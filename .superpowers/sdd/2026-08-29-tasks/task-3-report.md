@@ -29,3 +29,12 @@
 
 - `parse_task` receives a file label but does not enforce filename/id equality; repository-level checks can apply that when the filesystem context is available.
 - The strict frontmatter subset rejects bare colon-containing scalars, so task parsing quotes timestamps internally and serializer uses raw values to preserve the required canonical output.
+
+## Fix Round 1
+
+Validated the task ID and every dependency ID inside `validate_task`, covering public callers that construct `Task` values directly. Added focused coverage for invalid task and dependency IDs.
+
+- `CARGO_HOME=/mnt/ssd2/uv-cache/cargo cargo test format` — 5 passed.
+- `CARGO_HOME=/mnt/ssd2/uv-cache/cargo cargo test` — 14 passed.
+
+Commit: `fix: validate task and dependency ids`

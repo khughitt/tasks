@@ -196,6 +196,10 @@ pub fn validate_doc_path(kind: &str, dir: &str, rel: &str) -> Result<()> {
 }
 
 pub fn validate_task(t: &Task) -> Result<()> {
+    TaskId::parse(&t.id.to_string())?;
+    for dependency in &t.depends {
+        TaskId::parse(&dependency.to_string())?;
+    }
     validate_line("title", &t.title)?;
     if t.priority > 4 {
         return Err(Error::Validation("priority must be 0-4".into()));
@@ -339,5 +343,19 @@ mod tests {
             "x"
         )
         .is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_task_and_dependency_ids() {
+        let mut task = parse_task(MINIMAL, "x").unwrap();
+        task.id.hex = "bad".into();
+        assert!(validate_task(&task).is_err());
+
+        let mut task = parse_task(MINIMAL, "x").unwrap();
+        task.depends.push(TaskId {
+            prefix: "b".into(),
+            hex: "000001".into(),
+        });
+        assert!(validate_task(&task).is_err());
     }
 }
