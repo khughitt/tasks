@@ -35,6 +35,11 @@ fn main() {
                 eprint!("{}", output::pretty_warnings(&output::warnings_of(&out)));
             }
             println!("{}", output::render(&out, format));
+            if let output::Output::Check(check) = &out
+                && !check.errors.is_empty()
+            {
+                std::process::exit(1);
+            }
         }
         Err(error) => {
             eprintln!("{}", output::render_error(&error));

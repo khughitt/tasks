@@ -1,4 +1,5 @@
 pub mod add;
+pub mod check;
 pub mod dep;
 pub mod edit;
 pub mod graph;
@@ -227,9 +228,6 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Unblock { id } => status::unblock(open_ctx(dir)?, id),
         Command::Dep { id, on, rm } => dep::run(open_ctx(dir)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
-        _ => {
-            let _ctx = open_ctx(dir)?;
-            Err(Error::Validation("not implemented".into()))
-        }
+        Command::Check => check::run(open_ctx(dir)?),
     }
 }

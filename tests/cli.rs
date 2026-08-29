@@ -836,3 +836,157 @@ fn graph_renders_open_tasks() {
     assert!(value["text"].as_str().unwrap().contains(&a));
     assert_eq!(env.fail(&dir, &["graph", "--format", "png"]), "validation");
 }
+
+#[test]
+fn check_passes_clean_repo_and_reports_drift() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: one\n");
+    let a = env.json(&dir, &["add", "A", "--plan", "p", "--step", "Task 1: one"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = env.json(&dir, &["add", "B", "--depends", &a])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let v = env.json(&dir, &["check"]);
+    assert_eq!(v["errors"], serde_json::json!([]));
+    assert_eq!(v["warnings"], serde_json::json!([]));
+
+    // drift: heading renamed; dangling dep; garbage file; foreign unreachable dep
+    write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: uno\n");
+    let raw = env.read(&dir, &format!("tasks/{b}.md"));
+    std::fs::write(
+        dir.join(format!("tasks/{b}.md")),
+        raw.replace(
+            &format!("depends: [{a}]"),
+            &format!("depends: [{a}, sci-ffffff, zzz-000001]"),
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.join("tasks/sci-bad.md"), "nope").unwrap();
+    std::fs::write(
+        dir.join("tasks/sci-abcdef.md"),
+        "---\nnot: frontmatter\n---\n",
+    )
+    .unwrap();
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<&str> = v["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"step_missing"), "{kinds:?}");
+    assert!(kinds.contains(&"dangling_dep"), "{kinds:?}");
+    assert_eq!(
+        kinds.iter().filter(|k| **k == "parse").count(),
+        2,
+        "{kinds:?}"
+    );
+    let wkinds: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(wkinds.contains(&"unreachable_dep"), "{wkinds:?}");
+}
+
+#[test]
+fn check_reports_unparsable_foreign_dependency_as_warning() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let f = env.json(&fam, &["add", "F"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&sci, &["add", "S", "--depends", &f]);
+    std::fs::write(fam.join(format!("tasks/{f}.md")), "garbage").unwrap();
+    let v = env.json(&sci, &["check"]); // exit 0: warnings only
+    assert_eq!(v["errors"], serde_json::json!([]));
+    let wkinds: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(wkinds.contains(&"foreign_unparsable"), "{wkinds:?}");
+    assert!(wkinds.contains(&"cycle_unverifiable"), "{wkinds:?}");
+}
+
+#[test]
+fn check_reports_cycles_once() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = env.json(&dir, &["add", "A"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = env.json(&dir, &["add", "B", "--depends", &a])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let raw = env.read(&dir, &format!("tasks/{a}.md"));
+    std::fs::write(
+        dir.join(format!("tasks/{a}.md")),
+        raw.replace("depends: []", &format!("depends: [{b}]")),
+    )
+    .unwrap();
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let cycles: Vec<&serde_json::Value> = v["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "cycle")
+        .collect();
+    assert_eq!(cycles.len(), 1, "{:?}", v["errors"]);
+    // pretty mode lists findings one per line
+    let out = env.cmd(&dir).args(["--pretty", "check"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("cycle"));
+}
+
+#[test]
+fn check_reports_a_cycle_at_its_lowest_member() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let mut ids = [
+        env.json(&dir, &["add", "A"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        env.json(&dir, &["add", "B"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        env.json(&dir, &["add", "C"])["id"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+    ];
+    ids.sort();
+    for (id, dependency) in [(&ids[0], &ids[1]), (&ids[1], &ids[2]), (&ids[2], &ids[1])] {
+        let raw = env.read(&dir, &format!("tasks/{id}.md"));
+        std::fs::write(
+            dir.join(format!("tasks/{id}.md")),
+            raw.replace("depends: []", &format!("depends: [{dependency}]")),
+        )
+        .unwrap();
+    }
+
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let cycle = value["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["kind"] == "cycle")
+        .unwrap();
+    assert_eq!(cycle["id"], ids[1]);
+}

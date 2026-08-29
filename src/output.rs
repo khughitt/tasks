@@ -100,6 +100,20 @@ pub struct GraphOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct Finding {
+    pub id: Option<String>,
+    pub file: String,
+    pub kind: String,
+    pub detail: String,
+}
+
+#[derive(Serialize)]
+pub struct CheckOut {
+    pub errors: Vec<Finding>,
+    pub warnings: Vec<Finding>,
+}
+
 /// One variant per command payload. Later tasks add variants; `pretty` grows with them.
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -110,6 +124,7 @@ pub enum Output {
     List(ListOut),
     Prime(PrimeOut),
     Graph(GraphOut),
+    Check(CheckOut),
 }
 
 pub fn render(out: &Output, format: Format) -> String {
@@ -155,6 +170,19 @@ fn pretty(out: &Output) -> String {
             rendered
         }
         Output::Graph(o) => o.text.clone(),
+        Output::Check(o) => {
+            let mut rendered = String::new();
+            for finding in &o.errors {
+                rendered.push_str(&format!(
+                    "error: {} [{}] {}\n",
+                    finding.file, finding.kind, finding.detail
+                ));
+            }
+            if o.errors.is_empty() {
+                rendered.push_str("ok\n");
+            }
+            rendered
+        }
     }
 }
 
@@ -203,5 +231,10 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::List(o) => o.warnings.clone(),
         Output::Prime(o) => o.warnings.clone(),
         Output::Graph(o) => o.warnings.clone(),
+        Output::Check(o) => o
+            .warnings
+            .iter()
+            .map(|finding| format!("{} [{}] {}", finding.file, finding.kind, finding.detail))
+            .collect(),
     }
 }
