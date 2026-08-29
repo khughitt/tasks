@@ -279,3 +279,37 @@ fn show_resolves_local_and_foreign_dependencies() {
     assert_eq!(env.fail(&sci, &["show", "sci-000000"]), "task_not_found");
     assert_eq!(env.fail(&sci, &["show", "bogus"]), "invalid_id");
 }
+
+#[test]
+fn list_all_projects_walks_registry() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "S"]);
+    env.json(&fam, &["add", "F"]);
+    let v = env.json(&sci, &["list", "--all-projects"]);
+    let mut titles: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap())
+        .collect();
+    titles.sort();
+    assert_eq!(titles, ["F", "S"]);
+}
+
+#[test]
+fn list_warns_about_unreachable_dependencies() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let dep = env.json(&fam, &["add", "F"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&sci, &["add", "S", "--depends", &dep]);
+    std::fs::remove_file(fam.join(format!("tasks/{dep}.md"))).unwrap();
+    let v = env.json(&sci, &["list"]);
+    assert_eq!(v["warnings"].as_array().unwrap().len(), 1);
+    assert!(v["warnings"][0].as_str().unwrap().contains(&dep));
+}

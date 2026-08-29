@@ -1,5 +1,6 @@
 pub mod add;
 pub mod init;
+pub mod list;
 pub mod show;
 
 use crate::cli::{Cli, Command, FieldArgs};
@@ -148,6 +149,14 @@ pub fn run(cli: Cli) -> Result<Output> {
             fields,
         } => add::run(open_ctx(dir)?, title, status, fields),
         Command::Show { id } => show::run(open_ctx(dir)?, id),
+        Command::List {
+            statuses,
+            tags,
+            owner,
+            all_projects,
+        } => list::list(open_ctx(dir)?, statuses, tags, owner, all_projects),
+        Command::Ready { size, limit } => list::ready(open_ctx(dir)?, size, limit),
+        Command::Prime => list::prime(open_ctx(dir)?),
         _ => {
             let _ctx = open_ctx(dir)?;
             Err(Error::Validation("not implemented".into()))

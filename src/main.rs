@@ -5,6 +5,7 @@ mod format;
 mod frontmatter;
 mod model;
 mod output;
+mod query;
 mod registry;
 mod repo;
 mod resolve;

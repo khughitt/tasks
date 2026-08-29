@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::model::Task;
+use crate::model::{Size, Status, Task};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +39,60 @@ pub struct ShowOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Serialize, Clone)]
+pub struct TaskSummary {
+    pub id: String,
+    pub title: String,
+    pub status: Status,
+    pub priority: u8,
+    pub size: Option<Size>,
+    pub owner: Option<String>,
+    pub updated: String,
+    pub tags: Vec<String>,
+    pub depends: Vec<String>,
+}
+
+impl From<&Task> for TaskSummary {
+    fn from(task: &Task) -> TaskSummary {
+        TaskSummary {
+            id: task.id.to_string(),
+            title: task.title.clone(),
+            status: task.status,
+            priority: task.priority,
+            size: task.size,
+            owner: task.owner.clone(),
+            updated: task.updated.clone(),
+            tags: task.tags.clone(),
+            depends: task.depends.iter().map(ToString::to_string).collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ListOut {
+    pub tasks: Vec<TaskSummary>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize, Default)]
+pub struct Counts {
+    pub idea: usize,
+    pub todo: usize,
+    pub doing: usize,
+    pub blocked: usize,
+    pub done: usize,
+    pub dropped: usize,
+}
+
+#[derive(Serialize)]
+pub struct PrimeOut {
+    pub prefix: String,
+    pub counts: Counts,
+    pub ready: Vec<TaskSummary>,
+    pub doing: Vec<TaskSummary>,
+    pub warnings: Vec<String>,
+}
+
 /// One variant per command payload. Later tasks add variants; `pretty` grows with them.
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -46,6 +100,8 @@ pub enum Output {
     Init(InitOut),
     Id(IdOut),
     Show(ShowOut),
+    List(ListOut),
+    Prime(PrimeOut),
 }
 
 pub fn render(out: &Output, format: Format) -> String {
@@ -77,7 +133,48 @@ fn pretty(out: &Output) -> String {
             }
             rendered
         }
+        Output::List(o) => table(&o.tasks),
+        Output::Prime(o) => {
+            let c = &o.counts;
+            let mut rendered = format!(
+                "project {}\nidea {}  todo {}  doing {}  blocked {}  done {}  dropped {}\n",
+                o.prefix, c.idea, c.todo, c.doing, c.blocked, c.done, c.dropped
+            );
+            rendered.push_str("\nready:\n");
+            rendered.push_str(&table(&o.ready));
+            rendered.push_str("\ndoing:\n");
+            rendered.push_str(&table(&o.doing));
+            rendered
+        }
     }
+}
+
+pub fn table(rows: &[TaskSummary]) -> String {
+    let mut rendered = String::new();
+    for row in rows {
+        let size = row.size.map(Size::as_str).unwrap_or("-");
+        let owner = row.owner.as_deref().unwrap_or("");
+        let tags = if row.tags.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", row.tags.join(", "))
+        };
+        rendered.push_str(&format!(
+            "{}  P{} {:<2} {:<7} {}{}{}\n",
+            row.id,
+            row.priority,
+            size,
+            row.status.as_str(),
+            row.title,
+            tags,
+            if owner.is_empty() {
+                String::new()
+            } else {
+                format!(" @{owner}")
+            }
+        ));
+    }
+    rendered
 }
 
 pub fn render_error(e: &Error) -> String {
@@ -94,5 +191,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Init(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),
+        Output::List(o) => o.warnings.clone(),
+        Output::Prime(o) => o.warnings.clone(),
     }
 }
