@@ -5,7 +5,8 @@ use crate::format::parse_task;
 use crate::model::{Status, Task, TaskId};
 use crate::output::Output;
 use crate::resolve::{DocKind, Resolver};
-use std::io::Read;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
     if edited.id != original.id {
@@ -71,12 +72,12 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         .ok()
         .filter(|editor| !editor.is_empty())
         .ok_or_else(|| Error::Editor("EDITOR is not set".into()))?;
-    let tmp = ctx.project.tasks_dir().join(format!(
-        ".{}.{:06x}.edit.md",
-        original.id,
-        fastrand::u32(..0x100_0000)
-    ));
-    std::fs::write(&tmp, &original_raw)?;
+    let tmp = create_edit_temp(
+        &ctx.project.tasks_dir(),
+        &original.id,
+        &original_raw,
+        || fastrand::u32(..0x100_0000),
+    )?;
     let tmp_display = tmp.display().to_string();
     let suffix = format!(" (edit kept at {tmp_display})");
     let keep = |error: Error| error.with_suffix(&suffix);
@@ -137,4 +138,56 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ));
     }
     Ok(id_out(ctx, &edited))
+}
+
+fn create_edit_temp(
+    tasks_dir: &Path,
+    id: &TaskId,
+    raw: &str,
+    mut candidate: impl FnMut() -> u32,
+) -> Result<PathBuf> {
+    for _ in 0..16 {
+        let path = tasks_dir.join(format!(".{id}.{:06x}.edit.md", candidate()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                file.write_all(raw.as_bytes())?;
+                return Ok(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(Error::Validation(
+        "could not allocate an edit temp after 16 attempts".into(),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edit_temp_retries_without_following_existing_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let tasks = dir.path().join("tasks");
+        std::fs::create_dir(&tasks).unwrap();
+        let id = TaskId::parse("sci-000001").unwrap();
+        let target = dir.path().join("target");
+        std::fs::write(&target, "original").unwrap();
+        let existing = tasks.join(".sci-000001.000001.edit.md");
+        std::os::unix::fs::symlink(&target, &existing).unwrap();
+
+        let mut candidates = [1, 2].into_iter();
+        let allocated =
+            create_edit_temp(&tasks, &id, "edited", || candidates.next().unwrap()).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
+        assert_eq!(std::fs::read_link(&existing).unwrap(), target);
+        assert_eq!(allocated, tasks.join(".sci-000001.000002.edit.md"));
+        assert_eq!(std::fs::read_to_string(allocated).unwrap(), "edited");
+    }
 }
