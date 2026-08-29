@@ -299,6 +299,29 @@ fn list_all_projects_walks_registry() {
 }
 
 #[test]
+fn list_all_projects_warns_for_missing_registered_config() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+
+    let v = env.json(&sci, &["list", "--all-projects"]);
+
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 0);
+    assert_eq!(v["warnings"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn list_all_projects_errors_for_malformed_registered_config() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    std::fs::write(fam.join("tasks/.config.toml"), "not toml = [").unwrap();
+
+    assert_eq!(env.fail(&sci, &["list", "--all-projects"]), "config");
+}
+
+#[test]
 fn list_warns_about_unreachable_dependencies() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

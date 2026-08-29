@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{Counts, ListOut, Output, PrimeOut, TaskSummary};
 use crate::query::{is_ready, sort_list, sort_ready};
-use crate::repo::Project;
+use crate::repo::{CONFIG_REL, Project};
 use crate::resolve::Resolver;
 use std::collections::HashMap;
 
@@ -24,12 +24,14 @@ pub fn list(
             if *prefix == ctx.project.prefix {
                 continue;
             }
-            match Project::open(root) {
-                Ok(project) => tasks.extend(project.scan()?),
-                Err(error) => ctx
-                    .warnings
-                    .push(format!("project {prefix} at {}: {error}", root.display())),
+            if !root.try_exists()? || !root.join(CONFIG_REL).try_exists()? {
+                ctx.warnings.push(format!(
+                    "project {prefix} at {} is unreachable",
+                    root.display()
+                ));
+                continue;
             }
+            tasks.extend(Project::open(root)?.scan()?);
         }
     }
     tasks.retain(|task| {
