@@ -1,9 +1,59 @@
 use crate::error::{Error, Result};
 use crate::format::{parse_task, serialize_task};
 use crate::model::{Task, TaskId, is_valid_prefix};
+use std::ffi::OsString;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub const CONFIG_REL: &str = "tasks/.config.toml";
+
+pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
+    atomic_write_with(path, contents, || fastrand::u32(..0x100_0000))
+}
+
+fn atomic_write_with(
+    path: &Path,
+    contents: &[u8],
+    mut candidate: impl FnMut() -> u32,
+) -> Result<()> {
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} has no file name", path.display()),
+        )
+    })?;
+    for _ in 0..16 {
+        let mut temp_name = OsString::from(".");
+        temp_name.push(file_name);
+        temp_name.push(format!(".{:06x}.tmp", candidate()));
+        let temp = path.with_file_name(temp_name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+        {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(contents) {
+                    drop(file);
+                    let _ = std::fs::remove_file(&temp);
+                    return Err(error.into());
+                }
+                drop(file);
+                if let Err(error) = std::fs::rename(&temp, path) {
+                    let _ = std::fs::remove_file(&temp);
+                    return Err(error.into());
+                }
+                return Ok(());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(Error::Io(format!(
+        "could not allocate an atomic temp for {} after 16 attempts",
+        path.display()
+    )))
+}
 
 #[derive(Debug, Clone)]
 pub struct Project {
@@ -42,9 +92,7 @@ impl Project {
                 prefix: prefix.into(),
             })
             .expect("config serializes");
-            let temp = root.join("tasks/.config.toml.tmp");
-            std::fs::write(&temp, text)?;
-            std::fs::rename(&temp, &config)?;
+            atomic_write(&config, text.as_bytes())?;
         }
         Self::open(root)
     }
@@ -194,10 +242,7 @@ impl Project {
     }
 
     pub fn write_task(&self, task: &Task) -> Result<()> {
-        let temp = self.tasks_dir().join(format!(".{}.tmp", task.id));
-        std::fs::write(&temp, serialize_task(task))?;
-        std::fs::rename(&temp, self.task_path(&task.id))?;
-        Ok(())
+        atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
     }
 
     pub fn new_id(&self) -> Result<TaskId> {
@@ -284,7 +329,13 @@ mod tests {
         assert_eq!(from_raw, t);
         assert_eq!(parse_task(&raw, "test").unwrap(), t);
         assert_eq!(p.scan().unwrap(), vec![t.clone()]);
-        assert!(!p.tasks_dir().join(format!(".{}.tmp", t.id)).exists());
+        assert!(std::fs::read_dir(p.tasks_dir()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
     }
 
     #[test]
@@ -316,5 +367,24 @@ mod tests {
         let (ok, errs) = p.scan_lenient();
         assert!(ok.is_empty());
         assert_eq!(errs.len(), 1);
+    }
+
+    #[test]
+    fn atomic_write_retries_without_following_a_symlink_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        let victim = dir.path().join("victim");
+        std::fs::write(&target, "old").unwrap();
+        std::fs::write(&victim, "untouched").unwrap();
+        let collision = dir.path().join(".target.000001.tmp");
+        std::os::unix::fs::symlink(&victim, &collision).unwrap();
+        let mut candidates = [1, 2].into_iter();
+
+        atomic_write_with(&target, b"new", || candidates.next().unwrap()).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "untouched");
+        assert_eq!(std::fs::read_link(&collision).unwrap(), victim);
+        assert!(!dir.path().join(".target.000002.tmp").exists());
     }
 }

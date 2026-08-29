@@ -101,6 +101,8 @@ Unknown keys are an error. Every scalar and list item is a single line. Times ar
 The line `## Notes` (exactly: level-2 heading, that text, nothing else on the line) is
 reserved as the delimiter. Everything between the frontmatter and that line is the body,
 editable by `edit`; a body containing the reserved line is rejected on write and by `check`.
+The serializer's one structural newline after the closing frontmatter delimiter and trailing
+serialization whitespace are not body content; all other leading whitespace and blank lines are.
 
 The section after the delimiter is owned by the tool and holds only bullets of the form
 `- <timestamp> (<owner>): <text>`, appended by `note` and by the messages of
@@ -272,8 +274,8 @@ resolved-dependencies footer (`show`), and the bare id for write commands.
    of the temporary file so the edit is not lost; the original is untouched.
 4. Re-hash the original. If it changed since step 1, error `concurrent_modification`
    and keep the temporary file; nothing is written.
-5. Set `updated`, write the final content to `tasks/.<id>.tmp`, rename over the original,
-   remove the temporary file.
+5. Set `updated`, write the final content through the unique, exclusively claimed sibling
+   described in §10, rename over the original, and remove the edit temporary file.
 
 The original file is never written except by the final rename.
 
@@ -389,8 +391,11 @@ Manual, documented steps — the tool does not move files:
   (parse/serialize frontmatter + body + notes, round-trip exact), `repo` (locate project,
   scan, atomic write), `registry`, `query` (ready, graph, cycle detection across
   projects), `check`, `cli` (clap + JSON/pretty rendering).
-- Writes: build the full file in memory, write `tasks/.<id>.tmp`, rename over the target.
-  No partial files.
+- Writes: build the full file in memory, claim a unique same-directory sibling
+  (`.<target-name>.<random>.tmp`) with exclusive creation and at most 16 collision retries,
+  write it completely, then rename over the target. Task, project-config, and registry writes
+  share this path; a claimed sibling is cleaned up after write/rename failure where safe. No
+  partial target files.
 - Errors: a single typed error enum whose variants map to the `kind` strings in §5.1.
 - Tests: unit tests for format round-trip, id generation, the transition table,
   ready/cycle logic; integration tests via `assert_cmd` + `tempfile` running the binary

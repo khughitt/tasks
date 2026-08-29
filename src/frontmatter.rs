@@ -11,7 +11,10 @@ pub enum Value {
 const RESERVED: &str = "\"[],#:\\";
 
 fn bad(detail: impl Into<String>) -> Error {
-    Error::Parse { file: "<frontmatter>".into(), detail: detail.into() }
+    Error::Parse {
+        file: "<frontmatter>".into(),
+        detail: detail.into(),
+    }
 }
 
 pub fn parse(text: &str) -> Result<Vec<(String, Value)>> {
@@ -34,7 +37,9 @@ pub fn parse(text: &str) -> Result<Vec<(String, Value)>> {
             return Err(bad(format!("line {n}: duplicate key {key}")));
         }
         let value = if let Some(inner) = rest.strip_prefix('[') {
-            let inner = inner.strip_suffix(']').ok_or_else(|| bad(format!("line {n}: unterminated list")))?;
+            let inner = inner
+                .strip_suffix(']')
+                .ok_or_else(|| bad(format!("line {n}: unterminated list")))?;
             Value::List(parse_items(inner).map_err(|d| bad(format!("line {n}: {d}")))?)
         } else {
             Value::Scalar(parse_scalar(rest).map_err(|d| bad(format!("line {n}: {d}")))?)
@@ -45,7 +50,9 @@ pub fn parse(text: &str) -> Result<Vec<(String, Value)>> {
 }
 
 fn parse_items(inner: &str) -> std::result::Result<Vec<String>, String> {
-    if inner.is_empty() { return Ok(vec![]); }
+    if inner.is_empty() {
+        return Ok(vec![]);
+    }
     let mut items = Vec::new();
     let mut rest = inner;
     loop {
@@ -56,22 +63,36 @@ fn parse_items(inner: &str) -> std::result::Result<Vec<String>, String> {
             (parse_scalar(&rest[..end])?, &rest[end..])
         };
         items.push(item);
-        if after.is_empty() { return Ok(items); }
-        rest = after.strip_prefix(", ").ok_or_else(|| format!("expected `, ` before {after:?}"))?;
-        if rest.trim().is_empty() { return Err("trailing comma".into()); }
+        if after.is_empty() {
+            return Ok(items);
+        }
+        rest = after
+            .strip_prefix(", ")
+            .ok_or_else(|| format!("expected `, ` before {after:?}"))?;
+        if rest.trim().is_empty() {
+            return Err("trailing comma".into());
+        }
     }
 }
 
 fn parse_scalar(tok: &str) -> std::result::Result<String, String> {
     if tok.starts_with('"') {
         let (s, after) = take_quoted(tok)?;
-        if !after.is_empty() { return Err(format!("unexpected text after quoted string: {after:?}")); }
+        if !after.is_empty() {
+            return Err(format!("unexpected text after quoted string: {after:?}"));
+        }
         return Ok(s);
     }
-    if tok.is_empty() { return Err("empty bare scalar; use \"\"".into()); }
-    if tok.trim() != tok { return Err(format!("bare scalar {tok:?} has surrounding whitespace")); }
+    if tok.is_empty() {
+        return Err("empty bare scalar; use \"\"".into());
+    }
+    if tok.trim() != tok {
+        return Err(format!("bare scalar {tok:?} has surrounding whitespace"));
+    }
     if tok.chars().any(|c| RESERVED.contains(c)) {
-        return Err(format!("bare scalar {tok:?} contains a reserved character; quote it"));
+        return Err(format!(
+            "bare scalar {tok:?} contains a reserved character; quote it"
+        ));
     }
     Ok(tok.to_string())
 }
@@ -98,7 +119,9 @@ fn quote(s: &str) -> String {
     let mut q = String::with_capacity(s.len() + 2);
     q.push('"');
     for c in s.chars() {
-        if c == '"' || c == '\\' { q.push('\\'); }
+        if c == '"' || c == '\\' {
+            q.push('\\');
+        }
         q.push(c);
     }
     q.push('"');
@@ -114,7 +137,11 @@ fn needs_quotes(s: &str) -> bool {
 }
 
 fn render_scalar(s: &str) -> String {
-    if needs_quotes(s) { quote(s) } else { s.to_string() }
+    if needs_quotes(s) {
+        quote(s)
+    } else {
+        s.to_string()
+    }
 }
 
 pub fn serialize(pairs: &[(String, Value)]) -> String {
@@ -141,18 +168,26 @@ pub fn serialize(pairs: &[(String, Value)]) -> String {
 mod tests {
     use super::*;
 
-    fn s(v: &str) -> Value { Value::Scalar(v.into()) }
+    fn s(v: &str) -> Value {
+        Value::Scalar(v.into())
+    }
 
     #[test]
     fn parses_scalars_and_lists() {
         let text = "id: sci-4f2a9c\ntitle: \"Bank: the ledger\"\ndepends: [sci-91be03, fam-0c3d7e]\ntags: []\n";
         let pairs = parse(text).unwrap();
-        assert_eq!(pairs, vec![
-            ("id".into(), s("sci-4f2a9c")),
-            ("title".into(), s("Bank: the ledger")),
-            ("depends".into(), Value::List(vec!["sci-91be03".into(), "fam-0c3d7e".into()])),
-            ("tags".into(), Value::List(vec![])),
-        ]);
+        assert_eq!(
+            pairs,
+            vec![
+                ("id".into(), s("sci-4f2a9c")),
+                ("title".into(), s("Bank: the ledger")),
+                (
+                    "depends".into(),
+                    Value::List(vec!["sci-91be03".into(), "fam-0c3d7e".into()])
+                ),
+                ("tags".into(), Value::List(vec![])),
+            ]
+        );
     }
 
     #[test]
@@ -184,8 +219,14 @@ mod tests {
             ("tags".into(), Value::List(vec!["a b".into(), "c,d".into()])),
         ];
         let text = serialize(&pairs);
-        assert_eq!(text, "title: \"Task 3: emit \\\"the\\\" row\"\nowner: keith\nempty: \"\"\nnum: \"42\"\ntags: [a b, \"c,d\"]\n");
+        assert_eq!(
+            text,
+            "title: \"Task 3: emit \\\"the\\\" row\"\nowner: keith\nempty: \"\"\nnum: \"42\"\ntags: [a b, \"c,d\"]\n"
+        );
         assert_eq!(parse(&text).unwrap(), pairs);
-        assert_eq!(serialize(&[("priority".into(), Value::Raw("2".into()))]), "priority: 2\n");
+        assert_eq!(
+            serialize(&[("priority".into(), Value::Raw("2".into()))]),
+            "priority: 2\n"
+        );
     }
 }

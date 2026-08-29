@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::repo::atomic_write;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -51,10 +52,12 @@ impl Registry {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let temp = path.with_extension("toml.tmp");
-        std::fs::write(&temp, toml::to_string(self).expect("registry serializes"))?;
-        std::fs::rename(&temp, path)?;
-        Ok(())
+        atomic_write(
+            path,
+            toml::to_string(self)
+                .expect("registry serializes")
+                .as_bytes(),
+        )
     }
 
     pub fn register(&mut self, prefix: &str, root: &Path) -> Result<()> {

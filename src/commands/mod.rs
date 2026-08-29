@@ -44,10 +44,6 @@ pub fn owner_name(project: &Project) -> Result<String> {
     Ok(name)
 }
 
-pub fn parse_id(s: &str) -> Result<TaskId> {
-    TaskId::parse(s)
-}
-
 /// Applies the field flags present in `fields` to `task`, validating each against the repo.
 pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry);

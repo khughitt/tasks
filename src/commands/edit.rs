@@ -125,11 +125,15 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     edited.status = original.status;
     transition(&ctx, &mut edited, status, false).map_err(keep)?;
 
-    if ctx.project.read_raw(&original.id).map_err(keep)? != original_raw {
-        return Err(Error::ConcurrentModification(
-            original.id.to_string(),
-            tmp_display,
-        ));
+    match ctx.project.read_raw(&original.id) {
+        Ok(current) if current == original_raw => {}
+        Ok(_) | Err(Error::TaskNotFound(_)) => {
+            return Err(Error::ConcurrentModification(
+                original.id.to_string(),
+                tmp_display,
+            ));
+        }
+        Err(error) => return Err(keep(error)),
     }
     save(&ctx, &mut edited).map_err(keep)?;
     if let Err(error) = std::fs::remove_file(&tmp) {

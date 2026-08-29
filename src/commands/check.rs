@@ -30,7 +30,6 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     }
 
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
-    let local: BTreeSet<&TaskId> = tasks.iter().map(|task| &task.id).collect();
     let foreign = |id: &TaskId| -> std::result::Result<Option<Task>, String> {
         match resolver.resolve_task(id) {
             Ok(task) => Ok(task),
@@ -43,7 +42,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         let file = format!("tasks/{}.md", task.id);
         for dependency in &task.depends {
             if dependency.prefix == ctx.project.prefix {
-                if !local.contains(dependency) {
+                if !ctx.project.task_path(dependency).try_exists()? {
                     errors.push(finding(
                         Some(task),
                         file.clone(),

@@ -126,7 +126,13 @@ fn split_body_notes(after: &str, file: &str) -> Result<(String, Vec<Note>)> {
             );
         }
     }
-    Ok((body.join("\n").trim().to_string(), notes))
+    let body = body.join("\n");
+    let body = body
+        .strip_prefix('\n')
+        .unwrap_or(&body)
+        .trim_end()
+        .to_string();
+    Ok((body, notes))
 }
 
 fn parse_note_line(line: &str) -> Option<Note> {
@@ -321,28 +327,90 @@ mod tests {
         assert!(parse_task(&MINIMAL.replace("depends: []", "depends: [nope]"), "x").is_err());
         assert!(parse_task(&MINIMAL.replace("tags: []", "tags: []\nstep: only"), "x").is_err());
     }
+
+    #[test]
+    fn rejects_non_utc_timestamp() {
+        assert!(
+            parse_task(
+                &MINIMAL.replace(
+                    "created: 2026-08-29T14:02:11Z",
+                    "created: 2026-08-29T14:02:11+02:00"
+                ),
+                "x"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_note_owner() {
+        assert!(
+            parse_task(
+                &format!("{MINIMAL}\n## Notes\n\n- 2026-08-29T15:10:44Z (bad owner): text\n"),
+                "x"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_carriage_return_in_note_text() {
+        assert!(validate_note_text("a\rb").is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_notes_delimiter() {
+        assert!(
+            parse_task(
+                &format!("{MINIMAL}\n## Notes\n\n- 2026-08-29T15:10:44Z (k): a\n\n## Notes\n"),
+                "x"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_non_normalized_doc_paths() {
+        for path in ["/docs/specs/x.md", "docs/specs/./x.md", "docs/specs//x.md"] {
+            assert!(
+                parse_task(
+                    &MINIMAL.replace("tags: []", &format!("tags: []\nspec: {path}")),
+                    "x"
+                )
+                .is_err(),
+                "accepted {path}"
+            );
+        }
+    }
+
     #[test]
     fn rejects_body_notes_paths() {
-        assert!(parse_task(
-            &format!("{MINIMAL}\nbody\n\n## Notes\n\nnot a bullet\n"),
-            "x"
-        )
-        .is_err());
+        assert!(
+            parse_task(
+                &format!("{MINIMAL}\nbody\n\n## Notes\n\nnot a bullet\n"),
+                "x"
+            )
+            .is_err()
+        );
         assert!(parse_task(&format!("{MINIMAL}\n## Notes\n\n- bad line\n"), "x").is_err());
         assert!(validate_body("x\n## Notes\ny").is_err());
         assert!(validate_body("x\n### Notes\ny").is_ok());
         assert!(validate_note_text("a\nb").is_err());
         assert!(validate_note_text("").is_err());
-        assert!(parse_task(
-            &MINIMAL.replace("tags: []", "tags: []\nspec: docs/specs/../plans/x.md"),
-            "x"
-        )
-        .is_err());
-        assert!(parse_task(
-            &MINIMAL.replace("tags: []", "tags: []\nspec: docs/specs/sub/x.md"),
-            "x"
-        )
-        .is_ok());
+        assert!(
+            parse_task(
+                &MINIMAL.replace("tags: []", "tags: []\nspec: docs/specs/../plans/x.md"),
+                "x"
+            )
+            .is_err()
+        );
+        assert!(
+            parse_task(
+                &MINIMAL.replace("tags: []", "tags: []\nspec: docs/specs/sub/x.md"),
+                "x"
+            )
+            .is_ok()
+        );
     }
 
     #[test]

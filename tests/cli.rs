@@ -121,6 +121,21 @@ fn add_writes_a_valid_file_and_show_reads_it_back() {
 }
 
 #[test]
+fn body_leading_whitespace_survives_routine_writes() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let body = "\n    indented first line\n\n  indented second line";
+    let id = env.json(&dir, &["add", "Indented", "--body", body])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["body"], body);
+    env.json(&dir, &["note", &id, "routine write"]);
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["body"], body);
+}
+
+#[test]
 fn add_validates_before_writing() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -694,16 +709,18 @@ fn edit_editor_path_validates_and_is_atomic() {
         "the three failed edits keep their temp files; the good one removes its own"
     );
 
-    let fail_save = editor_script(
-        &dir,
-        "name=$(basename \"$1\"); id=${name#.}; id=${id%%.*}; mkdir \"$(dirname \"$1\")/.$id.tmp\"",
-    );
+    let fail_save = editor_script(&dir, "chmod 555 \"$(dirname \"$1\")\"");
     let out = env
         .cmd(&dir)
         .env("EDITOR", &fail_save)
         .args(["edit", &id])
         .output()
         .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let tasks_dir = dir.join("tasks");
+    let mut permissions = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&tasks_dir, permissions).unwrap();
     let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!(err["error"]["kind"], "io");
     assert!(
@@ -712,7 +729,6 @@ fn edit_editor_path_validates_and_is_atomic() {
             .unwrap()
             .contains(".edit.md")
     );
-    std::fs::remove_dir(dir.join(format!("tasks/.{id}.tmp"))).unwrap();
 
     let task_path = dir.join(format!("tasks/{id}.md")).display().to_string();
     let racy = editor_script(
@@ -739,6 +755,52 @@ fn edit_editor_path_validates_and_is_atomic() {
         .unwrap();
     let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!(err["error"]["kind"], "editor");
+}
+
+#[test]
+fn edit_reports_deleted_original_as_concurrent_modification_and_keeps_edit() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = env.json(&dir, &["add", "Original"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let task_path = dir.join(format!("tasks/{id}.md"));
+    let editor = editor_script(
+        &dir,
+        &format!(
+            "rm \"{}\"\nsed -i 's/^title: Original$/title: Edited/' \"$1\"",
+            task_path.display()
+        ),
+    );
+
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "concurrent_modification");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(".edit.md")
+    );
+    assert!(!task_path.exists());
+    let kept = std::fs::read_dir(dir.join("tasks"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().ends_with(".edit.md"))
+        .unwrap();
+    assert!(
+        std::fs::read_to_string(kept)
+            .unwrap()
+            .contains("title: Edited")
+    );
 }
 
 #[test]
@@ -920,6 +982,37 @@ fn check_reports_unparsable_foreign_dependency_as_warning() {
 }
 
 #[test]
+fn check_does_not_call_an_existing_malformed_local_dependency_dangling() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let dependency = env.json(&dir, &["add", "Dependency"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["add", "Dependent", "--depends", &dependency]);
+    std::fs::write(dir.join(format!("tasks/{dependency}.md")), "malformed").unwrap();
+
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+
+    assert_eq!(out.status.code(), Some(1));
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let errors = value["errors"].as_array().unwrap();
+    assert!(errors.iter().any(|finding| finding["kind"] == "parse"));
+    assert!(
+        !errors
+            .iter()
+            .any(|finding| finding["kind"] == "dangling_dep")
+    );
+    assert!(
+        value["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["kind"] == "cycle_unverifiable")
+    );
+}
+
+#[test]
 fn check_reports_cycles_once() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -980,13 +1073,19 @@ fn check_finds_cycle_after_missing_dependency() {
     let out = env.cmd(&dir).args(["check"]).output().unwrap();
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let errors = value["errors"].as_array().unwrap();
-    assert!(errors.iter().any(|finding| finding["kind"] == "dangling_dep"));
+    assert!(
+        errors
+            .iter()
+            .any(|finding| finding["kind"] == "dangling_dep")
+    );
     assert!(errors.iter().any(|finding| finding["kind"] == "cycle"));
-    assert!(value["warnings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|finding| finding["kind"] == "cycle_unverifiable"));
+    assert!(
+        value["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["kind"] == "cycle_unverifiable")
+    );
 }
 
 #[test]
