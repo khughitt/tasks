@@ -45,22 +45,20 @@ pub fn parse(text: &str) -> Result<Vec<(String, Value)>> {
 }
 
 fn parse_items(inner: &str) -> std::result::Result<Vec<String>, String> {
-    let inner = inner.trim();
     if inner.is_empty() { return Ok(vec![]); }
     let mut items = Vec::new();
     let mut rest = inner;
     loop {
-        rest = rest.trim_start();
         let (item, after) = if rest.starts_with('"') {
             take_quoted(rest)?
         } else {
             let end = rest.find(',').unwrap_or(rest.len());
-            (parse_scalar(rest[..end].trim())?, &rest[end..])
+            (parse_scalar(&rest[..end])?, &rest[end..])
         };
         items.push(item);
         let after = after.trim_start();
         if after.is_empty() { return Ok(items); }
-        rest = after.strip_prefix(',').ok_or_else(|| format!("expected `,` before {after:?}"))?;
+        rest = after.strip_prefix(',').ok_or_else(|| format!("expected `,` before {after:?}"))?.trim_start();
         if rest.trim().is_empty() { return Err("trailing comma".into()); }
     }
 }
@@ -168,6 +166,10 @@ mod tests {
         assert!(parse("a: [b, c\n").is_err());
         assert!(parse("a: [b,]\n").is_err());
         assert!(parse("a: [b,,c]\n").is_err());
+        assert!(parse("a: [ ]\n").is_err());
+        assert!(parse("a: [ a]\n").is_err());
+        assert!(parse("a: [a ]\n").is_err());
+        assert!(parse("a: [a , b]\n").is_err());
     }
 
     #[test]
