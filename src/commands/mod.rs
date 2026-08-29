@@ -1,4 +1,6 @@
 pub mod add;
+pub mod dep;
+pub mod graph;
 pub mod init;
 pub mod list;
 pub mod show;
@@ -67,6 +69,9 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
         let mut dependencies = Vec::new();
         for dependency in &fields.depends {
             let id = TaskId::parse(dependency)?;
+            if id == task.id {
+                return Err(Error::Cycle(format!("{id} -> {id}")));
+            }
             if resolver.resolve_task(&id)?.is_none() {
                 return Err(Error::UnresolvableId(id.to_string()));
             }
@@ -75,6 +80,7 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
             }
         }
         task.depends = dependencies;
+        dep::ensure_acyclic(ctx, task)?;
     }
     if let Some(spec) = &fields.spec {
         task.spec = Some(resolver.resolve_doc(DocKind::Spec, spec)?);
@@ -211,6 +217,8 @@ pub fn run(cli: Cli) -> Result<Output> {
         }
         Command::Block { id, message } => status::block(open_ctx(dir)?, id, message),
         Command::Unblock { id } => status::unblock(open_ctx(dir)?, id),
+        Command::Dep { id, on, rm } => dep::run(open_ctx(dir)?, id, on, rm),
+        Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         _ => {
             let _ctx = open_ctx(dir)?;
             Err(Error::Validation("not implemented".into()))

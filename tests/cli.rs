@@ -530,3 +530,99 @@ fn prime_reports_counts_ready_and_doing() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("sci") && text.contains(&a), "{text}");
 }
+
+#[test]
+fn dep_add_remove_and_local_cycle() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = env.json(&dir, &["add", "A"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = env.json(&dir, &["add", "B"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let c = env.json(&dir, &["add", "C"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["dep", &b, "--on", &a]);
+    env.json(&dir, &["dep", &c, "--on", &b]);
+    assert_eq!(env.fail(&dir, &["dep", &a, "--on", &c]), "cycle");
+    assert_eq!(env.fail(&dir, &["dep", &a, "--on", &a]), "cycle");
+    assert_eq!(
+        env.fail(&dir, &["dep", &a, "--on", "sci-ffffff"]),
+        "unresolvable_id"
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &c])["task"]["depends"],
+        serde_json::json!([b])
+    );
+    env.json(&dir, &["dep", &c, "--rm", &b]);
+    assert_eq!(
+        env.json(&dir, &["show", &c])["task"]["depends"],
+        serde_json::json!([])
+    );
+    assert_eq!(env.fail(&dir, &["dep", &c, "--rm", &b]), "validation");
+    env.json(&dir, &["dep", &b, "--on", &a]);
+    assert_eq!(
+        env.json(&dir, &["show", &b])["task"]["depends"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn cross_project_cycle_is_rejected_and_unreachable_blocks_link() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let s1 = env.json(&sci, &["add", "S1"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let f1 = env.json(&fam, &["add", "F1", "--depends", &s1])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(env.fail(&sci, &["dep", &s1, "--on", &f1]), "cycle");
+    let s2 = env.json(&sci, &["add", "S2"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let raw = env.read(&fam, &format!("tasks/{f1}.md"));
+    std::fs::write(
+        fam.join(format!("tasks/{f1}.md")),
+        raw.replace(&format!("depends: [{s1}]"), "depends: [zzz-000001]"),
+    )
+    .unwrap();
+    assert_eq!(
+        env.fail(&sci, &["dep", &s2, "--on", &f1]),
+        "unresolvable_id"
+    );
+}
+
+#[test]
+fn graph_renders_open_tasks() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = env.json(&dir, &["add", "A"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = env.json(&dir, &["add", "B", "--depends", &a])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["done", &a]);
+    let value = env.json(&dir, &["graph"]);
+    assert_eq!(value["format"], "mermaid");
+    let text = value["text"].as_str().unwrap();
+    assert!(text.contains(&b) && !text.contains(&a), "{text}");
+    let value = env.json(&dir, &["graph", "--all", "--format", "dot"]);
+    assert!(value["text"].as_str().unwrap().contains(&a));
+    assert_eq!(env.fail(&dir, &["graph", "--format", "png"]), "validation");
+}

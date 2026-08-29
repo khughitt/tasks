@@ -93,6 +93,13 @@ pub struct PrimeOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct GraphOut {
+    pub format: String,
+    pub text: String,
+    pub warnings: Vec<String>,
+}
+
 /// One variant per command payload. Later tasks add variants; `pretty` grows with them.
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -102,6 +109,7 @@ pub enum Output {
     Show(ShowOut),
     List(ListOut),
     Prime(PrimeOut),
+    Graph(GraphOut),
 }
 
 pub fn render(out: &Output, format: Format) -> String {
@@ -146,6 +154,7 @@ fn pretty(out: &Output) -> String {
             rendered.push_str(&table(&o.doing));
             rendered
         }
+        Output::Graph(o) => o.text.clone(),
     }
 }
 
@@ -193,5 +202,6 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Show(o) => o.warnings.clone(),
         Output::List(o) => o.warnings.clone(),
         Output::Prime(o) => o.warnings.clone(),
+        Output::Graph(o) => o.warnings.clone(),
     }
 }
