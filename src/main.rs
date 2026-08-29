@@ -7,6 +7,7 @@ mod model;
 mod output;
 mod registry;
 mod repo;
+mod resolve;
 mod time;
 
 use clap::Parser;

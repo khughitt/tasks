@@ -1,10 +1,15 @@
+pub mod add;
 pub mod init;
+pub mod show;
 
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, FieldArgs};
 use crate::error::{Error, Result};
+use crate::format::{validate_body, validate_task};
+use crate::model::{Size, Task, TaskId};
 use crate::output::Output;
 use crate::registry::Registry;
 use crate::repo::Project;
+use crate::resolve::{DocKind, Resolver};
 use std::path::Path;
 
 pub struct Ctx {
@@ -31,6 +36,80 @@ pub fn owner_name(project: &Project) -> Result<String> {
     let name = raw_owner_name(project)?;
     crate::format::validate_owner(&name)?;
     Ok(name)
+}
+
+pub fn parse_id(s: &str) -> Result<TaskId> {
+    TaskId::parse(s)
+}
+
+/// Applies the field flags present in `fields` to `task`, validating each against the repo.
+pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()> {
+    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    if let Some(body) = &fields.body {
+        validate_body(body)?;
+        task.body = body.clone();
+    }
+    if let Some(priority) = fields.priority {
+        if priority > 4 {
+            return Err(Error::Validation("priority must be 0-4".into()));
+        }
+        task.priority = priority;
+    }
+    if let Some(size) = &fields.size {
+        task.size = Some(Size::parse(size)?);
+    }
+    if !fields.tags.is_empty() {
+        task.tags = fields.tags.clone();
+    }
+    if !fields.depends.is_empty() {
+        let mut dependencies = Vec::new();
+        for dependency in &fields.depends {
+            let id = TaskId::parse(dependency)?;
+            if resolver.resolve_task(&id)?.is_none() {
+                return Err(Error::UnresolvableId(id.to_string()));
+            }
+            if !dependencies.contains(&id) {
+                dependencies.push(id);
+            }
+        }
+        task.depends = dependencies;
+    }
+    if let Some(spec) = &fields.spec {
+        task.spec = Some(resolver.resolve_doc(DocKind::Spec, spec)?);
+    }
+    if let Some(plan) = &fields.plan {
+        task.plan = Some(resolver.resolve_doc(DocKind::Plan, plan)?);
+    }
+    if let Some(step) = &fields.step {
+        task.step = Some(step.clone());
+    }
+    match (&task.plan, &task.step) {
+        (None, Some(_)) => return Err(Error::Validation("--step requires a plan".into())),
+        (Some(plan), Some(step)) if !resolver.step_exists(plan, step)? => {
+            return Err(Error::Validation(format!(
+                "heading {step:?} not found in {plan}"
+            )));
+        }
+        _ => {}
+    }
+    validate_task(task)
+}
+
+pub fn save(ctx: &Ctx, task: &mut Task) -> Result<()> {
+    task.updated = crate::time::now();
+    validate_task(task)?;
+    ctx.project.write_task(task)
+}
+
+pub fn load(ctx: &Ctx, id: &str) -> Result<Task> {
+    ctx.project.read_task(&TaskId::parse(id)?)
+}
+
+pub fn id_out(ctx: Ctx, task: &Task) -> Output {
+    Output::Id(crate::output::IdOut {
+        id: task.id.to_string(),
+        warnings: ctx.warnings,
+    })
 }
 
 fn raw_owner_name(project: &Project) -> Result<String> {
@@ -63,6 +142,12 @@ pub fn run(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
         Command::Init { prefix } => init::run(dir, prefix),
+        Command::Add {
+            title,
+            status,
+            fields,
+        } => add::run(open_ctx(dir)?, title, status, fields),
+        Command::Show { id } => show::run(open_ctx(dir)?, id),
         _ => {
             let _ctx = open_ctx(dir)?;
             Err(Error::Validation("not implemented".into()))
