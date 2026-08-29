@@ -1,8 +1,6 @@
 # tasks — design
 
-**Status:** approved design, not yet implemented (2026-08-29). Revised the same day after
-review: 6-digit ids with an explicit collision policy, strict doc paths, JSON schemas,
-editor safety, edit invariants, cross-project cycle rules, reserved notes delimiter.
+**Status:** implemented (2026-08-29); see docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
 
@@ -86,7 +84,7 @@ Free-form markdown body.
 | `status`   | enum                | yes      | `idea`, `todo`, `doing`, `blocked`, `done`, `dropped`. |
 | `priority` | int 0–4             | yes      | 0 = most urgent. Default 2. |
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
-| `owner`    | string              | no       | Advisory claim; set by `start`. |
+| `owner`    | string              | no       | Advisory claim; set by `start`; `[A-Za-z0-9._/@+-]+`. |
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
 | `updated`  | RFC 3339 UTC        | yes      | Set by every write command. |
 | `depends`  | list of ids         | yes      | May be empty. Foreign prefixes allowed (§6). |
@@ -95,7 +93,8 @@ Free-form markdown body.
 | `plan`     | repo-relative path  | no       | Must be an existing file under `docs/plans/`. |
 | `step`     | string              | no       | Exact text of a heading inside `plan`. Requires `plan`. |
 
-Unknown keys are an error. Times are UTC RFC 3339 with second precision.
+Unknown keys are an error. Every scalar and list item is a single line. Times are UTC RFC
+3339 with second precision.
 
 ### 3.2 Body and notes
 
@@ -158,7 +157,8 @@ Every command locates the project by walking up from the current directory to th
 tasks init [--prefix P]
     Create tasks/.config.toml, docs/specs/, docs/plans/ (if absent), and register the
     project in ~/.config/tasks/projects.toml. Prefix defaults to the first three letters
-    of the repo directory name; errors if the prefix is already registered to another path.
+    of the repo directory name; rerunning with the same prefix is an idempotent repair and
+    a different prefix is an error.
     Prints the skill install hint (§8) if no skill is found at user or project level.
 
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
@@ -253,8 +253,9 @@ check  -> { errors: [{ id: string|null, file: string, kind, detail }],
             warnings: [{ id, file, kind, detail }] }
 prime  -> { prefix, counts: { idea, todo, doing, blocked, done, dropped },
             ready: [TaskSummary], doing: [TaskSummary], warnings }
-init, add, edit, note, start, done, drop, block, unblock, dep
-       -> { id: string, warnings }
+init   -> { prefix, root, warnings }
+add, edit, note, start, done, drop, block, unblock, dep
+       -> { id, warnings }
 ```
 
 `--pretty` renders the same data as tables (`list`, `ready`, `prime`), the file text plus a
@@ -304,9 +305,10 @@ sci = "~/d/science"
 fam = "~/d/familiar"
 ```
 
-A foreign id `<p>-<hex>` resolves to `<projects.p>/tasks/<p>-<hex>.md`. The registry points
-at each project's main checkout, so a worktree reading a foreign dependency sees that
-project's main branch — accepted as the right approximation.
+A registry path may start with `~/`; it expands to the user's home directory. A foreign id
+`<p>-<hex>` resolves to `<projects.p>/tasks/<p>-<hex>.md`. The registry points at each
+project's main checkout, so a worktree reading a foreign dependency sees that project's main
+branch — accepted as the right approximation.
 
 A prefix is *unreachable* when it is not registered, or its path or the task file does not
 exist. Unreachable ids are warnings in `show`/`list`/`check` and errors (`unresolvable_id`)
@@ -381,7 +383,8 @@ Manual, documented steps — the tool does not move files:
 ## 10. Implementation
 
 - Rust, single static binary, edition 2024. Crates: `clap` (derive), `serde` +
-  `serde_yaml`, `serde_json`, `toml`, `time`, `rand`, `thiserror`/`anyhow`.
+  `serde_json`, `toml`, `time`, `fastrand`, `thiserror`. Frontmatter uses a strict in-tree
+  subset parser; no YAML crate is used. `serde_yaml`, `rand`, and `anyhow` are not used.
 - Modules: `model` (Task, Status, Size, id parsing, transition table), `format`
   (parse/serialize frontmatter + body + notes, round-trip exact), `repo` (locate project,
   scan, atomic write), `registry`, `query` (ready, graph, cycle detection across
