@@ -56,9 +56,8 @@ fn parse_items(inner: &str) -> std::result::Result<Vec<String>, String> {
             (parse_scalar(&rest[..end])?, &rest[end..])
         };
         items.push(item);
-        let after = after.trim_start();
         if after.is_empty() { return Ok(items); }
-        rest = after.strip_prefix(',').ok_or_else(|| format!("expected `,` before {after:?}"))?.trim_start();
+        rest = after.strip_prefix(", ").ok_or_else(|| format!("expected `, ` before {after:?}"))?;
         if rest.trim().is_empty() { return Err("trailing comma".into()); }
     }
 }
@@ -170,6 +169,9 @@ mod tests {
         assert!(parse("a: [ a]\n").is_err());
         assert!(parse("a: [a ]\n").is_err());
         assert!(parse("a: [a , b]\n").is_err());
+        assert!(parse("a: [\"a\" , b]\n").is_err());
+        assert!(parse("a: [a,  b]\n").is_err());
+        assert!(parse("a: [a,b]\n").is_err());
     }
 
     #[test]
