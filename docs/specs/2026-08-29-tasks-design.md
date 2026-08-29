@@ -12,7 +12,7 @@ into the project's repo; the CLI is the only writer.
 Goals:
 
 - Simple, discoverable CLI: `tasks add`, `tasks show`, `tasks list`, `tasks ready`, …
-- Tasks serialized as markdown with YAML frontmatter; readable with `cat`, diffable, mergeable.
+- Tasks serialized as markdown with YAML-like frontmatter; readable with `cat`, diffable, mergeable.
 - Agent-first: JSON output by default, `tasks prime` for session context, `tasks ready` for
   "what can I work on now", cheap to call hundreds of times per session.
 - First-class links to design specs and implementation plans, with drift detection.
@@ -382,7 +382,7 @@ Manual, documented steps — the tool does not move files:
 
 ## 10. Implementation
 
-- Rust, single static binary, edition 2024. Crates: `clap` (derive), `serde` +
+- Rust, single Rust binary, edition 2024. Crates: `clap` (derive), `serde` +
   `serde_json`, `toml`, `time`, `fastrand`, `thiserror`. Frontmatter uses a strict in-tree
   subset parser; no YAML crate is used. `serde_yaml`, `rand`, and `anyhow` are not used.
 - Modules: `model` (Task, Status, Size, id parsing, transition table), `format`
