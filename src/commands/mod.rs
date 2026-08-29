@@ -2,11 +2,12 @@ pub mod add;
 pub mod init;
 pub mod list;
 pub mod show;
+pub mod status;
 
 use crate::cli::{Cli, Command, FieldArgs};
 use crate::error::{Error, Result};
-use crate::format::{validate_body, validate_task};
-use crate::model::{Size, Task, TaskId};
+use crate::format::{validate_body, validate_note_text, validate_task};
+use crate::model::{Note, Size, Status, Task, TaskId};
 use crate::output::Output;
 use crate::registry::Registry;
 use crate::repo::Project;
@@ -113,6 +114,49 @@ pub fn id_out(ctx: Ctx, task: &Task) -> Output {
     })
 }
 
+pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
+    validate_note_text(text)?;
+    task.notes.push(Note {
+        at: crate::time::now(),
+        by: by.to_string(),
+        text: text.to_string(),
+    });
+    Ok(())
+}
+
+/// Ids of dependencies that are open or unreachable.
+pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
+    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let mut open = Vec::new();
+    for dependency in &task.depends {
+        match resolver.resolve_task(dependency)? {
+            Some(task) if !task.status.is_open() => {}
+            _ => open.push(dependency.to_string()),
+        }
+    }
+    Ok(open)
+}
+
+pub fn transition(ctx: &Ctx, task: &mut Task, to: Status, force: bool) -> Result<()> {
+    if !Status::can_transition(task.status, to) {
+        return Err(Error::InvalidTransition(
+            task.status.as_str().into(),
+            to.as_str().into(),
+        ));
+    }
+    if to == Status::Done && task.status != Status::Done && !force {
+        let open = open_deps(ctx, task)?;
+        if !open.is_empty() {
+            return Err(Error::OpenDependencies(
+                task.id.to_string(),
+                open.join(", "),
+            ));
+        }
+    }
+    task.status = to;
+    Ok(())
+}
+
 fn raw_owner_name(project: &Project) -> Result<String> {
     if let Ok(owner) = std::env::var("TASKS_OWNER") {
         if !owner.is_empty() {
@@ -157,6 +201,16 @@ pub fn run(cli: Cli) -> Result<Output> {
         } => list::list(open_ctx(dir)?, statuses, tags, owner, all_projects),
         Command::Ready { size, limit } => list::ready(open_ctx(dir)?, size, limit),
         Command::Prime => list::prime(open_ctx(dir)?),
+        Command::Note { id, text } => status::note(open_ctx(dir)?, id, text),
+        Command::Start { id } => status::start(open_ctx(dir)?, id),
+        Command::Done { id, message, force } => {
+            status::close(open_ctx(dir)?, id, Status::Done, message, force)
+        }
+        Command::Drop { id, message } => {
+            status::close(open_ctx(dir)?, id, Status::Dropped, message, false)
+        }
+        Command::Block { id, message } => status::block(open_ctx(dir)?, id, message),
+        Command::Unblock { id } => status::unblock(open_ctx(dir)?, id),
         _ => {
             let _ctx = open_ctx(dir)?;
             Err(Error::Validation("not implemented".into()))

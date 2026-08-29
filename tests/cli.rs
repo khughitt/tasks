@@ -336,3 +336,197 @@ fn list_warns_about_unreachable_dependencies() {
     assert_eq!(v["warnings"].as_array().unwrap().len(), 1);
     assert!(v["warnings"][0].as_str().unwrap().contains(&dep));
 }
+
+#[test]
+fn note_appends_single_line_entries() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = env.json(&dir, &["add", "A", "-b", "Body"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["note", &id, "first"]);
+    env.cmd(&dir)
+        .env("TASKS_OWNER", "agent-7")
+        .args(["note", &id, "second"])
+        .assert()
+        .success();
+    assert_eq!(env.fail(&dir, &["note", &id, "a\nb"]), "validation");
+    assert_eq!(env.fail(&dir, &["note", &id, ""]), "validation");
+    let out = env
+        .cmd(&dir)
+        .env("TASKS_OWNER", "bad owner)")
+        .args(["note", &id, "x"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let out = env
+        .cmd(&dir)
+        .env_remove("USER")
+        .args(["note", &id, "x"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "no owner source must be an error, not \"unknown\""
+    );
+    assert_eq!(env.fail(&dir, &["add", "x", "--tag", "a\nb"]), "validation");
+    let raw = env.read(&dir, &format!("tasks/{id}.md"));
+    assert!(raw.contains("\nBody\n\n## Notes\n\n- 20"), "{raw}");
+    assert!(raw.contains("(tester): first\n- 20"), "{raw}");
+    assert!(raw.ends_with("(agent-7): second\n"), "{raw}");
+    let s = env.json(&dir, &["show", &id]);
+    assert_eq!(s["task"]["notes"].as_array().unwrap().len(), 2);
+    assert_eq!(s["task"]["notes"][1]["by"], "agent-7");
+}
+
+#[test]
+fn start_done_drop_block_unblock_transitions() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let dep = env.json(&dir, &["add", "Dep"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let id = env.json(&dir, &["add", "Main", "--depends", &dep])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.cmd(&dir)
+        .env("TASKS_OWNER", "me")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let s = env.json(&dir, &["show", &id]);
+    assert_eq!(s["task"]["status"], "doing");
+    assert_eq!(s["task"]["owner"], "me");
+    assert_eq!(
+        env.fail(&dir, &["done", &id, "too soon"]),
+        "open_dependencies"
+    );
+    env.json(&dir, &["block", &id, "waiting on dep"]);
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "blocked");
+    env.json(&dir, &["unblock", &id]);
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "todo");
+    env.json(&dir, &["done", &id, "forced", "--force"]);
+    let s = env.json(&dir, &["show", &id]);
+    assert_eq!(s["task"]["status"], "done");
+    assert_eq!(
+        s["task"]["notes"].as_array().unwrap().last().unwrap()["text"],
+        "forced"
+    );
+    assert_eq!(env.fail(&dir, &["drop", &id]), "invalid_transition");
+    assert_eq!(env.fail(&dir, &["start", &id]), "invalid_transition");
+    env.json(&dir, &["done", &dep]);
+    assert_eq!(
+        env.fail(&dir, &["drop", &dep, "nope"]),
+        "invalid_transition"
+    ); // done -> dropped is not allowed
+}
+
+#[test]
+fn list_defaults_to_open_and_filters() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = env.json(&dir, &["add", "A", "-p", "3", "--tag", "x"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = env.json(&dir, &["add", "B", "-p", "0"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let c = env.json(&dir, &["add", "C", "--status", "idea", "--tag", "x"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["drop", &a, "obsolete"]);
+    let v = env.json(&dir, &["list"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [b.as_str(), c.as_str()]);
+    let v = env.json(&dir, &["list", "--status", "dropped"]);
+    assert_eq!(v["tasks"][0]["id"], a);
+    let v = env.json(
+        &dir,
+        &[
+            "list", "--status", "idea", "--status", "dropped", "--tag", "x",
+        ],
+    );
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 2);
+    assert_eq!(env.fail(&dir, &["list", "--status", "weird"]), "validation");
+    let summary = &v["tasks"][0];
+    for key in [
+        "id", "title", "status", "priority", "size", "owner", "updated", "tags", "depends",
+    ] {
+        assert!(summary.get(key).is_some(), "summary missing {key}");
+    }
+    assert!(summary.get("body").is_none());
+}
+
+#[test]
+fn ready_excludes_ideas_doing_and_open_deps() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = env.json(&dir, &["add", "A"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = env.json(&dir, &["add", "B", "--depends", &a, "-p", "0"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["add", "I", "--status", "idea", "-p", "0"]);
+    let d = env.json(&dir, &["add", "D", "-p", "0"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["start", &d]);
+    let v = env.json(&dir, &["ready"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [a.as_str()]);
+    env.json(&dir, &["done", &a]);
+    let v = env.json(&dir, &["ready"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [b.as_str()]);
+    let v = env.json(&dir, &["ready", "-n", "0"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn prime_reports_counts_ready_and_doing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = env.json(&dir, &["add", "A"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["add", "B"]);
+    env.json(&dir, &["start", &a]);
+    let v = env.json(&dir, &["prime"]);
+    assert_eq!(v["prefix"], "sci");
+    assert_eq!(v["counts"]["todo"], 1);
+    assert_eq!(v["counts"]["doing"], 1);
+    assert_eq!(v["counts"]["done"], 0);
+    assert_eq!(v["ready"].as_array().unwrap().len(), 1);
+    assert_eq!(v["doing"][0]["id"], a);
+    assert_eq!(v["doing"][0]["owner"], "tester");
+    let out = env.cmd(&dir).args(["--pretty", "prime"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sci") && text.contains(&a), "{text}");
+}
