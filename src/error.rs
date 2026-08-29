@@ -41,6 +41,32 @@ impl From<std::io::Error> for Error {
 }
 
 impl Error {
+    /// Appends `suffix` to the human-readable detail; the kind is unchanged.
+    pub fn with_suffix(self, suffix: &str) -> Error {
+        match self {
+            Error::Config(detail) => Error::Config(detail + suffix),
+            Error::TaskNotFound(detail) => Error::TaskNotFound(detail + suffix),
+            Error::UnresolvableId(detail) => Error::UnresolvableId(detail + suffix),
+            Error::InvalidId(id, detail) => Error::InvalidId(id, detail + suffix),
+            Error::Parse { file, detail } => Error::Parse {
+                file,
+                detail: detail + suffix,
+            },
+            Error::Validation(detail) => Error::Validation(detail + suffix),
+            Error::OpenDependencies(id, detail) => Error::OpenDependencies(id, detail + suffix),
+            Error::InvalidTransition(from, to) => Error::InvalidTransition(from, to + suffix),
+            Error::Cycle(detail) => Error::Cycle(detail + suffix),
+            Error::Ambiguous(detail) => Error::Ambiguous(detail + suffix),
+            Error::DocNotFound(detail) => Error::DocNotFound(detail + suffix),
+            Error::ConcurrentModification(id, path) => {
+                Error::ConcurrentModification(id, path + suffix)
+            }
+            Error::Editor(detail) => Error::Editor(detail + suffix),
+            Error::Io(detail) => Error::Io(detail + suffix),
+            error @ Error::NoProject(_) => error,
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Error::NoProject(_) => "no_project",

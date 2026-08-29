@@ -1,5 +1,6 @@
 pub mod add;
 pub mod dep;
+pub mod edit;
 pub mod graph;
 pub mod init;
 pub mod list;
@@ -206,6 +207,13 @@ pub fn run(cli: Cli) -> Result<Output> {
             all_projects,
         } => list::list(open_ctx(dir)?, statuses, tags, owner, all_projects),
         Command::Ready { size, limit } => list::ready(open_ctx(dir)?, size, limit),
+        Command::Edit {
+            id,
+            title,
+            status,
+            force,
+            fields,
+        } => edit::run(open_ctx(dir)?, id, title, status, force, fields),
         Command::Prime => list::prime(open_ctx(dir)?),
         Command::Note { id, text } => status::note(open_ctx(dir)?, id, text),
         Command::Start { id } => status::start(open_ctx(dir)?, id),

@@ -531,6 +531,216 @@ fn prime_reports_counts_ready_and_doing() {
     assert!(text.contains("sci") && text.contains(&a), "{text}");
 }
 
+fn editor_script(dir: &std::path::Path, body: &str) -> String {
+    let p = dir.join("editor.sh");
+    std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    p.display().to_string()
+}
+
+#[test]
+fn edit_flags_update_fields_and_enforce_rules() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let dep = env.json(&dir, &["add", "Dep"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let id = env.json(&dir, &["add", "A", "--depends", &dep])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(
+        &dir,
+        &[
+            "edit", &id, "--title", "A2", "-p", "0", "--size", "xl", "--tag", "t1",
+        ],
+    );
+    let s = env.json(&dir, &["show", &id]);
+    assert_eq!(s["task"]["title"], "A2");
+    assert_eq!(s["task"]["priority"], 0);
+    assert_eq!(s["task"]["size"], "xl");
+    assert_eq!(env.fail(&dir, &["edit", &id, "--force"]), "validation");
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--status", "todo", "--force"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--status", "done"]),
+        "open_dependencies"
+    );
+    let dep2 = env.json(&dir, &["add", "Dep2"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["done", &dep]);
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--status", "done", "--depends", &dep2]),
+        "open_dependencies"
+    );
+    env.json(&dir, &["edit", &id, "--status", "done", "--force"]);
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--status", "doing"]),
+        "invalid_transition"
+    );
+    env.json(&dir, &["edit", &id, "--status", "todo"]);
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "todo");
+    env.cmd(&dir)
+        .args(["edit", &id, "--body", "-"])
+        .write_stdin("New body\n")
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["body"], "New body");
+    write_doc(&dir, "docs/plans/2026-08-24-one.md", "### Task 1: keep\n");
+    write_doc(
+        &dir,
+        "docs/plans/2026-08-25-other.md",
+        "### Task 7: unrelated\n",
+    );
+    let linked = env.json(
+        &dir,
+        &["add", "Linked", "--plan", "one", "--step", "Task 1: keep"],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        env.fail(&dir, &["edit", &linked, "--plan", "other"]),
+        "validation"
+    );
+}
+
+#[test]
+fn edit_editor_path_validates_and_is_atomic() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = env.json(&dir, &["add", "A", "-b", "Body"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&dir, &["note", &id, "n1"]);
+    let before = env.read(&dir, &format!("tasks/{id}.md"));
+
+    let bad = editor_script(&dir, "echo garbage > \"$1\"");
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &bad)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "parse");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(".edit.md")
+    );
+    assert_eq!(env.read(&dir, &format!("tasks/{id}.md")), before);
+    let kept = std::fs::read_dir(dir.join("tasks"))
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".edit.md")
+        })
+        .count();
+    assert_eq!(kept, 1);
+
+    let tamper = editor_script(
+        &dir,
+        "sed -i 's/^created: .*/created: 2000-01-01T00:00:00Z/' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &tamper)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+
+    let notes = editor_script(&dir, "sed -i 's/): n1$/): hacked/' \"$1\"");
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &notes)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+
+    let good = editor_script(&dir, "sed -i 's/^title: A$/title: Edited/' \"$1\"");
+    env.cmd(&dir)
+        .env("EDITOR", &good)
+        .args(["edit", &id])
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["title"], "Edited");
+    let kept = std::fs::read_dir(dir.join("tasks"))
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".edit.md")
+        })
+        .count();
+    assert_eq!(
+        kept, 3,
+        "the three failed edits keep their temp files; the good one removes its own"
+    );
+
+    let fail_save = editor_script(
+        &dir,
+        "name=$(basename \"$1\"); id=${name#.}; id=${id%%.*}; mkdir \"$(dirname \"$1\")/.$id.tmp\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &fail_save)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "io");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(".edit.md")
+    );
+    std::fs::remove_dir(dir.join(format!("tasks/.{id}.tmp"))).unwrap();
+
+    let task_path = dir.join(format!("tasks/{id}.md")).display().to_string();
+    let racy = editor_script(
+        &dir,
+        &format!(
+            "sed -i 's/^title: .*/title: Racer/' \"{task_path}\"; sed -i 's/^title: .*/title: Loser/' \"$1\""
+        ),
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &racy)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "concurrent_modification");
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["title"], "Racer");
+
+    let out = env
+        .cmd(&dir)
+        .env_remove("EDITOR")
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "editor");
+}
+
 #[test]
 fn dep_add_remove_and_local_cycle() {
     let mut env = TestEnv::new();
