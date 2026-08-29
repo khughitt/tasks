@@ -953,6 +953,43 @@ fn check_reports_cycles_once() {
 }
 
 #[test]
+fn check_finds_cycle_after_missing_dependency() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = env.json(&dir, &["add", "A"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = env.json(&dir, &["add", "B"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let raw = env.read(&dir, &format!("tasks/{a}.md"));
+    std::fs::write(
+        dir.join(format!("tasks/{a}.md")),
+        raw.replace("depends: []", &format!("depends: [sci-ffffff, {b}]")),
+    )
+    .unwrap();
+    let raw = env.read(&dir, &format!("tasks/{b}.md"));
+    std::fs::write(
+        dir.join(format!("tasks/{b}.md")),
+        raw.replace("depends: []", &format!("depends: [{a}]")),
+    )
+    .unwrap();
+
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let errors = value["errors"].as_array().unwrap();
+    assert!(errors.iter().any(|finding| finding["kind"] == "dangling_dep"));
+    assert!(errors.iter().any(|finding| finding["kind"] == "cycle"));
+    assert!(value["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding["kind"] == "cycle_unverifiable"));
+}
+
+#[test]
 fn check_reports_a_cycle_at_its_lowest_member() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

@@ -4,6 +4,7 @@ use crate::model::{Task, TaskId};
 use crate::output::{CheckOut, Finding, Output};
 use crate::query::find_cycle;
 use crate::resolve::{DocKind, Resolver};
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 fn finding(task: Option<&Task>, file: String, kind: &str, detail: String) -> Finding {
@@ -93,13 +94,21 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     }
 
     let mut seen = BTreeSet::new();
+    let unreachable = RefCell::new(BTreeSet::new());
     let edges = |id: &TaskId| -> Result<Option<Vec<TaskId>>> {
         if let Some(task) = tasks.iter().find(|task| &task.id == id) {
             return Ok(Some(task.depends.clone()));
         }
-        Ok(foreign(id).unwrap_or(None).map(|task| task.depends))
+        match foreign(id) {
+            Ok(Some(task)) => Ok(Some(task.depends)),
+            Ok(None) | Err(_) => {
+                unreachable.borrow_mut().insert(id.clone());
+                Ok(Some(vec![]))
+            }
+        }
     };
     for task in &tasks {
+        unreachable.borrow_mut().clear();
         match find_cycle(&task.id, &edges) {
             Ok(None) => {}
             Ok(Some(cycle)) => {
@@ -119,13 +128,15 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     });
                 }
             }
-            Err(Error::UnresolvableId(id)) => warnings.push(finding(
+            Err(error) => return Err(error),
+        }
+        for id in std::mem::take(&mut *unreachable.borrow_mut()) {
+            warnings.push(finding(
                 Some(task),
                 format!("tasks/{}.md", task.id),
                 "cycle_unverifiable",
                 format!("cannot verify acyclicity through unreachable {id}"),
-            )),
-            Err(error) => return Err(error),
+            ));
         }
     }
 
