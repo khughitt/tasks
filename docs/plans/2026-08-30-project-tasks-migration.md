@@ -205,7 +205,9 @@ Use `apply_patch` for the ledger and current documentation. Preserve historical 
 ```bash
 set -euo pipefail
 cd ~/d/familiar/.worktrees/tasks-migration-fam
-rg -n 'Status:|to.?do|unchecked|supersed|README|surfaces|docs/(specs|plans|designs)' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
+audit_paths=(docs)
+for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || audit_paths+=("$f"); done
+rg -n 'Status:|to.?do|unchecked|supersed|README|surfaces|docs/(specs|plans|designs)' "${audit_paths[@]}" || { audit_rg_status=$?; test "$audit_rg_status" -eq 1; }
 comm -3 \
   <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-familiar-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-familiar-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
@@ -241,7 +243,7 @@ Expected before initialization: explicit `no_project` failure.
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-migration-fam.registry-path
-tasks_migration_config=$(mktemp -d)
+tasks_migration_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-fam.registry-path
 export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
 export TASKS_FORMAT=json
@@ -357,7 +359,9 @@ From the worktree root, read `AGENTS.md` first and treat its named authority des
 ```bash
 set -euo pipefail
 cd ~/d/atoms/.worktrees/tasks-migration-atoms
-rg -n 'Status:|A[1-9]|obligation|certif|adopt|Science|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
+audit_paths=(docs)
+for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || audit_paths+=("$f"); done
+rg -n 'Status:|A[1-9]|obligation|certif|adopt|Science|supersed' "${audit_paths[@]}" || { audit_rg_status=$?; test "$audit_rg_status" -eq 1; }
 comm -3 \
   <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-atoms-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-atoms-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
@@ -383,7 +387,7 @@ Expected: explicit `no_project` failure.
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-migration-atoms.registry-path
-tasks_migration_config=$(mktemp -d)
+tasks_migration_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-atoms.registry-path
 export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
 export TASKS_FORMAT=json
@@ -494,7 +498,9 @@ Create `AGENTS.md` if absent with the repository's authority and gate summary. A
 ```bash
 set -euo pipefail
 cd ~/d/science/.worktrees/tasks-migration-sci
-rg -n 'Status:|roadmap|adopt|cut.?12|guide|Atoms|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
+audit_paths=(docs)
+for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || audit_paths+=("$f"); done
+rg -n 'Status:|roadmap|adopt|cut.?12|guide|Atoms|supersed' "${audit_paths[@]}" || { audit_rg_status=$?; test "$audit_rg_status" -eq 1; }
 comm -3 \
   <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-science-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-science-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
@@ -519,7 +525,7 @@ Expected: explicit `no_project` failure.
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-migration-sci.registry-path
-tasks_migration_config=$(mktemp -d)
+tasks_migration_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-sci.registry-path
 export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
 export TASKS_FORMAT=json
@@ -634,7 +640,9 @@ Read `AGENTS.md` first and treat `docs/STANDARD.md` as the authority it names. V
 ```bash
 set -euo pipefail
 cd ~/d/nodes/.worktrees/tasks-migration-nodes
-rg -n 'Status:|STANDARD|parity|Python|TypeScript|Mindful|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
+audit_paths=(docs)
+for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || audit_paths+=("$f"); done
+rg -n 'Status:|STANDARD|parity|Python|TypeScript|Mindful|supersed' "${audit_paths[@]}" || { audit_rg_status=$?; test "$audit_rg_status" -eq 1; }
 comm -3 \
   <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-nodes-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-nodes-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
@@ -659,7 +667,7 @@ Expected: explicit `no_project` failure.
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-migration-nodes.registry-path
-tasks_migration_config=$(mktemp -d)
+tasks_migration_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-nodes.registry-path
 export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
 export TASKS_FORMAT=json
@@ -786,7 +794,9 @@ Read `AGENTS.md`, README, current roadmap and active plans, architecture-moderni
 ```bash
 set -euo pipefail
 cd ~/d/mindful/v3/.worktrees/tasks-migration-mind3
-rg -n 'Status:|roadmap|moderni[sz]|v3|v6|import|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
+audit_paths=(docs)
+for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || audit_paths+=("$f"); done
+rg -n 'Status:|roadmap|moderni[sz]|v3|v6|import|supersed' "${audit_paths[@]}" || { audit_rg_status=$?; test "$audit_rg_status" -eq 1; }
 comm -3 \
   <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-mindful-v3-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-mindful-v3-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
@@ -813,7 +823,7 @@ Expected: explicit `no_project` failure.
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-migration-mind3.registry-path
-tasks_migration_config=$(mktemp -d)
+tasks_migration_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-mind3.registry-path
 export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
 export TASKS_FORMAT=json
@@ -930,7 +940,9 @@ Read `AGENTS.md`, `docs/ARCHITECTURE.md`, and `docs/FORMATS.md` first as standin
 ```bash
 set -euo pipefail
 cd ~/d/mindful/v6/.worktrees/tasks-migration-mind6
-rg -n 'Status:|ARCHITECTURE|FORMATS|v3|v6|Nodes|sprint|import|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
+audit_paths=(docs)
+for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || audit_paths+=("$f"); done
+rg -n 'Status:|ARCHITECTURE|FORMATS|v3|v6|Nodes|sprint|import|supersed' "${audit_paths[@]}" || { audit_rg_status=$?; test "$audit_rg_status" -eq 1; }
 comm -3 \
   <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-mindful-v6-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-mindful-v6-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
@@ -955,7 +967,7 @@ Expected: explicit `no_project` failure.
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-migration-mind6.registry-path
-tasks_migration_config=$(mktemp -d)
+tasks_migration_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-mind6.registry-path
 export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
 export TASKS_FORMAT=json
@@ -1045,7 +1057,7 @@ rm -- /tmp/tasks-migration-mind6.registry-path
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-reconciliation-portfolio.registry-path
-tasks_portfolio_config=$(mktemp -d)
+tasks_portfolio_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_portfolio_config" >/tmp/tasks-reconciliation-portfolio.registry-path
 export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
 export TASKS_FORMAT=json
@@ -1282,7 +1294,7 @@ done
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-final-portfolio.registry-path
-tasks_portfolio_config=$(mktemp -d)
+tasks_portfolio_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_portfolio_config" >/tmp/tasks-final-portfolio.registry-path
 export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
 export TASKS_FORMAT=json
@@ -1376,6 +1388,8 @@ Expected: every established gate passes. Apply the documented Nodes build refres
 
 ```bash
 set -euo pipefail
+final_portfolio_config=$(</tmp/tasks-final-portfolio.registry-path)
+test "${XDG_CONFIG_HOME-}" != "${final_portfolio_config:?portfolio registry unset}"
 TASKS_FORMAT=json tasks -C ~/d/familiar init --prefix fam && TASKS_FORMAT=json tasks -C ~/d/familiar prime | jq -e '.prefix == "fam"'
 TASKS_FORMAT=json tasks -C ~/d/atoms init --prefix atoms && TASKS_FORMAT=json tasks -C ~/d/atoms prime | jq -e '.prefix == "atoms"'
 TASKS_FORMAT=json tasks -C ~/d/science init --prefix sci && TASKS_FORMAT=json tasks -C ~/d/science prime | jq -e '.prefix == "sci"'
@@ -1413,7 +1427,9 @@ Use `apply_patch` to change the design status from approved/not implemented to i
 ```bash
 set -euo pipefail
 cd ~/d/tasks/.worktrees/project-migration-complete
-rg -n 'project.tasks.migration|not implemented|implementation planning|migration.*pending' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
+audit_paths=(docs)
+for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || audit_paths+=("$f"); done
+rg -n 'project.tasks.migration|not implemented|implementation planning|migration.*pending' "${audit_paths[@]}" || { audit_rg_status=$?; test "$audit_rg_status" -eq 1; }
 git diff --check
 ```
 
