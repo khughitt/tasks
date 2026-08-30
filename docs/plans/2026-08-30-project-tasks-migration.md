@@ -527,8 +527,9 @@ rm -- /tmp/tasks-migration-atoms.registry-path
 **Files:**
 
 - Create: `~/d/beliefs/.worktrees/tasks-migration-beliefs/docs/plans/2026-08-30-beliefs-tasks-migration.md`
-- Create through CLI: `~/d/beliefs/.worktrees/tasks-migration-beliefs/tasks/.config.toml`
-- Create through CLI: `~/d/beliefs/.worktrees/tasks-migration-beliefs/tasks/beliefs-*.md`
+- Audit through CLI: `~/d/beliefs/.worktrees/tasks-migration-beliefs/tasks/.config.toml`
+- Preserve through CLI: `~/d/beliefs/.worktrees/tasks-migration-beliefs/tasks/beliefs-c88566.md`
+- Create through CLI: only additional evidence-backed `~/d/beliefs/.worktrees/tasks-migration-beliefs/tasks/beliefs-*.md`
 - Modify: evidence-backed drift under `README.md` and `docs/`
 - Create: `AGENTS.md` if still absent; otherwise modify it
 
@@ -537,13 +538,47 @@ rm -- /tmp/tasks-migration-atoms.registry-path
 - Consumes: integrated Familiar and Atoms, including resolvable `fam-*` and `atoms-*` IDs.
 - Produces: integrated `beliefs` tasks and explicit repository guidance.
 
-- [ ] **Step 1: Create the Beliefs worktree and run both baselines**
+- [ ] **Step 1: Create the Beliefs worktree and establish the kernel-sensitive baseline**
 
 ```bash
 set -euo pipefail
 git -C ~/d/beliefs worktree add -b chore/tasks-migration-beliefs ~/d/beliefs/.worktrees/tasks-migration-beliefs main
-cd ~/d/beliefs/.worktrees/tasks-migration-beliefs/python
-uv run --frozen pytest -q
+beliefs_worktree=~/d/beliefs/.worktrees/tasks-migration-beliefs
+beliefs_python_gate=/tmp/tasks-migration-beliefs-python-gate
+beliefs_failed_nodes=/tmp/tasks-migration-beliefs-python-failed-nodes
+test ! -e "$beliefs_python_gate"
+test ! -e "$beliefs_failed_nodes"
+cat >"$beliefs_python_gate" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+mode=${1:?mode required}
+worktree=${2:?worktree required}
+failed_nodes=${3:?failed-node file required}
+output=$(mktemp)
+trap 'rm -f -- "$output"' EXIT
+set +e
+(
+  cd "$worktree/python"
+  uv run --frozen pytest -q --tb=short
+) >"$output" 2>&1
+pytest_status=$?
+set -e
+test "$pytest_status" -eq 1
+test "$(rg -c '^FAILED ' "$output")" -eq 145
+test "$(rg -c '^FAILED .*atoms\\.core\\.errors\\.CapabilityUnavailable' "$output")" -eq 145
+rg -q '2579 passed' "$output"
+rg -q '145 failed' "$output"
+sed -n 's/^FAILED \([^ ]*\) .*/\1/p' "$output" | LC_ALL=C sort -u >"$output.nodes"
+test "$(wc -l <"$output.nodes")" -eq 145
+case "$mode" in
+  record) cp -- "$output.nodes" "$failed_nodes" ;;
+  check) cmp -- "$failed_nodes" "$output.nodes" ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod +x "$beliefs_python_gate"
+"$beliefs_python_gate" record "$beliefs_worktree" "$beliefs_failed_nodes"
+cd "$beliefs_worktree/python"
 uv run --frozen ruff check .
 uv run --frozen pyright
 cd ../ts
@@ -552,11 +587,17 @@ npm run typecheck
 npm run check
 ```
 
-Expected: all six gates pass before edits.
+Expected: on kernel `7.1.11-arch1-1`, Python records exactly `2579 passed, 145 failed`.
+Every failure is `atoms.core.errors.CapabilityUnavailable`: the ext4/kernel tuple is absent
+from the durability allowlist certified for kernel `7.1.10-arch1-1`. This user-authorized,
+kernel-sensitive baseline is for Task 4 only. The reusable gate records its 145 failed-node
+set here; every later Task 4 Python run must use `check` and match that set, the identical
+root-cause signature, and `2579 passed`. Ruff, Pyright, and all three TypeScript gates remain
+strict.
 
 - [ ] **Step 2: Audit Beliefs and write its ledger**
 
-Read the README, current roadmap and adoption ledgers, guide, active plans, code, and tests. Classify every document; verify adoption state, cut-12 claims, and unfinished work against all local branches/worktrees. Separate Beliefs outcomes from already-owned Atoms outcomes. Write `docs/plans/2026-08-30-beliefs-tasks-migration.md` with the shared contract.
+Read the README, current roadmap and adoption ledgers, guide, active plans, code, and tests. Classify every document; verify adoption state, cut-12 claims, and unfinished work against all local branches/worktrees. Separate Beliefs outcomes from already-owned Atoms outcomes. Write `docs/plans/2026-08-30-beliefs-tasks-migration.md` with the shared contract. Its `Candidate outcomes` ledger includes a literal row for existing task `beliefs-c88566`: size, proposed status, and blockers are `n/a`; disposition is `preserve (no task mutation)`; task ID is `beliefs-c88566`. Audit its evidence and every field, retain its task ID, and neither duplicate it nor silently omit it. Create only additional evidence-backed outcomes.
 
 - [ ] **Step 3: Correct drift, add guidance, and commit documentation**
 
@@ -572,7 +613,12 @@ comm -3 \
   <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-beliefs-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-beliefs-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
 git diff --check
-cd python && uv run --frozen pytest -q && uv run --frozen ruff check . && uv run --frozen pyright
+beliefs_python_gate=/tmp/tasks-migration-beliefs-python-gate
+beliefs_failed_nodes=/tmp/tasks-migration-beliefs-python-failed-nodes
+test -x "$beliefs_python_gate"
+test -f "$beliefs_failed_nodes"
+"$beliefs_python_gate" check "$PWD" "$beliefs_failed_nodes"
+cd python && uv run --frozen ruff check . && uv run --frozen pyright
 cd ../ts && npm test && npm run typecheck && npm run check
 cd ..
 git add README.md AGENTS.md docs
@@ -581,17 +627,12 @@ git diff --cached --check
 git commit -m "docs: reconcile project status for tasks migration"
 ```
 
-- [ ] **Step 4: Initialize Beliefs with earlier projects resolvable**
-
-```bash
-tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs prime
-```
-
-Expected: explicit `no_project` failure.
+- [ ] **Step 4: Audit and idempotently seed the existing Beliefs store**
 
 ```bash
 set -euo pipefail
 test ! -e /tmp/tasks-migration-beliefs.registry-path
+test ! -e /tmp/tasks-migration-beliefs-existing-task.json
 tasks_migration_config=$(TMPDIR=/tmp mktemp -d)
 printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-beliefs.registry-path
 export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
@@ -599,7 +640,17 @@ export TASKS_FORMAT=json
 tasks -C ~/d/familiar init --prefix fam
 tasks -C ~/d/atoms init --prefix atoms
 tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs init --prefix beliefs
+tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs init --prefix beliefs
+tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs check >/tmp/beliefs-existing-check.json
+jq -e '.errors == [] and .warnings == []' /tmp/beliefs-existing-check.json
+tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs prime | jq -e '.prefix == "beliefs"'
+tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs list --status idea --status todo --status doing --status blocked --status done --status dropped | jq -e '.tasks | length == 1 and .[0].id == "beliefs-c88566"'
+tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs show beliefs-c88566 | jq -S . >/tmp/tasks-migration-beliefs-existing-task.json
 ```
+
+Expected: the CLI-created store is valid with prefix `beliefs`, zero Tasks errors and warnings,
+and exactly the preserved task ID `beliefs-c88566`. The second `init` is the idempotent seed into
+the temporary registry; it does not create a store or change the existing task.
 
 - [ ] **Step 5: Create Beliefs tasks and dependencies**
 
@@ -614,7 +665,7 @@ export TASKS_FORMAT=json
 cd ~/d/beliefs/.worktrees/tasks-migration-beliefs
 ```
 
-Add only blockers proven by the Beliefs evidence; use existing Atoms IDs where delivery truly depends on them. Record blockers targeting Nodes or either Mindful repository as pending rather than dangling. Ensure `AGENTS.md` contains the shared guidance.
+Add only ledger rows marked `create` and blockers proven by the Beliefs evidence; use existing Atoms IDs where delivery truly depends on them. Do not mutate or recreate `beliefs-c88566`; after all additions, compare its complete CLI JSON record with `/tmp/tasks-migration-beliefs-existing-task.json`. Record blockers targeting Nodes or either Mindful repository as pending rather than dangling. Ensure `AGENTS.md` contains the shared guidance.
 
 - [ ] **Step 6: Verify, commit, and independently review Beliefs**
 
@@ -628,8 +679,13 @@ tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs check >/tmp/beliefs-chec
 jq -e '.errors == [] and .warnings == []' /tmp/beliefs-check.json
 tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs prime | jq -e '.prefix == "beliefs"'
 tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs ready
+tasks -C ~/d/beliefs/.worktrees/tasks-migration-beliefs show beliefs-c88566 | jq -S . | cmp -- /tmp/tasks-migration-beliefs-existing-task.json -
+beliefs_python_gate=/tmp/tasks-migration-beliefs-python-gate
+beliefs_failed_nodes=/tmp/tasks-migration-beliefs-python-failed-nodes
+test -x "$beliefs_python_gate"
+test -f "$beliefs_failed_nodes"
+"$beliefs_python_gate" check ~/d/beliefs/.worktrees/tasks-migration-beliefs "$beliefs_failed_nodes"
 cd ~/d/beliefs/.worktrees/tasks-migration-beliefs/python
-uv run --frozen pytest -q
 uv run --frozen ruff check .
 uv run --frozen pyright
 cd ../ts
@@ -653,7 +709,12 @@ set -euo pipefail
 tasks_migration_config=$(</tmp/tasks-migration-beliefs.registry-path)
 test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/beliefs merge --ff-only chore/tasks-migration-beliefs
-cd ~/d/beliefs/python && uv run --frozen pytest -q && uv run --frozen ruff check . && uv run --frozen pyright
+beliefs_python_gate=/tmp/tasks-migration-beliefs-python-gate
+beliefs_failed_nodes=/tmp/tasks-migration-beliefs-python-failed-nodes
+test -x "$beliefs_python_gate"
+test -f "$beliefs_failed_nodes"
+"$beliefs_python_gate" check ~/d/beliefs "$beliefs_failed_nodes"
+cd ~/d/beliefs/python && uv run --frozen ruff check . && uv run --frozen pyright
 cd ../ts && npm test && npm run typecheck && npm run check
 cd ..
 TASKS_FORMAT=json tasks init --prefix beliefs
@@ -681,6 +742,7 @@ git worktree remove ~/d/beliefs/.worktrees/tasks-migration-beliefs
 git branch -d chore/tasks-migration-beliefs
 case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
 rm -- /tmp/tasks-migration-beliefs.registry-path
+rm -- /tmp/beliefs-existing-check.json /tmp/beliefs-check.json /tmp/beliefs-stable-check.json /tmp/tasks-migration-beliefs-existing-task.json /tmp/tasks-migration-beliefs-python-failed-nodes /tmp/tasks-migration-beliefs-python-gate
 ```
 
 ### Task 5: Migrate Nodes
