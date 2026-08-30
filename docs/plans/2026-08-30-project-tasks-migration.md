@@ -555,7 +555,7 @@ mode=${1:?mode required}
 worktree=${2:?worktree required}
 failed_nodes=${3:?failed-node file required}
 output=$(mktemp)
-trap 'rm -f -- "$output"' EXIT
+trap 'rm -f -- "$output" "$output.nodes"' EXIT
 set +e
 (
   cd "$worktree/python"
