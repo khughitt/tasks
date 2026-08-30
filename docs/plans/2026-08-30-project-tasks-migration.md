@@ -575,7 +575,7 @@ test "$pytest_status" -eq 1
 test "$(awk '/^FAILED / { count += 1 } END { print count + 0 }' "$output")" -eq 144
 test "$(awk '/^E   / { count += 1 } END { print count + 0 }' "$output")" -eq 144
 test "$(awk '/^E   atoms\.core\.errors\.CapabilityUnavailable: volume configuration is not on the supplied durability allowlist: ext4 / { count += 1 } END { print count + 0 }' "$output")" -eq 144
-rg -q '^144 failed, 2580 passed in [0-9.]+s$' "$output"
+rg -q '^144 failed, 2580 passed in .+$' "$output"
 sed -n 's/^FAILED \([^ ]*\).*/\1/p' "$output" | LC_ALL=C sort -u >"$output.nodes"
 test "$(wc -l <"$output.nodes")" -eq 144
 case "$mode" in
