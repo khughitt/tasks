@@ -1395,6 +1395,13 @@ source /tmp/tasks-reconciliation-helper.zsh
 prefix=$(</tmp/tasks-reconciliation-current.prefix)
 load_reconciliation_target
 git -C "$repo" worktree add -b "chore/tasks-reconciliation-$prefix" "$worktree" main
+case "$prefix" in
+  fam|mind6) (cd "$worktree" && npm ci) ;;
+  beliefs|nodes) (cd "$worktree/ts" && npm ci) ;;
+  mind3) (cd "$worktree/react" && npm ci) ;;
+  atoms) ;;
+  *) exit 2 ;;
+esac
 run_reconciliation_gate "$prefix" "$worktree"
 ```
 
