@@ -1,6 +1,7 @@
 # Existing-project Tasks migration — design
 
-**Status:** design approved for implementation planning (2026-08-30); not implemented.
+**Status:** design approved and implementation planned in
+`docs/plans/2026-08-30-project-tasks-migration.md` (2026-08-30); not implemented.
 
 ## 1. Purpose
 
