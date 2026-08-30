@@ -1,0 +1,283 @@
+# Existing-project Tasks migration — design
+
+**Status:** approved (2026-08-30); implementation plan pending.
+
+## 1. Purpose
+
+Migrate Familiar, Science, Atoms, Nodes, Mindful v3, and Mindful v6 to the Tasks
+workflow without turning their historical design archives into synthetic task history.
+Each migration audits documentation against the repository, corrects drift, groups real
+remaining work into independently shippable outcomes, and creates checked-in task files.
+
+The migration is forward-only:
+
+- completed and abandoned work remains in Git and the documentation archive;
+- only actionable unfinished work becomes a task;
+- uncertain work becomes an `idea` with its evidence gap recorded;
+- task files are created and changed only through the `tasks` CLI.
+
+Non-goals:
+
+- moving every historical design into `docs/specs/`;
+- converting every unchecked plan step into a task;
+- creating closed tasks to reproduce project history;
+- standardizing unrelated documentation structure or prose;
+- adding CI integration before `tasks` has a pinned install source.
+
+## 2. Projects, prefixes, and order
+
+Prefixes are permanent cross-project identifiers. The compact names retain semantic cues:
+
+| Order | Project | Prefix | Initial authority anchors | Documents at inventory |
+|------:|---------|--------|---------------------------|-----------------------:|
+| 1 | Familiar | `fam` | `README.md`, `docs/surfaces.md`, current specs/plans | 17 |
+| 2 | Atoms | `atoms` | authority design named by `AGENTS.md`, obligation ledger, README | 35 |
+| 3 | Science | `sci` | README, current roadmap/adoption ledgers, guide | 85 |
+| 4 | Nodes | `nodes` | `docs/STANDARD.md`, code/tests, README | 44 |
+| 5 | Mindful v3 | `mind3` | README, `AGENTS.md`, current roadmap/active plans | 107 |
+| 6 | Mindful v6 | `mind6` | `docs/ARCHITECTURE.md`, `docs/FORMATS.md`, README | 124 |
+
+The counts are the 2026-08-30 inventory snapshot, not continuing invariants.
+
+Familiar is the pilot. Atoms precedes its Science consumer. Nodes and Mindful v3
+precede Mindful v6, which consumes Nodes and carries an explicit v3 import boundary.
+Only one repository is migrated at a time. A repository must pass its integration gate
+before the next migration starts.
+
+## 3. Repository-gated workflow
+
+Before the Familiar pilot, install one reviewed `tasks` binary and the Tasks agent skill
+at user level. Record the Tasks source commit used for the migration and use that binary
+for all six repositories. Do not pin six project-local skill copies.
+
+Each project uses a fresh migration worktree and the same pipeline:
+
+```text
+preflight and Git inventory
+  -> document classification
+  -> evidence-backed drift corrections
+  -> remaining-outcome synthesis
+  -> Tasks initialization and task creation
+  -> validation and independent review
+  -> integration and canonical registration
+```
+
+Existing branches, linked worktrees, and uncommitted changes are inspected read-only.
+All migration writes occur in the dedicated worktree. No current worktree is repurposed,
+cleaned, or modified. Run the repository's required gates before editing; a failing
+baseline is reported and resolved or explicitly deferred before migration work begins.
+
+Each project adds one concise ledger:
+
+```text
+docs/plans/YYYY-MM-DD-<project>-tasks-migration.md
+```
+
+The ledger is the durable evidence record for that repository, not an implementation
+plan that every task must cite. It contains:
+
+1. stable checkout HEAD and the local branches/worktrees inspected;
+2. authority/current, active-delivery, and historical document classifications;
+3. drift findings, evidence, corrections, and outward-grep results;
+4. candidate outcomes and their disposition;
+5. the local prefix plus any foreign prefixes used;
+6. created task IDs and deferred cross-project links;
+7. verification commands and results.
+
+## 4. Tiered documentation audit
+
+Every project document receives one classification:
+
+- **Authority/current:** semantically verify it against code, tests, schemas,
+  configuration, and current Git state.
+- **Active delivery:** verify status, checkboxes, dependencies, and remaining-work
+  claims; deeply verify the technical sections that govern unfinished work.
+- **Historical/superseded:** preserve its rationale and old snippets. Correct only
+  misleading status, broken authority links, or claims repeated by current user-facing
+  documentation.
+
+Evidence order is:
+
+1. current code, tests, schemas, and configuration;
+2. commit ancestry and merged history;
+3. active local branches/worktrees and their uncommitted state;
+4. documentation claims.
+
+A status header, checked box, unchecked box, branch name, or migration ledger entry is a
+claim, not proof. When the evidence cannot settle a claim, the ledger records the
+ambiguity instead of guessing.
+
+Drift corrections land before tasks are created. Corrections cover stale status and
+checkboxes, obsolete module/path names, broken authority links, supersession labels,
+current roadmaps, and README or agent-guidance summaries. After changing a claim, grep
+README files, agent guidance, roadmaps, guides, and active plans for the same claim and
+correct any propagated drift in the same change.
+
+Historical documents are not rewritten to describe today's architecture. If a current
+document depends on obsolete history, correct the current document or add a concise
+supersession note to the historical source.
+
+## 5. Remaining-outcome synthesis
+
+Before task creation, the ledger builds a candidate-outcomes table with:
+
+| Field | Meaning |
+|-------|---------|
+| Outcome | Independently shippable result, not an implementation step |
+| Evidence | Why the outcome is known to remain unfinished |
+| Sources | Governing or explanatory project documents |
+| Active state | Relevant branch/worktree and owner evidence, if any |
+| Size | `xs`, `s`, `m`, `l`, or `xl` |
+| Proposed status | `idea`, `todo`, `doing`, or `blocked` |
+| Blockers | Only work that truly prevents delivery |
+| Task ID | Filled after CLI creation |
+
+Conversion rules:
+
+- verified unfinished outcome -> `todo`;
+- demonstrably active outcome -> `doing`;
+- unproven status -> `idea`, with the missing evidence in the body;
+- external obstruction that is not another task -> `blocked`, with a note;
+- completed or abandoned history -> no task.
+
+An open dependency is represented by `depends`, not by also marking the task `blocked`.
+Only verified delivery blockers become dependencies. Advisory sequencing and thematic
+relationships stay in task bodies.
+
+Tasks receive the `migration` tag. Add another tag only when it supports a real project
+query. Task bodies state the outcome, acceptance evidence, source documents, and any
+audit uncertainty. Existing compatible `docs/plans/` files and exact headings use the
+structured `plan` and `step` fields. Existing `docs/designs/` files are referenced in the
+body rather than moved merely to satisfy the Tasks path convention. New designs and
+plans use `docs/specs/` and `docs/plans/`.
+
+## 6. Cross-project dependencies
+
+The migration order makes the common blocker direction resolvable: Atoms before Science,
+and Nodes plus Mindful v3 before Mindful v6. A foreign dependency is added only after its
+task exists and resolves through the staging registry.
+
+If a verified blocker points to a project that has not yet been migrated, record the
+relationship in the current ledger without creating a dangling dependency. A final
+portfolio reconciliation adds those links after every relevant task exists, then reruns
+`tasks check` in every project. Cycles are errors, not advisory warnings.
+
+## 7. Worktree-safe registry handling
+
+`tasks init` registers the canonicalized directory where it runs. Registering a temporary
+worktree in the normal machine registry would leave a stale path after cleanup. Migration
+commands therefore use a temporary configuration root created with `mktemp -d`:
+
+```sh
+tasks_migration_config=$(mktemp -d)
+XDG_CONFIG_HOME="$tasks_migration_config" tasks -C <stable-prior-repo> init --prefix <prefix>
+XDG_CONFIG_HOME="$tasks_migration_config" tasks -C <migration-worktree> init --prefix <prefix>
+```
+
+Seed the temporary registry with already-migrated stable checkouts needed for foreign
+resolution. Use the same temporary root for all commands in the current migration.
+
+After review and merge:
+
+1. run `tasks -C <stable-checkout> init --prefix <prefix>` without the temporary override;
+2. verify the normal registry resolves the stable checkout;
+3. remove the migration worktree;
+4. remove the temporary configuration directory.
+
+A prefix already registered to another path is a hard stop for explicit reconciliation.
+Never overwrite or silently ignore it.
+
+## 8. Commits and review
+
+Each repository migration has two logical commits:
+
+1. `docs: reconcile project status for tasks migration`
+   - add/update the ledger;
+   - correct documentation drift and propagated claims.
+2. `chore(tasks): initialize project task tracking`
+   - initialize `tasks/`;
+   - create tasks and dependencies through the CLI;
+   - fill task IDs and verification evidence into the ledger;
+   - update agent guidance with the Tasks session/completion gates.
+
+More commits are allowed only when a repository's existing review or test workflow needs
+them; do not split mechanical file-by-file changes. Independently review the complete
+repository migration before integration. Fix load-bearing findings, rerun affected
+checks, and preserve unrelated user changes.
+
+## 9. Verification and enforcement
+
+For each repository:
+
+1. run repository-specific documentation/status checks;
+2. run the repository's existing required test, type, lint, and formatting gates;
+3. run `tasks check`;
+4. smoke-test `tasks prime` and `tasks ready`;
+5. after canonical registration, verify `tasks prime` reports the expected prefix from
+   the stable checkout and inspect `tasks list --all-projects` for registry warnings;
+6. verify a clean diff/status and review the two-commit range.
+
+After all migrations and final dependency reconciliation:
+
+1. run `tasks check` from all six stable checkouts;
+2. run `tasks prime` in every stable checkout and confirm its expected prefix;
+3. run `tasks list --all-projects` and resolve every registry warning;
+4. inspect `tasks ready` in every project;
+5. confirm no task backfills completed history;
+6. confirm every unresolved audit item is represented by an `idea`.
+
+Agent guidance in each project requires `tasks prime` at session start and `tasks check`
+before completion. Do not add `command -v tasks && tasks check` or another silent CI
+fallback. CI enforcement waits until `tasks` has a pinned install source; until then the
+documented local gate fails explicitly when the binary is absent.
+
+## 10. Failure and recovery
+
+Stop the current migration when:
+
+- authority documents contradict code/tests and the discrepancy cannot be resolved;
+- active work ownership or intended landing state is unclear;
+- unrelated dirty changes overlap a required correction;
+- a plan step, dependency, registry entry, project gate, or `tasks check` fails;
+- task dependencies form a cycle.
+
+Do not proceed to the next repository around a failed gate. Earlier repositories remain
+usable; current writes remain isolated in the migration worktree and temporary registry.
+If the branch is abandoned before merge, discard its temporary registry without changing
+the normal registry. After merge, the stable checkout and normal registry are the source
+of truth.
+
+## 11. Alternatives rejected
+
+### Portfolio-first audit
+
+Auditing all projects before creating any tasks would maximize batch consistency but delay
+feedback and hold a large set of drift corrections open. The Familiar pilot provides the
+same learning sooner.
+
+### Task-first capture
+
+Creating candidate tasks during the audit would preserve discoveries quickly, but tasks
+would temporarily cite stale documents and require promotion/rewriting churn. The ledger
+captures candidates until the evidence and documents are ready.
+
+### Historical task backfill
+
+Closed tasks for hundreds of completed plans would duplicate Git history, obscure the
+actionable list, and invent ownership/timestamps that Tasks cannot prove. Historical docs
+remain the record.
+
+## 12. Completion criteria
+
+The portfolio migration is complete when:
+
+- every repository has its approved permanent prefix and a committed `tasks/.config.toml`;
+- all six stable checkouts are present in the normal registry;
+- each project has a completed migration ledger and corrected current documentation;
+- every evidence-backed remaining outcome has one task and no completed history was
+  backfilled;
+- all foreign dependencies resolve, with no cycles;
+- all six repositories pass their existing gates and `tasks check`;
+- `tasks prime` reports `fam`, `atoms`, `sci`, `nodes`, `mind3`, and `mind6` from their
+  stable checkouts, and global listing emits no registry warning;
+- every unresolved claim is visible as an `idea`, not silently treated as done or ready.
