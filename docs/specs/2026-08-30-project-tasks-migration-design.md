@@ -1,12 +1,12 @@
 # Existing-project Tasks migration — design
 
 **Status:** implementation in progress. Task 1, the Familiar pilot, and Atoms completed
-on 2026-08-30; Science through portfolio completion remain pending under
+on 2026-08-30; Beliefs through portfolio completion remain pending under
 `docs/plans/2026-08-30-project-tasks-migration.md`.
 
 ## 1. Purpose
 
-Migrate Familiar, Science, Atoms, Nodes, Mindful v3, and Mindful v6 to the Tasks
+Migrate Familiar, Beliefs, Atoms, Nodes, Mindful v3, and Mindful v6 to the Tasks
 workflow without turning their historical design archives into synthetic task history.
 Each migration audits documentation against the repository, corrects drift, groups real
 remaining work into independently shippable outcomes, and creates checked-in task files.
@@ -34,14 +34,14 @@ Prefixes are permanent cross-project identifiers. The compact names retain seman
 |------:|---------|--------|---------------------------|-----------------------:|
 | 1 | Familiar | `fam` | `README.md`, `docs/surfaces.md`, current specs/plans | 17 |
 | 2 | Atoms | `atoms` | authority design named by `AGENTS.md`, obligation ledger, README | 35 |
-| 3 | Science | `sci` | README, current roadmap/adoption ledgers, guide | 85 |
+| 3 | Beliefs | `beliefs` | README, current roadmap/adoption ledgers, guide | 85 |
 | 4 | Nodes | `nodes` | `docs/STANDARD.md`, code/tests, README | 44 |
 | 5 | Mindful v3 | `mind3` | README, `AGENTS.md`, current roadmap/active plans | 107 |
 | 6 | Mindful v6 | `mind6` | `docs/ARCHITECTURE.md`, `docs/FORMATS.md`, README | 124 |
 
 The counts are the 2026-08-30 inventory snapshot, not continuing invariants.
 
-Familiar is the pilot. Atoms precedes its Science consumer. Nodes and Mindful v3
+Familiar is the pilot. Atoms precedes its Beliefs consumer. Nodes and Mindful v3
 precede Mindful v6, which consumes Nodes and carries an explicit v3 import boundary.
 Only one repository is migrated at a time. A repository must pass its integration gate
 before the next migration starts.
@@ -186,7 +186,7 @@ New designs and plans use the canonical directories.
 
 ## 6. Cross-project dependencies
 
-The migration order makes the common blocker direction resolvable: Atoms before Science,
+The migration order makes the common blocker direction resolvable: Atoms before Beliefs,
 and Nodes plus Mindful v3 before Mindful v6. A foreign dependency is added only after its
 task exists and resolves through the staging registry.
 
@@ -233,7 +233,7 @@ one fresh temporary root; never hand-write its `projects.toml`:
 tasks_portfolio_config=$(mktemp -d)
 XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <familiar-checkout> init --prefix fam
 XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <atoms-checkout> init --prefix atoms
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <science-checkout> init --prefix sci
+XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <beliefs-checkout> init --prefix beliefs
 XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <nodes-checkout> init --prefix nodes
 XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <mindful-v3-checkout> init --prefix mind3
 XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <mindful-v6-checkout> init --prefix mind6
@@ -397,7 +397,7 @@ The portfolio migration is complete when:
   resolve, with no cycles;
 - all six repositories pass their existing gates and `tasks check` with zero errors and
   zero warnings;
-- `tasks prime` reports `fam`, `atoms`, `sci`, `nodes`, `mind3`, and `mind6` from their
+- `tasks prime` reports `fam`, `atoms`, `beliefs`, `nodes`, `mind3`, and `mind6` from their
   stable checkouts, and global listing against the six-project portfolio registry
   succeeds with no warning;
 - every unresolved claim is visible as an `idea`, not silently treated as done or ready.
