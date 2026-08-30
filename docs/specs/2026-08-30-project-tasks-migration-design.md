@@ -1,7 +1,7 @@
 # Existing-project Tasks migration — design
 
-**Status:** implementation in progress. Task 1 and the Familiar pilot completed on
-2026-08-30; Atoms through portfolio completion remain pending under
+**Status:** implementation in progress. Task 1, the Familiar pilot, and Atoms completed
+on 2026-08-30; Science through portfolio completion remain pending under
 `docs/plans/2026-08-30-project-tasks-migration.md`.
 
 ## 1. Purpose
