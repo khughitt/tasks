@@ -193,6 +193,8 @@ links:
 6. commit as `chore(tasks): reconcile cross-project dependencies`, independently review,
    merge, and remove the reconciliation worktree.
 
+Reconcile one repository at a time and merge it before creating the next reconciliation
+worktree, so every later acyclicity check reads all earlier edges from stable checkouts.
 No stable checkout is edited directly, and every dependency edit is committed. If no
 ledger has a deferred link, the reconciliation phase is a no-op. A cycle in a fully
 reachable graph is an error. If any foreign project is unreachable, cycle verification
@@ -213,6 +215,19 @@ XDG_CONFIG_HOME="$tasks_migration_config" tasks -C <migration-worktree> init --p
 
 Seed the temporary registry with already-migrated stable checkouts needed for foreign
 resolution. Use the same temporary root for all commands in the current migration.
+Create a six-project portfolio registry the same way: run these six CLI commands against
+one fresh temporary root; never hand-write its `projects.toml`:
+
+```sh
+tasks_portfolio_config=$(mktemp -d)
+XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <familiar-checkout> init --prefix fam
+XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <atoms-checkout> init --prefix atoms
+XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <science-checkout> init --prefix sci
+XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <nodes-checkout> init --prefix nodes
+XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <mindful-v3-checkout> init --prefix mind3
+XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C <mindful-v6-checkout> init --prefix mind6
+```
+
 Every command that records ownership or a note receives both overrides explicitly:
 
 ```sh
@@ -224,7 +239,7 @@ tasks -C <migration-worktree> <mutation>
 After review and merge:
 
 1. run `tasks -C <stable-checkout> init --prefix <prefix>` without the temporary override;
-2. verify the normal registry resolves the stable checkout;
+2. prove the normal registry mapping with the idempotent-init and prime check in §9 item 5;
 3. remove the migration worktree;
 4. remove the temporary configuration directory.
 
@@ -283,6 +298,12 @@ before completion. Do not add `command -v tasks && tasks check` or another silen
 fallback. CI enforcement waits until `tasks` has a pinned install source; until then the
 documented local gate fails explicitly when the binary is absent.
 
+The standing day-to-day `tasks check` gate requires zero errors and requires agents to
+report every warning. `unreachable_dep` and its `cycle_unverifiable` consequence caused
+solely by an unregistered foreign project are expected environmental warnings on a
+partially registered machine, not a local task failure; other warnings must be resolved.
+Migration and portfolio verification still require zero warnings.
+
 Foreign dependency resolution and cycle proof are machine-local because the registry is
 machine-local. Task files remain portable, but another machine must register every
 referenced project before its zero-warning check is meaningful. Portfolio completion is
@@ -304,6 +325,12 @@ usable; current writes remain isolated in the migration worktree and temporary r
 If the branch is abandoned before merge, discard its temporary registry without changing
 the normal registry. After merge, the stable checkout and normal registry are the source
 of truth.
+
+Registry entries are canonical absolute paths. A burst of `unreachable_dep` warnings
+across projects can therefore indicate that the checkout root moved, not that task edges
+became invalid. `tasks init` refuses to rebind an existing prefix: explicitly reconcile or
+remove the six stale mappings in the normal registry, then rerun `tasks init --prefix
+<prefix>` from each stable checkout and repeat the six-project portfolio check.
 
 ## 11. Alternatives rejected
 
