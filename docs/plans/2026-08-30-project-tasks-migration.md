@@ -4,7 +4,7 @@
 
 **Goal:** Audit Familiar, Atoms, Science, Nodes, Mindful v3, and Mindful v6 against their repositories, correct current documentation drift, and create forward-only Tasks stores for every evidence-backed remaining outcome.
 
-**Architecture:** Migrate one repository at a time in a fresh worktree, landing a documentation reconciliation commit before a Tasks initialization commit. Use CLI-built temporary registries for migration and portfolio validation, integrate each repository before beginning the next, then reconcile only the cross-project dependencies that had to be deferred.
+**Architecture:** Migrate one repository at a time in a fresh worktree, landing a documentation reconciliation commit before a Tasks initialization commit. Review and integrate those two commits, verify and register the stable checkout, then record that evidence in a reviewed ledger-finalization commit before cleanup. Use CLI-built temporary registries for migration and portfolio validation, integrate each repository before beginning the next, then reconcile only the cross-project dependencies that had to be deferred.
 
 **Tech Stack:** Rust `tasks` CLI, Git worktrees, Markdown, TOML, zsh, `jq`, npm, uv, and Docker Compose.
 
@@ -15,6 +15,7 @@
 - Migrate in this order: Familiar (`fam`), Atoms (`atoms`), Science (`sci`), Nodes (`nodes`), Mindful v3 (`mind3`), Mindful v6 (`mind6`).
 - Migrate and reconcile only one repository at a time; merge and verify it before creating the next worktree.
 - Inspect existing branches, linked worktrees, and uncommitted state read-only. Make all migration writes in a fresh `.worktrees/` worktree.
+- Keep each migration worktree through canonical registration and its reviewed post-registration ledger commit; remove it only after the second fast-forward merge.
 - Do not create tasks for completed or abandoned history. Create tasks only for actionable unfinished outcomes; use `idea` when evidence is inconclusive.
 - Size tasks as independently shippable outcomes with `xs`, `s`, `m`, `l`, or `xl`, never as implementation steps.
 - `tasks add` creates only `idea` or `todo`. Create `doing` by adding `todo` then running `tasks start`; create `blocked` by adding `todo` then running `tasks block`.
@@ -45,6 +46,8 @@ Every repository ledger contains these exact sections:
 
 Use exactly one classification per document: `authority/current`, `active delivery`, or `historical/superseded`. Each repository task supplies its literal ledger path and exact coverage command; expected output is empty.
 
+After stable verification and canonical registration, update the ledger in the still-open migration worktree. If `Deferred foreign dependencies` has no pending row, mark the migration complete and classify the ledger itself `historical/superseded`. If any pending row remains, mark the initial migration integrated but reconciliation pending and keep the ledger `active delivery` until Task 8 finalizes it.
+
 ## Shared Agent Guidance
 
 Add this concise section to the repository's existing agent guidance, or create `AGENTS.md` when none exists:
@@ -70,6 +73,19 @@ For each reviewed `Candidate outcomes` row whose disposition is `create`:
 6. Run `tasks show ID` and compare every field with the ledger row before continuing.
 
 All CLI calls in a migration worktree use the same temporary `XDG_CONFIG_HOME`. The initialization step writes that directory's path to the task-specific `/tmp/*.registry-path` file named below; every later step re-reads it, verifies the directory exists, and passes `XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"`. Pin `TASKS_FORMAT=json` for every command consumed as JSON. Every mutation that records ownership or a note also sets `TASKS_OWNER` explicitly.
+
+## Shared Post-registration Ledger Finalization
+
+For Tasks 2–7, independently review the documentation reconciliation and Tasks initialization commits before the first fast-forward. Then:
+
+1. Fast-forward those two commits into the stable checkout and run its complete repository gate.
+2. Against the normal registry, run `tasks init --prefix <prefix>` twice, `tasks check` with empty `errors` and `warnings`, `tasks prime` with the exact prefix, and `tasks ready` from the stable checkout.
+3. Keep the migration worktree, branch, and temporary registry. Use `apply_patch` in that worktree to record the exact integrated commits and the past-tense stable gate and registration results in the ledger, and apply the ledger self-classification rule above.
+4. Rerun that task's exact ledger coverage comparison and `git diff --check`, stage only the ledger, and commit with the exact subject `docs: record tasks migration integration`.
+5. Independently review the ledger-finalization diff. Fix findings with `apply_patch`, rerun the affected checks, and amend the commit without changing its subject.
+6. Fast-forward the reviewed finalization commit into the stable checkout. Only then remove the migration worktree and branch, temporary registry, and registry-path control file.
+
+The initial migration therefore has three commits. The first two receive the pre-integration review; the third receives its own review before the second fast-forward and cleanup.
 
 ---
 
@@ -124,11 +140,11 @@ for skill_root in "$HOME/.agents/skills" "$HOME/.claude/skills"; do
     mkdir -p "$skill_root"
     ln -s "$HOME/d/tasks/skills/tasks" "$skill_link"
   fi
-  test -ef "$skill_link" "$HOME/d/tasks/skills/tasks"
+  test "$skill_link" -ef "$HOME/d/tasks/skills/tasks"
 done
 ```
 
-If either path exists but `test -ef` fails, stop and reconcile it explicitly rather than overwriting it. The CLI recognizes either location; installing both also makes the skill available to Claude Code and other agent harnesses. Begin Task 2 in a fresh agent session so skill discovery observes the new links.
+If either path exists but the same-file check fails, stop and reconcile it explicitly rather than overwriting it. The CLI recognizes either location; installing both also makes the skill available to Claude Code and other agent harnesses. Begin Task 2 in a fresh agent session so skill discovery observes the new links.
 
 - [ ] **Step 4: Inventory all stable roots without modifying them**
 
@@ -189,10 +205,12 @@ Expected: a clean branch based on the current `main` commit recorded in the ledg
 ```bash
 set -euo pipefail
 cd ~/d/familiar/.worktrees/tasks-migration-fam
+npm ci
+test -z "$(git status --porcelain=v1)"
 npm test
 ```
 
-Expected: the repository's existing gate passes. Stop and report a baseline failure before changing documentation.
+Expected: setup changes no tracked or untracked path and the repository's existing gate passes. Stop and report a baseline failure before changing documentation.
 
 - [ ] **Step 3: Audit Git state and all project documents**
 
@@ -299,9 +317,9 @@ git commit -m "chore(tasks): initialize project task tracking"
 git status --short
 ```
 
-Review both migration commits against the design, ledger evidence, task files, and baseline diff. Fix load-bearing findings through the CLI or `apply_patch`, rerun affected gates, and use conventional fixup commits before integration.
+Independently review both initial migration commits against the design, ledger evidence, task files, and baseline diff before the first integration. Fix load-bearing findings through the CLI or `apply_patch`, rerun affected gates, and use conventional fixup commits before integration.
 
-- [ ] **Step 10: Integrate, register, and clean up the pilot**
+- [ ] **Step 10: Integrate, register, finalize, and clean up the pilot**
 
 ```bash
 set -euo pipefail
@@ -312,15 +330,47 @@ cd ~/d/familiar
 npm test
 TASKS_FORMAT=json tasks init --prefix fam
 TASKS_FORMAT=json tasks init --prefix fam
+TASKS_FORMAT=json tasks check >/tmp/fam-stable-check.json
+jq -e '.errors == [] and .warnings == []' /tmp/fam-stable-check.json
 TASKS_FORMAT=json tasks prime | jq -e '.prefix == "fam"'
+TASKS_FORMAT=json tasks ready
 git status --short --branch
+```
+
+Keep the migration worktree and temporary registry. Use `apply_patch` there to record the
+two exact integrated commits plus the past-tense stable test, Tasks gate, normal-registry,
+prime, and ready results. Familiar has no deferred foreign dependency, so mark the
+migration complete and classify the ledger row for itself `historical/superseded`.
+Rerun Step 4's exact coverage comparison and `git diff --check`, then:
+
+```bash
+set -euo pipefail
+cd ~/d/familiar/.worktrees/tasks-migration-fam
+git add docs/plans/2026-08-30-familiar-tasks-migration.md
+git diff --cached --check
+git commit -m "docs: record tasks migration integration"
+git status --short
+```
+
+Independently review this ledger-only diff and correct any finding before the second
+fast-forward. Then:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-fam.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+git -C ~/d/familiar merge --ff-only chore/tasks-migration-fam
+git -C ~/d/familiar status --short --branch
 git worktree remove ~/d/familiar/.worktrees/tasks-migration-fam
 git branch -d chore/tasks-migration-fam
 case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
 rm -- /tmp/tasks-migration-fam.registry-path
 ```
 
-Expected: `main` contains both commits, the normal registry maps `fam` to the stable checkout, and the migration worktree is gone. If the pilot exposes a contradiction in the design or ledger contract, stop, amend the design and this plan, review those changes, and only then begin Atoms.
+Expected: `main` contains all three initial-migration commits, the normal registry maps
+`fam` to the stable checkout, the ledger is historical, and the migration worktree is
+gone. If the pilot exposes a contradiction in the design or ledger contract, stop, amend
+the design and this plan, review those changes, and only then begin Atoms.
 
 ### Task 3: Migrate Atoms
 
@@ -434,9 +484,9 @@ git commit -m "chore(tasks): initialize project task tracking"
 git status --short
 ```
 
-Independently review both commits and correct findings before integration.
+Independently review both initial migration commits and correct findings before the first integration.
 
-- [ ] **Step 7: Integrate, register, and clean up Atoms**
+- [ ] **Step 7: Integrate, register, finalize, and clean up Atoms**
 
 ```bash
 set -euo pipefail
@@ -447,8 +497,25 @@ cd ~/d/atoms/python && uv run pytest && uv run ruff check . && uv run pyright
 cd ..
 TASKS_FORMAT=json tasks init --prefix atoms
 TASKS_FORMAT=json tasks init --prefix atoms
+TASKS_FORMAT=json tasks check >/tmp/atoms-stable-check.json
+jq -e '.errors == [] and .warnings == []' /tmp/atoms-stable-check.json
 TASKS_FORMAT=json tasks prime | jq -e '.prefix == "atoms"'
+TASKS_FORMAT=json tasks ready
 git status --short --branch
+```
+
+Apply the Shared Post-registration Ledger Finalization to
+`docs/plans/2026-08-30-atoms-tasks-migration.md`, rerunning Step 3's exact coverage
+comparison. Base the ledger status and self-classification on whether any deferred row is
+still pending. After its ledger-only commit passes independent review, run the second
+fast-forward and clean up:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-atoms.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+git -C ~/d/atoms merge --ff-only chore/tasks-migration-atoms
+git -C ~/d/atoms status --short --branch
 git worktree remove ~/d/atoms/.worktrees/tasks-migration-atoms
 git branch -d chore/tasks-migration-atoms
 case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
@@ -577,9 +644,9 @@ git commit -m "chore(tasks): initialize project task tracking"
 git status --short
 ```
 
-Independently review the full two-commit migration and fix findings before integration.
+Independently review the first two migration commits and fix findings before the first integration.
 
-- [ ] **Step 7: Integrate, register, and clean up Science**
+- [ ] **Step 7: Integrate, register, finalize, and clean up Science**
 
 ```bash
 set -euo pipefail
@@ -591,8 +658,25 @@ cd ../ts && npm test && npm run typecheck && npm run check
 cd ..
 TASKS_FORMAT=json tasks init --prefix sci
 TASKS_FORMAT=json tasks init --prefix sci
+TASKS_FORMAT=json tasks check >/tmp/sci-stable-check.json
+jq -e '.errors == [] and .warnings == []' /tmp/sci-stable-check.json
 TASKS_FORMAT=json tasks prime | jq -e '.prefix == "sci"'
+TASKS_FORMAT=json tasks ready
 git status --short --branch
+```
+
+Apply the Shared Post-registration Ledger Finalization to
+`docs/plans/2026-08-30-science-tasks-migration.md`, rerunning Step 3's exact coverage
+comparison. Base the ledger status and self-classification on whether any deferred row is
+still pending. After its ledger-only commit passes independent review, run the second
+fast-forward and clean up:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-sci.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+git -C ~/d/science merge --ff-only chore/tasks-migration-sci
+git -C ~/d/science status --short --branch
 git worktree remove ~/d/science/.worktrees/tasks-migration-sci
 git branch -d chore/tasks-migration-sci
 case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
@@ -720,9 +804,9 @@ git commit -m "chore(tasks): initialize project task tracking"
 git status --short
 ```
 
-Independently review the complete migration and fix findings before integration.
+Independently review the first two migration commits and fix findings before the first integration.
 
-- [ ] **Step 7: Integrate, register, and clean up Nodes**
+- [ ] **Step 7: Integrate, register, finalize, and clean up Nodes**
 
 ```bash
 set -euo pipefail
@@ -734,8 +818,25 @@ cd ../ts && npm test && npm run typecheck && npm run check
 cd ~/d/nodes
 TASKS_FORMAT=json tasks init --prefix nodes
 TASKS_FORMAT=json tasks init --prefix nodes
+TASKS_FORMAT=json tasks check >/tmp/nodes-stable-check.json
+jq -e '.errors == [] and .warnings == []' /tmp/nodes-stable-check.json
 TASKS_FORMAT=json tasks prime | jq -e '.prefix == "nodes"'
+TASKS_FORMAT=json tasks ready
 git status --short --branch
+```
+
+Apply the Shared Post-registration Ledger Finalization to
+`docs/plans/2026-08-30-nodes-tasks-migration.md`, rerunning Step 3's exact coverage
+comparison. Base the ledger status and self-classification on whether any deferred row is
+still pending. After its ledger-only commit passes independent review, run the second
+fast-forward and clean up:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-nodes.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+git -C ~/d/nodes merge --ff-only chore/tasks-migration-nodes
+git -C ~/d/nodes status --short --branch
 git worktree remove ~/d/nodes/.worktrees/tasks-migration-nodes
 git branch -d chore/tasks-migration-nodes
 case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
@@ -877,9 +978,9 @@ git commit -m "chore(tasks): initialize project task tracking"
 git status --short
 ```
 
-Independently review both commits and fix findings before integration.
+Independently review both initial migration commits and fix findings before the first integration.
 
-- [ ] **Step 8: Integrate, register, and clean up v3**
+- [ ] **Step 8: Integrate, register, finalize, and clean up v3**
 
 ```bash
 set -euo pipefail
@@ -893,8 +994,25 @@ docker exec mindful_fastapi_v3 uv run pytest tests/test_graph_producers.py -v
 docker exec mindful_fastapi_v3 uv run ruff check .
 TASKS_FORMAT=json tasks init --prefix mind3
 TASKS_FORMAT=json tasks init --prefix mind3
+TASKS_FORMAT=json tasks check >/tmp/mind3-stable-check.json
+jq -e '.errors == [] and .warnings == []' /tmp/mind3-stable-check.json
 TASKS_FORMAT=json tasks prime | jq -e '.prefix == "mind3"'
+TASKS_FORMAT=json tasks ready
 git status --short --branch
+```
+
+Apply the Shared Post-registration Ledger Finalization to
+`docs/plans/2026-08-30-mindful-v3-tasks-migration.md`, rerunning Step 4's exact coverage
+comparison. Base the ledger status and self-classification on whether any deferred row is
+still pending. After its ledger-only commit passes independent review, run the second
+fast-forward and clean up:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-mind3.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+git -C ~/d/mindful/v3 merge --ff-only chore/tasks-migration-mind3
+git -C ~/d/mindful/v3 status --short --branch
 git worktree remove ~/d/mindful/v3/.worktrees/tasks-migration-mind3
 git branch -d chore/tasks-migration-mind3
 case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
@@ -1017,9 +1135,9 @@ git commit -m "chore(tasks): initialize project task tracking"
 git status --short
 ```
 
-Independently review both commits and fix findings before integration.
+Independently review both initial migration commits and fix findings before the first integration.
 
-- [ ] **Step 7: Integrate, register, and clean up v6**
+- [ ] **Step 7: Integrate, register, finalize, and clean up v6**
 
 ```bash
 set -euo pipefail
@@ -1032,8 +1150,25 @@ npm run typecheck
 npm run check
 TASKS_FORMAT=json tasks init --prefix mind6
 TASKS_FORMAT=json tasks init --prefix mind6
+TASKS_FORMAT=json tasks check >/tmp/mind6-stable-check.json
+jq -e '.errors == [] and .warnings == []' /tmp/mind6-stable-check.json
 TASKS_FORMAT=json tasks prime | jq -e '.prefix == "mind6"'
+TASKS_FORMAT=json tasks ready
 git status --short --branch
+```
+
+Apply the Shared Post-registration Ledger Finalization to
+`docs/plans/2026-08-30-mindful-v6-tasks-migration.md`, rerunning Step 3's exact coverage
+comparison. Base the ledger status and self-classification on whether any deferred row is
+still pending. After its ledger-only commit passes independent review, run the second
+fast-forward and clean up:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-mind6.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+git -C ~/d/mindful/v6 merge --ff-only chore/tasks-migration-mind6
+git -C ~/d/mindful/v6 status --short --branch
 git worktree remove ~/d/mindful/v6/.worktrees/tasks-migration-mind6
 git branch -d chore/tasks-migration-mind6
 case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
@@ -1045,12 +1180,12 @@ rm -- /tmp/tasks-migration-mind6.registry-path
 **Files:**
 
 - Modify through CLI, only when pending rows exist: one or more of `tasks/fam-*.md`, `tasks/atoms-*.md`, `tasks/sci-*.md`, `tasks/nodes-*.md`, `tasks/mind3-*.md`, and `tasks/mind6-*.md` in the affected reconciliation worktree
-- Modify, only when pending rows exist: the affected repository's `docs/plans/2026-08-30-*-tasks-migration.md`
+- Modify, only when pending rows exist: the affected repository's `docs/plans/2026-08-30-*-tasks-migration.md`, including its final status and self-classification
 
 **Interfaces:**
 
 - Consumes: all six integrated task stores and every ledger's `Deferred foreign dependencies` table.
-- Produces: committed dependency edges for every pending row, or a verified no-op when no row is pending.
+- Produces: committed dependency edges and a complete `historical/superseded` ledger for every affected repository, or a verified no-op when no row is pending.
 
 - [ ] **Step 1: Build the exact six-project portfolio registry through the CLI**
 
@@ -1212,7 +1347,7 @@ tasks -C "$worktree" show "$local_id"
 rm -- /tmp/tasks-reconciliation-edge.zsh
 ```
 
-If the edge fails resolution or acyclicity, stop; do not weaken or omit it. Use `apply_patch` to change that exact row from `pending` to `reconciled` and record the new edge.
+If the edge fails resolution or acyclicity, stop; do not weaken or omit it. Use `apply_patch` to change that exact row from `pending` to `reconciled` and record the new edge. After the repository's final pending row is reconciled, also mark its migration complete, change the ledger's own classification from `active delivery` to `historical/superseded`, and record the reconciliation verification in the existing `Verification` section.
 
 - [ ] **Step 6: Verify and commit the affected reconciliation**
 
@@ -1235,7 +1370,7 @@ git -C "$worktree" commit -m "chore(tasks): reconcile cross-project dependencies
 git -C "$worktree" status --short
 ```
 
-Expected: one commit contains both the CLI-generated dependency edit and the reconciled ledger row.
+Expected: one commit contains the CLI-generated dependency edit, every reconciled ledger row, and the ledger's truthful complete/historical finalization.
 
 - [ ] **Step 7: Review, integrate, and remove the affected reconciliation**
 
@@ -1263,7 +1398,7 @@ Repeat Steps 4–7 for the next affected repository only after this stable check
 
 - [ ] **Step 8: Prove reconciliation is complete**
 
-Rerun Step 2. Expected: no pending row prints. Then clean up the reconciliation controls:
+Rerun Step 2. Expected: no pending row prints. Verify every migration ledger's own classification row is `historical/superseded` and every status says the migration is complete. Then clean up the reconciliation controls:
 
 ```bash
 set -euo pipefail
@@ -1363,7 +1498,7 @@ set -euo pipefail
   ~/d/mindful/v6/docs/plans/2026-08-30-mindful-v6-tasks-migration.md
 ```
 
-Expected: no pending row. Inspect every `Candidate outcomes` row against its task ID or explicit no-task disposition; confirm completed history was not backfilled, every unresolved claim is an `idea`, every `doing` owner has evidence, and every foreign edge is a real blocker.
+Expected: no pending row. Inspect every ledger's own classification and require `historical/superseded`. Inspect every `Candidate outcomes` row against its task ID or explicit no-task disposition; confirm completed history was not backfilled, every unresolved claim is an `idea`, every `doing` owner has evidence, and every foreign edge is a real blocker.
 
 - [ ] **Step 5: Run every repository's complete stable gate**
 
@@ -1422,7 +1557,7 @@ Expected: a clean worktree based on the then-current `main`, which must already 
 
 - [ ] **Step 8: Make completion claims truthful**
 
-Use `apply_patch` to change the design status from approved/not implemented to implemented with the actual date from `date +%F`. Check only plan boxes whose command and evidence were actually verified. Add concise final commit references or verification results where the ledger contract requires them. Then search outward for stale migration claims:
+Use `apply_patch` to change the design status from implementation in progress to implemented with the actual date from `date +%F`. Check only plan boxes whose command and evidence were actually verified. Add concise final commit references or verification results where the ledger contract requires them. Then search outward for stale migration claims:
 
 ```bash
 set -euo pipefail

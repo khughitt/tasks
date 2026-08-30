@@ -1,7 +1,8 @@
 # Existing-project Tasks migration — design
 
-**Status:** design approved and implementation planned in
-`docs/plans/2026-08-30-project-tasks-migration.md` (2026-08-30); not implemented.
+**Status:** implementation in progress. Task 1 and the Familiar pilot completed on
+2026-08-30; Atoms through portfolio completion remain pending under
+`docs/plans/2026-08-30-project-tasks-migration.md`.
 
 ## 1. Purpose
 
@@ -60,7 +61,9 @@ preflight and Git inventory
   -> remaining-outcome synthesis
   -> Tasks initialization and task creation
   -> validation and independent review
-  -> integration and canonical registration
+  -> initial integration, stable verification, and canonical registration
+  -> ledger finalization, independent review, and final integration
+  -> cleanup
 ```
 
 Existing branches, linked worktrees, and uncommitted changes are inspected read-only.
@@ -91,6 +94,12 @@ plan that every task must cite. It contains:
 5. the local prefix plus any foreign prefixes used;
 6. created task IDs and deferred cross-project links;
 7. verification commands and results.
+
+After canonical registration and stable verification, the ledger records that evidence
+in the past tense. If no deferred dependency remains, the ledger marks the migration
+complete and classifies itself `historical/superseded`. If a deferred dependency remains,
+the ledger marks the initial migration integrated but reconciliation pending and keeps
+itself `active delivery` until §6 completes the remaining links.
 
 ## 4. Tiered documentation audit
 
@@ -189,7 +198,8 @@ links:
 1. create a temporary portfolio registry containing exactly the six stable checkouts;
 2. create a fresh reconciliation worktree from the affected repository's stable branch;
 3. run `tasks dep <id> --on <foreign-id>` in that worktree;
-4. update the ledger so no deferred link remains;
+4. update the ledger so no deferred link remains, mark the migration complete, and
+   classify the ledger itself `historical/superseded`;
 5. run the repository gates and zero-warning `tasks check` against the portfolio registry;
 6. commit as `chore(tasks): reconcile cross-project dependencies`, independently review,
    merge, and remove the reconciliation worktree.
@@ -237,19 +247,24 @@ TASKS_OWNER=<verified-owner-or-migration> \
 tasks -C <migration-worktree> <mutation>
 ```
 
-After review and merge:
+After the first two commits pass independent review:
 
-1. run `tasks -C <stable-checkout> init --prefix <prefix>` without the temporary override;
-2. prove the normal registry mapping with the idempotent-init and prime check in §9 item 5;
-3. remove the migration worktree;
-4. remove the temporary configuration directory.
+1. fast-forward them into the stable checkout and run the stable repository gates;
+2. run `tasks -C <stable-checkout> init --prefix <prefix>` without the temporary override;
+3. prove the normal registry mapping with the idempotent-init, `tasks check`, `prime`, and
+   `ready` checks in §9;
+4. keep the migration worktree open and update its ledger with the past-tense integration,
+   stable-gate, registration, and dependency-reconciliation state;
+5. commit that ledger as `docs: record tasks migration integration`, independently review
+   the finalization diff, and fast-forward it into the stable checkout;
+6. remove the migration worktree and temporary configuration directory.
 
 A prefix already registered to another path is a hard stop for explicit reconciliation.
 Never overwrite or silently ignore it.
 
 ## 8. Commits and review
 
-Each repository migration has two logical commits:
+Each repository migration has three initial-migration commits:
 
 1. `docs: reconcile project status for tasks migration`
    - add/update the ledger;
@@ -259,12 +274,19 @@ Each repository migration has two logical commits:
    - create tasks and dependencies through the CLI;
    - fill task IDs and verification evidence into the ledger;
    - update agent guidance with the Tasks session/completion gates.
+3. `docs: record tasks migration integration`
+   - record the first fast-forward, stable repository and Tasks gates, and canonical
+     registration in the ledger;
+   - classify the ledger `historical/superseded` when no deferred dependency remains, or
+     retain `active delivery` with reconciliation explicitly pending.
 
 More commits are allowed only when a repository's existing review or test workflow needs
-them; do not split mechanical file-by-file changes. Independently review the complete
-repository migration before integration. Fix load-bearing findings, rerun affected
-checks, and preserve unrelated user changes. The conditional reconciliation phase in §6
-adds one later commit only to repositories with deferred foreign links.
+them; do not split mechanical file-by-file changes. Independently review the first two
+commits before their initial integration. Fix load-bearing findings, rerun affected
+checks, and preserve unrelated user changes. Independently review the ledger-finalization
+diff before its second fast-forward and cleanup. The conditional reconciliation phase in
+§6 adds one later commit only to repositories with deferred foreign links and finalizes
+each affected ledger when its reconciliation completes.
 
 ## 9. Verification and enforcement
 
@@ -275,10 +297,17 @@ For each repository:
 3. run `tasks check` and require both `errors` and `warnings` to be empty; exit status 0
    alone is insufficient because warnings do not change it;
 4. smoke-test `tasks prime` and `tasks ready`;
-5. after canonical registration, rerun `tasks init --prefix <prefix>` and `tasks prime`
-   from the stable checkout; successful idempotent init proves the normal registry entry
-   matches that root, and prime must report the expected prefix;
-6. verify a clean diff/status and review the complete initial migration range.
+5. after the first fast-forward, rerun the repository gates, `tasks init --prefix
+   <prefix>`, `tasks check`, `tasks prime`, and `tasks ready` from the stable checkout;
+   successful idempotent init proves the normal registry entry matches that root, check
+   must have empty errors and warnings, and prime must report the expected prefix;
+6. in the still-open migration worktree, record those results and the exact integrated
+   commits in the ledger; mark it complete and `historical/superseded` when no deferred
+   dependency remains, otherwise mark the initial migration integrated but reconciliation
+   pending and retain `active delivery`;
+7. commit with `docs: record tasks migration integration`, independently review that diff,
+   fast-forward it into the stable checkout, then verify clean status and remove the
+   migration worktree and temporary registry.
 
 After all migrations and final dependency reconciliation:
 
@@ -323,9 +352,10 @@ Stop the current migration when:
 
 Do not proceed to the next repository around a failed gate. Earlier repositories remain
 usable; current writes remain isolated in the migration worktree and temporary registry.
-If the branch is abandoned before merge, discard its temporary registry without changing
-the normal registry. After merge, the stable checkout and normal registry are the source
-of truth.
+If the branch is abandoned before the first merge, discard its temporary registry without
+changing the normal registry. After the first merge, the stable checkout and normal
+registry are the task-data source of truth, while the migration worktree remains until
+the post-registration ledger commit is reviewed and merged.
 
 Registry entries are canonical absolute paths. A burst of `unreachable_dep` warnings
 across projects can therefore indicate that the checkout root moved, not that task edges
@@ -359,7 +389,8 @@ The portfolio migration is complete when:
 
 - every repository has its approved permanent prefix and a committed `tasks/.config.toml`;
 - all six stable checkouts are present in the normal registry;
-- each project has a completed migration ledger and corrected current documentation;
+- each project has a completed migration ledger classified `historical/superseded` and
+  corrected current documentation;
 - every evidence-backed remaining outcome has one task and no completed history was
   backfilled;
 - every deferred foreign dependency edit is committed and all foreign dependencies
