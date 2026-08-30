@@ -6,7 +6,7 @@
 
 **Architecture:** Migrate one repository at a time in a fresh worktree, landing a documentation reconciliation commit before a Tasks initialization commit. Use CLI-built temporary registries for migration and portfolio validation, integrate each repository before beginning the next, then reconcile only the cross-project dependencies that had to be deferred.
 
-**Tech Stack:** Rust `tasks` CLI, Git worktrees, Markdown, TOML, POSIX shell, `jq`, npm, uv, and Docker Compose.
+**Tech Stack:** Rust `tasks` CLI, Git worktrees, Markdown, TOML, zsh, `jq`, npm, uv, and Docker Compose.
 
 **Spec:** `docs/specs/2026-08-30-project-tasks-migration-design.md`
 
@@ -29,6 +29,7 @@
 - Do not add CI enforcement until `tasks` has a pinned install source.
 - Use conventional commits with no AI attribution. Preserve unrelated user changes.
 - Use portable checkout notation such as `~/d/familiar` in committed documentation; do not record machine-resolved absolute paths.
+- Treat every checkbox step as a fresh shell invocation: begin success-path blocks with `set -euo pipefail`, set the working directory explicitly before relative commands, and re-derive all cross-step state from the named control file.
 
 ## Shared Migration Ledger Contract
 
@@ -36,7 +37,7 @@ Every repository ledger contains these exact sections:
 
 1. `Scope and evidence` — stable HEAD, Tasks source commit, audit date, and prefix.
 2. `Git state inspected` — every local branch, linked worktree, and dirty path reviewed read-only.
-3. `Document classification` — one row for each tracked file under `docs/` plus existing root `README.md`, `AGENTS.md`, and `CLAUDE.md`.
+3. `Document classification` — one row for each tracked file under `docs/`, the migration ledger itself, and existing root `README.md`, `AGENTS.md`, and `CLAUDE.md`.
 4. `Drift corrections` — evidence, correction, and outward-grep result for every changed claim.
 5. `Candidate outcomes` — outcome, evidence, sources, active state, size, proposed status, blockers, disposition, and task ID.
 6. `Deferred foreign dependencies` — local task, future project/outcome, evidence, and `pending` or `reconciled`; write `None` when empty.
@@ -68,7 +69,7 @@ For each reviewed `Candidate outcomes` row whose disposition is `create`:
 5. Copy the emitted ID into the same candidate row. Never infer an ID or edit the generated Markdown.
 6. Run `tasks show ID` and compare every field with the ledger row before continuing.
 
-All CLI calls in a migration worktree use the same temporary `XDG_CONFIG_HOME`. Every mutation that records ownership or a note also sets `TASKS_OWNER` explicitly.
+All CLI calls in a migration worktree use the same temporary `XDG_CONFIG_HOME`. The initialization step writes that directory's path to the task-specific `/tmp/*.registry-path` file named below; every later step re-reads it, verifies the directory exists, and passes `XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"`. Pin `TASKS_FORMAT=json` for every command consumed as JSON. Every mutation that records ownership or a note also sets `TASKS_OWNER` explicitly.
 
 ---
 
@@ -88,17 +89,19 @@ All CLI calls in a migration worktree use the same temporary `XDG_CONFIG_HOME`. 
 - [ ] **Step 1: Verify the Tasks source checkout**
 
 ```bash
+set -euo pipefail
 cd ~/d/tasks
 git status --short --branch
 git rev-parse HEAD
-CARGO_HOME=/tmp/tasks-migration-cargo cargo test
+cargo test
 ```
 
-Expected: the worktree has no unexplained changes and all 65 current tests pass. Record the exact commit for every repository ledger.
+Expected: the worktree has no unexplained changes and the complete suite passes with no failures. Record the exact commit for every repository ledger.
 
 - [ ] **Step 2: Install the reviewed binary once**
 
 ```bash
+set -euo pipefail
 cd ~/d/tasks
 cargo install --locked --path . --force
 command -v tasks
@@ -110,23 +113,27 @@ Expected: installation succeeds and `tasks --version` executes from the installe
 - [ ] **Step 3: Verify the user-level Tasks skill**
 
 ```bash
-if test -L ~/.agents/skills/tasks && ! test -e ~/.agents/skills/tasks; then
-  printf 'broken Tasks skill link; reconcile it explicitly\n' >&2
-  exit 1
-fi
-if ! test -e ~/.agents/skills/tasks; then
-  mkdir -p ~/.agents/skills
-  ln -s ~/d/tasks/skills/tasks ~/.agents/skills/tasks
-fi
-test -e ~/.agents/skills/tasks
-test -ef ~/.agents/skills/tasks ~/d/tasks/skills/tasks
+set -euo pipefail
+for skill_root in "$HOME/.agents/skills" "$HOME/.claude/skills"; do
+  skill_link="$skill_root/tasks"
+  if test -L "$skill_link" && ! test -e "$skill_link"; then
+    printf 'broken Tasks skill link: %s\n' "$skill_link" >&2
+    exit 1
+  fi
+  if ! test -e "$skill_link"; then
+    mkdir -p "$skill_root"
+    ln -s "$HOME/d/tasks/skills/tasks" "$skill_link"
+  fi
+  test -ef "$skill_link" "$HOME/d/tasks/skills/tasks"
+done
 ```
 
-If the path exists but `test -ef` fails, stop and reconcile it explicitly rather than overwriting it.
+If either path exists but `test -ef` fails, stop and reconcile it explicitly rather than overwriting it. The CLI recognizes either location; installing both also makes the skill available to Claude Code and other agent harnesses. Begin Task 2 in a fresh agent session so skill discovery observes the new links.
 
 - [ ] **Step 4: Inventory all stable roots without modifying them**
 
 ```bash
+set -euo pipefail
 for repo in ~/d/familiar ~/d/atoms ~/d/science ~/d/nodes ~/d/mindful/v3 ~/d/mindful/v6; do
   git -C "$repo" status --short --branch
   git -C "$repo" worktree list --porcelain
@@ -140,6 +147,7 @@ Expected: every root is identified, existing dirty state is recorded but untouch
 - [ ] **Step 5: Inspect the normal Tasks registry read-only**
 
 ```bash
+set -euo pipefail
 tasks_registry_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 tasks_registry_path="$tasks_registry_home/tasks/projects.toml"
 test ! -e "$tasks_registry_path" || sed -n '1,200p' "$tasks_registry_path"
@@ -169,6 +177,7 @@ No tracked commit is expected. Preserve the Tasks source commit and discovered s
 - [ ] **Step 1: Create an isolated pilot worktree**
 
 ```bash
+set -euo pipefail
 git -C ~/d/familiar worktree add -b chore/tasks-migration-fam ~/d/familiar/.worktrees/tasks-migration-fam main
 git -C ~/d/familiar/.worktrees/tasks-migration-fam status --short --branch
 ```
@@ -178,6 +187,7 @@ Expected: a clean branch based on the current `main` commit recorded in the ledg
 - [ ] **Step 2: Establish the unmodified baseline**
 
 ```bash
+set -euo pipefail
 cd ~/d/familiar/.worktrees/tasks-migration-fam
 npm test
 ```
@@ -193,9 +203,11 @@ Read `README.md`, `docs/surfaces.md`, every tracked file under `docs/`, and exis
 Use `apply_patch` for the ledger and current documentation. Preserve historical rationale, make uncertainty explicit, and grep each corrected claim through user-facing and active-delivery documents:
 
 ```bash
-rg -n 'Status:|to.?do|unchecked|supersed|README|surfaces|docs/(specs|plans|designs)' README.md AGENTS.md CLAUDE.md docs 2>/dev/null
+set -euo pipefail
+cd ~/d/familiar/.worktrees/tasks-migration-fam
+rg -n 'Status:|to.?do|unchecked|supersed|README|surfaces|docs/(specs|plans|designs)' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
 comm -3 \
-  <({ rg --files docs; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
+  <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-familiar-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-familiar-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
 git diff --check
 ```
@@ -207,6 +219,8 @@ Expected: the coverage comparison and `git diff --check` produce no output.
 Compare every ledger assertion with its cited evidence, run `npm test`, then commit only the ledger and drift corrections:
 
 ```bash
+set -euo pipefail
+cd ~/d/familiar/.worktrees/tasks-migration-fam
 npm test
 git add README.md AGENTS.md docs
 test ! -e CLAUDE.md || git add CLAUDE.md
@@ -225,25 +239,46 @@ tasks -C ~/d/familiar/.worktrees/tasks-migration-fam prime
 Expected before initialization: explicit `no_project` failure.
 
 ```bash
+set -euo pipefail
+test ! -e /tmp/tasks-migration-fam.registry-path
 tasks_migration_config=$(mktemp -d)
-export tasks_migration_config
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar/.worktrees/tasks-migration-fam init --prefix fam
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar/.worktrees/tasks-migration-fam prime
+printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-fam.registry-path
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar/.worktrees/tasks-migration-fam init --prefix fam
+tasks -C ~/d/familiar/.worktrees/tasks-migration-fam prime | jq -e '.prefix == "fam"'
 ```
 
 Expected: `prime` reports prefix `fam`.
 
 - [ ] **Step 7: Create and verify the reviewed Familiar outcomes**
 
-Apply the shared task-creation procedure to every ledger row marked `create`. Use the same `tasks_migration_config` for every call, record every generated ID, and leave completed/abandoned rows as `no task`. Add the shared agent guidance after task creation.
+In the shell that applies the shared task-creation procedure, first run:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-fam.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+cd ~/d/familiar/.worktrees/tasks-migration-fam
+```
+
+Then create every ledger row marked `create`, record every generated ID, and leave completed/abandoned rows as `no task`. Add the shared agent guidance after task creation.
 
 - [ ] **Step 8: Run the pilot's Tasks and repository gates**
 
 ```bash
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar/.worktrees/tasks-migration-fam check >/tmp/fam-check.json
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-fam.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+cd ~/d/familiar/.worktrees/tasks-migration-fam
+tasks -C ~/d/familiar/.worktrees/tasks-migration-fam check >/tmp/fam-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/fam-check.json
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar/.worktrees/tasks-migration-fam prime | jq -e '.prefix == "fam"'
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar/.worktrees/tasks-migration-fam ready
+tasks -C ~/d/familiar/.worktrees/tasks-migration-fam prime | jq -e '.prefix == "fam"'
+tasks -C ~/d/familiar/.worktrees/tasks-migration-fam ready
 npm test
 git diff --check
 ```
@@ -253,6 +288,9 @@ Expected: all commands pass; the JSON arrays are empty.
 - [ ] **Step 9: Commit and independently review the Tasks migration**
 
 ```bash
+set -euo pipefail
+cd ~/d/familiar/.worktrees/tasks-migration-fam
+test ! -e tasks/projects.toml
 git add tasks AGENTS.md docs/plans/2026-08-30-familiar-tasks-migration.md
 git diff --cached --check
 git commit -m "chore(tasks): initialize project task tracking"
@@ -264,16 +302,20 @@ Review both migration commits against the design, ledger evidence, task files, a
 - [ ] **Step 10: Integrate, register, and clean up the pilot**
 
 ```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-fam.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/familiar merge --ff-only chore/tasks-migration-fam
 cd ~/d/familiar
 npm test
-tasks init --prefix fam
-tasks init --prefix fam
-tasks prime | jq -e '.prefix == "fam"'
+TASKS_FORMAT=json tasks init --prefix fam
+TASKS_FORMAT=json tasks init --prefix fam
+TASKS_FORMAT=json tasks prime | jq -e '.prefix == "fam"'
 git status --short --branch
 git worktree remove ~/d/familiar/.worktrees/tasks-migration-fam
 git branch -d chore/tasks-migration-fam
-rm -r -- "$tasks_migration_config"
+case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-migration-fam.registry-path
 ```
 
 Expected: `main` contains both commits, the normal registry maps `fam` to the stable checkout, and the migration worktree is gone. If the pilot exposes a contradiction in the design or ledger contract, stop, amend the design and this plan, review those changes, and only then begin Atoms.
@@ -296,6 +338,7 @@ Expected: `main` contains both commits, the normal registry maps `fam` to the st
 - [ ] **Step 1: Create the Atoms worktree and run its baseline**
 
 ```bash
+set -euo pipefail
 git -C ~/d/atoms worktree add -b chore/tasks-migration-atoms ~/d/atoms/.worktrees/tasks-migration-atoms main
 cd ~/d/atoms/.worktrees/tasks-migration-atoms/python
 uv run pytest
@@ -312,10 +355,11 @@ From the worktree root, read `AGENTS.md` first and treat its named authority des
 - [ ] **Step 3: Correct drift, prove coverage, and commit documentation**
 
 ```bash
+set -euo pipefail
 cd ~/d/atoms/.worktrees/tasks-migration-atoms
-rg -n 'Status:|A[1-9]|obligation|certif|adopt|Science|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null
+rg -n 'Status:|A[1-9]|obligation|certif|adopt|Science|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
 comm -3 \
-  <({ rg --files docs; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
+  <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-atoms-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-atoms-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
 git diff --check
 cd python && uv run pytest && uv run ruff check . && uv run pyright
@@ -337,28 +381,49 @@ tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms prime
 Expected: explicit `no_project` failure.
 
 ```bash
+set -euo pipefail
+test ! -e /tmp/tasks-migration-atoms.registry-path
 tasks_migration_config=$(mktemp -d)
-export tasks_migration_config
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar init --prefix fam
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms init --prefix atoms
+printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-atoms.registry-path
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar init --prefix fam
+tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms init --prefix atoms
 ```
 
 - [ ] **Step 5: Create Atoms tasks and record future Science blockers**
 
-Apply the shared task-creation procedure. Create an A9-related task only when the repository evidence proves remaining delivery work. Add resolvable dependencies now; record any verified blocker pointing to not-yet-migrated Science as `pending` in `Deferred foreign dependencies` without creating a dangling edge. Add the shared agent guidance.
+Re-derive the registry before applying the shared task-creation procedure:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-atoms.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+cd ~/d/atoms/.worktrees/tasks-migration-atoms
+```
+
+Create an A9-related task only when the repository evidence proves remaining delivery work. Add resolvable dependencies now; record any verified blocker pointing to not-yet-migrated Science as `pending` in `Deferred foreign dependencies` without creating a dangling edge. Add the shared agent guidance.
 
 - [ ] **Step 6: Verify, commit, and review Atoms**
 
 ```bash
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms check >/tmp/atoms-check.json
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-atoms.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms check >/tmp/atoms-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/atoms-check.json
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms prime | jq -e '.prefix == "atoms"'
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms ready
+tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms prime | jq -e '.prefix == "atoms"'
+tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms ready
 cd ~/d/atoms/.worktrees/tasks-migration-atoms/python
 uv run pytest
 uv run ruff check .
 uv run pyright
 cd ..
+test ! -e tasks/projects.toml
 git add tasks AGENTS.md docs/plans/2026-08-30-atoms-tasks-migration.md
 git diff --cached --check
 git commit -m "chore(tasks): initialize project task tracking"
@@ -370,16 +435,20 @@ Independently review both commits and correct findings before integration.
 - [ ] **Step 7: Integrate, register, and clean up Atoms**
 
 ```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-atoms.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/atoms merge --ff-only chore/tasks-migration-atoms
 cd ~/d/atoms/python && uv run pytest && uv run ruff check . && uv run pyright
 cd ..
-tasks init --prefix atoms
-tasks init --prefix atoms
-tasks prime | jq -e '.prefix == "atoms"'
+TASKS_FORMAT=json tasks init --prefix atoms
+TASKS_FORMAT=json tasks init --prefix atoms
+TASKS_FORMAT=json tasks prime | jq -e '.prefix == "atoms"'
 git status --short --branch
 git worktree remove ~/d/atoms/.worktrees/tasks-migration-atoms
 git branch -d chore/tasks-migration-atoms
-rm -r -- "$tasks_migration_config"
+case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-migration-atoms.registry-path
 ```
 
 ### Task 4: Migrate Science
@@ -400,6 +469,7 @@ rm -r -- "$tasks_migration_config"
 - [ ] **Step 1: Create the Science worktree and run both baselines**
 
 ```bash
+set -euo pipefail
 git -C ~/d/science worktree add -b chore/tasks-migration-sci ~/d/science/.worktrees/tasks-migration-sci main
 cd ~/d/science/.worktrees/tasks-migration-sci/python
 uv run --frozen pytest -q
@@ -422,10 +492,11 @@ Read the README, current roadmap and adoption ledgers, guide, active plans, code
 Create `AGENTS.md` if absent with the repository's authority and gate summary. Add the shared Tasks guidance only after initialization in Step 5. Then run:
 
 ```bash
+set -euo pipefail
 cd ~/d/science/.worktrees/tasks-migration-sci
-rg -n 'Status:|roadmap|adopt|cut.?12|guide|Atoms|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null
+rg -n 'Status:|roadmap|adopt|cut.?12|guide|Atoms|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
 comm -3 \
-  <({ rg --files docs; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
+  <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-science-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-science-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
 git diff --check
 cd python && uv run --frozen pytest -q && uv run --frozen ruff check . && uv run --frozen pyright
@@ -446,24 +517,44 @@ tasks -C ~/d/science/.worktrees/tasks-migration-sci prime
 Expected: explicit `no_project` failure.
 
 ```bash
+set -euo pipefail
+test ! -e /tmp/tasks-migration-sci.registry-path
 tasks_migration_config=$(mktemp -d)
-export tasks_migration_config
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar init --prefix fam
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/atoms init --prefix atoms
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/science/.worktrees/tasks-migration-sci init --prefix sci
+printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-sci.registry-path
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar init --prefix fam
+tasks -C ~/d/atoms init --prefix atoms
+tasks -C ~/d/science/.worktrees/tasks-migration-sci init --prefix sci
 ```
 
 - [ ] **Step 5: Create Science tasks and dependencies**
 
-Apply the shared task-creation procedure. Add only blockers proven by the Science evidence; use existing Atoms IDs where delivery truly depends on them. Record blockers targeting Nodes or either Mindful repository as pending rather than dangling. Ensure `AGENTS.md` contains the shared guidance.
+Re-derive the registry before applying the shared task-creation procedure:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-sci.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+cd ~/d/science/.worktrees/tasks-migration-sci
+```
+
+Add only blockers proven by the Science evidence; use existing Atoms IDs where delivery truly depends on them. Record blockers targeting Nodes or either Mindful repository as pending rather than dangling. Ensure `AGENTS.md` contains the shared guidance.
 
 - [ ] **Step 6: Verify, commit, and independently review Science**
 
 ```bash
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/science/.worktrees/tasks-migration-sci check >/tmp/sci-check.json
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-sci.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/science/.worktrees/tasks-migration-sci check >/tmp/sci-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/sci-check.json
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/science/.worktrees/tasks-migration-sci prime | jq -e '.prefix == "sci"'
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/science/.worktrees/tasks-migration-sci ready
+tasks -C ~/d/science/.worktrees/tasks-migration-sci prime | jq -e '.prefix == "sci"'
+tasks -C ~/d/science/.worktrees/tasks-migration-sci ready
 cd ~/d/science/.worktrees/tasks-migration-sci/python
 uv run --frozen pytest -q
 uv run --frozen ruff check .
@@ -473,6 +564,7 @@ npm test
 npm run typecheck
 npm run check
 cd ..
+test ! -e tasks/projects.toml
 git add tasks AGENTS.md docs/plans/2026-08-30-science-tasks-migration.md
 git diff --cached --check
 git commit -m "chore(tasks): initialize project task tracking"
@@ -484,17 +576,21 @@ Independently review the full two-commit migration and fix findings before integ
 - [ ] **Step 7: Integrate, register, and clean up Science**
 
 ```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-sci.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/science merge --ff-only chore/tasks-migration-sci
 cd ~/d/science/python && uv run --frozen pytest -q && uv run --frozen ruff check . && uv run --frozen pyright
 cd ../ts && npm test && npm run typecheck && npm run check
 cd ..
-tasks init --prefix sci
-tasks init --prefix sci
-tasks prime | jq -e '.prefix == "sci"'
+TASKS_FORMAT=json tasks init --prefix sci
+TASKS_FORMAT=json tasks init --prefix sci
+TASKS_FORMAT=json tasks prime | jq -e '.prefix == "sci"'
 git status --short --branch
 git worktree remove ~/d/science/.worktrees/tasks-migration-sci
 git branch -d chore/tasks-migration-sci
-rm -r -- "$tasks_migration_config"
+case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-migration-sci.registry-path
 ```
 
 ### Task 5: Migrate Nodes
@@ -515,6 +611,7 @@ rm -r -- "$tasks_migration_config"
 - [ ] **Step 1: Create the Nodes worktree and run both baselines**
 
 ```bash
+set -euo pipefail
 git -C ~/d/nodes worktree add -b chore/tasks-migration-nodes ~/d/nodes/.worktrees/tasks-migration-nodes main
 cd ~/d/nodes/.worktrees/tasks-migration-nodes/python
 uv run --frozen pytest -q
@@ -535,10 +632,11 @@ Read `AGENTS.md` first and treat `docs/STANDARD.md` as the authority it names. V
 - [ ] **Step 3: Correct drift, prove coverage, and commit documentation**
 
 ```bash
+set -euo pipefail
 cd ~/d/nodes/.worktrees/tasks-migration-nodes
-rg -n 'Status:|STANDARD|parity|Python|TypeScript|Mindful|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null
+rg -n 'Status:|STANDARD|parity|Python|TypeScript|Mindful|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
 comm -3 \
-  <({ rg --files docs; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
+  <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-nodes-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-nodes-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
 git diff --check
 cd python && uv run --frozen pytest -q && uv run --frozen ruff check . && uv run --frozen pyright src
@@ -559,25 +657,45 @@ tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes prime
 Expected: explicit `no_project` failure.
 
 ```bash
+set -euo pipefail
+test ! -e /tmp/tasks-migration-nodes.registry-path
 tasks_migration_config=$(mktemp -d)
-export tasks_migration_config
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar init --prefix fam
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/atoms init --prefix atoms
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/science init --prefix sci
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes init --prefix nodes
+printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-nodes.registry-path
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar init --prefix fam
+tasks -C ~/d/atoms init --prefix atoms
+tasks -C ~/d/science init --prefix sci
+tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes init --prefix nodes
 ```
 
 - [ ] **Step 5: Create Nodes tasks and dependencies**
 
-Apply the shared task-creation procedure. Keep cross-language delivery together when acceptance requires parity. Record verified blockers targeting either future Mindful migration as pending; do not create dangling IDs. Add the shared agent guidance.
+Re-derive the registry before applying the shared task-creation procedure:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-nodes.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+cd ~/d/nodes/.worktrees/tasks-migration-nodes
+```
+
+Keep cross-language delivery together when acceptance requires parity. Record verified blockers targeting either future Mindful migration as pending; do not create dangling IDs. Add the shared agent guidance.
 
 - [ ] **Step 6: Verify, commit, and independently review Nodes**
 
 ```bash
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes check >/tmp/nodes-check.json
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-nodes.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes check >/tmp/nodes-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/nodes-check.json
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes prime | jq -e '.prefix == "nodes"'
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes ready
+tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes prime | jq -e '.prefix == "nodes"'
+tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes ready
 cd ~/d/nodes/.worktrees/tasks-migration-nodes/python
 uv run --frozen pytest -q
 uv run --frozen ruff check .
@@ -587,6 +705,7 @@ npm test
 npm run typecheck
 npm run check
 cd ..
+test ! -e tasks/projects.toml
 git add tasks AGENTS.md docs/plans/2026-08-30-nodes-tasks-migration.md
 git diff --cached --check
 git commit -m "chore(tasks): initialize project task tracking"
@@ -598,17 +717,21 @@ Independently review the complete migration and fix findings before integration.
 - [ ] **Step 7: Integrate, register, and clean up Nodes**
 
 ```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-nodes.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/nodes merge --ff-only chore/tasks-migration-nodes
 cd ~/d/nodes/python && uv run --frozen pytest -q && uv run --frozen ruff check . && uv run --frozen pyright src
 cd ../ts && npm test && npm run typecheck && npm run check
 cd ~/d/nodes
-tasks init --prefix nodes
-tasks init --prefix nodes
-tasks prime | jq -e '.prefix == "nodes"'
+TASKS_FORMAT=json tasks init --prefix nodes
+TASKS_FORMAT=json tasks init --prefix nodes
+TASKS_FORMAT=json tasks prime | jq -e '.prefix == "nodes"'
 git status --short --branch
 git worktree remove ~/d/nodes/.worktrees/tasks-migration-nodes
 git branch -d chore/tasks-migration-nodes
-rm -r -- "$tasks_migration_config"
+case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-migration-nodes.registry-path
 ```
 
 ### Task 6: Migrate Mindful v3
@@ -629,6 +752,7 @@ rm -r -- "$tasks_migration_config"
 - [ ] **Step 1: Create the v3 worktree and record service state**
 
 ```bash
+set -euo pipefail
 git -C ~/d/mindful/v3 worktree add -b chore/tasks-migration-mind3 ~/d/mindful/v3/.worktrees/tasks-migration-mind3 main
 cd ~/d/mindful/v3/.worktrees/tasks-migration-mind3
 docker compose ps
@@ -639,6 +763,7 @@ Record whether the required stack was already running. Start it only if the repo
 - [ ] **Step 2: Run the v3 baseline gates**
 
 ```bash
+set -euo pipefail
 cd ~/d/mindful/v3/.worktrees/tasks-migration-mind3/react
 npm run typecheck
 npm run lint
@@ -659,10 +784,11 @@ Read `AGENTS.md`, README, current roadmap and active plans, architecture-moderni
 - [ ] **Step 4: Correct drift, prove coverage, and commit documentation**
 
 ```bash
+set -euo pipefail
 cd ~/d/mindful/v3/.worktrees/tasks-migration-mind3
-rg -n 'Status:|roadmap|moderni[sz]|v3|v6|import|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null
+rg -n 'Status:|roadmap|moderni[sz]|v3|v6|import|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
 comm -3 \
-  <({ rg --files docs; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
+  <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-mindful-v3-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-mindful-v3-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
 git diff --check
 cd react && npm run typecheck && npm run lint && npm run test && npm run build
@@ -685,26 +811,46 @@ tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 prime
 Expected: explicit `no_project` failure.
 
 ```bash
+set -euo pipefail
+test ! -e /tmp/tasks-migration-mind3.registry-path
 tasks_migration_config=$(mktemp -d)
-export tasks_migration_config
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar init --prefix fam
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/atoms init --prefix atoms
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/science init --prefix sci
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/nodes init --prefix nodes
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 init --prefix mind3
+printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-mind3.registry-path
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar init --prefix fam
+tasks -C ~/d/atoms init --prefix atoms
+tasks -C ~/d/science init --prefix sci
+tasks -C ~/d/nodes init --prefix nodes
+tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 init --prefix mind3
 ```
 
 - [ ] **Step 6: Create v3 tasks and dependencies**
 
-Apply the shared task-creation procedure. Mark a task `doing` only with a verified owner token; never treat an old branch alone as ownership. Add direct Nodes blockers when proven. Record blockers targeting Mindful v6 as pending. Add the shared agent guidance.
+Re-derive the registry before applying the shared task-creation procedure:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-mind3.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+cd ~/d/mindful/v3/.worktrees/tasks-migration-mind3
+```
+
+Mark a task `doing` only with a verified owner token; never treat an old branch alone as ownership. Add direct Nodes blockers when proven. Record blockers targeting Mindful v6 as pending. Add the shared agent guidance.
 
 - [ ] **Step 7: Verify, commit, and independently review v3**
 
 ```bash
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 check >/tmp/mind3-check.json
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-mind3.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 check >/tmp/mind3-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/mind3-check.json
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 prime | jq -e '.prefix == "mind3"'
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 ready
+tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 prime | jq -e '.prefix == "mind3"'
+tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 ready
 cd ~/d/mindful/v3/.worktrees/tasks-migration-mind3/react
 npm run typecheck
 npm run lint
@@ -714,6 +860,7 @@ cd ..
 docker exec mindful_fastapi_v3 uv run pytest tests -v
 docker exec mindful_fastapi_v3 uv run pytest tests/test_graph_producers.py -v
 docker exec mindful_fastapi_v3 uv run ruff check .
+test ! -e tasks/projects.toml
 git add tasks AGENTS.md docs/plans/2026-08-30-mindful-v3-tasks-migration.md
 git diff --cached --check
 git commit -m "chore(tasks): initialize project task tracking"
@@ -725,19 +872,23 @@ Independently review both commits and fix findings before integration.
 - [ ] **Step 8: Integrate, register, and clean up v3**
 
 ```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-mind3.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/mindful/v3 merge --ff-only chore/tasks-migration-mind3
 cd ~/d/mindful/v3/react && npm run typecheck && npm run lint && npm run test && npm run build
 cd ..
 docker exec mindful_fastapi_v3 uv run pytest tests -v
 docker exec mindful_fastapi_v3 uv run pytest tests/test_graph_producers.py -v
 docker exec mindful_fastapi_v3 uv run ruff check .
-tasks init --prefix mind3
-tasks init --prefix mind3
-tasks prime | jq -e '.prefix == "mind3"'
+TASKS_FORMAT=json tasks init --prefix mind3
+TASKS_FORMAT=json tasks init --prefix mind3
+TASKS_FORMAT=json tasks prime | jq -e '.prefix == "mind3"'
 git status --short --branch
 git worktree remove ~/d/mindful/v3/.worktrees/tasks-migration-mind3
 git branch -d chore/tasks-migration-mind3
-rm -r -- "$tasks_migration_config"
+case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-migration-mind3.registry-path
 ```
 
 If Step 1 started the stack, stop it with the repository's normal `docker compose down` command without `--volumes`. Do not stop a stack that was already running.
@@ -760,6 +911,7 @@ If Step 1 started the stack, stop it with the repository's normal `docker compos
 - [ ] **Step 1: Create the v6 worktree and run its baseline**
 
 ```bash
+set -euo pipefail
 git -C ~/d/mindful/v6 worktree add -b chore/tasks-migration-mind6 ~/d/mindful/v6/.worktrees/tasks-migration-mind6 main
 cd ~/d/mindful/v6/.worktrees/tasks-migration-mind6
 npm test
@@ -776,10 +928,11 @@ Read `AGENTS.md`, `docs/ARCHITECTURE.md`, and `docs/FORMATS.md` first as standin
 - [ ] **Step 3: Correct drift, prove coverage, and commit documentation**
 
 ```bash
+set -euo pipefail
 cd ~/d/mindful/v6/.worktrees/tasks-migration-mind6
-rg -n 'Status:|ARCHITECTURE|FORMATS|v3|v6|Nodes|sprint|import|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null
+rg -n 'Status:|ARCHITECTURE|FORMATS|v3|v6|Nodes|sprint|import|supersed' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
 comm -3 \
-  <({ rg --files docs; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
+  <({ git ls-files docs; printf '%s\n' docs/plans/2026-08-30-mindful-v6-tasks-migration.md; for f in README.md AGENTS.md CLAUDE.md; do test ! -f "$f" || echo "$f"; done; } | sort -u) \
   <(sed -n '/^## Document classification$/,/^## /p' docs/plans/2026-08-30-mindful-v6-tasks-migration.md | awk -F'`' '/^\| `/{print $2}' | sort -u)
 git diff --check
 npm test
@@ -800,31 +953,52 @@ tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 prime
 Expected: explicit `no_project` failure.
 
 ```bash
+set -euo pipefail
+test ! -e /tmp/tasks-migration-mind6.registry-path
 tasks_migration_config=$(mktemp -d)
-export tasks_migration_config
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/familiar init --prefix fam
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/atoms init --prefix atoms
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/science init --prefix sci
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/nodes init --prefix nodes
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v3 init --prefix mind3
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 init --prefix mind6
+printf '%s\n' "$tasks_migration_config" >/tmp/tasks-migration-mind6.registry-path
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar init --prefix fam
+tasks -C ~/d/atoms init --prefix atoms
+tasks -C ~/d/science init --prefix sci
+tasks -C ~/d/nodes init --prefix nodes
+tasks -C ~/d/mindful/v3 init --prefix mind3
+tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 init --prefix mind6
 ```
 
 - [ ] **Step 5: Create v6 tasks and dependencies**
 
-Apply the shared task-creation procedure. Add direct dependencies on existing Nodes and Mindful v3 tasks only when they block delivery. Any dependency targeting earlier projects is now resolvable; treat failure to resolve as a registry or evidence error rather than omitting it. Add the shared agent guidance.
+Re-derive the registry before applying the shared task-creation procedure:
+
+```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-mind6.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+cd ~/d/mindful/v6/.worktrees/tasks-migration-mind6
+```
+
+Add direct dependencies on existing Nodes and Mindful v3 tasks only when they block delivery. Any dependency targeting earlier projects is now resolvable; treat failure to resolve as a registry or evidence error rather than omitting it. Add the shared agent guidance.
 
 - [ ] **Step 6: Verify, commit, and independently review v6**
 
 ```bash
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 check >/tmp/mind6-check.json
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-mind6.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
+export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 check >/tmp/mind6-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/mind6-check.json
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 prime | jq -e '.prefix == "mind6"'
-XDG_CONFIG_HOME="$tasks_migration_config" tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 ready
+tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 prime | jq -e '.prefix == "mind6"'
+tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 ready
 cd ~/d/mindful/v6/.worktrees/tasks-migration-mind6
 npm test
 npm run typecheck
 npm run check
+test ! -e tasks/projects.toml
 git add tasks AGENTS.md docs/plans/2026-08-30-mindful-v6-tasks-migration.md
 git diff --cached --check
 git commit -m "chore(tasks): initialize project task tracking"
@@ -836,18 +1010,22 @@ Independently review both commits and fix findings before integration.
 - [ ] **Step 7: Integrate, register, and clean up v6**
 
 ```bash
+set -euo pipefail
+tasks_migration_config=$(</tmp/tasks-migration-mind6.registry-path)
+test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/mindful/v6 merge --ff-only chore/tasks-migration-mind6
 cd ~/d/mindful/v6
 npm test
 npm run typecheck
 npm run check
-tasks init --prefix mind6
-tasks init --prefix mind6
-tasks prime | jq -e '.prefix == "mind6"'
+TASKS_FORMAT=json tasks init --prefix mind6
+TASKS_FORMAT=json tasks init --prefix mind6
+TASKS_FORMAT=json tasks prime | jq -e '.prefix == "mind6"'
 git status --short --branch
 git worktree remove ~/d/mindful/v6/.worktrees/tasks-migration-mind6
 git branch -d chore/tasks-migration-mind6
-rm -r -- "$tasks_migration_config"
+case "$tasks_migration_config" in /tmp/*) rm -r -- "$tasks_migration_config" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-migration-mind6.registry-path
 ```
 
 ### Task 8: Reconcile Deferred Cross-Project Dependencies
@@ -865,14 +1043,18 @@ rm -r -- "$tasks_migration_config"
 - [ ] **Step 1: Build the exact six-project portfolio registry through the CLI**
 
 ```bash
+set -euo pipefail
+test ! -e /tmp/tasks-reconciliation-portfolio.registry-path
 tasks_portfolio_config=$(mktemp -d)
-export tasks_portfolio_config
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/familiar init --prefix fam
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/atoms init --prefix atoms
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/science init --prefix sci
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/nodes init --prefix nodes
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/mindful/v3 init --prefix mind3
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/mindful/v6 init --prefix mind6
+printf '%s\n' "$tasks_portfolio_config" >/tmp/tasks-reconciliation-portfolio.registry-path
+export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar init --prefix fam
+tasks -C ~/d/atoms init --prefix atoms
+tasks -C ~/d/science init --prefix sci
+tasks -C ~/d/nodes init --prefix nodes
+tasks -C ~/d/mindful/v3 init --prefix mind3
+tasks -C ~/d/mindful/v6 init --prefix mind6
 ```
 
 Expected: six successful `init` calls. Do not write `projects.toml` directly.
@@ -880,6 +1062,7 @@ Expected: six successful `init` calls. Do not write `projects.toml` directly.
 - [ ] **Step 2: Enumerate pending rows exactly**
 
 ```bash
+set -euo pipefail
 for ledger in \
   ~/d/familiar/docs/plans/2026-08-30-familiar-tasks-migration.md \
   ~/d/atoms/docs/plans/2026-08-30-atoms-tasks-migration.md \
@@ -895,11 +1078,49 @@ do
 done
 ```
 
-If no row prints, record reconciliation as a verified no-op and continue to Task 9. Otherwise process the printed repositories one at a time in portfolio order.
+If no row prints, record reconciliation as a verified no-op and continue to Step 8. Otherwise process the printed repositories one at a time in portfolio order.
 
-- [ ] **Step 3: Define the reconciliation gate for all possible affected projects**
+- [ ] **Step 3: Create the reusable reconciliation helper**
 
-```bash
+Use `apply_patch` to create `/tmp/tasks-reconciliation-helper.zsh` with exactly this content:
+
+```zsh
+load_reconciliation_target() {
+  case "${prefix:?reconciliation prefix unset}" in
+    fam)
+      repo="$HOME/d/familiar"
+      worktree="$repo/.worktrees/tasks-reconciliation-fam"
+      ledger_rel=docs/plans/2026-08-30-familiar-tasks-migration.md
+      ;;
+    atoms)
+      repo="$HOME/d/atoms"
+      worktree="$repo/.worktrees/tasks-reconciliation-atoms"
+      ledger_rel=docs/plans/2026-08-30-atoms-tasks-migration.md
+      ;;
+    sci)
+      repo="$HOME/d/science"
+      worktree="$repo/.worktrees/tasks-reconciliation-sci"
+      ledger_rel=docs/plans/2026-08-30-science-tasks-migration.md
+      ;;
+    nodes)
+      repo="$HOME/d/nodes"
+      worktree="$repo/.worktrees/tasks-reconciliation-nodes"
+      ledger_rel=docs/plans/2026-08-30-nodes-tasks-migration.md
+      ;;
+    mind3)
+      repo="$HOME/d/mindful/v3"
+      worktree="$repo/.worktrees/tasks-reconciliation-mind3"
+      ledger_rel=docs/plans/2026-08-30-mindful-v3-tasks-migration.md
+      ;;
+    mind6)
+      repo="$HOME/d/mindful/v6"
+      worktree="$repo/.worktrees/tasks-reconciliation-mind6"
+      ledger_rel=docs/plans/2026-08-30-mindful-v6-tasks-migration.md
+      ;;
+    *) return 2 ;;
+  esac
+}
+
 run_reconciliation_gate() {
   case "$1" in
     fam)
@@ -930,7 +1151,7 @@ run_reconciliation_gate() {
 }
 ```
 
-Expected: the function returns 0 only when the affected repository's complete gate passes.
+Run `zsh -n /tmp/tasks-reconciliation-helper.zsh`. Expected: syntax validation succeeds. Every later reconciliation step sources this file, re-reads the selected prefix and portfolio registry, and re-derives `repo`, `worktree`, and `ledger_rel`.
 
 - [ ] **Step 4: Reconcile one affected repository in a fresh worktree**
 
@@ -945,9 +1166,13 @@ Resolve the repository, prefix, ledger, and worktree from this fixed map:
 | `~/d/mindful/v3` | `mind3` | `~/d/mindful/v3/.worktrees/tasks-reconciliation-mind3` | `docs/plans/2026-08-30-mindful-v3-tasks-migration.md` |
 | `~/d/mindful/v6` | `mind6` | `~/d/mindful/v6/.worktrees/tasks-reconciliation-mind6` | `docs/plans/2026-08-30-mindful-v6-tasks-migration.md` |
 
-Set `repo`, `prefix`, `worktree`, and `ledger_rel` to one literal row, then run:
+Use `apply_patch` to create `/tmp/tasks-reconciliation-current.prefix` containing exactly one literal prefix from the affected map: `fam`, `atoms`, `sci`, `nodes`, `mind3`, or `mind6`, followed by a newline. Then execute:
 
 ```bash
+set -euo pipefail
+source /tmp/tasks-reconciliation-helper.zsh
+prefix=$(</tmp/tasks-reconciliation-current.prefix)
+load_reconciliation_target
 git -C "$repo" worktree add -b "chore/tasks-reconciliation-$prefix" "$worktree" main
 run_reconciliation_gate "$prefix" "$worktree"
 ```
@@ -956,12 +1181,23 @@ Expected: the fresh worktree baseline passes. Do not create the next reconciliat
 
 - [ ] **Step 5: Add every pending edge through the CLI**
 
-For each pending row in that ledger, copy its literal local and foreign IDs into one input line, then run:
+For each pending row in that ledger, use `apply_patch` to create `/tmp/tasks-reconciliation-edge.zsh` with exactly two literal assignments, `local_id=` and `foreign_id=`, copied from that row. Source the assignments in the same invocation that mutates the task:
 
 ```bash
-read -r local_id foreign_id
-XDG_CONFIG_HOME="$tasks_portfolio_config" TASKS_OWNER=migration tasks -C "$worktree" dep "$local_id" --on "$foreign_id"
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C "$worktree" show "$local_id"
+set -euo pipefail
+source /tmp/tasks-reconciliation-helper.zsh
+source /tmp/tasks-reconciliation-edge.zsh
+prefix=$(</tmp/tasks-reconciliation-current.prefix)
+load_reconciliation_target
+tasks_portfolio_config=$(</tmp/tasks-reconciliation-portfolio.registry-path)
+test -d "${tasks_portfolio_config:?portfolio registry unset}"
+export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
+export TASKS_FORMAT=json
+test -n "${local_id:?literal local task ID unset}"
+test -n "${foreign_id:?literal foreign task ID unset}"
+TASKS_OWNER=migration tasks -C "$worktree" dep "$local_id" --on "$foreign_id"
+tasks -C "$worktree" show "$local_id"
+rm -- /tmp/tasks-reconciliation-edge.zsh
 ```
 
 If the edge fails resolution or acyclicity, stop; do not weaken or omit it. Use `apply_patch` to change that exact row from `pending` to `reconciled` and record the new edge.
@@ -969,7 +1205,15 @@ If the edge fails resolution or acyclicity, stop; do not weaken or omit it. Use 
 - [ ] **Step 6: Verify and commit the affected reconciliation**
 
 ```bash
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C "$worktree" check >/tmp/reconciliation-check.json
+set -euo pipefail
+source /tmp/tasks-reconciliation-helper.zsh
+prefix=$(</tmp/tasks-reconciliation-current.prefix)
+load_reconciliation_target
+tasks_portfolio_config=$(</tmp/tasks-reconciliation-portfolio.registry-path)
+test -d "${tasks_portfolio_config:?portfolio registry unset}"
+export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
+export TASKS_FORMAT=json
+tasks -C "$worktree" check >/tmp/reconciliation-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/reconciliation-check.json
 run_reconciliation_gate "$prefix" "$worktree"
 git -C "$worktree" diff --check
@@ -986,9 +1230,17 @@ Expected: one commit contains both the CLI-generated dependency edit and the rec
 Independently review the edge evidence, full reachable graph, ledger update, and commit diff. Fix findings and rerun Step 6, then:
 
 ```bash
+set -euo pipefail
+source /tmp/tasks-reconciliation-helper.zsh
+prefix=$(</tmp/tasks-reconciliation-current.prefix)
+load_reconciliation_target
+tasks_portfolio_config=$(</tmp/tasks-reconciliation-portfolio.registry-path)
+test -d "${tasks_portfolio_config:?portfolio registry unset}"
+export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
+export TASKS_FORMAT=json
 git -C "$repo" merge --ff-only "chore/tasks-reconciliation-$prefix"
 run_reconciliation_gate "$prefix" "$repo"
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C "$repo" check >/tmp/reconciliation-stable-check.json
+tasks -C "$repo" check >/tmp/reconciliation-stable-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/reconciliation-stable-check.json
 cd "$repo"
 git worktree remove "$worktree"
@@ -999,7 +1251,18 @@ Repeat Steps 4–7 for the next affected repository only after this stable check
 
 - [ ] **Step 8: Prove reconciliation is complete**
 
-Rerun Step 2. Expected: no pending row prints. Keep `tasks_portfolio_config` for Task 9 or remove it and create a fresh one there.
+Rerun Step 2. Expected: no pending row prints. Then clean up the reconciliation controls:
+
+```bash
+set -euo pipefail
+tasks_portfolio_config=$(</tmp/tasks-reconciliation-portfolio.registry-path)
+test -d "${tasks_portfolio_config:?portfolio registry unset}"
+case "$tasks_portfolio_config" in /tmp/*) rm -r -- "$tasks_portfolio_config" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-reconciliation-portfolio.registry-path
+for control_path in /tmp/tasks-reconciliation-helper.zsh /tmp/tasks-reconciliation-current.prefix /tmp/tasks-reconciliation-edge.zsh; do
+  test ! -e "$control_path" || rm -- "$control_path"
+done
+```
 
 ### Task 9: Run the Portfolio Gate and Record Completion
 
@@ -1017,14 +1280,18 @@ Rerun Step 2. Expected: no pending row prints. Keep `tasks_portfolio_config` for
 - [ ] **Step 1: Create a fresh exact portfolio registry**
 
 ```bash
+set -euo pipefail
+test ! -e /tmp/tasks-final-portfolio.registry-path
 tasks_portfolio_config=$(mktemp -d)
-export tasks_portfolio_config
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/familiar init --prefix fam
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/atoms init --prefix atoms
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/science init --prefix sci
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/nodes init --prefix nodes
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/mindful/v3 init --prefix mind3
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/mindful/v6 init --prefix mind6
+printf '%s\n' "$tasks_portfolio_config" >/tmp/tasks-final-portfolio.registry-path
+export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar init --prefix fam
+tasks -C ~/d/atoms init --prefix atoms
+tasks -C ~/d/science init --prefix sci
+tasks -C ~/d/nodes init --prefix nodes
+tasks -C ~/d/mindful/v3 init --prefix mind3
+tasks -C ~/d/mindful/v6 init --prefix mind6
 ```
 
 Expected: all six initializations succeed; unrelated registry projects are absent.
@@ -1032,6 +1299,11 @@ Expected: all six initializations succeed; unrelated registry projects are absen
 - [ ] **Step 2: Require empty checks and exact prefixes in all six projects**
 
 ```bash
+set -euo pipefail
+tasks_portfolio_config=$(</tmp/tasks-final-portfolio.registry-path)
+test -d "${tasks_portfolio_config:?portfolio registry unset}"
+export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
+export TASKS_FORMAT=json
 printf '%s %s\n' \
   "$HOME/d/familiar" fam \
   "$HOME/d/atoms" atoms \
@@ -1040,10 +1312,10 @@ printf '%s %s\n' \
   "$HOME/d/mindful/v3" mind3 \
   "$HOME/d/mindful/v6" mind6 |
 while read -r root prefix; do
-  XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C "$root" check >"/tmp/$prefix-portfolio-check.json"
+  tasks -C "$root" check >"/tmp/$prefix-portfolio-check.json"
   jq -e '.errors == [] and .warnings == []' "/tmp/$prefix-portfolio-check.json"
-  XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C "$root" prime | jq -e --arg prefix "$prefix" '.prefix == $prefix'
-  XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C "$root" ready
+  tasks -C "$root" prime | jq -e --arg prefix "$prefix" '.prefix == $prefix'
+  tasks -C "$root" ready
 done
 ```
 
@@ -1052,7 +1324,12 @@ Expected: every command passes and every check has zero warnings. The literal pa
 - [ ] **Step 3: Require strict global listing success without warnings**
 
 ```bash
-XDG_CONFIG_HOME="$tasks_portfolio_config" tasks -C ~/d/familiar list --all-projects >/tmp/tasks-portfolio-list.json 2>/tmp/tasks-portfolio-list.err
+set -euo pipefail
+tasks_portfolio_config=$(</tmp/tasks-final-portfolio.registry-path)
+test -d "${tasks_portfolio_config:?portfolio registry unset}"
+export XDG_CONFIG_HOME="${tasks_portfolio_config:?portfolio registry unset}"
+export TASKS_FORMAT=json
+tasks -C ~/d/familiar list --all-projects >/tmp/tasks-portfolio-list.json 2>/tmp/tasks-portfolio-list.err
 test ! -s /tmp/tasks-portfolio-list.err
 jq -e '.warnings == [] and (.tasks | type == "array")' /tmp/tasks-portfolio-list.json
 ```
@@ -1064,6 +1341,7 @@ Expected: strict scans of all six projects succeed and stderr is empty.
 For each ledger, rerun its exact coverage comparison. Then verify:
 
 ```bash
+set -euo pipefail
 ! rg -n '^\|.*\| pending \|$' \
   ~/d/familiar/docs/plans/2026-08-30-familiar-tasks-migration.md \
   ~/d/atoms/docs/plans/2026-08-30-atoms-tasks-migration.md \
@@ -1078,6 +1356,7 @@ Expected: no pending row. Inspect every `Candidate outcomes` row against its tas
 - [ ] **Step 5: Run every repository's complete stable gate**
 
 ```bash
+set -euo pipefail
 (cd ~/d/familiar && npm test)
 (cd ~/d/atoms/python && uv run pytest && uv run ruff check . && uv run pyright)
 (cd ~/d/science/python && uv run --frozen pytest -q && uv run --frozen ruff check . && uv run --frozen pyright)
@@ -1096,17 +1375,19 @@ Expected: every established gate passes. Apply the documented Nodes build refres
 - [ ] **Step 6: Prove and, if necessary, explicitly repair normal registry mappings**
 
 ```bash
-tasks -C ~/d/familiar init --prefix fam && tasks -C ~/d/familiar prime | jq -e '.prefix == "fam"'
-tasks -C ~/d/atoms init --prefix atoms && tasks -C ~/d/atoms prime | jq -e '.prefix == "atoms"'
-tasks -C ~/d/science init --prefix sci && tasks -C ~/d/science prime | jq -e '.prefix == "sci"'
-tasks -C ~/d/nodes init --prefix nodes && tasks -C ~/d/nodes prime | jq -e '.prefix == "nodes"'
-tasks -C ~/d/mindful/v3 init --prefix mind3 && tasks -C ~/d/mindful/v3 prime | jq -e '.prefix == "mind3"'
-tasks -C ~/d/mindful/v6 init --prefix mind6 && tasks -C ~/d/mindful/v6 prime | jq -e '.prefix == "mind6"'
+set -euo pipefail
+TASKS_FORMAT=json tasks -C ~/d/familiar init --prefix fam && TASKS_FORMAT=json tasks -C ~/d/familiar prime | jq -e '.prefix == "fam"'
+TASKS_FORMAT=json tasks -C ~/d/atoms init --prefix atoms && TASKS_FORMAT=json tasks -C ~/d/atoms prime | jq -e '.prefix == "atoms"'
+TASKS_FORMAT=json tasks -C ~/d/science init --prefix sci && TASKS_FORMAT=json tasks -C ~/d/science prime | jq -e '.prefix == "sci"'
+TASKS_FORMAT=json tasks -C ~/d/nodes init --prefix nodes && TASKS_FORMAT=json tasks -C ~/d/nodes prime | jq -e '.prefix == "nodes"'
+TASKS_FORMAT=json tasks -C ~/d/mindful/v3 init --prefix mind3 && TASKS_FORMAT=json tasks -C ~/d/mindful/v3 prime | jq -e '.prefix == "mind3"'
+TASKS_FORMAT=json tasks -C ~/d/mindful/v6 init --prefix mind6 && TASKS_FORMAT=json tasks -C ~/d/mindful/v6 prime | jq -e '.prefix == "mind6"'
 ```
 
 Expected: every repeated init succeeds and every prefix is exact. If a canonical root moved, stop and back up the normal registry:
 
 ```bash
+set -euo pipefail
 tasks_registry_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
 tasks_registry_path="$tasks_registry_home/tasks/projects.toml"
 test ! -e "$tasks_registry_path.pre-migration-repair"
@@ -1118,6 +1399,7 @@ Use `apply_patch` to remove only the stale entries among `fam`, `atoms`, `sci`, 
 - [ ] **Step 7: Create the Tasks completion worktree**
 
 ```bash
+set -euo pipefail
 git -C ~/d/tasks worktree add -b docs/project-migration-complete ~/d/tasks/.worktrees/project-migration-complete main
 cd ~/d/tasks/.worktrees/project-migration-complete
 ```
@@ -1129,7 +1411,9 @@ Expected: a clean worktree based on the then-current `main`, which must already 
 Use `apply_patch` to change the design status from approved/not implemented to implemented with the actual date from `date +%F`. Check only plan boxes whose command and evidence were actually verified. Add concise final commit references or verification results where the ledger contract requires them. Then search outward for stale migration claims:
 
 ```bash
-rg -n 'project.tasks.migration|not implemented|implementation planning|migration.*pending' README.md AGENTS.md CLAUDE.md docs 2>/dev/null
+set -euo pipefail
+cd ~/d/tasks/.worktrees/project-migration-complete
+rg -n 'project.tasks.migration|not implemented|implementation planning|migration.*pending' README.md AGENTS.md CLAUDE.md docs 2>/dev/null || true
 git diff --check
 ```
 
@@ -1138,7 +1422,9 @@ Correct propagated user-facing drift in the same change. Do not check a box base
 - [ ] **Step 9: Verify, commit, review, and integrate the completion record**
 
 ```bash
-CARGO_HOME=/tmp/tasks-migration-cargo cargo test
+set -euo pipefail
+cd ~/d/tasks/.worktrees/project-migration-complete
+cargo test
 git add docs
 for f in README.md AGENTS.md CLAUDE.md; do test ! -e "$f" || git add "$f"; done
 git diff --cached --check
@@ -1149,13 +1435,17 @@ git status --short
 Omit nonexistent pathspecs. Independently review the completion criteria against all six stable trees and the portfolio outputs. Fix any finding and rerun the affected gate before integration:
 
 ```bash
+set -euo pipefail
+tasks_portfolio_config=$(</tmp/tasks-final-portfolio.registry-path)
+test -d "${tasks_portfolio_config:?portfolio registry unset}"
 git -C ~/d/tasks merge --ff-only docs/project-migration-complete
 cd ~/d/tasks
-CARGO_HOME=/tmp/tasks-migration-cargo cargo test
+cargo test
 git status --short --branch
 git worktree remove ~/d/tasks/.worktrees/project-migration-complete
 git branch -d docs/project-migration-complete
-rm -r -- "$tasks_portfolio_config"
+case "$tasks_portfolio_config" in /tmp/*) rm -r -- "$tasks_portfolio_config" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-final-portfolio.registry-path
 ```
 
-Expected: Tasks `main` records the implemented design, the plan reflects only verified history, and all 65 current Tasks tests pass.
+Expected: Tasks `main` records the implemented design, the plan reflects only verified history, and the complete Tasks suite passes with no failures.
