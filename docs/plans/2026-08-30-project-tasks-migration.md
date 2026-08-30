@@ -590,6 +590,7 @@ cd "$beliefs_worktree/python"
 uv run --frozen ruff check .
 uv run --frozen pyright
 cd ../ts
+npm ci
 npm test
 npm run typecheck
 npm run check
@@ -778,6 +779,7 @@ uv run --frozen pytest -q
 uv run --frozen ruff check .
 uv run --frozen pyright src
 cd ../ts
+npm ci
 npm test
 npm run typecheck
 npm run check
@@ -944,6 +946,7 @@ Record whether the required stack was already running. Start it only if the repo
 ```bash
 set -euo pipefail
 cd ~/d/mindful/v3/.worktrees/tasks-migration-mind3/react
+npm ci
 npm run typecheck
 npm run lint
 npm run test
@@ -1112,6 +1115,7 @@ If Step 1 started the stack, stop it with the repository's normal `docker compos
 set -euo pipefail
 git -C ~/d/mindful/v6 worktree add -b chore/tasks-migration-mind6 ~/d/mindful/v6/.worktrees/tasks-migration-mind6 main
 cd ~/d/mindful/v6/.worktrees/tasks-migration-mind6
+npm ci
 npm test
 npm run typecheck
 npm run check
