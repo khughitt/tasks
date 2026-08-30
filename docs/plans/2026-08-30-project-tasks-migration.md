@@ -540,8 +540,16 @@ rm -- /tmp/tasks-migration-atoms.registry-path
 
 - [ ] **Step 1: Create the Beliefs worktree and establish the kernel-sensitive baseline**
 
+Preflight prerequisite: before creating the migration worktree, integrate the independently
+reviewed one-line `python/tests/test_holdings_boundary.py` package-rename correction on Beliefs
+stable `main` (`src/science/...` to `src/beliefs/...`). This is a preflight fix, not a migration
+commit; the migration's prescribed two initial commits remain documentation and Tasks only.
+
 ```bash
 set -euo pipefail
+test -f ~/d/beliefs/python/tests/test_holdings_boundary.py
+rg -q 'src/beliefs/' ~/d/beliefs/python/tests/test_holdings_boundary.py
+if rg -q 'src/science/' ~/d/beliefs/python/tests/test_holdings_boundary.py; then exit 1; fi
 git -C ~/d/beliefs worktree add -b chore/tasks-migration-beliefs ~/d/beliefs/.worktrees/tasks-migration-beliefs main
 beliefs_worktree=~/d/beliefs/.worktrees/tasks-migration-beliefs
 beliefs_python_gate=/tmp/tasks-migration-beliefs-python-gate
@@ -559,17 +567,17 @@ trap 'rm -f -- "$output" "$output.nodes"' EXIT
 set +e
 (
   cd "$worktree/python"
-  uv run --frozen pytest -q --tb=short
+  uv run --frozen pytest --tb=short
 ) >"$output" 2>&1
 pytest_status=$?
 set -e
 test "$pytest_status" -eq 1
-test "$(rg -c '^FAILED ' "$output")" -eq 145
-test "$(rg -c '^FAILED .*atoms\\.core\\.errors\\.CapabilityUnavailable' "$output")" -eq 145
-rg -q '2579 passed' "$output"
-rg -q '145 failed' "$output"
-sed -n 's/^FAILED \([^ ]*\) .*/\1/p' "$output" | LC_ALL=C sort -u >"$output.nodes"
-test "$(wc -l <"$output.nodes")" -eq 145
+test "$(awk '/^FAILED / { count += 1 } END { print count + 0 }' "$output")" -eq 144
+test "$(awk '/^E   / { count += 1 } END { print count + 0 }' "$output")" -eq 144
+test "$(awk '/^E   atoms\.core\.errors\.CapabilityUnavailable: volume configuration is not on the supplied durability allowlist: ext4 / { count += 1 } END { print count + 0 }' "$output")" -eq 144
+rg -q '^144 failed, 2580 passed in [0-9.]+s$' "$output"
+sed -n 's/^FAILED \([^ ]*\).*/\1/p' "$output" | LC_ALL=C sort -u >"$output.nodes"
+test "$(wc -l <"$output.nodes")" -eq 144
 case "$mode" in
   record) cp -- "$output.nodes" "$failed_nodes" ;;
   check) cmp -- "$failed_nodes" "$output.nodes" ;;
@@ -587,12 +595,12 @@ npm run typecheck
 npm run check
 ```
 
-Expected: on kernel `7.1.11-arch1-1`, Python records exactly `2579 passed, 145 failed`.
+Expected: on kernel `7.1.11-arch1-1`, Python records exactly `2580 passed, 144 failed`.
 Every failure is `atoms.core.errors.CapabilityUnavailable`: the ext4/kernel tuple is absent
 from the durability allowlist certified for kernel `7.1.10-arch1-1`. This user-authorized,
-kernel-sensitive baseline is for Task 4 only. The reusable gate records its 145 failed-node
+kernel-sensitive baseline is for Task 4 only. The reusable gate records its 144 failed-node
 set here; every later Task 4 Python run must use `check` and match that set, the identical
-root-cause signature, and `2579 passed`. Ruff, Pyright, and all three TypeScript gates remain
+root-cause signature, and `2580 passed`. Ruff, Pyright, and all three TypeScript gates remain
 strict.
 
 - [ ] **Step 2: Audit Beliefs and write its ledger**
