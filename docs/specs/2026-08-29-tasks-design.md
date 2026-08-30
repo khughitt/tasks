@@ -44,7 +44,8 @@ docs/
 `docs/specs/` and `docs/plans/` are the fixed convention: a task's `spec` must be a file
 under `docs/specs/` and its `plan` a file under `docs/plans/`. This is enforced on every
 write and by `check`; there is no configuration to relocate them. `tasks init` creates both
-directories if absent. Projects that keep specs/plans elsewhere move them first (§9).
+directories if absent. Historical docs need not move; projects move only files they want
+to use through structured `spec`/`plan` links (§9).
 
 Per machine, not checked in: `~/.config/tasks/projects.toml`, the project registry (§6).
 
@@ -334,9 +335,10 @@ If any id reached during traversal is unreachable, `dep --on` and `add --depends
 - `check` fails when: a linked file is missing; a path lies outside `docs/specs/` or
   `docs/plans/`; a `step` heading no longer appears verbatim in its plan; `step` is set
   without `plan`.
-- Running `check` in a project's test or pre-commit path turns doc drift under open tasks
-  into a build failure, which is the intended coupling: when a plan step is renamed or
-  removed, the task must be updated in the same change.
+- Once automation has a pinned Tasks install, running `check` in a project's test or
+  pre-commit path turns doc drift under open tasks into a build failure, which is the
+  intended coupling: when a plan step is renamed or removed, the task must be updated in
+  the same change. Never make the gate conditional on the binary being present.
 
 ## 8. Agent guidance (SKILL.md)
 
@@ -368,19 +370,21 @@ Skill content:
      `Task N:` heading with `--plan <topic> --step "Task N: …"` and `--depends` mirroring
      the plan's order.
    - executing-plans and subagent-driven-development call `tasks start`/`done` per step.
-   - `tasks check` in CI is the drift limiter (§7).
+   - `tasks check` in CI is the drift limiter once CI has a pinned install (§7).
 
 ## 9. Adoption in existing projects
 
 Manual, documented steps — the tool does not move files:
 
-1. Move specs to `docs/specs/` and plans to `docs/plans/` (for example, `git mv docs/designs
-   docs/specs`, `git mv docs/superpowers/plans/* docs/plans/`), fixing links in the README.
-   This is required for `spec`/`plan` links; a project that does not move its docs can still
-   use every other feature.
+1. Keep historical docs in place. Move only active specs/plans that need structured task
+   links into `docs/specs/` / `docs/plans/`, fixing links. This is required for linked
+   files; projects may reference other historical layouts in task bodies, and `init`
+   intentionally creates canonical directories alongside them.
 2. `tasks init --prefix <p>`.
 3. Install the skill (user level preferred) and add a line to CLAUDE.md pointing at it.
-4. Add `tasks check` to the test script or pre-commit hook.
+4. Require `tasks prime` at session start and `tasks check` before completion. Add
+   `tasks check` to the test script or pre-commit hook once the binary has a pinned install
+   source; never silently skip it when unavailable.
 
 ## 10. Implementation
 

@@ -41,10 +41,13 @@ or per project, when a project needs to pin its own copy:
 
 ## Adopting in an existing project
 
-1. Move design specs to `docs/specs/` and plans to `docs/plans/` (`git mv`), fixing links.
+1. Keep historical docs in place. Move only active specs/plans that need structured task
+   links into `docs/specs/` / `docs/plans/`, fixing links; new docs use those directories.
 2. `tasks init --prefix <p>`.
 3. Install the skill and mention it in the project's CLAUDE.md / AGENTS.md.
-4. Add `tasks check` to the test script or pre-commit hook.
+4. Require `tasks prime` at session start and `tasks check` before completion. Add
+   `tasks check` to automation once the binary has a pinned install source; never skip it
+   conditionally when unavailable.
 
 ## Layout
 
