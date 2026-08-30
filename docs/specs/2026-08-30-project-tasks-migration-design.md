@@ -71,7 +71,8 @@ Never let a migration worktree's branch name become task ownership evidence. Set
 `TASKS_OWNER` explicitly on every migration command that records an owner or note. Use
 `migration` for migration-authored notes and the verified existing owner for `start`. If
 the audit cannot identify a valid owner, do not mark the task `doing`; record the branch
-evidence in its body and leave it `todo` or `idea`.
+evidence in its body and leave it `todo` or `idea`. Owner tokens must match
+`[A-Za-z0-9._/@+-]+`; put human display names or other punctuation in the body.
 
 Each project adds one concise ledger:
 
@@ -163,7 +164,10 @@ Tasks receive the `migration` tag. Add another tag only when it supports a real 
 query, and pass the complete initial tag set as repeated `--tag` arguments in the single
 `add` command. `edit --tag` replaces the entire tag list; any later tag edit must repeat
 the complete desired set, including `migration`. Task bodies state the outcome,
-acceptance evidence, source documents, and any audit uncertainty. Existing compatible
+acceptance evidence, source documents, and any audit uncertainty. A body cannot contain
+a bare line equal to `## Notes`; quote that historical heading as `> ## Notes` or mention
+it inline. Note and close/block messages are single-line summaries with no newline or
+carriage return; multi-line evidence belongs in the body. Existing compatible
 `docs/plans/` files and exact headings use the structured `plan` and `step` fields.
 Existing `docs/designs/` files are referenced in the body rather than moved merely to
 satisfy the Tasks path convention. `tasks init` still creates `docs/specs/` and
@@ -177,11 +181,23 @@ and Nodes plus Mindful v3 before Mindful v6. A foreign dependency is added only 
 task exists and resolves through the staging registry.
 
 If a verified blocker points to a project that has not yet been migrated, record the
-relationship in the current ledger without creating a dangling dependency. A final
-portfolio reconciliation adds those links after every relevant task exists, then reruns
-`tasks check` in every project. A cycle in a fully reachable graph is an error. If any
-foreign project is unreachable, cycle verification degrades to a warning; the migration's
-zero-warning gate treats that as unresolved rather than accepting the command's exit code.
+relationship in the current ledger without creating a dangling dependency. After all
+initial migrations, run a conditional reconciliation phase only for ledgers with deferred
+links:
+
+1. create a temporary portfolio registry containing exactly the six stable checkouts;
+2. create a fresh reconciliation worktree from the affected repository's stable branch;
+3. run `tasks dep <id> --on <foreign-id>` in that worktree;
+4. update the ledger so no deferred link remains;
+5. run the repository gates and zero-warning `tasks check` against the portfolio registry;
+6. commit as `chore(tasks): reconcile cross-project dependencies`, independently review,
+   merge, and remove the reconciliation worktree.
+
+No stable checkout is edited directly, and every dependency edit is committed. If no
+ledger has a deferred link, the reconciliation phase is a no-op. A cycle in a fully
+reachable graph is an error. If any foreign project is unreachable, cycle verification
+degrades to a warning; the migration's zero-warning gate treats that as unresolved rather
+than accepting the command's exit code.
 
 ## 7. Worktree-safe registry handling
 
@@ -231,7 +247,8 @@ Each repository migration has two logical commits:
 More commits are allowed only when a repository's existing review or test workflow needs
 them; do not split mechanical file-by-file changes. Independently review the complete
 repository migration before integration. Fix load-bearing findings, rerun affected
-checks, and preserve unrelated user changes.
+checks, and preserve unrelated user changes. The conditional reconciliation phase in §6
+adds one later commit only to repositories with deferred foreign links.
 
 ## 9. Verification and enforcement
 
@@ -242,18 +259,24 @@ For each repository:
 3. run `tasks check` and require both `errors` and `warnings` to be empty; exit status 0
    alone is insufficient because warnings do not change it;
 4. smoke-test `tasks prime` and `tasks ready`;
-5. after canonical registration, verify `tasks prime` reports the expected prefix from
-   the stable checkout and inspect `tasks list --all-projects` for registry warnings;
-6. verify a clean diff/status and review the two-commit range.
+5. after canonical registration, rerun `tasks init --prefix <prefix>` and `tasks prime`
+   from the stable checkout; successful idempotent init proves the normal registry entry
+   matches that root, and prime must report the expected prefix;
+6. verify a clean diff/status and review the complete initial migration range.
 
 After all migrations and final dependency reconciliation:
 
-1. run `tasks check` from all six stable checkouts and require zero errors and warnings;
-2. run `tasks prime` in every stable checkout and confirm its expected prefix;
-3. run `tasks list --all-projects` and resolve every registry warning;
-4. inspect `tasks ready` in every project;
-5. confirm no task backfills completed history;
-6. confirm every unresolved audit item is represented by an `idea`.
+1. create a fresh temporary portfolio registry containing exactly the six stable
+   checkouts, independent of unrelated entries in the normal machine registry;
+   use that registry for every command in items 2–5;
+2. against that registry, run `tasks check` from all six stable checkouts and require
+   zero errors and warnings;
+3. run `tasks prime` in every stable checkout and confirm its expected prefix;
+4. run `tasks list --all-projects`, require command success, and resolve every warning;
+5. inspect `tasks ready` in every project;
+6. confirm no task backfills completed history;
+7. confirm every unresolved audit item is represented by an `idea` and every deferred
+   dependency has a merged reconciliation commit.
 
 Agent guidance in each project requires `tasks prime` at session start and `tasks check`
 before completion. Do not add `command -v tasks && tasks check` or another silent CI
@@ -311,8 +334,11 @@ The portfolio migration is complete when:
 - each project has a completed migration ledger and corrected current documentation;
 - every evidence-backed remaining outcome has one task and no completed history was
   backfilled;
-- all foreign dependencies resolve, with no cycles;
-- all six repositories pass their existing gates and `tasks check`;
+- every deferred foreign dependency edit is committed and all foreign dependencies
+  resolve, with no cycles;
+- all six repositories pass their existing gates and `tasks check` with zero errors and
+  zero warnings;
 - `tasks prime` reports `fam`, `atoms`, `sci`, `nodes`, `mind3`, and `mind6` from their
-  stable checkouts, and global listing emits no registry warning;
+  stable checkouts, and global listing against the six-project portfolio registry
+  succeeds with no warning;
 - every unresolved claim is visible as an `idea`, not silently treated as done or ready.
