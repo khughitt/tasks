@@ -718,12 +718,10 @@ set -euo pipefail
 tasks_migration_config=$(</tmp/tasks-migration-beliefs.registry-path)
 test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/beliefs merge --ff-only chore/tasks-migration-beliefs
-beliefs_python_gate=/tmp/tasks-migration-beliefs-python-gate
-beliefs_failed_nodes=/tmp/tasks-migration-beliefs-python-failed-nodes
-test -x "$beliefs_python_gate"
-test -f "$beliefs_failed_nodes"
-"$beliefs_python_gate" check ~/d/beliefs "$beliefs_failed_nodes"
-cd ~/d/beliefs/python && uv run --frozen ruff check . && uv run --frozen pyright
+cd ~/d/beliefs/python
+uv run --frozen pytest --tb=short
+uv run --frozen ruff check .
+uv run --frozen pyright
 cd ../ts && npm test && npm run typecheck && npm run check
 cd ..
 TASKS_FORMAT=json tasks init --prefix beliefs
