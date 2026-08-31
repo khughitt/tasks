@@ -599,10 +599,10 @@ npm run check
 Expected: on kernel `7.1.11-arch1-1`, Python records exactly `2580 passed, 144 failed`.
 Every failure is `atoms.core.errors.CapabilityUnavailable`: the ext4/kernel tuple is absent
 from the durability allowlist certified for kernel `7.1.10-arch1-1`. This user-authorized,
-kernel-sensitive baseline is for Task 4 only. The reusable gate records its 144 failed-node
-set here; every later Task 4 Python run must use `check` and match that set, the identical
-root-cause signature, and `2580 passed`. Ruff, Pyright, and all three TypeScript gates remain
-strict.
+kernel-sensitive baseline applies to the already-executed Steps 1, 3, and 6. Their helper
+records and checks the same 144 failed-node set, root-cause signature, and `2580 passed`.
+After Atoms certified kernel `7.1.11-arch1-1`, Step 7 and subsequent Beliefs gates require
+the full Python suite to pass. Ruff, Pyright, and all three TypeScript gates remain strict.
 
 - [ ] **Step 2: Audit Beliefs and write its ledger**
 
