@@ -1114,12 +1114,37 @@ set -euo pipefail
 git -C ~/d/mindful/v6 worktree add -b chore/tasks-migration-mind6 ~/d/mindful/v6/.worktrees/tasks-migration-mind6 main
 cd ~/d/mindful/v6/.worktrees/tasks-migration-mind6
 npm ci
-npm test
-npm run typecheck
-npm run check
+nodes_ts=$(cd ~/d/nodes/ts && pwd -P)
+core_link=node_modules/@nodes-dev/core
+test -L "$core_link"
+rm -- "$core_link"
+ln -s "$nodes_ts" "$core_link"
+test "$(cd "$core_link" && pwd -P)" = "$nodes_ts"
+
+run_v6_gates() {
+  npm test &&
+  npm run typecheck &&
+  npm run check
+}
+
+set +e
+gate_output=$(run_v6_gates 2>&1)
+gate_status=$?
+set -e
+printf '%s\n' "$gate_output"
+if test "$gate_status" -eq 0; then
+  :
+elif test "$gate_status" -eq 2 &&
+  rg -q '^@nodes-dev/core dist is stale \(.+\) — run npm run build in ~/d/nodes/ts$' <<<"$gate_output"
+then
+  (cd "$nodes_ts" && npm run build)
+  run_v6_gates
+else
+  exit "$gate_status"
+fi
 ```
 
-If a gate exits 2 solely because the Nodes core build is stale, run `npm run build` in `~/d/nodes/ts`, rerun all three v6 gates, and record that prerequisite in the ledger. Treat every other failure as a baseline failure.
+The generated `file:../../nodes/ts` dependency link is relative to the package, so a linked worktree would otherwise resolve it inside `.worktrees/`. Repoint only that ignored symlink to the runtime-canonical Nodes checkout; never commit its machine-specific target. Only exit 2 with the exact stale-core diagnostic permits one Nodes build, after which all three v6 gates rerun. Treat every other failure as a baseline failure, and record any permitted build prerequisite in the ledger.
 
 - [ ] **Step 2: Audit Mindful v6 and write its ledger**
 
@@ -1394,16 +1419,44 @@ prefix=$(</tmp/tasks-reconciliation-current.prefix)
 load_reconciliation_target
 git -C "$repo" worktree add -b "chore/tasks-reconciliation-$prefix" "$worktree" main
 case "$prefix" in
-  fam|mind6) (cd "$worktree" && npm ci) ;;
+  fam) (cd "$worktree" && npm ci) ;;
+  mind6)
+    (
+      cd "$worktree"
+      npm ci
+      nodes_ts=$(cd "$HOME/d/nodes/ts" && pwd -P)
+      core_link=node_modules/@nodes-dev/core
+      test -L "$core_link"
+      rm -- "$core_link"
+      ln -s "$nodes_ts" "$core_link"
+      test "$(cd "$core_link" && pwd -P)" = "$nodes_ts"
+    )
+    ;;
   beliefs|nodes) (cd "$worktree/ts" && npm ci) ;;
   mind3) (cd "$worktree/react" && npm ci) ;;
   atoms) ;;
   *) exit 2 ;;
 esac
-run_reconciliation_gate "$prefix" "$worktree"
+set +e
+gate_output=$(run_reconciliation_gate "$prefix" "$worktree" 2>&1)
+gate_status=$?
+set -e
+printf '%s\n' "$gate_output"
+if test "$gate_status" -eq 0; then
+  :
+elif test "$prefix" = mind6 &&
+  test "$gate_status" -eq 2 &&
+  rg -q '^@nodes-dev/core dist is stale \(.+\) — run npm run build in ~/d/nodes/ts$' <<<"$gate_output"
+then
+  nodes_ts=$(cd "$HOME/d/nodes/ts" && pwd -P)
+  (cd "$nodes_ts" && npm run build)
+  run_reconciliation_gate "$prefix" "$worktree"
+else
+  exit "$gate_status"
+fi
 ```
 
-Expected: the fresh worktree baseline passes. Do not create the next reconciliation worktree until this one is merged and removed.
+Expected: the fresh worktree baseline passes. For `mind6`, repoint only the ignored generated dependency symlink as in Task 7; only the exact exit-2 stale-core diagnostic permits one Nodes build and a rerun of all three v6 gates. Every other failure is a baseline failure. Do not create the next reconciliation worktree until this one is merged and removed.
 
 - [ ] **Step 5: Add every pending edge through the CLI**
 
