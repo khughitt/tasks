@@ -1,8 +1,9 @@
 # Material and Prism Tasks migration — design
 
-**Status:** approved on 2026-08-31; execution in progress 2026-09-01. Material
-and Prism repository migrations are integrated; portfolio reconciliation and
-final completion recording remain pending.
+**Status:** implemented on 2026-09-01. Material is integrated at
+`8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519`, Prism is integrated at
+`b05b4af214ee714faa6fbd41bbf9121e902e3f59`, reconciliation was a reviewed no-op,
+and the fresh exact-eight portfolio gate completed with zero Tasks errors or warnings.
 
 ## 1. Purpose and baseline
 

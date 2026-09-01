@@ -17,9 +17,10 @@ uv/MkDocs, npm/Node.js, Lua, and Qt 6 `qmllint`.
 
 **Spec:** `docs/specs/2026-08-31-material-prism-tasks-migration-design.md`
 
-**Status:** execution in progress 2026-09-01. Material and Prism repository
-migrations are integrated; portfolio reconciliation and final completion
-recording remain pending.
+**Status:** implemented on 2026-09-01. Material is integrated at
+`8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519`, Prism is integrated at
+`b05b4af214ee714faa6fbd41bbf9121e902e3f59`, reconciliation was a reviewed no-op,
+and Task 5 records the fresh exact-eight completion evidence.
 
 ## Global Constraints
 
@@ -1088,7 +1089,27 @@ test ! -e /tmp/tasks-material-prism-edge.zsh || rm -- /tmp/tasks-material-prism-
 - Produces: final portfolio evidence and truthful implemented status in this design and
   plan.
 
-- [ ] **Step 1: Build a fresh exact-eight final registry**
+Execution evidence from 2026-09-01:
+
+- the fresh registry contained exactly `fam`, `atoms`, `beliefs`, `nodes`, `mind3`,
+  `mind6`, `material`, and `prism`; all eight `check`, `prime`, and `ready` commands
+  reported no warnings, and the global list returned 41 tasks with no warnings;
+- exact ledger coverage was 114/114 paths for Material and 14/14 for Prism, with no
+  pending dependency row; CLI inspection matched all five created tasks to their
+  reviewed candidate rows, including `material-e88df7` as `doing` under
+  `debug/overview-drag-frost` and `material-cad932` as the sole unresolved `idea`;
+- Material tests, clippy, and strict MkDocs completed successfully. Stable rustfmt
+  1.9.0 exited 1 only for untouched `src/protocols/foreign_toplevel.rs`; its
+  pre-migration, integrated, and current SHA-256 is
+  `41891c1ce0b3e4e5c59f51db9f82009ab2a677b12f50a8a2d9b60e443652ce50`;
+- Prism's 140 tests passed and `qmllint` exited zero with exactly the accepted
+  `Type PanelWindow is not creatable. [uncreatable-type]` warning at line 9:9; the
+  Tasks suite passed all 65 tests;
+- normal `material` and `prism` registration was already canonical and idempotent;
+  the normal registry checksum and `aut` mapping were unchanged, and the active
+  Material worktree passed its five-file checksum and dirty-state guards.
+
+- [x] **Step 1: Build a fresh exact-eight final registry**
 
 ```bash
 set -euo pipefail
@@ -1108,7 +1129,7 @@ tasks -C ~/d/prism init --prefix prism
 test "$(rg -c '^[a-z][a-z0-9]* = ' "$tasks_portfolio_config/tasks/projects.toml")" -eq 8
 ```
 
-- [ ] **Step 2: Require warning-free checks and exact prefixes in all eight projects**
+- [x] **Step 2: Require warning-free checks and exact prefixes in all eight projects**
 
 ```bash
 set -euo pipefail
@@ -1133,7 +1154,7 @@ $HOME/d/prism prism
 EOF
 ```
 
-- [ ] **Step 3: Require global listing success and no warnings**
+- [x] **Step 3: Require global listing success and no warnings**
 
 ```bash
 set -euo pipefail
@@ -1148,7 +1169,7 @@ test ! -s /tmp/tasks-material-prism-list.err
 jq -e '.warnings == [] and (.tasks | type == "array")' /tmp/tasks-material-prism-list.json
 ```
 
-- [ ] **Step 4: Audit both ledgers and task semantics**
+- [x] **Step 4: Audit both ledgers and task semantics**
 
 Run both exact coverage comparisons from the stable checkouts:
 
@@ -1216,7 +1237,7 @@ completed history was not backfilled, every unresolved claim is an `idea`, the o
 task is `doing` with the verified owner, every foreign edge is a real blocker, and both
 guidance files contain the shared Tasks section.
 
-- [ ] **Step 5: Run both repository gates and the Tasks suite**
+- [x] **Step 5: Run both repository gates and the Tasks suite**
 
 ```bash
 set -euo pipefail
@@ -1224,7 +1245,34 @@ set -euo pipefail
   cd ~/d/niri-material
   cargo test --all --exclude niri-visual-tests -- --nocapture
   cargo clippy --all --all-targets
-  cargo fmt --all -- --check
+  rustfmt --version | tee /tmp/material-final-rustfmt.version
+  set +e
+  cargo fmt --all -- --check \
+    >/tmp/material-final-fmt.out \
+    2>/tmp/material-final-fmt.err
+  fmt_status=$?
+  set -e
+  printf '%s\n' "$fmt_status" >/tmp/material-final-fmt.status
+  test "$fmt_status" -eq 1
+  cat /tmp/material-final-fmt.out /tmp/material-final-fmt.err \
+    >/tmp/material-final-fmt.combined
+  test "$(rg -c '^Diff in ' /tmp/material-final-fmt.combined)" -ge 1
+  rg -q '^Diff in .*/src/protocols/foreign_toplevel\.rs:' \
+    /tmp/material-final-fmt.combined
+  if rg '^Diff in ' /tmp/material-final-fmt.combined |
+    rg -v '/src/protocols/foreign_toplevel\.rs:'
+  then
+    exit 1
+  fi
+  expected=41891c1ce0b3e4e5c59f51db9f82009ab2a677b12f50a8a2d9b60e443652ce50
+  test "$(sha256sum src/protocols/foreign_toplevel.rs | cut -d' ' -f1)" = "$expected"
+  test "$(git show 7e94d71af195d5f5062d9b51ec80bca513af8ae3:src/protocols/foreign_toplevel.rs | sha256sum | cut -d' ' -f1)" = "$expected"
+  test "$(git show 8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519:src/protocols/foreign_toplevel.rs | sha256sum | cut -d' ' -f1)" = "$expected"
+  git diff --quiet \
+    7e94d71af195d5f5062d9b51ec80bca513af8ae3 \
+    8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519 -- \
+    src/protocols/foreign_toplevel.rs
+  test -z "$(git status --porcelain=v1)"
   tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
   test -d "${tasks_docs_root:?docs environment root unset}"
   export UV_PROJECT_ENVIRONMENT="$tasks_docs_root/venv"
@@ -1238,7 +1286,18 @@ set -euo pipefail
   node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
   npm ci
   npm test
-  /usr/lib/qt6/bin/qmllint integrations/debug-backdrop/shell.qml
+  set +e
+  /usr/lib/qt6/bin/qmllint integrations/debug-backdrop/shell.qml \
+    >/tmp/prism-final-qmllint.out \
+    2>/tmp/prism-final-qmllint.err
+  qmllint_status=$?
+  set -e
+  test "$qmllint_status" -eq 0
+  test ! -s /tmp/prism-final-qmllint.out
+  cmp /tmp/prism-final-qmllint.err <(printf '%s\n' \
+    'Warning: integrations/debug-backdrop/shell.qml:9:9: Type PanelWindow is not creatable. [uncreatable-type]' \
+    '        PanelWindow {' \
+    '        ^^^^^^^^^^^')
   test -z "$(git status --porcelain=v1)"
 )
 (
@@ -1259,9 +1318,11 @@ set -euo pipefail
 )
 ```
 
-Expected: all noninteractive gates pass and active Material work remains byte-identical.
+Expected: every executable gate passes, the exact accepted Prism warning is present,
+the captured stable-rustfmt nonzero result is limited to the proved unchanged baseline,
+and active Material work remains byte-identical.
 
-- [ ] **Step 6: Prove normal mappings without touching `aut`**
+- [x] **Step 6: Prove normal mappings without touching `aut`**
 
 ```bash
 set -euo pipefail
@@ -1292,7 +1353,7 @@ cp -- "$tasks_registry_path" "$backup_path"
 Use `apply_patch` to remove only stale `material` or `prism` entries, rerun the four CLI
 commands, then repeat Steps 1–3. Never remove or rewrite `aut` or the completed six.
 
-- [ ] **Step 7: Create the Tasks completion worktree**
+- [x] **Step 7: Create the Tasks completion worktree**
 
 ```bash
 set -euo pipefail
@@ -1305,7 +1366,7 @@ cd ~/d/tasks/.worktrees/material-prism-tasks-migration-complete
 
 Expected: a clean worktree whose base already contains this approved design and plan.
 
-- [ ] **Step 8: Make the design and plan completion claims truthful**
+- [x] **Step 8: Make the design and plan completion claims truthful**
 
 Use `apply_patch` to record the actual implementation date, integrated commit evidence,
 and checked steps whose commands ran. Change the design status to implemented only after
