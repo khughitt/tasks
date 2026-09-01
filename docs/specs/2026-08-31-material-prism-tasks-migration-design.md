@@ -1,7 +1,7 @@
 # Material and Prism Tasks migration — design
 
-**Status:** approved on 2026-08-31; implementation planning and migration have not
-started.
+**Status:** approved on 2026-08-31 and corrected after review on 2026-09-01;
+implementation planning and migration have not started.
 
 ## 1. Purpose and baseline
 
@@ -101,8 +101,9 @@ commit.
 
 ## 5. Tiered documentation audit
 
-Use `git ls-files docs` as the exact tracked-document denominator, then include the new
-ledger in its own classification table. Every row receives one classification:
+Use `git ls-files -z docs` as the exact tracked-document denominator, then include the
+new ledger in its own classification coverage. Every document receives one
+classification:
 
 - **Authority/current:** verify semantics against code, tests, configuration, and current
   Git state.
@@ -118,10 +119,14 @@ headers and checkboxes are claims about the past, not proof.
 
 ### Material audit scope
 
-Deep-audit `docs/materials/**`, Material-specific plans, and relevant root claims.
-Classify every inherited upstream `docs/wiki/**` document for exact coverage, but change
-it only when a Material-specific current claim depends on it. Do not rewrite upstream
-history for stylistic consistency.
+Deep-audit `docs/materials/**`, Material-specific plans, and relevant root claims. Cover
+the 83 inherited upstream `docs/wiki/**` documents with one explicit bulk
+`historical/upstream, unchanged` rule and list per-file exceptions; do not spend one
+ledger row repeating the same classification for every file. The NUL-delimited coverage
+gate must still prove that the bulk rule plus exceptions account for every tracked path,
+including names Git would otherwise quote. Change an upstream document only when a
+Material-specific current claim depends on it. Do not rewrite upstream history for
+stylistic consistency.
 
 Known candidates to settle from evidence include:
 
@@ -192,15 +197,22 @@ not depend on shell state. Pin creation to `/tmp`, require non-empty expansions,
 `TASKS_FORMAT=json`, and assert that no relative `tasks/projects.toml` was created before
 staging repository task files.
 
-`niri-experiments`, `niri-glass`, and dotfiles are evidence-only boundaries. Cite them by
-repository, branch, commit, or document as appropriate; do not invent task IDs or create
-dangling dependencies to unmigrated projects.
+The normal machine registry also contains Autonomy as `aut`, with no task records or
+dependency role in this migration. Deliberately exclude it from the exact-eight
+temporary registry and leave its normal mapping untouched. `niri-experiments`,
+`niri-glass`, and dotfiles are evidence-only boundaries. Cite them by repository,
+branch, commit, or document as appropriate; do not invent task IDs or create dangling
+dependencies to unmigrated projects.
 
 Material may depend on verified tasks from the completed six-project portfolio. Prism
 may also depend on Material after the relevant Material task exists and resolves. Add
-only genuine blockers. After both initial migrations, reconcile any deferred links one
-repository at a time and merge each reconciliation before beginning the next, so cycle
-checks always see preceding edges.
+only genuine blockers. Because Material migrates first, the only link that can require
+deferral is Material to a not-yet-created Prism task; Prism-to-Material links resolve
+during the Prism migration. After both initial migrations, reconcile each deferred
+Material-to-Prism link, record the merged dependency and zero-warning evidence in the
+Material ledger, and classify that ledger complete and historical. Reconcile one
+repository at a time and merge it before beginning another, so cycle checks always see
+preceding edges.
 
 Every migration and portfolio `tasks check` requires empty errors and warnings. CLI exit
 status alone is insufficient because unreachable foreign dependencies and unverifiable
@@ -214,25 +226,31 @@ checkout at the integration points.
 Material's noninteractive gate is:
 
 ```sh
-cargo test --workspace --all-targets --locked
+cargo test --all --exclude niri-visual-tests -- --nocapture
 cargo clippy --all --all-targets
 cargo fmt --all -- --check
+(cd docs && uv sync --locked --all-extras --dev && uv run mkdocs build)
 ```
 
-Compare it with current CI during the audit and stop if a genuine required gate is
-missing or fails. Do not redeploy, mutate a live compositor, or rerun historical DRM,
-nested-Winit, burn-in, or subjective visual evidence.
+This matches the current CI test selection, preserves doctests, deliberately excludes
+the GPU-client visual-test package, and includes the strict MkDocs build that validates
+the audited wiki. Compare it with current CI during the audit and stop if a relevant job
+changed or fails. Source-neutral platform, feature-matrix, visual-client, and deployment
+jobs are not rerun locally. Do not redeploy, mutate a live compositor, or rerun
+historical DRM, nested-Winit, burn-in, or subjective visual evidence.
 
 Prism's gate is:
 
 ```sh
+command -v lua
 npm ci
 npm test
-/usr/lib/qt6/bin/qmllint <all-shipped-QML-files>
+/usr/lib/qt6/bin/qmllint integrations/debug-backdrop/shell.qml
 ```
 
-The QML lint command must exit zero; only the documented unresolved `qs.*` warnings are
-accepted. Record the exact file enumeration and output disposition in the ledger.
+Lua is a required development prerequisite because `npm test` invokes the direct plugin
+test. The QML lint command must exit zero; only the documented unresolved `qs.*`
+warnings are accepted. Record its output disposition in the ledger.
 
 For each repository also require:
 
@@ -246,9 +264,10 @@ For each repository also require:
 - a clean stable checkout before worktree and branch cleanup.
 
 The final gate uses a fresh eight-project registry and requires warning-free `tasks
-check`, correct `prime`, inspected `ready`, and successful strict `list --all-projects`
-across all eight stable checkouts. It also runs the Tasks repository test suite and
-proves that every deferred dependency is merged and cycle-free.
+check`, correct `prime`, and inspected `ready` across all eight stable checkouts. It runs
+`TASKS_FORMAT=json tasks list --all-projects`, requires command success and an empty
+`warnings` array, runs the Tasks repository test suite, and proves that every deferred
+dependency is merged and cycle-free.
 
 ## 9. Commits and review
 
@@ -261,14 +280,17 @@ Each repository receives these commits:
 The first commit contains the initial ledger and evidence-backed documentation fixes.
 The second contains CLI-created task state, task IDs and verification evidence in the
 ledger, and concise agent guidance requiring `tasks prime` at session start and `tasks
-check` before completion. The third records completed stable verification and canonical
+check` before completion. Extend Material's existing `.agents/AGENTS.md`; create
+Prism's root `AGENTS.md`. The third records completed stable verification and canonical
 registration, then marks the ledger complete and historical when no reconciliation is
 pending.
 
 Independently review the first two commits before the initial fast-forward and the third
-before the final fast-forward. A repository with a deferred foreign link receives one
-additional `chore(tasks): reconcile cross-project dependencies` commit after both
-initial migrations.
+before the final fast-forward. If Material has a deferred Prism link, its third commit
+keeps the ledger active with reconciliation pending. After Prism lands, one additional
+`chore(tasks): reconcile cross-project dependencies` commit applies the edge, records
+its integration and zero-warning evidence, and closes the Material ledger as
+`historical/superseded`.
 
 ## 10. Failure and recovery
 
@@ -290,8 +312,9 @@ migration worktree remains available for ledger finalization.
 
 Registry paths are canonical and machine-local. If checkout relocation produces a burst
 of unreachable dependency warnings, explicitly repair the affected normal-registry
-mappings with `tasks init` from the stable checkouts and repeat the eight-project gate;
-do not alter valid dependency edges to silence an environmental warning.
+mappings among these eight projects with `tasks init` from the stable checkouts and
+repeat the eight-project gate. Leave unrelated mappings such as `aut` untouched; do not
+alter valid dependency edges to silence an environmental warning.
 
 ## 11. Alternatives rejected
 
