@@ -17,7 +17,8 @@ uv/MkDocs, npm/Node.js, Lua, and Qt 6 `qmllint`.
 
 **Spec:** `docs/specs/2026-08-31-material-prism-tasks-migration-design.md`
 
-**Status:** drafted 2026-09-01; implementation has not started.
+**Status:** execution preflight started 2026-09-01; repository migrations have not
+started.
 
 ## Global Constraints
 
@@ -25,13 +26,20 @@ uv/MkDocs, npm/Node.js, Lua, and Qt 6 `qmllint`.
   `materials-26.04`, then Prism (`prism`) from `~/d/prism` branch `main`.
 - Migrate and reconcile one repository at a time. Merge, verify, and clean up the
   current repository before creating the next migration or reconciliation worktree.
-- Treat the approved starting commits as guards: Material
-  `048814893b9bc4924927468ce1f539b7764d942b`; Prism
+- Treat the approved starting commits as guards: Material's stable branch
+  `7e94d71af195d5f5062d9b51ec80bca513af8ae3` is three commits ahead of
+  `origin/materials-26.04`; its active debug branch remains separately pinned at
+  `048814893b9bc4924927468ce1f539b7764d942b`; Prism is
   `d20111c2182adcbbb2bd3b76356d6e1557cb1e12`. Stop and amend the evidence if either
   stable branch moves before its task starts.
 - Preserve `~/d/niri-material/.worktrees/overview-drag-frost` byte-for-byte. It must
-  remain on `debug/overview-drag-frost` at the Material starting commit with only
-  `src/render_helpers/effect_buffer.rs` and `src/render_helpers/material.rs` modified.
+  remain on `debug/overview-drag-frost` at
+  `048814893b9bc4924927468ce1f539b7764d942b` with only
+  `niri-config/src/lib.rs`, `src/layout/tile.rs`,
+  `src/render_helpers/effect_buffer.rs`, `src/render_helpers/material.rs`, and
+  `src/render_helpers/xray.rs` modified. The two intervening stable commits are
+  documentation-only evidence for the same open frost investigation; tracked docs
+  remain 111.
 - Inspect existing branches, worktrees, and dirty state read-only. All migration writes
   occur in fresh `.worktrees/` worktrees; never stash, clean, repurpose, or modify active
   work. The sole stable-checkout untracked-state exception is Prism's required `npm ci`,
@@ -231,28 +239,34 @@ set -euo pipefail
 repo="$HOME/d/niri-material"
 active="$repo/.worktrees/overview-drag-frost"
 test "$(git -C "$repo" branch --show-current)" = materials-26.04
-test "$(git -C "$repo" rev-parse HEAD)" = 048814893b9bc4924927468ce1f539b7764d942b
-test "$(git -C "$repo" rev-list --count origin/materials-26.04..HEAD)" = 1
+test "$(git -C "$repo" rev-parse HEAD)" = 7e94d71af195d5f5062d9b51ec80bca513af8ae3
+test "$(git -C "$repo" rev-list --count origin/materials-26.04..HEAD)" = 3
 test -z "$(git -C "$repo" status --porcelain=v1)"
 test "$(git -C "$active" branch --show-current)" = debug/overview-drag-frost
 test "$(git -C "$active" rev-parse HEAD)" = 048814893b9bc4924927468ce1f539b7764d942b
 git -C "$active" diff --name-only | sort | cmp - <(printf '%s\n' \
+  niri-config/src/lib.rs \
+  src/layout/tile.rs \
   src/render_helpers/effect_buffer.rs \
-  src/render_helpers/material.rs | sort)
+  src/render_helpers/material.rs \
+  src/render_helpers/xray.rs | sort)
 test -z "$(git -C "$active" diff --cached --name-only)"
 test -z "$(git -C "$active" ls-files --others --exclude-standard)"
 (
   cd "$active"
   sha256sum \
+    niri-config/src/lib.rs \
+    src/layout/tile.rs \
     src/render_helpers/effect_buffer.rs \
     src/render_helpers/material.rs \
+    src/render_helpers/xray.rs \
     > /tmp/tasks-material-active-worktree.sha256
 )
 git -C "$repo" worktree list --porcelain
 git -C "$repo" check-ignore -q .worktrees
 ```
 
-Expected: every assertion passes and the checksum file records the two dirty files
+Expected: every assertion passes and the checksum file records the five dirty files
 without changing them.
 
 - [ ] **Step 5: Guard Prism and inventory all portfolio roots**
@@ -322,7 +336,7 @@ git -C ~/d/niri-material worktree add \
   ~/d/niri-material/.worktrees/tasks-migration-material \
   materials-26.04
 test "$(git -C ~/d/niri-material/.worktrees/tasks-migration-material rev-parse HEAD)" = \
-  048814893b9bc4924927468ce1f539b7764d942b
+  7e94d71af195d5f5062d9b51ec80bca513af8ae3
 test -z "$(git -C ~/d/niri-material/.worktrees/tasks-migration-material status --porcelain=v1)"
 (
   cd ~/d/niri-material/.worktrees/overview-drag-frost
@@ -567,8 +581,11 @@ TASKS_FORMAT=json tasks ready
   cd .worktrees/overview-drag-frost
   sha256sum --check /tmp/tasks-material-active-worktree.sha256
   git diff --name-only | sort | cmp - <(printf '%s\n' \
+    niri-config/src/lib.rs \
+    src/layout/tile.rs \
     src/render_helpers/effect_buffer.rs \
-    src/render_helpers/material.rs | sort)
+    src/render_helpers/material.rs \
+    src/render_helpers/xray.rs | sort)
   test -z "$(git diff --cached --name-only)"
   test -z "$(git ls-files --others --exclude-standard)"
 )
@@ -602,8 +619,11 @@ git -C ~/d/niri-material merge --ff-only chore/tasks-migration-material
   cd ~/d/niri-material/.worktrees/overview-drag-frost
   sha256sum --check /tmp/tasks-material-active-worktree.sha256
   git diff --name-only | sort | cmp - <(printf '%s\n' \
+    niri-config/src/lib.rs \
+    src/layout/tile.rs \
     src/render_helpers/effect_buffer.rs \
-    src/render_helpers/material.rs | sort)
+    src/render_helpers/material.rs \
+    src/render_helpers/xray.rs | sort)
   test -z "$(git diff --cached --name-only)"
   test -z "$(git ls-files --others --exclude-standard)"
 )
@@ -616,7 +636,7 @@ git -C ~/d/niri-material status --short --branch
 
 Expected: Material contains the three required reviewed migration commits plus any
 review-fix commits, the normal registry maps `material` to the stable checkout, the active
-debug work is unchanged, and only its pre-existing two dirty files remain in that
+debug work is unchanged, and only its pre-existing five dirty files remain in that
 separate worktree.
 
 ### Task 3: Audit and Migrate Prism
@@ -1019,8 +1039,11 @@ jq -e '.errors == [] and .warnings == []' /tmp/material-reconciliation-stable-ch
   cd .worktrees/overview-drag-frost
   sha256sum --check /tmp/tasks-material-active-worktree.sha256
   git diff --name-only | sort | cmp - <(printf '%s\n' \
+    niri-config/src/lib.rs \
+    src/layout/tile.rs \
     src/render_helpers/effect_buffer.rs \
-    src/render_helpers/material.rs | sort)
+    src/render_helpers/material.rs \
+    src/render_helpers/xray.rs | sort)
   test -z "$(git diff --cached --name-only)"
   test -z "$(git ls-files --others --exclude-standard)"
 )
@@ -1223,8 +1246,11 @@ set -euo pipefail
   cd ~/d/niri-material/.worktrees/overview-drag-frost
   sha256sum --check /tmp/tasks-material-active-worktree.sha256
   git diff --name-only | sort | cmp - <(printf '%s\n' \
+    niri-config/src/lib.rs \
+    src/layout/tile.rs \
     src/render_helpers/effect_buffer.rs \
-    src/render_helpers/material.rs | sort)
+    src/render_helpers/material.rs \
+    src/render_helpers/xray.rs | sort)
   test -z "$(git diff --cached --name-only)"
   test -z "$(git ls-files --others --exclude-standard)"
 )

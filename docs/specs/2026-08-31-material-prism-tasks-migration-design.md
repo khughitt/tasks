@@ -1,7 +1,7 @@
 # Material and Prism Tasks migration — design
 
-**Status:** approved on 2026-08-31, corrected after review, and implementation planned
-on 2026-09-01; migration has not started.
+**Status:** approved on 2026-08-31; execution preflight started 2026-09-01.
+Repository migrations have not started.
 
 ## 1. Purpose and baseline
 
@@ -50,14 +50,18 @@ on the next repository.
 
 ## 3. Verified starting state
 
-At approval:
+At execution preflight start:
 
 - Material's stable checkout is clean at
-  `048814893b9bc4924927468ce1f539b7764d942b`, one commit ahead of
+  `7e94d71af195d5f5062d9b51ec80bca513af8ae3`, three commits ahead of
   `origin/materials-26.04`;
-- its linked `debug/overview-drag-frost` worktree starts at the same commit and has
-  uncommitted changes only in `src/render_helpers/effect_buffer.rs` and
-  `src/render_helpers/material.rs`;
+- the two intervening stable commits are documentation-only evidence for the same open
+  frost investigation; the tracked-document inventory remains 111;
+- its linked `debug/overview-drag-frost` worktree remains pinned at
+  `048814893b9bc4924927468ce1f539b7764d942b` with uncommitted changes only in
+  `niri-config/src/lib.rs`, `src/layout/tile.rs`,
+  `src/render_helpers/effect_buffer.rs`, `src/render_helpers/material.rs`, and
+  `src/render_helpers/xray.rs`;
 - Prism's stable checkout is clean at
   `d20111c2182adcbbb2bd3b76356d6e1557cb1e12` on `main`;
 - neither repository has a Tasks project.
