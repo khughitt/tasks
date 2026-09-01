@@ -1,7 +1,7 @@
 # Material and Prism Tasks migration — design
 
-**Status:** approved on 2026-08-31 and corrected after review on 2026-09-01;
-implementation planning and migration have not started.
+**Status:** approved on 2026-08-31, corrected after review, and implementation planned
+on 2026-09-01; migration has not started.
 
 ## 1. Purpose and baseline
 
