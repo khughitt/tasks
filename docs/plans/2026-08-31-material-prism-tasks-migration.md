@@ -34,7 +34,9 @@ uv/MkDocs, npm/Node.js, Lua, and Qt 6 `qmllint`.
   `src/render_helpers/effect_buffer.rs` and `src/render_helpers/material.rs` modified.
 - Inspect existing branches, worktrees, and dirty state read-only. All migration writes
   occur in fresh `.worktrees/` worktrees; never stash, clean, repurpose, or modify active
-  work.
+  work. The sole stable-checkout untracked-state exception is Prism's required `npm ci`,
+  which replaces ignored `node_modules/` reproducibly; require clean Git status before
+  and after it.
 - Do not deploy, restart or mutate a live compositor or shell, run a GPU client, perform
   physical DRM acceptance, or rerun historical nested-Winit, burn-in, or subjective
   visual evidence.
@@ -94,9 +96,17 @@ Material's classification uses one literal bulk row:
 | `docs/wiki/**` | `historical/superseded` | Inherited upstream wiki; unchanged except listed per-file exceptions. |
 ```
 
-All non-wiki paths and every changed wiki exception receive explicit rows. The
-NUL-delimited comparison in Task 2 proves that the bulk rule plus explicit rows covers
-the exact tracked set without relying on Git's quoted display.
+It uses a second literal bulk row for the six docs-build files:
+
+```markdown
+| `docs build tooling` | `authority/current` | `docs/.gitignore`, `docs/hooks/**`, `docs/mkdocs.yaml`, `docs/pyproject.toml`, and `docs/uv.lock`; verified by the strict docs gate. |
+```
+
+Every other non-wiki path—including
+`docs/superpowers/plans/2026-08-29-material-backdrop-blur.md`—and every changed wiki
+exception receives an explicit row. The NUL-delimited comparison in Task 2 proves that
+the two bulk rules plus explicit rows cover the exact tracked set without classifying a
+lockfile as a project document or relying on Git's quoted display.
 
 After stable verification and canonical registration, update the ledger in the still-open
 migration worktree. If no dependency row is pending, mark the migration complete and
@@ -146,6 +156,7 @@ every owner/note mutation.
 - Inspect: `~/d/niri-material`, its linked worktrees, and `~/d/prism`
 - Inspect: the six completed portfolio roots and the normal Tasks registry
 - Create outside Git: `/tmp/tasks-material-active-worktree.sha256`
+- Create outside Git: `/tmp/tasks-material-docs-environment.root`
 
 **Interfaces:**
 
@@ -157,7 +168,15 @@ every owner/note mutation.
 ```bash
 set -euo pipefail
 cd ~/d/tasks
+test "$(git branch --show-current)" = main
+git show main:docs/specs/2026-08-31-material-prism-tasks-migration-design.md >/dev/null
+git show main:docs/plans/2026-08-31-material-prism-tasks-migration.md >/dev/null
+cmp docs/specs/2026-08-31-material-prism-tasks-migration-design.md \
+  <(git show main:docs/specs/2026-08-31-material-prism-tasks-migration-design.md)
+cmp docs/plans/2026-08-31-material-prism-tasks-migration.md \
+  <(git show main:docs/plans/2026-08-31-material-prism-tasks-migration.md)
 git status --short --branch
+test -z "$(git status --porcelain=v1)"
 git rev-parse HEAD
 cargo test
 cargo install --locked --path . --force
@@ -165,8 +184,9 @@ command -v tasks
 tasks --version
 ```
 
-Expected: the complete suite passes and the installed binary reports its version. Record
-the exact source commit in both migration ledgers.
+Expected: `main` contains the reviewed design and this exact plan, the complete suite
+passes, and the installed binary reports its version. Record the exact source commit in
+both migration ledgers. Do not begin execution from the documentation branch.
 
 - [ ] **Step 2: Verify both user-level Tasks skill links**
 
@@ -181,7 +201,29 @@ done
 Expected: both links resolve to the reviewed Tasks skill. Stop rather than overwriting a
 different existing path.
 
-- [ ] **Step 3: Guard the Material stable and active worktrees**
+- [ ] **Step 3: Verify runtime prerequisites and create the external docs environment**
+
+```bash
+set -euo pipefail
+command -v git
+command -v uv
+command -v node
+command -v npm
+command -v lua
+node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
+git ls-remote https://github.com/chinatsu/pygments HEAD >/dev/null
+test ! -e /tmp/tasks-material-docs-environment.root
+tasks_docs_root=$(TMPDIR=/tmp mktemp -d)
+printf '%s\n' "$tasks_docs_root" >/tmp/tasks-material-docs-environment.root
+test -d "$tasks_docs_root"
+```
+
+Expected: Node is at least 20, Lua and uv are available, the pinned Pygments Git source
+is reachable, and the guarded temporary root is ready. Every Material docs gate sets
+`UV_PROJECT_ENVIRONMENT` to its `venv` child so `uv sync` cannot create
+`docs/.venv/`.
+
+- [ ] **Step 4: Guard the Material stable and active worktrees**
 
 ```bash
 set -euo pipefail
@@ -212,7 +254,7 @@ git -C "$repo" check-ignore -q .worktrees
 Expected: every assertion passes and the checksum file records the two dirty files
 without changing them.
 
-- [ ] **Step 4: Guard Prism and inventory all portfolio roots**
+- [ ] **Step 5: Guard Prism and inventory all portfolio roots**
 
 ```bash
 set -euo pipefail
@@ -233,7 +275,7 @@ done
 Expected: Prism is unchanged at the approved commit, `.worktrees/` is ignored in both
 new repositories, and the completed six-project roots remain available.
 
-- [ ] **Step 5: Inspect the normal registry read-only**
+- [ ] **Step 6: Inspect the normal registry read-only**
 
 ```bash
 set -euo pipefail
@@ -297,6 +339,9 @@ cd ~/d/niri-material/.worktrees/tasks-migration-material
 cargo test --all --exclude niri-visual-tests -- --nocapture
 cargo clippy --all --all-targets
 cargo fmt --all -- --check
+tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
+test -d "${tasks_docs_root:?docs environment root unset}"
+export UV_PROJECT_ENVIRONMENT="$tasks_docs_root/venv"
 (cd docs && uv sync --locked --all-extras --dev && uv run mkdocs build)
 test -z "$(git status --porcelain=v1)"
 ```
@@ -334,18 +379,21 @@ set -euo pipefail
 cd ~/d/niri-material/.worktrees/tasks-migration-material
 ledger=docs/plans/2026-08-31-material-tasks-migration.md
 rg -qF '| `docs/wiki/**` | `historical/superseded` |' "$ledger"
+rg -qF '| `docs build tooling` | `authority/current` |' "$ledger"
 {
   git ls-files -z docs
   printf '%s\0' "$ledger"
-  for path in README.md AGENTS.md CLAUDE.md .agents/AGENTS.md; do
-    test ! -e "$path" || printf '%s\0' "$path"
+  for doc_path in README.md AGENTS.md CLAUDE.md .agents/AGENTS.md; do
+    test ! -e "$doc_path" || printf '%s\0' "$doc_path"
   done
 } | sort -z -u > /tmp/material-docs.actual
 {
   git ls-files -z docs/wiki
+  git ls-files -z \
+    docs/.gitignore docs/hooks docs/mkdocs.yaml docs/pyproject.toml docs/uv.lock
   sed -n '/^## Document classification$/,/^## /p' "$ledger" |
-    awk -F'`' '/^\| `/{if ($2 != "docs/wiki/**") print $2}' |
-    while IFS= read -r path; do printf '%s\0' "$path"; done
+    awk -F'`' '/^\| `/{if ($2 != "docs/wiki/**" && $2 != "docs build tooling") print $2}' |
+    while IFS= read -r doc_path; do printf '%s\0' "$doc_path"; done
 } | sort -z -u > /tmp/material-docs.classified
 cmp /tmp/material-docs.actual /tmp/material-docs.classified
 audit_paths=(docs README.md .agents/AGENTS.md)
@@ -365,6 +413,9 @@ cd ~/d/niri-material/.worktrees/tasks-migration-material
 cargo test --all --exclude niri-visual-tests -- --nocapture
 cargo clippy --all --all-targets
 cargo fmt --all -- --check
+tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
+test -d "${tasks_docs_root:?docs environment root unset}"
+export UV_PROJECT_ENVIRONMENT="$tasks_docs_root/venv"
 (cd docs && uv sync --locked --all-extras --dev && uv run mkdocs build)
 git add docs README.md
 git diff --cached --check
@@ -409,6 +460,14 @@ registry mappings and a `material` project.
 
 - [ ] **Step 7: Create the active overview task and every other reviewed outcome**
 
+Use `apply_patch` to create three controls from the reviewed overview candidate row:
+
+- `/tmp/tasks-material-overview.title` contains its literal title;
+- `/tmp/tasks-material-overview.size` contains its literal size token;
+- `/tmp/tasks-material-overview.body` contains its complete literal task body.
+
+Then create the task from those reviewed values:
+
 ```bash
 set -euo pipefail
 tasks_migration_config=$(</tmp/tasks-migration-material.registry-path)
@@ -416,13 +475,27 @@ test -d "${tasks_migration_config:?migration registry unset}"
 export XDG_CONFIG_HOME="${tasks_migration_config:?migration registry unset}"
 export TASKS_FORMAT=json
 cd ~/d/niri-material/.worktrees/tasks-migration-material
-overview_body=$'Outcome: preserve backdrop frost on a dragged material window when the insert hint appears.\n\nAcceptance: the sampling-geometry defect is fixed without regressing stationary material windows or backdrop-blur opt-out; automated evidence and separately authorized live acceptance are recorded.\n\nSource: docs/materials/2026-08-29-material-backdrop-blur-design.md. Active evidence: debug/overview-drag-frost at the preflight commit with the two fingerprinted renderer files modified.'
-overview_id=$(tasks add "Restore frost during overview drag" \
-  --status todo --size m --tag migration --body "$overview_body" | jq -er '.id')
+overview_title=$(</tmp/tasks-material-overview.title)
+overview_size=$(</tmp/tasks-material-overview.size)
+overview_body=$(</tmp/tasks-material-overview.body)
+test -n "${overview_title:?overview title unset}"
+case "${overview_size:?overview size unset}" in xs|s|m|l|xl) ;; *) exit 1 ;; esac
+test -n "${overview_body:?overview body unset}"
+overview_id=$(tasks add "$overview_title" \
+  --status todo --size "$overview_size" --tag migration --body "$overview_body" |
+  jq -er '.id')
 TASKS_OWNER=debug/overview-drag-frost tasks start "$overview_id" |
   jq -e --arg id "$overview_id" '.id == $id'
-tasks show "$overview_id" | jq -e --arg id "$overview_id" \
-  '.task.id == $id and .task.status == "doing" and .task.owner == "debug/overview-drag-frost" and (.task.tags | index("migration")) != null'
+tasks show "$overview_id" | jq -e \
+  --arg id "$overview_id" \
+  --arg title "$overview_title" \
+  --arg size "$overview_size" \
+  --arg body "$overview_body" \
+  '.task.id == $id and .task.title == $title and .task.size == $size and .task.body == $body and .task.status == "doing" and .task.owner == "debug/overview-drag-frost" and (.task.tags | index("migration")) != null'
+rm -- \
+  /tmp/tasks-material-overview.title \
+  /tmp/tasks-material-overview.size \
+  /tmp/tasks-material-overview.body
 ```
 
 Record `overview_id` in the exact candidate row with `apply_patch`. Apply the shared
@@ -476,6 +549,9 @@ cd ~/d/niri-material
 cargo test --all --exclude niri-visual-tests -- --nocapture
 cargo clippy --all --all-targets
 cargo fmt --all -- --check
+tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
+test -d "${tasks_docs_root:?docs environment root unset}"
+export UV_PROJECT_ENVIRONMENT="$tasks_docs_root/venv"
 (cd docs && uv sync --locked --all-extras --dev && uv run mkdocs build)
 TASKS_FORMAT=json tasks init --prefix material |
   jq -e '.prefix == "material" and .warnings == []'
@@ -569,7 +645,10 @@ git -C ~/d/prism worktree add \
 test "$(git -C ~/d/prism/.worktrees/tasks-migration-prism rev-parse HEAD)" = \
   d20111c2182adcbbb2bd3b76356d6e1557cb1e12
 cd ~/d/prism/.worktrees/tasks-migration-prism
+command -v node
+command -v npm
 command -v lua
+node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
 npm ci
 npm test
 /usr/lib/qt6/bin/qmllint integrations/debug-backdrop/shell.qml
@@ -600,19 +679,22 @@ ledger=docs/plans/2026-08-31-prism-tasks-migration.md
 {
   git ls-files -z docs
   printf '%s\0' "$ledger"
-  for path in README.md AGENTS.md CLAUDE.md .agents/AGENTS.md; do
-    test ! -e "$path" || printf '%s\0' "$path"
+  for doc_path in README.md AGENTS.md CLAUDE.md .agents/AGENTS.md; do
+    test ! -e "$doc_path" || printf '%s\0' "$doc_path"
   done
 } | sort -z -u > /tmp/prism-docs.actual
 sed -n '/^## Document classification$/,/^## /p' "$ledger" |
   awk -F'`' '/^\| `/{print $2}' |
-  while IFS= read -r path; do printf '%s\0' "$path"; done |
+  while IFS= read -r doc_path; do printf '%s\0' "$doc_path"; done |
   sort -z -u > /tmp/prism-docs.classified
 cmp /tmp/prism-docs.actual /tmp/prism-docs.classified
 audit_paths=(docs README.md)
 rg -n 'Status:|\[ \]|outstanding|pending|deployed|burn-in|backdropBlur|backdrop-blur' \
   "${audit_paths[@]}" || { audit_rg_status=$?; test "$audit_rg_status" -eq 1; }
+command -v node
+command -v npm
 command -v lua
+node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
 npm ci
 npm test
 /usr/lib/qt6/bin/qmllint integrations/debug-backdrop/shell.qml
@@ -686,7 +768,10 @@ tasks check >/tmp/prism-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/prism-check.json
 tasks prime | jq -e '.prefix == "prism" and .warnings == []'
 tasks ready | jq -e '.warnings == []'
+command -v node
+command -v npm
 command -v lua
+node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
 npm ci
 npm test
 /usr/lib/qt6/bin/qmllint integrations/debug-backdrop/shell.qml
@@ -713,7 +798,10 @@ tasks_migration_config=$(</tmp/tasks-migration-prism.registry-path)
 test -d "${tasks_migration_config:?migration registry unset}"
 git -C ~/d/prism merge --ff-only chore/tasks-migration-prism
 cd ~/d/prism
+command -v node
+command -v npm
 command -v lua
+node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
 npm ci
 npm test
 /usr/lib/qt6/bin/qmllint integrations/debug-backdrop/shell.qml
@@ -725,6 +813,7 @@ TASKS_FORMAT=json tasks check >/tmp/prism-stable-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/prism-stable-check.json
 TASKS_FORMAT=json tasks prime | jq -e '.prefix == "prism"'
 TASKS_FORMAT=json tasks ready
+test -z "$(git status --porcelain=v1)"
 git status --short --branch
 ```
 
@@ -796,8 +885,13 @@ test "$(rg -c '^[a-z][a-z0-9]* = ' "$tasks_portfolio_config/tasks/projects.toml"
 ```bash
 set -euo pipefail
 ledger=~/d/niri-material/docs/plans/2026-08-31-material-tasks-migration.md
+test -r "$ledger"
+set +e
 pending_rows=$(sed -n '/^## Deferred foreign dependencies$/,/^## /p' "$ledger" |
-  rg '^\|.*\| pending \|$' || true)
+  rg '^\|.*\| pending \|$')
+pending_status=$?
+set -e
+test "$pending_status" -eq 0 || test "$pending_status" -eq 1
 test -z "$pending_rows" || printf '%s\n' "$pending_rows"
 ```
 
@@ -817,6 +911,9 @@ cd ~/d/niri-material/.worktrees/tasks-reconciliation-material
 cargo test --all --exclude niri-visual-tests -- --nocapture
 cargo clippy --all --all-targets
 cargo fmt --all -- --check
+tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
+test -d "${tasks_docs_root:?docs environment root unset}"
+export UV_PROJECT_ENVIRONMENT="$tasks_docs_root/venv"
 (cd docs && uv sync --locked --all-extras --dev && uv run mkdocs build)
 test -z "$(git status --porcelain=v1)"
 ```
@@ -866,7 +963,29 @@ jq -e '.errors == [] and .warnings == []' /tmp/material-reconciliation-check.jso
 cargo test --all --exclude niri-visual-tests -- --nocapture
 cargo clippy --all --all-targets
 cargo fmt --all -- --check
+tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
+test -d "${tasks_docs_root:?docs environment root unset}"
+export UV_PROJECT_ENVIRONMENT="$tasks_docs_root/venv"
 (cd docs && uv sync --locked --all-extras --dev && uv run mkdocs build)
+ledger=docs/plans/2026-08-31-material-tasks-migration.md
+rg -qF '| `docs/wiki/**` | `historical/superseded` |' "$ledger"
+rg -qF '| `docs build tooling` | `authority/current` |' "$ledger"
+{
+  git ls-files -z docs
+  printf '%s\0' "$ledger"
+  for doc_path in README.md AGENTS.md CLAUDE.md .agents/AGENTS.md; do
+    test ! -e "$doc_path" || printf '%s\0' "$doc_path"
+  done
+} | sort -z -u > /tmp/material-docs.actual
+{
+  git ls-files -z docs/wiki
+  git ls-files -z \
+    docs/.gitignore docs/hooks docs/mkdocs.yaml docs/pyproject.toml docs/uv.lock
+  sed -n '/^## Document classification$/,/^## /p' "$ledger" |
+    awk -F'`' '/^\| `/{if ($2 != "docs/wiki/**" && $2 != "docs build tooling") print $2}' |
+    while IFS= read -r doc_path; do printf '%s\0' "$doc_path"; done
+} | sort -z -u > /tmp/material-docs.classified
+cmp /tmp/material-docs.actual /tmp/material-docs.classified
 git diff --check
 git add tasks docs/plans/2026-08-31-material-tasks-migration.md
 git diff --cached --check
@@ -888,6 +1007,9 @@ cd ~/d/niri-material
 cargo test --all --exclude niri-visual-tests -- --nocapture
 cargo clippy --all --all-targets
 cargo fmt --all -- --check
+tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
+test -d "${tasks_docs_root:?docs environment root unset}"
+export UV_PROJECT_ENVIRONMENT="$tasks_docs_root/venv"
 (cd docs && uv sync --locked --all-extras --dev && uv run mkdocs build)
 tasks -C ~/d/niri-material check >/tmp/material-reconciliation-stable-check.json
 jq -e '.errors == [] and .warnings == []' /tmp/material-reconciliation-stable-check.json
@@ -909,8 +1031,13 @@ git -C ~/d/niri-material branch -d chore/tasks-reconciliation-material
 ```bash
 set -euo pipefail
 ledger=~/d/niri-material/docs/plans/2026-08-31-material-tasks-migration.md
-! sed -n '/^## Deferred foreign dependencies$/,/^## /p' "$ledger" |
+test -r "$ledger"
+set +e
+sed -n '/^## Deferred foreign dependencies$/,/^## /p' "$ledger" |
   rg '^\|.*\| pending \|$'
+pending_status=$?
+set -e
+test "$pending_status" -eq 1
 rg -q 'historical/superseded' "$ledger"
 tasks_portfolio_config=$(</tmp/tasks-material-prism-reconciliation.registry-path)
 test -d "${tasks_portfolio_config:?portfolio registry unset}"
@@ -995,13 +1122,63 @@ jq -e '.warnings == [] and (.tasks | type == "array")' /tmp/tasks-material-prism
 
 - [ ] **Step 4: Audit both ledgers and task semantics**
 
-Rerun Task 2 Step 4 and Task 3 Step 3 coverage comparisons. Then:
+Run both exact coverage comparisons from the stable checkouts:
+
+```bash
+set -euo pipefail
+(
+  cd ~/d/niri-material
+  ledger=docs/plans/2026-08-31-material-tasks-migration.md
+  rg -qF '| `docs/wiki/**` | `historical/superseded` |' "$ledger"
+  rg -qF '| `docs build tooling` | `authority/current` |' "$ledger"
+  {
+    git ls-files -z docs
+    printf '%s\0' "$ledger"
+    for doc_path in README.md AGENTS.md CLAUDE.md .agents/AGENTS.md; do
+      test ! -e "$doc_path" || printf '%s\0' "$doc_path"
+    done
+  } | sort -z -u > /tmp/material-docs.actual
+  {
+    git ls-files -z docs/wiki
+    git ls-files -z \
+      docs/.gitignore docs/hooks docs/mkdocs.yaml docs/pyproject.toml docs/uv.lock
+    sed -n '/^## Document classification$/,/^## /p' "$ledger" |
+      awk -F'`' '/^\| `/{if ($2 != "docs/wiki/**" && $2 != "docs build tooling") print $2}' |
+      while IFS= read -r doc_path; do printf '%s\0' "$doc_path"; done
+  } | sort -z -u > /tmp/material-docs.classified
+  cmp /tmp/material-docs.actual /tmp/material-docs.classified
+)
+(
+  cd ~/d/prism
+  ledger=docs/plans/2026-08-31-prism-tasks-migration.md
+  {
+    git ls-files -z docs
+    printf '%s\0' "$ledger"
+    for doc_path in README.md AGENTS.md CLAUDE.md .agents/AGENTS.md; do
+      test ! -e "$doc_path" || printf '%s\0' "$doc_path"
+    done
+  } | sort -z -u > /tmp/prism-docs.actual
+  sed -n '/^## Document classification$/,/^## /p' "$ledger" |
+    awk -F'`' '/^\| `/{print $2}' |
+    while IFS= read -r doc_path; do printf '%s\0' "$doc_path"; done |
+    sort -z -u > /tmp/prism-docs.classified
+  cmp /tmp/prism-docs.actual /tmp/prism-docs.classified
+)
+```
+
+Then require no pending rows without treating read errors as absence:
 
 ```bash
 set -euo pipefail
 material_ledger=~/d/niri-material/docs/plans/2026-08-31-material-tasks-migration.md
 prism_ledger=~/d/prism/docs/plans/2026-08-31-prism-tasks-migration.md
-! rg '^\|.*\| pending \|$' "$material_ledger" "$prism_ledger"
+test -r "$material_ledger"
+test -r "$prism_ledger"
+set +e
+rg '^\|.*\| pending \|$' "$material_ledger" "$prism_ledger"
+pending_status=$?
+set -e
+test "$pending_status" -eq 1
 rg -q 'historical/superseded' "$material_ledger"
 rg -q 'historical/superseded' "$prism_ledger"
 ```
@@ -1020,14 +1197,21 @@ set -euo pipefail
   cargo test --all --exclude niri-visual-tests -- --nocapture
   cargo clippy --all --all-targets
   cargo fmt --all -- --check
+  tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
+  test -d "${tasks_docs_root:?docs environment root unset}"
+  export UV_PROJECT_ENVIRONMENT="$tasks_docs_root/venv"
   (cd docs && uv sync --locked --all-extras --dev && uv run mkdocs build)
 )
 (
   cd ~/d/prism
+  command -v node
+  command -v npm
   command -v lua
+  node -e 'if (Number(process.versions.node.split(".")[0]) < 20) process.exit(1)'
   npm ci
   npm test
   /usr/lib/qt6/bin/qmllint integrations/debug-backdrop/shell.qml
+  test -z "$(git status --porcelain=v1)"
 )
 (
   cd ~/d/tasks
@@ -1137,6 +1321,10 @@ git worktree remove ~/d/tasks/.worktrees/material-prism-tasks-migration-complete
 git branch -d docs/material-prism-tasks-migration-complete
 case "$tasks_portfolio_config" in /tmp/*) rm -r -- "$tasks_portfolio_config" ;; *) exit 1 ;; esac
 rm -- /tmp/tasks-material-prism-final.registry-path
+tasks_docs_root=$(</tmp/tasks-material-docs-environment.root)
+test -d "${tasks_docs_root:?docs environment root unset}"
+case "$tasks_docs_root" in /tmp/*) rm -r -- "$tasks_docs_root" ;; *) exit 1 ;; esac
+rm -- /tmp/tasks-material-docs-environment.root
 rm -- /tmp/tasks-material-active-worktree.sha256
 for output_path in \
   /tmp/material-pre-init.json /tmp/material-pre-init.err \
@@ -1147,7 +1335,9 @@ for output_path in \
   /tmp/prism-check.json /tmp/prism-stable-check.json \
   /tmp/material-reconciliation-check.json \
   /tmp/material-reconciliation-stable-check.json \
-  /tmp/tasks-material-prism-list.json /tmp/tasks-material-prism-list.err
+  /tmp/tasks-material-prism-list.json /tmp/tasks-material-prism-list.err \
+  /tmp/tasks-material-overview.title /tmp/tasks-material-overview.size \
+  /tmp/tasks-material-overview.body
 do
   test ! -e "$output_path" || rm -- "$output_path"
 done
