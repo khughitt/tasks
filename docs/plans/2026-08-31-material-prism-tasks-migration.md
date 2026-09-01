@@ -17,9 +17,9 @@ uv/MkDocs, npm/Node.js, Lua, and Qt 6 `qmllint`.
 
 **Spec:** `docs/specs/2026-08-31-material-prism-tasks-migration-design.md`
 
-**Status:** execution in progress 2026-09-01. Material is integrated through
-`8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519`, and Prism's phase-A commits are
-under independent review.
+**Status:** execution in progress 2026-09-01. Material and Prism repository
+migrations are integrated; portfolio reconciliation and final completion
+recording remain pending.
 
 ## Global Constraints
 
