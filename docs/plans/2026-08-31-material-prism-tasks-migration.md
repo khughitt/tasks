@@ -186,7 +186,8 @@ tasks --version
 
 Expected: `main` contains the reviewed design and this exact plan, the complete suite
 passes, and the installed binary reports its version. Record the exact source commit in
-both migration ledgers. Do not begin execution from the documentation branch.
+both migration ledgers. Before execution, merge the documentation branch into `main`,
+then remove its worktree and merged branch; do not begin from the documentation branch.
 
 - [ ] **Step 2: Verify both user-level Tasks skill links**
 
@@ -464,7 +465,8 @@ Use `apply_patch` to create three controls from the reviewed overview candidate 
 
 - `/tmp/tasks-material-overview.title` contains its literal title;
 - `/tmp/tasks-material-overview.size` contains its literal size token;
-- `/tmp/tasks-material-overview.body` contains its complete literal task body.
+- `/tmp/tasks-material-overview.body` contains its complete literal task body with no
+  trailing spaces or tabs.
 
 Then create the task from those reviewed values:
 
