@@ -17,9 +17,9 @@ uv/MkDocs, npm/Node.js, Lua, and Qt 6 `qmllint`.
 
 **Spec:** `docs/specs/2026-08-31-material-prism-tasks-migration-design.md`
 
-**Status:** implemented on 2026-09-01. Material is integrated at
-`8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519`, Prism is integrated at
-`b05b4af214ee714faa6fbd41bbf9121e902e3f59`, reconciliation was a reviewed no-op,
+**Status:** implemented on 2026-09-01. The current final-review heads are Material
+`b0b45f075fca24371125a42cce630d7bd0d900a5` and Prism
+`3c3f241604075a2a04531ab35b1c123abfe1bd13`; reconciliation was a reviewed no-op,
 and Task 5 records the fresh exact-eight completion and cleanup evidence.
 
 ## Global Constraints
@@ -125,8 +125,7 @@ initial integration but keep the ledger `active delivery` until Task 4 closes it
 
 ## Shared Agent Guidance
 
-Append this section to Material's `.agents/AGENTS.md` and create Prism's root
-`AGENTS.md` with the same section:
+Create Material's `.agents/AGENTS.md` and Prism's root `AGENTS.md` with this section:
 
 ```markdown
 ## Tasks workflow
@@ -317,7 +316,7 @@ migration stops for explicit reconciliation.
 - Create: `~/d/niri-material/.worktrees/tasks-migration-material/docs/plans/2026-08-31-material-tasks-migration.md`
 - Create through CLI: `~/d/niri-material/.worktrees/tasks-migration-material/tasks/.config.toml`
 - Create through CLI: `~/d/niri-material/.worktrees/tasks-migration-material/tasks/material-*.md`
-- Modify: `~/d/niri-material/.worktrees/tasks-migration-material/.agents/AGENTS.md`
+- Create: `~/d/niri-material/.worktrees/tasks-migration-material/.agents/AGENTS.md`
 - Modify only when evidence proves drift: `docs/materials/README.md`,
   `docs/materials/2026-08-29-material-backdrop-blur-design.md`,
   `docs/materials/plans/2026-08-28-v1-daily-driver-rollout.md`, and other explicit
@@ -520,8 +519,8 @@ Record `overview_id` in the exact candidate row with `apply_patch`. Apply the sh
 task-creation procedure to every other row marked `create`; do not create the DRM or
 noise/saturation task unless Step 3's current evidence supports that disposition. Add
 already-resolvable blockers to the six baseline projects. Record a Material-to-Prism
-blocker only as a `pending` ledger row. Append the shared Tasks guidance to
-`.agents/AGENTS.md` with `apply_patch`.
+blocker only as a `pending` ledger row. Create `.agents/AGENTS.md` with the shared Tasks
+guidance using `apply_patch`.
 
 - [ ] **Step 8: Verify and commit the Material Tasks store**
 
@@ -1111,7 +1110,8 @@ Execution evidence from 2026-09-01:
 - on 2026-09-01, reviewed completion commit `ced9c4559b188c9f2af7e03d12d4fb44a18985bb`
   was fast-forwarded to Tasks `main`; all 65 Tasks tests passed there, the completion
   worktree and merged branch were removed, and the guarded final registry, shared docs
-  environment, active-work checksum, and every planned temporary output were removed.
+  environment, active-work checksum, and every cleanup-listed temporary output were
+  removed.
 
 - [x] **Step 1: Build a fresh exact-eight final registry**
 
