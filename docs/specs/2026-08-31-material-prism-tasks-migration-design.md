@@ -178,8 +178,11 @@ coexist with older layouts.
 
 ## 7. Registry and dependency boundary
 
-Use a temporary registry for migration and portfolio checks. Seed it only through
-idempotent `tasks init` calls and include exactly these stable checkouts:
+Seed every temporary registry only through idempotent `tasks init` calls. A repository
+migration registry contains the completed six-project baseline, each already-integrated
+extension project, and the current migration worktree: seven entries for Material and
+eight for Prism. Reconciliation and final portfolio registries contain exactly these
+eight stable checkouts:
 
 | Prefix | Project |
 |--------|---------|
