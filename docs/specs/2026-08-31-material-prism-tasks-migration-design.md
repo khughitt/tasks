@@ -97,7 +97,7 @@ The ledger records the inspected HEAD and worktrees, complete document classific
 drift findings and outward greps, candidate outcomes and dispositions, created task IDs,
 dependency decisions, commands and results, review fixes, integrated commits, and
 canonical registration evidence. It classifies itself and is finalized in the third
-commit.
+commit, or in the reconciliation commit when a deferred link is pending.
 
 ## 5. Tiered documentation audit
 
