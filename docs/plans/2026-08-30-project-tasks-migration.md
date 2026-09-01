@@ -10,6 +10,9 @@
 
 **Spec:** `docs/specs/2026-08-30-project-tasks-migration-design.md`
 
+**Status:** Implementation is complete through Task 9 Step 8 on 2026-08-31. Task 9 Step 9
+remains unchecked until this completion record is independently reviewed and integrated.
+
 ## Global Constraints
 
 - Migrate in this order: Familiar (`fam`), Atoms (`atoms`), Beliefs (`beliefs`), Nodes (`nodes`), Mindful v3 (`mind3`), Mindful v6 (`mind6`).
@@ -102,7 +105,7 @@ The initial migration therefore has three commits. The first two receive the pre
 
 - Produces: one tested `tasks` binary, the user-level Tasks skill, the recorded Tasks source commit, and six known stable roots for Tasks 2–9.
 
-- [ ] **Step 1: Verify the Tasks source checkout**
+- [x] **Step 1: Verify the Tasks source checkout**
 
 ```bash
 set -euo pipefail
@@ -114,7 +117,7 @@ cargo test
 
 Expected: the worktree has no unexplained changes and the complete suite passes with no failures. Record the exact commit for every repository ledger.
 
-- [ ] **Step 2: Install the reviewed binary once**
+- [x] **Step 2: Install the reviewed binary once**
 
 ```bash
 set -euo pipefail
@@ -126,7 +129,7 @@ tasks --version
 
 Expected: installation succeeds and `tasks --version` executes from the installed binary.
 
-- [ ] **Step 3: Verify the user-level Tasks skill**
+- [x] **Step 3: Verify the user-level Tasks skill**
 
 ```bash
 set -euo pipefail
@@ -146,7 +149,7 @@ done
 
 If either path exists but the same-file check fails, stop and reconcile it explicitly rather than overwriting it. The CLI recognizes either location; installing both also makes the skill available to Claude Code and other agent harnesses. Begin Task 2 in a fresh agent session so skill discovery observes the new links.
 
-- [ ] **Step 4: Inventory all stable roots without modifying them**
+- [x] **Step 4: Inventory all stable roots without modifying them**
 
 ```bash
 set -euo pipefail
@@ -160,7 +163,7 @@ done
 
 Expected: every root is identified, existing dirty state is recorded but untouched, and `.worktrees/` is ignored. Stop before migration if a required correction would overlap unrelated dirty work.
 
-- [ ] **Step 5: Inspect the normal Tasks registry read-only**
+- [x] **Step 5: Inspect the normal Tasks registry read-only**
 
 ```bash
 set -euo pipefail
@@ -171,7 +174,7 @@ test ! -e "$tasks_registry_path" || sed -n '1,200p' "$tasks_registry_path"
 
 Record existing prefix mappings. Do not repair or hand-edit the registry during preflight; any conflicting prefix is a hard stop for that repository's integration step.
 
-- [ ] **Step 6: Record the preflight result**
+- [x] **Step 6: Record the preflight result**
 
 No tracked commit is expected. Preserve the Tasks source commit and discovered stable branch for use in each ledger.
 
@@ -190,7 +193,7 @@ No tracked commit is expected. Preserve the Tasks source commit and discovered s
 - Consumes: the Tasks source commit and stable-root inventory from Task 1.
 - Produces: the first integrated `fam` store, the approved ledger pattern, and a stable Familiar checkout available to later temporary registries.
 
-- [ ] **Step 1: Create an isolated pilot worktree**
+- [x] **Step 1: Create an isolated pilot worktree**
 
 ```bash
 set -euo pipefail
@@ -200,7 +203,7 @@ git -C ~/d/familiar/.worktrees/tasks-migration-fam status --short --branch
 
 Expected: a clean branch based on the current `main` commit recorded in the ledger.
 
-- [ ] **Step 2: Establish the unmodified baseline**
+- [x] **Step 2: Establish the unmodified baseline**
 
 ```bash
 set -euo pipefail
@@ -212,11 +215,11 @@ npm test
 
 Expected: setup changes no tracked or untracked path and the repository's existing gate passes. Stop and report a baseline failure before changing documentation.
 
-- [ ] **Step 3: Audit Git state and all project documents**
+- [x] **Step 3: Audit Git state and all project documents**
 
 Read `README.md`, `docs/surfaces.md`, every tracked file under `docs/`, and existing root guidance. For every status header, checkbox, path, current-behavior claim, and remaining-work claim, verify against code/tests/configuration, commit ancestry, and the read-only branch/worktree inventory in that order. Write every file into `docs/plans/2026-08-30-familiar-tasks-migration.md` using the shared ledger contract.
 
-- [ ] **Step 4: Correct evidence-backed drift**
+- [x] **Step 4: Correct evidence-backed drift**
 
 Use `apply_patch` for the ledger and current documentation. Preserve historical rationale, make uncertainty explicit, and grep each corrected claim through user-facing and active-delivery documents:
 
@@ -234,7 +237,7 @@ git diff --check
 
 Expected: the coverage comparison and `git diff --check` produce no output.
 
-- [ ] **Step 5: Review and commit the documentation reconciliation**
+- [x] **Step 5: Review and commit the documentation reconciliation**
 
 Compare every ledger assertion with its cited evidence, run `npm test`, then commit only the ledger and drift corrections:
 
@@ -250,7 +253,7 @@ git commit -m "docs: reconcile project status for tasks migration"
 
 Pathspecs that do not exist may be omitted. Expected: one reviewable documentation commit and a clean worktree.
 
-- [ ] **Step 6: Prove the Tasks store is absent, then initialize it in a temporary registry**
+- [x] **Step 6: Prove the Tasks store is absent, then initialize it in a temporary registry**
 
 ```bash
 tasks -C ~/d/familiar/.worktrees/tasks-migration-fam prime
@@ -271,7 +274,7 @@ tasks -C ~/d/familiar/.worktrees/tasks-migration-fam prime | jq -e '.prefix == "
 
 Expected: `prime` reports prefix `fam`.
 
-- [ ] **Step 7: Create and verify the reviewed Familiar outcomes**
+- [x] **Step 7: Create and verify the reviewed Familiar outcomes**
 
 In the shell that applies the shared task-creation procedure, first run:
 
@@ -286,7 +289,7 @@ cd ~/d/familiar/.worktrees/tasks-migration-fam
 
 Then create every ledger row marked `create`, record every generated ID, and leave completed/abandoned rows as `no task`. Add the shared agent guidance after task creation.
 
-- [ ] **Step 8: Run the pilot's Tasks and repository gates**
+- [x] **Step 8: Run the pilot's Tasks and repository gates**
 
 ```bash
 set -euo pipefail
@@ -305,7 +308,7 @@ git diff --check
 
 Expected: all commands pass; the JSON arrays are empty.
 
-- [ ] **Step 9: Commit and independently review the Tasks migration**
+- [x] **Step 9: Commit and independently review the Tasks migration**
 
 ```bash
 set -euo pipefail
@@ -319,7 +322,7 @@ git status --short
 
 Independently review both initial migration commits against the design, ledger evidence, task files, and baseline diff before the first integration. Fix load-bearing findings through the CLI or `apply_patch`, rerun affected gates, and use conventional fixup commits before integration.
 
-- [ ] **Step 10: Integrate, register, finalize, and clean up the pilot**
+- [x] **Step 10: Integrate, register, finalize, and clean up the pilot**
 
 ```bash
 set -euo pipefail
@@ -387,7 +390,7 @@ the design and this plan, review those changes, and only then begin Atoms.
 - Consumes: integrated Familiar and the approved pilot procedure.
 - Produces: integrated `atoms` tasks and a stable producer for Beliefs dependencies.
 
-- [ ] **Step 1: Create the Atoms worktree and run its baseline**
+- [x] **Step 1: Create the Atoms worktree and run its baseline**
 
 ```bash
 set -euo pipefail
@@ -400,11 +403,11 @@ uv run pyright
 
 Expected: all existing gates pass before edits.
 
-- [ ] **Step 2: Audit Atoms and write its ledger**
+- [x] **Step 2: Audit Atoms and write its ledger**
 
 From the worktree root, read `AGENTS.md` first and treat its named authority design and obligation ledger as current anchors. Classify every document, verify A1–A9 and certification/adoption claims against code/tests/history, and distinguish Atoms delivery from Beliefs-consumer work. Write `docs/plans/2026-08-30-atoms-tasks-migration.md` with the shared contract.
 
-- [ ] **Step 3: Correct drift, prove coverage, and commit documentation**
+- [x] **Step 3: Correct drift, prove coverage, and commit documentation**
 
 ```bash
 set -euo pipefail
@@ -426,7 +429,7 @@ git commit -m "docs: reconcile project status for tasks migration"
 
 Expected: coverage is exact, gates pass, and the first commit contains only evidence and drift reconciliation.
 
-- [ ] **Step 4: Initialize Atoms with Familiar resolvable**
+- [x] **Step 4: Initialize Atoms with Familiar resolvable**
 
 ```bash
 tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms prime
@@ -445,7 +448,7 @@ tasks -C ~/d/familiar init --prefix fam
 tasks -C ~/d/atoms/.worktrees/tasks-migration-atoms init --prefix atoms
 ```
 
-- [ ] **Step 5: Create Atoms tasks and record future Beliefs blockers**
+- [x] **Step 5: Create Atoms tasks and record future Beliefs blockers**
 
 Re-derive the registry before applying the shared task-creation procedure:
 
@@ -460,7 +463,7 @@ cd ~/d/atoms/.worktrees/tasks-migration-atoms
 
 Create an A9-related task only when the repository evidence proves remaining delivery work. Add resolvable dependencies now; record any verified blocker pointing to not-yet-migrated Beliefs as `pending` in `Deferred foreign dependencies` without creating a dangling edge. Add the shared agent guidance.
 
-- [ ] **Step 6: Verify, commit, and review Atoms**
+- [x] **Step 6: Verify, commit, and review Atoms**
 
 ```bash
 set -euo pipefail
@@ -486,7 +489,7 @@ git status --short
 
 Independently review both initial migration commits and correct findings before the first integration.
 
-- [ ] **Step 7: Integrate, register, finalize, and clean up Atoms**
+- [x] **Step 7: Integrate, register, finalize, and clean up Atoms**
 
 ```bash
 set -euo pipefail
@@ -538,7 +541,7 @@ rm -- /tmp/tasks-migration-atoms.registry-path
 - Consumes: integrated Familiar and Atoms, including resolvable `fam-*` and `atoms-*` IDs.
 - Produces: integrated `beliefs` tasks and explicit repository guidance.
 
-- [ ] **Step 1: Create the Beliefs worktree and establish the kernel-sensitive baseline**
+- [x] **Step 1: Create the Beliefs worktree and establish the kernel-sensitive baseline**
 
 Preflight prerequisite: before creating the migration worktree, integrate the independently
 reviewed one-line `python/tests/test_holdings_boundary.py` package-rename correction on Beliefs
@@ -604,11 +607,11 @@ records and checks the same 144 failed-node set, root-cause signature, and `2580
 After Atoms certified kernel `7.1.11-arch1-1`, Step 7 and subsequent Beliefs gates require
 the full Python suite to pass. Ruff, Pyright, and all three TypeScript gates remain strict.
 
-- [ ] **Step 2: Audit Beliefs and write its ledger**
+- [x] **Step 2: Audit Beliefs and write its ledger**
 
 Read the README, current roadmap and adoption ledgers, guide, active plans, code, and tests. Classify every document; verify adoption state, cut-12 claims, and unfinished work against all local branches/worktrees. Separate Beliefs outcomes from already-owned Atoms outcomes. Write `docs/plans/2026-08-30-beliefs-tasks-migration.md` with the shared contract. Its `Candidate outcomes` ledger includes a literal row for existing task `beliefs-c88566`: size, proposed status, and blockers are `n/a`; disposition is `preserve (no task mutation)`; task ID is `beliefs-c88566`. Audit its evidence and every field, retain its task ID, and neither duplicate it nor silently omit it. Create only additional evidence-backed outcomes.
 
-- [ ] **Step 3: Correct drift, add guidance, and commit documentation**
+- [x] **Step 3: Correct drift, add guidance, and commit documentation**
 
 Create `AGENTS.md` if absent with the repository's authority and gate summary. Add the shared Tasks guidance only after initialization in Step 5. Then run:
 
@@ -636,7 +639,7 @@ git diff --cached --check
 git commit -m "docs: reconcile project status for tasks migration"
 ```
 
-- [ ] **Step 4: Audit and idempotently seed the existing Beliefs store**
+- [x] **Step 4: Audit and idempotently seed the existing Beliefs store**
 
 ```bash
 set -euo pipefail
@@ -661,7 +664,7 @@ Expected: the CLI-created store is valid with prefix `beliefs`, zero Tasks error
 and exactly the preserved task ID `beliefs-c88566`. The second `init` is the idempotent seed into
 the temporary registry; it does not create a store or change the existing task.
 
-- [ ] **Step 5: Create Beliefs tasks and dependencies**
+- [x] **Step 5: Create Beliefs tasks and dependencies**
 
 Re-derive the registry before applying the shared task-creation procedure:
 
@@ -676,7 +679,7 @@ cd ~/d/beliefs/.worktrees/tasks-migration-beliefs
 
 Add only ledger rows marked `create` and blockers proven by the Beliefs evidence; use existing Atoms IDs where delivery truly depends on them. Do not mutate or recreate `beliefs-c88566`; after all additions, compare its complete CLI JSON record with `/tmp/tasks-migration-beliefs-existing-task.json`. Record blockers targeting Nodes or either Mindful repository as pending rather than dangling. Ensure `AGENTS.md` contains the shared guidance.
 
-- [ ] **Step 6: Verify, commit, and independently review Beliefs**
+- [x] **Step 6: Verify, commit, and independently review Beliefs**
 
 ```bash
 set -euo pipefail
@@ -711,7 +714,7 @@ git status --short
 
 Independently review the first two migration commits and fix findings before the first integration.
 
-- [ ] **Step 7: Integrate, register, finalize, and clean up Beliefs**
+- [x] **Step 7: Integrate, register, finalize, and clean up Beliefs**
 
 ```bash
 set -euo pipefail
@@ -767,7 +770,7 @@ rm -- /tmp/beliefs-existing-check.json /tmp/beliefs-check.json /tmp/beliefs-stab
 - Consumes: integrated Familiar, Atoms, and Beliefs.
 - Produces: integrated `nodes` tasks and stable blocker IDs for both Mindful repositories.
 
-- [ ] **Step 1: Create the Nodes worktree and run both baselines**
+- [x] **Step 1: Create the Nodes worktree and run both baselines**
 
 ```bash
 set -euo pipefail
@@ -785,11 +788,11 @@ npm run check
 
 Expected: all six gates pass before edits.
 
-- [ ] **Step 2: Audit Nodes and write its ledger**
+- [x] **Step 2: Audit Nodes and write its ledger**
 
 Read `AGENTS.md` first and treat `docs/STANDARD.md` as the authority it names. Verify Python/TypeScript parity claims, current APIs, tests, active plans, and README statements. Classify every document and express parity as one outcome when it ships as one result rather than splitting it by language. Write `docs/plans/2026-08-30-nodes-tasks-migration.md`.
 
-- [ ] **Step 3: Correct drift, prove coverage, and commit documentation**
+- [x] **Step 3: Correct drift, prove coverage, and commit documentation**
 
 ```bash
 set -euo pipefail
@@ -810,7 +813,7 @@ git diff --cached --check
 git commit -m "docs: reconcile project status for tasks migration"
 ```
 
-- [ ] **Step 4: Initialize Nodes with earlier projects resolvable**
+- [x] **Step 4: Initialize Nodes with earlier projects resolvable**
 
 ```bash
 tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes prime
@@ -831,7 +834,7 @@ tasks -C ~/d/beliefs init --prefix beliefs
 tasks -C ~/d/nodes/.worktrees/tasks-migration-nodes init --prefix nodes
 ```
 
-- [ ] **Step 5: Create Nodes tasks and dependencies**
+- [x] **Step 5: Create Nodes tasks and dependencies**
 
 Re-derive the registry before applying the shared task-creation procedure:
 
@@ -846,7 +849,7 @@ cd ~/d/nodes/.worktrees/tasks-migration-nodes
 
 Keep cross-language delivery together when acceptance requires parity. Record verified blockers targeting either future Mindful migration as pending; do not create dangling IDs. Add the shared agent guidance.
 
-- [ ] **Step 6: Verify, commit, and independently review Nodes**
+- [x] **Step 6: Verify, commit, and independently review Nodes**
 
 ```bash
 set -euo pipefail
@@ -876,7 +879,7 @@ git status --short
 
 Independently review the first two migration commits and fix findings before the first integration.
 
-- [ ] **Step 7: Integrate, register, finalize, and clean up Nodes**
+- [x] **Step 7: Integrate, register, finalize, and clean up Nodes**
 
 ```bash
 set -euo pipefail
@@ -928,7 +931,7 @@ rm -- /tmp/tasks-migration-nodes.registry-path
 - Consumes: integrated Familiar, Atoms, Beliefs, and Nodes.
 - Produces: integrated `mind3` tasks and stable v3 IDs for Mindful v6 dependencies.
 
-- [ ] **Step 1: Create the v3 worktree and record service state**
+- [x] **Step 1: Create the v3 worktree and record service state**
 
 ```bash
 set -euo pipefail
@@ -939,7 +942,7 @@ docker compose ps
 
 Record whether the required stack was already running. Start it only if the repository's existing gate requires it and it is absent; do not recreate healthy services unnecessarily.
 
-- [ ] **Step 2: Run the v3 baseline gates**
+- [x] **Step 2: Run the v3 baseline gates**
 
 ```bash
 set -euo pipefail
@@ -957,11 +960,11 @@ docker exec mindful_fastapi_v3 uv run ruff check .
 
 Expected: all frontend and backend gates pass before edits.
 
-- [ ] **Step 3: Audit Mindful v3 and write its ledger**
+- [x] **Step 3: Audit Mindful v3 and write its ledger**
 
 Read `AGENTS.md`, README, current roadmap and active plans, architecture-modernization documents, v3/v6 boundary documents, code, and tests. Classify all documents. Treat unchecked historical plans as claims, not work; create no task unless present evidence proves an unfinished outcome. Write `docs/plans/2026-08-30-mindful-v3-tasks-migration.md`.
 
-- [ ] **Step 4: Correct drift, prove coverage, and commit documentation**
+- [x] **Step 4: Correct drift, prove coverage, and commit documentation**
 
 ```bash
 set -euo pipefail
@@ -984,7 +987,7 @@ git diff --cached --check
 git commit -m "docs: reconcile project status for tasks migration"
 ```
 
-- [ ] **Step 5: Initialize v3 with earlier projects resolvable**
+- [x] **Step 5: Initialize v3 with earlier projects resolvable**
 
 ```bash
 tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 prime
@@ -1006,7 +1009,7 @@ tasks -C ~/d/nodes init --prefix nodes
 tasks -C ~/d/mindful/v3/.worktrees/tasks-migration-mind3 init --prefix mind3
 ```
 
-- [ ] **Step 6: Create v3 tasks and dependencies**
+- [x] **Step 6: Create v3 tasks and dependencies**
 
 Re-derive the registry before applying the shared task-creation procedure:
 
@@ -1021,7 +1024,7 @@ cd ~/d/mindful/v3/.worktrees/tasks-migration-mind3
 
 Mark a task `doing` only with a verified owner token; never treat an old branch alone as ownership. Add direct Nodes blockers when proven. Record blockers targeting Mindful v6 as pending. Add the shared agent guidance.
 
-- [ ] **Step 7: Verify, commit, and independently review v3**
+- [x] **Step 7: Verify, commit, and independently review v3**
 
 ```bash
 set -euo pipefail
@@ -1051,7 +1054,7 @@ git status --short
 
 Independently review both initial migration commits and fix findings before the first integration.
 
-- [ ] **Step 8: Integrate, register, finalize, and clean up v3**
+- [x] **Step 8: Integrate, register, finalize, and clean up v3**
 
 ```bash
 set -euo pipefail
@@ -1107,7 +1110,7 @@ If Step 1 started the stack, stop it with the repository's normal `docker compos
 - Consumes: all five previously integrated stores, especially `nodes-*` and `mind3-*` IDs.
 - Produces: the sixth integrated Tasks store and a complete set of IDs for reconciliation.
 
-- [ ] **Step 1: Create the v6 worktree and run its baseline**
+- [x] **Step 1: Create the v6 worktree and run its baseline**
 
 ```bash
 set -euo pipefail
@@ -1146,11 +1149,11 @@ fi
 
 The generated `file:../../nodes/ts` dependency link is relative to the package, so a linked worktree would otherwise resolve it inside `.worktrees/`. Repoint only that ignored symlink to the runtime-canonical Nodes checkout; never commit its machine-specific target. Only exit 2 with the exact stale-core diagnostic permits one Nodes build, after which all three v6 gates rerun. Treat every other failure as a baseline failure, and record any permitted build prerequisite in the ledger.
 
-- [ ] **Step 2: Audit Mindful v6 and write its ledger**
+- [x] **Step 2: Audit Mindful v6 and write its ledger**
 
 Read `AGENTS.md`, `docs/ARCHITECTURE.md`, and `docs/FORMATS.md` first as standing authority. Classify all documents; verify the v3 import boundary, Nodes integration, sprint/history claims, and all active plans against code/tests/current Git state. Write `docs/plans/2026-08-30-mindful-v6-tasks-migration.md`.
 
-- [ ] **Step 3: Correct drift, prove coverage, and commit documentation**
+- [x] **Step 3: Correct drift, prove coverage, and commit documentation**
 
 ```bash
 set -euo pipefail
@@ -1171,7 +1174,7 @@ git diff --cached --check
 git commit -m "docs: reconcile project status for tasks migration"
 ```
 
-- [ ] **Step 4: Initialize v6 with all earlier projects resolvable**
+- [x] **Step 4: Initialize v6 with all earlier projects resolvable**
 
 ```bash
 tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 prime
@@ -1194,7 +1197,7 @@ tasks -C ~/d/mindful/v3 init --prefix mind3
 tasks -C ~/d/mindful/v6/.worktrees/tasks-migration-mind6 init --prefix mind6
 ```
 
-- [ ] **Step 5: Create v6 tasks and dependencies**
+- [x] **Step 5: Create v6 tasks and dependencies**
 
 Re-derive the registry before applying the shared task-creation procedure:
 
@@ -1209,7 +1212,7 @@ cd ~/d/mindful/v6/.worktrees/tasks-migration-mind6
 
 Add direct dependencies on existing Nodes and Mindful v3 tasks only when they block delivery. Any dependency targeting earlier projects is now resolvable; treat failure to resolve as a registry or evidence error rather than omitting it. Add the shared agent guidance.
 
-- [ ] **Step 6: Verify, commit, and independently review v6**
+- [x] **Step 6: Verify, commit, and independently review v6**
 
 ```bash
 set -euo pipefail
@@ -1234,7 +1237,7 @@ git status --short
 
 Independently review both initial migration commits and fix findings before the first integration.
 
-- [ ] **Step 7: Integrate, register, finalize, and clean up v6**
+- [x] **Step 7: Integrate, register, finalize, and clean up v6**
 
 ```bash
 set -euo pipefail
@@ -1284,7 +1287,7 @@ rm -- /tmp/tasks-migration-mind6.registry-path
 - Consumes: all six integrated task stores and every ledger's `Deferred foreign dependencies` table.
 - Produces: committed dependency edges and a complete `historical/superseded` ledger for every affected repository, or a verified no-op when no row is pending.
 
-- [ ] **Step 1: Build the exact six-project portfolio registry through the CLI**
+- [x] **Step 1: Build the exact six-project portfolio registry through the CLI**
 
 ```bash
 set -euo pipefail
@@ -1303,7 +1306,7 @@ tasks -C ~/d/mindful/v6 init --prefix mind6
 
 Expected: six successful `init` calls. Do not write `projects.toml` directly.
 
-- [ ] **Step 2: Enumerate pending rows exactly**
+- [x] **Step 2: Enumerate pending rows exactly**
 
 ```bash
 set -euo pipefail
@@ -1324,7 +1327,7 @@ done
 
 If no row prints, record reconciliation as a verified no-op and continue to Step 8. Otherwise process the printed repositories one at a time in portfolio order.
 
-- [ ] **Step 3: Create the reusable reconciliation helper**
+- [x] **Step 3: Create the reusable reconciliation helper**
 
 Use `apply_patch` to create `/tmp/tasks-reconciliation-helper.zsh` with exactly this content:
 
@@ -1397,7 +1400,7 @@ run_reconciliation_gate() {
 
 Run `zsh -n /tmp/tasks-reconciliation-helper.zsh`. Expected: syntax validation succeeds. Every later reconciliation step sources this file, re-reads the selected prefix and portfolio registry, and re-derives `repo`, `worktree`, and `ledger_rel`.
 
-- [ ] **Step 4: Reconcile one affected repository in a fresh worktree**
+- [x] **Step 4: Reconcile one affected repository in a fresh worktree**
 
 Resolve the repository, prefix, ledger, and worktree from this fixed map:
 
@@ -1458,7 +1461,7 @@ fi
 
 Expected: the fresh worktree baseline passes. For `mind6`, repoint only the ignored generated dependency symlink as in Task 7; only the exact exit-2 stale-core diagnostic permits one Nodes build and a rerun of all three v6 gates. Every other failure is a baseline failure. Do not create the next reconciliation worktree until this one is merged and removed.
 
-- [ ] **Step 5: Add every pending edge through the CLI**
+- [x] **Step 5: Add every pending edge through the CLI**
 
 For each pending row in that ledger, use `apply_patch` to create `/tmp/tasks-reconciliation-edge.zsh` with exactly two literal assignments, `local_id=` and `foreign_id=`, copied from that row. Source the assignments in the same invocation that mutates the task:
 
@@ -1481,7 +1484,7 @@ rm -- /tmp/tasks-reconciliation-edge.zsh
 
 If the edge fails resolution or acyclicity, stop; do not weaken or omit it. Use `apply_patch` to change that exact row from `pending` to `reconciled` and record the new edge. After the repository's final pending row is reconciled, also mark its migration complete, change the ledger's own classification from `active delivery` to `historical/superseded`, and record the reconciliation verification in the existing `Verification` section.
 
-- [ ] **Step 6: Verify and commit the affected reconciliation**
+- [x] **Step 6: Verify and commit the affected reconciliation**
 
 ```bash
 set -euo pipefail
@@ -1504,7 +1507,7 @@ git -C "$worktree" status --short
 
 Expected: one commit contains the CLI-generated dependency edit, every reconciled ledger row, and the ledger's truthful complete/historical finalization.
 
-- [ ] **Step 7: Review, integrate, and remove the affected reconciliation**
+- [x] **Step 7: Review, integrate, and remove the affected reconciliation**
 
 Independently review the edge evidence, full reachable graph, ledger update, and commit diff. Fix findings and rerun Step 6, then:
 
@@ -1528,7 +1531,7 @@ git branch -d "chore/tasks-reconciliation-$prefix"
 
 Repeat Steps 4–7 for the next affected repository only after this stable check passes.
 
-- [ ] **Step 8: Prove reconciliation is complete**
+- [x] **Step 8: Prove reconciliation is complete**
 
 Rerun Step 2. Expected: no pending row prints. Verify every migration ledger's own classification row is `historical/superseded` and every status says the migration is complete. Then clean up the reconciliation controls:
 
@@ -1556,7 +1559,7 @@ done
 - Consumes: six integrated repositories with no pending reconciliation row.
 - Produces: the final six-project verification record and truthful completion status in the Tasks design and plan.
 
-- [ ] **Step 1: Create a fresh exact portfolio registry**
+- [x] **Step 1: Create a fresh exact portfolio registry**
 
 ```bash
 set -euo pipefail
@@ -1575,7 +1578,7 @@ tasks -C ~/d/mindful/v6 init --prefix mind6
 
 Expected: all six initializations succeed; unrelated registry projects are absent.
 
-- [ ] **Step 2: Require empty checks and exact prefixes in all six projects**
+- [x] **Step 2: Require empty checks and exact prefixes in all six projects**
 
 ```bash
 set -euo pipefail
@@ -1600,7 +1603,7 @@ done
 
 Expected: every command passes and every check has zero warnings. The literal paths above are command input only; do not copy them into committed documentation.
 
-- [ ] **Step 3: Require strict global listing success without warnings**
+- [x] **Step 3: Require strict global listing success without warnings**
 
 ```bash
 set -euo pipefail
@@ -1615,7 +1618,7 @@ jq -e '.warnings == [] and (.tasks | type == "array")' /tmp/tasks-portfolio-list
 
 Expected: strict scans of all six projects succeed and stderr is empty.
 
-- [ ] **Step 4: Audit ledgers and task semantics**
+- [x] **Step 4: Audit ledgers and task semantics**
 
 For each ledger, rerun its exact coverage comparison. Then verify:
 
@@ -1632,7 +1635,7 @@ set -euo pipefail
 
 Expected: no pending row. Inspect every ledger's own classification and require `historical/superseded`. Inspect every `Candidate outcomes` row against its task ID or explicit no-task disposition; confirm completed history was not backfilled, every unresolved claim is an `idea`, every `doing` owner has evidence, and every foreign edge is a real blocker.
 
-- [ ] **Step 5: Run every repository's complete stable gate**
+- [x] **Step 5: Run every repository's complete stable gate**
 
 ```bash
 set -euo pipefail
@@ -1651,7 +1654,7 @@ docker exec mindful_fastapi_v3 uv run ruff check .
 
 Expected: every established gate passes. Apply the documented Nodes build refresh only for Mindful v6's known stale-core exit 2.
 
-- [ ] **Step 6: Prove and, if necessary, explicitly repair normal registry mappings**
+- [x] **Step 6: Prove and, if necessary, explicitly repair normal registry mappings**
 
 ```bash
 set -euo pipefail
@@ -1677,7 +1680,7 @@ cp -- "$tasks_registry_path" "$tasks_registry_path.pre-migration-repair"
 
 Use `apply_patch` to remove only the stale entries among `fam`, `atoms`, `beliefs`, `nodes`, `mind3`, and `mind6`; preserve every unrelated entry. Then rerun the six CLI commands above and repeat Steps 1–3. This is the explicit normal-registry recovery exception; `tasks init` must never silently rebind a prefix.
 
-- [ ] **Step 7: Create the Tasks completion worktree**
+- [x] **Step 7: Create the Tasks completion worktree**
 
 ```bash
 set -euo pipefail
@@ -1687,7 +1690,7 @@ cd ~/d/tasks/.worktrees/project-migration-complete
 
 Expected: a clean worktree based on the then-current `main`, which must already contain the approved design and this plan.
 
-- [ ] **Step 8: Make completion claims truthful**
+- [x] **Step 8: Make completion claims truthful**
 
 Use `apply_patch` to change the design status from implementation in progress to implemented with the actual date from `date +%F`. Check only plan boxes whose command and evidence were actually verified. Add concise final commit references or verification results where the ledger contract requires them. Then search outward for stale migration claims:
 

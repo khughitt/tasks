@@ -1,8 +1,8 @@
 # Existing-project Tasks migration — design
 
-**Status:** implementation in progress. Task 1, the Familiar pilot, and Atoms completed
-on 2026-08-30; Beliefs through portfolio completion remain pending under
-`docs/plans/2026-08-30-project-tasks-migration.md`.
+**Status:** implemented on 2026-08-31. All six repositories are migrated and canonically
+registered, the deferred Beliefs-to-Nodes dependency is reconciled, and the fresh portfolio
+gate passes with zero Tasks errors or warnings.
 
 ## 1. Purpose
 
