@@ -1,7 +1,8 @@
 # Material and Prism Tasks migration — design
 
-**Status:** approved on 2026-08-31; execution preflight started 2026-09-01.
-Repository migrations have not started.
+**Status:** approved on 2026-08-31; execution in progress 2026-09-01. Material
+is integrated through `8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519`, and
+Prism's phase-A commits are under independent review.
 
 ## 1. Purpose and baseline
 
@@ -256,8 +257,10 @@ npm test
 ```
 
 Lua is a required development prerequisite because `npm test` invokes the direct plugin
-test. The QML lint command must exit zero; only the documented unresolved `qs.*`
-warnings are accepted. Record its output disposition in the ledger.
+test. The QML lint command must exit zero. Its accepted deterministic output is exactly
+one warning, `Type PanelWindow is not creatable. [uncreatable-type]`, at
+`integrations/debug-backdrop/shell.qml:9:9`; no unresolved `qs.*` warning is part of the
+current baseline. Record the exact output disposition in the ledger.
 
 For each repository also require:
 

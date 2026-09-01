@@ -17,8 +17,9 @@ uv/MkDocs, npm/Node.js, Lua, and Qt 6 `qmllint`.
 
 **Spec:** `docs/specs/2026-08-31-material-prism-tasks-migration-design.md`
 
-**Status:** execution preflight started 2026-09-01; repository migrations have not
-started.
+**Status:** execution in progress 2026-09-01. Material is integrated through
+`8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519`, and Prism's phase-A commits are
+under independent review.
 
 ## Global Constraints
 
@@ -677,8 +678,10 @@ npm test
 test -z "$(git status --porcelain=v1)"
 ```
 
-Expected: Node and Lua tests pass; Qt 6 lint exits zero with only the documented unresolved
-`qs.*` warnings.
+Expected: Node and Lua tests pass; Qt 6 lint exits zero with exactly
+`Type PanelWindow is not creatable. [uncreatable-type]` at
+`integrations/debug-backdrop/shell.qml:9:9`. No unresolved `qs.*` warning is part of the
+accepted current baseline.
 
 - [ ] **Step 2: Audit all Prism documents and synthesize outcomes**
 
