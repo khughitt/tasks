@@ -20,7 +20,7 @@ uv/MkDocs, npm/Node.js, Lua, and Qt 6 `qmllint`.
 **Status:** implemented on 2026-09-01. Material is integrated at
 `8047b6ca14ec1e2a0760a79f5d9d4883a9fc2519`, Prism is integrated at
 `b05b4af214ee714faa6fbd41bbf9121e902e3f59`, reconciliation was a reviewed no-op,
-and Task 5 records the fresh exact-eight completion evidence.
+and Task 5 records the fresh exact-eight completion and cleanup evidence.
 
 ## Global Constraints
 
@@ -1108,6 +1108,10 @@ Execution evidence from 2026-09-01:
 - normal `material` and `prism` registration was already canonical and idempotent;
   the normal registry checksum and `aut` mapping were unchanged, and the active
   Material worktree passed its five-file checksum and dirty-state guards.
+- on 2026-09-01, reviewed completion commit `ced9c4559b188c9f2af7e03d12d4fb44a18985bb`
+  was fast-forwarded to Tasks `main`; all 65 Tasks tests passed there, the completion
+  worktree and merged branch were removed, and the guarded final registry, shared docs
+  environment, active-work checksum, and every planned temporary output were removed.
 
 - [x] **Step 1: Build a fresh exact-eight final registry**
 
@@ -1385,7 +1389,7 @@ git diff --check
 Correct propagated current-document drift in the same commit. Do not check a plan box
 from an earlier claim; require command evidence from this execution.
 
-- [ ] **Step 9: Verify, commit, review, integrate, and clean up**
+- [x] **Step 9: Verify, commit, review, integrate, and clean up**
 
 ```bash
 set -euo pipefail
