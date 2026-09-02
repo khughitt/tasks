@@ -31,7 +31,9 @@ updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates th
 
 ## With superpowers
 
-- **brainstorming** writes the spec to `docs/specs/YYYY-MM-DD-<topic>-design.md`. After approval: one task per deliverable, `--spec <topic>`.
+- **brainstorming** writes specs under `docs/{specs,designs}/` or
+  `docs/superpowers/{specs,designs}/`. After approval: one task per deliverable,
+  `--spec <topic>`.
 - **writing-plans** writes the plan to `docs/plans/YYYY-MM-DD-<topic>.md`. One task per `### Task N:` heading:
   `tasks add "<heading>" --plan <topic> --step "Task N: <title>" --depends <previous-task-id>`.
 - **executing-plans / subagent-driven-development**: `tasks start` a step before implementing, `tasks done` when its commit lands.

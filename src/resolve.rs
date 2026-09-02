@@ -11,10 +11,10 @@ pub enum DocKind {
 }
 
 impl DocKind {
-    pub fn dir(self) -> &'static str {
+    pub fn dirs(self) -> &'static [&'static str] {
         match self {
-            DocKind::Spec => "docs/specs",
-            DocKind::Plan => "docs/plans",
+            DocKind::Spec => crate::format::SPEC_DIRS,
+            DocKind::Plan => crate::format::PLAN_DIRS,
         }
     }
 
@@ -64,9 +64,9 @@ impl<'a> Resolver<'a> {
 
     pub fn resolve_doc(&self, kind: DocKind, name_or_path: &str) -> Result<String> {
         crate::format::validate_line(kind.name(), name_or_path)?;
-        let dir = kind.dir();
+        let dirs = kind.dirs();
         if name_or_path.contains('/') || name_or_path.ends_with(".md") {
-            crate::format::validate_doc_path(kind.name(), dir, name_or_path)?;
+            crate::format::validate_doc_path(kind.name(), dirs, name_or_path)?;
             if !self.project.root.join(name_or_path).is_file() {
                 return Err(Error::DocNotFound(format!(
                     "{} {name_or_path:?} does not exist",
@@ -77,23 +77,26 @@ impl<'a> Resolver<'a> {
         }
 
         let mut matches = Vec::new();
-        let full = self.project.root.join(dir);
-        if full.is_dir() {
-            for entry in std::fs::read_dir(full)? {
-                let path = entry?.path();
-                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                    continue;
-                };
-                if path.is_file() && name.ends_with(".md") && name.contains(name_or_path) {
-                    matches.push(format!("{dir}/{name}"));
+        for dir in dirs {
+            let full = self.project.root.join(dir);
+            if full.is_dir() {
+                for entry in std::fs::read_dir(full)? {
+                    let path = entry?.path();
+                    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                        continue;
+                    };
+                    if path.is_file() && name.ends_with(".md") && name.contains(name_or_path) {
+                        matches.push(format!("{dir}/{name}"));
+                    }
                 }
             }
         }
         matches.sort();
         match matches.len() {
             0 => Err(Error::DocNotFound(format!(
-                "no {} matching {name_or_path:?} under {dir}/",
-                kind.name()
+                "no {} matching {name_or_path:?} under {}/",
+                kind.name(),
+                dirs.join("/ or ")
             ))),
             1 => Ok(matches.remove(0)),
             _ => Err(Error::Ambiguous(format!(

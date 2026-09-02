@@ -41,8 +41,9 @@ or per project, when a project needs to pin its own copy:
 
 ## Adopting in an existing project
 
-1. Keep historical docs in place. Move only active specs/plans that need structured task
-   links into `docs/specs/` / `docs/plans/`, fixing links; new docs use those directories.
+1. Keep historical docs in place. Structured spec links accept `docs/specs/`,
+   `docs/designs/`, `docs/superpowers/specs/`, and `docs/superpowers/designs/`; plan links
+   use `docs/plans/`. Move only linked docs outside those directories, fixing links.
 2. `tasks init --prefix <p>`.
 3. Install the skill and mention it in the project's CLAUDE.md / AGENTS.md.
 4. Require `tasks prime` at session start and `tasks check` before completion. Add

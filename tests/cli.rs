@@ -268,6 +268,50 @@ fn add_resolves_spec_plan_and_step() {
 }
 
 #[test]
+fn add_resolves_specs_from_supported_directories() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for (topic, rel) in [
+        ("root-specs", "docs/specs/2026-09-02-root-specs-design.md"),
+        (
+            "root-designs",
+            "docs/designs/2026-09-02-root-designs-design.md",
+        ),
+        (
+            "superpowers-specs",
+            "docs/superpowers/specs/2026-09-02-superpowers-specs-design.md",
+        ),
+        (
+            "superpowers-designs",
+            "docs/superpowers/designs/2026-09-02-superpowers-designs-design.md",
+        ),
+    ] {
+        write_doc(&dir, rel, "# Design\n");
+        let id = env.json(&dir, &["add", topic, "--spec", topic])["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(env.json(&dir, &["show", &id])["task"]["spec"], rel);
+    }
+}
+
+#[test]
+fn bare_spec_names_are_ambiguous_across_supported_directories() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    write_doc(&dir, "docs/specs/2026-09-02-shared-design.md", "# Specs\n");
+    write_doc(
+        &dir,
+        "docs/designs/2026-09-02-shared-design.md",
+        "# Designs\n",
+    );
+    assert_eq!(
+        env.fail(&dir, &["add", "x", "--spec", "shared"]),
+        "ambiguous"
+    );
+}
+
+#[test]
 fn show_resolves_local_and_foreign_dependencies() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

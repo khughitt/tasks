@@ -183,19 +183,29 @@ pub fn validate_owner(o: &str) -> Result<()> {
     }
     Ok(())
 }
-pub fn validate_doc_path(kind: &str, dir: &str, rel: &str) -> Result<()> {
+pub const SPEC_DIRS: &[&str] = &[
+    "docs/specs",
+    "docs/designs",
+    "docs/superpowers/specs",
+    "docs/superpowers/designs",
+];
+pub const PLAN_DIRS: &[&str] = &["docs/plans"];
+
+pub fn validate_doc_path(kind: &str, dirs: &[&str], rel: &str) -> Result<()> {
     validate_line(kind, rel)?;
     let segs: Vec<_> = rel.split('/').collect();
-    let expected: Vec<_> = dir.split('/').collect();
     if !segs
         .iter()
         .all(|s| !s.is_empty() && *s != "." && *s != "..")
-        || segs.len() <= expected.len()
-        || segs[..expected.len()] != expected[..]
+        || !dirs.iter().any(|dir| {
+            rel.strip_prefix(dir)
+                .is_some_and(|rest| rest.starts_with('/'))
+        })
         || !rel.ends_with(".md")
     {
         return Err(Error::Validation(format!(
-            "{kind} {rel:?} must be a normalized path under {dir}/"
+            "{kind} {rel:?} must be a normalized path under {}",
+            dirs.join("/ or ") + "/"
         )));
     }
     Ok(())
@@ -216,10 +226,10 @@ pub fn validate_task(t: &Task) -> Result<()> {
         return Err(Error::Validation("step requires plan".into()));
     }
     if let Some(s) = &t.spec {
-        validate_doc_path("spec", "docs/specs", s)?;
+        validate_doc_path("spec", SPEC_DIRS, s)?;
     }
     if let Some(p) = &t.plan {
-        validate_doc_path("plan", "docs/plans", p)?;
+        validate_doc_path("plan", PLAN_DIRS, p)?;
     }
     if let Some(st) = &t.step {
         validate_line("step", st)?;

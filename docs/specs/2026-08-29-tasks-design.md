@@ -1,6 +1,7 @@
 # tasks — design
 
-**Status:** implemented (2026-08-29); see docs/plans/2026-08-29-tasks.md.
+**Status:** implemented (2026-08-29; spec roots extended 2026-09-02); see
+docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
 
@@ -38,14 +39,19 @@ tasks/
   sci-91be03.md
 docs/
   specs/              design specs   (YYYY-MM-DD-<topic>-design.md)
+  designs/            alternative accepted spec root
+  superpowers/
+    specs/            alternative accepted spec root
+    designs/          alternative accepted spec root
   plans/              implementation plans (YYYY-MM-DD-<topic>.md)
 ```
 
-`docs/specs/` and `docs/plans/` are the fixed convention: a task's `spec` must be a file
-under `docs/specs/` and its `plan` a file under `docs/plans/`. This is enforced on every
-write and by `check`; there is no configuration to relocate them. `tasks init` creates both
-directories if absent. Historical docs need not move; projects move only files they want
-to use through structured `spec`/`plan` links (§9).
+A task's `spec` must be under `docs/specs/`, `docs/designs/`,
+`docs/superpowers/specs/`, or `docs/superpowers/designs/`; its `plan` must be under
+`docs/plans/`. This is enforced on every write and by `check`; there is no configuration
+to relocate them. `tasks init` creates the default `docs/specs/` and `docs/plans/`
+directories if absent. Historical docs need not move unless they fall outside every
+accepted root and need structured `spec`/`plan` links (§9).
 
 Per machine, not checked in: `~/.config/tasks/projects.toml`, the project registry (§6).
 
@@ -90,7 +96,7 @@ Free-form markdown body.
 | `updated`  | RFC 3339 UTC        | yes      | Set by every write command. |
 | `depends`  | list of ids         | yes      | May be empty. Foreign prefixes allowed (§6). |
 | `tags`     | list of strings     | yes      | May be empty. The only grouping mechanism. |
-| `spec`     | repo-relative path  | no       | Must be an existing file under `docs/specs/`. |
+| `spec`     | repo-relative path  | no       | Must be an existing file under an accepted spec or design root (§2). |
 | `plan`     | repo-relative path  | no       | Must be an existing file under `docs/plans/`. |
 | `step`     | string              | no       | Exact text of a heading inside `plan`. Requires `plan`. |
 
@@ -167,9 +173,9 @@ tasks init [--prefix P]
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
-    repo-relative path under the canonical directory or a bare name resolved as the unique
-    docs/<kind>/*NAME*.md (error on 0 or >1 matches). --depends ids and --step headings
-    are validated before anything is written.
+    repo-relative path under an accepted directory or a bare name resolved as the unique
+    match across the accepted directories (error on 0 or >1 matches). --depends ids and
+    --step headings are validated before anything is written.
 
 tasks show <id>
     The full task with resolved spec/plan paths, each dependency's title and status,
@@ -212,7 +218,7 @@ tasks graph [--format mermaid|dot] [--all]
 
 tasks check
     Validate every task file: frontmatter schema, filename == id, timestamps, dangling
-    depends/spec/plan, paths outside the canonical directories, missing step heading,
+    depends/spec/plan, paths outside the accepted directories, missing step heading,
     dependency cycles, reserved delimiter in body, malformed notes section. Exit 1 on any
     error. Unresolvable foreign ids (unregistered or unreachable prefix) are warnings.
 
@@ -332,9 +338,9 @@ If any id reached during traversal is unreachable, `dep --on` and `add --depends
 
 - A task may point at a spec (`spec`), a plan (`plan`), and a heading inside that plan
   (`step`). These are validated on write and re-validated by `check`.
-- `check` fails when: a linked file is missing; a path lies outside `docs/specs/` or
-  `docs/plans/`; a `step` heading no longer appears verbatim in its plan; `step` is set
-  without `plan`.
+- `check` fails when: a linked file is missing; a path lies outside the accepted spec
+  roots (§2) or `docs/plans/`; a `step` heading no longer appears verbatim in its plan;
+  `step` is set without `plan`.
 - Once automation has a pinned Tasks install, running `check` in a project's test or
   pre-commit path turns doc drift under open tasks into a build failure, which is the
   intended coupling: when a plan step is renamed or removed, the task must be updated in
@@ -364,8 +370,8 @@ Skill content:
    `dep <original> --on <pieces>` or drop the original, and leave a note); blocking on
    another project's task; resolving an id collision (§4).
 3. **Superpowers integration** (applies when the superpowers plugin is present):
-   - Brainstorming writes specs to `docs/specs/YYYY-MM-DD-<topic>-design.md`. After
-     approval, add one task per major deliverable with `--spec <topic>`.
+   - Brainstorming writes specs under one of the accepted roots in §2. After approval,
+     add one task per major deliverable with `--spec <topic>`.
    - writing-plans writes plans to `docs/plans/YYYY-MM-DD-<topic>.md`. Add one task per
      `Task N:` heading with `--plan <topic> --step "Task N: …"` and `--depends` mirroring
      the plan's order.
@@ -376,10 +382,10 @@ Skill content:
 
 Manual, documented steps — the tool does not move files:
 
-1. Keep historical docs in place. Move only active specs/plans that need structured task
-   links into `docs/specs/` / `docs/plans/`, fixing links. This is required for linked
-   files; projects may reference other historical layouts in task bodies, and `init`
-   intentionally creates canonical directories alongside them.
+1. Keep historical docs in place. Structured spec links accept every root in §2 and plan
+   links accept `docs/plans/`. Move only linked docs outside those roots, fixing links;
+   projects may reference other historical layouts in task bodies, and `init`
+   intentionally creates the default directories alongside them.
 2. `tasks init --prefix <p>`.
 3. Install the skill (user level preferred) and add a line to CLAUDE.md pointing at it.
 4. Require `tasks prime` at session start and `tasks check` before completion. Add
