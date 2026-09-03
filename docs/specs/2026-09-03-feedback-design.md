@@ -104,7 +104,8 @@ lowercase ASCII-alphanumeric tokens of three or more characters, in order.
 
 Fuzzy matching is never allowed to merge on its own because a merge hides a report and the
 reporting side has no way to unmerge later: "check rejects missing spec" and "check
-rejects missing plan" score 0.67 and are different bugs. A false split, by contrast, costs
+rejects missing plan" share three of five tokens, score exactly 0.6, and are different
+bugs. A false split, by contrast, costs
 the maintainer one `dep` or `drop` at triage. The reporter can always override in either
 direction with `--recur` or `--new`.
 

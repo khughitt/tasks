@@ -29,11 +29,12 @@ Tracker: `tasks-c80832`. Spec §2, §3, §4.1.
 
 **Files:**
 - Create: `src/hierarchy.rs`
-- Modify: `src/main.rs` (add `mod hierarchy;`), `src/model.rs:213-229` (Task struct), `src/format.rs` (KEYS, parse, validate, serialize, tests), `src/cli.rs` (FieldArgs, Edit), `src/commands/mod.rs` (apply_fields, dispatch), `src/commands/edit.rs` (flags, editor path), `src/commands/add.rs` (Task literal), `src/commands/check.rs`, `src/repo.rs` (test literal), `src/query.rs` (test literal)
+- Modify: `src/main.rs` (add `mod hierarchy;`), `src/model.rs:213-229` (Task struct), `src/format.rs` (KEYS, parse, serialize, tests), `src/cli.rs` (FieldArgs, Edit), `src/commands/mod.rs` (apply_fields, dispatch), `src/commands/edit.rs` (flags), `src/commands/add.rs` (Task literal), `src/commands/check.rs`, `src/repo.rs` (write_task, test literal), `src/query.rs` (test literal)
+- Also, if the feedback plan has landed first: `src/commands/feedback.rs` (`create` literal) and `src/similarity.rs` (test literal) gain `parent: None,`. Whichever plan lands second makes the other compile; never merge a branch that does not build.
 - Test: `tests/cli.rs`
 
 **Interfaces:**
-- Produces: `Task.parent: Option<TaskId>`; `hierarchy::validate_parent(project: &Project, task: &Task) -> Result<()>`; `hierarchy::parent_cycle(tasks: &[Task], start: &TaskId) -> Option<Vec<TaskId>>`; `edit::run(..., no_parent: bool, ...)`.
+- Produces: `Task.parent: Option<TaskId>`; `hierarchy::validate_parent(project: &Project, task: &Task) -> Result<()>`, called by `Project::write_task` so every write path is covered; `hierarchy::parent_cycle(tasks: &[Task], start: &TaskId) -> Option<Vec<TaskId>>`; `edit::run(..., no_parent: bool, ...)`.
 
 - [ ] **Step 1: Write the failing e2e tests**
 
@@ -127,7 +128,8 @@ fn check_reports_parent_problems() {
     let b = id_of(env.json(&dir, &["add", "B", "--parent", &a]));
     let c = id_of(env.json(&dir, &["add", "C"]));
     let d = id_of(env.json(&dir, &["add", "D"]));
-    // a -> b loop, c dangling, d foreign; written by hand to simulate drift
+    let e = id_of(env.json(&dir, &["add", "E"]));
+    // a -> b loop, c dangling, d foreign, e its own parent; written by hand to simulate drift
     let set_parent = |id: &str, parent: &str| {
         let raw = env.read(&dir, &format!("tasks/{id}.md"));
         std::fs::write(
@@ -139,6 +141,7 @@ fn check_reports_parent_problems() {
     set_parent(&a, &b);
     set_parent(&c, "sci-ffffff");
     set_parent(&d, "fam-000001");
+    set_parent(&e, &e);
     let out = env.cmd(&dir).args(["check"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -156,17 +159,29 @@ fn check_reports_parent_problems() {
     assert!(kinds.contains(&("parent_cycle".into(), a.clone().min(b.clone()))), "{check}");
     assert!(kinds.contains(&("dangling_parent".into(), c.clone())), "{check}");
     assert!(kinds.contains(&("foreign_parent".into(), d.clone())), "{check}");
+    assert!(kinds.contains(&("parent_cycle".into(), e.clone())), "self-edge: {check}");
     assert_eq!(
         kinds.iter().filter(|(kind, _)| kind == "parent_cycle").count(),
-        1,
-        "a cycle is reported once, at its lowest member: {check}"
+        2,
+        "each cycle is reported once, at its lowest member: {check}"
+    );
+    assert!(
+        !kinds.iter().any(|(kind, _)| kind == "parse"),
+        "a self-edge is a hierarchy finding, not a parse error: {check}"
     );
 }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --test cli parent_is_validated_persisted_and_clearable editor_path_validates_parent check_reports_parent_problems`
+Run each (cargo accepts one filter before `--`):
+
+```bash
+cargo test --test cli parent_is_validated_persisted_and_clearable
+cargo test --test cli editor_path_validates_parent
+cargo test --test cli check_reports_parent_problems
+```
+
 Expected: FAIL (clap rejects `--parent`; the test for check fails on missing finding kinds).
 
 - [ ] **Step 3: Add the field to the model and the file format**
@@ -195,13 +210,7 @@ In `parse_task`, in the `Task { ... }` literal after `depends,`:
             .map_err(|e| perr(file, e.to_string()))?,
 ```
 
-In `validate_task`, after the self-dependency check:
-
-```rust
-    if t.parent.as_ref() == Some(&t.id) {
-        return Err(Error::Validation("task cannot be its own parent".into()));
-    }
-```
+`validate_task` does not learn any parent rule. Self-parent, foreign parent, missing parent, and loops are all hierarchy facts, and `hierarchy::validate_parent` (Step 4) owns them so that the editor path reports `cycle` and `check` reports `parent_cycle`, never `parse`. A file with `parent` equal to its own id therefore parses; it is `write_task` and `check` that reject it.
 
 In `serialize_task`, replace the `pairs.extend([...])` block so `parent` follows `depends`:
 
@@ -226,13 +235,13 @@ Add a unit test in `src/format.rs` tests:
 
 ```rust
     #[test]
-    fn parent_roundtrips_after_depends_and_rejects_self() {
+    fn parent_roundtrips_after_depends() {
         let with_parent = MINIMAL.replace("depends: []", "depends: []\nparent: sci-000002");
         let t = parse_task(&with_parent, "x").unwrap();
         assert_eq!(t.parent.as_ref().unwrap().to_string(), "sci-000002");
         assert_eq!(serialize_task(&t), with_parent);
         let own = MINIMAL.replace("depends: []", "depends: []\nparent: sci-000001");
-        assert!(parse_task(&own, "x").is_err());
+        assert!(parse_task(&own, "x").is_ok(), "self-parent is a hierarchy rule, not a format rule");
     }
 ```
 
@@ -349,6 +358,34 @@ mod tests {
 
 Add `mod hierarchy;` to `src/main.rs` in alphabetical position (after `mod frontmatter;`).
 
+Hook the validation into the single writer so that every command that rewrites a task, including `note`, `start`, `done`, `dep`, unrelated `edit` flags, and the feedback plan's direct writes, refuses a dangling, foreign, or cyclic parent. `src/repo.rs`:
+
+```rust
+    pub fn write_task(&self, task: &Task) -> Result<()> {
+        crate::hierarchy::validate_parent(self, task)?;
+        atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
+    }
+```
+
+Add a unit test in `src/repo.rs` tests:
+
+```rust
+    #[test]
+    fn write_task_refuses_a_bad_parent_on_any_write() {
+        let (_dir, p) = temp_project();
+        let mut t = sample(&p);
+        t.parent = Some(TaskId {
+            prefix: "tst".into(),
+            hex: "ffffff".into(),
+        });
+        assert!(matches!(p.write_task(&t), Err(Error::UnresolvableId(_))));
+        t.parent = Some(t.id.clone());
+        assert!(matches!(p.write_task(&t), Err(Error::Cycle(_))));
+        t.parent = None;
+        p.write_task(&t).unwrap();
+    }
+```
+
 - [ ] **Step 5: Wire the flags and the write paths**
 
 `src/cli.rs`, in `FieldArgs` after `step`:
@@ -372,9 +409,10 @@ In `Command::Edit` after `force`:
 ```rust
     if let Some(parent) = &fields.parent {
         task.parent = Some(TaskId::parse(parent)?);
-        crate::hierarchy::validate_parent(&ctx.project, task)?;
     }
 ```
+
+No validation call here: `save` ends in `write_task`, which validates (Step 4), and doing it once keeps the rule in one place.
 
 In `run`, the `Command::Edit` arm gains `no_parent` in both the pattern and the call: `edit::run(open_ctx(dir)?, id, title, status, force, no_parent, fields)`.
 
@@ -386,11 +424,7 @@ In `run`, the `Command::Edit` arm gains `no_parent` in both the pattern and the 
     }
 ```
 
-In `editor`, after `check_invariants(&original, &edited).map_err(keep)?;`:
-
-```rust
-    crate::hierarchy::validate_parent(&ctx.project, &edited).map_err(keep)?;
-```
+The editor path needs no extra call either: it ends in `save(&ctx, &mut edited).map_err(keep)?`, so a bad parent comes back as `cycle`, `unresolvable_id`, or `validation` with the "edit kept at" suffix like any other rejection.
 
 - [ ] **Step 6: Add the check findings**
 
@@ -441,7 +475,7 @@ After the dependency-cycle loop (before `Ok(Output::Check(...))`):
     }
 ```
 
-Note the self-parent file is rejected at parse time (Step 3) and surfaces as a `parse` finding; `parent_cycle` never sees it.
+A self-edge is a two-element path from `parent_cycle` and is reported as `parent_cycle` like any longer loop; the e2e test asserts no `parse` finding appears for it.
 
 - [ ] **Step 7: Run all gates**
 
@@ -553,7 +587,14 @@ fn check_warns_on_open_child_of_closed_parent() {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --test cli closing_rules_walk_descendants ready_never_lists check_warns_on_open_child`
+Run each:
+
+```bash
+cargo test --test cli closing_rules_walk_descendants
+cargo test --test cli ready_never_lists
+cargo test --test cli check_warns_on_open_child
+```
+
 Expected: FAIL (`done a` succeeds today; `child_count` missing).
 
 - [ ] **Step 3: Add subtree helpers to `src/hierarchy.rs`**
@@ -689,7 +730,7 @@ Update the unit test `ready_requires_todo_and_closed_deps` to pass `false` as th
         assert!(!is_ready(&a, true, &closed_all), "parents are never ready");
 ```
 
-`src/commands/list.rs`: every `TaskSummary::from` becomes `TaskSummary::of(task, &all)` where `all` is the full local scan. In `list`, the scan is already bound as `tasks` before filtering; clone it first: `let all = tasks.clone();` right after `let mut tasks = ctx.project.scan()?;` (before the all-projects extension) and use `&all` for counts. In `ready_tasks`, the call becomes:
+`src/commands/list.rs`: every `TaskSummary::from` becomes `TaskSummary::of(task, &all)`. In `list`, bind `let all = tasks.clone();` immediately **after** the `--all-projects` extension loop and before `tasks.retain`, so that foreign rows get their counts from their own project's tasks (the extension pulls in each project's full scan, and `parent` never crosses projects, so counting within the combined set is exact). In `ready_tasks`, the call becomes:
 
 ```rust
         let has_children = !crate::hierarchy::children(all, &task.id).is_empty();
@@ -835,7 +876,13 @@ fn show_reports_parent_and_children_and_list_filters_by_parent() {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --test cli tree_nests_prunes_and_orders show_reports_parent_and_children`
+Run each:
+
+```bash
+cargo test --test cli tree_nests_prunes_and_orders
+cargo test --test cli show_reports_parent_and_children
+```
+
 Expected: FAIL (`tree` is an unknown subcommand, exit 2).
 
 - [ ] **Step 3: Output shapes**
@@ -1135,6 +1182,15 @@ fn prime_shows_roadmap_and_closeout() {
     assert_eq!(prime["closeout"][0]["id"], goal, "a doing parent surfaces: {prime}");
     assert!(prime["ready"].as_array().unwrap().iter().all(|t| t["id"] != goal));
 
+    let parked = id_of(env.json(&dir, &["add", "Parked", "--status", "idea"]));
+    let kid = id_of(env.json(&dir, &["add", "Kid", "--parent", &parked]));
+    env.json(&dir, &["done", &kid]);
+    let prime = env.json(&dir, &["prime"]);
+    assert!(
+        prime["closeout"].as_array().unwrap().iter().all(|t| t["id"] != parked),
+        "an idea is never a close-out candidate: {prime}"
+    );
+
     let out = env.cmd(&dir).args(["--pretty", "prime"]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("\ncloseout:\n"), "{text}");
@@ -1183,7 +1239,8 @@ Note the partition uses `children.is_empty()` on the pruned node, which is what 
     let mut closeout: Vec<Task> = all
         .iter()
         .filter(|task| {
-            task.status.is_open()
+            // spec §4.3: todo, doing, or blocked; an idea is open but not a candidate
+            matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
                 && !crate::hierarchy::children(&all, &task.id).is_empty()
                 && crate::hierarchy::open_descendants(&all, &task.id).is_empty()
         })
