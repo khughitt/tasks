@@ -57,8 +57,9 @@ Behaviour, in order:
    with `config` and a message saying to clone the upstream repository and run
    `tasks init` there. There is no configuration key for the target; the prefix is the
    contract. Filing from inside the target itself is allowed and yields `from:tasks`.
-3. **Look for an open match** (§4) unless `--new` is given. An exact match recurs. Similar
-   but inexact candidates are never merged automatically: the command fails with
+3. **Look for an open match** (§4) unless `--new` is given. Exactly one exact match
+   recurs. Multiple exact matches, or similar but inexact candidates when there is no
+   unique exact match, are never merged automatically: the command fails with
    `ambiguous`, listing the candidate ids and titles, and the reporter reruns with
    `--recur ID` or `--new`. `--recur ID` names the match explicitly and skips the search;
    the id must be an open task in the target tagged `feedback`, else `validation`.
@@ -66,9 +67,10 @@ Behaviour, in order:
    - Match: append a note reading `feedback from <prefix>: <summary>` and, if `--body` was
      given, a second note `detail from <prefix>: <text>` (single line, as all notes are;
      multi-line detail is rejected with `validation` on recurrence). Add `from:<prefix>`
-     and `<category>` to the tags if absent. The task's `updated` is refreshed, so it
-     rises in `list`; timestamps have second precision, so a repeat within the same
-     second keeps the same value. The write is a guarded read-modify-write: the file's hash is taken on read
+     and `<category>` to the tags if absent. The task's `updated` is set to the current
+     whole second; when it advances, the task moves ahead of older tasks at the same
+     priority in `list`, while a same-second repeat keeps its position. The write is a
+     guarded read-modify-write: the file's hash is taken on read
      and checked again immediately before the atomic replace; on a mismatch the whole
      step is retried from the read, up to eight times, then fails with
      `concurrent_modification`. Every read also re-checks that the task is still open
@@ -107,7 +109,8 @@ what makes an unfiled report hard to miss.
 Candidates are the target's open tasks tagged `feedback`. Titles are normalized to
 lowercase ASCII-alphanumeric tokens of three or more characters, in order.
 
-- **Exact:** identical normalized token sequences. This recurs automatically.
+- **Exact:** identical normalized token sequences. Exactly one recurs automatically; two
+  or more are ambiguous and sort first in the candidate list with score 1.0.
 - **Similar:** Jaccard similarity of the token sets at least 0.6 but not exact. These are
   advisory only and produce the `ambiguous` error in §3, in descending similarity, ties
   to the older task.
@@ -177,6 +180,8 @@ End to end (`tests/cli.rs`), with two projects in one registry, one registered a
 - a similar but inexact summary fails with `ambiguous` naming the candidate and writes
   nothing; `--new` then creates a second file and `--recur <id>` recurs; `--recur` rejects
   an id that is not open feedback;
+- after `--new` creates a second exact title, another automatic report is ambiguous and
+  names both exact candidates;
 - a dissimilar summary creates a new entry (threshold check both sides of 0.6);
 - no `tasks` prefix in the registry, or a registered root without a config, fails with
   `config` and writes nothing; running outside any project fails with `no_project`;
