@@ -311,6 +311,89 @@ impl Project {
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
     }
 
+    /// Project-relative paths of changed or untracked files under tasks/, or `None` in
+    /// exactly two documented cases: git itself says the root is not inside a repository,
+    /// or there is no git executable. Any other git failure (permissions, a corrupt index,
+    /// an unexpected exit) is an `io` error, not a skip.
+    ///
+    /// Discovery is git's: `rev-parse --show-toplevel`. A repository whose HEAD is
+    /// unreadable is reported by git as "not a git repository" and is treated the same
+    /// way, since distinguishing the two would mean reimplementing discovery. `LC_ALL=C`
+    /// pins git's messages to English so that the one string match is stable.
+    pub fn uncommitted_task_files(&self) -> Result<Option<Vec<String>>> {
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .env("LC_ALL", "C")
+                .current_dir(&self.root)
+                .output()
+        };
+        let toplevel = match git(&["rev-parse", "--show-toplevel"]) {
+            Ok(output) if output.status.success() => {
+                PathBuf::from(String::from_utf8_lossy(&output.stdout).trim_end())
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if stderr.contains("not a git repository") {
+                    return Ok(None);
+                }
+                return Err(Error::Io(format!(
+                    "git rev-parse in {} failed ({}): {}",
+                    self.root.display(),
+                    output.status,
+                    stderr.trim()
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let output = git(&[
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--",
+            "tasks/",
+        ])?;
+        if !output.status.success() {
+            return Err(Error::Io(format!(
+                "git status in {} failed ({}): {}",
+                self.root.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        // porcelain v1 with -z: NUL-terminated records, paths verbatim (no quoting of
+        // spaces or non-ASCII), and a rename or copy record carries the new path in the
+        // record and the old path as the next NUL-terminated field. Paths are relative to
+        // the repository top level, which is not the project root for a nested project.
+        let mut files = Vec::new();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut fields = stdout.split('\0').filter(|field| !field.is_empty());
+        while let Some(record) = fields.next() {
+            let (status, repo_relative) = record.split_at(3.min(record.len()));
+            if status.starts_with(['R', 'C']) {
+                fields.next(); // the source path of the rename or copy
+            }
+            let absolute = toplevel.join(repo_relative); // bound first: strip_prefix borrows it
+            let Ok(relative) = absolute.strip_prefix(&self.root) else {
+                return Err(Error::Io(format!(
+                    "git status reported {repo_relative:?}, which is not under {}",
+                    self.root.display()
+                )));
+            };
+            let name = relative
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if name.ends_with(".tmp") || name.ends_with(".edit.md") {
+                continue; // transient files of an in-flight write or edit
+            }
+            files.push(relative.display().to_string());
+        }
+        Ok(Some(files))
+    }
+
     /// Assigns a fresh id and links the file into place with an exclusive operation, so a
     /// concurrent creator that drew the same id can never be overwritten: on a collision
     /// the id is regenerated. The temp file lives under tasks/ like every other write.

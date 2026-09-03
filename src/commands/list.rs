@@ -172,6 +172,12 @@ pub fn prime(mut ctx: Ctx) -> Result<Output> {
         .cloned()
         .collect();
     sort_ready(&mut closeout);
+    if let Some(files) = ctx.project.uncommitted_task_files()?
+        && !files.is_empty()
+    {
+        ctx.warnings
+            .push(format!("uncommitted task files: {}", files.join(", ")));
+    }
     Ok(Output::Prime(PrimeOut {
         prefix: ctx.project.prefix.clone(),
         counts,

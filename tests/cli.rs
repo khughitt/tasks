@@ -1977,3 +1977,97 @@ fn show_resolves_a_foreign_id_read_only() {
     std::fs::write(&registry, text).unwrap();
     assert_eq!(env.fail(&sci, &["show", "zzz-000001"]), "config");
 }
+
+#[test]
+fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
+    let mut env = TestEnv::new();
+    let plain = env.init("sci");
+    env.json(&plain, &["add", "Loose"]);
+    assert_eq!(
+        env.json(&plain, &["prime"])["warnings"],
+        serde_json::json!([])
+    );
+
+    let repo = env.init("fam");
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&repo)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let id = id_of(env.json(&repo, &["add", "Unfiled"]));
+    let text = env.json(&repo, &["prime"])["warnings"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        text,
+        format!("uncommitted task files: tasks/.config.toml, tasks/{id}.md"),
+        "the config counts too; it is a changed file under tasks/"
+    );
+
+    // a project nested inside a larger repository reports project-relative paths
+    let outer = tempfile::tempdir().unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(outer.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    // the directory name has a space: without -z git would quote the whole path
+    std::fs::create_dir_all(outer.path().join("sub space")).unwrap();
+    let nested = outer.path().join("sub space").canonicalize().unwrap();
+    env.json(&nested, &["init", "--prefix", "nst"]);
+    let id = id_of(env.json(&nested, &["add", "Deep"]));
+    let text = env.json(&nested, &["prime"])["warnings"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        text,
+        format!("uncommitted task files: tasks/.config.toml, tasks/{id}.md"),
+        "project-relative, unquoted: not \"sub space/tasks/…\""
+    );
+
+    // a staged rename record carries two paths; only the new one is reported. The file
+    // renamed is a dotfile, which the task scanner skips, because renaming a task file
+    // would break id == filename and fail prime's scan before the warning is built
+    std::fs::write(nested.join("tasks/.keep"), "").unwrap();
+    let add = std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&nested)
+        .status()
+        .unwrap();
+    assert!(add.success());
+    let commit = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "seed",
+        ])
+        .current_dir(&nested)
+        .status()
+        .unwrap();
+    assert!(commit.success());
+    let renamed = std::process::Command::new("git")
+        .args(["mv", "tasks/.keep", "tasks/.kept"])
+        .current_dir(&nested)
+        .status()
+        .unwrap();
+    assert!(renamed.success());
+    let text = env.json(&nested, &["prime"])["warnings"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(text, "uncommitted task files: tasks/.kept", "{text}");
+
+    // a broken repository is an error, not a silent skip: a corrupt index makes
+    // `git status` fail after discovery succeeded
+    std::fs::write(outer.path().join(".git/index"), "garbage").unwrap();
+    assert_eq!(env.fail(&nested, &["prime"]), "io");
+}
