@@ -307,6 +307,7 @@ impl Project {
     }
 
     pub fn write_task(&self, task: &Task) -> Result<()> {
+        crate::hierarchy::validate_parent(self, task)?;
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
     }
 
@@ -348,6 +349,7 @@ mod tests {
             created: crate::time::now(),
             updated: crate::time::now(),
             depends: vec![],
+            parent: None,
             tags: vec![],
             spec: None,
             plan: None,
@@ -401,6 +403,21 @@ mod tests {
                 .to_string_lossy()
                 .ends_with(".tmp")
         }));
+    }
+
+    #[test]
+    fn write_task_refuses_a_bad_parent_on_any_write() {
+        let (_dir, p) = temp_project();
+        let mut t = sample(&p);
+        t.parent = Some(TaskId {
+            prefix: "tst".into(),
+            hex: "ffffff".into(),
+        });
+        assert!(matches!(p.write_task(&t), Err(Error::UnresolvableId(_))));
+        t.parent = Some(t.id.clone());
+        assert!(matches!(p.write_task(&t), Err(Error::Cycle(_))));
+        t.parent = None;
+        p.write_task(&t).unwrap();
     }
 
     #[test]

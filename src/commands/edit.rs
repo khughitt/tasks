@@ -29,6 +29,7 @@ pub fn run(
     title: Option<String>,
     status: Option<String>,
     force: bool,
+    no_parent: bool,
     mut fields: FieldArgs,
 ) -> Result<Output> {
     if force && status.as_deref() != Some("done") {
@@ -43,7 +44,9 @@ pub fn run(
         || !fields.depends.is_empty()
         || fields.spec.is_some()
         || fields.plan.is_some()
-        || fields.step.is_some();
+        || fields.step.is_some()
+        || fields.parent.is_some()
+        || no_parent;
     if !has_flags {
         return editor(ctx, id);
     }
@@ -56,6 +59,9 @@ pub fn run(
     }
     if let Some(title) = title {
         task.title = title;
+    }
+    if no_parent {
+        task.parent = None;
     }
     apply_fields(&ctx, &mut task, &fields)?;
     if let Some(status) = status {

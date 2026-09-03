@@ -22,6 +22,7 @@ pub fn run(ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Result
         created: now.clone(),
         updated: now,
         depends: vec![],
+        parent: None,
         tags: vec![],
         spec: None,
         plan: None,

@@ -3,9 +3,9 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Note, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 13] = [
-    "id", "title", "status", "priority", "size", "owner", "created", "updated", "depends", "tags",
-    "spec", "plan", "step",
+const KEYS: [&str; 14] = [
+    "id", "title", "status", "priority", "size", "owner", "created", "updated", "depends",
+    "parent", "tags", "spec", "plan", "step",
 ];
 
 fn perr(file: &str, detail: impl Into<String>) -> Error {
@@ -94,6 +94,10 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         created,
         updated,
         depends,
+        parent: scalar("parent")?
+            .map(|p| TaskId::parse(&p))
+            .transpose()
+            .map_err(|e| perr(file, e.to_string()))?,
         tags: list("tags")?,
         spec: scalar("spec")?,
         plan: scalar("plan")?,
@@ -275,8 +279,11 @@ pub fn serialize_task(t: &Task) -> String {
             String::from("depends"),
             Value::List(t.depends.iter().map(ToString::to_string).collect()),
         ),
-        (String::from("tags"), Value::List(t.tags.clone())),
     ]);
+    if let Some(parent) = &t.parent {
+        pairs.push(("parent".into(), s(&parent.to_string())));
+    }
+    pairs.push((String::from("tags"), Value::List(t.tags.clone())));
     if let Some(v) = &t.spec {
         pairs.push(("spec".into(), s(v)));
     }
@@ -329,6 +336,18 @@ mod tests {
         assert_eq!(t.body, "");
         assert!(t.notes.is_empty());
         assert_eq!(serialize_task(&t), MINIMAL);
+    }
+    #[test]
+    fn parent_roundtrips_after_depends() {
+        let with_parent = MINIMAL.replace("depends: []", "depends: []\nparent: sci-000002");
+        let t = parse_task(&with_parent, "x").unwrap();
+        assert_eq!(t.parent.as_ref().unwrap().to_string(), "sci-000002");
+        assert_eq!(serialize_task(&t), with_parent);
+        let own = MINIMAL.replace("depends: []", "depends: []\nparent: sci-000001");
+        assert!(
+            parse_task(&own, "x").is_ok(),
+            "self-parent is a hierarchy rule, not a format rule"
+        );
     }
     #[test]
     fn rejects_bad_values() {

@@ -36,6 +36,9 @@ pub struct FieldArgs {
     pub plan: Option<String>,
     #[arg(long)]
     pub step: Option<String>,
+    /// Make this task part of another task (same project).
+    #[arg(long)]
+    pub parent: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -82,6 +85,9 @@ pub enum Command {
         status: Option<String>,
         #[arg(long)]
         force: bool,
+        /// Detach from the parent.
+        #[arg(long, conflicts_with = "parent")]
+        no_parent: bool,
         #[command(flatten)]
         fields: FieldArgs,
     },

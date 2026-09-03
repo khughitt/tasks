@@ -3,6 +3,7 @@ mod commands;
 mod error;
 mod format;
 mod frontmatter;
+mod hierarchy;
 mod model;
 mod output;
 mod query;

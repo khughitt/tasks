@@ -68,6 +68,23 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 }
             }
         }
+        if let Some(parent) = &task.parent {
+            if parent.prefix != ctx.project.prefix {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "foreign_parent",
+                    format!("parent {parent} is not in this project"),
+                ));
+            } else if !ctx.project.task_path(parent).try_exists()? {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "dangling_parent",
+                    format!("parent {parent} does not exist"),
+                ));
+            }
+        }
         for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
             let Some(path) = path else { continue };
             if !ctx.project.root.join(path).is_file() {
@@ -136,6 +153,27 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 "cycle_unverifiable",
                 format!("cannot verify acyclicity through unreachable {id}"),
             ));
+        }
+    }
+
+    let mut seen_parent_cycles = BTreeSet::new();
+    for task in &tasks {
+        if let Some(cycle) = crate::hierarchy::parent_cycle(&tasks, &task.id) {
+            let mut key: Vec<String> = cycle[..cycle.len() - 1]
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            key.sort();
+            if seen_parent_cycles.insert(key) {
+                let lowest = cycle[..cycle.len() - 1].iter().min().unwrap();
+                let path: Vec<String> = cycle.iter().map(ToString::to_string).collect();
+                errors.push(Finding {
+                    id: Some(lowest.to_string()),
+                    file: format!("tasks/{lowest}.md"),
+                    kind: "parent_cycle".into(),
+                    detail: path.join(" -> "),
+                });
+            }
         }
     }
 

@@ -76,6 +76,179 @@ fn write_doc(dir: &std::path::Path, rel: &str, text: &str) {
     std::fs::write(p, text).unwrap();
 }
 
+fn id_of(value: serde_json::Value) -> String {
+    value["id"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn parent_is_validated_persisted_and_clearable() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.init("fam");
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    let child = id_of(env.json(&dir, &["add", "Child", "--parent", &goal]));
+    let raw = env.read(&dir, &format!("tasks/{child}.md"));
+    assert!(
+        raw.contains(&format!("depends: []\nparent: {goal}\ntags: []\n")),
+        "{raw}"
+    );
+    assert_eq!(env.json(&dir, &["show", &child])["task"]["parent"], goal);
+    assert_eq!(
+        env.json(&dir, &["show", &goal])["task"]["parent"],
+        serde_json::Value::Null
+    );
+
+    assert_eq!(
+        env.fail(&dir, &["add", "x", "--parent", "sci-ffffff"]),
+        "unresolvable_id"
+    );
+    assert_eq!(
+        env.fail(&dir, &["add", "x", "--parent", "fam-000001"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&dir, &["edit", &goal, "--parent", &child]),
+        "cycle"
+    );
+    assert_eq!(env.fail(&dir, &["edit", &goal, "--parent", &goal]), "cycle");
+    let grandchild = id_of(env.json(&dir, &["add", "Grandchild", "--parent", &child]));
+    assert_eq!(
+        env.fail(&dir, &["edit", &goal, "--parent", &grandchild]),
+        "cycle"
+    );
+    let files = std::fs::read_dir(dir.join("tasks"))
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|x| x == "md")
+        })
+        .count();
+    assert_eq!(
+        files, 3,
+        "rejected adds wrote nothing: goal, child, grandchild only"
+    );
+
+    env.json(&dir, &["edit", &child, "--no-parent"]);
+    assert_eq!(
+        env.json(&dir, &["show", &child])["task"]["parent"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
+fn editor_path_validates_parent() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    let child = id_of(env.json(&dir, &["add", "Child"]));
+    let set = editor_script(
+        &dir,
+        &format!("sed -i 's/^depends: \\[\\]$/depends: []\\nparent: {goal}/' \"$1\""),
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &set)
+        .args(["edit", &child])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(env.json(&dir, &["show", &child])["task"]["parent"], goal);
+
+    let loop_back = editor_script(
+        &dir,
+        &format!("sed -i 's/^depends: \\[\\]$/depends: []\\nparent: {child}/' \"$1\""),
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &loop_back)
+        .args(["edit", &goal])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "cycle");
+}
+
+#[test]
+fn check_reports_parent_problems() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = id_of(env.json(&dir, &["add", "A"]));
+    let b = id_of(env.json(&dir, &["add", "B", "--parent", &a]));
+    let c = id_of(env.json(&dir, &["add", "C"]));
+    let d = id_of(env.json(&dir, &["add", "D"]));
+    let e = id_of(env.json(&dir, &["add", "E"]));
+    let f = id_of(env.json(&dir, &["add", "F", "--parent", &a]));
+    // a -> b loop with f as a tail into it, c dangling, d foreign, e its own parent;
+    // written by hand to simulate drift
+    let set_parent = |id: &str, parent: &str| {
+        let raw = env.read(&dir, &format!("tasks/{id}.md"));
+        std::fs::write(
+            dir.join(format!("tasks/{id}.md")),
+            raw.replace("depends: []\n", &format!("depends: []\nparent: {parent}\n")),
+        )
+        .unwrap();
+    };
+    set_parent(&a, &b);
+    set_parent(&c, "sci-ffffff");
+    set_parent(&d, "fam-000001");
+    set_parent(&e, &e);
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<(String, String)> = check["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["kind"].as_str().unwrap().to_string(),
+                f["id"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert!(
+        kinds.contains(&("parent_cycle".into(), a.clone().min(b.clone()))),
+        "{check}"
+    );
+    assert!(
+        kinds.contains(&("dangling_parent".into(), c.clone())),
+        "{check}"
+    );
+    assert!(
+        kinds.contains(&("foreign_parent".into(), d.clone())),
+        "{check}"
+    );
+    assert!(
+        kinds.contains(&("parent_cycle".into(), e.clone())),
+        "self-edge: {check}"
+    );
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|(kind, _)| kind == "parent_cycle")
+            .count(),
+        2,
+        "each cycle is reported once, at its lowest member, even with the tail f: {check}"
+    );
+    assert!(
+        !kinds.iter().any(|(_, id)| id == &f),
+        "the tail is not a cycle member: {check}"
+    );
+    assert!(
+        !kinds.iter().any(|(kind, _)| kind == "parse"),
+        "a self-edge is a hierarchy finding, not a parse error: {check}"
+    );
+}
+
 #[test]
 fn add_writes_a_valid_file_and_show_reads_it_back() {
     let mut env = TestEnv::new();

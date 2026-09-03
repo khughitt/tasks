@@ -80,6 +80,9 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
         task.depends = dependencies;
         dep::ensure_acyclic(ctx, task)?;
     }
+    if let Some(parent) = &fields.parent {
+        task.parent = Some(TaskId::parse(parent)?);
+    }
     if let Some(spec) = &fields.spec {
         task.spec = Some(resolver.resolve_doc(DocKind::Spec, spec)?);
     }
@@ -210,8 +213,9 @@ pub fn run(cli: Cli) -> Result<Output> {
             title,
             status,
             force,
+            no_parent,
             fields,
-        } => edit::run(open_ctx(dir)?, id, title, status, force, fields),
+        } => edit::run(open_ctx(dir)?, id, title, status, force, no_parent, fields),
         Command::Prime => list::prime(open_ctx(dir)?),
         Command::Note { id, text } => status::note(open_ctx(dir)?, id, text),
         Command::Start { id } => status::start(open_ctx(dir)?, id),

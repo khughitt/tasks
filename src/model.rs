@@ -220,6 +220,7 @@ pub struct Task {
     pub created: String,
     pub updated: String,
     pub depends: Vec<TaskId>,
+    pub parent: Option<TaskId>,
     pub tags: Vec<String>,
     pub spec: Option<String>,
     pub plan: Option<String>,
