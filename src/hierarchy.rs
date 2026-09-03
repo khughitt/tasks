@@ -59,6 +59,37 @@ pub fn parent_cycle(tasks: &[Task], start: &TaskId) -> Option<Vec<TaskId>> {
     None
 }
 
+/// Direct children of `id`, in the order they appear in `tasks`.
+pub fn children<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
+    tasks
+        .iter()
+        .filter(|task| task.parent.as_ref() == Some(id))
+        .collect()
+}
+
+/// Every task below `id`, depth first. A visited set makes a corrupt loop terminate.
+pub fn descendants<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
+    let mut out = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut stack: Vec<&TaskId> = vec![id];
+    while let Some(current) = stack.pop() {
+        for child in children(tasks, current) {
+            if visited.insert(&child.id) {
+                out.push(child);
+                stack.push(&child.id);
+            }
+        }
+    }
+    out
+}
+
+pub fn open_descendants<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
+    descendants(tasks, id)
+        .into_iter()
+        .filter(|task| task.status.is_open())
+        .collect()
+}
+
 fn join(path: &[TaskId]) -> String {
     path.iter()
         .map(ToString::to_string)
@@ -133,5 +164,20 @@ mod tests {
             members(&from_tail),
             "same set, so check dedupes"
         );
+    }
+
+    #[test]
+    fn open_descendants_see_through_a_closed_middle_node() {
+        let a = task("xx-000001", None, Status::Todo);
+        let b = task("xx-000002", Some("xx-000001"), Status::Done);
+        let c = task("xx-000003", Some("xx-000002"), Status::Todo);
+        let all = [a.clone(), b, c];
+        assert_eq!(children(&all, &a.id).len(), 1);
+        assert_eq!(descendants(&all, &a.id).len(), 2);
+        let open: Vec<String> = open_descendants(&all, &a.id)
+            .iter()
+            .map(|t| t.id.to_string())
+            .collect();
+        assert_eq!(open, ["xx-000003"]);
     }
 }

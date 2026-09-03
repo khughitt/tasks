@@ -1470,3 +1470,86 @@ fn check_reports_a_cycle_at_its_lowest_member() {
         .unwrap();
     assert_eq!(cycle["id"], ids[1]);
 }
+
+#[test]
+fn closing_rules_walk_descendants() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = id_of(env.json(&dir, &["add", "A"]));
+    let b = id_of(env.json(&dir, &["add", "B", "--parent", &a]));
+    let c = id_of(env.json(&dir, &["add", "C", "--parent", &b]));
+    assert_eq!(env.fail(&dir, &["done", &a]), "open_descendants");
+    assert_eq!(env.fail(&dir, &["drop", &a]), "open_descendants");
+    env.json(&dir, &["done", &b, "forced past c", "--force"]);
+    assert_eq!(
+        env.fail(&dir, &["done", &a]),
+        "open_descendants",
+        "c is still open under the force-closed b"
+    );
+    let out = env
+        .cmd(&dir)
+        .args(["drop", &a, "--force"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "drop has no override flag");
+    env.json(&dir, &["done", &c]);
+    env.json(&dir, &["done", &a]);
+    assert_eq!(env.json(&dir, &["show", &a])["task"]["status"], "done");
+}
+
+#[test]
+fn ready_never_lists_a_task_with_children_and_summaries_carry_counts() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    let leaf = id_of(env.json(&dir, &["add", "Leaf", "--parent", &goal]));
+    let ready = env.json(&dir, &["ready"]);
+    let ids: Vec<&str> = ready["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [leaf.as_str()]);
+    let list = env.json(&dir, &["list"]);
+    let goal_row = list["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == goal)
+        .unwrap();
+    assert_eq!(goal_row["parent"], serde_json::Value::Null);
+    assert_eq!(goal_row["child_count"], 1);
+    assert_eq!(goal_row["open_descendant_count"], 1);
+    let leaf_row = list["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == leaf)
+        .unwrap();
+    assert_eq!(leaf_row["parent"], goal);
+    assert_eq!(leaf_row["child_count"], 0);
+    env.json(&dir, &["done", &leaf]);
+    let ready = env.json(&dir, &["ready"]);
+    assert_eq!(
+        ready["tasks"].as_array().unwrap().len(),
+        0,
+        "a parent is never ready"
+    );
+}
+
+#[test]
+fn check_warns_on_open_child_of_closed_parent() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = id_of(env.json(&dir, &["add", "A"]));
+    let b = id_of(env.json(&dir, &["add", "B", "--parent", &a]));
+    env.json(&dir, &["done", &b]);
+    env.json(&dir, &["done", &a]);
+    env.json(&dir, &["edit", &b, "--status", "todo"]);
+    let check = env.json(&dir, &["check"]);
+    assert_eq!(check["errors"], serde_json::json!([]));
+    let warning = &check["warnings"].as_array().unwrap()[0];
+    assert_eq!(warning["kind"], "open_child_of_closed_parent");
+    assert_eq!(warning["id"], b);
+}

@@ -162,6 +162,17 @@ pub fn transition(ctx: &Ctx, task: &mut Task, to: Status, force: bool) -> Result
             ));
         }
     }
+    let closing = matches!(to, Status::Done | Status::Dropped) && task.status != to;
+    if closing && !(force && to == Status::Done) {
+        let all = ctx.project.scan()?;
+        let open: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id)
+            .iter()
+            .map(|task| task.id.to_string())
+            .collect();
+        if !open.is_empty() {
+            return Err(Error::OpenDescendants(task.id.to_string(), open.join(", ")));
+        }
+    }
     task.status = to;
     Ok(())
 }

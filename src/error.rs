@@ -18,6 +18,8 @@ pub enum Error {
     Validation(String),
     #[error("{0} has open dependencies: {1}")]
     OpenDependencies(String, String),
+    #[error("{0} has open descendants: {1}")]
+    OpenDescendants(String, String),
     #[error("invalid transition {0} -> {1}")]
     InvalidTransition(String, String),
     #[error("dependency cycle: {0}")]
@@ -54,6 +56,7 @@ impl Error {
             },
             Error::Validation(detail) => Error::Validation(detail + suffix),
             Error::OpenDependencies(id, detail) => Error::OpenDependencies(id, detail + suffix),
+            Error::OpenDescendants(id, detail) => Error::OpenDescendants(id, detail + suffix),
             Error::InvalidTransition(from, to) => Error::InvalidTransition(from, to + suffix),
             Error::Cycle(detail) => Error::Cycle(detail + suffix),
             Error::Ambiguous(detail) => Error::Ambiguous(detail + suffix),
@@ -77,6 +80,7 @@ impl Error {
             Error::Parse { .. } => "parse",
             Error::Validation(_) => "validation",
             Error::OpenDependencies(..) => "open_dependencies",
+            Error::OpenDescendants(..) => "open_descendants",
             Error::InvalidTransition(..) => "invalid_transition",
             Error::Cycle(_) => "cycle",
             Error::Ambiguous(_) => "ambiguous",

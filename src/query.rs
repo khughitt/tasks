@@ -127,8 +127,11 @@ pub fn render_graph(tasks: &[Task], format: GraphFormat) -> String {
 }
 
 /// `lookup` returns Some(closed?) for a reachable dependency, None if unreachable.
-pub fn is_ready(task: &Task, lookup: &dyn Fn(&TaskId) -> Option<bool>) -> bool {
-    task.status == Status::Todo && task.depends.iter().all(|d| lookup(d) == Some(true))
+/// A task with children is a goal, not work, and is never ready.
+pub fn is_ready(task: &Task, has_children: bool, lookup: &dyn Fn(&TaskId) -> Option<bool>) -> bool {
+    task.status == Status::Todo
+        && !has_children
+        && task.depends.iter().all(|d| lookup(d) == Some(true))
 }
 
 pub fn sort_list(tasks: &mut [Task]) {
@@ -193,13 +196,14 @@ mod tests {
         let closed_all = |_: &TaskId| Some(true);
         let open_one = |id: &TaskId| Some(id.hex != "000002");
         let unreachable = |id: &TaskId| if id.prefix == "yy" { None } else { Some(true) };
-        assert!(is_ready(&a, &closed_all));
-        assert!(!is_ready(&a, &open_one));
-        assert!(!is_ready(&a, &unreachable));
+        assert!(is_ready(&a, false, &closed_all));
+        assert!(!is_ready(&a, false, &open_one));
+        assert!(!is_ready(&a, false, &unreachable));
         let idea = t("xx-000009", Status::Idea, 0, None, &[]);
-        assert!(!is_ready(&idea, &closed_all));
+        assert!(!is_ready(&idea, false, &closed_all));
         let doing = t("xx-000008", Status::Doing, 0, None, &[]);
-        assert!(!is_ready(&doing, &closed_all));
+        assert!(!is_ready(&doing, false, &closed_all));
+        assert!(!is_ready(&a, true, &closed_all), "parents are never ready");
     }
 
     #[test]

@@ -34,6 +34,7 @@ pub fn list(
             tasks.extend(Project::open(root)?.scan()?);
         }
     }
+    let all = tasks.clone();
     tasks.retain(|task| {
         let status_ok = if statuses.is_empty() {
             task.status.is_open()
@@ -59,7 +60,10 @@ pub fn list(
     }
     sort_list(&mut tasks);
     Ok(Output::List(ListOut {
-        tasks: tasks.iter().map(TaskSummary::from).collect(),
+        tasks: tasks
+            .iter()
+            .map(|task| TaskSummary::of(task, &all))
+            .collect(),
         warnings: ctx.warnings,
     }))
 }
@@ -97,7 +101,8 @@ pub fn ready_tasks(ctx: &mut Ctx, all: &[Task]) -> Result<Vec<Task>> {
                 ));
             }
         }
-        if is_ready(task, &lookup) {
+        let has_children = !crate::hierarchy::children(all, &task.id).is_empty();
+        if is_ready(task, has_children, &lookup) {
             ready.push(task.clone());
         }
     }
@@ -117,7 +122,10 @@ pub fn ready(mut ctx: Ctx, size: Option<String>, limit: Option<usize>) -> Result
         tasks.truncate(limit);
     }
     Ok(Output::List(ListOut {
-        tasks: tasks.iter().map(TaskSummary::from).collect(),
+        tasks: tasks
+            .iter()
+            .map(|task| TaskSummary::of(task, &all))
+            .collect(),
         warnings: ctx.warnings,
     }))
 }
@@ -145,8 +153,14 @@ pub fn prime(mut ctx: Ctx) -> Result<Output> {
     Ok(Output::Prime(PrimeOut {
         prefix: ctx.project.prefix.clone(),
         counts,
-        ready: ready.iter().map(TaskSummary::from).collect(),
-        doing: doing.iter().map(TaskSummary::from).collect(),
+        ready: ready
+            .iter()
+            .map(|task| TaskSummary::of(task, &all))
+            .collect(),
+        doing: doing
+            .iter()
+            .map(|task| TaskSummary::of(task, &all))
+            .collect(),
         warnings: ctx.warnings,
     }))
 }

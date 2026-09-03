@@ -50,10 +50,14 @@ pub struct TaskSummary {
     pub updated: String,
     pub tags: Vec<String>,
     pub depends: Vec<String>,
+    pub parent: Option<String>,
+    pub child_count: usize,
+    pub open_descendant_count: usize,
 }
 
-impl From<&Task> for TaskSummary {
-    fn from(task: &Task) -> TaskSummary {
+impl TaskSummary {
+    /// `all` is the scan the row came from; counts are computed against it.
+    pub fn of(task: &Task, all: &[Task]) -> TaskSummary {
         TaskSummary {
             id: task.id.to_string(),
             title: task.title.clone(),
@@ -64,6 +68,9 @@ impl From<&Task> for TaskSummary {
             updated: task.updated.clone(),
             tags: task.tags.clone(),
             depends: task.depends.iter().map(ToString::to_string).collect(),
+            parent: task.parent.as_ref().map(ToString::to_string),
+            child_count: crate::hierarchy::children(all, &task.id).len(),
+            open_descendant_count: crate::hierarchy::open_descendants(all, &task.id).len(),
         }
     }
 }

@@ -85,6 +85,22 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ));
             }
         }
+        if let Some(parent) = &task.parent
+            && task.status.is_open()
+            && let Some(parent_task) = tasks.iter().find(|candidate| &candidate.id == parent)
+            && !parent_task.status.is_open()
+        {
+            warnings.push(finding(
+                Some(task),
+                file.clone(),
+                "open_child_of_closed_parent",
+                format!(
+                    "open under {} which is {}",
+                    parent,
+                    parent_task.status.as_str()
+                ),
+            ));
+        }
         for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
             let Some(path) = path else { continue };
             if !ctx.project.root.join(path).is_file() {
