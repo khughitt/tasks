@@ -1948,3 +1948,32 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
         "validation"
     );
 }
+
+#[test]
+fn show_resolves_a_foreign_id_read_only() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    write_doc(&fam, "docs/specs/2026-09-03-far-design.md", "# Far\n");
+    let f = id_of(env.json(&fam, &["add", "Far", "--spec", "far"]));
+    env.json(&fam, &["note", &f, "seen from afar"]);
+    let shown = env.json(&sci, &["show", &f]);
+    assert_eq!(shown["task"]["id"], f);
+    assert_eq!(shown["task"]["notes"][0]["text"], "seen from afar");
+    let spec_path = shown["spec_path"].as_str().unwrap();
+    assert!(spec_path.starts_with(fam.to_str().unwrap()), "{spec_path}");
+    assert_eq!(env.fail(&sci, &["show", "zzz-000001"]), "unresolvable_id");
+    assert_eq!(env.fail(&sci, &["show", "fam-ffffff"]), "task_not_found");
+
+    // relationships are read from the foreign project too
+    let kid = id_of(env.json(&fam, &["add", "Kid", "--parent", &f]));
+    let shown = env.json(&sci, &["show", &f]);
+    assert_eq!(shown["children"][0]["id"], kid);
+    assert_eq!(env.json(&sci, &["show", &kid])["parent"]["id"], f);
+
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let mut text = std::fs::read_to_string(&registry).unwrap();
+    text.push_str(&format!("zzz = {:?}\n", fam.to_str().unwrap()));
+    std::fs::write(&registry, text).unwrap();
+    assert_eq!(env.fail(&sci, &["show", "zzz-000001"]), "config");
+}

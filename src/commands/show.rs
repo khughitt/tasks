@@ -1,11 +1,35 @@
-use super::{Ctx, load};
-use crate::error::Result;
+use super::Ctx;
+use crate::error::{Error, Result};
+use crate::model::TaskId;
 use crate::output::{DepInfo, Output, Related, ShowOut};
+use crate::repo::{CONFIG_REL, Project};
 use crate::resolve::Resolver;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
-    let task = load(&ctx, &id)?;
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let id = TaskId::parse(&id)?;
+    let foreign;
+    let project: &Project = if id.prefix == ctx.project.prefix {
+        &ctx.project
+    } else {
+        let Some(root) = ctx.registry.project_root(&id.prefix) else {
+            return Err(Error::UnresolvableId(id.to_string()));
+        };
+        if !root.join(CONFIG_REL).is_file() {
+            return Err(Error::UnresolvableId(id.to_string()));
+        }
+        foreign = Project::open(root)?;
+        if foreign.prefix != id.prefix {
+            return Err(Error::Config(format!(
+                "registry maps {:?} to {}, whose prefix is {:?}; fix the registry",
+                id.prefix,
+                root.display(),
+                foreign.prefix
+            )));
+        }
+        &foreign
+    };
+    let task = project.read_task(&id)?;
+    let resolver = Resolver::new(project, &ctx.registry);
     let mut depends_on = Vec::new();
     for dependency in &task.depends {
         match resolver.resolve_task(dependency)? {
@@ -31,7 +55,6 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         (Some(plan), Some(step)) => Some(resolver.step_exists(plan, step)?),
         _ => None,
     };
-    let project = &ctx.project; // the feedback plan's Task 2 replaces this binding
     let all = project.scan()?;
     let related = |task: &crate::model::Task| Related {
         id: task.id.to_string(),
