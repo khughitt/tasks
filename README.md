@@ -14,7 +14,7 @@ Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-ta
 ## Use
 
     cd <repo>
-    tasks init --prefix sci          # creates tasks/, docs/specs/, docs/plans/; registers the project
+    tasks init --prefix sci          # creates tasks/ and the doc roots; registers the project
     tasks add "Bank the ledger" -p 1 --size m --tag ledger
     tasks ready                      # what can be worked on now (JSON)
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
@@ -41,9 +41,19 @@ or per project, when a project needs to pin its own copy:
 
 ## Adopting in an existing project
 
-1. Keep historical docs in place. Structured spec links accept `docs/specs/`,
+1. Keep historical docs in place. By default spec links accept `docs/specs/`,
    `docs/designs/`, `docs/superpowers/specs/`, and `docs/superpowers/designs/`; plan links
-   use `docs/plans/`. Move only linked docs outside those directories, fixing links.
+   accept `docs/plans/`. If the project keeps them elsewhere, say so before `init`:
+
+       mkdir -p tasks && cat > tasks/.config.toml <<'EOF'
+       prefix = "sci"
+       spec_dirs = ["design", "rfcs"]
+       plan_dirs = ["planning"]
+       EOF
+
+   A configured list replaces the defaults. The roots are both the validation boundary
+   and the search path for bare names, and they are project-level only so `tasks check`
+   agrees on every machine.
 2. `tasks init --prefix <p>`.
 3. Install the skill and mention it in the project's CLAUDE.md / AGENTS.md.
 4. Require `tasks prime` at session start and `tasks check` before completion. Add
@@ -52,6 +62,6 @@ or per project, when a project needs to pin its own copy:
 
 ## Layout
 
-    tasks/.config.toml               prefix = "sci"
+    tasks/.config.toml               prefix = "sci"; optional spec_dirs / plan_dirs
     tasks/sci-4f2a9c.md              one task
     ~/.config/tasks/projects.toml    per-machine registry: prefix -> repo path

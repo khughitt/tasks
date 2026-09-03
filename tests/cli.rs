@@ -312,6 +312,133 @@ fn bare_spec_names_are_ambiguous_across_supported_directories() {
 }
 
 #[test]
+fn configured_doc_roots_replace_the_defaults() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    std::fs::write(
+        dir.join("tasks/.config.toml"),
+        "prefix = \"sci\"\nspec_dirs = [\"design/\", \"rfcs\"]\nplan_dirs = [\"planning\"]\n",
+    )
+    .unwrap();
+    write_doc(&dir, "design/2026-09-03-ledger-design.md", "# Design\n");
+    write_doc(&dir, "rfcs/0001-index.md", "# RFC\n");
+    write_doc(
+        &dir,
+        "planning/2026-09-03-ledger.md",
+        "# Plan\n\n### Task 1: bank\n",
+    );
+    write_doc(&dir, "docs/specs/2026-09-03-old-design.md", "# Old\n");
+
+    let id = env.json(
+        &dir,
+        &[
+            "add",
+            "Bank",
+            "--spec",
+            "ledger",
+            "--plan",
+            "ledger",
+            "--step",
+            "Task 1: bank",
+        ],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let shown = env.json(&dir, &["show", &id]);
+    assert_eq!(shown["task"]["spec"], "design/2026-09-03-ledger-design.md");
+    assert_eq!(shown["task"]["plan"], "planning/2026-09-03-ledger.md");
+    assert_eq!(shown["step_found"], true);
+
+    let id = env.json(&dir, &["add", "Index", "--spec", "rfcs/0001-index.md"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["spec"],
+        "rfcs/0001-index.md"
+    );
+
+    assert_eq!(
+        env.fail(
+            &dir,
+            &["add", "x", "--spec", "docs/specs/2026-09-03-old-design.md"]
+        ),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&dir, &["add", "x", "--spec", "old"]),
+        "doc_not_found"
+    );
+    let check = env.json(&dir, &["check"]);
+    assert_eq!(check["errors"].as_array().unwrap().len(), 0, "{check}");
+}
+
+#[test]
+fn check_reports_links_outside_the_configured_roots() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    write_doc(&dir, "docs/specs/2026-09-03-ledger-design.md", "# Design\n");
+    let id = env.json(&dir, &["add", "Bank", "--spec", "ledger"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    std::fs::write(
+        dir.join("tasks/.config.toml"),
+        "prefix = \"sci\"\nspec_dirs = [\"design\"]\n",
+    )
+    .unwrap();
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let errors = check["errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1, "{check}");
+    assert_eq!(errors[0]["file"], format!("tasks/{id}.md"));
+    assert_eq!(errors[0]["kind"], "parse");
+    assert!(
+        errors[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("under design/"),
+        "{check}"
+    );
+    assert_eq!(env.fail(&dir, &["show", &id]), "parse");
+}
+
+#[test]
+fn malformed_doc_roots_are_a_config_error() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for config in [
+        "prefix = \"sci\"\nspec_dirs = []\n",
+        "prefix = \"sci\"\nplan_dirs = [\"../plans\"]\n",
+        "prefix = \"sci\"\nspec_dirs = [\"/abs/specs\"]\n",
+        "prefix = \"sci\"\nspec_dirs = \"docs/specs\"\n",
+    ] {
+        std::fs::write(dir.join("tasks/.config.toml"), config).unwrap();
+        assert_eq!(env.fail(&dir, &["list"]), "config", "{config}");
+    }
+}
+
+#[test]
+fn init_creates_the_first_configured_roots() {
+    let env = TestEnv::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir_all(dir.join("tasks")).unwrap();
+    std::fs::write(
+        dir.join("tasks/.config.toml"),
+        "prefix = \"sci\"\nspec_dirs = [\"design\", \"rfcs\"]\nplan_dirs = [\"planning\"]\n",
+    )
+    .unwrap();
+    env.json(&dir, &["init", "--prefix", "sci"]);
+    assert!(dir.join("design").is_dir());
+    assert!(dir.join("planning").is_dir());
+    assert!(!dir.join("rfcs").exists());
+    assert!(!dir.join("docs").exists());
+}
+
+#[test]
 fn show_resolves_local_and_foreign_dependencies() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

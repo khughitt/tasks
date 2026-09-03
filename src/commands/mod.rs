@@ -98,12 +98,14 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
         }
         _ => {}
     }
-    validate_task(task)
+    validate_task(task)?;
+    resolver.project.validate_docs(task)
 }
 
 pub fn save(ctx: &Ctx, task: &mut Task) -> Result<()> {
     task.updated = crate::time::now();
     validate_task(task)?;
+    ctx.project.validate_docs(task)?;
     ctx.project.write_task(task)
 }
 

@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::format::{parse_task, serialize_task};
+use crate::format::{parse_task, serialize_task, validate_doc_path};
 use crate::model::{Task, TaskId, is_valid_prefix};
 use std::ffi::OsString;
 use std::io::Write;
@@ -55,15 +55,59 @@ fn atomic_write_with(
     )))
 }
 
+pub const DEFAULT_SPEC_DIRS: &[&str] = &[
+    "docs/specs",
+    "docs/designs",
+    "docs/superpowers/specs",
+    "docs/superpowers/designs",
+];
+pub const DEFAULT_PLAN_DIRS: &[&str] = &["docs/plans"];
+
 #[derive(Debug, Clone)]
 pub struct Project {
     pub root: PathBuf,
     pub prefix: String,
+    /// Roots a `spec` link may live under; also the search path for bare spec names.
+    pub spec_dirs: Vec<String>,
+    /// Roots a `plan` link may live under; also the search path for bare plan names.
+    pub plan_dirs: Vec<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Config {
     prefix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spec_dirs: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plan_dirs: Option<Vec<String>>,
+}
+
+/// Normalizes a configured doc root: one trailing slash is dropped; anything that is not a
+/// plain relative path (`a/b`, no `.`/`..`/empty segments) is a config error.
+fn doc_root(key: &str, raw: &str) -> Result<String> {
+    let dir = raw.strip_suffix('/').unwrap_or(raw);
+    let normalized = !dir.is_empty()
+        && dir
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
+    if !normalized {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: {key} entry {raw:?} must be a normalized relative path"
+        )));
+    }
+    Ok(dir.to_string())
+}
+
+fn doc_roots(key: &str, configured: Option<Vec<String>>, defaults: &[&str]) -> Result<Vec<String>> {
+    let Some(configured) = configured else {
+        return Ok(defaults.iter().map(|dir| dir.to_string()).collect());
+    };
+    if configured.is_empty() {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: {key} must list at least one directory"
+        )));
+    }
+    configured.iter().map(|raw| doc_root(key, raw)).collect()
 }
 
 impl Project {
@@ -85,16 +129,19 @@ impl Project {
             }
         }
         std::fs::create_dir_all(root.join("tasks"))?;
-        std::fs::create_dir_all(root.join("docs/specs"))?;
-        std::fs::create_dir_all(root.join("docs/plans"))?;
         if !config.exists() {
             let text = toml::to_string(&Config {
                 prefix: prefix.into(),
+                spec_dirs: None,
+                plan_dirs: None,
             })
             .expect("config serializes");
             atomic_write(&config, text.as_bytes())?;
         }
-        Self::open(root)
+        let project = Self::open(root)?;
+        std::fs::create_dir_all(project.root.join(&project.spec_dirs[0]))?;
+        std::fs::create_dir_all(project.root.join(&project.plan_dirs[0]))?;
+        Ok(project)
     }
 
     pub fn open(root: &Path) -> Result<Project> {
@@ -111,7 +158,21 @@ impl Project {
         Ok(Project {
             root,
             prefix: config.prefix,
+            spec_dirs: doc_roots("spec_dirs", config.spec_dirs, DEFAULT_SPEC_DIRS)?,
+            plan_dirs: doc_roots("plan_dirs", config.plan_dirs, DEFAULT_PLAN_DIRS)?,
         })
+    }
+
+    /// Checks that a task's `spec`/`plan` links lie under this project's configured roots.
+    /// Path shape (normalized, `.md`) is already covered by `validate_task`.
+    pub fn validate_docs(&self, task: &Task) -> Result<()> {
+        if let Some(spec) = &task.spec {
+            validate_doc_path("spec", &self.spec_dirs, spec)?;
+        }
+        if let Some(plan) = &task.plan {
+            validate_doc_path("plan", &self.plan_dirs, plan)?;
+        }
+        Ok(())
     }
 
     pub fn locate(start: &Path) -> Result<Project> {
@@ -150,6 +211,10 @@ impl Project {
         let raw = self.read_raw(id)?;
         let file = format!("tasks/{id}.md");
         let task = parse_task(&raw, &file)?;
+        self.validate_docs(&task).map_err(|error| Error::Parse {
+            file: file.clone(),
+            detail: error.to_string(),
+        })?;
         if &task.id != id {
             return Err(Error::Parse {
                 file,

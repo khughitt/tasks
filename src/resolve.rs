@@ -11,13 +11,6 @@ pub enum DocKind {
 }
 
 impl DocKind {
-    pub fn dirs(self) -> &'static [&'static str] {
-        match self {
-            DocKind::Spec => crate::format::SPEC_DIRS,
-            DocKind::Plan => crate::format::PLAN_DIRS,
-        }
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             DocKind::Spec => "spec",
@@ -62,9 +55,18 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// The project's configured roots for `kind`: the validation boundary for explicit
+    /// paths and the search path for bare names.
+    pub fn dirs(&self, kind: DocKind) -> &[String] {
+        match kind {
+            DocKind::Spec => &self.project.spec_dirs,
+            DocKind::Plan => &self.project.plan_dirs,
+        }
+    }
+
     pub fn resolve_doc(&self, kind: DocKind, name_or_path: &str) -> Result<String> {
         crate::format::validate_line(kind.name(), name_or_path)?;
-        let dirs = kind.dirs();
+        let dirs = self.dirs(kind);
         if name_or_path.contains('/') || name_or_path.ends_with(".md") {
             crate::format::validate_doc_path(kind.name(), dirs, name_or_path)?;
             if !self.project.root.join(name_or_path).is_file() {

@@ -183,29 +183,31 @@ pub fn validate_owner(o: &str) -> Result<()> {
     }
     Ok(())
 }
-pub const SPEC_DIRS: &[&str] = &[
-    "docs/specs",
-    "docs/designs",
-    "docs/superpowers/specs",
-    "docs/superpowers/designs",
-];
-pub const PLAN_DIRS: &[&str] = &["docs/plans"];
-
-pub fn validate_doc_path(kind: &str, dirs: &[&str], rel: &str) -> Result<()> {
+/// A doc link must be a normalized repo-relative `.md` path (no empty, `.`, or `..`
+/// segments). Which roots it may live under is the project's decision (`Project::validate_docs`).
+pub fn validate_doc_shape(kind: &str, rel: &str) -> Result<()> {
     validate_line(kind, rel)?;
-    let segs: Vec<_> = rel.split('/').collect();
-    if !segs
-        .iter()
-        .all(|s| !s.is_empty() && *s != "." && *s != "..")
-        || !dirs.iter().any(|dir| {
-            rel.strip_prefix(dir)
-                .is_some_and(|rest| rest.starts_with('/'))
-        })
-        || !rel.ends_with(".md")
-    {
+    let normalized = rel
+        .split('/')
+        .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
+    if !normalized || !rel.ends_with(".md") {
         return Err(Error::Validation(format!(
-            "{kind} {rel:?} must be a normalized path under {}",
-            dirs.join("/ or ") + "/"
+            "{kind} {rel:?} must be a normalized repo-relative .md path"
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_doc_path(kind: &str, dirs: &[String], rel: &str) -> Result<()> {
+    validate_doc_shape(kind, rel)?;
+    let under_root = dirs.iter().any(|dir| {
+        rel.strip_prefix(dir.as_str())
+            .is_some_and(|rest| rest.starts_with('/'))
+    });
+    if !under_root {
+        return Err(Error::Validation(format!(
+            "{kind} {rel:?} must be under {}/",
+            dirs.join("/ or ")
         )));
     }
     Ok(())
@@ -226,10 +228,10 @@ pub fn validate_task(t: &Task) -> Result<()> {
         return Err(Error::Validation("step requires plan".into()));
     }
     if let Some(s) = &t.spec {
-        validate_doc_path("spec", SPEC_DIRS, s)?;
+        validate_doc_shape("spec", s)?;
     }
     if let Some(p) = &t.plan {
-        validate_doc_path("plan", PLAN_DIRS, p)?;
+        validate_doc_shape("plan", p)?;
     }
     if let Some(st) = &t.step {
         validate_line("step", st)?;

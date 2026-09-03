@@ -31,10 +31,12 @@ updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates th
 
 ## With superpowers
 
-- **brainstorming** writes specs under `docs/{specs,designs}/` or
+- **brainstorming** writes specs under one of the project's spec roots: `spec_dirs` in
+  `tasks/.config.toml`, or by default `docs/{specs,designs}/` and
   `docs/superpowers/{specs,designs}/`. After approval: one task per deliverable,
   `--spec <topic>`.
-- **writing-plans** writes the plan to `docs/plans/YYYY-MM-DD-<topic>.md`. One task per `### Task N:` heading:
+- **writing-plans** writes the plan under a plan root (`plan_dirs`, default `docs/plans/`)
+  as `YYYY-MM-DD-<topic>.md`. One task per `### Task N:` heading:
   `tasks add "<heading>" --plan <topic> --step "Task N: <title>" --depends <previous-task-id>`.
 - **executing-plans / subagent-driven-development**: `tasks start` a step before implementing, `tasks done` when its commit lands.
 - Plan headings are the drift contract: renaming or removing a heading under an open task fails `tasks check`. Update the task in the same change.

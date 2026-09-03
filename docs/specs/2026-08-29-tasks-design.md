@@ -1,6 +1,7 @@
 # tasks — design
 
-**Status:** implemented (2026-08-29; spec roots extended 2026-09-02); see
+**Status:** implemented (2026-08-29; spec roots extended 2026-09-02; doc roots made
+configurable per project 2026-09-03); see
 docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
@@ -34,24 +35,39 @@ Per repository, checked in:
 
 ```
 tasks/
-  .config.toml        project prefix
+  .config.toml        project prefix; optional spec_dirs / plan_dirs
   sci-4f2a9c.md       one file per task; filename == id
   sci-91be03.md
 docs/
   specs/              design specs   (YYYY-MM-DD-<topic>-design.md)
-  designs/            alternative accepted spec root
+  designs/            alternative default spec root
   superpowers/
-    specs/            alternative accepted spec root
-    designs/          alternative accepted spec root
+    specs/            alternative default spec root
+    designs/          alternative default spec root
   plans/              implementation plans (YYYY-MM-DD-<topic>.md)
 ```
 
-A task's `spec` must be under `docs/specs/`, `docs/designs/`,
-`docs/superpowers/specs/`, or `docs/superpowers/designs/`; its `plan` must be under
-`docs/plans/`. This is enforced on every write and by `check`; there is no configuration
-to relocate them. `tasks init` creates the default `docs/specs/` and `docs/plans/`
-directories if absent. Historical docs need not move unless they fall outside every
-accepted root and need structured `spec`/`plan` links (§9).
+A task's `spec` must lie under one of the project's spec roots and its `plan` under one of
+its plan roots. The roots are set in `tasks/.config.toml`:
+
+```toml
+prefix = "sci"
+spec_dirs = ["docs/specs", "docs/designs", "docs/superpowers/specs", "docs/superpowers/designs"]
+plan_dirs = ["docs/plans"]
+```
+
+Both keys are optional; the values above are the defaults when a key is absent. A
+configured list replaces the default list rather than extending it, must name at least one
+directory, and each entry must be a normalized repo-relative path (one trailing slash is
+tolerated). The roots serve two purposes: they are the validation boundary for explicit
+paths, enforced on every write and by `check`, and they are the search path for bare names
+(`--spec holdings`). There is deliberately no per-machine setting: task files are checked
+in and `check` runs on every collaborator's machine, so the project config is the only
+place the answer is reproducible.
+
+`tasks init` creates the first spec root and the first plan root if absent (`docs/specs/`
+and `docs/plans/` by default). Historical docs need not move unless they fall outside every
+configured root and need structured `spec`/`plan` links (§9).
 
 Per machine, not checked in: `~/.config/tasks/projects.toml`, the project registry (§6).
 
@@ -96,8 +112,8 @@ Free-form markdown body.
 | `updated`  | RFC 3339 UTC        | yes      | Set by every write command. |
 | `depends`  | list of ids         | yes      | May be empty. Foreign prefixes allowed (§6). |
 | `tags`     | list of strings     | yes      | May be empty. The only grouping mechanism. |
-| `spec`     | repo-relative path  | no       | Must be an existing file under an accepted spec or design root (§2). |
-| `plan`     | repo-relative path  | no       | Must be an existing file under `docs/plans/`. |
+| `spec`     | repo-relative path  | no       | Must be an existing file under one of the project's spec roots (§2). |
+| `plan`     | repo-relative path  | no       | Must be an existing file under one of the project's plan roots (§2). |
 | `step`     | string              | no       | Exact text of a heading inside `plan`. Requires `plan`. |
 
 Unknown keys are an error. Every scalar and list item is a single line. Times are UTC RFC
@@ -164,8 +180,9 @@ Every command locates the project by walking up from the current directory to th
 
 ```
 tasks init [--prefix P]
-    Create tasks/.config.toml, docs/specs/, docs/plans/ (if absent), and register the
-    project in ~/.config/tasks/projects.toml. Prefix defaults to the first three letters
+    Create tasks/.config.toml, the first spec root and the first plan root (if absent;
+    docs/specs/ and docs/plans/ by default), and register the project in
+    ~/.config/tasks/projects.toml. Prefix defaults to the first three letters
     of the repo directory name; rerunning with the same prefix is an idempotent repair and
     a different prefix is an error.
     Prints the skill install hint (§8) if no skill is found at user or project level.
@@ -173,8 +190,8 @@ tasks init [--prefix P]
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
-    repo-relative path under an accepted directory or a bare name resolved as the unique
-    match across the accepted directories (error on 0 or >1 matches). --depends ids and
+    repo-relative path under a configured root or a bare name resolved as the unique
+    match across the configured roots (error on 0 or >1 matches). --depends ids and
     --step headings are validated before anything is written.
 
 tasks show <id>
@@ -218,7 +235,7 @@ tasks graph [--format mermaid|dot] [--all]
 
 tasks check
     Validate every task file: frontmatter schema, filename == id, timestamps, dangling
-    depends/spec/plan, paths outside the accepted directories, missing step heading,
+    depends/spec/plan, paths outside the configured doc roots, missing step heading,
     dependency cycles, reserved delimiter in body, malformed notes section. Exit 1 on any
     error. Unresolvable foreign ids (unregistered or unreachable prefix) are warnings.
 
@@ -338,9 +355,9 @@ If any id reached during traversal is unreachable, `dep --on` and `add --depends
 
 - A task may point at a spec (`spec`), a plan (`plan`), and a heading inside that plan
   (`step`). These are validated on write and re-validated by `check`.
-- `check` fails when: a linked file is missing; a path lies outside the accepted spec
-  roots (§2) or `docs/plans/`; a `step` heading no longer appears verbatim in its plan;
-  `step` is set without `plan`.
+- `check` fails when: a linked file is missing; a path lies outside the project's
+  configured spec or plan roots (§2), including after the roots are narrowed; a `step`
+  heading no longer appears verbatim in its plan; `step` is set without `plan`.
 - Once automation has a pinned Tasks install, running `check` in a project's test or
   pre-commit path turns doc drift under open tasks into a build failure, which is the
   intended coupling: when a plan step is renamed or removed, the task must be updated in
@@ -370,9 +387,10 @@ Skill content:
    `dep <original> --on <pieces>` or drop the original, and leave a note); blocking on
    another project's task; resolving an id collision (§4).
 3. **Superpowers integration** (applies when the superpowers plugin is present):
-   - Brainstorming writes specs under one of the accepted roots in §2. After approval,
-     add one task per major deliverable with `--spec <topic>`.
-   - writing-plans writes plans to `docs/plans/YYYY-MM-DD-<topic>.md`. Add one task per
+   - Brainstorming writes specs under one of the project's spec roots (§2). After
+     approval, add one task per major deliverable with `--spec <topic>`.
+   - writing-plans writes plans under a plan root, `docs/plans/YYYY-MM-DD-<topic>.md` by
+     default. Add one task per
      `Task N:` heading with `--plan <topic> --step "Task N: …"` and `--depends` mirroring
      the plan's order.
    - executing-plans and subagent-driven-development call `tasks start`/`done` per step.
@@ -382,10 +400,11 @@ Skill content:
 
 Manual, documented steps — the tool does not move files:
 
-1. Keep historical docs in place. Structured spec links accept every root in §2 and plan
-   links accept `docs/plans/`. Move only linked docs outside those roots, fixing links;
-   projects may reference other historical layouts in task bodies, and `init`
-   intentionally creates the default directories alongside them.
+1. Keep historical docs in place. If the project already keeps specs or plans somewhere
+   other than the defaults in §2, list those directories as `spec_dirs` / `plan_dirs` in
+   `tasks/.config.toml` before `init` so links resolve and `init` creates nothing
+   unwanted. Otherwise move only linked docs outside the roots, fixing links; projects
+   may reference other historical layouts in task bodies.
 2. `tasks init --prefix <p>`.
 3. Install the skill (user level preferred) and add a line to CLAUDE.md pointing at it.
 4. Require `tasks prime` at session start and `tasks check` before completion. Add
