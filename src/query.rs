@@ -143,19 +143,21 @@ pub fn sort_list(tasks: &mut [Task]) {
     });
 }
 
+pub fn ready_order(a: &Task, b: &Task) -> Ordering {
+    a.priority
+        .cmp(&b.priority)
+        .then_with(|| match (a.size, b.size) {
+            (Some(x), Some(y)) => x.cmp(&y),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        })
+        .then_with(|| a.created.cmp(&b.created))
+        .then_with(|| a.id.cmp(&b.id))
+}
+
 pub fn sort_ready(tasks: &mut [Task]) {
-    tasks.sort_by(|a, b| {
-        a.priority
-            .cmp(&b.priority)
-            .then_with(|| match (a.size, b.size) {
-                (Some(x), Some(y)) => x.cmp(&y),
-                (Some(_), None) => Ordering::Less,
-                (None, Some(_)) => Ordering::Greater,
-                (None, None) => Ordering::Equal,
-            })
-            .then_with(|| a.created.cmp(&b.created))
-            .then_with(|| a.id.cmp(&b.id))
-    });
+    tasks.sort_by(ready_order);
 }
 
 #[cfg(test)]

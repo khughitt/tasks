@@ -1,5 +1,7 @@
 use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
+use crate::output::{TaskSummary, TreeNode};
+use crate::query::ready_order;
 use crate::repo::Project;
 use std::collections::HashMap;
 
@@ -88,6 +90,52 @@ pub fn open_descendants<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
         .into_iter()
         .filter(|task| task.status.is_open())
         .collect()
+}
+
+/// The forest under `root` (or every root when `None`). Without `include_closed`, a node
+/// is kept when it is open or has an open descendant, so a closed ancestor of open work
+/// stays visible as context. Roots and siblings are in ready order.
+pub fn forest(all: &[Task], root: Option<&TaskId>, include_closed: bool) -> Vec<TreeNode> {
+    let mut tops: Vec<&Task> = match root {
+        Some(id) => all.iter().filter(|task| &task.id == id).collect(),
+        None => all.iter().filter(|task| task.parent.is_none()).collect(),
+    };
+    tops.sort_by(|a, b| ready_order(a, b));
+    tops.into_iter()
+        .filter_map(|task| {
+            node(
+                all,
+                task,
+                include_closed,
+                &mut std::collections::HashSet::new(),
+            )
+        })
+        .collect()
+}
+
+fn node(
+    all: &[Task],
+    task: &Task,
+    include_closed: bool,
+    visited: &mut std::collections::HashSet<TaskId>,
+) -> Option<TreeNode> {
+    if !visited.insert(task.id.clone()) {
+        return None;
+    }
+    let keep =
+        include_closed || task.status.is_open() || !open_descendants(all, &task.id).is_empty();
+    if !keep {
+        return None;
+    }
+    let mut kids = children(all, &task.id);
+    kids.sort_by(|a, b| ready_order(a, b));
+    Some(TreeNode {
+        summary: TaskSummary::of(task, all),
+        children: kids
+            .into_iter()
+            .filter_map(|child| node(all, child, include_closed, visited))
+            .collect(),
+    })
 }
 
 fn join(path: &[TaskId]) -> String {
@@ -179,5 +227,28 @@ mod tests {
             .map(|t| t.id.to_string())
             .collect();
         assert_eq!(open, ["xx-000003"]);
+    }
+
+    #[test]
+    fn forest_prunes_closed_leaves_but_keeps_closed_ancestors_of_open_work() {
+        let root = task("xx-000001", None, Status::Todo);
+        let closed_leaf = task("xx-000002", Some("xx-000001"), Status::Done);
+        let closed_mid = task("xx-000003", Some("xx-000001"), Status::Done);
+        let open_deep = task("xx-000004", Some("xx-000003"), Status::Todo);
+        let all = [root, closed_leaf, closed_mid, open_deep];
+        let nodes = forest(&all, None, false);
+        assert_eq!(nodes.len(), 1);
+        let kids: Vec<&str> = nodes[0]
+            .children
+            .iter()
+            .map(|n| n.summary.id.as_str())
+            .collect();
+        assert_eq!(kids, ["xx-000003"]);
+        assert_eq!(nodes[0].children[0].children[0].summary.id, "xx-000004");
+        assert_eq!(forest(&all, None, true)[0].children.len(), 2);
+        assert_eq!(
+            forest(&all, Some(&all[2].id), true)[0].summary.id,
+            "xx-000003"
+        );
     }
 }

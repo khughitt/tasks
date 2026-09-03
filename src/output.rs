@@ -30,12 +30,21 @@ pub struct DepInfo {
 }
 
 #[derive(Serialize)]
+pub struct Related {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+}
+
+#[derive(Serialize)]
 pub struct ShowOut {
     pub task: Task,
     pub spec_path: Option<String>,
     pub plan_path: Option<String>,
     pub step_found: Option<bool>,
     pub depends_on: Vec<DepInfo>,
+    pub parent: Option<Related>,
+    pub children: Vec<Related>,
     pub warnings: Vec<String>,
 }
 
@@ -78,6 +87,19 @@ impl TaskSummary {
 #[derive(Serialize)]
 pub struct ListOut {
     pub tasks: Vec<TaskSummary>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct TreeNode {
+    #[serde(flatten)]
+    pub summary: TaskSummary,
+    pub children: Vec<TreeNode>,
+}
+
+#[derive(Serialize)]
+pub struct TreeOut {
+    pub nodes: Vec<TreeNode>,
     pub warnings: Vec<String>,
 }
 
@@ -132,6 +154,7 @@ pub enum Output {
     Prime(PrimeOut),
     Graph(GraphOut),
     Check(CheckOut),
+    Tree(TreeOut),
 }
 
 pub fn render(out: &Output, format: Format) -> String {
@@ -160,6 +183,21 @@ fn pretty(out: &Output) -> String {
                     "\n# step {}\n",
                     if found { "found" } else { "MISSING" }
                 ));
+            }
+            if let Some(parent) = &o.parent {
+                rendered.push_str(&format!(
+                    "\n# parent\n- {} [{}] {}\n",
+                    parent.id, parent.status, parent.title
+                ));
+            }
+            if !o.children.is_empty() {
+                rendered.push_str("\n# children\n");
+                for child in &o.children {
+                    rendered.push_str(&format!(
+                        "- {} [{}] {}\n",
+                        child.id, child.status, child.title
+                    ));
+                }
             }
             rendered
         }
@@ -190,7 +228,19 @@ fn pretty(out: &Output) -> String {
             }
             rendered
         }
+        Output::Tree(o) => tree_text(&o.nodes, 0),
     }
+}
+
+fn tree_text(nodes: &[TreeNode], depth: usize) -> String {
+    let mut rendered = String::new();
+    for node in nodes {
+        let row = table(std::slice::from_ref(&node.summary));
+        rendered.push_str(&"  ".repeat(depth));
+        rendered.push_str(&row);
+        rendered.push_str(&tree_text(&node.children, depth + 1));
+    }
+    rendered
 }
 
 pub fn table(rows: &[TaskSummary]) -> String {
@@ -243,5 +293,6 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
             .iter()
             .map(|finding| format!("{} [{}] {}", finding.file, finding.kind, finding.detail))
             .collect(),
+        Output::Tree(o) => o.warnings.clone(),
     }
 }

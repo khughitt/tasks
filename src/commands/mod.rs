@@ -7,6 +7,7 @@ pub mod init;
 pub mod list;
 pub mod show;
 pub mod status;
+pub mod tree;
 
 use crate::cli::{Cli, Command, FieldArgs};
 use crate::error::{Error, Result};
@@ -216,8 +217,9 @@ pub fn run(cli: Cli) -> Result<Output> {
             statuses,
             tags,
             owner,
+            parent,
             all_projects,
-        } => list::list(open_ctx(dir)?, statuses, tags, owner, all_projects),
+        } => list::list(open_ctx(dir)?, statuses, tags, owner, parent, all_projects),
         Command::Ready { size, limit } => list::ready(open_ctx(dir)?, size, limit),
         Command::Edit {
             id,
@@ -241,5 +243,6 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Dep { id, on, rm } => dep::run(open_ctx(dir)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
+        Command::Tree { id, all } => tree::run(open_ctx(dir)?, id, all),
     }
 }

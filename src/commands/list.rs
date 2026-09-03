@@ -1,5 +1,5 @@
 use super::Ctx;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{Counts, ListOut, Output, PrimeOut, TaskSummary};
 use crate::query::{is_ready, sort_list, sort_ready};
@@ -12,6 +12,7 @@ pub fn list(
     statuses: Vec<String>,
     tags: Vec<String>,
     owner: Option<String>,
+    parent: Option<String>,
     all_projects: bool,
 ) -> Result<Output> {
     let statuses = statuses
@@ -35,6 +36,12 @@ pub fn list(
         }
     }
     let all = tasks.clone();
+    let parent = parent.as_deref().map(TaskId::parse).transpose()?;
+    if let Some(parent) = &parent
+        && !all.iter().any(|task| &task.id == parent)
+    {
+        return Err(Error::TaskNotFound(parent.to_string()));
+    }
     tasks.retain(|task| {
         let status_ok = if statuses.is_empty() {
             task.status.is_open()
@@ -45,7 +52,10 @@ pub fn list(
         let owner_ok = owner
             .as_ref()
             .is_none_or(|value| task.owner.as_ref() == Some(value));
-        status_ok && tags_ok && owner_ok
+        let parent_ok = parent
+            .as_ref()
+            .is_none_or(|p| task.parent.as_ref() == Some(p));
+        status_ok && tags_ok && owner_ok && parent_ok
     });
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
     for task in &tasks {

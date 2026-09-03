@@ -66,6 +66,9 @@ pub enum Command {
         tags: Vec<String>,
         #[arg(long)]
         owner: Option<String>,
+        /// Only direct children of this task.
+        #[arg(long)]
+        parent: Option<String>,
         #[arg(long)]
         all_projects: bool,
     },
@@ -127,4 +130,10 @@ pub enum Command {
     Check,
     /// Session context for agents.
     Prime,
+    /// The task hierarchy as nested nodes (open work only unless --all).
+    Tree {
+        id: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
 }

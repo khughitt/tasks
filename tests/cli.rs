@@ -1553,3 +1553,99 @@ fn check_warns_on_open_child_of_closed_parent() {
     assert_eq!(warning["kind"], "open_child_of_closed_parent");
     assert_eq!(warning["id"], b);
 }
+
+#[test]
+fn tree_nests_prunes_and_orders() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal", "-p", "1"]));
+    let big = id_of(env.json(&dir, &["add", "Big", "--parent", &goal, "--size", "l"]));
+    let small = id_of(env.json(&dir, &["add", "Small", "--parent", &goal, "--size", "xs"]));
+    let deep = id_of(env.json(&dir, &["add", "Deep", "--parent", &big]));
+    let loner = id_of(env.json(&dir, &["add", "Loner", "-p", "3"]));
+    env.json(&dir, &["done", &small]);
+
+    let tree = env.json(&dir, &["tree"]);
+    let nodes = tree["nodes"].as_array().unwrap();
+    assert_eq!(nodes[0]["id"], goal);
+    assert_eq!(nodes[1]["id"], loner);
+    let goal_children = nodes[0]["children"].as_array().unwrap();
+    assert_eq!(goal_children.len(), 1, "closed Small is pruned: {tree}");
+    assert_eq!(goal_children[0]["id"], big);
+    assert_eq!(goal_children[0]["children"][0]["id"], deep);
+    assert_eq!(nodes[0]["child_count"], 2);
+    assert_eq!(nodes[0]["open_descendant_count"], 2);
+
+    let all = env.json(&dir, &["tree", "--all"]);
+    let goal_children = all["nodes"][0]["children"].as_array().unwrap();
+    let ids: Vec<&str> = goal_children
+        .iter()
+        .map(|n| n["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        [small.as_str(), big.as_str()],
+        "ready order: xs before l"
+    );
+
+    let sub = env.json(&dir, &["tree", &big]);
+    assert_eq!(sub["nodes"].as_array().unwrap().len(), 1);
+    assert_eq!(sub["nodes"][0]["id"], big);
+    assert_eq!(env.fail(&dir, &["tree", "sci-ffffff"]), "task_not_found");
+
+    // an open task under a closed parent stays visible with its closed ancestor
+    env.json(&dir, &["done", &deep]);
+    env.json(&dir, &["done", &big]);
+    env.json(&dir, &["edit", &deep, "--status", "todo"]);
+    let tree = env.json(&dir, &["tree"]);
+    let big_node = &tree["nodes"][0]["children"][0];
+    assert_eq!(big_node["id"], big);
+    assert_eq!(big_node["status"], "done");
+    assert_eq!(big_node["children"][0]["id"], deep);
+
+    let out = env.cmd(&dir).args(["--pretty", "tree"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains(&format!("{goal}  P1")), "{text}");
+    assert!(
+        text.contains(&format!("  {big}  P2")),
+        "children are indented: {text}"
+    );
+}
+
+#[test]
+fn show_reports_parent_and_children_and_list_filters_by_parent() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    // priorities pin the order: children are reported in ready order, not id order
+    let two = id_of(env.json(&dir, &["add", "Two", "--parent", &goal, "-p", "2"]));
+    let one = id_of(env.json(&dir, &["add", "One", "--parent", &goal, "-p", "1"]));
+    let other = id_of(env.json(&dir, &["add", "Other"]));
+    let shown = env.json(&dir, &["show", &one]);
+    assert_eq!(shown["parent"]["id"], goal);
+    assert_eq!(shown["parent"]["title"], "Goal");
+    assert_eq!(shown["parent"]["status"], "todo");
+    assert_eq!(shown["children"], serde_json::json!([]));
+    let shown = env.json(&dir, &["show", &goal]);
+    assert_eq!(shown["parent"], serde_json::Value::Null);
+    let kids: Vec<&str> = shown["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(kids, [one.as_str(), two.as_str()]);
+    let filtered = env.json(&dir, &["list", "--parent", &goal]);
+    let ids: Vec<&str> = filtered["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert!(!ids.contains(&other.as_str()));
+    assert_eq!(
+        env.fail(&dir, &["list", "--parent", "sci-ffffff"]),
+        "task_not_found"
+    );
+}
