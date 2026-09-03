@@ -230,9 +230,11 @@ The counts are named so that no field changes type between shapes: `children` is
 an array of nodes and only appears in `TreeNode` and `show`.
 
 `--pretty` renders `tree` as an indented list. For `prime` it prints `closeout:` and
-`roadmap:` sections above `ready:`; to keep a flat project's `prime` readable, the
-roadmap section prints the subtree of every root that has children and then one line
-counting the childless roots, which `ready:` already lists.
+`roadmap:` sections above `ready:`. To keep a flat project's `prime` readable without
+hiding anything, the roadmap section prints the subtree of every root that has children,
+prints each childless root that is not in `ready` (blocked, idea, doing, or waiting on a
+dependency), and ends with one line counting the childless roots that `ready:` lists
+below.
 
 ## 7. Original design updates
 

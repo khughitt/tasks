@@ -78,6 +78,11 @@ fn parent_is_validated_persisted_and_clearable() {
         env.fail(&dir, &["edit", &goal, "--parent", &grandchild]),
         "cycle"
     );
+    let files = std::fs::read_dir(dir.join("tasks"))
+        .unwrap()
+        .filter(|entry| entry.as_ref().unwrap().path().extension().is_some_and(|x| x == "md"))
+        .count();
+    assert_eq!(files, 3, "rejected adds wrote nothing: goal, child, grandchild only");
 
     env.json(&dir, &["edit", &child, "--no-parent"]);
     assert_eq!(
@@ -129,7 +134,9 @@ fn check_reports_parent_problems() {
     let c = id_of(env.json(&dir, &["add", "C"]));
     let d = id_of(env.json(&dir, &["add", "D"]));
     let e = id_of(env.json(&dir, &["add", "E"]));
-    // a -> b loop, c dangling, d foreign, e its own parent; written by hand to simulate drift
+    let f = id_of(env.json(&dir, &["add", "F", "--parent", &a]));
+    // a -> b loop with f as a tail into it, c dangling, d foreign, e its own parent;
+    // written by hand to simulate drift
     let set_parent = |id: &str, parent: &str| {
         let raw = env.read(&dir, &format!("tasks/{id}.md"));
         std::fs::write(
@@ -163,8 +170,9 @@ fn check_reports_parent_problems() {
     assert_eq!(
         kinds.iter().filter(|(kind, _)| kind == "parent_cycle").count(),
         2,
-        "each cycle is reported once, at its lowest member: {check}"
+        "each cycle is reported once, at its lowest member, even with the tail f: {check}"
     );
+    assert!(!kinds.iter().any(|(_, id)| id == &f), "the tail is not a cycle member: {check}");
     assert!(
         !kinds.iter().any(|(kind, _)| kind == "parse"),
         "a self-edge is a hierarchy finding, not a parse error: {check}"
@@ -285,8 +293,10 @@ pub fn validate_parent(project: &Project, task: &Task) -> Result<()> {
     Ok(())
 }
 
-/// The parent chain from `start` upward, returned as a cycle path (`a -> b -> a`) when it
-/// loops, using only the tasks given. Missing parents end the walk without a cycle.
+/// Walks the parent chain upward from `start` and returns the loop it runs into, if any,
+/// as `a -> b -> a`: only the cycle, never the tail that led into it, so that every task
+/// on or above a cycle reports the same path and `check` can deduplicate. Missing parents
+/// end the walk without a cycle.
 pub fn parent_cycle(tasks: &[Task], start: &TaskId) -> Option<Vec<TaskId>> {
     let parents: HashMap<&TaskId, &TaskId> = tasks
         .iter()
@@ -295,9 +305,10 @@ pub fn parent_cycle(tasks: &[Task], start: &TaskId) -> Option<Vec<TaskId>> {
     let mut path = vec![start.clone()];
     let mut current = parents.get(start).copied();
     while let Some(id) = current {
-        if path.contains(id) {
-            path.push(id.clone());
-            return Some(path);
+        if let Some(position) = path.iter().position(|item| item == id) {
+            let mut cycle = path[position..].to_vec();
+            cycle.push(id.clone());
+            return Some(cycle);
         }
         path.push(id.clone());
         current = parents.get(id).copied();
@@ -352,6 +363,16 @@ mod tests {
         assert!(parent_cycle(std::slice::from_ref(&dangling), &dangling.id).is_none());
         let own = task("xx-000007", Some("xx-000007"), Status::Todo);
         assert_eq!(parent_cycle(std::slice::from_ref(&own), &own.id).unwrap().len(), 2);
+        // a tail entering a loop reports only the loop, so the report is the same from
+        // every start point: C -> A -> B -> A yields A -> B -> A from C
+        let tail = task("xx-000005", Some("xx-000001"), Status::Todo);
+        let a2 = task("xx-000001", Some("xx-000002"), Status::Todo);
+        let b2 = task("xx-000002", Some("xx-000001"), Status::Todo);
+        let from_tail = parent_cycle(&[tail.clone(), a2.clone(), b2.clone()], &tail.id).unwrap();
+        let from_a = parent_cycle(&[tail, a2.clone(), b2], &a2.id).unwrap();
+        let ids = |path: &[TaskId]| path.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(ids(&from_tail), ["xx-000001", "xx-000002", "xx-000001"]);
+        assert_eq!(ids(&from_a), ids(&from_tail));
     }
 }
 ```
@@ -479,7 +500,11 @@ A self-edge is a two-element path from `parent_cycle` and is reported as `parent
 
 - [ ] **Step 7: Run all gates**
 
-Run: `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test`
+Run the gates:
+
+```bash
+cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && tasks check
+```
 Expected: all pass, including the three new e2e tests and the two new unit tests.
 
 - [ ] **Step 8: Reinstall, close the task, commit**
@@ -760,7 +785,11 @@ Update the unit test `ready_requires_todo_and_closed_deps` to pass `false` as th
 
 - [ ] **Step 7: Run all gates**
 
-Run: `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test`
+Run the gates:
+
+```bash
+cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && tasks check
+```
 Expected: all pass. The existing `prime_reports_counts_ready_and_doing` and `ready_excludes_ideas_doing_and_open_deps` tests still pass because they use no parents.
 
 - [ ] **Step 8: Reinstall, close the task, commit**
@@ -844,8 +873,9 @@ fn show_reports_parent_and_children_and_list_filters_by_parent() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let goal = id_of(env.json(&dir, &["add", "Goal"]));
-    let one = id_of(env.json(&dir, &["add", "One", "--parent", &goal]));
-    let two = id_of(env.json(&dir, &["add", "Two", "--parent", &goal]));
+    // priorities pin the order: children are reported in ready order, not id order
+    let two = id_of(env.json(&dir, &["add", "Two", "--parent", &goal, "-p", "2"]));
+    let one = id_of(env.json(&dir, &["add", "One", "--parent", &goal, "-p", "1"]));
     let other = id_of(env.json(&dir, &["add", "Other"]));
     let shown = env.json(&dir, &["show", &one]);
     assert_eq!(shown["parent"]["id"], goal);
@@ -1113,17 +1143,20 @@ and inside the retain closure add `let parent_ok = parent.as_ref().is_none_or(|p
         .as_ref()
         .and_then(|id| all.iter().find(|candidate| &candidate.id == id))
         .map(related);
-    let children = crate::hierarchy::children(&all, &task.id)
-        .into_iter()
-        .map(related)
-        .collect();
+    let mut kids = crate::hierarchy::children(&all, &task.id);
+    kids.sort_by(|a, b| crate::query::ready_order(a, b));
+    let children = kids.into_iter().map(related).collect();
 ```
 
-and pass `parent, children,` into `ShowOut`. Import `Related` from `crate::output`.
+and pass `parent, children,` into `ShowOut`. Import `Related` from `crate::output`. Children are in ready order (priority, size, created), the same order `tree` uses; `Project::scan` order is id order, which is random with respect to creation and must not leak into the contract.
 
 - [ ] **Step 6: Run all gates**
 
-Run: `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test`
+Run the gates:
+
+```bash
+cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && tasks check
+```
 Expected: all pass.
 
 - [ ] **Step 7: Reinstall, close the task, commit**
@@ -1191,11 +1224,20 @@ fn prime_shows_roadmap_and_closeout() {
         "an idea is never a close-out candidate: {prime}"
     );
 
+    let stuck = id_of(env.json(&dir, &["add", "Stuck"]));
+    env.json(&dir, &["block", &stuck, "waiting"]);
     let out = env.cmd(&dir).args(["--pretty", "prime"]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("\ncloseout:\n"), "{text}");
-    assert!(text.contains("\nroadmap:\n"), "{text}");
-    assert!(text.contains("1 open task(s) without children; see ready"), "{text}");
+    let roadmap = text.split("\nroadmap:\n").nth(1).unwrap().split("\nready:\n").next().unwrap();
+    assert!(roadmap.contains(&goal), "roots with children print as subtrees: {roadmap}");
+    assert!(roadmap.contains(&parked), "an idea with children is still a subtree: {roadmap}");
+    assert!(roadmap.contains(&stuck), "a childless root absent from ready is printed: {roadmap}");
+    assert!(!roadmap.contains(&loner), "a childless root present in ready is only counted: {roadmap}");
+    assert!(
+        roadmap.contains("1 open task(s) without children are listed under ready"),
+        "{roadmap}"
+    );
 }
 ```
 
@@ -1219,18 +1261,24 @@ In the `Output::Prime` pretty arm, before `"\nready:\n"`:
             rendered.push_str("\ncloseout:\n");
             rendered.push_str(&table(&o.closeout));
             rendered.push_str("\nroadmap:\n");
-            let (parents, childless): (Vec<&TreeNode>, Vec<&TreeNode>) =
-                o.roadmap.iter().partition(|node| !node.children.is_empty());
-            for node in parents {
-                rendered.push_str(&tree_text(std::slice::from_ref(node), 0));
+            let ready_ids: std::collections::HashSet<&str> =
+                o.ready.iter().map(|row| row.id.as_str()).collect();
+            let mut listed_under_ready = 0;
+            for node in &o.roadmap {
+                if node.summary.child_count > 0 {
+                    rendered.push_str(&tree_text(std::slice::from_ref(node), 0));
+                } else if ready_ids.contains(node.summary.id.as_str()) {
+                    listed_under_ready += 1;
+                } else {
+                    rendered.push_str(&table(std::slice::from_ref(&node.summary)));
+                }
             }
             rendered.push_str(&format!(
-                "{} open task(s) without children; see ready\n",
-                childless.len()
+                "{listed_under_ready} open task(s) without children are listed under ready\n"
             ));
 ```
 
-Note the partition uses `children.is_empty()` on the pruned node, which is what the spec means by "roots that have children" in the open forest; a root whose children are all closed is listed under closeout, not as a subtree.
+Three rules, each for a reason. A root is a subtree when it has children at all (`child_count`, not the pruned `children` array, so a goal whose children are all closed still prints as a goal rather than being miscounted as childless). A childless root is only counted when it actually appears in `ready`, so nothing is hidden behind the count. Every other childless root (blocked, idea, doing, or todo with an open dependency) is printed, because it is in the roadmap and nowhere else on the screen.
 
 `src/commands/list.rs`, in `prime`, before constructing `PrimeOut`:
 
@@ -1253,7 +1301,11 @@ and pass `roadmap, closeout: closeout.iter().map(|task| TaskSummary::of(task, &a
 
 - [ ] **Step 4: Run all gates**
 
-Run: `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test`
+Run the gates:
+
+```bash
+cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && tasks check
+```
 Expected: all pass. `prime_reports_counts_ready_and_doing` keeps passing; it does not assert on the new fields.
 
 - [ ] **Step 5: Reinstall, close the task, commit**
@@ -1371,7 +1423,11 @@ Unit test in `src/resolve.rs` (add a `#[cfg(test)] mod tests` if absent):
 
 - [ ] **Step 4: Run all gates**
 
-Run: `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test`
+Run the gates:
+
+```bash
+cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && tasks check
+```
 Expected: all pass. `check_passes_clean_repo_and_reports_drift` links its only heading, so it stays warning-free before the drift edits; after the rename to `Task 1: uno` that test now sees one extra `unlinked_step` warning in addition to the `step_missing` error. Update its warning assertions accordingly (the test already inspects warnings for the foreign dependency; add the new kind to the expected set).
 
 Then run `tasks check` in this repository: the two plans written by this design (`2026-09-03-task-hierarchy.md`, `2026-09-03-feedback.md`) link every heading, so it stays clean. `docs/plans/2026-08-29-tasks.md` is not linked by any open task and is not scanned.
@@ -1430,7 +1486,13 @@ In `skills/tasks/SKILL.md`:
 
 - [ ] **Step 5: Verify, close the task and the umbrella, commit**
 
-Run: `cargo test && tasks check`. Then, since this is the last piece under the umbrella:
+Run the gates:
+
+```bash
+cargo fmt && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && tasks check
+```
+
+Then, since this is the last piece under the umbrella:
 
 ```bash
 tasks done tasks-43e062 "design, skill, README, AGENTS.md describe the hierarchy protocol; both spec statuses updated"

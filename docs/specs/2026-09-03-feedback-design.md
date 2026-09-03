@@ -70,11 +70,18 @@ Behaviour, in order:
      `list`. The write is a guarded read-modify-write: the file's hash is taken on read
      and checked again immediately before the atomic replace; on a mismatch the whole
      step is retried from the read, up to eight times, then fails with
-     `concurrent_modification`. The remaining window between check and rename is the
-     same one every other write command in the tool has; the guard closes the realistic
-     case of two reporters landing seconds apart.
+     `concurrent_modification`. Every read also re-checks that the task is still open
+     feedback and, for an automatic match, still carries the matched title; a task that
+     was closed, retagged, or renamed since the match fails with `validation` and is not
+     touched. The remaining window between check and rename is the same one every other
+     write command in the tool has; the guard closes the realistic case of two reporters
+     landing seconds apart.
    - No match: add a task in the target with title `<summary>`, status `idea`, priority
      2, no size, no owner, body `<text>`, tags `feedback`, `<category>`, `from:<prefix>`.
+     Creation links the file into place exclusively and regenerates the id on a
+     collision, so two creators drawing the same id cannot overwrite each other; the same
+     primitive backs `add`. A summary with no token of three or more characters (§4) is
+     rejected with `validation`, since it could match nothing meaningfully.
 5. **Report.** The output names what happened, because the reporter should know whether it
    started something or joined something.
 
@@ -86,11 +93,13 @@ file and its checkout.
 entry lands there. Worktrees of the same repository do not see it until it is committed.
 This repository's own protocol runs `tasks prime` in the registered checkout before any
 worktree is created, and `prime` gains a warning listing uncommitted files under
-`tasks/` (from `git status --porcelain -- tasks/`; when the project is not a git checkout
-or git is unavailable the warning is skipped, which is stated here so it is not a
-silent fallback). That warning is useful on its own, since `done` in the same commit as
-the code is a rule that is easy to break, and it is what makes an unfiled report hard to
-miss.
+`tasks/`, project-relative, including the config file and excluding only transient
+temp files. The list comes from `git status --porcelain`. It is skipped in exactly two
+cases, stated here so neither is a silent fallback: git reports the root is not inside a
+repository (git's own discovery, which also covers an unreadable HEAD), or there is no
+git executable. Any other git failure is an error. That warning is useful on its own,
+since `done` in the same commit as the code is a rule that is easy to break, and it is
+what makes an unfiled report hard to miss.
 
 ## 4. Matching
 
