@@ -3,7 +3,7 @@ use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::output::{CheckOut, Finding, Output};
 use crate::query::find_cycle;
-use crate::resolve::{DocKind, Resolver};
+use crate::resolve::{DocKind, Resolver, step_headings};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
@@ -13,6 +13,31 @@ fn finding(task: Option<&Task>, file: String, kind: &str, detail: String) -> Fin
         file,
         kind: kind.into(),
         detail,
+    }
+}
+
+/// Records one cycle finding, deduped by its member set (order-independent) through
+/// `seen`, at the cycle's lowest member.
+fn record_cycle(
+    cycle: &[TaskId],
+    kind: &str,
+    seen: &mut BTreeSet<Vec<String>>,
+    errors: &mut Vec<Finding>,
+) {
+    let mut key: Vec<String> = cycle[..cycle.len() - 1]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    key.sort();
+    if seen.insert(key) {
+        let lowest = cycle[..cycle.len() - 1].iter().min().unwrap();
+        let path: Vec<String> = cycle.iter().map(ToString::to_string).collect();
+        errors.push(Finding {
+            id: Some(lowest.to_string()),
+            file: format!("tasks/{lowest}.md"),
+            kind: kind.into(),
+            detail: path.join(" -> "),
+        });
     }
 }
 
@@ -143,23 +168,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         unreachable.borrow_mut().clear();
         match find_cycle(&task.id, &edges) {
             Ok(None) => {}
-            Ok(Some(cycle)) => {
-                let mut key: Vec<String> = cycle[..cycle.len() - 1]
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect();
-                key.sort();
-                if seen.insert(key) {
-                    let lowest = cycle[..cycle.len() - 1].iter().min().unwrap();
-                    let path: Vec<String> = cycle.iter().map(ToString::to_string).collect();
-                    errors.push(Finding {
-                        id: Some(lowest.to_string()),
-                        file: format!("tasks/{lowest}.md"),
-                        kind: "cycle".into(),
-                        detail: path.join(" -> "),
-                    });
-                }
-            }
+            Ok(Some(cycle)) => record_cycle(&cycle, "cycle", &mut seen, &mut errors),
             Err(error) => return Err(error),
         }
         for id in std::mem::take(&mut *unreachable.borrow_mut()) {
@@ -175,21 +184,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     let mut seen_parent_cycles = BTreeSet::new();
     for task in &tasks {
         if let Some(cycle) = crate::hierarchy::parent_cycle(&tasks, &task.id) {
-            let mut key: Vec<String> = cycle[..cycle.len() - 1]
-                .iter()
-                .map(ToString::to_string)
-                .collect();
-            key.sort();
-            if seen_parent_cycles.insert(key) {
-                let lowest = cycle[..cycle.len() - 1].iter().min().unwrap();
-                let path: Vec<String> = cycle.iter().map(ToString::to_string).collect();
-                errors.push(Finding {
-                    id: Some(lowest.to_string()),
-                    file: format!("tasks/{lowest}.md"),
-                    kind: "parent_cycle".into(),
-                    detail: path.join(" -> "),
-                });
-            }
+            record_cycle(&cycle, "parent_cycle", &mut seen_parent_cycles, &mut errors);
         }
     }
 
@@ -203,7 +198,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
             continue; // already an error above
         }
         let text = std::fs::read_to_string(path)?;
-        for heading in crate::resolve::step_headings(&text) {
+        for heading in step_headings(&text) {
             let linked = tasks.iter().any(|task| {
                 task.plan.as_ref() == Some(plan) && task.step.as_deref() == Some(&heading)
             });

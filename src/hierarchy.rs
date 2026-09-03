@@ -21,7 +21,9 @@ pub fn validate_parent(project: &Project, task: &Task) -> Result<()> {
         return Err(Error::Cycle(format!("{parent} -> {parent}")));
     }
     if !project.task_path(parent).is_file() {
-        return Err(Error::UnresolvableId(parent.to_string()));
+        return Err(Error::UnresolvableId(format!(
+            "parent {parent} does not exist"
+        )));
     }
     let mut path = vec![task.id.clone()];
     let mut current = Some(parent.clone());
@@ -30,7 +32,11 @@ pub fn validate_parent(project: &Project, task: &Task) -> Result<()> {
             path.push(id);
             return Err(Error::Cycle(join(&path)));
         }
-        let ancestor = project.read_task(&id)?;
+        let ancestor = match project.read_task(&id) {
+            Ok(ancestor) => ancestor,
+            Err(Error::TaskNotFound(_)) => break,
+            Err(error) => return Err(error),
+        };
         path.push(id);
         current = ancestor.parent;
     }
@@ -94,11 +100,20 @@ pub fn open_descendants<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
 
 /// The forest under `root` (or every root when `None`). Without `include_closed`, a node
 /// is kept when it is open or has an open descendant, so a closed ancestor of open work
-/// stays visible as context. Roots and siblings are in ready order.
+/// stays visible as context. Roots and siblings are in ready order. A task whose parent is
+/// missing from `all` is treated as a root; members of a parent cycle are not shown at all
+/// (`check` reports them as `parent_cycle`).
 pub fn forest(all: &[Task], root: Option<&TaskId>, include_closed: bool) -> Vec<TreeNode> {
     let mut tops: Vec<&Task> = match root {
         Some(id) => all.iter().filter(|task| &task.id == id).collect(),
-        None => all.iter().filter(|task| task.parent.is_none()).collect(),
+        None => all
+            .iter()
+            .filter(|task| {
+                task.parent
+                    .as_ref()
+                    .is_none_or(|parent| !all.iter().any(|candidate| &candidate.id == parent))
+            })
+            .collect(),
     };
     tops.sort_by(|a, b| ready_order(a, b));
     tops.into_iter()

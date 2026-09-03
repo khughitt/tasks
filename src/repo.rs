@@ -421,6 +421,24 @@ mod tests {
     }
 
     #[test]
+    fn write_task_survives_a_missing_ancestor_further_up_the_chain() {
+        let (_dir, p) = temp_project();
+        let grandparent = sample(&p);
+        p.write_task(&grandparent).unwrap();
+        let mut parent = sample(&p);
+        parent.parent = Some(grandparent.id.clone());
+        p.write_task(&parent).unwrap();
+        let mut child = sample(&p);
+        child.parent = Some(parent.id.clone());
+        p.write_task(&child).unwrap();
+
+        std::fs::remove_file(p.task_path(&grandparent.id)).unwrap();
+
+        child.title = "unrelated change".into();
+        p.write_task(&child).unwrap();
+    }
+
+    #[test]
     fn new_id_uses_prefix_and_avoids_existing() {
         let (_dir, p) = temp_project();
         let id = p.new_id().unwrap();

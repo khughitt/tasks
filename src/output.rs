@@ -226,7 +226,7 @@ fn pretty(out: &Output) -> String {
                 }
             }
             rendered.push_str(&format!(
-                "{listed_under_ready} open task(s) without children are listed under ready\n"
+                "{listed_under_ready} childless root(s) are listed under ready\n"
             ));
             rendered.push_str("\nready:\n");
             rendered.push_str(&table(&o.ready));

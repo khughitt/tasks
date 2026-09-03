@@ -972,7 +972,7 @@ fn prime_shows_roadmap_and_closeout() {
         "a childless root present in ready is only counted: {roadmap}"
     );
     assert!(
-        roadmap.contains("1 open task(s) without children are listed under ready"),
+        roadmap.contains("1 childless root(s) are listed under ready"),
         "{roadmap}"
     );
 }
@@ -1667,7 +1667,9 @@ fn check_warns_on_open_child_of_closed_parent() {
     env.json(&dir, &["edit", &b, "--status", "todo"]);
     let check = env.json(&dir, &["check"]);
     assert_eq!(check["errors"], serde_json::json!([]));
-    let warning = &check["warnings"].as_array().unwrap()[0];
+    let warnings = check["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{check}");
+    let warning = &warnings[0];
     assert_eq!(warning["kind"], "open_child_of_closed_parent");
     assert_eq!(warning["id"], b);
 }
@@ -1731,6 +1733,24 @@ fn tree_nests_prunes_and_orders() {
 }
 
 #[test]
+fn orphaned_tasks_are_roots_in_tree_and_roadmap() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    let mid = id_of(env.json(&dir, &["add", "Mid", "--parent", &goal]));
+    let kid = id_of(env.json(&dir, &["add", "Kid", "--parent", &mid]));
+    std::fs::remove_file(dir.join(format!("tasks/{goal}.md"))).unwrap();
+    let tree = env.json(&dir, &["tree"]);
+    assert_eq!(tree["nodes"][0]["id"], mid, "{tree}");
+    assert_eq!(tree["nodes"][0]["children"][0]["id"], kid, "{tree}");
+    let prime = env.json(&dir, &["prime"]);
+    assert_eq!(prime["roadmap"][0]["id"], mid, "{prime}");
+    // kid's own parent (mid) still exists; the walk only runs into the missing
+    // grandparent (goal), so the write still succeeds.
+    env.json(&dir, &["note", &kid, "still writable"]);
+}
+
+#[test]
 fn show_reports_parent_and_children_and_list_filters_by_parent() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -1765,5 +1785,22 @@ fn show_reports_parent_and_children_and_list_filters_by_parent() {
     assert_eq!(
         env.fail(&dir, &["list", "--parent", "sci-ffffff"]),
         "task_not_found"
+    );
+}
+
+#[test]
+fn show_warns_when_the_parent_is_missing_from_the_scan() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    let kid = id_of(env.json(&dir, &["add", "Kid", "--parent", &goal]));
+    std::fs::remove_file(dir.join(format!("tasks/{goal}.md"))).unwrap();
+    let out = env.cmd(&dir).args(["show", &kid]).output().unwrap();
+    let shown: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(shown["parent"], serde_json::Value::Null, "{shown}");
+    assert_eq!(
+        shown["warnings"],
+        serde_json::json!([format!("parent {goal} not found")]),
+        "{shown}"
     );
 }

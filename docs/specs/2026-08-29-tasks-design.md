@@ -234,7 +234,8 @@ tasks done <id> [message] [--force]
     status=done; message appended as a note. Refuses under the open-work rule.
 
 tasks drop <id> [message]
-    status=dropped; message appended as a note.
+    status=dropped; message appended as a note. Refuses while any descendant is open; no
+    override.
 
 tasks block <id> [message]
 tasks unblock <id>

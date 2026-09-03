@@ -5,8 +5,9 @@ status: todo
 priority: 2
 size: s
 created: 2026-09-03T13:45:11Z
-updated: 2026-09-03T14:22:57Z
+updated: 2026-09-03T22:43:33Z
 depends: [tasks-1e0bbe, tasks-ddd9ed, tasks-80fec3]
+parent: tasks-059b2f
 tags: [feedback, docs]
 spec: docs/specs/2026-09-03-feedback-design.md
 plan: docs/plans/2026-09-03-feedback.md

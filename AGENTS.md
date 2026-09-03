@@ -24,7 +24,8 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 
 - `src/` — `main.rs` / `cli.rs` (clap), `commands/` (one module per subcommand), `model.rs`
   (task record), `frontmatter.rs`, `repo.rs` (tasks/ dir), `registry.rs` (`~/.config/tasks/projects.toml`),
-  `resolve.rs` (spec/plan links), `query.rs`, `output.rs` / `format.rs` (JSON default, `--pretty`).
+  `resolve.rs` (spec/plan links), `query.rs`, `output.rs` / `format.rs` (JSON default, `--pretty`),
+  `hierarchy.rs` (parent validation, subtree walks, forest).
 - `tests/cli.rs` — end-to-end tests against the built binary in temp repos.
 - `skills/tasks/SKILL.md` — the agent skill shipped to other projects; keep it in step with CLI changes.
 - `docs/specs/`, `docs/plans/` — design and plan docs; tasks link to them with `--spec` / `--plan --step`.

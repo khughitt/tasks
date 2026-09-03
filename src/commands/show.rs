@@ -38,11 +38,16 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         title: task.title.clone(),
         status: task.status.as_str().into(),
     };
-    let parent = task
-        .parent
-        .as_ref()
-        .and_then(|id| all.iter().find(|candidate| &candidate.id == id))
-        .map(related);
+    let parent = match &task.parent {
+        Some(id) => match all.iter().find(|candidate| &candidate.id == id) {
+            Some(found) => Some(related(found)),
+            None => {
+                ctx.warnings.push(format!("parent {id} not found"));
+                None
+            }
+        },
+        None => None,
+    };
     let mut kids = crate::hierarchy::children(&all, &task.id);
     kids.sort_by(|a, b| crate::query::ready_order(a, b));
     let children = kids.into_iter().map(related).collect();
