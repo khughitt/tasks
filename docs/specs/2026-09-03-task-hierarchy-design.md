@@ -58,7 +58,12 @@ They never appear as field values.
   forest.
 
 A child is not implicitly a dependency of its parent for scheduling purposes, but the
-closing rules in §4.2 treat open children the way they treat open dependencies.
+closing rules in §4.2 treat open descendants the way they treat open dependencies.
+
+Because nesting is unbounded, every rule below is stated in terms of **descendants**, not
+direct children. A direct-child rule would let a force-closed middle node hide open work
+beneath it: with `A → B → C`, force-closing `B` while `C` is open must not make `A`
+closable without force. "Open descendant" is computed by walking the subtree.
 
 ## 3. Storage
 
@@ -87,34 +92,42 @@ and additionally warns:
 ### 4.2 Closing rules
 
 The open-deps rule of the original design §3.3 becomes the open-work rule: a task may
-become `done` only when every dependency **and every child** is closed. `--force` on
-`done` overrides both, as today. `drop` refuses while any child is open and has no
-override; an abandoned goal must have its children dropped or reparented first, so that
+become `done` only when every dependency **and every descendant** is closed. `--force` on
+`done` overrides both, as today. `drop` refuses while any descendant is open and has no
+override; an abandoned goal must have its subtree dropped or reparented first, so that
 nothing open is silently left under a closed node.
 
 Reopening a closed task (`done`/`dropped` → `todo`) is allowed regardless of its parent's
-status; `check` then warns if the parent is closed.
+status; `check` then warns if the parent is closed. Force-closing and reopening are the
+only ways an open task ends up under a closed ancestor; the views in §4.3 and §4.4 are
+defined so that such a task is never hidden.
 
 ### 4.3 Ready and prime
 
-`ready` gains one condition: **a task with an open child is not ready**. The definition
-becomes: status `todo`, every dependency closed, no open child. Consequences:
+`ready` is for work, and a task with children is a goal, not work. So `ready` gains one
+condition: **a task with children is never ready.** The definition becomes: status
+`todo`, every dependency closed, no children. A root with no children is an ordinary
+task and is ready under the old rule.
 
-- An umbrella never appears in `ready` while it has open children, so it cannot be
-  picked as if it were a unit of work.
-- Once its last child closes, the umbrella surfaces in `ready`. That is the explicit
-  close-out: someone confirms the goal is met and runs `done`. Nothing closes
+Parents surface through a separate list, because the protocol has an agent `start` a goal
+before brainstorming or decomposing it, which leaves the goal `doing`. A `todo`-only rule
+would therefore never show it again. `prime` gains:
+
+- `closeout`: every open task (`todo`, `doing`, or `blocked`) that has at least one child
+  and no open descendant. That is the explicit close-out: someone confirms the goal is met
+  and runs `done`, or adds the children that are still missing. Nothing closes
   automatically.
-- A root with no children is an ordinary task and is ready under the old rule.
+- `roadmap`: the open forest, as nested nodes, identical to `tasks tree` with no
+  arguments (§4.4). Roots are the roadmap; their subtrees show how each goal is
+  decomposed and how far along it is. A project with no hierarchy gets a flat list of its
+  open tasks here, which is the honest answer to "what is this project trying to do".
+
+A reader of `prime` alone can now see a goal with four open children even when `ready` is
+empty, and a `doing` goal whose children have all closed even though `ready` will never
+list it.
 
 Parents do not inherit or propagate anything else. A `blocked` parent does not block its
 children; priority and size are per task; a child's owner is its own.
-
-`prime` gains a `roadmap` section: every open task that has at least one child, in
-preorder (a parent before its children, siblings in ready order), each with child
-counts. A project with no hierarchy gets an empty list and everything else unchanged. A
-reader of `prime` alone can now see that a goal with four open children is outstanding
-even when `ready` is empty.
 
 ### 4.4 Commands
 
@@ -129,8 +142,12 @@ tasks list [... existing flags ...] [--parent ID]
     Direct children of ID, subject to the other filters.
 
 tasks tree [<id>] [--all]
-    The hierarchy as nested nodes: the whole forest, or the subtree under <id>. Open
-    tasks only unless --all. This is the read side of parent, as graph is of depends.
+    The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
+    the read side of parent, as graph is of depends. Without --all the forest is pruned
+    to nodes that are open or have an open descendant, so a closed ancestor of open work
+    stays visible as context, with its closed status, rather than hiding the work
+    beneath it. --all includes every task. Roots and siblings are in ready order
+    (priority, size, created); a parent precedes its children.
 
 tasks show <id>
     Additionally reports the parent (id, title, status) and the direct children.
@@ -173,18 +190,21 @@ The skill's rules change in these places:
   add each piece with `--parent <goal>`. Use `dep` only for ordering between the pieces.
   The old recipe of splitting through `dep` alone still works but leaves the tree flat and
   loses the roadmap view; prefer `--parent`.
-- **Never pick a task with open children.** `ready` already excludes them; the rule is
-  stated so that an agent reading `list` does not start an umbrella by hand.
-- **Close out explicitly.** When an umbrella appears in `ready`, confirm the goal is met
-  and `done` it with a message, or add the missing children.
+- **Never pick a task with children as work.** `ready` already excludes them; the rule is
+  stated so that an agent reading `list` does not start an umbrella by hand. `start` on
+  an umbrella means "I am decomposing or designing this", and it is expected to stay
+  `doing` until close-out.
+- **Close out explicitly.** When an umbrella appears in `prime`'s `closeout` list, confirm
+  the goal is met and `done` it with a message, or add the missing children.
 - **Brainstorming** attaches, rather than creates: it runs against an existing task, and
   after approval the spec is attached with `edit <id> --spec <topic>`. Deliverables the
   spec identifies become children of that task.
 - **writing-plans** writes the plan for a task and attaches it with `edit <id> --plan`;
   its `Task N:` headings become children with `--parent <id> --plan --step`. `check`'s
   `unlinked_step` warning then names any heading without a task.
-- **`prime`** is read for its `roadmap` section as well as `ready`; the roadmap is the
-  answer to "what is this project trying to do" and `ready` is "what can I do now".
+- **`prime`** is read for `roadmap` and `closeout` as well as `ready`; the roadmap is the
+  answer to "what is this project trying to do", `closeout` is "which goals need a
+  verdict", and `ready` is "what can I do now".
 
 ## 6. JSON contract changes
 
@@ -192,19 +212,26 @@ All additions; no existing field changes meaning.
 
 ```
 Task        += parent: string|null
-TaskSummary += parent: string|null, children: int, open_children: int
+TaskSummary += parent: string|null,
+               child_count: int,              direct children, any status
+               open_descendant_count: int     open tasks anywhere in the subtree
 show        += parent: { id, title, status }|null,
                children: [{ id, title, status }]
-prime       += roadmap: [TaskSummary]         (preorder, see §4.3)
+TreeNode     = TaskSummary + { children: [TreeNode] }
 tree        -> { nodes: [TreeNode], warnings }
-TreeNode     = TaskSummary + { children: [TreeNode] }   (children replaces the count
-                                                          in this shape only)
+prime       += roadmap: [TreeNode],           the open forest, pruned as tree (§4.4)
+               closeout: [TaskSummary]        see §4.3, ready order
 check       += kinds dangling_parent, foreign_parent, parent_cycle (errors);
                open_child_of_closed_parent, unlinked_step (warnings)
 ```
 
-`--pretty` renders `tree` as an indented list, `prime`'s roadmap as a section headed
-`roadmap:` above `ready:`, and marks a ready task that has children as `close-out`.
+The counts are named so that no field changes type between shapes: `children` is always
+an array of nodes and only appears in `TreeNode` and `show`.
+
+`--pretty` renders `tree` as an indented list. For `prime` it prints `closeout:` and
+`roadmap:` sections above `ready:`; to keep a flat project's `prime` readable, the
+roadmap section prints the subtree of every root that has children and then one line
+counting the childless roots, which `ready:` already lists.
 
 ## 7. Original design updates
 
@@ -221,15 +248,19 @@ Land in the same change as the implementation:
 ## 8. Testing
 
 Unit: parent cycle detection (including self-parent and a three-deep loop); ready
-excludes a task with an open child and includes it once the child closes; preorder of
-the roadmap; serialized field order.
+excludes any task with children; open-descendant counting through a force-closed middle
+node (`A → B → C` with `B` done and `C` open gives `A` one open descendant); pruning
+keeps a closed ancestor of an open task; preorder and sibling order; serialized field
+order.
 
 End to end (`tests/cli.rs`): `add --parent` validates prefix, existence, and cycles
-before writing; `done` refuses with an open child and succeeds with `--force`; `drop`
-refuses with an open child; `edit --no-parent` detaches; `tree` nests and `--all`
-includes closed; `prime.roadmap` lists an open parent while `ready` omits it; `check`
-reports each new error and warning kind, including `unlinked_step` for a plan with an
-unreferenced `Task 3:` heading; editor path accepts and rejects `parent` like the flags.
+before writing; `done` refuses with an open descendant, including one under a
+force-closed child, and succeeds with `--force`; `drop` refuses with an open descendant;
+`edit --no-parent` detaches; `tree` nests, prunes, and `--all` includes closed;
+`prime.roadmap` lists an open parent while `ready` omits it; a `doing` parent whose
+children have all closed appears in `prime.closeout`; `check` reports each new error and
+warning kind, including `unlinked_step` for a plan with an unreferenced `Task 3:` heading;
+editor path accepts and rejects `parent` like the flags.
 
 ## 9. Out of scope
 
