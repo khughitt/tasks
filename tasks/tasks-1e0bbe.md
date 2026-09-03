@@ -5,10 +5,10 @@ status: todo
 priority: 1
 size: s
 created: 2026-09-03T13:45:11Z
-updated: 2026-09-03T13:45:11Z
+updated: 2026-09-03T13:57:05Z
 depends: [tasks-d7ba4e]
 tags: [feedback, cli]
 spec: docs/specs/2026-09-03-feedback-design.md
 ---
 
-Feedback design §3 steps 3-4 (recur branch) and §4: candidates are open target tasks tagged feedback; lowercase alnum tokens >= 3 chars, Jaccard >= 0.6, best match, ties to the older task; append 'feedback from <prefix>: <summary>' and optional single-line detail note; --recur ID validates open feedback; --new skips matching; action: recurred. Unit tests for normalization and threshold; e2e per §8.
+Feedback design §3 steps 3-4 (recur branch) and §4: candidates are open target tasks tagged feedback; lowercase alnum tokens >= 3 chars; an exact normalized token sequence recurs automatically; Jaccard >= 0.6 but inexact fails with ambiguous listing candidate ids and titles (descending similarity, ties to the older task); --recur ID validates open feedback; --new skips matching. Recurrence appends 'feedback from <prefix>: <summary>' plus optional single-line detail note and adds from:<prefix> and <category> tags if absent, through a guarded read-modify-write (hash on read, re-check before atomic replace, retry up to 8 times, then concurrent_modification). action: recurred. Unit tests for normalization, exact vs similar, and the guard; e2e per §8.

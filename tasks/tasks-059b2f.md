@@ -5,8 +5,8 @@ status: todo
 priority: 1
 size: m
 created: 2026-09-03T02:23:22Z
-updated: 2026-09-03T13:45:11Z
-depends: [tasks-d7ba4e, tasks-1e0bbe, tasks-010f75]
+updated: 2026-09-03T13:57:23Z
+depends: [tasks-d7ba4e, tasks-1e0bbe, tasks-010f75, tasks-ddd9ed, tasks-80fec3]
 tags: [feedback, cli]
 spec: docs/specs/2026-09-03-feedback-design.md
 ---
@@ -16,3 +16,4 @@ Goal: let any project that uses tasks file structured feedback about the tool it
 ## Notes
 
 - 2026-09-03T13:45:11Z (open-items): design written: docs/specs/2026-09-03-feedback-design.md; split into tasks-d7ba4e tasks-1e0bbe tasks-010f75; stays open as the umbrella until they land
+- 2026-09-03T13:57:23Z (open-items): review round 1: recurrence carries tags; only exact titles auto-recur, similar ones are ambiguous; guarded write; human commit is the disclosure gate; added tasks-ddd9ed (show foreign ids) and tasks-80fec3 (prime uncommitted warning)
