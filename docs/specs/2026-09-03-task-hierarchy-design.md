@@ -1,6 +1,7 @@
 # Task hierarchy: tasks as the authority for goals — design
 
-**Status:** proposed (2026-09-03); implements tasks-061851. Supersedes the "no hierarchy"
+**Status:** approved (2026-09-03, after one review round), not yet implemented; implements
+tasks-061851. Supersedes the "no hierarchy"
 non-goal in docs/specs/2026-08-29-tasks-design.md §1.
 
 ## 1. Problem
