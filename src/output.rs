@@ -119,6 +119,8 @@ pub struct PrimeOut {
     pub counts: Counts,
     pub ready: Vec<TaskSummary>,
     pub doing: Vec<TaskSummary>,
+    pub roadmap: Vec<TreeNode>,
+    pub closeout: Vec<TaskSummary>,
     pub warnings: Vec<String>,
 }
 
@@ -208,6 +210,24 @@ fn pretty(out: &Output) -> String {
                 "project {}\nidea {}  todo {}  doing {}  blocked {}  done {}  dropped {}\n",
                 o.prefix, c.idea, c.todo, c.doing, c.blocked, c.done, c.dropped
             );
+            rendered.push_str("\ncloseout:\n");
+            rendered.push_str(&table(&o.closeout));
+            rendered.push_str("\nroadmap:\n");
+            let ready_ids: std::collections::HashSet<&str> =
+                o.ready.iter().map(|row| row.id.as_str()).collect();
+            let mut listed_under_ready = 0;
+            for node in &o.roadmap {
+                if node.summary.child_count > 0 {
+                    rendered.push_str(&tree_text(std::slice::from_ref(node), 0));
+                } else if ready_ids.contains(node.summary.id.as_str()) {
+                    listed_under_ready += 1;
+                } else {
+                    rendered.push_str(&table(std::slice::from_ref(&node.summary)));
+                }
+            }
+            rendered.push_str(&format!(
+                "{listed_under_ready} open task(s) without children are listed under ready\n"
+            ));
             rendered.push_str("\nready:\n");
             rendered.push_str(&table(&o.ready));
             rendered.push_str("\ndoing:\n");

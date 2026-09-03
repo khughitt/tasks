@@ -890,6 +890,93 @@ fn prime_reports_counts_ready_and_doing() {
     assert!(text.contains("sci") && text.contains(&a), "{text}");
 }
 
+#[test]
+fn prime_shows_roadmap_and_closeout() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    // goal gets an explicit priority so it sorts before loner deterministically: both are
+    // otherwise tied on priority/size/created (same second) and the id tie-break is random hex.
+    let goal = id_of(env.json(&dir, &["add", "Goal", "-p", "1"]));
+    let leaf = id_of(env.json(&dir, &["add", "Leaf", "--parent", &goal]));
+    let loner = id_of(env.json(&dir, &["add", "Loner"]));
+    env.json(&dir, &["start", &goal]);
+
+    let prime = env.json(&dir, &["prime"]);
+    assert_eq!(prime["closeout"], serde_json::json!([]));
+    let roadmap = prime["roadmap"].as_array().unwrap();
+    assert_eq!(roadmap.len(), 2, "{prime}");
+    assert_eq!(roadmap[0]["id"], goal);
+    assert_eq!(roadmap[0]["children"][0]["id"], leaf);
+    assert_eq!(roadmap[1]["id"], loner);
+    let ready: Vec<&str> = prime["ready"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert!(!ready.contains(&goal.as_str()));
+
+    env.json(&dir, &["done", &leaf]);
+    let prime = env.json(&dir, &["prime"]);
+    assert_eq!(
+        prime["closeout"][0]["id"], goal,
+        "a doing parent surfaces: {prime}"
+    );
+    assert!(
+        prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["id"] != goal)
+    );
+
+    let parked = id_of(env.json(&dir, &["add", "Parked", "--status", "idea"]));
+    let kid = id_of(env.json(&dir, &["add", "Kid", "--parent", &parked]));
+    env.json(&dir, &["done", &kid]);
+    let prime = env.json(&dir, &["prime"]);
+    assert!(
+        prime["closeout"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["id"] != parked),
+        "an idea is never a close-out candidate: {prime}"
+    );
+
+    let stuck = id_of(env.json(&dir, &["add", "Stuck"]));
+    env.json(&dir, &["block", &stuck, "waiting"]);
+    let out = env.cmd(&dir).args(["--pretty", "prime"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("\ncloseout:\n"), "{text}");
+    let roadmap = text
+        .split("\nroadmap:\n")
+        .nth(1)
+        .unwrap()
+        .split("\nready:\n")
+        .next()
+        .unwrap();
+    assert!(
+        roadmap.contains(&goal),
+        "roots with children print as subtrees: {roadmap}"
+    );
+    assert!(
+        roadmap.contains(&parked),
+        "an idea with children is still a subtree: {roadmap}"
+    );
+    assert!(
+        roadmap.contains(&stuck),
+        "a childless root absent from ready is printed: {roadmap}"
+    );
+    assert!(
+        !roadmap.contains(&loner),
+        "a childless root present in ready is only counted: {roadmap}"
+    );
+    assert!(
+        roadmap.contains("1 open task(s) without children are listed under ready"),
+        "{roadmap}"
+    );
+}
+
 fn editor_script(dir: &std::path::Path, body: &str) -> String {
     let p = dir.join("editor.sh");
     std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();

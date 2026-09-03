@@ -160,6 +160,18 @@ pub fn prime(mut ctx: Ctx) -> Result<Output> {
         .cloned()
         .collect();
     sort_list(&mut doing);
+    let roadmap = crate::hierarchy::forest(&all, None, false);
+    let mut closeout: Vec<Task> = all
+        .iter()
+        .filter(|task| {
+            // spec §4.3: todo, doing, or blocked; an idea is open but not a candidate
+            matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
+                && !crate::hierarchy::children(&all, &task.id).is_empty()
+                && crate::hierarchy::open_descendants(&all, &task.id).is_empty()
+        })
+        .cloned()
+        .collect();
+    sort_ready(&mut closeout);
     Ok(Output::Prime(PrimeOut {
         prefix: ctx.project.prefix.clone(),
         counts,
@@ -168,6 +180,11 @@ pub fn prime(mut ctx: Ctx) -> Result<Output> {
             .map(|task| TaskSummary::of(task, &all))
             .collect(),
         doing: doing
+            .iter()
+            .map(|task| TaskSummary::of(task, &all))
+            .collect(),
+        roadmap,
+        closeout: closeout
             .iter()
             .map(|task| TaskSummary::of(task, &all))
             .collect(),
