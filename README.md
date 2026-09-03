@@ -7,9 +7,55 @@ Rust binary as the only writer. JSON output by default.
 Design: [`docs/specs/2026-08-29-tasks-design.md`](docs/specs/2026-08-29-tasks-design.md).
 Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-tasks.md).
 
+## For agents
+
+If you have been asked to install `tasks` or adopt it in a project, do these in order.
+Each step is idempotent.
+
+1. Install the binary and the skill (once per machine; needs a Rust toolchain):
+
+       git clone https://github.com/khughitt/tasks ~/.local/src/tasks
+       cargo install --path ~/.local/src/tasks
+       mkdir -p ~/.claude/skills && ln -sfn ~/.local/src/tasks/skills/tasks ~/.claude/skills/tasks
+
+   Other harnesses look in `~/.agents/skills`; symlink there as well if relevant.
+
+2. Initialise the project (once per repository):
+
+       cd <repo>
+       tasks init --prefix <p>          # p: a letter then 1-7 letters/digits, e.g. sci
+
+   If the project keeps specs or plans outside `docs/specs/` and `docs/plans/`, see
+   "Adopting in an existing project" below before running `init`.
+
+3. Add this to the project's `AGENTS.md` or `CLAUDE.md`:
+
+       Work is tracked with `tasks` (see ~/.claude/skills/tasks/SKILL.md). Start every
+       session with `tasks prime`, `tasks start <id>` before changing code, `tasks done <id>`
+       in the same commit as the code, and `tasks check` before every commit.
+
+4. Work:
+
+       tasks prime                      # counts, ready list, who is doing what
+       tasks ready                      # what can be worked on now
+       tasks start <id>                 # claim it
+       tasks note <id> "<one line>"     # when scope or understanding changes
+       tasks done <id> "<what landed>"  # in the same commit as the code
+       tasks check                      # before every commit
+
+Never edit `tasks/*.md` by hand. `tasks --help` lists every command; add `--pretty` to any
+command for human-readable output.
+
 ## Install
 
+From a checkout:
+
     cargo install --path .
+
+Without a checkout (binary only; the skill still needs the `skills/tasks` directory
+from a clone):
+
+    cargo install --git https://github.com/khughitt/tasks
 
 ## Use
 
