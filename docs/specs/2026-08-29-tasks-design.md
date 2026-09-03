@@ -1,7 +1,7 @@
 # tasks — design
 
 **Status:** implemented (2026-08-29; spec roots extended 2026-09-02; doc roots made
-configurable per project 2026-09-03); see
+configurable per project 2026-09-03; hierarchy 2026-09-03); see
 docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
@@ -25,7 +25,7 @@ Goals:
 Non-goals (deliberately):
 
 - No database, cache, or index. Every command scans `tasks/*.md`.
-- No hierarchy (epics/subtasks), no `split` command, no scheduling math.
+- No task kinds and no scheduling math; hierarchy is one `parent` field (docs/specs/2026-09-03-task-hierarchy-design.md).
 - No locking or atomic claims; claims are advisory and git is the arbiter.
 - No delete; `drop` closes a task and keeps its history.
 
@@ -84,6 +84,7 @@ owner: keith
 created: 2026-08-29T14:02:11Z
 updated: 2026-08-29T14:02:11Z
 depends: [sci-91be03, fam-0c3d7e]
+parent: sci-1a2b3c
 tags: [world-index, cut-12]
 spec: docs/specs/2026-08-24-world-index-holdings-design.md
 plan: docs/plans/2026-08-24-holdings.md
@@ -111,6 +112,7 @@ Free-form markdown body.
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
 | `updated`  | RFC 3339 UTC        | yes      | Set by every write command. |
 | `depends`  | list of ids         | yes      | May be empty. Foreign prefixes allowed (§6). |
+| `parent`   | task id             | no       | Same project; must exist; a task cannot be its own ancestor. Written after `depends`. |
 | `tags`     | list of strings     | yes      | May be empty. The only grouping mechanism. |
 | `spec`     | repo-relative path  | no       | Must be an existing file under one of the project's spec roots (§2). |
 | `plan`     | repo-relative path  | no       | Must be an existing file under one of the project's plan roots (§2). |
@@ -144,16 +146,17 @@ editor path:
 | From      | To                                   |
 |-----------|--------------------------------------|
 | any open  | any other open status                |
-| any open  | `done` (subject to the open-deps rule), `dropped` |
+| any open  | `done` (subject to the open-work rule), `dropped` |
 | `done`, `dropped` | `todo` only (reopen)         |
 
-Open-deps rule: a task may become `done` only when every dependency is closed, unless
-`--force` is given. It applies to `done` and to `edit --status done` alike.
+Open-work rule: a task may become `done` only when every dependency and every
+descendant is closed, unless `--force` is given; `drop` refuses while any descendant
+is open and has no override. It applies to `done` and to `edit --status done` alike.
 
 - `idea`: unscoped; never appears in `ready`.
 - `blocked`: explicit judgment, distinct from "has open dependencies".
 
-`ready` = status `todo` and every entry in `depends` is closed.
+`ready` = status `todo`, no children, and every entry in `depends` is closed.
 
 ## 4. Identity and collisions
 
@@ -189,6 +192,7 @@ tasks init [--prefix P]
 
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
+          [--parent ID]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
     repo-relative path under a configured root or a bare name resolved as the unique
     match across the configured roots (error on 0 or >1 matches). --depends ids and
@@ -196,17 +200,26 @@ tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
 
 tasks show <id>
     The full task with resolved spec/plan paths, each dependency's title and status,
-    and whether the step heading still resolves.
+    whether the step heading still resolves, and the parent and direct children.
 
-tasks list [--status S]... [--tag T]... [--owner O] [--all-projects]
+tasks list [--status S]... [--tag T]... [--owner O] [--all-projects] [--parent ID]
     Default: open tasks, sorted by priority then updated desc. --all-projects walks the
     registry.
+
+tasks tree [<id>] [--all]
+    The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
+    the read side of parent, as graph is of depends. Without --all the forest is pruned
+    to nodes that are open or have an open descendant, so a closed ancestor of open work
+    stays visible as context, with its closed status, rather than hiding the work
+    beneath it. --all includes every task. Roots and siblings are in ready order
+    (priority, size, created); a parent precedes its children.
 
 tasks ready [--size S] [-n N]
     Actionable tasks: todo with all dependencies closed. Sorted by priority, then size
     (xs first, unsized last), then created.
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
+           [--parent ID | --no-parent]
     With flags: update those fields. Without flags: open an editable copy in $EDITOR
     (§5.2). Either way the result is validated against §3 and the invariants in §5.3
     before it replaces the original.
@@ -218,7 +231,7 @@ tasks start <id>
     status=doing, owner=$TASKS_OWNER, else the current git branch name, else $USER.
 
 tasks done <id> [message] [--force]
-    status=done; message appended as a note. Refuses under the open-deps rule.
+    status=done; message appended as a note. Refuses under the open-work rule.
 
 tasks drop <id> [message]
     status=dropped; message appended as a note.
@@ -236,12 +249,15 @@ tasks graph [--format mermaid|dot] [--all]
 tasks check
     Validate every task file: frontmatter schema, filename == id, timestamps, dangling
     depends/spec/plan, paths outside the configured doc roots, missing step heading,
-    dependency cycles, reserved delimiter in body, malformed notes section. Exit 1 on any
-    error. Unresolvable foreign ids (unregistered or unreachable prefix) are warnings.
+    dependency cycles, parent problems (dangling, foreign, cycle), open child of closed
+    parent, plan headings with no task, reserved delimiter in body, malformed notes
+    section. Exit 1 on any error. Unresolvable foreign ids (unregistered or unreachable
+    prefix) are warnings.
 
 tasks prime
-    Agent session context: prefix, counts by status, the ready list, and doing tasks
-    with owners. Intended to be run at the start of every agent session.
+    Agent session context: prefix, counts by status, the ready list, doing tasks
+    with owners, the roadmap (open forest) and closeout list. Intended to be run at
+    the start of every agent session.
 ```
 
 ### 5.1 Output contract
@@ -282,6 +298,19 @@ prime  -> { prefix, counts: { idea, todo, doing, blocked, done, dropped },
 init   -> { prefix, root, warnings }
 add, edit, note, start, done, drop, block, unblock, dep
        -> { id, warnings }
+
+Task        += parent: string|null
+TaskSummary += parent: string|null,
+               child_count: int,              direct children, any status
+               open_descendant_count: int     open tasks anywhere in the subtree
+show        += parent: { id, title, status }|null,
+               children: [{ id, title, status }]
+TreeNode     = TaskSummary + { children: [TreeNode] }
+tree        -> { nodes: [TreeNode], warnings }
+prime       += roadmap: [TreeNode],           the open forest, pruned as tree (§4.4)
+               closeout: [TaskSummary]        see §4.3, ready order
+check       += kinds dangling_parent, foreign_parent, parent_cycle (errors);
+               open_child_of_closed_parent, unlinked_step (warnings)
 ```
 
 `--pretty` renders the same data as tables (`list`, `ready`, `prime`), the file text plus a
@@ -309,7 +338,7 @@ Validation of an edited task (flags or editor) compares against the original:
 
 - `id` and `created` must be unchanged.
 - `status` changes must be allowed by the §3.3 table; a change to `done` obeys the
-  open-deps rule (`--force` applies to the flag path; the editor path has no force and
+  open-work rule (`--force` applies to the flag path; the editor path has no force and
   fails with `open_dependencies`).
 - `updated` in the edited content is ignored and replaced.
 - The notes section must be unchanged (notes are append-only via `note`).
@@ -358,6 +387,8 @@ If any id reached during traversal is unreachable, `dep --on` and `add --depends
 - `check` fails when: a linked file is missing; a path lies outside the project's
   configured spec or plan roots (§2), including after the roots are narrowed; a `step`
   heading no longer appears verbatim in its plan; `step` is set without `plan`.
+- `check` warns `unlinked_step` for a `Task N:` heading in a linked plan that no task
+  references.
 - Once automation has a pinned Tasks install, running `check` in a project's test or
   pre-commit path turns doc drift under open tasks into a build failure, which is the
   intended coupling: when a plan step is renamed or removed, the task must be updated in
@@ -387,13 +418,26 @@ Skill content:
    `dep <original> --on <pieces>` or drop the original, and leave a note); blocking on
    another project's task; resolving an id collision (§4).
 3. **Superpowers integration** (applies when the superpowers plugin is present):
-   - Brainstorming writes specs under one of the project's spec roots (§2). After
-     approval, add one task per major deliverable with `--spec <topic>`.
-   - writing-plans writes plans under a plan root, `docs/plans/YYYY-MM-DD-<topic>.md` by
-     default. Add one task per
-     `Task N:` heading with `--plan <topic> --step "Task N: …"` and `--depends` mirroring
-     the plan's order.
-   - executing-plans and subagent-driven-development call `tasks start`/`done` per step.
+   - **Tasks first.** A goal that is committed work is recorded as a `todo` task with a
+     body the moment it is known, however large. `idea` stays reserved for uncommitted
+     thoughts; a roadmap item that the project intends to do is not an idea.
+   - **Decompose with `--parent`.** When a goal is split into pieces that are parts of
+     it, add each piece with `--parent <goal>`. Use `dep` only for ordering between the
+     pieces. The old recipe of splitting through `dep` alone still works but leaves the
+     tree flat and loses the roadmap view; prefer `--parent`.
+   - **Never pick a task with children as work.** `ready` already excludes them; the
+     rule is stated so that an agent reading `list` does not start an umbrella by hand.
+     `start` on an umbrella means "I am decomposing or designing this", and it is
+     expected to stay `doing` until close-out.
+   - **Close out explicitly.** When an umbrella appears in `prime`'s `closeout` list,
+     confirm the goal is met and `done` it with a message, or add the missing children.
+   - **Brainstorming** attaches, rather than creates: it runs against an existing task,
+     and after approval the spec is attached with `edit <id> --spec <topic>`.
+     Deliverables the spec identifies become children of that task.
+   - **writing-plans** writes the plan for a task and attaches it with
+     `edit <id> --plan`; its `Task N:` headings become children with
+     `--parent <id> --plan --step`. `check`'s `unlinked_step` warning then names any
+     heading without a task.
    - `tasks check` in CI is the drift limiter once CI has a pinned install (§7).
 
 ## 9. Adoption in existing projects

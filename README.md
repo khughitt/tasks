@@ -38,6 +38,7 @@ Each step is idempotent.
 
        tasks prime                      # counts, ready list, who is doing what
        tasks ready                      # what can be worked on now
+       tasks tree                       # the goal hierarchy
        tasks start <id>                 # claim it
        tasks note <id> "<one line>"     # when scope or understanding changes
        tasks done <id> "<what landed>"  # in the same commit as the code
@@ -62,7 +63,9 @@ from a clone):
     cd <repo>
     tasks init --prefix sci          # creates tasks/ and the doc roots; registers the project
     tasks add "Bank the ledger" -p 1 --size m --tag ledger
+    tasks add "Emit rows" --parent sci-4f2a9c
     tasks ready                      # what can be worked on now (JSON)
+    tasks tree                       # the goal hierarchy
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
     tasks start sci-4f2a9c
     tasks note sci-4f2a9c "spec §4 no longer holds"

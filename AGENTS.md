@@ -8,6 +8,7 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 - Start with `tasks prime`; pick from `tasks ready`; `tasks start <id>` before changing code.
 - `tasks note <id> "<one line>"` when scope or understanding changes.
 - `tasks done <id> "<what landed>"` in the same commit as the code. `tasks check` before every commit.
+- Decompose goals with `--parent`; close a goal from `prime`'s closeout list.
 - Never edit `tasks/*.md` by hand; the binary is the only writer. Full protocol: `skills/tasks/SKILL.md`.
 
 ## Gates
