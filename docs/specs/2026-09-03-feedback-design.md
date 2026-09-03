@@ -66,8 +66,9 @@ Behaviour, in order:
    - Match: append a note reading `feedback from <prefix>: <summary>` and, if `--body` was
      given, a second note `detail from <prefix>: <text>` (single line, as all notes are;
      multi-line detail is rejected with `validation` on recurrence). Add `from:<prefix>`
-     and `<category>` to the tags if absent. The task's `updated` moves, so it rises in
-     `list`. The write is a guarded read-modify-write: the file's hash is taken on read
+     and `<category>` to the tags if absent. The task's `updated` is refreshed, so it
+     rises in `list`; timestamps have second precision, so a repeat within the same
+     second keeps the same value. The write is a guarded read-modify-write: the file's hash is taken on read
      and checked again immediately before the atomic replace; on a mismatch the whole
      step is retried from the read, up to eight times, then fails with
      `concurrent_modification`. Every read also re-checks that the task is still open
