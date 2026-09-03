@@ -215,8 +215,8 @@ tasks tree [<id>] [--all]
     (priority, size, created); a parent precedes its children.
 
 tasks ready [--size S] [-n N]
-    Actionable tasks: todo with all dependencies closed. Sorted by priority, then size
-    (xs first, unsized last), then created.
+    Actionable tasks: todo, no children, and all dependencies closed. Sorted by
+    priority, then size (xs first, unsized last), then created.
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
            [--parent ID | --no-parent]
@@ -339,7 +339,7 @@ Validation of an edited task (flags or editor) compares against the original:
 - `id` and `created` must be unchanged.
 - `status` changes must be allowed by the §3.3 table; a change to `done` obeys the
   open-work rule (`--force` applies to the flag path; the editor path has no force and
-  fails with `open_dependencies`).
+  fails with `open_dependencies` or `open_descendants`).
 - `updated` in the edited content is ignored and replaced.
 - The notes section must be unchanged (notes are append-only via `note`).
 - Everything else is validated as on `add`.
@@ -411,26 +411,17 @@ documented in the README:
 
 Skill content:
 
-1. **Session protocol**: run `tasks prime`; choose from `ready`; `tasks start` before
-   changing code; `tasks note` when scope or understanding changes; `tasks done <id> "…"`
-   with a message in the same commit as the code. Never edit `tasks/*.md` by hand.
-2. **Recipes**: recording an idea vs. a scoped task; splitting a task (add the pieces,
-   `dep <original> --on <pieces>` or drop the original, and leave a note); blocking on
-   another project's task; resolving an id collision (§4).
+1. **Session protocol**: run `tasks prime` for the roadmap, closeout, and ready lists,
+   and who is working on what; pick from `ready` (never a task with children — those
+   are goals, not work); `tasks start` before changing code; `tasks note` when scope
+   or understanding changes; `tasks done <id> "…"` with a message in the same commit
+   as the code; when a goal appears under `closeout`, confirm it is met and `done` it,
+   or add the missing children. Never edit `tasks/*.md` by hand.
+2. **Recipes**: recording an idea vs. a scoped task; decomposing a goal
+   (`tasks add "<piece>" --parent <goal>` for each part; `dep` only for ordering
+   between the pieces); blocking on another project's task; resolving an id collision
+   (§4).
 3. **Superpowers integration** (applies when the superpowers plugin is present):
-   - **Tasks first.** A goal that is committed work is recorded as a `todo` task with a
-     body the moment it is known, however large. `idea` stays reserved for uncommitted
-     thoughts; a roadmap item that the project intends to do is not an idea.
-   - **Decompose with `--parent`.** When a goal is split into pieces that are parts of
-     it, add each piece with `--parent <goal>`. Use `dep` only for ordering between the
-     pieces. The old recipe of splitting through `dep` alone still works but leaves the
-     tree flat and loses the roadmap view; prefer `--parent`.
-   - **Never pick a task with children as work.** `ready` already excludes them; the
-     rule is stated so that an agent reading `list` does not start an umbrella by hand.
-     `start` on an umbrella means "I am decomposing or designing this", and it is
-     expected to stay `doing` until close-out.
-   - **Close out explicitly.** When an umbrella appears in `prime`'s `closeout` list,
-     confirm the goal is met and `done` it with a message, or add the missing children.
    - **Brainstorming** attaches, rather than creates: it runs against an existing task,
      and after approval the spec is attached with `edit <id> --spec <topic>`.
      Deliverables the spec identifies become children of that task.
@@ -438,6 +429,8 @@ Skill content:
      `edit <id> --plan`; its `Task N:` headings become children with
      `--parent <id> --plan --step`. `check`'s `unlinked_step` warning then names any
      heading without a task.
+   - executing-plans and subagent-driven-development call `tasks start`/`done` per
+     step.
    - `tasks check` in CI is the drift limiter once CI has a pinned install (§7).
 
 ## 9. Adoption in existing projects

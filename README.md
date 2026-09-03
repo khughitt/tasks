@@ -69,7 +69,8 @@ from a clone):
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
     tasks start sci-4f2a9c
     tasks note sci-4f2a9c "spec §4 no longer holds"
-    tasks done sci-4f2a9c "landed in 1a2b3c"
+    tasks done sci-91be03 "rows emitted"
+    tasks done sci-4f2a9c "landed in 1a2b3c"  # open-work rule: closes once its child is
     tasks check                      # validate files, links, plan steps, dependencies
 
 Run `tasks --help` for the full command list.
