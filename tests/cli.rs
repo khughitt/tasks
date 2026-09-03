@@ -1387,6 +1387,37 @@ fn check_passes_clean_repo_and_reports_drift() {
         .map(|e| e["kind"].as_str().unwrap())
         .collect();
     assert!(wkinds.contains(&"unreachable_dep"), "{wkinds:?}");
+    assert!(wkinds.contains(&"unlinked_step"), "{wkinds:?}");
+}
+
+#[test]
+fn check_warns_on_plan_headings_without_a_task() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    write_doc(
+        &dir,
+        "docs/plans/2026-09-03-p.md",
+        "# Plan\n\n## Overview\n\n### Task 1: one\n\n### Task 2: two\n\n### Notes on Task 3\n",
+    );
+    write_doc(
+        &dir,
+        "docs/plans/2026-09-03-unlinked.md",
+        "### Task 1: nobody\n",
+    );
+    env.json(&dir, &["add", "A", "--plan", "p", "--step", "Task 1: one"]);
+    let check = env.json(&dir, &["check"]);
+    assert_eq!(check["errors"], serde_json::json!([]));
+    let warnings = check["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{check}");
+    assert_eq!(warnings[0]["kind"], "unlinked_step");
+    assert_eq!(warnings[0]["file"], "docs/plans/2026-09-03-p.md");
+    assert_eq!(warnings[0]["id"], serde_json::Value::Null);
+    assert!(
+        warnings[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Task 2: two")
+    );
 }
 
 #[test]

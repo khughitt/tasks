@@ -193,5 +193,30 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
     }
 
+    let mut linked_plans: Vec<&String> =
+        tasks.iter().filter_map(|task| task.plan.as_ref()).collect();
+    linked_plans.sort();
+    linked_plans.dedup();
+    for plan in linked_plans {
+        let path = ctx.project.root.join(plan);
+        if !path.is_file() {
+            continue; // already an error above
+        }
+        let text = std::fs::read_to_string(path)?;
+        for heading in crate::resolve::step_headings(&text) {
+            let linked = tasks.iter().any(|task| {
+                task.plan.as_ref() == Some(plan) && task.step.as_deref() == Some(&heading)
+            });
+            if !linked {
+                warnings.push(finding(
+                    None,
+                    plan.clone(),
+                    "unlinked_step",
+                    format!("heading {heading:?} has no task"),
+                ));
+            }
+        }
+    }
+
     Ok(Output::Check(CheckOut { errors, warnings }))
 }

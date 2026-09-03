@@ -130,3 +130,30 @@ pub fn heading_text(line: &str) -> Option<&str> {
     }
     trimmed.strip_prefix(' ').map(str::trim_end)
 }
+
+/// Heading texts of the form `Task <digits>: …`, in file order.
+pub fn step_headings(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(heading_text)
+        .filter(|heading| {
+            heading
+                .strip_prefix("Task ")
+                .and_then(|rest| rest.split_once(':'))
+                .is_some_and(|(number, _)| {
+                    !number.is_empty() && number.chars().all(|c| c.is_ascii_digit())
+                })
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn step_headings_match_only_the_task_n_convention() {
+        let text = "# P\n### Task 1: one\n## Task 12: twelve\n### Notes on Task 3\n### Task x: no\nTask 4: not a heading\n";
+        assert_eq!(step_headings(text), ["Task 1: one", "Task 12: twelve"]);
+    }
+}
