@@ -10,6 +10,7 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 - `tasks done <id> "<what landed>"` in the same commit as the code. `tasks check` before every commit.
 - Decompose goals with `--parent`; close a goal from `prime`'s closeout list.
 - Never edit `tasks/*.md` by hand; the binary is the only writer. Full protocol: `skills/tasks/SKILL.md`.
+- File tool friction with `tasks feedback`; in this repo, review uncommitted feedback files before committing them.
 
 ## Gates
 

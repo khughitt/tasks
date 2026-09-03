@@ -1,12 +1,12 @@
 ---
 id: tasks-059b2f
 title: Add a tasks feedback command for structured upstream feedback
-status: doing
+status: done
 priority: 1
 size: m
 owner: open-items
 created: 2026-09-03T02:23:22Z
-updated: 2026-09-03T20:57:21Z
+updated: 2026-09-03T23:47:38Z
 depends: [tasks-d7ba4e, tasks-1e0bbe, tasks-010f75, tasks-ddd9ed, tasks-80fec3]
 tags: [feedback, cli]
 spec: docs/specs/2026-09-03-feedback-design.md
@@ -19,3 +19,4 @@ Goal: let any project that uses tasks file structured feedback about the tool it
 - 2026-09-03T13:45:11Z (open-items): design written: docs/specs/2026-09-03-feedback-design.md; split into tasks-d7ba4e tasks-1e0bbe tasks-010f75; stays open as the umbrella until they land
 - 2026-09-03T13:57:23Z (open-items): review round 1: recurrence carries tags; only exact titles auto-recur, similar ones are ambiguous; guarded write; human commit is the disclosure gate; added tasks-ddd9ed (show foreign ids) and tasks-80fec3 (prime uncommitted warning)
 - 2026-09-03T20:57:21Z (open-items): final review: multiple exact titles are explicitly ambiguous; updated ordering is defined within a priority at whole-second precision
+- 2026-09-03T23:47:38Z (feat/feedback): feedback shipped: files ideas upstream with recurrence, foreign show, prime uncommitted warning

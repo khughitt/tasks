@@ -43,6 +43,7 @@ Each step is idempotent.
        tasks note <id> "<one line>"     # when scope or understanding changes
        tasks done <id> "<what landed>"  # in the same commit as the code
        tasks check                      # before every commit
+       tasks feedback "<about the tool>" --category friction   # file friction upstream
 
 Never edit `tasks/*.md` by hand. `tasks --help` lists every command; add `--pretty` to any
 command for human-readable output.
@@ -88,6 +89,19 @@ or per project, when a project needs to pin its own copy:
     mkdir -p <repo>/.claude/skills && cp -r skills/tasks <repo>/.claude/skills/tasks
 
 `tasks init` warns when neither location has the skill.
+
+## Feedback
+
+When the tool itself gets in the way, cannot do something needed, suggests an improvement,
+or works notably well, file it from wherever you are:
+
+    tasks feedback "<one line about the tool>" --category <friction|gap|idea|positive> [-b "<detail>"]
+
+The entry lands as an `idea` in whichever checkout is registered under the `tasks` prefix,
+tagged `feedback`, the category, and `from:<your prefix>`. A repeat of the same one-liner
+appends a note to the open entry instead of creating a duplicate; `--recur <id>` and
+`--new` settle an `ambiguous` result. The command never commits: this repository is public,
+so a person here reviews each uncommitted file before it becomes public.
 
 ## Adopting in an existing project
 

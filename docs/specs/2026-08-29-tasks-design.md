@@ -1,7 +1,7 @@
 # tasks — design
 
 **Status:** implemented (2026-08-29; spec roots extended 2026-09-02; doc roots made
-configurable per project 2026-09-03; hierarchy 2026-09-03); see
+configurable per project 2026-09-03; hierarchy 2026-09-03; feedback 2026-09-03); see
 docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
@@ -200,7 +200,10 @@ tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
 
 tasks show <id>
     The full task with resolved spec/plan paths, each dependency's title and status,
-    whether the step heading still resolves, and the parent and direct children.
+    whether the step heading still resolves, and the parent and direct children. An id
+    with another registered prefix is read from that project, read-only, with the doc
+    paths resolved against that project's root; an unregistered or unreachable prefix is
+    unresolvable_id.
 
 tasks list [--status S]... [--tag T]... [--owner O] [--all-projects] [--parent ID]
     Default: open tasks, sorted by priority then updated desc. --all-projects walks the
@@ -258,7 +261,28 @@ tasks check
 tasks prime
     Agent session context: prefix, counts by status, the ready list, doing tasks
     with owners, the roadmap (open forest) and closeout list. Intended to be run at
-    the start of every agent session.
+    the start of every agent session. Warns about uncommitted files under tasks/
+    (project-relative, from git status, transient temp files excluded); silent when the
+    root is not inside a git repository or git is absent.
+
+tasks feedback <summary> --category friction|gap|idea|positive [-b|--body TEXT]
+               [--recur ID | --new]
+    File feedback about the tasks tool itself into the upstream tasks project: the
+    registry entry whose prefix is exactly tasks (no configuration key; a missing entry,
+    a root without a config, or a root whose own prefix differs is a config error). The
+    reporting project is the one located as for every other command; outside a project
+    the command fails with no_project. Unless --new is given, the target's open tasks
+    tagged feedback are matched on the summary's normalized tokens: exactly one exact
+    match recurs, appending "feedback from <prefix>: <summary>" (and a second note for
+    --body) authored as feedback, and adding from:<prefix> and the category to the tags
+    through a hash-guarded read-modify-write. Two or more exact matches, or similar
+    candidates (Jaccard >= 0.6) with no unique exact one, are ambiguous: the ids are
+    listed and the reporter reruns with --recur ID or --new. Otherwise a task is created
+    with status idea, priority 2, no size, and tags feedback, <category>, from:<prefix>.
+    --recur ID names an open feedback task in the target explicitly and skips the scan.
+    The command never sets priority or size and never commits: the entry lands as an
+    uncommitted file, named in a warning, and a person in the target repository reviews
+    and commits it.
 ```
 
 ### 5.1 Output contract
@@ -312,6 +336,9 @@ prime       += roadmap: [TreeNode],           the open forest, pruned as tree (�
                closeout: [TaskSummary]        see §4.3, ready order
 check       += kinds dangling_parent, foreign_parent, parent_cycle (errors);
                open_child_of_closed_parent, unlinked_step (warnings)
+
+feedback    -> { id, action: "created"|"recurred", path, warnings }
+               path is the absolute task file in the target project
 ```
 
 `--pretty` renders the same data as tables (`list`, `ready`, `prime`), the file text plus a
@@ -433,6 +460,20 @@ Skill content:
    - executing-plans and subagent-driven-development call `tasks start`/`done` per
      step.
    - `tasks check` in CI is the drift limiter once CI has a pinned install (§7).
+4. **Feedback about the tool**: when `tasks` gets in the way (`friction`), cannot do
+   something needed (`gap`), suggests an improvement (`idea`), or works notably well
+   (`positive`), file it at that moment with `tasks feedback` and carry on; do not hold
+   it for the end of the session. One line about the tool, with the command, error kind,
+   and expectation in `--body`. Describe the tool, not the project: no repository names,
+   file paths, people, or project content, since the upstream repository is public. Do
+   not commit there and do not triage your own report; keep the returned id in a note if
+   the outcome matters, and `tasks show <id>` reads it back later from any registered
+   project.
+5. **Triage, in the tasks repository itself**: uncommitted files under `tasks/` tagged
+   `feedback` are unreviewed reports — read each, redact anything describing a project
+   rather than the tool, then commit. Ideas tagged `feedback` are the triage queue; scope,
+   drop, or promote them like any other idea and record the outcome in a note so a
+   reporter checking back sees it.
 
 ## 9. Adoption in existing projects
 

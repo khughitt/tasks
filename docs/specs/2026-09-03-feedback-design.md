@@ -1,6 +1,6 @@
 # Upstream feedback as tasks — design
 
-**Status:** approved (2026-09-03), not yet implemented; implements tasks-059b2f.
+**Status:** implemented (2026-09-03); see docs/plans/2026-09-03-feedback.md.
 
 ## 1. Problem
 
