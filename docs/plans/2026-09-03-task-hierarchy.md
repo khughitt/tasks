@@ -294,9 +294,10 @@ pub fn validate_parent(project: &Project, task: &Task) -> Result<()> {
 }
 
 /// Walks the parent chain upward from `start` and returns the loop it runs into, if any,
-/// as `a -> b -> a`: only the cycle, never the tail that led into it, so that every task
-/// on or above a cycle reports the same path and `check` can deduplicate. Missing parents
-/// end the walk without a cycle.
+/// as `a -> b -> a`: only the cycle, never the tail that led into it. The path starts at
+/// whichever member the walk enters first (`b -> a -> b` from `b`), so callers that
+/// deduplicate must key on the set of members, as `check` does, not on the order. Missing
+/// parents end the walk without a cycle.
 pub fn parent_cycle(tasks: &[Task], start: &TaskId) -> Option<Vec<TaskId>> {
     let parents: HashMap<&TaskId, &TaskId> = tasks
         .iter()
@@ -363,23 +364,31 @@ mod tests {
         assert!(parent_cycle(std::slice::from_ref(&dangling), &dangling.id).is_none());
         let own = task("xx-000007", Some("xx-000007"), Status::Todo);
         assert_eq!(parent_cycle(std::slice::from_ref(&own), &own.id).unwrap().len(), 2);
-        // a tail entering a loop reports only the loop, so the report is the same from
-        // every start point: C -> A -> B -> A yields A -> B -> A from C
+        // a tail entering a loop reports only the loop: C -> A -> B -> A yields
+        // A -> B -> A from C, the same as from A; from B the same members in B's order
         let tail = task("xx-000005", Some("xx-000001"), Status::Todo);
         let a2 = task("xx-000001", Some("xx-000002"), Status::Todo);
         let b2 = task("xx-000002", Some("xx-000001"), Status::Todo);
-        let from_tail = parent_cycle(&[tail.clone(), a2.clone(), b2.clone()], &tail.id).unwrap();
-        let from_a = parent_cycle(&[tail, a2.clone(), b2], &a2.id).unwrap();
+        let all = [tail.clone(), a2.clone(), b2.clone()];
         let ids = |path: &[TaskId]| path.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let from_tail = parent_cycle(&all, &tail.id).unwrap();
         assert_eq!(ids(&from_tail), ["xx-000001", "xx-000002", "xx-000001"]);
-        assert_eq!(ids(&from_a), ids(&from_tail));
+        assert_eq!(ids(&parent_cycle(&all, &a2.id).unwrap()), ids(&from_tail));
+        let from_b = parent_cycle(&all, &b2.id).unwrap();
+        assert_eq!(ids(&from_b), ["xx-000002", "xx-000001", "xx-000002"]);
+        let members = |path: &[TaskId]| {
+            let mut m: Vec<String> = ids(&path[..path.len() - 1]);
+            m.sort();
+            m
+        };
+        assert_eq!(members(&from_b), members(&from_tail), "same set, so check dedupes");
     }
 }
 ```
 
 Add `mod hierarchy;` to `src/main.rs` in alphabetical position (after `mod frontmatter;`).
 
-Hook the validation into the single writer so that every command that rewrites a task, including `note`, `start`, `done`, `dep`, unrelated `edit` flags, and the feedback plan's direct writes, refuses a dangling, foreign, or cyclic parent. `src/repo.rs`:
+Hook the validation into the writers so that every command that writes a task, including `note`, `start`, `done`, `dep`, unrelated `edit` flags, and the feedback plan's direct writes, refuses a dangling, foreign, or cyclic parent. `src/repo.rs`:
 
 ```rust
     pub fn write_task(&self, task: &Task) -> Result<()> {
@@ -387,6 +396,8 @@ Hook the validation into the single writer so that every command that rewrites a
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
     }
 ```
+
+There are two writers if the feedback plan has landed first: its Task 1 adds `Project::create_task` (exclusive creation, used by `add` and by the feedback command) with `create_task_with` behind it. Add the same `crate::hierarchy::validate_parent(self, task)?;` as the first statement of `create_task_with`, before its id loop. Parent validity does not depend on the new id, since a fresh id is never an existing task and so never the parent. If the feedback plan has not landed, `add` still writes through `save` and `write_task`, and the feedback plan adds the call itself when it lands second. The e2e test above (`add x --parent sci-ffffff` is `unresolvable_id`) fails loudly if either writer is missed.
 
 Add a unit test in `src/repo.rs` tests:
 
@@ -1132,7 +1143,8 @@ and inside the retain closure add `let parent_ok = parent.as_ref().is_none_or(|p
 `src/commands/show.rs`: after building `depends_on`:
 
 ```rust
-    let all = ctx.project.scan()?;
+    let project = &ctx.project; // the feedback plan's Task 2 replaces this binding
+    let all = project.scan()?;
     let related = |task: &crate::model::Task| Related {
         id: task.id.to_string(),
         title: task.title.clone(),
@@ -1149,6 +1161,18 @@ and inside the retain closure add `let parent_ok = parent.as_ref().is_none_or(|p
 ```
 
 and pass `parent, children,` into `ShowOut`. Import `Related` from `crate::output`. Children are in ready order (priority, size, created), the same order `tree` uses; `Project::scan` order is id order, which is random with respect to creation and must not leak into the contract.
+
+**Cross-plan integration.** The feedback plan's Task 2 makes `show` resolve foreign ids by binding `let project: &Project = …` (local or foreign) at the top of `run`. If that has landed, delete the `let project = &ctx.project;` line above so the scan reads the foreign project; relationships must never silently come back empty for a foreign task. If it has not landed, keep the line; the feedback plan says the same from its side. Then extend the show test so the seam is proven:
+
+```rust
+    // only once the feedback plan's Task 2 has landed: relationships resolve for a
+    // foreign id too
+    let fam = env.init("fam");
+    let far = id_of(env.json(&fam, &["add", "Far"]));
+    let far_kid = id_of(env.json(&fam, &["add", "Far kid", "--parent", &far]));
+    assert_eq!(env.json(&dir, &["show", &far])["children"][0]["id"], far_kid);
+    assert_eq!(env.json(&dir, &["show", &far_kid])["parent"]["id"], far);
+```
 
 - [ ] **Step 6: Run all gates**
 
