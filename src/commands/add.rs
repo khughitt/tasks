@@ -1,4 +1,4 @@
-use super::{Ctx, apply_fields, id_out, save};
+use super::{Ctx, apply_fields, create, id_out};
 use crate::cli::FieldArgs;
 use crate::error::{Error, Result};
 use crate::model::{Status, Task};
@@ -31,6 +31,6 @@ pub fn run(ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Result
         notes: vec![],
     };
     apply_fields(&ctx, &mut task, &fields)?;
-    save(&ctx, &mut task)?;
+    create(&ctx.project, &mut task)?;
     Ok(id_out(ctx, &task))
 }

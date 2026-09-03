@@ -1804,3 +1804,147 @@ fn show_warns_when_the_parent_is_missing_from_the_scan() {
         "{shown}"
     );
 }
+
+fn feedback_env() -> (TestEnv, std::path::PathBuf, std::path::PathBuf) {
+    let mut env = TestEnv::new();
+    let target = env.init("tasks");
+    let reporter = env.init("sci");
+    (env, target, reporter)
+}
+
+#[test]
+fn feedback_creates_an_idea_in_the_registered_tasks_project() {
+    let (env, target, reporter) = feedback_env();
+    let out = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "check rejects a spec outside the roots",
+            "--category",
+            "friction",
+            "-b",
+            "expected a hint naming the configured roots",
+        ],
+    );
+    assert_eq!(out["action"], "created");
+    let id = out["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("tasks-"), "{id}");
+    let path = out["path"].as_str().unwrap();
+    assert!(std::path::Path::new(path).is_file());
+    assert!(path.starts_with(target.to_str().unwrap()), "{path}");
+    let warnings = out["warnings"].as_array().unwrap();
+    assert!(
+        warnings[0].as_str().unwrap().contains("uncommitted"),
+        "{out}"
+    );
+
+    let shown = env.json(&target, &["show", &id]);
+    assert_eq!(shown["task"]["status"], "idea");
+    assert_eq!(
+        shown["task"]["title"],
+        "check rejects a spec outside the roots"
+    );
+    assert_eq!(
+        shown["task"]["body"],
+        "expected a hint naming the configured roots"
+    );
+    assert_eq!(shown["task"]["priority"], 2);
+    assert_eq!(shown["task"]["size"], serde_json::Value::Null);
+    assert_eq!(
+        shown["task"]["tags"],
+        serde_json::json!(["feedback", "friction", "from:sci"])
+    );
+    assert_eq!(
+        env.json(&reporter, &["ready"])["tasks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    let out = env.json(
+        &target,
+        &["feedback", "prime is fast", "--category", "positive"],
+    );
+    let shown = env.json(&target, &["show", out["id"].as_str().unwrap()]);
+    assert_eq!(shown["task"]["tags"][2], "from:tasks");
+
+    let out = env
+        .cmd(&target)
+        .args(["--pretty", "feedback", "pretty check", "--category", "idea"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("created tasks-"));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.starts_with("warning: ") && stderr.contains("uncommitted"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn feedback_fails_early_without_a_target_or_a_reporter() {
+    let mut env = TestEnv::new();
+    let reporter = env.init("sci");
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &["feedback", "probe summary", "--category", "gap"]
+        ),
+        "config"
+    );
+    let target = env.init("tasks");
+    std::fs::remove_file(target.join("tasks/.config.toml")).unwrap();
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &["feedback", "probe summary", "--category", "gap"]
+        ),
+        "config"
+    );
+    assert!(
+        std::fs::read_dir(target.join("tasks"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    std::fs::write(target.join("tasks/.config.toml"), "prefix = \"other\"\n").unwrap();
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &["feedback", "probe summary", "--category", "gap"]
+        ),
+        "config",
+        "a registry entry pointing at a project with another prefix is refused"
+    );
+    let nowhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.fail(
+            nowhere.path(),
+            &["feedback", "probe summary", "--category", "gap"]
+        ),
+        "no_project"
+    );
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &["feedback", "probe summary", "--category", "rant"]
+        ),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &[
+                "feedback",
+                "probe summary",
+                "--category",
+                "gap",
+                "-b",
+                "a\n## Notes\nb"
+            ]
+        ),
+        "validation"
+    );
+}

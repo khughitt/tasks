@@ -140,6 +140,14 @@ pub struct Finding {
 }
 
 #[derive(Serialize)]
+pub struct FeedbackOut {
+    pub id: String,
+    pub action: String,
+    pub path: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct CheckOut {
     pub errors: Vec<Finding>,
     pub warnings: Vec<Finding>,
@@ -157,6 +165,7 @@ pub enum Output {
     Graph(GraphOut),
     Check(CheckOut),
     Tree(TreeOut),
+    Feedback(FeedbackOut),
 }
 
 pub fn render(out: &Output, format: Format) -> String {
@@ -249,6 +258,7 @@ fn pretty(out: &Output) -> String {
             rendered
         }
         Output::Tree(o) => tree_text(&o.nodes, 0),
+        Output::Feedback(o) => format!("{} {}", o.action, o.id),
     }
 }
 
@@ -314,5 +324,6 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
             .map(|finding| format!("{} [{}] {}", finding.file, finding.kind, finding.detail))
             .collect(),
         Output::Tree(o) => o.warnings.clone(),
+        Output::Feedback(o) => o.warnings.clone(),
     }
 }

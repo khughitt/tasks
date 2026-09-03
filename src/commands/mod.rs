@@ -2,6 +2,7 @@ pub mod add;
 pub mod check;
 pub mod dep;
 pub mod edit;
+pub mod feedback;
 pub mod graph;
 pub mod init;
 pub mod list;
@@ -111,6 +112,15 @@ pub fn save(ctx: &Ctx, task: &mut Task) -> Result<()> {
     validate_task(task)?;
     ctx.project.validate_docs(task)?;
     ctx.project.write_task(task)
+}
+
+/// `save` for a task that does not exist yet: validates, then creates exclusively. Takes
+/// the project rather than `Ctx` because the feedback command creates in another project.
+pub fn create(project: &Project, task: &mut Task) -> Result<()> {
+    task.updated = crate::time::now();
+    validate_task(task)?;
+    project.validate_docs(task)?;
+    project.create_task(task)
 }
 
 pub fn load(ctx: &Ctx, id: &str) -> Result<Task> {
@@ -244,5 +254,10 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
         Command::Tree { id, all } => tree::run(open_ctx(dir)?, id, all),
+        Command::Feedback {
+            summary,
+            category,
+            body,
+        } => feedback::run(open_ctx(dir)?, summary, category, body),
     }
 }

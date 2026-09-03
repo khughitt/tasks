@@ -311,6 +311,53 @@ impl Project {
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
     }
 
+    /// Assigns a fresh id and links the file into place with an exclusive operation, so a
+    /// concurrent creator that drew the same id can never be overwritten: on a collision
+    /// the id is regenerated. The temp file lives under tasks/ like every other write.
+    pub fn create_task(&self, task: &mut Task) -> Result<()> {
+        self.create_task_with(task, || fastrand::u32(..0x100_0000))
+    }
+
+    fn create_task_with(&self, task: &mut Task, mut candidate: impl FnMut() -> u32) -> Result<()> {
+        crate::hierarchy::validate_parent(self, task)?;
+        for _ in 0..16 {
+            task.id = TaskId {
+                prefix: self.prefix.clone(),
+                hex: format!("{:06x}", candidate()),
+            };
+            let path = self.task_path(&task.id);
+            if path.exists() {
+                continue;
+            }
+            let temp = path.with_file_name(format!(".{}.new.tmp", task.id));
+            let mut file = match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if let Err(error) = file.write_all(serialize_task(task).as_bytes()) {
+                drop(file);
+                let _ = std::fs::remove_file(&temp);
+                return Err(error.into());
+            }
+            drop(file);
+            let linked = std::fs::hard_link(&temp, &path);
+            let _ = std::fs::remove_file(&temp);
+            match linked {
+                Ok(()) => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(Error::Validation(
+            "could not allocate a free id after 16 attempts".into(),
+        ))
+    }
+
     pub fn new_id(&self) -> Result<TaskId> {
         for _ in 0..16 {
             let id = TaskId {
@@ -436,6 +483,33 @@ mod tests {
 
         child.title = "unrelated change".into();
         p.write_task(&child).unwrap();
+    }
+
+    #[test]
+    fn create_task_takes_the_next_free_id_and_leaves_no_temp() {
+        let (_dir, p) = temp_project();
+        let mut first = sample(&p);
+        first.id = TaskId {
+            prefix: "tst".into(),
+            hex: "000001".into(),
+        };
+        first.title = "first".into();
+        p.write_task(&first).unwrap();
+        let mut second = sample(&p);
+        second.title = "second".into();
+        let mut candidates = [1, 2].into_iter();
+        p.create_task_with(&mut second, || candidates.next().unwrap())
+            .unwrap();
+        assert_eq!(second.id.hex, "000002");
+        assert_eq!(p.read_task(&first.id).unwrap().title, "first");
+        assert_eq!(p.read_task(&second.id).unwrap().title, "second");
+        assert!(std::fs::read_dir(p.tasks_dir()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")
+        }));
     }
 
     #[test]

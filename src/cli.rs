@@ -130,6 +130,15 @@ pub enum Command {
     Check,
     /// Session context for agents.
     Prime,
+    /// File feedback about the tasks tool itself into the upstream tasks project.
+    Feedback {
+        summary: String,
+        /// friction | gap | idea | positive
+        #[arg(long)]
+        category: String,
+        #[arg(short = 'b', long)]
+        body: Option<String>,
+    },
     /// The task hierarchy as nested nodes (open work only unless --all).
     Tree {
         id: Option<String>,
