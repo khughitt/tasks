@@ -2071,3 +2071,282 @@ fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
     std::fs::write(outer.path().join(".git/index"), "garbage").unwrap();
     assert_eq!(env.fail(&nested, &["prime"]), "io");
 }
+
+#[test]
+fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
+    let (mut env, target, reporter) = feedback_env();
+    let other = env.init("mnd");
+    let first = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "check rejects missing spec",
+            "--category",
+            "friction",
+        ],
+    );
+    let id = first["id"].as_str().unwrap().to_string();
+
+    let again = env.json(
+        &other,
+        &[
+            "feedback",
+            "Check rejects MISSING spec!",
+            "--category",
+            "gap",
+            "-b",
+            "same here",
+        ],
+    );
+    assert_eq!(again["action"], "recurred");
+    assert_eq!(again["id"], id);
+    let shown = env.json(&target, &["show", &id]);
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 2, "{shown}");
+    assert_eq!(
+        notes[0]["text"],
+        "feedback from mnd: Check rejects MISSING spec!"
+    );
+    assert_eq!(notes[1]["text"], "detail from mnd: same here");
+    assert_eq!(
+        notes[0]["by"], "feedback",
+        "never the reporter's owner name"
+    );
+    assert_eq!(notes[1]["by"], "feedback");
+    assert_eq!(
+        shown["task"]["tags"],
+        serde_json::json!(["feedback", "friction", "from:sci", "from:mnd", "gap"])
+    );
+    let files = std::fs::read_dir(target.join("tasks")).unwrap().count();
+    assert_eq!(files, 2, "config plus one task file");
+
+    // three shared tokens of six is below the threshold: a new entry, no ambiguity
+    let below = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "check rejects a missing plan file",
+            "--category",
+            "friction",
+        ],
+    );
+    assert_eq!(below["action"], "created");
+
+    let entries = || std::fs::read_dir(target.join("tasks")).unwrap().count();
+    let before = entries();
+    let out = env
+        .cmd(&reporter)
+        .args([
+            "feedback",
+            "check rejects missing plan",
+            "--category",
+            "friction",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "ambiguous");
+    assert!(
+        err["error"]["detail"].as_str().unwrap().contains(&id),
+        "{err}"
+    );
+    assert_eq!(entries(), before, "an ambiguous request writes nothing");
+
+    let forced = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "check rejects missing plan",
+            "--category",
+            "friction",
+            "--new",
+        ],
+    );
+    assert_eq!(forced["action"], "created");
+    assert_ne!(forced["id"], id);
+
+    // a single exact title recurs on its own; once --new has made a second one, an
+    // automatic report must ask rather than pick the lower id
+    let auto = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "check rejects missing plan",
+            "--category",
+            "friction",
+        ],
+    );
+    assert_eq!(auto["action"], "recurred");
+    assert_eq!(auto["id"], forced["id"]);
+    let twin = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "check rejects missing plan",
+            "--category",
+            "friction",
+            "--new",
+        ],
+    );
+    assert_eq!(twin["action"], "created");
+    let out = env
+        .cmd(&reporter)
+        .args([
+            "feedback",
+            "check rejects missing plan",
+            "--category",
+            "friction",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "ambiguous");
+    let detail = err["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains(forced["id"].as_str().unwrap()), "{detail}");
+    assert!(detail.contains(twin["id"].as_str().unwrap()), "{detail}");
+
+    let explicit = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "check rejects missing plan",
+            "--category",
+            "friction",
+            "--recur",
+            &id,
+        ],
+    );
+    assert_eq!(explicit["action"], "recurred");
+    assert_eq!(explicit["id"], id);
+
+    // explicit requests do not scan the target, so an unrelated malformed file there
+    // blocks neither --recur nor --new (it would fail an automatic report's scan)
+    std::fs::write(target.join("tasks/tasks-bad.md"), "nope").unwrap();
+    let again = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "check rejects missing plan",
+            "--category",
+            "friction",
+            "--recur",
+            &id,
+        ],
+    );
+    assert_eq!(again["action"], "recurred");
+    let isolated = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "isolated new entry",
+            "--category",
+            "gap",
+            "--new",
+        ],
+    );
+    assert_eq!(isolated["action"], "created");
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &["feedback", "another automatic report", "--category", "gap"]
+        ),
+        "parse"
+    );
+    std::fs::remove_file(target.join("tasks/tasks-bad.md")).unwrap();
+
+    let unrelated = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "prime output is delightful",
+            "--category",
+            "positive",
+        ],
+    );
+    assert_eq!(unrelated["action"], "created");
+    let unrelated_id = unrelated["id"].as_str().unwrap().to_string();
+
+    // a closed feedback entry is neither matched automatically nor accepted by --recur
+    env.json(&target, &["done", &unrelated_id, "triaged"]);
+    let refiled = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "prime output is delightful",
+            "--category",
+            "positive",
+        ],
+    );
+    assert_eq!(refiled["action"], "created");
+    assert_ne!(refiled["id"], unrelated_id);
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &[
+                "feedback",
+                "probe summary",
+                "--category",
+                "gap",
+                "--recur",
+                &unrelated_id
+            ]
+        ),
+        "validation"
+    );
+
+    // a summary with no usable tokens can match nothing and is refused outright, before
+    // the target is even looked up; every other summary in these tests has tokens so that
+    // the assertion it carries fails for its own reason and not for this one
+    assert_eq!(
+        env.fail(&reporter, &["feedback", "a !", "--category", "gap"]),
+        "validation"
+    );
+
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &[
+                "feedback",
+                "probe summary",
+                "--category",
+                "gap",
+                "--recur",
+                "tasks-ffffff"
+            ]
+        ),
+        "validation"
+    );
+    let plain = id_of(env.json(&target, &["add", "Not feedback"]));
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &[
+                "feedback",
+                "probe summary",
+                "--category",
+                "gap",
+                "--recur",
+                &plain
+            ]
+        ),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(
+            &reporter,
+            &[
+                "feedback",
+                "probe summary",
+                "--category",
+                "gap",
+                "--recur",
+                &id,
+                "-b",
+                "two\nlines"
+            ]
+        ),
+        "validation"
+    );
+}

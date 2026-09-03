@@ -28,7 +28,7 @@ pub enum Error {
     Ambiguous(String),
     #[error("{0}")]
     DocNotFound(String),
-    #[error("{0} changed on disk during edit; your edit is kept at {1}")]
+    #[error("{0} changed on disk; {1}")]
     ConcurrentModification(String, String),
     #[error("{0}")]
     Editor(String),

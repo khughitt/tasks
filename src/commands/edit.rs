@@ -136,7 +136,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         Ok(_) | Err(Error::TaskNotFound(_)) => {
             return Err(Error::ConcurrentModification(
                 original.id.to_string(),
-                tmp_display,
+                format!("your edit is kept at {tmp_display}"),
             ));
         }
         Err(error) => return Err(keep(error)),

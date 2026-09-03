@@ -258,6 +258,8 @@ pub fn run(cli: Cli) -> Result<Output> {
             summary,
             category,
             body,
-        } => feedback::run(open_ctx(dir)?, summary, category, body),
+            recur,
+            new,
+        } => feedback::run(open_ctx(dir)?, summary, category, body, recur, new),
     }
 }

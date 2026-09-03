@@ -10,6 +10,7 @@ mod query;
 mod registry;
 mod repo;
 mod resolve;
+mod similarity;
 mod time;
 
 use clap::Parser;

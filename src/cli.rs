@@ -138,6 +138,12 @@ pub enum Command {
         category: String,
         #[arg(short = 'b', long)]
         body: Option<String>,
+        /// Append to this open feedback task instead of matching titles.
+        #[arg(long, conflicts_with = "new")]
+        recur: Option<String>,
+        /// Create a new entry even if a similar one exists.
+        #[arg(long)]
+        new: bool,
     },
     /// The task hierarchy as nested nodes (open work only unless --all).
     Tree {
