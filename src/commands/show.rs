@@ -31,12 +31,12 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         (Some(plan), Some(step)) => Some(resolver.step_exists(plan, step)?),
         _ => None,
     };
-    Ok(Output::Show(ShowOut {
+    Ok(Output::Show(Box::new(ShowOut {
         spec_path: task.spec.as_deref().map(|path| resolver.abs(path)),
         plan_path: task.plan.as_deref().map(|path| resolver.abs(path)),
         step_found,
         depends_on,
         task,
         warnings: ctx.warnings,
-    }))
+    })))
 }

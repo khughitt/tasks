@@ -162,21 +162,20 @@ pub fn transition(ctx: &Ctx, task: &mut Task, to: Status, force: bool) -> Result
 }
 
 fn raw_owner_name(project: &Project) -> Result<String> {
-    if let Ok(owner) = std::env::var("TASKS_OWNER") {
-        if !owner.is_empty() {
-            return Ok(owner);
-        }
+    if let Ok(owner) = std::env::var("TASKS_OWNER")
+        && !owner.is_empty()
+    {
+        return Ok(owner);
     }
     if let Ok(output) = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(&project.root)
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !branch.is_empty() && branch != "HEAD" {
-                return Ok(branch);
-            }
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() && branch != "HEAD" {
+            return Ok(branch);
         }
     }
     match std::env::var("USER") {

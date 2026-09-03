@@ -120,7 +120,7 @@ pub struct CheckOut {
 pub enum Output {
     Init(InitOut),
     Id(IdOut),
-    Show(ShowOut),
+    Show(Box<ShowOut>),
     List(ListOut),
     Prime(PrimeOut),
     Graph(GraphOut),

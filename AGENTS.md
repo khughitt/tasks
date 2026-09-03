@@ -14,7 +14,7 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 
     cargo test
     cargo fmt --check
-    cargo clippy --all-targets -- -D warnings   # pending tasks-3ad7e9; three known lints
+    cargo clippy --all-targets -- -D warnings
 
 Rebuild and reinstall after CLI changes so the tracker used above is the code under test:
 `cargo install --path .`
