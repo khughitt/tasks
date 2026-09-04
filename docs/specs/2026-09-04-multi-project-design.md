@@ -92,7 +92,9 @@ also the per-project slices it was built from. Ids are globally unique through t
 prefix, so the hierarchy, ready, and sort code runs on the union unchanged. Dependency
 resolution looks in the union first and then in the registry, as `ready` already does.
 Ordering is whatever the command uses locally; a wide `ready` is priority, then size, then
-created, with no project tiebreak. The one exception is `tree`, which groups by project
+created, then id, exactly as a local one, with no project grouping or weighting (the id
+tiebreak orders by prefix only among tasks equal on everything else). The one exception
+is `tree`, which groups by project
 (§4.1): it runs the forest builder once per project slice and concatenates, because the
 builder sorts every root globally in ready order and a single run over the union would
 interleave projects.
@@ -134,19 +136,23 @@ tasks next [--all-projects]
     error: the task is null, warnings are still reported, exit 0.
 
 tasks root <id>
-    The registered root of the id's project. Runs outside a project. An unregistered
-    prefix is `unresolvable_id`. The task file is not checked; the root is what the
-    caller wants, and a missing file is `show`'s to report.
+    The registered root of the id's project, resolved strictly by §3.1 (it came in with
+    an id, so unregistered or config-less is `unresolvable_id`; mismatched is `config`).
+    Runs outside a project. The task file is not checked; the root is what the caller
+    wants, and a missing file is `show`'s to report.
 
 tasks tags [--status S]... [--all-projects]
-    Every tag in scope with its count and, per project, its count there. Open tasks only
-    unless `--status` is given, so a tag that survives only on done tasks does not look
-    current. Sorted by count descending, then tag.
+    Every tag in scope with the number of tasks carrying it (a task counts once per tag,
+    however many times it lists the tag) and, per project, the same count there. Open
+    tasks only unless `--status` is given, so a tag that survives only on done tasks does
+    not look current. Sorted by count descending, then tag.
 
 tasks projects
     Every registry entry with its root, whether it is reachable (§3.2, the first two
     outcomes), and, when reachable, the same status counts `prime` reports. Runs outside a
-    project. A malformed reachable project is a `config` error here as everywhere.
+    project. An unreachable entry is a row, not a warning: here the row is the report. A
+    malformed reachable project is a `config` error here as everywhere. The two shared
+    warnings of §3.2 (empty registry, unregistered current project) are emitted.
 ```
 
 `show` is unchanged: a foreign id already routes through the registry. `graph` stays local.

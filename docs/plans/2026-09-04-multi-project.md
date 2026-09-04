@@ -17,14 +17,14 @@
 - JSON output is the contract. Additive only, except `prime.prefix` becoming `string | null` (null only under `--all-projects`). New shapes, all fields always present:
   - `next -> { next: ShowFields | null, warnings }` where `ShowFields` is the `show` object without `warnings`
   - `root -> { prefix, root, warnings }`
-  - `tags -> { tags: [{ tag, count, projects: { <prefix>: count } }], warnings }`
+  - `tags -> { tags: [{ tag, count, projects: { <prefix>: count } }], warnings }`; a count is the number of tasks carrying the tag, once each
   - `projects -> { projects: [{ prefix, root, reachable, counts: Counts | null }], warnings }`
   - `prime += projects: [prefix]`
 - Registry-wide scope never locates a local project (spec §3.2). `--all-projects` is defined only on `list`, `ready`, `prime`, `tree`, `next`, `tags`.
 - Reachability outcomes (spec §3.2): missing root or config warns and skips; malformed config or prefix mismatch is a `config` error.
 - Prefix resolution (spec §3.1): an unregistered or config-less prefix is `unresolvable_id` when reached through an id and `config` when typed as a prefix; a mismatch is always `config`.
 - No new error kinds. Fail early with a typed `Error`; no silent fallbacks.
-- Each task below is one tracker task; close it with `tasks done <id> "<what landed>"` in its commit, and run `tasks check` after `done` so the mutation it commits is the one checked.
+- Each task below is one tracker task: `tasks start <id>` before touching code, `tasks done <id> "<what landed>"` in its commit, and `tasks check` after `done` so the mutation it commits is the one checked.
 - Conventional commits, no AI-attribution trailers.
 
 ---
@@ -33,6 +33,8 @@
 
 Tracker: `tasks-64319f`. Spec §3.1.
 
+Before anything else: `tasks start tasks-64319f`.
+
 **Files:**
 - Create: `src/scope.rs`
 - Modify: `src/main.rs` (module), `src/commands/show.rs:9-29`, `src/commands/feedback.rs:13-34`
@@ -40,7 +42,7 @@ Tracker: `tasks-64319f`. Spec §3.1.
 
 **Interfaces:**
 - Consumes: `Registry::project_root(&self, prefix: &str) -> Option<&Path>`, `Project::open(root: &Path) -> Result<Project>`, `repo::CONFIG_REL`.
-- Produces: `scope::Origin<'a> { Id(&'a TaskId), Prefix }`; `scope::open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Result<Project>`.
+- Produces: `scope::Origin<'a> { Id(&'a TaskId), Prefix }`; `scope::has_config(root: &Path) -> Result<bool>`; `scope::open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Result<Project>`.
 
 - [ ] **Step 1: Write the failing unit tests**
 
@@ -51,6 +53,7 @@ use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::registry::Registry;
 use crate::repo::{CONFIG_REL, Project};
+use std::path::Path;
 
 /// How a prefix reached the resolver, which decides the error kind when it cannot be
 /// opened (spec §3.1): an id that cannot be followed is `unresolvable_id`; a prefix a
@@ -62,6 +65,14 @@ pub enum Origin<'a> {
     Prefix,
 }
 
+/// The config file exists and is a file. `try_exists` so a permission error surfaces
+/// instead of reading as absent; `is_file` so a directory at that path is not mistaken
+/// for a config. Every reachability test in the tool goes through this one function.
+pub fn has_config(root: &Path) -> Result<bool> {
+    let config = root.join(CONFIG_REL);
+    Ok(config.try_exists()? && config.is_file())
+}
+
 /// Opens the project registered as `prefix`, applying the three checks every
 /// cross-project path shares: registered, config present, prefix agrees.
 pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Result<Project> {
@@ -71,7 +82,6 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     fn registry_with(prefix: &str, root: &Path) -> Registry {
         let mut registry = Registry::default();
@@ -161,7 +171,7 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
     let Some(root) = registry.project_root(prefix) else {
         return Err(fail(format!("no project registered as {prefix:?}")));
     };
-    if !root.join(CONFIG_REL).is_file() {
+    if !has_config(root)? {
         return Err(fail(format!(
             "project {prefix:?} at {} has no {CONFIG_REL}; run `tasks init` there",
             root.display()
@@ -238,6 +248,8 @@ git commit -m "refactor: one resolver for registered prefixes"
 ### Task 2: Scope, ReadCtx, and `list --all-projects` outside a project
 
 Tracker: `tasks-fe2041`. Spec §2 (one scope), §3.2, §3.3, §4.1 (`list`).
+
+Before anything else: `tasks start tasks-fe2041`.
 
 **Files:**
 - Modify: `src/scope.rs`, `src/resolve.rs:31-55`, `src/commands/mod.rs` (ReadCtx, `open_read_ctx`, dispatch for `List`), `src/commands/list.rs:1-80`
@@ -354,17 +366,16 @@ pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Tas
 
 - [ ] **Step 4: Add `Scope` to `src/scope.rs`**
 
-Below `open_registered`:
+Below `open_registered` (`Path` and `CONFIG_REL` are already imported):
 
 ```rust
 use crate::model::Task;
-use std::path::Path;
 
 /// The first two outcomes of spec §3.2: a root that exists and holds a config. The third
 /// (a config that does not parse or disagrees with the key) surfaces from
 /// `open_registered`, which every reachable root then goes through.
 pub fn is_reachable(root: &Path) -> Result<bool> {
-    Ok(root.try_exists()? && root.join(CONFIG_REL).try_exists()?)
+    Ok(root.try_exists()? && has_config(root)?)
 }
 
 /// The two warnings every registry-wide command shares: an empty registry, and a `cwd`
@@ -479,6 +490,21 @@ Add unit tests to the `tests` module in `src/scope.rs`:
         std::fs::write(gone.path().join(CONFIG_REL), "not toml = [").unwrap();
         assert!(matches!(
             Scope::open_all(&registry, gone.path()),
+            Err(Error::Config(_))
+        ));
+    }
+
+    #[test]
+    fn a_directory_where_the_config_should_be_is_unreachable_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(CONFIG_REL)).unwrap();
+        let registry = registry_with("sci", dir.path());
+        assert!(!is_reachable(dir.path()).unwrap());
+        let (scope, warnings) = Scope::open_all(&registry, dir.path()).unwrap();
+        assert!(scope.projects().is_empty());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(matches!(
+            open_registered(&registry, "sci", Origin::Prefix),
             Err(Error::Config(_))
         ));
     }
@@ -657,6 +683,8 @@ git commit -m "feat: registry-wide scope for list, no local project needed"
 ### Task 3: `ready --all-projects` and `prime --all-projects`
 
 Tracker: `tasks-6d33e6`. Spec §4.1 (`ready`, `prime`), §5 (`prime` shape and pretty header).
+
+Before anything else: `tasks start tasks-6d33e6`.
 
 **Files:**
 - Modify: `src/cli.rs` (`Ready`, `Prime`), `src/commands/mod.rs` (dispatch), `src/commands/list.rs` (`prime`), `src/output.rs` (`PrimeOut`, pretty header, `Counts::of`)
@@ -886,6 +914,8 @@ git commit -m "feat: ready and prime across all projects"
 
 Tracker: `tasks-d1d97d`. Spec §3.2 (the `tree` exception), §4.1 (`tree`), §6 (clap conflict).
 
+Before anything else: `tasks start tasks-d1d97d`.
+
 **Files:**
 - Modify: `src/cli.rs` (`Tree`), `src/commands/mod.rs` (dispatch), `src/commands/tree.rs`
 - Test: `tests/cli.rs`
@@ -1007,6 +1037,8 @@ git commit -m "feat: tree across all projects, grouped by project"
 ### Task 5: `next`
 
 Tracker: `tasks-789d72`. Spec §2 (`next`), §4.2 (`next`), §5 (`next` shape and pretty).
+
+Before anything else: `tasks start tasks-789d72`.
 
 **Files:**
 - Modify: `src/cli.rs` (`Next`), `src/commands/mod.rs` (dispatch), `src/commands/show.rs` (split into `describe`), `src/commands/list.rs` (`next`), `src/output.rs` (`ShowFields`, `ShowOut`, `NextOut`, `Output::Next`, `show_text`, `warnings_of`)
@@ -1337,6 +1369,8 @@ git commit -m "feat: tasks next"
 
 Tracker: `tasks-5afcc4`. Spec §4.2 (`root`, `projects`), §5 (shapes and pretty).
 
+Before anything else: `tasks start tasks-5afcc4`.
+
 **Files:**
 - Create: `src/commands/root.rs`, `src/commands/projects.rs`
 - Modify: `src/cli.rs`, `src/commands/mod.rs` (modules, dispatch), `src/output.rs` (`RootOut`, `ProjectRow`, `ProjectsOut`, `Output` variants, pretty, `warnings_of`)
@@ -1576,6 +1610,8 @@ git commit -m "feat: tasks root and tasks projects"
 
 Tracker: `tasks-6680f2`. Spec §2 (tags), §4.2 (`tags`), §5 (shape and pretty).
 
+Before anything else: `tasks start tasks-6680f2`.
+
 **Files:**
 - Create: `src/commands/tags.rs`
 - Modify: `src/cli.rs`, `src/commands/mod.rs`, `src/output.rs` (`TagRow`, `TagsOut`, `Output::Tags`, pretty, `warnings_of`)
@@ -1596,7 +1632,8 @@ fn tags_counts_per_project_and_filters_by_status() {
     let sci = env.init("sci");
     let fam = env.init("fam");
     env.json(&sci, &["add", "A", "--tag", "testing", "--tag", "perf"]);
-    env.json(&sci, &["add", "B", "--tag", "testing"]);
+    // a repeated tag counts the task once
+    env.json(&sci, &["add", "B", "--tag", "testing", "--tag", "testing"]);
     env.json(&fam, &["add", "C", "--tag", "testing"]);
     let old = id_of(env.json(&fam, &["add", "D", "--tag", "legacy"]));
     env.json(&fam, &["done", &old]);
@@ -1690,10 +1727,11 @@ use super::ReadCtx;
 use crate::error::Result;
 use crate::model::Status;
 use crate::output::{Output, TagRow, TagsOut};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-/// Tag frequencies over open tasks, or over the given statuses. Visibility only: this is
-/// how a shared vocabulary would be chosen, not enforced.
+/// Tag frequencies over open tasks, or over the given statuses: how many tasks carry
+/// each tag. Visibility only: this is how a shared vocabulary would be chosen, not
+/// enforced.
 pub fn run(ctx: ReadCtx, statuses: Vec<String>) -> Result<Output> {
     let statuses = statuses
         .iter()
@@ -1708,9 +1746,11 @@ pub fn run(ctx: ReadCtx, statuses: Vec<String>) -> Result<Output> {
             statuses.contains(&task.status)
         }
     }) {
-        for tag in &task.tags {
-            let row = rows.entry(tag.as_str()).or_insert_with(|| TagRow {
-                tag: tag.clone(),
+        // a task counts once per tag, however many times the tag is listed on it
+        let distinct: BTreeSet<&str> = task.tags.iter().map(String::as_str).collect();
+        for tag in distinct {
+            let row = rows.entry(tag).or_insert_with(|| TagRow {
+                tag: tag.to_string(),
                 count: 0,
                 projects: BTreeMap::new(),
             });
@@ -1769,6 +1809,8 @@ git commit -m "feat: tasks tags"
 
 Tracker: `tasks-f89af3`. Spec §2 (write exception), §4.3, §4.4.
 
+Before anything else: `tasks start tasks-f89af3`.
+
 **Files:**
 - Modify: `src/cli.rs` (`Add`), `src/commands/mod.rs` (dispatch), `src/commands/add.rs` (`blank`), `src/commands/feedback.rs` (`create` uses `blank`)
 - Test: `tests/cli.rs`
@@ -1823,15 +1865,20 @@ fn add_project_creates_in_the_named_project_from_anywhere() {
         env.fail(nowhere.path(), &["add", "x", "--project", "zzz"]),
         "config"
     );
-    // the wire-up: the goal depends on the piece, and leaves ready until it closes
+    // the wire-up: the goal depends on the piece, leaves ready while it is open, and
+    // returns once it closes
     env.json(&ops, &["dep", &goal, "--on", &id]);
-    assert!(
+    let in_ready = |env: &TestEnv| {
         env.json(&ops, &["ready"])["tasks"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|t| t["id"] != goal)
-    );
+            .any(|t| t["id"] == goal)
+    };
+    assert!(!in_ready(&env));
+    env.json(&ops, &["done", &groundwork]);
+    env.json(&fam, &["done", &id]);
+    assert!(in_ready(&env), "the goal is the verify-and-close step now");
 }
 ```
 
@@ -1978,6 +2025,8 @@ git commit -m "feat: add --project"
 
 Tracker: `tasks-559ff6`. Spec §7, §9 (the in-repo part).
 
+Before anything else: `tasks start tasks-559ff6`.
+
 **Files:**
 - Modify: `docs/specs/2026-08-29-tasks-design.md` (§5 command reference, §5.1 shapes, §6), `docs/specs/2026-09-04-multi-project-design.md` (status line), `skills/tasks/SKILL.md`, `AGENTS.md`, `README.md`
 - Test: `tasks check` (the spec link on the goal task), a manual smoke run of each new command from a directory outside any project
@@ -2022,8 +2071,10 @@ tasks tree [<id>] [--all] [--all-projects]
 
 tasks ready [--size S] [-n N] [--all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
-    priority, then size (xs first, unsized last), then created. --all-projects: the
-    same over every reachable registered project, no project tiebreak.
+    priority, then size (xs first, unsized last), then created, then id.
+    --all-projects: the same order over every reachable registered project; no project
+    grouping or weighting (the final id tiebreak orders by prefix only among tasks equal
+    on everything else).
 
 tasks next [--all-projects]
     The first task of ready in the show shape, or null when nothing is ready (exit 0).
@@ -2065,7 +2116,12 @@ In §6, after the paragraph defining *unreachable*, add:
 `--all-projects` (on list, ready, prime, tree, next, tags) reads the registry and locates
 no local project: a missing root or config is a warning and the entry is skipped; a
 malformed config or a prefix that disagrees with the registry key is a config error.
-`projects` and `root` follow the same rules. See docs/specs/2026-09-04-multi-project-design.md.
+`projects` applies the same test but reports an unreachable entry as a row with
+reachable=false rather than a warning, since the row is the report; a malformed entry is
+still a config error. `root` resolves one prefix strictly: unregistered or without a
+config is unresolvable_id, mismatched is config. All three emit the two shared warnings
+(empty registry; current directory inside an unregistered project). See
+docs/specs/2026-09-04-multi-project-design.md.
 ```
 
 - [ ] **Step 2: Skill and agent guide**
