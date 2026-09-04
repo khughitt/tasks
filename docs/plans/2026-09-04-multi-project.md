@@ -24,7 +24,7 @@
 - Reachability outcomes (spec §3.2): missing root or config warns and skips; malformed config or prefix mismatch is a `config` error.
 - Prefix resolution (spec §3.1): an unregistered or config-less prefix is `unresolvable_id` when reached through an id and `config` when typed as a prefix; a mismatch is always `config`.
 - No new error kinds. Fail early with a typed `Error`; no silent fallbacks.
-- Each task below is one tracker task; close it with `tasks done <id> "<what landed>"` in its commit.
+- Each task below is one tracker task; close it with `tasks done <id> "<what landed>"` in its commit, and run `tasks check` after `done` so the mutation it commits is the one checked.
 - Conventional commits, no AI-attribution trailers.
 
 ---
@@ -221,13 +221,14 @@ Add `use crate::scope::Origin;`; drop the `CONFIG_REL` import if unused.
 
 - [ ] **Step 7: Run the gates**
 
-Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`
-Expected: all pass; the existing `show_resolves_a_foreign_id_read_only` and `feedback_fails_early_without_a_target_or_a_reporter` tests still pass because only messages changed, not kinds.
+Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
+Expected: all pass, and the installed `tasks` is now the code under test; the existing `show_resolves_a_foreign_id_read_only` and `feedback_fails_early_without_a_target_or_a_reporter` tests still pass because only messages changed, not kinds.
 
 - [ ] **Step 8: Commit**
 
 ```bash
 tasks done tasks-64319f "scope::open_registered shared by show and feedback"
+tasks check
 git add src/scope.rs src/main.rs src/commands/show.rs src/commands/feedback.rs tasks/
 git commit -m "refactor: one resolver for registered prefixes"
 ```
@@ -245,6 +246,7 @@ Tracker: `tasks-fe2041`. Spec §2 (one scope), §3.2, §3.3, §4.1 (`list`).
 **Interfaces:**
 - Consumes: `scope::open_registered` (Task 1); `Project::scan`, `Project::locate`, `Registry::load`, `Registry.projects: BTreeMap<String, PathBuf>`.
 - Produces:
+  - `scope::is_reachable(root: &Path) -> Result<bool>`; `scope::registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>>`.
   - `scope::Scope { Local(Project), All(Vec<Project>) }` with `projects(&self) -> &[Project]`, `prefixes(&self) -> Vec<String>`, `scan(&self) -> Result<Vec<Task>>`, `scan_each(&self) -> Result<Vec<(&Project, Vec<Task>)>>`, `resolve_task(&self, registry: &Registry, id: &TaskId) -> Result<Option<Task>>`, `Scope::open_all(registry: &Registry, cwd: &Path) -> Result<(Scope, Vec<String>)>`.
   - `resolve::resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>>` and `resolve::read_present(project: &Project, id: &TaskId) -> Result<Option<Task>>` (the two halves of `Resolver::resolve_task`).
   - `commands::ReadCtx { scope: Scope, registry: Registry, warnings: Vec<String> }` with `resolve_task(&self, id: &TaskId) -> Result<Option<Task>>`; `commands::open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx>`; `commands::start_dir(dir: Option<&Path>) -> Result<PathBuf>`.
@@ -358,6 +360,34 @@ Below `open_registered`:
 use crate::model::Task;
 use std::path::Path;
 
+/// The first two outcomes of spec §3.2: a root that exists and holds a config. The third
+/// (a config that does not parse or disagrees with the key) surfaces from
+/// `open_registered`, which every reachable root then goes through.
+pub fn is_reachable(root: &Path) -> Result<bool> {
+    Ok(root.try_exists()? && root.join(CONFIG_REL).try_exists()?)
+}
+
+/// The two warnings every registry-wide command shares: an empty registry, and a `cwd`
+/// inside a project the registry does not know, which would otherwise vanish from its
+/// own portfolio view. The only look at `cwd` a wide command takes, and read-only.
+pub fn registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>> {
+    let mut warnings = Vec::new();
+    if registry.projects.is_empty() {
+        warnings.push("registry is empty".into());
+    }
+    match Project::locate(cwd) {
+        Ok(current) if !registry.projects.contains_key(&current.prefix) => {
+            warnings.push(format!(
+                "current project {} is not registered",
+                current.prefix
+            ));
+        }
+        Ok(_) | Err(Error::NoProject(_)) => {}
+        Err(error) => return Err(error),
+    }
+    Ok(warnings)
+}
+
 /// What a read command looks at: one project, or every reachable registered project.
 pub enum Scope {
     Local(Project),
@@ -369,13 +399,10 @@ impl Scope {
     /// warnings the walk produced. Never locates a local project; the only look at `cwd`
     /// is to warn when it lies inside a project the registry does not know.
     pub fn open_all(registry: &Registry, cwd: &Path) -> Result<(Scope, Vec<String>)> {
-        let mut warnings = Vec::new();
+        let mut warnings = registry_warnings(registry, cwd)?;
         let mut projects = Vec::new();
-        if registry.projects.is_empty() {
-            warnings.push("registry is empty".into());
-        }
         for (prefix, root) in &registry.projects {
-            if !root.try_exists()? || !root.join(CONFIG_REL).try_exists()? {
+            if !is_reachable(root)? {
                 warnings.push(format!(
                     "project {prefix} at {} is unreachable",
                     root.display()
@@ -383,16 +410,6 @@ impl Scope {
                 continue;
             }
             projects.push(open_registered(registry, prefix, Origin::Prefix)?);
-        }
-        match Project::locate(cwd) {
-            Ok(current) if !registry.projects.contains_key(&current.prefix) => {
-                warnings.push(format!(
-                    "current project {} is not registered",
-                    current.prefix
-                ));
-            }
-            Ok(_) | Err(Error::NoProject(_)) => {}
-            Err(error) => return Err(error),
         }
         Ok((Scope::All(projects), warnings))
     }
@@ -623,13 +640,14 @@ In `commands::run`:
 
 - [ ] **Step 8: Run the gates**
 
-Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`
-Expected: all pass, including the three existing `list_all_projects_*` tests (the "missing config" one still sees exactly one warning: fam is unreachable, sci is registered).
+Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
+Expected: all pass, and the installed `tasks` is now the code under test, including the three existing `list_all_projects_*` tests (the "missing config" one still sees exactly one warning: fam is unreachable, sci is registered).
 
 - [ ] **Step 9: Commit**
 
 ```bash
 tasks done tasks-fe2041 "Scope and ReadCtx; list --all-projects runs from anywhere"
+tasks check
 git add src/scope.rs src/resolve.rs src/commands/mod.rs src/commands/list.rs tests/cli.rs tasks/
 git commit -m "feat: registry-wide scope for list, no local project needed"
 ```
@@ -720,7 +738,7 @@ fn prime_all_projects_reports_scope_and_per_project_uncommitted_files() {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --test cli all_projects`
+Run: `cargo test --test cli all_projects_orders` then `cargo test --test cli prime_all_projects`
 Expected: both new tests fail with a clap usage error (exit 2) because the flag does not exist on `ready` and `prime`.
 
 - [ ] **Step 3: Add the flags and dispatch**
@@ -850,13 +868,14 @@ Import `crate::scope::Scope`.
 
 - [ ] **Step 6: Run the gates**
 
-Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`
-Expected: all pass. `prime_reports_counts_ready_and_doing` still passes: `prefix` serializes as `"sci"`.
+Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
+Expected: all pass, and the installed `tasks` is now the code under test. `prime_reports_counts_ready_and_doing` still passes: `prefix` serializes as `"sci"`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 tasks done tasks-6d33e6 "ready and prime take --all-projects; prime reports projects in scope"
+tasks check
 git add src/cli.rs src/commands/mod.rs src/commands/list.rs src/output.rs tests/cli.rs tasks/
 git commit -m "feat: ready and prime across all projects"
 ```
@@ -971,13 +990,14 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
 
 - [ ] **Step 5: Run the gates**
 
-Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`
-Expected: all pass, including `tree_nests_prunes_and_orders` (local behavior unchanged).
+Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
+Expected: all pass, and the installed `tasks` is now the code under test, including `tree_nests_prunes_and_orders` (local behavior unchanged).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 tasks done tasks-d1d97d "tree --all-projects: one forest per project"
+tasks check
 git add src/cli.rs src/commands/mod.rs src/commands/tree.rs tests/cli.rs tasks/
 git commit -m "feat: tree across all projects, grouped by project"
 ```
@@ -1019,11 +1039,12 @@ fn next_is_the_head_of_ready_in_show_shape() {
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "nothing ready");
 
-    // Top and Piece are both P1 and unsized, so `created` orders them: Top first.
+    // Top and Piece are both P1; Top is sized and Piece is not, so Top sorts first
+    // whatever the clock says (timestamps have second precision; ids are random).
     let dep = id_of(env.json(&sci, &["add", "Dep", "-p", "3"]));
     let top = id_of(env.json(
         &fam,
-        &["add", "Top", "-p", "1", "-b", "do the thing", "--depends", &dep],
+        &["add", "Top", "-p", "1", "--size", "s", "-b", "do the thing", "--depends", &dep],
     ));
     let goal = id_of(env.json(&fam, &["add", "Goal", "-p", "0"]));
     let piece = id_of(env.json(&fam, &["add", "Piece", "-p", "1", "--parent", &goal]));
@@ -1101,11 +1122,47 @@ Add `Next(Box<NextOut>)` to `Output` after `Show` (boxed like `Show`, since a `T
 ```rust
 fn show_text(o: &ShowFields, painter: &Painter) -> String {
     let mut rendered = crate::format::serialize_task(&o.task);
-    // ... the existing body, unchanged, referring to `o.depends_on`, `o.step_found`,
-    // `o.parent`, `o.children` ...
+    // Footer rows only. The serialize_task text above stays plain: it is file
+    // text and has to remain copy-pasteable.
+    let related_row = |id: &str, status: Option<Status>, title: &str| {
+        let status = match status {
+            Some(status) => painter.paint(Style::Status(status), status.as_str()),
+            None => "?".into(),
+        };
+        format!(
+            "- {} [{status}] {title}\n",
+            painter.paint(Style::Chrome, id)
+        )
+    };
+    if !o.depends_on.is_empty() {
+        rendered.push_str("\n# depends on\n");
+        for dependency in &o.depends_on {
+            let title = dependency.title.as_deref().unwrap_or("(unresolved)");
+            rendered.push_str(&related_row(&dependency.id, dependency.status, title));
+        }
+    }
+    if let Some(found) = o.step_found {
+        rendered.push_str(&if found {
+            "\n# step found\n".to_string()
+        } else {
+            format!("\n{}\n", painter.paint(Style::Error, "# step MISSING"))
+        });
+    }
+    if let Some(parent) = &o.parent {
+        rendered.push_str("\n# parent\n");
+        rendered.push_str(&related_row(&parent.id, Some(parent.status), &parent.title));
+    }
+    if !o.children.is_empty() {
+        rendered.push_str("\n# children\n");
+        for child in &o.children {
+            rendered.push_str(&related_row(&child.id, Some(child.status), &child.title));
+        }
+    }
     rendered
 }
 ```
+
+This is the existing `Output::Show` arm body verbatim with `o` now a `&ShowFields`.
 
 - [ ] **Step 4: Extract `describe` in `show.rs`**
 
@@ -1138,9 +1195,9 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
 }
 
 /// The `show` view of `task`, which lives in `project`. `all` is a scan containing that
-/// project's tasks (a union is fine: parent and children are looked up by id, and ids
-/// carry their prefix). Unreachable dependencies and a missing parent are pushed to
-/// `warnings`, never errors.
+/// project's tasks (a union is fine: dependencies, parent, and children are looked up
+/// by id, and ids carry their prefix). Unreachable dependencies and a missing parent are
+/// pushed to `warnings`, never errors.
 pub fn describe(
     project: &Project,
     registry: &Registry,
@@ -1151,7 +1208,13 @@ pub fn describe(
     let resolver = Resolver::new(project, registry);
     let mut depends_on = Vec::new();
     for dependency in &task.depends {
-        match resolver.resolve_task(dependency)? {
+        // The scan the caller already holds answers first, so `next` describes the same
+        // snapshot it chose from; only ids outside it touch the filesystem.
+        let resolved = match all.iter().find(|candidate| &candidate.id == dependency) {
+            Some(found) => Some(found.clone()),
+            None => resolver.resolve_task(dependency)?,
+        };
+        match resolved {
             Some(task) => depends_on.push(DepInfo {
                 id: dependency.to_string(),
                 title: Some(task.title),
@@ -1256,13 +1319,14 @@ Import `NextOut`. `src/cli.rs`, after `Ready`:
 
 - [ ] **Step 6: Run the gates**
 
-Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`
-Expected: all pass. The existing `show` tests pass unchanged: `flatten` keeps the JSON keys at the top level.
+Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
+Expected: all pass, and the installed `tasks` is now the code under test. The existing `show` tests pass unchanged: `flatten` keeps the JSON keys at the top level.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 tasks done tasks-789d72 "tasks next: head of ready in the show shape, local or across projects"
+tasks check
 git add src/cli.rs src/commands/mod.rs src/commands/show.rs src/commands/list.rs src/output.rs tests/cli.rs tasks/
 git commit -m "feat: tasks next"
 ```
@@ -1279,8 +1343,8 @@ Tracker: `tasks-5afcc4`. Spec §4.2 (`root`, `projects`), §5 (shapes and pretty
 - Test: `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `scope::open_registered` (Task 1), `Counts::of` (Task 3), `Registry::load`, `Registry.projects`.
-- Produces: `root::run(id: String) -> Result<Output>`, `projects::run() -> Result<Output>`, `output::RootOut { prefix, root, warnings }`, `output::ProjectRow { prefix, root, reachable, counts: Option<Counts> }`, `output::ProjectsOut { projects: Vec<ProjectRow>, warnings }`.
+- Consumes: `scope::open_registered` (Task 1), `scope::is_reachable`, `scope::registry_warnings`, `commands::start_dir` (Task 2), `Counts::of` (Task 3), `Registry::load`, `Registry.projects`.
+- Produces: `root::run(id: String) -> Result<Output>`, `projects::run(dir: Option<&Path>) -> Result<Output>`, `output::RootOut { prefix, root, warnings }`, `output::ProjectRow { prefix, root, reachable, counts: Option<Counts> }`, `output::ProjectsOut { projects: Vec<ProjectRow>, warnings }`.
 
 - [ ] **Step 1: Write the failing e2e tests**
 
@@ -1342,12 +1406,18 @@ fn projects_lists_the_registry_with_reachability_and_counts() {
 
     std::fs::write(fam.join("tasks/.config.toml"), "not toml = [").unwrap();
     assert_eq!(env.fail(nowhere.path(), &["projects"]), "config");
+
+    // the shared registry warnings apply here too
+    let fresh = TestEnv::new();
+    let v = fresh.json(nowhere.path(), &["projects"]);
+    assert_eq!(v["projects"], serde_json::json!([]));
+    assert_eq!(v["warnings"], serde_json::json!(["registry is empty"]));
 }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --test cli root_prints projects_lists`
+Run: `cargo test --test cli root_prints` then `cargo test --test cli projects_lists`
 Expected: both FAIL with unknown subcommand (exit 2).
 
 - [ ] **Step 3: Output shapes**
@@ -1437,16 +1507,19 @@ pub fn run(id: String) -> Result<Output> {
 use crate::error::Result;
 use crate::output::{Counts, Output, ProjectRow, ProjectsOut};
 use crate::registry::Registry;
-use crate::repo::CONFIG_REL;
-use crate::scope::{Origin, open_registered};
+use crate::scope::{Origin, is_reachable, open_registered, registry_warnings};
+use std::path::Path;
 
-/// The registry as rows, with reachability decided as the wide scope decides it (spec
-/// §3.2): a missing root or config is an unreachable row, a malformed one is an error.
-pub fn run() -> Result<Output> {
+/// The registry as rows. Reachability is the wide scope's rule (spec §3.2) through the
+/// same helpers: a missing root or config is an unreachable row rather than a warning,
+/// because here the row is the report; a malformed config is an error. The two shared
+/// warnings (empty registry, unregistered current project) are the same as everywhere.
+pub fn run(dir: Option<&Path>) -> Result<Output> {
     let registry = Registry::load()?;
+    let warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
     let mut rows = Vec::new();
     for (prefix, root) in &registry.projects {
-        let reachable = root.try_exists()? && root.join(CONFIG_REL).try_exists()?;
+        let reachable = is_reachable(root)?;
         let counts = if reachable {
             let project = open_registered(&registry, prefix, Origin::Prefix)?;
             Some(Counts::of(&project.scan()?))
@@ -1462,7 +1535,7 @@ pub fn run() -> Result<Output> {
     }
     Ok(Output::Projects(ProjectsOut {
         projects: rows,
-        warnings: Vec::new(),
+        warnings,
     }))
 }
 ```
@@ -1479,19 +1552,20 @@ pub fn run() -> Result<Output> {
 `src/commands/mod.rs`: `pub mod projects;`, `pub mod root;`, and
 
 ```rust
-        Command::Projects => projects::run(),
+        Command::Projects => projects::run(dir),
         Command::Root { id } => root::run(id),
 ```
 
 - [ ] **Step 5: Run the gates**
 
-Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`
-Expected: all pass.
+Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
+Expected: all pass, and the installed `tasks` is now the code under test.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 tasks done tasks-5afcc4 "tasks root and tasks projects"
+tasks check
 git add src/commands/root.rs src/commands/projects.rs src/cli.rs src/commands/mod.rs src/output.rs tests/cli.rs tasks/
 git commit -m "feat: tasks root and tasks projects"
 ```
@@ -1593,23 +1667,19 @@ Add `Tags(TagsOut)` to `Output`, the `warnings_of` arm, and in `pretty`:
         Output::Tags(o) => {
             let mut rendered = String::new();
             for row in &o.tags {
-                let breakdown = if row.projects.len() > 1 {
-                    let parts: Vec<String> = row
-                        .projects
-                        .iter()
-                        .map(|(prefix, count)| format!("{prefix} {count}"))
-                        .collect();
-                    painter.paint(Style::Chrome, &format!("  ({})", parts.join(", ")))
-                } else {
-                    String::new()
-                };
+                let parts: Vec<String> = row
+                    .projects
+                    .iter()
+                    .map(|(prefix, count)| format!("{prefix} {count}"))
+                    .collect();
+                let breakdown = painter.paint(Style::Chrome, &format!("  ({})", parts.join(", ")));
                 rendered.push_str(&format!("{:>4}  {}{breakdown}\n", row.count, row.tag));
             }
             rendered
         }
 ```
 
-(The breakdown appears whenever a tag spans more than one project, which only happens in wide scope.)
+(The per-project map is always rendered; locally it names the one project, which keeps the wide and local renderings the same shape.)
 
 - [ ] **Step 4: The command**
 
@@ -1681,13 +1751,14 @@ pub fn run(ctx: ReadCtx, statuses: Vec<String>) -> Result<Output> {
 
 - [ ] **Step 5: Run the gates**
 
-Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`
-Expected: all pass.
+Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
+Expected: all pass, and the installed `tasks` is now the code under test.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 tasks done tasks-6680f2 "tasks tags: frequencies per project"
+tasks check
 git add src/commands/tags.rs src/cli.rs src/commands/mod.rs src/output.rs tests/cli.rs tasks/
 git commit -m "feat: tasks tags"
 ```
@@ -1718,18 +1789,20 @@ fn add_project_creates_in_the_named_project_from_anywhere() {
     let fam = env.init("fam");
     write_doc(&fam, "docs/specs/fam-thing.md", "# Fam thing\n");
     let goal = id_of(env.json(&ops, &["add", "Cross-cutting goal"]));
+    let groundwork = id_of(env.json(&ops, &["add", "Groundwork"]));
     let fam_parent = id_of(env.json(&fam, &["add", "Fam goal"]));
     let nowhere = tempfile::tempdir().unwrap();
 
+    // a foreign --depends resolves through the registry from the target's point of view
     let id = id_of(env.json(nowhere.path(), &[
         "add", "Fam piece", "--project", "fam", "--parent", &fam_parent,
-        "--spec", "fam-thing", "--depends", &goal, "--tag", "audit",
+        "--spec", "fam-thing", "--depends", &groundwork, "--tag", "audit",
     ]));
     assert!(id.starts_with("fam-"), "{id}");
     let shown = env.json(&fam, &["show", &id]);
     assert_eq!(shown["task"]["parent"], fam_parent);
     assert_eq!(shown["task"]["spec"], "docs/specs/fam-thing.md");
-    assert_eq!(shown["task"]["depends"][0], goal);
+    assert_eq!(shown["task"]["depends"][0], groundwork);
     assert_eq!(shown["task"]["tags"][0], "audit");
     assert_eq!(shown["task"]["status"], "todo");
 
@@ -1887,13 +1960,14 @@ fn create(
 
 - [ ] **Step 5: Run the gates**
 
-Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`
-Expected: all pass, including every `feedback_*` test.
+Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
+Expected: all pass, and the installed `tasks` is now the code under test, including every `feedback_*` test.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 tasks done tasks-f89af3 "add --project creates in a registered project; feedback shares the constructor"
+tasks check
 git add src/cli.rs src/commands/mod.rs src/commands/add.rs src/commands/feedback.rs tests/cli.rs tasks/
 git commit -m "feat: add --project"
 ```
@@ -1912,7 +1986,7 @@ Tracker: `tasks-559ff6`. Spec §7, §9 (the in-repo part).
 
 In `docs/specs/2026-08-29-tasks-design.md` §5:
 
-Replace the `show` paragraph's last sentence and the `list`, `tree`, `ready` entries, and add the new commands, so the block reads:
+Replace the `add`, `show`, `list`, `tree`, `ready`, and `prime` entries with the text below (each is the existing entry plus the new flag's sentence), and insert the `next`, `tags`, `projects`, and `root` entries after `prime`:
 
 ```
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
@@ -1926,15 +2000,25 @@ tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
     against it; no local project is needed. An unregistered prefix is config.
 
 tasks show <id>
-    (unchanged text)
+    The full task with resolved spec/plan paths, each dependency's title and status,
+    whether the step heading still resolves, and the parent and direct children. An id
+    with another registered prefix is read from that project, read-only, with the doc
+    paths resolved against that project's root; an unregistered or unreachable prefix is
+    unresolvable_id.
 
 tasks list [--status S]... [--tag T]... [--owner O] [--all-projects] [--parent ID]
     Default: open tasks, sorted by priority then updated desc. --all-projects walks the
     registry and needs no local project (§6).
 
 tasks tree [<id>] [--all] [--all-projects]
-    (existing text) With --all-projects, one forest per reachable registered project,
-    concatenated in registry order; <id> conflicts with it.
+    The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
+    the read side of parent, as graph is of depends. Without --all the forest is pruned
+    to nodes that are open or have an open descendant, so a closed ancestor of open work
+    stays visible as context, with its closed status, rather than hiding the work
+    beneath it. --all includes every task. Roots and siblings are in ready order
+    (priority, size, created); a parent precedes its children. With --all-projects, one
+    forest per reachable registered project, concatenated in registry order; <id>
+    conflicts with it.
 
 tasks ready [--size S] [-n N] [--all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
@@ -1945,8 +2029,13 @@ tasks next [--all-projects]
     The first task of ready in the show shape, or null when nothing is ready (exit 0).
 
 tasks prime [--all-projects]
-    (existing text) --all-projects: counts, ready, doing, roadmap, and closeout over
-    every reachable registered project; prefix is null and projects lists the scope.
+    Agent session context: prefix, counts by status, the ready list, doing tasks
+    with owners, the roadmap (open forest) and closeout list. Intended to be run at
+    the start of every agent session. Warns about uncommitted files under tasks/
+    (project-relative, from git status, transient temp files excluded); silent when the
+    root is not inside a git repository or git is absent. --all-projects: the same over
+    every reachable registered project; prefix is null, projects lists the scope, and the
+    uncommitted-files warning is emitted per project, prefixed with its prefix.
 
 tasks tags [--status S]... [--all-projects]
     Tag frequencies over open tasks (or the given statuses), with a count per project.
@@ -2036,8 +2125,9 @@ Expected: the real registry renders, no errors; unreachable rows, if any, say so
 - [ ] **Step 5: Run the gates and commit**
 
 ```bash
-cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check
+cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings
 tasks done tasks-559ff6 "docs, skill, README, and spec status for multi-project support"
+tasks check
 git add docs/ skills/ AGENTS.md README.md tasks/
 git commit -m "docs: multi-project commands in the design, skill, and README"
 ```
@@ -2046,5 +2136,6 @@ Then close the goal from `tasks prime`'s closeout list:
 
 ```bash
 tasks done tasks-3029be "multi-project support landed"
+tasks check
 git add tasks/ && git commit -m "chore: close multi-project goal"
 ```
