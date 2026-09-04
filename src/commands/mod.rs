@@ -280,6 +280,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             limit,
             all_projects,
         } => list::ready(open_read_ctx(dir, all_projects)?, size, limit),
+        Command::Next { all_projects } => list::next(open_read_ctx(dir, all_projects)?),
         Command::Edit {
             id,
             title,

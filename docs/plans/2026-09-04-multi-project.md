@@ -1092,7 +1092,7 @@ Before anything else: `tasks start tasks-789d72`.
 - Consumes: `list::ready_tasks(ctx: &mut ReadCtx, all: &[Task]) -> Result<Vec<Task>>` (Task 2), `Scope::projects` (Task 2), `Resolver`.
 - Produces: `output::ShowFields { task, spec_path, plan_path, step_found, depends_on, parent, children }`; `output::ShowOut { fields: ShowFields (flattened), warnings }`; `output::NextOut { next: Option<ShowFields>, warnings }`; `Output::Next(Box<NextOut>)`; `show::describe(project: &Project, registry: &Registry, task: Task, all: &[Task], warnings: &mut Vec<String>) -> Result<ShowFields>`; `list::next(ctx: ReadCtx) -> Result<Output>`.
 
-- [ ] **Step 1: Write the failing e2e test**
+- [x] **Step 1: Write the failing e2e test**
 
 Append to `tests/cli.rs`:
 
@@ -1149,12 +1149,12 @@ fn next_is_the_head_of_ready_in_show_shape() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli next_is_the_head`
 Expected: FAIL, unknown subcommand `next` (exit 2).
 
-- [ ] **Step 3: Split the show shape**
+- [x] **Step 3: Split the show shape**
 
 `src/output.rs`: replace `ShowOut` with
 
@@ -1240,7 +1240,7 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
 
 This is the existing `Output::Show` arm body verbatim with `o` now a `&ShowFields`.
 
-- [ ] **Step 4: Extract `describe` in `show.rs`**
+- [x] **Step 4: Extract `describe` in `show.rs`**
 
 ```rust
 use super::Ctx;
@@ -1343,7 +1343,7 @@ pub fn describe(
 }
 ```
 
-- [ ] **Step 5: Add `next` to `list.rs`, the flag, and dispatch**
+- [x] **Step 5: Add `next` to `list.rs`, the flag, and dispatch**
 
 `src/commands/list.rs`:
 
@@ -1393,12 +1393,12 @@ Import `NextOut`. `src/cli.rs`, after `Ready`:
         Command::Next { all_projects } => list::next(open_read_ctx(dir, all_projects)?),
 ```
 
-- [ ] **Step 6: Run the gates**
+- [x] **Step 6: Run the gates**
 
 Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
 Expected: all pass, and the installed `tasks` is now the code under test. The existing `show` tests pass unchanged: `flatten` keeps the JSON keys at the top level.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 tasks done tasks-789d72 "tasks next: head of ready in the show shape, local or across projects"

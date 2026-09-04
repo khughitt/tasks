@@ -15,6 +15,74 @@ fn init_creates_layout_and_registers() {
 }
 
 #[test]
+fn next_is_the_head_of_ready_in_show_shape() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let empty = env.json(nowhere.path(), &["next", "--all-projects"]);
+    assert_eq!(empty["next"], serde_json::Value::Null);
+    assert_eq!(empty["warnings"], serde_json::json!([]));
+    let out = env
+        .cmd(nowhere.path())
+        .args(["--pretty", "next", "--all-projects"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "nothing ready");
+
+    // Top and Piece are both P1; Top is sized and Piece is not, so Top sorts first
+    // whatever the clock says (timestamps have second precision; ids are random).
+    let dep = id_of(env.json(&sci, &["add", "Dep", "-p", "3"]));
+    let top = id_of(env.json(
+        &fam,
+        &[
+            "add",
+            "Top",
+            "-p",
+            "1",
+            "--size",
+            "s",
+            "-b",
+            "do the thing",
+            "--depends",
+            &dep,
+        ],
+    ));
+    let goal = id_of(env.json(&fam, &["add", "Goal", "-p", "0"]));
+    let piece = id_of(env.json(&fam, &["add", "Piece", "-p", "1", "--parent", &goal]));
+
+    // locally, while Top is still blocked on Dep: Piece, with its parent resolved
+    let v = env.json(&fam, &["next"]);
+    assert_eq!(v["next"]["task"]["id"], piece, "{v}");
+    assert_eq!(v["next"]["parent"]["id"], goal);
+    assert!(
+        v["next"].get("warnings").is_none(),
+        "warnings live at the top: {v}"
+    );
+
+    // once Dep closes, Top is the head across projects, and its dependency is described
+    env.json(&sci, &["done", &dep]);
+    let v = env.json(nowhere.path(), &["next", "--all-projects"]);
+    assert_eq!(v["next"]["task"]["id"], top, "{v}");
+    assert_eq!(v["next"]["task"]["body"], "do the thing");
+    assert_eq!(v["next"]["depends_on"][0]["id"], dep);
+    assert_eq!(v["next"]["depends_on"][0]["status"], "done");
+    assert_eq!(v["next"]["spec_path"], serde_json::Value::Null);
+    let out = env
+        .cmd(nowhere.path())
+        .args(["--pretty", "next", "--all-projects"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("title: Top") && text.contains("# depends on"),
+        "{text}"
+    );
+}
+
+#[test]
 fn init_refuses_prefix_registered_elsewhere() {
     let mut env = TestEnv::new();
     env.init("sci");

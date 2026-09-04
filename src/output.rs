@@ -39,8 +39,9 @@ pub struct Related {
     pub status: Status,
 }
 
+/// Everything `show` says about one task, without the warnings, so `next` can embed it.
 #[derive(Serialize)]
-pub struct ShowOut {
+pub struct ShowFields {
     pub task: Task,
     pub spec_path: Option<String>,
     pub plan_path: Option<String>,
@@ -48,6 +49,18 @@ pub struct ShowOut {
     pub depends_on: Vec<DepInfo>,
     pub parent: Option<Related>,
     pub children: Vec<Related>,
+}
+
+#[derive(Serialize)]
+pub struct ShowOut {
+    #[serde(flatten)]
+    pub fields: ShowFields,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct NextOut {
+    pub next: Option<ShowFields>,
     pub warnings: Vec<String>,
 }
 
@@ -183,6 +196,7 @@ pub enum Output {
     Init(InitOut),
     Id(IdOut),
     Show(Box<ShowOut>),
+    Next(Box<NextOut>),
     List(ListOut),
     Prime(PrimeOut),
     Graph(GraphOut),
@@ -202,46 +216,11 @@ fn pretty(out: &Output, painter: &Painter) -> String {
     match out {
         Output::Init(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
-        Output::Show(o) => {
-            let mut rendered = crate::format::serialize_task(&o.task);
-            // Footer rows only. The serialize_task text above stays plain: it is file
-            // text and has to remain copy-pasteable.
-            let related_row = |id: &str, status: Option<Status>, title: &str| {
-                let status = match status {
-                    Some(status) => painter.paint(Style::Status(status), status.as_str()),
-                    None => "?".into(),
-                };
-                format!(
-                    "- {} [{status}] {title}\n",
-                    painter.paint(Style::Chrome, id)
-                )
-            };
-            if !o.depends_on.is_empty() {
-                rendered.push_str("\n# depends on\n");
-                for dependency in &o.depends_on {
-                    let title = dependency.title.as_deref().unwrap_or("(unresolved)");
-                    rendered.push_str(&related_row(&dependency.id, dependency.status, title));
-                }
-            }
-            if let Some(found) = o.step_found {
-                rendered.push_str(&if found {
-                    "\n# step found\n".to_string()
-                } else {
-                    format!("\n{}\n", painter.paint(Style::Error, "# step MISSING"))
-                });
-            }
-            if let Some(parent) = &o.parent {
-                rendered.push_str("\n# parent\n");
-                rendered.push_str(&related_row(&parent.id, Some(parent.status), &parent.title));
-            }
-            if !o.children.is_empty() {
-                rendered.push_str("\n# children\n");
-                for child in &o.children {
-                    rendered.push_str(&related_row(&child.id, Some(child.status), &child.title));
-                }
-            }
-            rendered
-        }
+        Output::Show(o) => show_text(&o.fields, painter),
+        Output::Next(o) => match &o.next {
+            Some(fields) => show_text(fields, painter),
+            None => "nothing ready".into(),
+        },
         Output::List(o) => table(&o.tasks, painter),
         Output::Prime(o) => {
             let c = &o.counts;
@@ -305,6 +284,47 @@ fn pretty(out: &Output, painter: &Painter) -> String {
     }
 }
 
+fn show_text(o: &ShowFields, painter: &Painter) -> String {
+    let mut rendered = crate::format::serialize_task(&o.task);
+    // Footer rows only. The serialize_task text above stays plain: it is file
+    // text and has to remain copy-pasteable.
+    let related_row = |id: &str, status: Option<Status>, title: &str| {
+        let status = match status {
+            Some(status) => painter.paint(Style::Status(status), status.as_str()),
+            None => "?".into(),
+        };
+        format!(
+            "- {} [{status}] {title}\n",
+            painter.paint(Style::Chrome, id)
+        )
+    };
+    if !o.depends_on.is_empty() {
+        rendered.push_str("\n# depends on\n");
+        for dependency in &o.depends_on {
+            let title = dependency.title.as_deref().unwrap_or("(unresolved)");
+            rendered.push_str(&related_row(&dependency.id, dependency.status, title));
+        }
+    }
+    if let Some(found) = o.step_found {
+        rendered.push_str(&if found {
+            "\n# step found\n".to_string()
+        } else {
+            format!("\n{}\n", painter.paint(Style::Error, "# step MISSING"))
+        });
+    }
+    if let Some(parent) = &o.parent {
+        rendered.push_str("\n# parent\n");
+        rendered.push_str(&related_row(&parent.id, Some(parent.status), &parent.title));
+    }
+    if !o.children.is_empty() {
+        rendered.push_str("\n# children\n");
+        for child in &o.children {
+            rendered.push_str(&related_row(&child.id, Some(child.status), &child.title));
+        }
+    }
+    rendered
+}
+
 fn tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter) -> String {
     let mut rendered = String::new();
     for node in nodes {
@@ -366,6 +386,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Init(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),
+        Output::Next(o) => o.warnings.clone(),
         Output::List(o) => o.warnings.clone(),
         Output::Prime(o) => o.warnings.clone(),
         Output::Graph(o) => o.warnings.clone(),

@@ -1,7 +1,7 @@
 use super::ReadCtx;
 use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
-use crate::output::{Counts, ListOut, Output, PrimeOut, TaskSummary};
+use crate::output::{Counts, ListOut, NextOut, Output, PrimeOut, TaskSummary};
 use crate::query::{is_ready, sort_list, sort_ready};
 use crate::scope::Scope;
 use std::collections::HashMap;
@@ -119,6 +119,32 @@ pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Re
             .collect(),
         warnings: ctx.warnings,
     }))
+}
+
+/// The head of `ready` in the show shape, so a caller can start on it without a second
+/// lookup. Nothing ready is a normal state: null, warnings, exit 0.
+pub fn next(mut ctx: ReadCtx) -> Result<Output> {
+    let all = ctx.scope.scan()?;
+    let ready = ready_tasks(&mut ctx, &all)?;
+    let next = match ready.into_iter().next() {
+        None => None,
+        Some(task) => {
+            let project = ctx
+                .scope
+                .projects()
+                .iter()
+                .find(|project| project.prefix == task.id.prefix)
+                .expect("a ready task was scanned from a project in scope");
+            let mut warnings = Vec::new();
+            let fields = super::show::describe(project, &ctx.registry, task, &all, &mut warnings)?;
+            ctx.warnings.extend(warnings);
+            Some(fields)
+        }
+    };
+    Ok(Output::Next(Box::new(NextOut {
+        next,
+        warnings: ctx.warnings,
+    })))
 }
 
 pub fn prime(mut ctx: ReadCtx) -> Result<Output> {

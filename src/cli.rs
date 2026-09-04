@@ -91,6 +91,12 @@ pub enum Command {
         #[arg(long)]
         all_projects: bool,
     },
+    /// The first ready task, in the show shape; null when nothing is ready.
+    Next {
+        /// Every reachable registered project; needs no local project.
+        #[arg(long)]
+        all_projects: bool,
+    },
     /// Edit fields, or open the task in $EDITOR when no field flags are given.
     Edit {
         id: String,
