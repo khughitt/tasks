@@ -968,7 +968,7 @@ Before anything else: `tasks start tasks-d1d97d`.
 - Consumes: `ReadCtx`, `Scope::scan_each` (Task 2), `hierarchy::forest(all: &[Task], root: Option<&TaskId>, include_closed: bool) -> Vec<TreeNode>`.
 - Produces: `tree::run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output>`.
 
-- [ ] **Step 1: Write the failing e2e test**
+- [x] **Step 1: Write the failing e2e test**
 
 Append to `tests/cli.rs`:
 
@@ -999,12 +999,12 @@ fn tree_all_projects_groups_by_project_in_registry_order() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli tree_all_projects`
 Expected: FAIL, clap rejects `--all-projects` on `tree` (exit 2 where success was expected).
 
-- [ ] **Step 3: Add the flag with the conflict**
+- [x] **Step 3: Add the flag with the conflict**
 
 `src/cli.rs`:
 
@@ -1030,7 +1030,7 @@ Expected: FAIL, clap rejects `--all-projects` on `tree` (exit 2 where success wa
         } => tree::run(open_read_ctx(dir, all_projects)?, id, all),
 ```
 
-- [ ] **Step 4: Build one forest per project**
+- [x] **Step 4: Build one forest per project**
 
 `src/commands/tree.rs`:
 
@@ -1062,12 +1062,12 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
 }
 ```
 
-- [ ] **Step 5: Run the gates**
+- [x] **Step 5: Run the gates**
 
 Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
 Expected: all pass, and the installed `tasks` is now the code under test, including `tree_nests_prunes_and_orders` (local behavior unchanged).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 tasks done tasks-d1d97d "tree --all-projects: one forest per project"

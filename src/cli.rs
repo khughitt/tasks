@@ -166,5 +166,8 @@ pub enum Command {
         id: Option<String>,
         #[arg(long)]
         all: bool,
+        /// Every reachable registered project, one forest each; needs no local project.
+        #[arg(long, conflicts_with = "id")]
+        all_projects: bool,
     },
 }

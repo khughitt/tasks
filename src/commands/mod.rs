@@ -302,7 +302,11 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Dep { id, on, rm } => dep::run(open_ctx(dir)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
-        Command::Tree { id, all } => tree::run(open_ctx(dir)?, id, all),
+        Command::Tree {
+            id,
+            all,
+            all_projects,
+        } => tree::run(open_read_ctx(dir, all_projects)?, id, all),
         Command::Feedback {
             summary,
             category,

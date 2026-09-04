@@ -1886,6 +1886,31 @@ fn tree_nests_prunes_and_orders() {
 }
 
 #[test]
+fn tree_all_projects_groups_by_project_in_registry_order() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    // sci's root outranks fam's, but registry order (fam before sci) wins
+    let s_goal = id_of(env.json(&sci, &["add", "S goal", "-p", "0"]));
+    let s_child = id_of(env.json(&sci, &["add", "S child", "--parent", &s_goal]));
+    let f_goal = id_of(env.json(&fam, &["add", "F goal", "-p", "3"]));
+    let nowhere = tempfile::tempdir().unwrap();
+    let v = env.json(nowhere.path(), &["tree", "--all-projects"]);
+    let nodes = v["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2, "{v}");
+    assert_eq!(nodes[0]["id"], f_goal);
+    assert_eq!(nodes[1]["id"], s_goal);
+    assert_eq!(nodes[1]["children"][0]["id"], s_child);
+
+    let out = env
+        .cmd(nowhere.path())
+        .args(["tree", &s_goal, "--all-projects"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "id and --all-projects conflict");
+}
+
+#[test]
 fn orphaned_tasks_are_roots_in_tree_and_roadmap() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
