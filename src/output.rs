@@ -26,7 +26,8 @@ pub struct IdOut {
 pub struct DepInfo {
     pub id: String,
     pub title: Option<String>,
-    pub status: Option<String>,
+    /// Typed, but serde still emits the same lowercase strings as before.
+    pub status: Option<Status>,
     pub resolved: bool,
 }
 
@@ -34,7 +35,8 @@ pub struct DepInfo {
 pub struct Related {
     pub id: String,
     pub title: String,
-    pub status: String,
+    /// Typed, but serde still emits the same lowercase strings as before.
+    pub status: Status,
 }
 
 #[derive(Serialize)]
@@ -182,33 +184,40 @@ fn pretty(out: &Output, painter: &Painter) -> String {
         Output::Id(o) => o.id.clone(),
         Output::Show(o) => {
             let mut rendered = crate::format::serialize_task(&o.task);
+            // Footer rows only. The serialize_task text above stays plain: it is file
+            // text and has to remain copy-pasteable.
+            let related_row = |id: &str, status: Option<Status>, title: &str| {
+                let status = match status {
+                    Some(status) => painter.paint(Style::Status(status), status.as_str()),
+                    None => "?".into(),
+                };
+                format!(
+                    "- {} [{status}] {title}\n",
+                    painter.paint(Style::Chrome, id)
+                )
+            };
             if !o.depends_on.is_empty() {
                 rendered.push_str("\n# depends on\n");
                 for dependency in &o.depends_on {
-                    let status = dependency.status.as_deref().unwrap_or("?");
                     let title = dependency.title.as_deref().unwrap_or("(unresolved)");
-                    rendered.push_str(&format!("- {} [{status}] {title}\n", dependency.id));
+                    rendered.push_str(&related_row(&dependency.id, dependency.status, title));
                 }
             }
             if let Some(found) = o.step_found {
-                rendered.push_str(&format!(
-                    "\n# step {}\n",
-                    if found { "found" } else { "MISSING" }
-                ));
+                rendered.push_str(&if found {
+                    "\n# step found\n".to_string()
+                } else {
+                    format!("\n{}\n", painter.paint(Style::Error, "# step MISSING"))
+                });
             }
             if let Some(parent) = &o.parent {
-                rendered.push_str(&format!(
-                    "\n# parent\n- {} [{}] {}\n",
-                    parent.id, parent.status, parent.title
-                ));
+                rendered.push_str("\n# parent\n");
+                rendered.push_str(&related_row(&parent.id, Some(parent.status), &parent.title));
             }
             if !o.children.is_empty() {
                 rendered.push_str("\n# children\n");
                 for child in &o.children {
-                    rendered.push_str(&format!(
-                        "- {} [{}] {}\n",
-                        child.id, child.status, child.title
-                    ));
+                    rendered.push_str(&related_row(&child.id, Some(child.status), &child.title));
                 }
             }
             rendered

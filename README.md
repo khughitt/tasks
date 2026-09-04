@@ -68,6 +68,7 @@ from a clone):
     tasks ready                      # what can be worked on now (JSON)
     tasks tree                       # the goal hierarchy
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
+    tasks --pretty --color auto ready # color when stdout is a terminal
     tasks start sci-4f2a9c
     tasks note sci-4f2a9c "spec §4 no longer holds"
     tasks done sci-91be03 "rows emitted"
@@ -75,6 +76,12 @@ from a clone):
     tasks check                      # validate files, links, plan steps, dependencies
 
 Run `tasks --help` for the full command list.
+
+Color is off unless you ask for it. `--color auto|always|never`, or `TASKS_COLOR` with the
+same three values, styles `--pretty` output only; JSON never carries escape sequences.
+`auto` colors a stream only when that stream is a terminal, so putting `TASKS_COLOR=auto`
+in a shell rc leaves piped and agent-run output plain. A non-empty `NO_COLOR` turns off
+color selected through the environment, and an explicit `--color` overrides it.
 
 ## Agent skill
 

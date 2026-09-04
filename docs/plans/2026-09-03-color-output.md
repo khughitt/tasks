@@ -585,7 +585,7 @@ Tracker: `tasks-8eb927`. Depends on Task 2. Spec §3 show rules, §4 typed statu
 - Preserves publicly: serde still emits lowercase JSON strings because `Status` derives `Serialize` with `rename_all = "lowercase"`.
 - Consumes: `Painter`, `Style::Status`, `Style::Chrome`, and `Style::Error` from Task 1.
 
-- [ ] **Step 1: Claim the tracker task**
+- [x] **Step 1: Claim the tracker task**
 
 Run:
 
@@ -595,7 +595,7 @@ tasks start tasks-8eb927
 
 Expected: the task becomes `doing`.
 
-- [ ] **Step 2: Write failing show tests while retaining JSON assertions**
+- [x] **Step 2: Write failing show tests while retaining JSON assertions**
 
 Keep the existing assertions that `depends_on[*].status`, `parent.status`, and `children[*].status` are lowercase JSON strings. Extend `show_reports_parent_and_children_and_list_filters_by_parent` to invoke:
 
@@ -627,7 +627,7 @@ assert!(text.contains(&format!("\x1b[2m{fid}\x1b[0m [todo] Foreign dep")), "{tex
 
 Extend `add_resolves_spec_plan_and_step` after it observes `step_found == false`: invoke `--pretty --color always show <id>` and assert it contains `\x1b[31m# step MISSING\x1b[0m`. Locate `"\n\x1b[31m# step MISSING"` and assert the output slice before that marker contains no `\x1b[`, proving the serialized task text stayed plain.
 
-- [ ] **Step 3: Run the focused tests and verify they fail**
+- [x] **Step 3: Run the focused tests and verify they fail**
 
 Run:
 
@@ -639,7 +639,7 @@ cargo test add_resolves_spec_plan_and_step
 
 Expected: the pretty-output assertions fail because `show` footers are still plain.
 
-- [ ] **Step 4: Keep statuses typed and paint only footer roles**
+- [x] **Step 4: Keep statuses typed and paint only footer roles**
 
 In `src/output.rs`, change the internal fields:
 
@@ -667,7 +667,7 @@ status: task.status,
 
 For each resolved dependency, parent, and child, paint the id with `Style::Chrome` and the lowercase status text with `Style::Status(status)`. `Status` has no `Display` impl, so these footers must format `status.as_str()` rather than `{}`; the unresolved-dependency arm becomes `dep.status.map(Status::as_str).unwrap_or("?")` with the `?` left unpainted. Keep titles and section headers plain. For `step_found == Some(false)`, paint the `# step MISSING` text with `Style::Error`, leaving the newlines on either side outside the painted span; keep `# step found` plain. Continue appending all footers after the untouched `serialize_task` result.
 
-- [ ] **Step 5: Update public documentation and implementation status**
+- [x] **Step 5: Update public documentation and implementation status**
 
 In `README.md`, add one human-facing example and the three-mode contract immediately after the existing `--pretty` example:
 
@@ -693,7 +693,7 @@ rg -n "TTY detection|--pretty|TASKS_COLOR|--color|NO_COLOR" README.md skills doc
 
 Expected: every statement agrees that output format is never inferred, color is off by default, and `auto` probes each output stream only after explicit selection.
 
-- [ ] **Step 6: Run final verification**
+- [x] **Step 6: Run final verification**
 
 Run:
 
@@ -715,7 +715,7 @@ tasks --pretty --color always ready
 
 Expected: all gates exit 0; the first command is plain valid JSON and the second visibly colors the pretty table.
 
-- [ ] **Step 7: Close the child and parent tasks, then commit**
+- [x] **Step 7: Close the child and parent tasks, then commit**
 
 Mark this task's completed checkboxes `[x]`, then run:
 

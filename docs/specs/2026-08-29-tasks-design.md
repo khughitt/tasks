@@ -1,7 +1,8 @@
 # tasks — design
 
 **Status:** implemented (2026-08-29; spec roots extended 2026-09-02; doc roots made
-configurable per project 2026-09-03; hierarchy 2026-09-03; feedback 2026-09-03); see
+configurable per project 2026-09-03; hierarchy 2026-09-03; feedback 2026-09-03;
+color 2026-09-03); see
 docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
@@ -179,7 +180,11 @@ means task `0c3d7e` in the project registered as `fam`.
 
 Every command locates the project by walking up from the current directory to the nearest
 `tasks/.config.toml`; `-C <path>` overrides. Output is JSON by default; `--pretty` (or
-`TASKS_FORMAT=pretty`) renders tables and full text for humans. TTY detection is not used.
+`TASKS_FORMAT=pretty`) renders tables and full text for humans. TTY detection is never used
+to choose the format. `--color auto|always|never` (or `TASKS_COLOR`) styles pretty output
+only and is off unless asked for; `auto` is the single place a stream is probed for a
+terminal, and only after color has been selected explicitly. See
+docs/specs/2026-09-03-color-output-design.md for the roles and palette.
 
 ```
 tasks init [--prefix P]
@@ -342,7 +347,9 @@ feedback    -> { id, action: "created"|"recurred", path, warnings }
 ```
 
 `--pretty` renders the same data as tables (`list`, `ready`, `prime`), the file text plus a
-resolved-dependencies footer (`show`), and the bare id for write commands.
+resolved-dependencies footer (`show`), and the bare id for write commands. Color, when
+explicitly enabled, styles only that rendering; the JSON branch never emits an escape
+sequence, whatever `--color` says.
 
 ### 5.2 Interactive editing
 

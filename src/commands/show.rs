@@ -36,7 +36,7 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
             Some(task) => depends_on.push(DepInfo {
                 id: dependency.to_string(),
                 title: Some(task.title),
-                status: Some(task.status.as_str().into()),
+                status: Some(task.status),
                 resolved: true,
             }),
             None => {
@@ -59,7 +59,7 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let related = |task: &crate::model::Task| Related {
         id: task.id.to_string(),
         title: task.title.clone(),
-        status: task.status.as_str().into(),
+        status: task.status,
     };
     let parent = match &task.parent {
         Some(id) => match all.iter().find(|candidate| &candidate.id == id) {

@@ -438,6 +438,22 @@ fn add_resolves_spec_plan_and_step() {
     );
     let s = env.json(&dir, &["show", id]);
     assert_eq!(s["step_found"], false);
+
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "show", id])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    let marker = "\n\x1b[31m# step MISSING\x1b[0m\n";
+    let at = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("no painted step marker: {text:?}"));
+    assert!(
+        !text[..at].contains("\x1b["),
+        "the serialized task text stays plain: {:?}",
+        &text[..at]
+    );
 }
 
 #[test]
@@ -630,6 +646,22 @@ fn show_resolves_local_and_foreign_dependencies() {
     assert_eq!(deps[0]["resolved"], true);
     assert_eq!(deps[1]["id"], fid);
     assert_eq!(deps[1]["title"], "Foreign dep");
+
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--color", "always", "show", &bid])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains(&format!("\x1b[2m{aid}\x1b[0m [todo] Local dep")),
+        "{text:?}"
+    );
+    assert!(
+        text.contains(&format!("\x1b[2m{fid}\x1b[0m [todo] Foreign dep")),
+        "{text:?}"
+    );
+
     std::fs::remove_file(fam.join(format!("tasks/{fid}.md"))).unwrap();
     let s = env.json(&sci, &["show", &bid]);
     assert_eq!(s["depends_on"][1]["resolved"], false);
@@ -1798,6 +1830,36 @@ fn show_reports_parent_and_children_and_list_filters_by_parent() {
     assert_eq!(
         env.fail(&dir, &["list", "--parent", "sci-ffffff"]),
         "task_not_found"
+    );
+
+    let colored = |id: &str| {
+        let out = env
+            .cmd(&dir)
+            .args(["--pretty", "--color", "always", "show", id])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let text = colored(&goal);
+    assert!(
+        text.contains(&format!("\x1b[2m{one}\x1b[0m [todo] One")),
+        "{text:?}"
+    );
+    assert!(
+        text.contains(&format!("\x1b[2m{two}\x1b[0m [todo] Two")),
+        "{text:?}"
+    );
+
+    env.json(&dir, &["block", &two, "waiting"]);
+    let text = colored(&goal);
+    assert!(
+        text.contains(&format!("\x1b[2m{two}\x1b[0m [\x1b[31mblocked\x1b[0m] Two")),
+        "footer statuses use the same role as tables: {text:?}"
+    );
+    let text = colored(&one);
+    assert!(
+        text.contains(&format!("\x1b[2m{goal}\x1b[0m [todo] Goal")),
+        "{text:?}"
     );
 }
 

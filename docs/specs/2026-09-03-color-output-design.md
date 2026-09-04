@@ -1,6 +1,6 @@
 # Color output for pretty views — design
 
-**Status:** approved (2026-09-03), not yet implemented; implements tasks-4737b6.
+**Status:** implemented (2026-09-03); see docs/plans/2026-09-03-color-output.md.
 
 ## 1. Problem
 
