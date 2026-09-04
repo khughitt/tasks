@@ -127,25 +127,9 @@ fn create(
     category: &str,
     from: &str,
 ) -> Result<Task> {
-    let now = crate::time::now();
-    let mut task = Task {
-        id: target.new_id()?,
-        title: summary,
-        status: Status::Idea,
-        priority: 2,
-        size: None,
-        owner: None,
-        created: now.clone(),
-        updated: now,
-        depends: vec![],
-        parent: None,
-        tags: vec!["feedback".into(), category.into(), from.into()],
-        spec: None,
-        plan: None,
-        step: None,
-        body,
-        notes: vec![],
-    };
+    let mut task = super::add::blank(target, summary, Status::Idea)?;
+    task.tags = vec!["feedback".into(), category.into(), from.into()];
+    task.body = body;
     super::create(target, &mut task)?;
     Ok(task)
 }

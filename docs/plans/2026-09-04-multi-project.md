@@ -1873,7 +1873,7 @@ Before anything else: `tasks start tasks-f89af3`.
 - Consumes: `scope::open_registered` (Task 1), `commands::create(project, task)`, `commands::apply_fields(ctx, task, fields)`.
 - Produces: `add::blank(project: &Project, title: String, status: Status) -> Result<Task>` (fresh id from `project`, timestamps now, every other field at its default).
 
-- [ ] **Step 1: Write the failing e2e test**
+- [x] **Step 1: Write the failing e2e test**
 
 Append to `tests/cli.rs`:
 
@@ -1949,12 +1949,12 @@ fn add_project_creates_in_the_named_project_from_anywhere() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli add_project_creates`
 Expected: FAIL, unexpected argument `--project` (exit 2).
 
-- [ ] **Step 3: The flag and lazy dispatch**
+- [x] **Step 3: The flag and lazy dispatch**
 
 `src/cli.rs`:
 
@@ -2003,7 +2003,7 @@ Expected: FAIL, unexpected argument `--project` (exit 2).
 
 Add `use crate::scope::Origin;`.
 
-- [ ] **Step 4: One constructor for new tasks**
+- [x] **Step 4: One constructor for new tasks**
 
 `src/commands/add.rs`:
 
@@ -2072,12 +2072,12 @@ fn create(
 }
 ```
 
-- [ ] **Step 5: Run the gates**
+- [x] **Step 5: Run the gates**
 
 Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
 Expected: all pass, and the installed `tasks` is now the code under test, including every `feedback_*` test.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 tasks done tasks-f89af3 "add --project creates in a registered project; feedback shares the constructor"

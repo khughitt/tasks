@@ -22,7 +22,7 @@ use crate::output::Output;
 use crate::registry::Registry;
 use crate::repo::Project;
 use crate::resolve::{DocKind, Resolver};
-use crate::scope::Scope;
+use crate::scope::{Origin, Scope};
 use std::path::{Path, PathBuf};
 
 pub struct Ctx {
@@ -264,8 +264,27 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Add {
             title,
             status,
+            project,
             fields,
-        } => add::run(open_ctx(dir)?, title, status, fields),
+        } => {
+            // The one write command that may run without a local project (spec §2):
+            // an explicit target replaces the lookup, and the unchanged `add` validates
+            // every field against whichever project it is handed.
+            let ctx = match project {
+                Some(prefix) => {
+                    let registry = Registry::load()?;
+                    let project =
+                        crate::scope::open_registered(&registry, &prefix, Origin::Prefix)?;
+                    Ctx {
+                        project,
+                        registry,
+                        warnings: Vec::new(),
+                    }
+                }
+                None => open_ctx(dir)?,
+            };
+            add::run(ctx, title, status, fields)
+        }
         Command::Show { id } => show::run(open_ctx(dir)?, id),
         Command::List {
             statuses,

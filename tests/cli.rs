@@ -205,6 +205,91 @@ fn id_of(value: serde_json::Value) -> String {
 }
 
 #[test]
+fn add_project_creates_in_the_named_project_from_anywhere() {
+    let mut env = TestEnv::new();
+    let ops = env.init("ops");
+    let fam = env.init("fam");
+    write_doc(&fam, "docs/specs/fam-thing.md", "# Fam thing\n");
+    let goal = id_of(env.json(&ops, &["add", "Cross-cutting goal"]));
+    let groundwork = id_of(env.json(&ops, &["add", "Groundwork"]));
+    let fam_parent = id_of(env.json(&fam, &["add", "Fam goal"]));
+    let nowhere = tempfile::tempdir().unwrap();
+
+    // a foreign --depends resolves through the registry from the target's point of view
+    let id = id_of(env.json(
+        nowhere.path(),
+        &[
+            "add",
+            "Fam piece",
+            "--project",
+            "fam",
+            "--parent",
+            &fam_parent,
+            "--spec",
+            "fam-thing",
+            "--depends",
+            &groundwork,
+            "--tag",
+            "audit",
+        ],
+    ));
+    assert!(id.starts_with("fam-"), "{id}");
+    let shown = env.json(&fam, &["show", &id]);
+    assert_eq!(shown["task"]["parent"], fam_parent);
+    assert_eq!(shown["task"]["spec"], "docs/specs/fam-thing.md");
+    assert_eq!(shown["task"]["depends"][0], groundwork);
+    assert_eq!(shown["task"]["tags"][0], "audit");
+    assert_eq!(shown["task"]["status"], "todo");
+
+    // validated against the target, not the caller: ops has no such spec or parent
+    assert_eq!(
+        env.fail(&ops, &["add", "x", "--project", "fam", "--spec", "nope"]),
+        "doc_not_found"
+    );
+    assert_eq!(
+        env.fail(&ops, &["add", "x", "--project", "fam", "--parent", &goal]),
+        "validation"
+    );
+    // an explicit prefix targets the registry root, not a displaced checkout with the
+    // same prefix
+    let displaced = tempfile::tempdir().unwrap();
+    std::fs::create_dir(displaced.path().join("tasks")).unwrap();
+    std::fs::write(
+        displaced.path().join("tasks/.config.toml"),
+        "prefix = \"ops\"\n",
+    )
+    .unwrap();
+    let registered = id_of(env.json(displaced.path(), &["add", "Local", "--project", "ops"]));
+    assert!(registered.starts_with("ops-"));
+    assert!(ops.join(format!("tasks/{registered}.md")).is_file());
+    assert!(
+        !displaced
+            .path()
+            .join(format!("tasks/{registered}.md"))
+            .exists()
+    );
+    // an unknown prefix is config, since a person typed it
+    assert_eq!(
+        env.fail(nowhere.path(), &["add", "x", "--project", "zzz"]),
+        "config"
+    );
+    // the wire-up: the goal depends on the piece, leaves ready while it is open, and
+    // returns once it closes
+    env.json(&ops, &["dep", &goal, "--on", &id]);
+    let in_ready = |env: &TestEnv| {
+        env.json(&ops, &["ready"])["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == goal)
+    };
+    assert!(!in_ready(&env));
+    env.json(&ops, &["done", &groundwork]);
+    env.json(&fam, &["done", &id]);
+    assert!(in_ready(&env), "the goal is the verify-and-close step now");
+}
+
+#[test]
 fn parent_is_validated_persisted_and_clearable() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

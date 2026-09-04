@@ -66,6 +66,10 @@ pub enum Command {
         title: String,
         #[arg(long, default_value = "todo")]
         status: String,
+        /// Create it in this registered project instead of the current one; needs no
+        /// local project. Every field is validated against that project.
+        #[arg(long)]
+        project: Option<String>,
         #[command(flatten)]
         fields: FieldArgs,
     },
