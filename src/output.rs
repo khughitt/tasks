@@ -141,6 +141,20 @@ pub struct TreeOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct TagRow {
+    pub tag: String,
+    pub count: usize,
+    /// Count per project; one key in local scope.
+    pub projects: std::collections::BTreeMap<String, usize>,
+}
+
+#[derive(Serialize)]
+pub struct TagsOut {
+    pub tags: Vec<TagRow>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Serialize, Default)]
 pub struct Counts {
     pub idea: usize,
@@ -226,6 +240,7 @@ pub enum Output {
     Graph(GraphOut),
     Check(CheckOut),
     Tree(TreeOut),
+    Tags(TagsOut),
     Feedback(FeedbackOut),
 }
 
@@ -326,6 +341,19 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             rendered
         }
         Output::Tree(o) => tree_text(&o.nodes, 0, painter),
+        Output::Tags(o) => {
+            let mut rendered = String::new();
+            for row in &o.tags {
+                let parts: Vec<String> = row
+                    .projects
+                    .iter()
+                    .map(|(prefix, count)| format!("{prefix} {count}"))
+                    .collect();
+                let breakdown = painter.paint(Style::Chrome, &format!("  ({})", parts.join(", ")));
+                rendered.push_str(&format!("{:>4}  {}{breakdown}\n", row.count, row.tag));
+            }
+            rendered
+        }
         Output::Feedback(o) => format!("{} {}", o.action, o.id),
     }
 }
@@ -444,6 +472,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
             .map(|finding| format!("{} [{}] {}", finding.file, finding.kind, finding.detail))
             .collect(),
         Output::Tree(o) => o.warnings.clone(),
+        Output::Tags(o) => o.warnings.clone(),
         Output::Feedback(o) => o.warnings.clone(),
     }
 }

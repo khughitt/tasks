@@ -1675,7 +1675,7 @@ Before anything else: `tasks start tasks-6680f2`.
 - Consumes: `ReadCtx`, `Scope::scan` (Task 2).
 - Produces: `tags::run(ctx: ReadCtx, statuses: Vec<String>) -> Result<Output>`, `output::TagRow { tag, count, projects: BTreeMap<String, usize> }`, `output::TagsOut { tags: Vec<TagRow>, warnings }`.
 
-- [ ] **Step 1: Write the failing e2e test**
+- [x] **Step 1: Write the failing e2e test**
 
 Append to `tests/cli.rs`:
 
@@ -1727,12 +1727,12 @@ fn tags_counts_per_project_and_filters_by_status() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli tags_counts`
 Expected: FAIL, unknown subcommand (exit 2).
 
-- [ ] **Step 3: Shape and pretty**
+- [x] **Step 3: Shape and pretty**
 
 `src/output.rs`:
 
@@ -1772,7 +1772,7 @@ Add `Tags(TagsOut)` to `Output`, the `warnings_of` arm, and in `pretty`:
 
 (The per-project map is always rendered; locally it names the one project, which keeps the wide and local renderings the same shape.)
 
-- [ ] **Step 4: The command**
+- [x] **Step 4: The command**
 
 `src/commands/tags.rs`:
 
@@ -1843,12 +1843,12 @@ pub fn run(ctx: ReadCtx, statuses: Vec<String>) -> Result<Output> {
         } => tags::run(open_read_ctx(dir, all_projects)?, statuses),
 ```
 
-- [ ] **Step 5: Run the gates**
+- [x] **Step 5: Run the gates**
 
 Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
 Expected: all pass, and the installed `tasks` is now the code under test.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 tasks done tasks-6680f2 "tasks tags: frequencies per project"

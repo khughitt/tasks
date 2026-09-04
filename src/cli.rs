@@ -180,4 +180,12 @@ pub enum Command {
         #[arg(long, conflicts_with = "id")]
         all_projects: bool,
     },
+    /// Tag frequencies (open tasks unless --status), per project.
+    Tags {
+        #[arg(long = "status")]
+        statuses: Vec<String>,
+        /// Every reachable registered project; needs no local project.
+        #[arg(long)]
+        all_projects: bool,
+    },
 }

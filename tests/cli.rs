@@ -126,6 +126,62 @@ fn no_project_is_an_error_and_usage_errors_exit_2() {
 }
 
 #[test]
+fn tags_counts_per_project_and_filters_by_status() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "A", "--tag", "testing", "--tag", "perf"]);
+    // A repeated tag counts the task once.
+    env.json(&sci, &["add", "B", "--tag", "testing", "--tag", "testing"]);
+    env.json(&fam, &["add", "C", "--tag", "testing"]);
+    let old = id_of(env.json(&fam, &["add", "D", "--tag", "legacy"]));
+    env.json(&fam, &["done", &old]);
+
+    let local = env.json(&sci, &["tags"]);
+    assert_eq!(
+        local["tags"],
+        serde_json::json!([
+            { "tag": "testing", "count": 2, "projects": { "sci": 2 } },
+            { "tag": "perf", "count": 1, "projects": { "sci": 1 } }
+        ])
+    );
+
+    let nowhere = tempfile::tempdir().unwrap();
+    let wide = env.json(nowhere.path(), &["tags", "--all-projects"]);
+    assert_eq!(wide["tags"][0]["tag"], "testing");
+    assert_eq!(wide["tags"][0]["count"], 3);
+    assert_eq!(
+        wide["tags"][0]["projects"],
+        serde_json::json!({ "fam": 1, "sci": 2 })
+    );
+    assert_eq!(
+        wide["tags"].as_array().unwrap().len(),
+        2,
+        "legacy is on a done task"
+    );
+
+    let closed = env.json(
+        nowhere.path(),
+        &["tags", "--all-projects", "--status", "done"],
+    );
+    assert_eq!(
+        closed["tags"],
+        serde_json::json!([{ "tag": "legacy", "count": 1, "projects": { "fam": 1 } }])
+    );
+
+    let out = env
+        .cmd(nowhere.path())
+        .args(["--pretty", "tags", "--all-projects"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("testing") && text.contains("fam 1, sci 2"),
+        "{text}"
+    );
+}
+
+#[test]
 fn tasks_format_env_must_be_valid() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

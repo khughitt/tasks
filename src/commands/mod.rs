@@ -10,6 +10,7 @@ pub mod projects;
 pub mod root;
 pub mod show;
 pub mod status;
+pub mod tags;
 pub mod tree;
 pub mod unregister;
 
@@ -312,6 +313,10 @@ pub fn run(cli: Cli) -> Result<Output> {
             all,
             all_projects,
         } => tree::run(open_read_ctx(dir, all_projects)?, id, all),
+        Command::Tags {
+            statuses,
+            all_projects,
+        } => tags::run(open_read_ctx(dir, all_projects)?, statuses),
         Command::Feedback {
             summary,
             category,
