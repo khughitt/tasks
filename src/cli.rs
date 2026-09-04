@@ -87,6 +87,9 @@ pub enum Command {
         size: Option<String>,
         #[arg(short = 'n', long)]
         limit: Option<usize>,
+        /// Every reachable registered project; needs no local project.
+        #[arg(long)]
+        all_projects: bool,
     },
     /// Edit fields, or open the task in $EDITOR when no field flags are given.
     Edit {
@@ -138,7 +141,11 @@ pub enum Command {
     /// Validate every task file.
     Check,
     /// Session context for agents.
-    Prime,
+    Prime {
+        /// Every reachable registered project; needs no local project.
+        #[arg(long)]
+        all_projects: bool,
+    },
     /// File feedback about the tasks tool itself into the upstream tasks project.
     Feedback {
         summary: String,

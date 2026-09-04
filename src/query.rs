@@ -221,6 +221,24 @@ mod tests {
         assert_eq!(ids, ["000003", "000002", "000004", "000001"]);
     }
 
+    #[test]
+    fn ready_order_uses_created_then_full_id_for_remaining_ties() {
+        let mut newer = t("aaa-000001", Status::Todo, 1, Some(Size::S), &[]);
+        newer.created = "2026-08-29T00:00:02Z".into();
+        let mut tasks = vec![
+            newer,
+            t("sci-000001", Status::Todo, 1, Some(Size::S), &[]),
+            t("fam-ffffff", Status::Todo, 1, Some(Size::S), &[]),
+            t("fam-000001", Status::Todo, 1, Some(Size::S), &[]),
+        ];
+        sort_ready(&mut tasks);
+        let ids: Vec<String> = tasks.iter().map(|task| task.id.to_string()).collect();
+        assert_eq!(
+            ids,
+            ["fam-000001", "fam-ffffff", "sci-000001", "aaa-000001"]
+        );
+    }
+
     fn edges_from<'a>(
         map: &'a [(&'a str, &'a [&'a str])],
     ) -> impl Fn(&TaskId) -> crate::error::Result<Option<Vec<TaskId>>> + 'a {

@@ -275,7 +275,11 @@ pub fn run(cli: Cli) -> Result<Output> {
             owner,
             parent,
         ),
-        Command::Ready { size, limit } => list::ready(open_read_ctx(dir, false)?, size, limit),
+        Command::Ready {
+            size,
+            limit,
+            all_projects,
+        } => list::ready(open_read_ctx(dir, all_projects)?, size, limit),
         Command::Edit {
             id,
             title,
@@ -284,7 +288,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             no_parent,
             fields,
         } => edit::run(open_ctx(dir)?, id, title, status, force, no_parent, fields),
-        Command::Prime => list::prime(open_read_ctx(dir, false)?),
+        Command::Prime { all_projects } => list::prime(open_read_ctx(dir, all_projects)?),
         Command::Note { id, text } => status::note(open_ctx(dir)?, id, text),
         Command::Start { id } => status::start(open_ctx(dir)?, id),
         Command::Done { id, message, force } => {

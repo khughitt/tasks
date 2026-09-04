@@ -944,6 +944,70 @@ fn ready_excludes_ideas_doing_and_open_deps() {
 }
 
 #[test]
+fn ready_all_projects_orders_across_projects() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let low = id_of(env.json(&sci, &["add", "Low", "-p", "3"]));
+    let high = id_of(env.json(&fam, &["add", "High", "-p", "1", "--size", "s"]));
+    let mid = id_of(env.json(&sci, &["add", "Mid", "-p", "1", "--size", "m"]));
+    let nowhere = tempfile::tempdir().unwrap();
+    let v = env.json(nowhere.path(), &["ready", "--all-projects"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [high.as_str(), mid.as_str(), low.as_str()]);
+    let v = env.json(nowhere.path(), &["ready", "--all-projects", "-n", "1"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn prime_all_projects_reports_scope_and_per_project_uncommitted_files() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&fam)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let s = id_of(env.json(&sci, &["add", "S"]));
+    let f = id_of(env.json(&fam, &["add", "F"]));
+    env.json(&sci, &["start", &s]);
+
+    let local = env.json(&sci, &["prime"]);
+    assert_eq!(local["prefix"], "sci");
+    assert_eq!(local["projects"], serde_json::json!(["sci"]));
+
+    let nowhere = tempfile::tempdir().unwrap();
+    let v = env.json(nowhere.path(), &["prime", "--all-projects"]);
+    assert_eq!(v["prefix"], serde_json::Value::Null);
+    assert_eq!(v["projects"], serde_json::json!(["fam", "sci"]));
+    assert_eq!(v["counts"]["todo"], 1);
+    assert_eq!(v["counts"]["doing"], 1);
+    assert_eq!(v["ready"][0]["id"], f);
+    assert_eq!(v["doing"][0]["id"], s);
+    assert_eq!(v["roadmap"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        v["warnings"],
+        serde_json::json!([format!(
+            "fam: uncommitted task files: tasks/.config.toml, tasks/{f}.md"
+        )])
+    );
+    let out = env
+        .cmd(nowhere.path())
+        .args(["--pretty", "prime", "--all-projects"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.starts_with("projects fam, sci\n"), "{text}");
+}
+
+#[test]
 fn prime_reports_counts_ready_and_doing() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

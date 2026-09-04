@@ -116,9 +116,29 @@ pub struct Counts {
     pub dropped: usize,
 }
 
+impl Counts {
+    pub fn of(tasks: &[Task]) -> Counts {
+        let mut counts = Counts::default();
+        for task in tasks {
+            match task.status {
+                Status::Idea => counts.idea += 1,
+                Status::Todo => counts.todo += 1,
+                Status::Doing => counts.doing += 1,
+                Status::Blocked => counts.blocked += 1,
+                Status::Done => counts.done += 1,
+                Status::Dropped => counts.dropped += 1,
+            }
+        }
+        counts
+    }
+}
+
 #[derive(Serialize)]
 pub struct PrimeOut {
-    pub prefix: String,
+    /// The local project; null under --all-projects.
+    pub prefix: Option<String>,
+    /// Every prefix in scope; one entry locally.
+    pub projects: Vec<String>,
     pub counts: Counts,
     pub ready: Vec<TaskSummary>,
     pub doing: Vec<TaskSummary>,
@@ -225,9 +245,13 @@ fn pretty(out: &Output, painter: &Painter) -> String {
         Output::List(o) => table(&o.tasks, painter),
         Output::Prime(o) => {
             let c = &o.counts;
+            let header = match &o.prefix {
+                Some(prefix) => format!("project {prefix}"),
+                None => format!("projects {}", o.projects.join(", ")),
+            };
             let mut rendered = format!(
-                "project {}\nidea {}  todo {}  doing {}  blocked {}  done {}  dropped {}\n",
-                o.prefix, c.idea, c.todo, c.doing, c.blocked, c.done, c.dropped
+                "{header}\nidea {}  todo {}  doing {}  blocked {}  done {}  dropped {}\n",
+                c.idea, c.todo, c.doing, c.blocked, c.done, c.dropped
             );
             rendered.push_str(&format!(
                 "\n{}\n",

@@ -3,6 +3,7 @@ use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{Counts, ListOut, Output, PrimeOut, TaskSummary};
 use crate::query::{is_ready, sort_list, sort_ready};
+use crate::scope::Scope;
 use std::collections::HashMap;
 
 pub fn list(
@@ -122,17 +123,7 @@ pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Re
 
 pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
     let all = ctx.scope.scan()?;
-    let mut counts = Counts::default();
-    for task in &all {
-        match task.status {
-            Status::Idea => counts.idea += 1,
-            Status::Todo => counts.todo += 1,
-            Status::Doing => counts.doing += 1,
-            Status::Blocked => counts.blocked += 1,
-            Status::Done => counts.done += 1,
-            Status::Dropped => counts.dropped += 1,
-        }
-    }
+    let counts = Counts::of(&all);
     let ready = ready_tasks(&mut ctx, &all)?;
     let mut doing: Vec<Task> = all
         .iter()
@@ -152,16 +143,25 @@ pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
         .cloned()
         .collect();
     sort_ready(&mut closeout);
+    let wide = matches!(ctx.scope, Scope::All(_));
     for project in ctx.scope.projects() {
         if let Some(files) = project.uncommitted_task_files()?
             && !files.is_empty()
         {
-            ctx.warnings
-                .push(format!("uncommitted task files: {}", files.join(", ")));
+            let message = format!("uncommitted task files: {}", files.join(", "));
+            ctx.warnings.push(if wide {
+                format!("{}: {message}", project.prefix)
+            } else {
+                message
+            });
         }
     }
     Ok(Output::Prime(PrimeOut {
-        prefix: ctx.scope.projects()[0].prefix.clone(),
+        prefix: match &ctx.scope {
+            Scope::Local(project) => Some(project.prefix.clone()),
+            Scope::All(_) => None,
+        },
+        projects: ctx.scope.prefixes(),
         counts,
         ready: ready
             .iter()
