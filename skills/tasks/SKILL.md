@@ -41,6 +41,12 @@ updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates th
 - Blocking on another project: `tasks dep <id> --on <prefix>-<hex>`; the other project must be registered (`tasks init` there).
 - Id collision after a merge (git add/add conflict on the same `tasks/<id>.md`): keep one file, rename the other to a fresh id, fix its `id` field, then run `tasks check` and repair any `depends` it reports.
 - `tasks tree [<id>]` shows the hierarchy; `tasks edit <id> --parent <goal>` / `--no-parent` moves a task.
+- Throwaway projects get a throwaway registry: `tasks init` registers globally in
+  `~/.config/tasks/projects.toml`, and that entry outlives the scratch directory it
+  names. For a demo, a smoke test, or anything under a temp dir, run
+  `XDG_CONFIG_HOME=$(mktemp -d) tasks init --prefix <p>` so the registration dies with
+  it. If you forget, `tasks unregister <prefix>` removes the entry; project files are
+  untouched.
 
 ## With superpowers
 

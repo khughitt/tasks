@@ -199,6 +199,9 @@ tasks init [--prefix P] [--force]
     a valid config, and an unmounted drive must never be mistaken for an abandoned one.
     The registry is saved only after the project is written, so a failed init changes
     nothing.
+    Registration is machine-global and outlives the directory it names, which is how a
+    scratch project pollutes the registry; point XDG_CONFIG_HOME at a temporary directory
+    to give a throwaway project a throwaway registry.
     Prints the skill install hint (§8) if no skill is found at user or project level.
 
 tasks unregister <prefix>
