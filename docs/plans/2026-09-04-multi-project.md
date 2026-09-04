@@ -45,7 +45,7 @@ Before anything else: `tasks start tasks-64319f`.
 - Consumes: `Registry::project_root(&self, prefix: &str) -> Option<&Path>`, `Project::open(root: &Path) -> Result<Project>`, `repo::CONFIG_REL`.
 - Produces: `scope::Origin<'a> { Id(&'a TaskId), Prefix }`; `scope::has_config(root: &Path) -> Result<bool>`; `scope::open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Result<Project>`.
 
-- [ ] **Step 1: Write the failing unit tests**
+- [x] **Step 1: Write the failing unit tests**
 
 Create `src/scope.rs`:
 
@@ -154,12 +154,12 @@ mod tests {
 
 Add `mod scope;` to `src/main.rs` (alphabetically, after `mod resolve;`).
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test scope::`
 Expected: four failures panicking at `not yet implemented`.
 
-- [ ] **Step 3: Implement `open_registered`**
+- [x] **Step 3: Implement `open_registered`**
 
 Replace the `todo!()` body:
 
@@ -190,12 +190,12 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test scope::`
 Expected: 4 passed.
 
-- [ ] **Step 5: Use it in `show`**
+- [x] **Step 5: Use it in `show`**
 
 In `src/commands/show.rs`, replace the foreign branch. The whole `let project: &Project = ...` block becomes:
 
@@ -211,7 +211,7 @@ In `src/commands/show.rs`, replace the foreign branch. The whole `let project: &
 
 Add `use crate::scope::Origin;`, change the error import to `use crate::error::Result;`, and change the repository import to `use crate::repo::Project;`.
 
-- [ ] **Step 6: Use it in `feedback`**
+- [x] **Step 6: Use it in `feedback`**
 
 In `src/commands/feedback.rs`, replace `locate_target`:
 
@@ -230,12 +230,12 @@ pub fn locate_target(registry: &Registry) -> Result<Project> {
 
 Add `use crate::scope::Origin;` and change the repository import to `use crate::repo::Project;` (`Error` remains in use for the target-specific hint).
 
-- [ ] **Step 7: Run the gates**
+- [x] **Step 7: Run the gates**
 
 Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
 Expected: all pass, and the installed `tasks` is now the code under test; the existing `show_resolves_a_foreign_id_read_only` and `feedback_fails_early_without_a_target_or_a_reporter` tests still pass because only messages changed, not kinds.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 tasks done tasks-64319f "scope::open_registered shared by show and feedback"
@@ -715,7 +715,7 @@ Before anything else: `tasks start tasks-6d33e6`.
 - Consumes: `ReadCtx`, `Scope::projects`, `Scope::prefixes` (Task 2).
 - Produces: `PrimeOut.prefix: Option<String>`, `PrimeOut.projects: Vec<String>`; `Counts::of(tasks: &[Task]) -> Counts` (reused by `projects` in Task 6).
 
-- [ ] **Step 1: Write the failing e2e tests and the id-tiebreak characterization**
+- [x] **Step 1: Write the failing e2e tests and the id-tiebreak characterization**
 
 Append to `tests/cli.rs`:
 
@@ -808,12 +808,12 @@ fn ready_order_uses_created_then_full_id_for_remaining_ties() {
 }
 ```
 
-- [ ] **Step 2: Run the characterization and verify the new command tests fail**
+- [x] **Step 2: Run the characterization and verify the new command tests fail**
 
 Run: `cargo test query::tests::ready_order_uses_created_then_full_id_for_remaining_ties`, then `cargo test --test cli all_projects_orders`, then `cargo test --test cli prime_all_projects`.
 Expected: the characterization test passes; both new e2e tests fail with a clap usage error (exit 2) because the flag does not exist on `ready` and `prime`.
 
-- [ ] **Step 3: Add the flags and dispatch**
+- [x] **Step 3: Add the flags and dispatch**
 
 `src/cli.rs`:
 
@@ -850,7 +850,7 @@ Expected: the characterization test passes; both new e2e tests fail with a clap 
         Command::Prime { all_projects } => list::prime(open_read_ctx(dir, all_projects)?),
 ```
 
-- [ ] **Step 4: Change `PrimeOut` and the pretty header**
+- [x] **Step 4: Change `PrimeOut` and the pretty header**
 
 `src/output.rs`:
 
@@ -904,7 +904,7 @@ In `pretty`, the `Output::Prime` arm's header:
             );
 ```
 
-- [ ] **Step 5: Finish `prime` in `list.rs`**
+- [x] **Step 5: Finish `prime` in `list.rs`**
 
 Replace the counts loop with `let counts = Counts::of(&all);`. Replace the uncommitted-files block with the per-project form:
 
@@ -938,12 +938,12 @@ and the output head:
 
 Import `crate::scope::Scope`.
 
-- [ ] **Step 6: Run the gates**
+- [x] **Step 6: Run the gates**
 
 Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
 Expected: all pass, and the installed `tasks` is now the code under test. `prime_reports_counts_ready_and_doing` still passes: `prefix` serializes as `"sci"`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 tasks done tasks-6d33e6 "ready and prime take --all-projects; prime reports projects in scope"
