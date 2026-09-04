@@ -28,7 +28,8 @@ TASKS_COLOR=<auto|always|never>
 
 - **Unset** — no color, ever. The invariant holds literally out of the box, and an agent
   that has never heard of this feature cannot be surprised by it.
-- **`auto`** — color if and only if stdout is a terminal (`std::io::IsTerminal`).
+- **`auto`** — color if and only if the stream being written to is a terminal
+  (`std::io::IsTerminal`), decided per stream: see §4.
 - **`always`** — color unconditionally, for `| less -R` and for tests.
 - **`never`** — off.
 
@@ -36,7 +37,7 @@ Consequences the design accepts:
 
 - **Detection is opt-in, not default.** An operator who wants color by default puts
   `TASKS_COLOR=auto` in a shell rc. Agent subprocesses inherit that variable and still get
-  nothing, because they have no terminal on stdout. A plain boolean `TASKS_COLOR=1` would
+  nothing, because they have no terminal on either stream. A plain boolean `TASKS_COLOR=1` would
   have no such backstop, which is why the variable is tri-state rather than a flag.
 - **`TERM` is never consulted.** `TERM` is inherited by subprocesses that have no terminal
   at all; a session was observed carrying `TERM=xterm-kitty` with none of stdin, stdout, or
@@ -59,7 +60,14 @@ user who keeps `TASKS_COLOR=auto` in a shell rc suppress color for a single invo
 
 `TASKS_COLOR` is parsed and validated whenever it is set, even when `NO_COLOR` or a flag
 outranks it, so a typo is reported rather than silently ignored. An unparseable value is a
-`config` error before any work is done, exactly as an unparseable `TASKS_FORMAT` is today.
+`config` error before any work is done.
+
+That is deliberately stricter than `TASKS_FORMAT`, which is validated only when it is
+actually consulted: `--pretty` with `TASKS_FORMAT=xml` succeeds today and ignores the
+variable, because `main` matches the `--pretty` arm first. Fail-early is the rule this
+repository states, so the new variable follows the rule rather than the precedent. Making
+`TASKS_FORMAT` consistent is tasks-a14f0d and is not done here: it turns a
+currently-succeeding command into an error, which deserves its own change.
 
 `--color` takes a plain string parsed by the same `ColorMode::parse`, matching how
 `--status` and `graph --format` are handled rather than clap's `ValueEnum`; an invalid
@@ -124,15 +132,30 @@ pub enum Style { Status(crate::model::Status), Chrome, Emphasis, Error, Ok, Warn
 
 pub struct Painter { enabled: bool }
 impl Painter {
-    pub fn new(mode: ColorMode, format: Format) -> Painter;
+    /// `stream_is_terminal` answers the `Auto` probe for the stream this painter writes to.
+    pub fn new(mode: ColorMode, format: Format, stream_is_terminal: bool) -> Painter;
     pub fn paint(&self, style: Style, text: &str) -> String;
 }
 ```
 
 `Painter` is threaded, not global: `render(&out, format, &painter)` and
-`pretty_warnings(&warnings, &painter)` take it, `main` builds the one instance. This keeps
-`pretty` a pure function of its inputs, so both modes are unit-testable and tests cannot
-leak modes into each other.
+`pretty_warnings(&warnings, &painter)` take it. This keeps `pretty` a pure function of its
+inputs, so both modes are unit-testable and tests cannot leak modes into each other.
+
+**One painter per stream.** Warnings go to stderr and everything else to stdout, and the
+two are redirected independently: `tasks --pretty list > out.txt` run from a terminal
+leaves stderr a tty and stdout a file. A single painter probing stdout would therefore
+either write escapes into a redirected stderr or drop color from a terminal one. `main`
+builds two painters from the same mode, one per stream — `render` takes the stdout one,
+`pretty_warnings` the stderr one. Only `auto` can differ between them; `always` and
+`never` are the same on both.
+
+**Statuses stay typed.** `DepInfo.status` is `Option<String>` and `Related.status` is
+`String` today, so coloring `show`'s footers would mean reparsing a status string during
+rendering. They become `Option<Status>` and `Status`. `Status` already derives `Serialize`
+with `rename_all = "lowercase"`, producing exactly the strings `as_str` produces at the two
+construction sites in `show.rs`, so the emitted JSON is byte-identical and the output
+contract in §5.1 of the original design is untouched.
 
 **Pad first, paint last.** `table` aligns columns with `{:<2}` and `{:<7}` width
 specifiers, and escape bytes count toward those widths. Painting before padding silently
@@ -147,8 +170,13 @@ End to end (`tests/cli.rs`), which pipes stdout and so has no terminal:
 - `--pretty --color always` emits escape sequences; the same command without `--color`
   emits none, and neither does `--color auto`, which is the agent-safety property;
 - `--color always` without `--pretty` emits plain JSON;
-- `NO_COLOR=1` with `TASKS_COLOR=auto` suppresses color, and `--color always` overrides
-  `NO_COLOR`;
+- `NO_COLOR=1` with `TASKS_COLOR=always` emits no color, and `--color always` alongside
+  `NO_COLOR=1` still emits color. The `always` pairing is the load-bearing one: with
+  `TASKS_COLOR=auto` the piped stdout would have disabled color anyway, so an
+  implementation that ignored `NO_COLOR` entirely would pass such a test;
+- `TestEnv::cmd` removes `TASKS_COLOR` and `NO_COLOR` from the child environment, beside
+  the `TASKS_FORMAT` and `TASKS_OWNER` it already removes, so a developer's shell cannot
+  change the result of an unrelated test;
 - `TASKS_COLOR=chartreuse` is a `config` error, and remains one when `NO_COLOR` is also
   set, since the variable is validated whenever present;
 - a colored `--pretty ready` table has the same visible column layout as an uncolored one.
