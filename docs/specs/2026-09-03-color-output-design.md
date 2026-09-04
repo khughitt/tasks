@@ -124,7 +124,7 @@ Not colored, deliberately:
 A `src/style.rs` module owning three things and nothing else:
 
 ```rust
-pub enum ColorMode { Auto, Always, Never }   // parse() mirrors TASKS_FORMAT's errors
+pub enum ColorMode { Auto, Always, Never }
 
 /// A role, never a color. Call sites name what a span means; this module decides how
 /// that looks, so the same meaning renders identically in every view.
@@ -189,4 +189,5 @@ function.
 
 Per-status or per-tag palette configuration; 256-color or truecolor output; terminal
 capability detection beyond `IsTerminal`; colored `graph` output; coloring the task file
-text in `show`; a `--color` value of `auto` meaning anything other than "stdout is a tty".
+text in `show`; a `--color` value of `auto` meaning anything other than "the output stream
+is a tty".
