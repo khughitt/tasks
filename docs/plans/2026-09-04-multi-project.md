@@ -265,7 +265,7 @@ Before anything else: `tasks start tasks-fe2041`.
   - `commands::ReadCtx { scope: Scope, registry: Registry, warnings: Vec<String> }` with `resolve_task(&self, id: &TaskId) -> Result<Option<Task>>`; `commands::open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx>`; `commands::start_dir(dir: Option<&Path>) -> Result<PathBuf>`.
   - `list::list(ctx: ReadCtx, statuses, tags, owner, parent) -> Result<Output>` (no `all_projects` parameter; the scope carries it). `list::ready_tasks(ctx: &mut ReadCtx, all: &[Task])`, `list::ready(ctx: ReadCtx, ...)`, `list::prime(ctx: ReadCtx)` take `ReadCtx` (behavior unchanged in this task).
 
-- [ ] **Step 1: Write the failing e2e tests**
+- [x] **Step 1: Write the failing e2e tests**
 
 Append to `tests/cli.rs`:
 
@@ -315,12 +315,12 @@ fn all_projects_rejects_a_prefix_mismatch() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --test cli all_projects_`
 Expected: `all_projects_needs_no_local_project` fails with kind `no_project`; the empty-registry test fails because the current `list` walks only from inside a project; the mismatch test fails because today the mismatched project is simply scanned.
 
-- [ ] **Step 3: Split `Resolver::resolve_task` into reusable halves**
+- [x] **Step 3: Split `Resolver::resolve_task` into reusable halves**
 
 In `src/resolve.rs`, replace `resolve_task` and add two free functions:
 
@@ -371,7 +371,7 @@ pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Tas
 }
 ```
 
-- [ ] **Step 4: Add `Scope` to `src/scope.rs`**
+- [x] **Step 4: Add `Scope` to `src/scope.rs`**
 
 Below `open_registered` (`Path` and `CONFIG_REL` are already imported):
 
@@ -547,7 +547,7 @@ Add unit tests to the `tests` module in `src/scope.rs`:
     }
 ```
 
-- [ ] **Step 5: Add `ReadCtx` and `open_read_ctx` to `src/commands/mod.rs`**
+- [x] **Step 5: Add `ReadCtx` and `open_read_ctx` to `src/commands/mod.rs`**
 
 After `open_ctx`:
 
@@ -594,7 +594,7 @@ pub fn open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx> 
 
 Make `open_ctx` use `start_dir` too. Add `use crate::scope::Scope;` and `use std::path::PathBuf;`.
 
-- [ ] **Step 6: Convert `list.rs` to `ReadCtx`**
+- [x] **Step 6: Convert `list.rs` to `ReadCtx`**
 
 Replace the head of `list` and the dependency loop:
 
@@ -663,7 +663,7 @@ In `prime`, the uncommitted-files block needs a project. For now (wide `prime` i
 
 and `prefix: ctx.project.prefix.clone()` becomes `prefix: ctx.scope.projects()[0].prefix.clone()` (Task 3 replaces this). Update imports: `use super::ReadCtx;`, drop `Resolver`, `Project`, `CONFIG_REL`, `HashMap` only if unused (the `closed` map in `ready_tasks` still uses `HashMap`).
 
-- [ ] **Step 7: Update dispatch**
+- [x] **Step 7: Update dispatch**
 
 In `commands::run`:
 
@@ -685,12 +685,12 @@ In `commands::run`:
         Command::Prime => list::prime(open_read_ctx(dir, false)?),
 ```
 
-- [ ] **Step 8: Run the gates**
+- [x] **Step 8: Run the gates**
 
 Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
 Expected: all pass, and the installed `tasks` is now the code under test, including the three existing `list_all_projects_*` tests (the "missing config" one still sees exactly one warning: fam is unreachable, sci is registered).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 tasks done tasks-fe2041 "Scope and ReadCtx; list --all-projects runs from anywhere"

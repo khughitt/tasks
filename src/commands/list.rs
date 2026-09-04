@@ -1,40 +1,22 @@
-use super::Ctx;
+use super::ReadCtx;
 use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{Counts, ListOut, Output, PrimeOut, TaskSummary};
 use crate::query::{is_ready, sort_list, sort_ready};
-use crate::repo::{CONFIG_REL, Project};
-use crate::resolve::Resolver;
 use std::collections::HashMap;
 
 pub fn list(
-    mut ctx: Ctx,
+    mut ctx: ReadCtx,
     statuses: Vec<String>,
     tags: Vec<String>,
     owner: Option<String>,
     parent: Option<String>,
-    all_projects: bool,
 ) -> Result<Output> {
     let statuses = statuses
         .iter()
         .map(|status| Status::parse(status))
         .collect::<Result<Vec<_>>>()?;
-    let mut tasks = ctx.project.scan()?;
-    if all_projects {
-        for (prefix, root) in &ctx.registry.projects {
-            if *prefix == ctx.project.prefix {
-                continue;
-            }
-            if !root.try_exists()? || !root.join(CONFIG_REL).try_exists()? {
-                ctx.warnings.push(format!(
-                    "project {prefix} at {} is unreachable",
-                    root.display()
-                ));
-                continue;
-            }
-            tasks.extend(Project::open(root)?.scan()?);
-        }
-    }
+    let mut tasks = ctx.scope.scan()?;
     let all = tasks.clone();
     let parent = parent.as_deref().map(TaskId::parse).transpose()?;
     if let Some(parent) = &parent
@@ -57,10 +39,9 @@ pub fn list(
             .is_none_or(|p| task.parent.as_ref() == Some(p));
         status_ok && tags_ok && owner_ok && parent_ok
     });
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
     for task in &tasks {
         for dependency in &task.depends {
-            if resolver.resolve_task(dependency)?.is_none() {
+            if ctx.resolve_task(dependency)?.is_none() {
                 ctx.warnings.push(format!(
                     "{}: dependency {dependency} is unreachable",
                     task.id
@@ -79,8 +60,7 @@ pub fn list(
 }
 
 /// Ready tasks in ready order; pushes a warning per unreachable dependency.
-pub fn ready_tasks(ctx: &mut Ctx, all: &[Task]) -> Result<Vec<Task>> {
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+pub fn ready_tasks(ctx: &mut ReadCtx, all: &[Task]) -> Result<Vec<Task>> {
     let mut warnings = Vec::new();
     let mut closed: HashMap<TaskId, Option<bool>> = HashMap::new();
     for task in all.iter().filter(|task| task.status == Status::Todo) {
@@ -90,7 +70,7 @@ pub fn ready_tasks(ctx: &mut Ctx, all: &[Task]) -> Result<Vec<Task>> {
             }
             let value = match all.iter().find(|task| &task.id == dependency) {
                 Some(local) => Some(!local.status.is_open()),
-                None => resolver
+                None => ctx
                     .resolve_task(dependency)?
                     .map(|task| !task.status.is_open()),
             };
@@ -121,9 +101,9 @@ pub fn ready_tasks(ctx: &mut Ctx, all: &[Task]) -> Result<Vec<Task>> {
     Ok(ready)
 }
 
-pub fn ready(mut ctx: Ctx, size: Option<String>, limit: Option<usize>) -> Result<Output> {
+pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Result<Output> {
     let size = size.map(|size| Size::parse(&size)).transpose()?;
-    let all = ctx.project.scan()?;
+    let all = ctx.scope.scan()?;
     let mut tasks = ready_tasks(&mut ctx, &all)?;
     if let Some(size) = size {
         tasks.retain(|task| task.size == Some(size));
@@ -140,8 +120,8 @@ pub fn ready(mut ctx: Ctx, size: Option<String>, limit: Option<usize>) -> Result
     }))
 }
 
-pub fn prime(mut ctx: Ctx) -> Result<Output> {
-    let all = ctx.project.scan()?;
+pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
+    let all = ctx.scope.scan()?;
     let mut counts = Counts::default();
     for task in &all {
         match task.status {
@@ -172,14 +152,16 @@ pub fn prime(mut ctx: Ctx) -> Result<Output> {
         .cloned()
         .collect();
     sort_ready(&mut closeout);
-    if let Some(files) = ctx.project.uncommitted_task_files()?
-        && !files.is_empty()
-    {
-        ctx.warnings
-            .push(format!("uncommitted task files: {}", files.join(", ")));
+    for project in ctx.scope.projects() {
+        if let Some(files) = project.uncommitted_task_files()?
+            && !files.is_empty()
+        {
+            ctx.warnings
+                .push(format!("uncommitted task files: {}", files.join(", ")));
+        }
     }
     Ok(Output::Prime(PrimeOut {
-        prefix: ctx.project.prefix.clone(),
+        prefix: ctx.scope.projects()[0].prefix.clone(),
         counts,
         ready: ready
             .iter()

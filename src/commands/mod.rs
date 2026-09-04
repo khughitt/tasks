@@ -19,7 +19,8 @@ use crate::output::Output;
 use crate::registry::Registry;
 use crate::repo::Project;
 use crate::resolve::{DocKind, Resolver};
-use std::path::Path;
+use crate::scope::Scope;
+use std::path::{Path, PathBuf};
 
 pub struct Ctx {
     pub project: Project,
@@ -28,13 +29,49 @@ pub struct Ctx {
 }
 
 pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
-    let start = match dir {
-        Some(dir) => dir.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+    let start = start_dir(dir)?;
     Ok(Ctx {
         project: Project::locate(&start)?,
         registry: Registry::load()?,
+        warnings: Vec::new(),
+    })
+}
+
+pub struct ReadCtx {
+    pub scope: Scope,
+    pub registry: Registry,
+    pub warnings: Vec<String>,
+}
+
+impl ReadCtx {
+    pub fn resolve_task(&self, id: &TaskId) -> Result<Option<Task>> {
+        self.scope.resolve_task(&self.registry, id)
+    }
+}
+
+pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
+    Ok(match dir {
+        Some(dir) => dir.to_path_buf(),
+        None => std::env::current_dir()?,
+    })
+}
+
+/// Read commands: the local project, or with `all_projects` every reachable registered
+/// project and no local lookup at all (spec §3.2).
+pub fn open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx> {
+    let start = start_dir(dir)?;
+    let registry = Registry::load()?;
+    if all_projects {
+        let (scope, warnings) = Scope::open_all(&registry, &start)?;
+        return Ok(ReadCtx {
+            scope,
+            registry,
+            warnings,
+        });
+    }
+    Ok(ReadCtx {
+        scope: Scope::Local(Project::locate(&start)?),
+        registry,
         warnings: Vec::new(),
     })
 }
@@ -231,8 +268,14 @@ pub fn run(cli: Cli) -> Result<Output> {
             owner,
             parent,
             all_projects,
-        } => list::list(open_ctx(dir)?, statuses, tags, owner, parent, all_projects),
-        Command::Ready { size, limit } => list::ready(open_ctx(dir)?, size, limit),
+        } => list::list(
+            open_read_ctx(dir, all_projects)?,
+            statuses,
+            tags,
+            owner,
+            parent,
+        ),
+        Command::Ready { size, limit } => list::ready(open_read_ctx(dir, false)?, size, limit),
         Command::Edit {
             id,
             title,
@@ -241,7 +284,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             no_parent,
             fields,
         } => edit::run(open_ctx(dir)?, id, title, status, force, no_parent, fields),
-        Command::Prime => list::prime(open_ctx(dir)?),
+        Command::Prime => list::prime(open_read_ctx(dir, false)?),
         Command::Note { id, text } => status::note(open_ctx(dir)?, id, text),
         Command::Start { id } => status::start(open_ctx(dir)?, id),
         Command::Done { id, message, force } => {

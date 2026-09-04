@@ -32,26 +32,10 @@ impl<'a> Resolver<'a> {
     /// `Ok(None)` when the id is unreachable (unregistered prefix, missing root, or
     /// missing file); `Err` when a file exists but cannot be parsed.
     pub fn resolve_task(&self, id: &TaskId) -> Result<Option<Task>> {
-        let project;
-        let project = if id.prefix == self.project.prefix {
-            self.project
+        if id.prefix == self.project.prefix {
+            read_present(self.project, id)
         } else {
-            let Some(root) = self.registry.project_root(&id.prefix) else {
-                return Ok(None);
-            };
-            if !root.join(crate::repo::CONFIG_REL).try_exists()? {
-                return Ok(None);
-            }
-            project = Project::open(root)?;
-            &project
-        };
-        if !project.task_path(id).try_exists()? {
-            return Ok(None);
-        }
-        match project.read_task(id) {
-            Ok(task) => Ok(Some(task)),
-            Err(Error::TaskNotFound(_)) => Ok(None),
-            Err(error) => Err(error),
+            resolve_registered(self.registry, id)
         }
     }
 
@@ -120,6 +104,34 @@ impl<'a> Resolver<'a> {
             .display()
             .to_string()
     }
+}
+
+/// The task if its file exists in `project`; `Ok(None)` when it does not.
+pub fn read_present(project: &Project, id: &TaskId) -> Result<Option<Task>> {
+    if !project.task_path(id).try_exists()? {
+        return Ok(None);
+    }
+    match project.read_task(id) {
+        Ok(task) => Ok(Some(task)),
+        Err(Error::TaskNotFound(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Follows a foreign id through the registry. Lenient on purpose: an unregistered
+/// prefix or a missing root or config is `Ok(None)`, because callers report those as
+/// unreachable-dependency warnings. Once those cases are excluded, the strict shared
+/// opener makes malformed config or a registry/config prefix mismatch a config error.
+pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
+    let Some(root) = registry.project_root(&id.prefix) else {
+        return Ok(None);
+    };
+    if !crate::scope::has_config(root)? {
+        return Ok(None);
+    }
+    let project =
+        crate::scope::open_registered(registry, &id.prefix, crate::scope::Origin::Id(id))?;
+    read_present(&project, id)
 }
 
 /// `### Task 1: x` -> `Some("Task 1: x")`; non-headings -> None.

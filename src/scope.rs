@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::model::TaskId;
+use crate::model::{Task, TaskId};
 use crate::registry::Registry;
 use crate::repo::{CONFIG_REL, Project};
 use std::path::Path;
@@ -47,6 +47,107 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
         )));
     }
     Ok(project)
+}
+
+/// The first two outcomes of spec §3.2: a root that exists and holds a config. The third
+/// (a config that does not parse or disagrees with the key) surfaces from
+/// `open_registered`, which every reachable root then goes through.
+pub fn is_reachable(root: &Path) -> Result<bool> {
+    Ok(root.try_exists()? && has_config(root)?)
+}
+
+/// The two warnings every registry-wide command shares: an empty registry, and a `cwd`
+/// inside a project the registry does not know, which would otherwise vanish from its
+/// own portfolio view. The only look at `cwd` a wide command takes, and read-only.
+pub fn registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>> {
+    let mut warnings = Vec::new();
+    if registry.projects.is_empty() {
+        warnings.push("registry is empty".into());
+    }
+    match Project::locate(cwd) {
+        Ok(current) if !registry.projects.contains_key(&current.prefix) => {
+            warnings.push(format!(
+                "current project {} is not registered",
+                current.prefix
+            ));
+        }
+        Ok(_) | Err(Error::NoProject(_)) => {}
+        Err(error) => return Err(error),
+    }
+    Ok(warnings)
+}
+
+/// What a read command looks at: one project, or every reachable registered project.
+pub enum Scope {
+    Local(Project),
+    All(Vec<Project>),
+}
+
+impl Scope {
+    /// Every registered project that is reachable, in registry (prefix) order, plus the
+    /// warnings the walk produced. Never locates a local project; the only look at `cwd`
+    /// is to warn when it lies inside a project the registry does not know.
+    pub fn open_all(registry: &Registry, cwd: &Path) -> Result<(Scope, Vec<String>)> {
+        let mut warnings = registry_warnings(registry, cwd)?;
+        let mut projects = Vec::new();
+        for (prefix, root) in &registry.projects {
+            if !is_reachable(root)? {
+                warnings.push(format!(
+                    "project {prefix} at {} is unreachable",
+                    root.display()
+                ));
+                continue;
+            }
+            projects.push(open_registered(registry, prefix, Origin::Prefix)?);
+        }
+        Ok((Scope::All(projects), warnings))
+    }
+
+    pub fn projects(&self) -> &[Project] {
+        match self {
+            Scope::Local(project) => std::slice::from_ref(project),
+            Scope::All(projects) => projects,
+        }
+    }
+
+    #[allow(dead_code)] // Used by later registry-wide commands.
+    pub fn prefixes(&self) -> Vec<String> {
+        self.projects()
+            .iter()
+            .map(|project| project.prefix.clone())
+            .collect()
+    }
+
+    /// The union of every project's tasks, projects in scope order.
+    pub fn scan(&self) -> Result<Vec<Task>> {
+        let mut all = Vec::new();
+        for project in self.projects() {
+            all.extend(project.scan()?);
+        }
+        Ok(all)
+    }
+
+    /// One scan per project, for commands that group by project (`tree`).
+    #[allow(dead_code)] // Used by the later registry-wide tree command.
+    pub fn scan_each(&self) -> Result<Vec<(&Project, Vec<Task>)>> {
+        self.projects()
+            .iter()
+            .map(|project| Ok((project, project.scan()?)))
+            .collect()
+    }
+
+    /// A project in scope answers for its own prefix; anything else goes through the
+    /// registry, leniently, as dependency resolution always has.
+    pub fn resolve_task(&self, registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
+        match self
+            .projects()
+            .iter()
+            .find(|project| project.prefix == id.prefix)
+        {
+            Some(project) => crate::resolve::read_present(project, id),
+            None => crate::resolve::resolve_registered(registry, id),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -117,5 +218,70 @@ mod tests {
         let project = open_registered(&registry, "sci", Origin::Prefix).unwrap();
         assert_eq!(project.prefix, "sci");
         assert_eq!(project.root, dir.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn open_all_skips_unreachable_and_errors_on_malformed() {
+        let good = tempfile::tempdir().unwrap();
+        write_config(good.path(), "sci");
+        let gone = tempfile::tempdir().unwrap();
+        let mut registry = registry_with("sci", good.path());
+        registry.register("fam", gone.path()).unwrap();
+        let (scope, warnings) = Scope::open_all(&registry, gone.path()).unwrap();
+        assert_eq!(scope.prefixes(), ["sci"]);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].starts_with("project fam at "), "{warnings:?}");
+
+        std::fs::create_dir_all(gone.path().join("tasks")).unwrap();
+        std::fs::write(gone.path().join(CONFIG_REL), "not toml = [").unwrap();
+        assert!(matches!(
+            Scope::open_all(&registry, gone.path()),
+            Err(Error::Config(_))
+        ));
+    }
+
+    #[test]
+    fn scope_and_dependency_resolution_share_config_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(CONFIG_REL)).unwrap();
+        let registry = registry_with("sci", dir.path());
+        let id = TaskId::parse("sci-000001").unwrap();
+        assert!(!is_reachable(dir.path()).unwrap());
+        assert!(
+            crate::resolve::resolve_registered(&registry, &id)
+                .unwrap()
+                .is_none(),
+            "dependency resolution treats a non-file config as unreachable"
+        );
+        let (scope, warnings) = Scope::open_all(&registry, dir.path()).unwrap();
+        assert!(scope.projects().is_empty());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(matches!(
+            open_registered(&registry, "sci", Origin::Prefix),
+            Err(Error::Config(_))
+        ));
+
+        std::fs::remove_dir_all(dir.path().join(CONFIG_REL)).unwrap();
+        write_config(dir.path(), "zzz");
+        assert!(matches!(
+            crate::resolve::resolve_registered(&registry, &id),
+            Err(Error::Config(_))
+        ));
+    }
+
+    #[test]
+    fn open_all_warns_on_empty_registry_and_unregistered_cwd() {
+        let registry = Registry::default();
+        let nowhere = tempfile::tempdir().unwrap();
+        let (_, warnings) = Scope::open_all(&registry, nowhere.path()).unwrap();
+        assert_eq!(warnings, ["registry is empty"]);
+
+        let lone = tempfile::tempdir().unwrap();
+        write_config(lone.path(), "lon");
+        let (_, warnings) = Scope::open_all(&registry, lone.path()).unwrap();
+        assert_eq!(
+            warnings,
+            ["registry is empty", "current project lon is not registered"]
+        );
     }
 }

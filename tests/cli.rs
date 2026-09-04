@@ -713,6 +713,50 @@ fn list_all_projects_errors_for_malformed_registered_config() {
 }
 
 #[test]
+fn all_projects_needs_no_local_project() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "S"]);
+    let nowhere = tempfile::tempdir().unwrap();
+    let v = env.json(nowhere.path(), &["list", "--all-projects"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tasks"][0]["title"], "S");
+    assert_eq!(v["warnings"], serde_json::json!([]));
+}
+
+#[test]
+fn all_projects_warns_on_empty_registry_and_unregistered_current_project() {
+    let env = TestEnv::new();
+    let nowhere = tempfile::tempdir().unwrap();
+    let v = env.json(nowhere.path(), &["list", "--all-projects"]);
+    assert_eq!(v["tasks"], serde_json::json!([]));
+    assert_eq!(v["warnings"], serde_json::json!(["registry is empty"]));
+
+    // a project that was initialised under another home is not in this registry
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lone = tempfile::tempdir().unwrap();
+    let other = TestEnv::new();
+    other.json(lone.path(), &["init", "--prefix", "lon"]);
+    env.json(&sci, &["add", "S"]);
+    let v = env.json(lone.path(), &["list", "--all-projects"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1, "{v}");
+    assert_eq!(
+        v["warnings"],
+        serde_json::json!(["current project lon is not registered"])
+    );
+}
+
+#[test]
+fn all_projects_rejects_a_prefix_mismatch() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    std::fs::write(fam.join("tasks/.config.toml"), "prefix = \"zzz\"\n").unwrap();
+    assert_eq!(env.fail(&sci, &["list", "--all-projects"]), "config");
+}
+
+#[test]
 fn list_warns_about_unreachable_dependencies() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
