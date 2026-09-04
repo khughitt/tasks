@@ -126,6 +126,17 @@ fn no_project_is_an_error_and_usage_errors_exit_2() {
 }
 
 #[test]
+fn local_read_prefers_no_project_to_a_malformed_registry() {
+    let env = TestEnv::new();
+    let dir = tempfile::tempdir().unwrap();
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    std::fs::create_dir_all(registry.parent().unwrap()).unwrap();
+    std::fs::write(registry, "not toml = [").unwrap();
+
+    assert_eq!(env.fail(dir.path(), &["list"]), "no_project");
+}
+
+#[test]
 fn tags_counts_per_project_and_filters_by_status() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

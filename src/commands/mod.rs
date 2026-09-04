@@ -63,8 +63,8 @@ pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
 /// project and no local lookup at all (spec §3.2).
 pub fn open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx> {
     let start = start_dir(dir)?;
-    let registry = Registry::load()?;
     if all_projects {
+        let registry = Registry::load()?;
         let (scope, warnings) = Scope::open_all(&registry, &start)?;
         return Ok(ReadCtx {
             scope,
@@ -72,9 +72,10 @@ pub fn open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx> 
             warnings,
         });
     }
+    let project = Project::locate(&start)?;
     Ok(ReadCtx {
-        scope: Scope::Local(Project::locate(&start)?),
-        registry,
+        scope: Scope::Local(project),
+        registry: Registry::load()?,
         warnings: Vec::new(),
     })
 }

@@ -1,11 +1,11 @@
 ---
 id: tasks-3029be
 title: "Multi-project support: registry-wide views, hub goals, cross-project add"
-status: done
+status: todo
 priority: 2
 size: l
 created: 2026-09-04T12:48:03Z
-updated: 2026-09-04T16:03:30Z
+updated: 2026-09-04T16:24:02Z
 depends: []
 tags: [multi-project]
 spec: docs/specs/2026-09-04-multi-project-design.md

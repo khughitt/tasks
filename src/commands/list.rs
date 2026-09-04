@@ -6,6 +6,13 @@ use crate::query::{is_ready, sort_list, sort_ready};
 use crate::scope::Scope;
 use std::collections::HashMap;
 
+fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
+    match all.iter().find(|task| &task.id == id) {
+        Some(task) => Ok(Some(task.clone())),
+        None => ctx.resolve_task(id),
+    }
+}
+
 pub fn list(
     mut ctx: ReadCtx,
     statuses: Vec<String>,
@@ -42,7 +49,7 @@ pub fn list(
     });
     for task in &tasks {
         for dependency in &task.depends {
-            if ctx.resolve_task(dependency)?.is_none() {
+            if resolve_dependency(&ctx, &all, dependency)?.is_none() {
                 ctx.warnings.push(format!(
                     "{}: dependency {dependency} is unreachable",
                     task.id
@@ -69,12 +76,8 @@ pub fn ready_tasks(ctx: &mut ReadCtx, all: &[Task]) -> Result<Vec<Task>> {
             if closed.contains_key(dependency) {
                 continue;
             }
-            let value = match all.iter().find(|task| &task.id == dependency) {
-                Some(local) => Some(!local.status.is_open()),
-                None => ctx
-                    .resolve_task(dependency)?
-                    .map(|task| !task.status.is_open()),
-            };
+            let value =
+                resolve_dependency(ctx, all, dependency)?.map(|task| !task.status.is_open());
             closed.insert(dependency.clone(), value);
         }
     }
@@ -204,4 +207,30 @@ pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
             .collect(),
         warnings: ctx.warnings,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dependency_resolution_prefers_the_captured_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = crate::repo::Project::init(dir.path(), "sci").unwrap();
+        let dependency =
+            crate::commands::add::blank(&project, "Dependency".into(), Status::Todo).unwrap();
+        std::fs::write(project.root.join(crate::repo::CONFIG_REL), "not toml = [").unwrap();
+        let mut registry = crate::registry::Registry::default();
+        registry.register("sci", &project.root).unwrap();
+        let ctx = ReadCtx {
+            scope: Scope::All(vec![]),
+            registry,
+            warnings: vec![],
+        };
+
+        assert_eq!(
+            resolve_dependency(&ctx, std::slice::from_ref(&dependency), &dependency.id).unwrap(),
+            Some(dependency)
+        );
+    }
 }

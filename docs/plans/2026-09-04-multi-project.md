@@ -575,8 +575,8 @@ pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
 /// project and no local lookup at all (spec §3.2).
 pub fn open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx> {
     let start = start_dir(dir)?;
-    let registry = Registry::load()?;
     if all_projects {
+        let registry = Registry::load()?;
         let (scope, warnings) = Scope::open_all(&registry, &start)?;
         return Ok(ReadCtx {
             scope,
@@ -584,9 +584,10 @@ pub fn open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx> 
             warnings,
         });
     }
+    let project = Project::locate(&start)?;
     Ok(ReadCtx {
-        scope: Scope::Local(Project::locate(&start)?),
-        registry,
+        scope: Scope::Local(project),
+        registry: Registry::load()?,
         warnings: Vec::new(),
     })
 }
@@ -614,12 +615,20 @@ pub fn list(
     let all = tasks.clone();
 ```
 
-(The `if all_projects { ... }` loop is deleted.) The retain block is unchanged. The dependency warning loop becomes:
+(The `if all_projects { ... }` loop is deleted.) The retain block is unchanged. Resolve
+dependencies from the captured scan before consulting the filesystem:
 
 ```rust
+fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
+    match all.iter().find(|task| &task.id == id) {
+        Some(task) => Ok(Some(task.clone())),
+        None => ctx.resolve_task(id),
+    }
+}
+
     for task in &tasks {
         for dependency in &task.depends {
-            if ctx.resolve_task(dependency)?.is_none() {
+            if resolve_dependency(&ctx, &all, dependency)?.is_none() {
                 ctx.warnings.push(format!(
                     "{}: dependency {dependency} is unreachable",
                     task.id
@@ -635,7 +644,8 @@ pub fn list(
 pub fn ready_tasks(ctx: &mut ReadCtx, all: &[Task]) -> Result<Vec<Task>> {
 ```
 
-with `resolver.resolve_task(dependency)?` replaced by `ctx.resolve_task(dependency)?` (delete the `let resolver = ...` line), and
+with `resolver.resolve_task(dependency)?` replaced by
+`resolve_dependency(ctx, all, dependency)?` (delete the `let resolver = ...` line), and
 
 ```rust
 pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Result<Output> {
@@ -698,6 +708,8 @@ tasks check
 git add src/scope.rs src/resolve.rs src/commands/mod.rs src/commands/list.rs tests/cli.rs tasks/
 git commit -m "feat: registry-wide scope for list, no local project needed"
 ```
+
+- [x] **Final-review correction: preserve local error precedence and snapshot-first list dependencies**
 
 ---
 
