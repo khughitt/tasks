@@ -20,6 +20,8 @@
 - `auto` tests the stream being written, so stdout and stderr receive separate painters.
 - Use only basic ANSI colors plus bold and dim. Add no dependency and no palette configuration.
 - Pad table fields before painting them. ANSI bytes must not affect visible alignment.
+- Escape sequences never span a newline. Paint the line content, then append `\n` outside the
+  painted span, so the reset always lands before the break.
 - Do not color graph output or the serialized task text at the start of `show --pretty`.
 - Each task below is one tracker task; close it with `tasks done <id> "<what landed>"` in its commit.
 - The final task updates the design status and closes parent goal `tasks-4737b6` in the same commit.
@@ -41,7 +43,7 @@ Tracker: `tasks-f412d4`. Spec §2, §2.1, §3 severity, §4 stream handling, §5
 - Changes: `output::render(out: &Output, format: Format, painter: &Painter) -> String`; `output::pretty_warnings(warnings: &[String], painter: &Painter) -> String`.
 - Preserves: `output::render_error` stays plain JSON and does not take a painter.
 
-- [ ] **Step 1: Claim the tracker task**
+- [x] **Step 1: Claim the tracker task**
 
 Run:
 
@@ -51,7 +53,7 @@ tasks start tasks-f412d4
 
 Expected: the task becomes `doing` with the current worktree owner.
 
-- [ ] **Step 2: Write failing unit tests for policy and painting**
+- [x] **Step 2: Write failing unit tests for policy and painting**
 
 Create `src/style.rs`, declare it with `mod style;` in `src/main.rs`, and start with tests that establish the complete policy and palette:
 
@@ -116,7 +118,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Write failing end-to-end tests for public color selection**
+- [x] **Step 3: Write failing end-to-end tests for public color selection**
 
 First extend `TestEnv::cmd` in `tests/common/mod.rs` so every test begins from a deterministic environment:
 
@@ -220,7 +222,7 @@ fn tasks_color_is_always_validated_and_warnings_use_the_stderr_painter() {
 }
 ```
 
-- [ ] **Step 4: Run the focused tests and verify they fail**
+- [x] **Step 4: Run the focused tests and verify they fail**
 
 Run:
 
@@ -231,7 +233,7 @@ cargo test color_is_opt_in_and_never_reaches_json
 
 Expected: compilation fails because `ColorMode`, `Style`, `Painter`, and `--color` are not implemented.
 
-- [ ] **Step 5: Implement the policy, painter, and stream plumbing**
+- [x] **Step 5: Implement the policy, painter, and stream plumbing**
 
 Implement `src/style.rs` with no dependency:
 
@@ -367,9 +369,9 @@ let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().i
 let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
 ```
 
-Render configuration failures through the existing `output::render_error`. Pass the stdout painter into `output::render` and the stderr painter into `output::pretty_warnings`. In `output.rs`, color only `check`'s complete `error:` lines and `ok` line, and only the literal `warning:` prefix on stderr. Leave command errors plain JSON.
+Render configuration failures through the existing `output::render_error`. Pass the stdout painter into `output::render` and the stderr painter into `output::pretty_warnings`. In `output.rs`, color `check`'s `error:` line content and its `ok` word, and only the literal `warning:` prefix on stderr. Each of those strings currently carries its own trailing `\n`; paint the content and append the newline outside the painted span. Leave command errors plain JSON.
 
-- [ ] **Step 6: Run focused and full verification**
+- [x] **Step 6: Run focused and full verification**
 
 Run:
 
@@ -387,7 +389,7 @@ tasks check
 
 Expected: every command exits 0 and all tests pass.
 
-- [ ] **Step 7: Close and commit Task 1**
+- [x] **Step 7: Close and commit Task 1**
 
 Mark this task's completed checkboxes `[x]`, then run:
 
@@ -663,7 +665,7 @@ status: Some(task.status),
 status: task.status,
 ```
 
-For each resolved dependency, parent, and child, paint the id with `Style::Chrome` and the lowercase status text with `Style::Status(status)`. Keep unresolved dependency status `?`, titles, and section headers plain. For `step_found == Some(false)`, paint the complete `# step MISSING` line with `Style::Error`; keep `# step found` plain. Continue appending all footers after the untouched `serialize_task` result.
+For each resolved dependency, parent, and child, paint the id with `Style::Chrome` and the lowercase status text with `Style::Status(status)`. `Status` has no `Display` impl, so these footers must format `status.as_str()` rather than `{}`; the unresolved-dependency arm becomes `dep.status.map(Status::as_str).unwrap_or("?")` with the `?` left unpainted. Keep titles and section headers plain. For `step_found == Some(false)`, paint the `# step MISSING` text with `Style::Error`, leaving the newlines on either side outside the painted span; keep `# step found` plain. Continue appending all footers after the untouched `serialize_task` result.
 
 - [ ] **Step 5: Update public documentation and implementation status**
 

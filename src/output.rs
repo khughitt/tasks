@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::model::{Size, Status, Task};
+use crate::style::{Painter, Style};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,14 +169,14 @@ pub enum Output {
     Feedback(FeedbackOut),
 }
 
-pub fn render(out: &Output, format: Format) -> String {
+pub fn render(out: &Output, format: Format, painter: &Painter) -> String {
     match format {
         Format::Json => serde_json::to_string(out).expect("output serializes"),
-        Format::Pretty => pretty(out),
+        Format::Pretty => pretty(out, painter),
     }
 }
 
-fn pretty(out: &Output) -> String {
+fn pretty(out: &Output, painter: &Painter) -> String {
     match out {
         Output::Init(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
@@ -247,13 +248,16 @@ fn pretty(out: &Output) -> String {
         Output::Check(o) => {
             let mut rendered = String::new();
             for finding in &o.errors {
-                rendered.push_str(&format!(
-                    "error: {} [{}] {}\n",
+                let line = format!(
+                    "error: {} [{}] {}",
                     finding.file, finding.kind, finding.detail
-                ));
+                );
+                rendered.push_str(&painter.paint(Style::Error, &line));
+                rendered.push('\n');
             }
             if o.errors.is_empty() {
-                rendered.push_str("ok\n");
+                rendered.push_str(&painter.paint(Style::Ok, "ok"));
+                rendered.push('\n');
             }
             rendered
         }
@@ -306,8 +310,9 @@ pub fn render_error(e: &Error) -> String {
 }
 
 /// stderr text for warnings in pretty mode.
-pub fn pretty_warnings(warnings: &[String]) -> String {
-    warnings.iter().map(|w| format!("warning: {w}\n")).collect()
+pub fn pretty_warnings(warnings: &[String], painter: &Painter) -> String {
+    let prefix = painter.paint(Style::Warning, "warning:");
+    warnings.iter().map(|w| format!("{prefix} {w}\n")).collect()
 }
 
 pub fn warnings_of(out: &Output) -> Vec<String> {

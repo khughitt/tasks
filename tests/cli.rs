@@ -2350,3 +2350,92 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         "validation"
     );
 }
+
+fn has_ansi(bytes: &[u8]) -> bool {
+    bytes.windows(2).any(|pair| pair == b"\x1b[")
+}
+
+#[test]
+fn color_is_opt_in_and_never_reaches_json() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+
+    for args in [
+        &["--pretty", "check"][..],
+        &["--pretty", "--color", "auto", "check"][..],
+    ] {
+        let out = env.cmd(&dir).args(args).output().unwrap();
+        assert!(out.status.success());
+        assert!(!has_ansi(&out.stdout), "{args:?}");
+    }
+
+    let colored = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "check"])
+        .output()
+        .unwrap();
+    assert!(has_ansi(&colored.stdout));
+
+    let json = env
+        .cmd(&dir)
+        .args(["--color", "always", "check"])
+        .output()
+        .unwrap();
+    assert!(!has_ansi(&json.stdout));
+    serde_json::from_slice::<serde_json::Value>(&json.stdout).unwrap();
+}
+
+#[test]
+fn no_color_suppresses_config_but_an_explicit_flag_wins() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+
+    let suppressed = env
+        .cmd(&dir)
+        .env("TASKS_COLOR", "always")
+        .env("NO_COLOR", "1")
+        .args(["--pretty", "check"])
+        .output()
+        .unwrap();
+    assert!(!has_ansi(&suppressed.stdout));
+
+    let overridden = env
+        .cmd(&dir)
+        .env("TASKS_COLOR", "never")
+        .env("NO_COLOR", "1")
+        .args(["--pretty", "--color", "always", "check"])
+        .output()
+        .unwrap();
+    assert!(has_ansi(&overridden.stdout));
+}
+
+#[test]
+fn tasks_color_is_always_validated_and_warnings_use_the_stderr_painter() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for args in [
+        &["check"][..],
+        &["--pretty", "check"][..],
+        &["--pretty", "--color", "never", "check"][..],
+    ] {
+        let out = env
+            .cmd(&dir)
+            .env("TASKS_COLOR", "chartreuse")
+            .env("NO_COLOR", "1")
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "config");
+    }
+
+    let fresh = tempfile::tempdir().unwrap();
+    let warned = env
+        .cmd(fresh.path())
+        .args(["--pretty", "--color", "always", "init", "--prefix", "warn"])
+        .output()
+        .unwrap();
+    assert!(warned.status.success());
+    assert!(String::from_utf8_lossy(&warned.stderr).starts_with("\x1b[33mwarning:\x1b[0m "));
+}

@@ -14,6 +14,10 @@ pub struct Cli {
     /// Human-readable output instead of JSON (also TASKS_FORMAT=pretty).
     #[arg(long, global = true)]
     pub pretty: bool,
+    /// Color pretty output: auto (when the stream is a terminal), always, or never.
+    /// Also TASKS_COLOR. Off unless asked for; never applies to JSON.
+    #[arg(long, global = true, value_name = "WHEN")]
+    pub color: Option<String>,
     #[command(subcommand)]
     pub command: Command,
 }

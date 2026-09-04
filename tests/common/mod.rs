@@ -22,6 +22,8 @@ impl TestEnv {
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("TASKS_FORMAT")
             .env_remove("TASKS_OWNER")
+            .env_remove("TASKS_COLOR")
+            .env_remove("NO_COLOR")
             .env("USER", "tester")
             .current_dir(dir);
         c
