@@ -1,9 +1,10 @@
 use super::Ctx;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::model::TaskId;
 use crate::output::{DepInfo, Output, Related, ShowOut};
-use crate::repo::{CONFIG_REL, Project};
+use crate::repo::Project;
 use crate::resolve::Resolver;
+use crate::scope::Origin;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = TaskId::parse(&id)?;
@@ -11,21 +12,7 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let project: &Project = if id.prefix == ctx.project.prefix {
         &ctx.project
     } else {
-        let Some(root) = ctx.registry.project_root(&id.prefix) else {
-            return Err(Error::UnresolvableId(id.to_string()));
-        };
-        if !root.join(CONFIG_REL).is_file() {
-            return Err(Error::UnresolvableId(id.to_string()));
-        }
-        foreign = Project::open(root)?;
-        if foreign.prefix != id.prefix {
-            return Err(Error::Config(format!(
-                "registry maps {:?} to {}, whose prefix is {:?}; fix the registry",
-                id.prefix,
-                root.display(),
-                foreign.prefix
-            )));
-        }
+        foreign = crate::scope::open_registered(&ctx.registry, &id.prefix, Origin::Id(&id))?;
         &foreign
     };
     let task = project.read_task(&id)?;

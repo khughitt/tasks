@@ -4,34 +4,22 @@ use crate::format::{validate_body, validate_line, validate_note_text, validate_t
 use crate::model::{Status, Task, TaskId};
 use crate::output::{FeedbackOut, Output};
 use crate::registry::Registry;
-use crate::repo::{CONFIG_REL, Project};
+use crate::repo::Project;
+use crate::scope::Origin;
 use crate::similarity::Match;
 
 pub const TARGET_PREFIX: &str = "tasks";
 pub const CATEGORIES: [&str; 4] = ["friction", "gap", "idea", "positive"];
 
-/// The upstream project: the registry entry whose prefix is `tasks`.
+/// The upstream project: the registry entry whose prefix is `tasks`. The unregistered
+/// case gets a hint the generic resolver cannot know: where the upstream lives.
 pub fn locate_target(registry: &Registry) -> Result<Project> {
-    let Some(root) = registry.project_root(TARGET_PREFIX) else {
+    if registry.project_root(TARGET_PREFIX).is_none() {
         return Err(Error::Config(format!(
             "no project registered as {TARGET_PREFIX:?}; clone the upstream tasks repository and run `tasks init` there"
         )));
-    };
-    if !root.join(CONFIG_REL).is_file() {
-        return Err(Error::Config(format!(
-            "project {TARGET_PREFIX:?} at {} has no {CONFIG_REL}; run `tasks init` there",
-            root.display()
-        )));
     }
-    let project = Project::open(root)?;
-    if project.prefix != TARGET_PREFIX {
-        return Err(Error::Config(format!(
-            "registry maps {TARGET_PREFIX:?} to {}, whose prefix is {:?}; fix the registry",
-            root.display(),
-            project.prefix
-        )));
-    }
-    Ok(project)
+    crate::scope::open_registered(registry, TARGET_PREFIX, Origin::Prefix)
 }
 
 pub const NOTE_AUTHOR: &str = "feedback";

@@ -10,6 +10,7 @@ mod query;
 mod registry;
 mod repo;
 mod resolve;
+mod scope;
 mod similarity;
 mod style;
 mod time;
