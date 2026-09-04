@@ -2589,3 +2589,88 @@ fn colored_tables_use_semantic_roles_without_changing_layout() {
         String::from_utf8(plain_ready.stdout).unwrap()
     );
 }
+
+#[test]
+fn init_force_repoints_a_prefix_and_unregister_frees_it() {
+    let mut env = TestEnv::new();
+    let first = env.init("sci");
+    let second = tempfile::tempdir().unwrap();
+    let second = second.path().canonicalize().unwrap();
+
+    // the conflict is an error that names both remedies
+    let out = env
+        .cmd(&second)
+        .args(["init", "--prefix", "sci"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "config");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains(first.to_str().unwrap()), "{detail}");
+    assert!(detail.contains("--force"), "{detail}");
+    assert!(detail.contains("tasks unregister sci"), "{detail}");
+    assert!(
+        !second.join("tasks").exists(),
+        "a refused init writes nothing"
+    );
+
+    // --force re-points and warns with the displaced root
+    let forced = env.json(&second, &["init", "--prefix", "sci", "--force"]);
+    assert_eq!(forced["prefix"], "sci");
+    assert_eq!(forced["root"], second.to_str().unwrap());
+    let warnings = forced["warnings"].as_array().unwrap();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains(first.to_str().unwrap())),
+        "{forced}"
+    );
+
+    // the re-point took effect: a foreign id now resolves through the new root
+    let moved = id_of(env.json(&second, &["add", "Moved"]));
+    let other = env.init("fam");
+    let shown = env.json(&other, &["show", &moved]);
+    assert_eq!(shown["task"]["title"], "Moved");
+
+    // re-pointing at the same root displaces nothing, so there is nothing to warn about
+    let again = env.json(&second, &["init", "--prefix", "sci", "--force"]);
+    assert!(
+        !again["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("registered")),
+        "{again}"
+    );
+
+    // unregister works from outside any project and frees the prefix
+    let nowhere = tempfile::tempdir().unwrap();
+    let dropped = env.json(nowhere.path(), &["unregister", "sci"]);
+    assert_eq!(dropped["prefix"], "sci");
+    assert_eq!(dropped["root"], second.to_str().unwrap());
+    assert_eq!(
+        env.fail(nowhere.path(), &["unregister", "sci"]),
+        "config",
+        "removing an absent prefix is an error, not a silent no-op"
+    );
+    assert_eq!(env.fail(&other, &["show", &moved]), "unresolvable_id");
+    assert!(
+        second.join("tasks/.config.toml").is_file(),
+        "unregister edits the registry only; project files are untouched"
+    );
+
+    // and the prefix is claimable again without --force
+    env.json(&second, &["init", "--prefix", "sci"]);
+    assert_eq!(
+        env.json(&other, &["show", &moved])["task"]["title"],
+        "Moved"
+    );
+
+    let out = env
+        .cmd(nowhere.path())
+        .args(["--pretty", "unregister", "sci"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "sci");
+}

@@ -63,6 +63,8 @@ from a clone):
 
     cd <repo>
     tasks init --prefix sci          # creates tasks/ and the doc roots; registers the project
+    tasks init --prefix sci --force  # re-point the prefix here after moving the repo
+    tasks unregister sci             # drop a stale prefix; project files are untouched
     tasks add "Bank the ledger" -p 1 --size m --tag ledger
     tasks add "Emit rows" --parent sci-4f2a9c
     tasks ready                      # what can be worked on now (JSON)

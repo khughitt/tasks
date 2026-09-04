@@ -51,7 +51,12 @@ pub enum Command {
     Init {
         #[arg(long)]
         prefix: Option<String>,
+        /// Re-point the prefix at this directory even if it is registered elsewhere.
+        #[arg(long)]
+        force: bool,
     },
+    /// Remove a prefix from the registry. Project files are left untouched.
+    Unregister { prefix: String },
     /// Create a task.
     Add {
         title: String,

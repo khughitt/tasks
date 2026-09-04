@@ -187,13 +187,25 @@ terminal, and only after color has been selected explicitly. See
 docs/specs/2026-09-03-color-output-design.md for the roles and palette.
 
 ```
-tasks init [--prefix P]
+tasks init [--prefix P] [--force]
     Create tasks/.config.toml, the first spec root and the first plan root (if absent;
     docs/specs/ and docs/plans/ by default), and register the project in
     ~/.config/tasks/projects.toml. Prefix defaults to the first three letters
     of the repo directory name; rerunning with the same prefix is an idempotent repair and
     a different prefix is an error.
+    A prefix already registered to another root is a conflict naming both remedies, never
+    a silent takeover. --force re-points it here and warns with the displaced root.
+    Staleness is not inferred: an abandoned checkout usually still exists and still holds
+    a valid config, and an unmounted drive must never be mistaken for an abandoned one.
+    The registry is saved only after the project is written, so a failed init changes
+    nothing.
     Prints the skill install hint (§8) if no skill is found at user or project level.
+
+tasks unregister <prefix>
+    Remove a prefix from the registry and report the root it pointed at. Runs outside a
+    project, since the directory being cleaned up after may be gone or unwanted. Removing
+    an unregistered prefix is an error, not a no-op. Project files are untouched; only
+    ~/.config/tasks/projects.toml changes.
 
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
@@ -325,7 +337,8 @@ check  -> { errors: [{ id: string|null, file: string, kind, detail }],
             warnings: [{ id, file, kind, detail }] }
 prime  -> { prefix, counts: { idea, todo, doing, blocked, done, dropped },
             ready: [TaskSummary], doing: [TaskSummary], warnings }
-init   -> { prefix, root, warnings }
+init, unregister
+       -> { prefix, root, warnings }    unregister reports the root it removed
 add, edit, note, start, done, drop, block, unblock, dep
        -> { id, warnings }
 

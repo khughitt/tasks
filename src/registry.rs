@@ -60,17 +60,39 @@ impl Registry {
         )
     }
 
+    /// Claims `prefix` for `root`. A prefix already pointing somewhere else is a conflict,
+    /// never a silent takeover; the message names both ways out.
     pub fn register(&mut self, prefix: &str, root: &Path) -> Result<()> {
         if let Some(existing) = self.projects.get(prefix)
             && existing != root
         {
             return Err(Error::Config(format!(
-                "prefix {prefix:?} is already registered to {}",
+                "prefix {prefix:?} is already registered to {}; re-point it with \
+                 `tasks init --prefix {prefix} --force`, or drop it with \
+                 `tasks unregister {prefix}`",
                 existing.display()
             )));
         }
         self.projects.insert(prefix.into(), root.into());
         Ok(())
+    }
+
+    /// Points `prefix` at `root` whatever it pointed at before, returning the displaced
+    /// root when that changed anything. The deliberate override behind `init --force`.
+    pub fn repoint(&mut self, prefix: &str, root: &Path) -> Option<PathBuf> {
+        match self.projects.insert(prefix.into(), root.into()) {
+            Some(previous) if previous != root => Some(previous),
+            _ => None,
+        }
+    }
+
+    /// Drops `prefix`, returning the root it pointed at. Removing something that is not
+    /// there is an error rather than a no-op, so a typo does not look like success. Only
+    /// the registry is touched; the project's own files are left alone.
+    pub fn unregister(&mut self, prefix: &str) -> Result<PathBuf> {
+        self.projects
+            .remove(prefix)
+            .ok_or_else(|| Error::Config(format!("no project registered as {prefix:?}")))
     }
 
     pub fn project_root(&self, prefix: &str) -> Option<&Path> {
@@ -101,6 +123,37 @@ mod tests {
             std::path::Path::new("/tmp/sci")
         );
         assert!(r2.project_root("nope").is_none());
+    }
+
+    #[test]
+    fn repoint_replaces_and_reports_the_displaced_root() {
+        let mut r = Registry::default();
+        assert_eq!(r.repoint("sci", Path::new("/tmp/a")), None);
+        assert_eq!(
+            r.repoint("sci", Path::new("/tmp/b")),
+            Some(PathBuf::from("/tmp/a"))
+        );
+        assert_eq!(r.project_root("sci").unwrap(), Path::new("/tmp/b"));
+        assert_eq!(
+            r.repoint("sci", Path::new("/tmp/b")),
+            None,
+            "re-pointing at the same root displaces nothing"
+        );
+    }
+
+    #[test]
+    fn unregister_removes_once_and_then_reports_the_prefix_is_absent() {
+        let mut r = Registry::default();
+        r.register("sci", Path::new("/tmp/a")).unwrap();
+        assert_eq!(r.unregister("sci").unwrap(), PathBuf::from("/tmp/a"));
+        assert!(r.project_root("sci").is_none());
+        assert_eq!(r.unregister("sci").unwrap_err().kind(), "config");
+        r.register("sci", Path::new("/tmp/c")).unwrap();
+        assert_eq!(
+            r.project_root("sci").unwrap(),
+            Path::new("/tmp/c"),
+            "the prefix is free again after removal"
+        );
     }
 
     #[test]

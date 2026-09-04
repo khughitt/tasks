@@ -9,6 +9,7 @@ pub mod list;
 pub mod show;
 pub mod status;
 pub mod tree;
+pub mod unregister;
 
 use crate::cli::{Cli, Command, FieldArgs};
 use crate::error::{Error, Result};
@@ -216,7 +217,8 @@ fn raw_owner_name(project: &Project) -> Result<String> {
 pub fn run(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
-        Command::Init { prefix } => init::run(dir, prefix),
+        Command::Init { prefix, force } => init::run(dir, prefix, force),
+        Command::Unregister { prefix } => unregister::run(prefix),
         Command::Add {
             title,
             status,

@@ -1,11 +1,12 @@
 ---
 id: tasks-9b5f81
 title: init cannot re-point a prefix already registered to a stale directory; no unregister or --force
-status: todo
+status: done
 priority: 2
 size: s
+owner: feat/registry
 created: 2026-09-04T02:43:34Z
-updated: 2026-09-04T09:21:04Z
+updated: 2026-09-04T09:41:19Z
 depends: []
 tags: [feedback, gap, "from:beliefs", cli]
 ---
@@ -33,3 +34,4 @@ remedy; today it states the conflict and stops.
 ## Notes
 
 - 2026-09-04T09:21:04Z (main): triaged: confirmed gap, scoped P2/s; needs an explicit override, since staleness cannot be detected reliably
+- 2026-09-04T09:41:19Z (feat/registry): init --force re-points a prefix and warns with the displaced root; tasks unregister drops one from anywhere; the conflict error now names both remedies
