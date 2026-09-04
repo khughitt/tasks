@@ -23,6 +23,28 @@ pub struct IdOut {
 }
 
 #[derive(Serialize)]
+pub struct RootOut {
+    pub prefix: String,
+    pub root: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ProjectRow {
+    pub prefix: String,
+    pub root: String,
+    pub reachable: bool,
+    /// Present only for a reachable project.
+    pub counts: Option<Counts>,
+}
+
+#[derive(Serialize)]
+pub struct ProjectsOut {
+    pub projects: Vec<ProjectRow>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct DepInfo {
     pub id: String,
     pub title: Option<String>,
@@ -195,6 +217,8 @@ pub struct CheckOut {
 pub enum Output {
     Init(InitOut),
     Id(IdOut),
+    Root(RootOut),
+    Projects(ProjectsOut),
     Show(Box<ShowOut>),
     Next(Box<NextOut>),
     List(ListOut),
@@ -216,6 +240,28 @@ fn pretty(out: &Output, painter: &Painter) -> String {
     match out {
         Output::Init(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
+        Output::Root(o) => o.root.clone(),
+        Output::Projects(o) => {
+            let width = o
+                .projects
+                .iter()
+                .map(|row| row.prefix.len())
+                .max()
+                .unwrap_or(0);
+            let mut rendered = String::new();
+            for row in &o.projects {
+                let prefix = painter.paint(Style::Chrome, &format!("{:<width$}", row.prefix));
+                let state = match &row.counts {
+                    Some(c) => format!(
+                        "idea {}  todo {}  doing {}  blocked {}  done {}  dropped {}",
+                        c.idea, c.todo, c.doing, c.blocked, c.done, c.dropped
+                    ),
+                    None => painter.paint(Style::Error, "unreachable"),
+                };
+                rendered.push_str(&format!("{prefix}  {}  {state}\n", row.root));
+            }
+            rendered
+        }
         Output::Show(o) => show_text(&o.fields, painter),
         Output::Next(o) => match &o.next {
             Some(fields) => show_text(fields, painter),
@@ -385,6 +431,8 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
     match out {
         Output::Init(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
+        Output::Root(o) => o.warnings.clone(),
+        Output::Projects(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),
         Output::Next(o) => o.warnings.clone(),
         Output::List(o) => o.warnings.clone(),

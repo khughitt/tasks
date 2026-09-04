@@ -6,6 +6,8 @@ pub mod feedback;
 pub mod graph;
 pub mod init;
 pub mod list;
+pub mod projects;
+pub mod root;
 pub mod show;
 pub mod status;
 pub mod tree;
@@ -256,6 +258,8 @@ pub fn run(cli: Cli) -> Result<Output> {
     match cli.command {
         Command::Init { prefix, force } => init::run(dir, prefix, force),
         Command::Unregister { prefix } => unregister::run(prefix),
+        Command::Projects => projects::run(dir),
+        Command::Root { id } => root::run(id, dir),
         Command::Add {
             title,
             status,

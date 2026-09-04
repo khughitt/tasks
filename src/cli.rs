@@ -57,6 +57,10 @@ pub enum Command {
     },
     /// Remove a prefix from the registry. Project files are left untouched.
     Unregister { prefix: String },
+    /// The registry: every project, whether it is reachable, and its status counts.
+    Projects,
+    /// The registered root of the project an id belongs to.
+    Root { id: String },
     /// Create a task.
     Add {
         title: String,

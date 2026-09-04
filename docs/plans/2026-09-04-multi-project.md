@@ -1424,7 +1424,7 @@ Before anything else: `tasks start tasks-5afcc4`.
 - Consumes: `scope::open_registered` (Task 1), `scope::is_reachable`, `scope::registry_warnings`, `commands::start_dir` (Task 2), `Counts::of` (Task 3), `Registry::load`, `Registry.projects`.
 - Produces: `root::run(id: String, dir: Option<&Path>) -> Result<Output>`, `projects::run(dir: Option<&Path>) -> Result<Output>`, `output::RootOut { prefix, root, warnings }`, `output::ProjectRow { prefix, root, reachable, counts: Option<Counts> }`, `output::ProjectsOut { projects: Vec<ProjectRow>, warnings }`.
 
-- [ ] **Step 1: Write the failing e2e tests**
+- [x] **Step 1: Write the failing e2e tests**
 
 Append to `tests/cli.rs`:
 
@@ -1501,12 +1501,12 @@ fn projects_lists_the_registry_with_reachability_and_counts() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --test cli root_prints` then `cargo test --test cli projects_lists`
 Expected: both FAIL with unknown subcommand (exit 2).
 
-- [ ] **Step 3: Output shapes**
+- [x] **Step 3: Output shapes**
 
 `src/output.rs`:
 
@@ -1561,7 +1561,7 @@ Add `Root(RootOut)` and `Projects(ProjectsOut)` to `Output`; in `warnings_of` ad
         }
 ```
 
-- [ ] **Step 4: The commands**
+- [x] **Step 4: The commands**
 
 `src/commands/root.rs`:
 
@@ -1644,12 +1644,12 @@ pub fn run(dir: Option<&Path>) -> Result<Output> {
         Command::Root { id } => root::run(id, dir),
 ```
 
-- [ ] **Step 5: Run the gates**
+- [x] **Step 5: Run the gates**
 
 Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo install --path .`
 Expected: all pass, and the installed `tasks` is now the code under test.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 tasks done tasks-5afcc4 "tasks root and tasks projects"

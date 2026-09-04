@@ -2875,3 +2875,80 @@ fn init_force_repoints_a_prefix_and_unregister_frees_it() {
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "sci");
 }
+
+#[test]
+fn root_prints_the_registered_root_of_an_id() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let nowhere = tempfile::tempdir().unwrap();
+    let v = env.json(nowhere.path(), &["root", "sci-000000"]);
+    assert_eq!(v["prefix"], "sci");
+    assert_eq!(v["root"], sci.to_str().unwrap());
+    assert_eq!(v["warnings"], serde_json::json!([]));
+    let out = env
+        .cmd(nowhere.path())
+        .args(["--pretty", "root", "sci-000000"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        sci.to_str().unwrap()
+    );
+    assert_eq!(
+        env.fail(nowhere.path(), &["root", "zzz-000000"]),
+        "unresolvable_id"
+    );
+    assert_eq!(env.fail(nowhere.path(), &["root", "bogus"]), "invalid_id");
+
+    let mut other_env = TestEnv::new();
+    let unregistered = other_env.init("lon");
+    let v = env.json(&unregistered, &["root", "sci-000000"]);
+    assert_eq!(
+        v["warnings"],
+        serde_json::json!(["current project lon is not registered"])
+    );
+}
+
+#[test]
+fn projects_lists_the_registry_with_reachability_and_counts() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let a = id_of(env.json(&sci, &["add", "A"]));
+    env.json(&sci, &["add", "B", "--status", "idea"]);
+    env.json(&sci, &["done", &a]);
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    let nowhere = tempfile::tempdir().unwrap();
+    let v = env.json(nowhere.path(), &["projects"]);
+    let rows = v["projects"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["prefix"], "fam");
+    assert_eq!(rows[0]["reachable"], false);
+    assert_eq!(rows[0]["counts"], serde_json::Value::Null);
+    assert_eq!(rows[1]["prefix"], "sci");
+    assert_eq!(rows[1]["root"], sci.to_str().unwrap());
+    assert_eq!(rows[1]["reachable"], true);
+    assert_eq!(rows[1]["counts"]["idea"], 1);
+    assert_eq!(rows[1]["counts"]["done"], 1);
+    assert_eq!(v["warnings"], serde_json::json!([]));
+    let out = env
+        .cmd(nowhere.path())
+        .args(["--pretty", "projects"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("fam") && text.contains("unreachable"),
+        "{text}"
+    );
+    assert!(text.contains("sci") && text.contains("idea 1"), "{text}");
+
+    std::fs::write(fam.join("tasks/.config.toml"), "not toml = [").unwrap();
+    assert_eq!(env.fail(nowhere.path(), &["projects"]), "config");
+
+    // the shared registry warnings apply here too
+    let fresh = TestEnv::new();
+    let v = fresh.json(nowhere.path(), &["projects"]);
+    assert_eq!(v["projects"], serde_json::json!([]));
+    assert_eq!(v["warnings"], serde_json::json!(["registry is empty"]));
+}
