@@ -21,9 +21,10 @@ visiting each checkout in turn.
   the names of every project and what is being done in them.
 - **A hub goal links to its pieces by dependencies only.** The goal in `ops` depends on one
   task per affected project. `show` already resolves each dependency's title and status
-  through the registry, `graph` draws the edges, and the goal leaves `ready` while any
-  piece is open and returns when the last one closes, which is the moment to verify and
-  close it. `parent` stays local. Foreign parents were considered and rejected: the hub
+  through the registry, and the goal leaves `ready` while any piece is open and returns
+  when the last one closes, which is the moment to verify and close it. `parent` stays
+  local. `graph` also stays local and omits edges to tasks outside its scan, so the hub
+  goal's dependency picture is `show`, not `graph`. Foreign parents were considered and rejected: the hub
   could only find its foreign children by scanning every registered project on every
   `done`, `drop`, and `prime`, with no way to know in advance which projects to look in.
 - **Registry-wide scope makes the local project optional.** A command run with
@@ -34,9 +35,11 @@ visiting each checkout in turn.
 - **One scope, opened once.** Read commands take a `Scope` that is either the local project
   or the set of reachable registered projects. Reachability is decided in one function, so
   `list`, `ready`, `prime`, `tree`, `next`, `tags`, and `projects` cannot drift in how they
-  treat a missing root. Write commands keep a mandatory local project; `--all-projects`
-  is only defined on the read commands, so a write path never has to ask whether a project
-  exists.
+  treat a missing root. `--all-projects` is only defined on the read commands. Write
+  commands keep a mandatory local project, with exactly one exception: `add --project`
+  names its target explicitly and locates no local project (§4.3). Dispatch must therefore
+  open the local project lazily for `add`, after the flag is known, rather than eagerly
+  for every command as it does today.
 - **`next` answers "what do I do now" in one call.** It is the head of `ready` in the
   `show` shape, per project or across all of them.
 - **Tags get visibility, not a vocabulary.** `tags --all-projects` shows which tags are
@@ -84,11 +87,15 @@ silently from its own portfolio view. That second check is the only time a wide 
 looks at the current directory, and it is read-only.
 
 Projects are visited in registry order (the registry is a sorted map, so alphabetical by
-prefix). The scope hands commands the union of every project's tasks in one slice. Ids are
-globally unique through their prefix, so the hierarchy, ready, and sort code runs on the
-union unchanged. Dependency resolution looks in the union first and then in the registry,
-as `ready` already does. Ordering is whatever the command uses locally; a wide `ready` is
-priority, then size, then created, with no project tiebreak.
+prefix). The scope hands commands the union of every project's tasks in one slice, and
+also the per-project slices it was built from. Ids are globally unique through their
+prefix, so the hierarchy, ready, and sort code runs on the union unchanged. Dependency
+resolution looks in the union first and then in the registry, as `ready` already does.
+Ordering is whatever the command uses locally; a wide `ready` is priority, then size, then
+created, with no project tiebreak. The one exception is `tree`, which groups by project
+(§4.1): it runs the forest builder once per project slice and concatenates, because the
+builder sorts every root globally in ready order and a single run over the union would
+interleave projects.
 
 Warnings are reported per project, prefixed with the prefix, in the same `warnings` array
 as today: unreachable projects, unreachable dependencies, and uncommitted task files.
@@ -111,8 +118,9 @@ tasks prime [--all-projects]
 
 - `list`: as today, except it now works outside a project.
 - `ready`: the union's ready tasks in ready order.
-- `tree`: each project's forest, concatenated in registry order. `<id>` and
-  `--all-projects` conflict (the subtree of an id is read from that id's own project).
+- `tree`: each project's forest, built per project and concatenated in registry order
+  (§3.2). `<id>` and `--all-projects` conflict (the subtree of an id is read from that
+  id's own project).
 - `prime`: counts, ready, doing, roadmap, and closeout over the union. Each list keeps its
   local order. `prefix` is null and the new `projects` field lists the prefixes in scope.
   The uncommitted-files warning is emitted per project.
@@ -171,7 +179,7 @@ its provenance, and feedback without provenance is not accepted
 ```
 next     -> { next: ShowFields | null, warnings }
             ShowFields = the `show` object without its `warnings`
-root     -> { prefix, root }
+root     -> { prefix, root, warnings }
 tags     -> { tags: [{ tag, count, projects: { <prefix>: count } }], warnings }
 projects -> { projects: [{ prefix, root, reachable, counts: Counts | null }], warnings }
 prime    -> existing fields + projects: [prefix]; prefix: string | null
@@ -180,6 +188,8 @@ prime    -> existing fields + projects: [prefix]; prefix: string | null
 - `tags.projects` is always a map, with one key in local scope, so the shape does not
   depend on the flag.
 - `projects[].counts` uses the same object as `prime.counts`.
+- `root.warnings` is normally empty; it is present because every success payload carries
+  `warnings` (docs/specs/2026-08-29-tasks-design.md §5.1).
 - `prime.projects` is always present; locally it is the one-element list. `prime.prefix`
   is null only under `--all-projects`.
 - `list`, `ready`, `tree`, `show`: unchanged.
