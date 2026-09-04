@@ -1,6 +1,6 @@
 # Multi-project support — design
 
-**Status:** approved 2026-09-04; not yet implemented. Task: tasks-3029be.
+**Status:** implemented 2026-09-04; see docs/plans/2026-09-04-multi-project.md. Task: tasks-3029be.
 
 ## 1. Problem
 

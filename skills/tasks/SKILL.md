@@ -14,6 +14,8 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Never pick a task with children; those are goals. `ready` already omits them.
+   With nothing in hand, `tasks next` prints the first ready task in full; `tasks next
+   --all-projects` does the same across every registered project.
 3. `tasks start <id>` before changing code. It records you as owner.
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
 5. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are
@@ -39,6 +41,10 @@ updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates th
   open and has no override — drop or reparent the subtree first
   (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
 - Blocking on another project: `tasks dep <id> --on <prefix>-<hex>`; the other project must be registered (`tasks init` there).
+- Work spanning projects: a goal in the hub project, then one
+  `tasks add "<piece>" --project <prefix>` per affected project and one
+  `tasks dep <goal> --on <piece>` each. The goal returns to `ready` when the last piece
+  closes; verify and `tasks done` it then. `tasks root <id>` prints where a piece lives.
 - Id collision after a merge (git add/add conflict on the same `tasks/<id>.md`): keep one file, rename the other to a fresh id, fix its `id` field, then run `tasks check` and repair any `depends` it reports.
 - `tasks tree [<id>]` shows the hierarchy; `tasks edit <id> --parent <goal>` / `--no-parent` moves a task.
 - Throwaway projects get a throwaway registry: `tasks init` registers globally in

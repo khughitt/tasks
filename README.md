@@ -69,6 +69,10 @@ from a clone):
     tasks add "Emit rows" --parent sci-4f2a9c
     tasks ready                      # what can be worked on now (JSON)
     tasks tree                       # the goal hierarchy
+    tasks next                       # the first ready task, in full
+    tasks next --all-projects        # the same across every registered project
+    tasks projects                   # the registry: reachable? counts?
+    tasks add "Piece" --project fam  # create in another registered project
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
     tasks --pretty --color auto ready # color when stdout is a terminal
     tasks start sci-4f2a9c

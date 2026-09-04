@@ -2098,7 +2098,7 @@ Before anything else: `tasks start tasks-559ff6`.
 - Modify: `docs/specs/2026-08-29-tasks-design.md` (§5 command reference, §5.1 shapes, §6), `docs/specs/2026-09-04-multi-project-design.md` (status line), `skills/tasks/SKILL.md`, `AGENTS.md`, `README.md`
 - Test: `tasks check` (the spec link on the goal task), a manual smoke run of each new command from a directory outside any project
 
-- [ ] **Step 1: Command reference in the original design**
+- [x] **Step 1: Command reference in the original design**
 
 In `docs/specs/2026-08-29-tasks-design.md` §5:
 
@@ -2192,7 +2192,7 @@ emits the unregistered-current-project warning; an empty registry cannot produce
 successful root lookup. See docs/specs/2026-09-04-multi-project-design.md.
 ```
 
-- [ ] **Step 2: Skill and agent guide**
+- [x] **Step 2: Skill and agent guide**
 
 `skills/tasks/SKILL.md`, session protocol, add after item 2:
 
@@ -2225,7 +2225,7 @@ In "Recording work", after the "Blocking on another project" bullet:
     tasks add "Piece" --project fam  # create in another registered project
 ```
 
-- [ ] **Step 3: Mark the spec implemented**
+- [x] **Step 3: Mark the spec implemented**
 
 In `docs/specs/2026-09-04-multi-project-design.md` change the status line to:
 
@@ -2233,7 +2233,7 @@ In `docs/specs/2026-09-04-multi-project-design.md` change the status line to:
 **Status:** implemented <date of this commit, YYYY-MM-DD>; see docs/plans/2026-09-04-multi-project.md. Task: tasks-3029be.
 ```
 
-- [ ] **Step 4: Reinstall and smoke-test**
+- [x] **Step 4: Reinstall and smoke-test**
 
 ```bash
 cargo install --path .
@@ -2246,7 +2246,7 @@ tasks root tasks-3029be --pretty
 
 Expected: the real registry renders, no errors; unreachable rows, if any, say so.
 
-- [ ] **Step 5: Run the gates and commit**
+- [x] **Step 5: Run the gates and commit**
 
 ```bash
 cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings

@@ -178,8 +178,8 @@ means task `0c3d7e` in the project registered as `fam`.
 
 ## 5. CLI
 
-Every command locates the project by walking up from the current directory to the nearest
-`tasks/.config.toml`; `-C <path>` overrides. Output is JSON by default; `--pretty` (or
+Commands that need a local project locate it by walking up from the current directory to the
+nearest `tasks/.config.toml`; `-C <path>` overrides. Output is JSON by default; `--pretty` (or
 `TASKS_FORMAT=pretty`) renders tables and full text for humans. TTY detection is never used
 to choose the format. `--color auto|always|never` (or `TASKS_COLOR`) styles pretty output
 only and is off unless asked for; `auto` is the single place a stream is probed for a
@@ -212,11 +212,13 @@ tasks unregister <prefix>
 
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
-          [--parent ID]
+          [--parent ID] [--project PREFIX]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
     repo-relative path under a configured root or a bare name resolved as the unique
     match across the configured roots (error on 0 or >1 matches). --depends ids and
-    --step headings are validated before anything is written.
+    --step headings are validated before anything is written. --project creates the
+    task in that registered project instead of the current one, validating every field
+    against it; no local project is needed. An unregistered prefix is config.
 
 tasks show <id>
     The full task with resolved spec/plan paths, each dependency's title and status,
@@ -227,19 +229,24 @@ tasks show <id>
 
 tasks list [--status S]... [--tag T]... [--owner O] [--all-projects] [--parent ID]
     Default: open tasks, sorted by priority then updated desc. --all-projects walks the
-    registry.
+    registry and needs no local project (§6).
 
-tasks tree [<id>] [--all]
+tasks tree [<id>] [--all] [--all-projects]
     The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
     the read side of parent, as graph is of depends. Without --all the forest is pruned
     to nodes that are open or have an open descendant, so a closed ancestor of open work
     stays visible as context, with its closed status, rather than hiding the work
     beneath it. --all includes every task. Roots and siblings are in ready order
-    (priority, size, created); a parent precedes its children.
+    (priority, size, created); a parent precedes its children. With --all-projects, one
+    forest per reachable registered project, concatenated in registry order; <id>
+    conflicts with it.
 
-tasks ready [--size S] [-n N]
+tasks ready [--size S] [-n N] [--all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
-    priority, then size (xs first, unsized last), then created.
+    priority, then size (xs first, unsized last), then created, then id.
+    --all-projects: the same order over every reachable registered project; no project
+    grouping or weighting (the final id tiebreak orders by prefix only among tasks equal
+    on everything else).
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
            [--parent ID | --no-parent]
@@ -278,12 +285,28 @@ tasks check
     section. Exit 1 on any error. Unresolvable foreign ids (unregistered or unreachable
     prefix) are warnings.
 
-tasks prime
+tasks next [--all-projects]
+    The first task of ready in the show shape, or null when nothing is ready (exit 0).
+
+tasks prime [--all-projects]
     Agent session context: prefix, counts by status, the ready list, doing tasks
     with owners, the roadmap (open forest) and closeout list. Intended to be run at
     the start of every agent session. Warns about uncommitted files under tasks/
     (project-relative, from git status, transient temp files excluded); silent when the
-    root is not inside a git repository or git is absent.
+    root is not inside a git repository or git is absent. --all-projects: the same over
+    every reachable registered project; prefix is null, projects lists the scope, and the
+    uncommitted-files warning is emitted per project, prefixed with its prefix.
+
+tasks tags [--status S]... [--all-projects]
+    Tag frequencies over open tasks (or the given statuses), with a count per project.
+
+tasks projects
+    Every registry entry: root, reachability, and status counts when reachable. Needs no
+    project.
+
+tasks root <id>
+    The registered root of the id's project. Needs no project; unregistered prefix is
+    unresolvable_id.
 
 tasks feedback <summary> --category friction|gap|idea|positive [-b|--body TEXT]
                [--recur ID | --new]
@@ -358,6 +381,12 @@ prime       += roadmap: [TreeNode],           the open forest, pruned as tree (�
 check       += kinds dangling_parent, foreign_parent, parent_cycle (errors);
                open_child_of_closed_parent, unlinked_step (warnings)
 
+prime       += projects: [string]; prefix is string|null (null under --all-projects)
+next        -> { next: ShowFields|null, warnings }   ShowFields = show without warnings
+root        -> { prefix, root, warnings }
+tags        -> { tags: [{ tag, count, projects: { <prefix>: int } }], warnings }
+projects    -> { projects: [{ prefix, root, reachable: bool, counts: Counts|null }], warnings }
+
 feedback    -> { id, action: "created"|"recurred", path, warnings }
                path is the absolute task file in the target project
 ```
@@ -419,6 +448,17 @@ branch — accepted as the right approximation.
 A prefix is *unreachable* when it is not registered, or its path or the task file does not
 exist. Unreachable ids are warnings in `show`/`list`/`check` and errors (`unresolvable_id`)
 in `dep --on` and `add --depends`.
+
+`--all-projects` (on list, ready, prime, tree, next, tags) reads the registry and locates
+no local project: a missing root or config is a warning and the entry is skipped; a
+malformed config or a prefix that disagrees with the registry key is a config error.
+`projects` applies the same test but reports an unreachable entry as a row with
+reachable=false rather than a warning, since the row is the report; a malformed entry is
+still a config error and emits the two wide-scope warnings (empty registry; current
+directory inside an unregistered project). `root` resolves one prefix strictly:
+unregistered or without a config is unresolvable_id, mismatched is config. On success it
+emits the unregistered-current-project warning; an empty registry cannot produce a
+successful root lookup. See docs/specs/2026-09-04-multi-project-design.md.
 
 ### 6.1 Cycle detection
 
