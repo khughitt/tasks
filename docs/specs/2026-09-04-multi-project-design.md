@@ -59,7 +59,9 @@ second command is cheap and the explicit link reads better in a transcript).
 ### 3.1 Opening a registered project by prefix
 
 The three checks that `show` and `feedback` each perform by hand today become one function
-used by `show`, `feedback`, `root`, `add --project`, and the scope opener:
+used by `show`, `feedback`, `root`, `add --project`, and the scope opener. The dependency
+resolver deliberately returns no task for an unregistered or config-less prefix, then uses
+the same function so malformed config and prefix mismatch retain the strict errors below:
 
 1. The prefix must be registered. Otherwise: `unresolvable_id` when the caller came in
    with a task id, `config` when it came in with a prefix (`--project`), each naming the
@@ -90,7 +92,8 @@ Projects are visited in registry order (the registry is a sorted map, so alphabe
 prefix). The scope hands commands the union of every project's tasks in one slice, and
 also the per-project slices it was built from. Ids are globally unique through their
 prefix, so the hierarchy, ready, and sort code runs on the union unchanged. Dependency
-resolution looks in the union first and then in the registry, as `ready` already does.
+resolution looks in the union first and then in the registry, as `ready` already does; its
+registry lookup uses the same config-file and prefix-mismatch checks as the scope opener.
 Ordering is whatever the command uses locally; a wide `ready` is priority, then size, then
 created, then id, exactly as a local one, with no project grouping or weighting (the id
 tiebreak orders by prefix only among tasks equal on everything else). The one exception
@@ -139,7 +142,9 @@ tasks root <id>
     The registered root of the id's project, resolved strictly by §3.1 (it came in with
     an id, so unregistered or config-less is `unresolvable_id`; mismatched is `config`).
     Runs outside a project. The task file is not checked; the root is what the caller
-    wants, and a missing file is `show`'s to report.
+    wants, and a missing file is `show`'s to report. A successful lookup emits the
+    unregistered-current-project warning when applicable; an empty registry cannot
+    produce a successful root lookup.
 
 tasks tags [--status S]... [--all-projects]
     Every tag in scope with the number of tasks carrying it (a task counts once per tag,
@@ -167,9 +172,10 @@ Creates the task in the named registered project exactly as `add` would there. E
 is validated against the target: `--parent` and `--depends` must resolve from the target,
 `--spec`, `--plan`, and `--step` resolve against the target's doc roots, the id takes the
 target's prefix, and the owner recorded on any note is derived from the target. The output
-is the usual `add` output. No local project is located, so it runs from anywhere; naming
-the current project is allowed and equivalent to plain `add`. As with every `add`, nothing
-is committed.
+is the usual `add` output. No local project is located, so it runs from anywhere. An
+explicit prefix always targets its registered root, including when the current checkout
+has the same prefix; in a linked or displaced checkout this intentionally differs from
+plain `add`. As with every `add`, nothing is committed.
 
 ### 4.4 `feedback` on top of it
 
@@ -235,20 +241,23 @@ registry:
   its warning; with an empty registry, with its warning;
 - one unreachable entry warns and is skipped; one malformed config fails with `config`;
   one prefix mismatch fails with `config`;
-- `ready --all-projects` orders across two projects by priority, size, created;
+- `ready --all-projects` applies ready order across two projects; its shared comparator is
+  characterized through the created and final id tiebreaks;
 - `next` returns the show shape for a task in another project; `next` with nothing ready
   gives a null task and exit 0;
 - `prime --all-projects`: null prefix, the projects list, per-project uncommitted warnings;
 - `tree --all-projects` concatenates in registry order; `tree <id> --all-projects` is a
   usage error;
-- `root` for a registered and an unregistered prefix; `--pretty` prints the path alone;
+- `root` for a registered and an unregistered prefix, including the shared warning for an
+  unregistered current project; `--pretty` prints the path alone;
 - `projects` with a reachable and an unreachable row;
 - `tags` counts per project, and `--status` widening to closed tasks;
 - `add --project` from outside a project; `--parent`, `--spec`, and `--depends` validated
   against the target and not the caller; an unregistered `--project` is `config`;
 - `feedback` still lands in `tasks` with its tags after the refactor (existing tests).
 
-Unit tests cover the scope opener's three outcomes and the shared prefix resolver.
+Unit tests cover the scope opener's three outcomes, shared config rules for foreign
+dependency resolution, the shared prefix resolver, and the created/id ready tiebreaks.
 
 ## 9. Follow-through outside this repository
 

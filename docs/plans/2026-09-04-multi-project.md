@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Gates before every commit: `cargo test`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `tasks check`.
+- Gates before every task commit: `cargo test`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `tasks check`. The final tracker-only goal close reruns only `tasks check`, since code and docs are unchanged.
 - Rebuild and reinstall after CLI changes: `cargo install --path .`
 - JSON output is the contract. Additive only, except `prime.prefix` becoming `string | null` (null only under `--all-projects`). New shapes, all fields always present:
   - `next -> { next: ShowFields | null, warnings }` where `ShowFields` is the `show` object without `warnings`
@@ -21,6 +21,7 @@
   - `projects -> { projects: [{ prefix, root, reachable, counts: Counts | null }], warnings }`
   - `prime += projects: [prefix]`
 - Registry-wide scope never locates a local project (spec §3.2). `--all-projects` is defined only on `list`, `ready`, `prime`, `tree`, `next`, `tags`.
+- An explicit `add --project <prefix>` always targets that prefix's registered root. It does not locate or prefer a current checkout carrying the same prefix.
 - Reachability outcomes (spec §3.2): missing root or config warns and skips; malformed config or prefix mismatch is a `config` error.
 - Prefix resolution (spec §3.1): an unregistered or config-less prefix is `unresolvable_id` when reached through an id and `config` when typed as a prefix; a mismatch is always `config`.
 - No new error kinds. Fail early with a typed `Error`; no silent fallbacks.
@@ -208,7 +209,7 @@ In `src/commands/show.rs`, replace the foreign branch. The whole `let project: &
     };
 ```
 
-Add `use crate::scope::Origin;` and drop the now-unused `CONFIG_REL` import (keep `Project`). Remove the unused `Error` import if the compiler says so.
+Add `use crate::scope::Origin;`, change the error import to `use crate::error::Result;`, and change the repository import to `use crate::repo::Project;`.
 
 - [ ] **Step 6: Use it in `feedback`**
 
@@ -227,7 +228,7 @@ pub fn locate_target(registry: &Registry) -> Result<Project> {
 }
 ```
 
-Add `use crate::scope::Origin;`; drop the `CONFIG_REL` import if unused.
+Add `use crate::scope::Origin;` and change the repository import to `use crate::repo::Project;` (`Error` remains in use for the target-specific hint).
 
 - [ ] **Step 7: Run the gates**
 
@@ -256,7 +257,7 @@ Before anything else: `tasks start tasks-fe2041`.
 - Test: `tests/cli.rs`, `src/scope.rs` (unit)
 
 **Interfaces:**
-- Consumes: `scope::open_registered` (Task 1); `Project::scan`, `Project::locate`, `Registry::load`, `Registry.projects: BTreeMap<String, PathBuf>`.
+- Consumes: `scope::has_config`, `scope::open_registered` (Task 1); `Project::scan`, `Project::locate`, `Registry::load`, `Registry.projects: BTreeMap<String, PathBuf>`.
 - Produces:
   - `scope::is_reachable(root: &Path) -> Result<bool>`; `scope::registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>>`.
   - `scope::Scope { Local(Project), All(Vec<Project>) }` with `projects(&self) -> &[Project]`, `prefixes(&self) -> Vec<String>`, `scan(&self) -> Result<Vec<Task>>`, `scan_each(&self) -> Result<Vec<(&Project, Vec<Task>)>>`, `resolve_task(&self, registry: &Registry, id: &TaskId) -> Result<Option<Task>>`, `Scope::open_all(registry: &Registry, cwd: &Path) -> Result<(Scope, Vec<String>)>`.
@@ -352,15 +353,21 @@ pub fn read_present(project: &Project, id: &TaskId) -> Result<Option<Task>> {
 
 /// Follows a foreign id through the registry. Lenient on purpose: an unregistered
 /// prefix or a missing root or config is `Ok(None)`, because callers report those as
-/// unreachable-dependency warnings. A config that exists but cannot be parsed is an error.
+/// unreachable-dependency warnings. Once those cases are excluded, the strict shared
+/// opener makes malformed config or a registry/config prefix mismatch a config error.
 pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
     let Some(root) = registry.project_root(&id.prefix) else {
         return Ok(None);
     };
-    if !root.join(crate::repo::CONFIG_REL).try_exists()? {
+    if !crate::scope::has_config(root)? {
         return Ok(None);
     }
-    read_present(&Project::open(root)?, id)
+    let project = crate::scope::open_registered(
+        registry,
+        &id.prefix,
+        crate::scope::Origin::Id(id),
+    )?;
+    read_present(&project, id)
 }
 ```
 
@@ -495,16 +502,30 @@ Add unit tests to the `tests` module in `src/scope.rs`:
     }
 
     #[test]
-    fn a_directory_where_the_config_should_be_is_unreachable_not_an_error() {
+    fn scope_and_dependency_resolution_share_config_rules() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(CONFIG_REL)).unwrap();
         let registry = registry_with("sci", dir.path());
+        let id = TaskId::parse("sci-000001").unwrap();
         assert!(!is_reachable(dir.path()).unwrap());
+        assert!(
+            crate::resolve::resolve_registered(&registry, &id)
+                .unwrap()
+                .is_none(),
+            "dependency resolution treats a non-file config as unreachable"
+        );
         let (scope, warnings) = Scope::open_all(&registry, dir.path()).unwrap();
         assert!(scope.projects().is_empty());
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(matches!(
             open_registered(&registry, "sci", Origin::Prefix),
+            Err(Error::Config(_))
+        ));
+
+        std::fs::remove_dir_all(dir.path().join(CONFIG_REL)).unwrap();
+        write_config(dir.path(), "zzz");
+        assert!(matches!(
+            crate::resolve::resolve_registered(&registry, &id),
             Err(Error::Config(_))
         ));
     }
@@ -688,13 +709,13 @@ Before anything else: `tasks start tasks-6d33e6`.
 
 **Files:**
 - Modify: `src/cli.rs` (`Ready`, `Prime`), `src/commands/mod.rs` (dispatch), `src/commands/list.rs` (`prime`), `src/output.rs` (`PrimeOut`, pretty header, `Counts::of`)
-- Test: `tests/cli.rs`
+- Test: `tests/cli.rs`, `src/query.rs` (the documented created and id tiebreaks)
 
 **Interfaces:**
 - Consumes: `ReadCtx`, `Scope::projects`, `Scope::prefixes` (Task 2).
 - Produces: `PrimeOut.prefix: Option<String>`, `PrimeOut.projects: Vec<String>`; `Counts::of(tasks: &[Task]) -> Counts` (reused by `projects` in Task 6).
 
-- [ ] **Step 1: Write the failing e2e tests**
+- [ ] **Step 1: Write the failing e2e tests and the id-tiebreak characterization**
 
 Append to `tests/cli.rs`:
 
@@ -764,10 +785,33 @@ fn prime_all_projects_reports_scope_and_per_project_uncommitted_files() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+In `src/query.rs`, append to the existing `tests` module. This characterizes the existing
+final comparator rather than a new behavior, so it passes before the feature code changes:
 
-Run: `cargo test --test cli all_projects_orders` then `cargo test --test cli prime_all_projects`
-Expected: both new tests fail with a clap usage error (exit 2) because the flag does not exist on `ready` and `prime`.
+```rust
+#[test]
+fn ready_order_uses_created_then_full_id_for_remaining_ties() {
+    let mut newer = t("aaa-000001", Status::Todo, 1, Some(Size::S), &[]);
+    newer.created = "2026-08-29T00:00:02Z".into();
+    let mut tasks = vec![
+        newer,
+        t("sci-000001", Status::Todo, 1, Some(Size::S), &[]),
+        t("fam-ffffff", Status::Todo, 1, Some(Size::S), &[]),
+        t("fam-000001", Status::Todo, 1, Some(Size::S), &[]),
+    ];
+    sort_ready(&mut tasks);
+    let ids: Vec<String> = tasks.iter().map(|task| task.id.to_string()).collect();
+    assert_eq!(
+        ids,
+        ["fam-000001", "fam-ffffff", "sci-000001", "aaa-000001"]
+    );
+}
+```
+
+- [ ] **Step 2: Run the characterization and verify the new command tests fail**
+
+Run: `cargo test query::tests::ready_order_uses_created_then_full_id_for_remaining_ties`, then `cargo test --test cli all_projects_orders`, then `cargo test --test cli prime_all_projects`.
+Expected: the characterization test passes; both new e2e tests fail with a clap usage error (exit 2) because the flag does not exist on `ready` and `prime`.
 
 - [ ] **Step 3: Add the flags and dispatch**
 
@@ -904,7 +948,7 @@ Expected: all pass, and the installed `tasks` is now the code under test. `prime
 ```bash
 tasks done tasks-6d33e6 "ready and prime take --all-projects; prime reports projects in scope"
 tasks check
-git add src/cli.rs src/commands/mod.rs src/commands/list.rs src/output.rs tests/cli.rs tasks/
+git add src/cli.rs src/commands/mod.rs src/commands/list.rs src/output.rs src/query.rs tests/cli.rs tasks/
 git commit -m "feat: ready and prime across all projects"
 ```
 
@@ -1378,7 +1422,7 @@ Before anything else: `tasks start tasks-5afcc4`.
 
 **Interfaces:**
 - Consumes: `scope::open_registered` (Task 1), `scope::is_reachable`, `scope::registry_warnings`, `commands::start_dir` (Task 2), `Counts::of` (Task 3), `Registry::load`, `Registry.projects`.
-- Produces: `root::run(id: String) -> Result<Output>`, `projects::run(dir: Option<&Path>) -> Result<Output>`, `output::RootOut { prefix, root, warnings }`, `output::ProjectRow { prefix, root, reachable, counts: Option<Counts> }`, `output::ProjectsOut { projects: Vec<ProjectRow>, warnings }`.
+- Produces: `root::run(id: String, dir: Option<&Path>) -> Result<Output>`, `projects::run(dir: Option<&Path>) -> Result<Output>`, `output::RootOut { prefix, root, warnings }`, `output::ProjectRow { prefix, root, reachable, counts: Option<Counts> }`, `output::ProjectsOut { projects: Vec<ProjectRow>, warnings }`.
 
 - [ ] **Step 1: Write the failing e2e tests**
 
@@ -1405,6 +1449,14 @@ fn root_prints_the_registered_root_of_an_id() {
         "unresolvable_id"
     );
     assert_eq!(env.fail(nowhere.path(), &["root", "bogus"]), "invalid_id");
+
+    let mut other_env = TestEnv::new();
+    let unregistered = other_env.init("lon");
+    let v = env.json(&unregistered, &["root", "sci-000000"]);
+    assert_eq!(
+        v["warnings"],
+        serde_json::json!(["current project lon is not registered"])
+    );
 }
 
 #[test]
@@ -1518,19 +1570,21 @@ use crate::error::Result;
 use crate::model::TaskId;
 use crate::output::{Output, RootOut};
 use crate::registry::Registry;
-use crate::scope::{Origin, open_registered};
+use crate::scope::{Origin, open_registered, registry_warnings};
+use std::path::Path;
 
 /// Where the id's project lives, for a shell alias or a dashboard to jump to. Runs
 /// outside any project. The task file is not checked: a missing file is `show`'s to
 /// report, and the caller asked for the root.
-pub fn run(id: String) -> Result<Output> {
+pub fn run(id: String, dir: Option<&Path>) -> Result<Output> {
     let id = TaskId::parse(&id)?;
     let registry = Registry::load()?;
+    let warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
     let project = open_registered(&registry, &id.prefix, Origin::Id(&id))?;
     Ok(Output::Root(RootOut {
         prefix: project.prefix,
         root: project.root.display().to_string(),
-        warnings: Vec::new(),
+        warnings,
     }))
 }
 ```
@@ -1547,7 +1601,7 @@ use std::path::Path;
 /// The registry as rows. Reachability is the wide scope's rule (spec §3.2) through the
 /// same helpers: a missing root or config is an unreachable row rather than a warning,
 /// because here the row is the report; a malformed config is an error. The two shared
-/// warnings (empty registry, unregistered current project) are the same as everywhere.
+/// warnings (empty registry, unregistered current project) are the same as wide scope.
 pub fn run(dir: Option<&Path>) -> Result<Output> {
     let registry = Registry::load()?;
     let warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
@@ -1587,7 +1641,7 @@ pub fn run(dir: Option<&Path>) -> Result<Output> {
 
 ```rust
         Command::Projects => projects::run(dir),
-        Command::Root { id } => root::run(id),
+        Command::Root { id } => root::run(id, dir),
 ```
 
 - [ ] **Step 5: Run the gates**
@@ -1857,9 +1911,22 @@ fn add_project_creates_in_the_named_project_from_anywhere() {
         env.fail(&ops, &["add", "x", "--project", "fam", "--parent", &goal]),
         "validation"
     );
-    // naming the current project is plain add
-    let local = id_of(env.json(&ops, &["add", "Local", "--project", "ops"]));
-    assert!(local.starts_with("ops-"));
+    // an explicit prefix targets the registry root, not a displaced checkout with the
+    // same prefix
+    let displaced = tempfile::tempdir().unwrap();
+    std::fs::create_dir(displaced.path().join("tasks")).unwrap();
+    std::fs::write(
+        displaced.path().join("tasks/.config.toml"),
+        "prefix = \"ops\"\n",
+    )
+    .unwrap();
+    let registered = id_of(env.json(
+        displaced.path(),
+        &["add", "Local", "--project", "ops"],
+    ));
+    assert!(registered.starts_with("ops-"));
+    assert!(ops.join(format!("tasks/{registered}.md")).is_file());
+    assert!(!displaced.path().join(format!("tasks/{registered}.md")).exists());
     // an unknown prefix is config, since a person typed it
     assert_eq!(
         env.fail(nowhere.path(), &["add", "x", "--project", "zzz"]),
@@ -2118,10 +2185,11 @@ no local project: a missing root or config is a warning and the entry is skipped
 malformed config or a prefix that disagrees with the registry key is a config error.
 `projects` applies the same test but reports an unreachable entry as a row with
 reachable=false rather than a warning, since the row is the report; a malformed entry is
-still a config error. `root` resolves one prefix strictly: unregistered or without a
-config is unresolvable_id, mismatched is config. All three emit the two shared warnings
-(empty registry; current directory inside an unregistered project). See
-docs/specs/2026-09-04-multi-project-design.md.
+still a config error and emits the two wide-scope warnings (empty registry; current
+directory inside an unregistered project). `root` resolves one prefix strictly:
+unregistered or without a config is unresolvable_id, mismatched is config. On success it
+emits the unregistered-current-project warning; an empty registry cannot produce a
+successful root lookup. See docs/specs/2026-09-04-multi-project-design.md.
 ```
 
 - [ ] **Step 2: Skill and agent guide**
@@ -2191,6 +2259,7 @@ git commit -m "docs: multi-project commands in the design, skill, and README"
 Then close the goal from `tasks prime`'s closeout list:
 
 ```bash
+tasks prime --pretty
 tasks done tasks-3029be "multi-project support landed"
 tasks check
 git add tasks/ && git commit -m "chore: close multi-project goal"
