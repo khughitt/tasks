@@ -1,11 +1,11 @@
 ---
 id: tasks-3029be
 title: "Multi-project support: registry-wide views, hub goals, cross-project add"
-status: todo
+status: done
 priority: 2
 size: l
 created: 2026-09-04T12:48:03Z
-updated: 2026-09-04T16:24:02Z
+updated: 2026-09-04T16:31:09Z
 depends: []
 tags: [multi-project]
 spec: docs/specs/2026-09-04-multi-project-design.md
@@ -17,3 +17,4 @@ Cross-project awareness on top of the existing registry. Candidates: --all scope
 ## Notes
 
 - 2026-09-04T16:03:30Z (multi-project): multi-project support landed
+- 2026-09-04T16:31:09Z (multi-project): multi-project support complete; final review findings resolved
