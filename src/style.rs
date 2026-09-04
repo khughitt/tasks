@@ -52,13 +52,8 @@ impl ColorMode {
 /// looks, so the same meaning renders identically in every view.
 #[derive(Debug, Clone, Copy)]
 pub enum Style {
-    // `expect`, not `allow`: these three are unused until tables are painted, and the
-    // expectation fails once they are, so the attribute cannot outlive its reason.
-    #[cfg_attr(not(test), expect(dead_code))]
     Status(Status),
-    #[cfg_attr(not(test), expect(dead_code))]
     Chrome,
-    #[cfg_attr(not(test), expect(dead_code))]
     Emphasis,
     Error,
     Ok,

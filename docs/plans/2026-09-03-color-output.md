@@ -414,7 +414,7 @@ Tracker: `tasks-1bdfed`. Depends on Task 1. Spec §3, §4 padding rule, §5 layo
 - Changes: `table(rows: &[TaskSummary], painter: &Painter) -> String`; `tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter) -> String`.
 - Preserves: visible table text and spacing after ANSI SGR sequences are removed.
 
-- [ ] **Step 1: Claim the tracker task**
+- [x] **Step 1: Claim the tracker task**
 
 Run:
 
@@ -424,7 +424,7 @@ tasks start tasks-1bdfed
 
 Expected: the task becomes `doing`.
 
-- [ ] **Step 2: Write failing table and prime tests**
+- [x] **Step 2: Write failing table and prime tests**
 
 Add this dependency-free test helper to `tests/cli.rs` beside `has_ansi`:
 
@@ -498,7 +498,7 @@ fn colored_tables_use_semantic_roles_without_changing_layout() {
 
 Extend the existing `prime_shows_roadmap_and_closeout` test with a colored invocation and assert that `closeout:`, `roadmap:`, `ready:`, and `doing:` are each wrapped in `\x1b[1m...\x1b[0m`. The existing pretty tree test remains the regression check that indentation precedes the painted row.
 
-- [ ] **Step 3: Run the focused test and verify it fails**
+- [x] **Step 3: Run the focused test and verify it fails**
 
 Run:
 
@@ -508,7 +508,7 @@ cargo test colored_tables_use_semantic_roles_without_changing_layout
 
 Expected: FAIL because table rows do not yet contain the status, chrome, or emphasis sequences.
 
-- [ ] **Step 4: Apply styles after padding**
+- [x] **Step 4: Apply styles after padding**
 
 Change `table` to format the width-sensitive fields before painting:
 
@@ -542,7 +542,7 @@ rendered.push_str(&format!(
 
 Thread `&Painter` through every `table` and `tree_text` call. Paint only the four `prime` section header words with `Style::Emphasis`; keep their surrounding newlines plain. Do not paint `project`, counts, the childless-root summary, task titles, sizes, or indentation.
 
-- [ ] **Step 5: Run focused and full verification**
+- [x] **Step 5: Run focused and full verification**
 
 Run:
 
@@ -559,7 +559,7 @@ tasks check
 
 Expected: every command exits 0; stripped colored tables exactly equal uncolored tables.
 
-- [ ] **Step 6: Close and commit Task 2**
+- [x] **Step 6: Close and commit Task 2**
 
 Mark this task's completed checkboxes `[x]`, then run:
 

@@ -971,6 +971,19 @@ fn prime_shows_roadmap_and_closeout() {
         !roadmap.contains(&loner),
         "a childless root present in ready is only counted: {roadmap}"
     );
+    let colored = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "prime"])
+        .output()
+        .unwrap();
+    let colored = String::from_utf8_lossy(&colored.stdout);
+    for header in ["closeout:", "roadmap:", "ready:", "doing:"] {
+        assert!(
+            colored.contains(&format!("\n\x1b[1m{header}\x1b[0m\n")),
+            "{header} must be emphasised with the newlines outside the span: {colored:?}"
+        );
+    }
+
     assert!(
         roadmap.contains("1 childless root(s) are listed under ready"),
         "{roadmap}"
@@ -2438,4 +2451,79 @@ fn tasks_color_is_always_validated_and_warnings_use_the_stderr_painter() {
         .unwrap();
     assert!(warned.status.success());
     assert!(String::from_utf8_lossy(&warned.stderr).starts_with("\x1b[33mwarning:\x1b[0m "));
+}
+
+fn strip_ansi(text: &str) -> String {
+    [
+        "\x1b[0m",
+        "\x1b[1m",
+        "\x1b[2m",
+        "\x1b[31m",
+        "\x1b[32m",
+        "\x1b[33m",
+        "\x1b[34m",
+        "\x1b[2;31m",
+        "\x1b[2;32m",
+    ]
+    .into_iter()
+    .fold(text.to_string(), |text, code| text.replace(code, ""))
+}
+
+#[test]
+fn colored_tables_use_semantic_roles_without_changing_layout() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(&dir, &["add", "Idea", "--status", "idea", "--tag", "later"]);
+    env.json(&dir, &["add", "Todo", "-p", "0", "--tag", "now"]);
+    let doing = id_of(env.json(&dir, &["add", "Doing"]));
+    env.json(&dir, &["start", &doing]);
+    let blocked = id_of(env.json(&dir, &["add", "Blocked"]));
+    env.json(&dir, &["block", &blocked]);
+    let done = id_of(env.json(&dir, &["add", "Done"]));
+    env.json(&dir, &["done", &done]);
+    let dropped = id_of(env.json(&dir, &["add", "Dropped"]));
+    env.json(&dir, &["drop", &dropped]);
+
+    let statuses = [
+        "--status", "idea", "--status", "todo", "--status", "doing", "--status", "blocked",
+        "--status", "done", "--status", "dropped",
+    ];
+    let plain = env
+        .cmd(&dir)
+        .arg("--pretty")
+        .arg("list")
+        .args(statuses)
+        .output()
+        .unwrap();
+    let colored = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "list"])
+        .args(statuses)
+        .output()
+        .unwrap();
+    let plain = String::from_utf8(plain.stdout).unwrap();
+    let colored = String::from_utf8(colored.stdout).unwrap();
+    assert_eq!(strip_ansi(&colored), plain);
+    for code in [
+        "\x1b[34m",
+        "\x1b[33m",
+        "\x1b[31m",
+        "\x1b[2;32m",
+        "\x1b[2;31m",
+    ] {
+        assert!(colored.contains(code), "missing {code:?}: {colored:?}");
+    }
+    assert!(colored.contains("\x1b[1mP0\x1b[0m"));
+    assert!(colored.contains("\x1b[2m [now]\x1b[0m"));
+
+    let plain_ready = env.cmd(&dir).args(["--pretty", "ready"]).output().unwrap();
+    let colored_ready = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "ready"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        strip_ansi(&String::from_utf8(colored_ready.stdout).unwrap()),
+        String::from_utf8(plain_ready.stdout).unwrap()
+    );
 }
