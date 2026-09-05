@@ -294,8 +294,10 @@ values.
   worktree of it;
 - fixed sets: `--status` offers six values on `edit` and two on `add`; `--project` offers
   registry prefixes;
-- silence: from outside any project, and with an unreadable `tasks/` directory, a malformed
-  task file, and a malformed registry — no candidates, exit 0, empty stderr in each case;
+- silence: from outside any project, and with an unreadable `tasks/` directory — no
+  candidates; a malformed task file is skipped, and a malformed registry is not consulted
+  to open the local project, so in both cases the project's other ids are still offered;
+  exit 0 and empty stderr in every case;
 - with no words after `--`, the output is the registration stub naming the binary;
 - inertness: with `TASKS_COMPLETE` unset, an **ordinary** argv (`tasks list`, not the
   transport form) runs the command as before. The transport argv is not a valid command

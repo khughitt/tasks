@@ -265,9 +265,9 @@ fn local_or_foreign(registry: &Registry, base: Option<Project>, current: &str) -
         && base.as_ref().is_none_or(|project| project.prefix != prefix)
         && let Some(foreign) = open_prefix(registry, prefix)
     {
-        return foreign.scan().unwrap_or_default();
+        return foreign.scan_lenient().0;
     }
-    base.map(|project| project.scan().unwrap_or_default())
+    base.map(|project| project.scan_lenient().0)
         .unwrap_or_default()
 }
 
@@ -280,18 +280,20 @@ fn described(id: &str, task: Option<&Task>) -> CompletionCandidate {
     CompletionCandidate::new(id).help(help)
 }
 
+/// Open before closed, then id ascending — the ordering both `candidates()` and
+/// `dependencies()` present. An id with no status to be "open" with (an unresolvable
+/// dependency) sorts alongside the closed ones.
+fn open_then_id(a_open: bool, a_id: &TaskId, b_open: bool, b_id: &TaskId) -> std::cmp::Ordering {
+    b_open.cmp(&a_open).then_with(|| a_id.cmp(b_id))
+}
+
 /// Filter to the typed fragment, open tasks first, each group by id.
 fn candidates(tasks: Vec<Task>, current: &str) -> Vec<CompletionCandidate> {
     let mut matching: Vec<Task> = tasks
         .into_iter()
         .filter(|task| task.id.to_string().starts_with(current))
         .collect();
-    matching.sort_by(|a, b| {
-        b.status
-            .is_open()
-            .cmp(&a.status.is_open())
-            .then_with(|| a.id.cmp(&b.id))
-    });
+    matching.sort_by(|a, b| open_then_id(a.status.is_open(), &a.id, b.status.is_open(), &b.id));
     matching
         .iter()
         .map(|task| described(&task.id.to_string(), Some(task)))
@@ -343,29 +345,36 @@ pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
     if line.all_projects {
         for prefix in registry.projects.keys() {
             if let Some(project) = open_prefix(&registry, prefix) {
-                tasks.extend(project.scan().unwrap_or_default());
+                tasks.extend(project.scan_lenient().0);
             }
         }
     } else if let Some(project) = open_local(&line) {
-        tasks.extend(project.scan().unwrap_or_default());
+        tasks.extend(project.scan_lenient().0);
     }
     candidates(tasks, current)
 }
 
-/// `--parent`: a parent must live in the same project as its child.
+/// `--parent`: a parent must live in the same project as its child, and never the child
+/// itself — `apply_fields` rejects a task named as its own parent the same way `dep`
+/// rejects a self-dependency.
 pub fn destination_ids(current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();
     };
     let line = line();
     let registry = Registry::load().unwrap_or_default();
-    let tasks = destination(&registry, &line)
-        .map(|project| project.scan().unwrap_or_default())
+    let mut tasks = destination(&registry, &line)
+        .map(|project| project.scan_lenient().0)
         .unwrap_or_default();
+    if let Some(subject) = &line.subject {
+        tasks.retain(|task| &task.id != subject);
+    }
     candidates(tasks, current)
 }
 
-/// `--depends` and `dep --on`: whatever `Resolver` can reach *from the destination*.
+/// `--depends` and `dep --on`: whatever `Resolver` can reach *from the destination*,
+/// excluding the subject itself — a task cannot depend on itself, and `dep::run` and
+/// `apply_fields` both reject a self-dependency with a `cycle` error.
 /// `apply_fields` and `dep::run` both build their `Resolver` on the project being written
 /// to, so a worktree's own ids are the ones `add --project` would reject.
 pub fn resolvable(current: &OsStr) -> Vec<CompletionCandidate> {
@@ -375,7 +384,11 @@ pub fn resolvable(current: &OsStr) -> Vec<CompletionCandidate> {
     let line = line();
     let registry = Registry::load().unwrap_or_default();
     let base = destination(&registry, &line);
-    candidates(local_or_foreign(&registry, base, current), current)
+    let mut tasks = local_or_foreign(&registry, base, current);
+    if let Some(subject) = &line.subject {
+        tasks.retain(|task| &task.id != subject);
+    }
+    candidates(tasks, current)
 }
 
 /// `dep --rm`: only what the task already depends on. Removal does not resolve ids, so an
@@ -400,12 +413,11 @@ pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
         .map(|id| (id.clone(), resolver.resolve_task(id).ok().flatten()))
         .collect();
     // Open dependencies before closed-or-unresolvable, each group by id ascending —
-    // the same ordering `candidates()` applies, with an unresolvable dependency (no
-    // status to be "open" with) sorted alongside the closed ones.
+    // the same ordering `candidates()` applies, via the same helper.
     resolved.sort_by(|(a_id, a_task), (b_id, b_task)| {
         let a_open = a_task.as_ref().is_some_and(|task| task.status.is_open());
         let b_open = b_task.as_ref().is_some_and(|task| task.status.is_open());
-        b_open.cmp(&a_open).then_with(|| a_id.cmp(b_id))
+        open_then_id(a_open, a_id, b_open, b_id)
     });
     resolved
         .into_iter()
@@ -425,8 +437,8 @@ pub fn upstream_feedback(current: &OsStr) -> Vec<CompletionCandidate> {
         return Vec::new();
     };
     let tasks = project
-        .scan()
-        .unwrap_or_default()
+        .scan_lenient()
+        .0
         .into_iter()
         .filter(crate::commands::feedback::is_open_feedback)
         .collect();

@@ -4807,7 +4807,7 @@ fn completion_follows_a_typed_prefix_and_prefers_the_local_checkout() {
 fn completion_is_silent_when_anything_is_wrong() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
-    env.json(&sci, &["add", "Fine"]);
+    let fine = id_of(env.json(&sci, &["add", "Fine"]));
     let nowhere = tempfile::tempdir().unwrap();
 
     // outside every project
@@ -4820,9 +4820,14 @@ fn completion_is_silent_when_anything_is_wrong() {
         env.complete(&sci, "bash", 2, &["tasks", "show", "zzz-"])
             .is_empty()
     );
-    // a malformed task file
+    // a malformed task file does not wipe the rest of the menu: the good id is still
+    // offered, the bad file is silently skipped
     std::fs::write(sci.join("tasks/sci-bad001.md"), "not a task").unwrap();
-    env.complete(&sci, "bash", 2, &["tasks", "show", ""]);
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]),
+        [fine.as_str()],
+        "a malformed sibling file must not hide a valid id"
+    );
     // an unreadable tasks directory (registered before the registry below is corrupted,
     // since `init` itself needs a readable registry)
     let locked = env.init("lck");
@@ -4835,13 +4840,19 @@ fn completion_is_silent_when_anything_is_wrong() {
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
     std::fs::set_permissions(locked.join("tasks"), perms).unwrap();
     assert!(out.is_empty(), "{out:?}");
-    // a malformed registry
+    // a malformed registry does not disable the local project: it is opened by walking
+    // up from the effective directory, not through the registry, so its ids are still
+    // offered even though the registry itself cannot be read
     std::fs::write(
         env.home.path().join(".config/tasks/projects.toml"),
         "not toml = [",
     )
     .unwrap();
-    env.complete(&sci, "bash", 2, &["tasks", "show", ""]);
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]),
+        [fine.as_str()],
+        "a malformed registry must not disable the local project"
+    );
 }
 
 #[test]
@@ -4906,16 +4917,25 @@ fn completion_scopes_ids_to_what_each_argument_accepts() {
         "--all-projects widens the scope to the registry"
     );
 
-    // Destination: --parent follows --project, and the subject id on edit
-    assert_eq!(
-        env.complete(
-            &sci,
-            "bash",
-            6,
-            &["tasks", "add", "T", "--project", "fam", "--parent", ""]
-        ),
-        [foreign.as_str()]
+    // a second task in each project — enough to prove a scope excludes the subject's
+    // own id while still offering everything else
+    let sci_peer = id_of(env.json(&sci, &["add", "Sci peer"]));
+    let fam_peer = id_of(env.json(&fam, &["add", "Fam peer"]));
+    let mut fam_ids = [foreign.clone(), fam_peer.clone()];
+    fam_ids.sort();
+    let mut sci_ids = [local.clone(), sci_peer.clone()];
+    sci_ids.sort();
+
+    // Destination: --parent follows --project, and the subject id on edit — but never
+    // the subject's own id, which `apply_fields` rejects as a task's own parent
+    let mut via_project = env.complete(
+        &sci,
+        "bash",
+        6,
+        &["tasks", "add", "T", "--project", "fam", "--parent", ""],
     );
+    via_project.sort();
+    assert_eq!(via_project, fam_ids);
     assert_eq!(
         env.complete(
             &sci,
@@ -4923,22 +4943,28 @@ fn completion_scopes_ids_to_what_each_argument_accepts() {
             4,
             &["tasks", "edit", &foreign, "--parent", ""]
         ),
-        [foreign.as_str()]
+        [fam_peer.as_str()],
+        "a task must not be offered as its own parent"
     );
     // add's title is not a subject: --parent stays local
-    assert_eq!(
-        env.complete(&sci, "bash", 4, &["tasks", "add", &foreign, "--parent", ""]),
-        [local.as_str()]
-    );
+    let mut via_add_title =
+        env.complete(&sci, "bash", 4, &["tasks", "add", &foreign, "--parent", ""]);
+    via_add_title.sort();
+    assert_eq!(via_add_title, sci_ids);
 
-    // Resolvable: --depends and dep --on reach any registered project
+    // Resolvable: --depends and dep --on reach any registered project — but never offer
+    // the subject as its own dependency, which `dep`/`apply_fields` reject as a cycle
+    let mut via_depends =
+        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--depends", "fam-"]);
+    via_depends.sort();
+    assert_eq!(via_depends, fam_ids);
+    let mut via_dep_on = env.complete(&sci, "bash", 4, &["tasks", "dep", &local, "--on", "fam-"]);
+    via_dep_on.sort();
+    assert_eq!(via_dep_on, fam_ids);
     assert_eq!(
-        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--depends", "fam-"]),
-        [foreign.as_str()]
-    );
-    assert_eq!(
-        env.complete(&sci, "bash", 4, &["tasks", "dep", &local, "--on", "fam-"]),
-        [foreign.as_str()]
+        env.complete(&sci, "bash", 4, &["tasks", "dep", &local, "--on", ""]),
+        [sci_peer.as_str()],
+        "a task must not be offered as its own dependency"
     );
 }
 
