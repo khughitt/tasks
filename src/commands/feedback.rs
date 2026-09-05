@@ -100,7 +100,7 @@ pub fn run(
     let (task, action) = match existing {
         Some((id, automatic)) => (
             recur_into(
-                &ctx, &target, &id, automatic, &summary, &body, &category, &from,
+                &mut ctx, &target, &id, automatic, &summary, &body, &category, &from,
             )?,
             "recurred",
         ),
@@ -136,7 +136,7 @@ fn create(
 
 #[allow(clippy::too_many_arguments)]
 fn recur_into(
-    ctx: &Ctx,
+    ctx: &mut Ctx,
     target: &Project,
     id: &TaskId,
     automatic: bool,
@@ -169,10 +169,13 @@ fn recur_into(
         }
         Ok(())
     };
+    // Lock only the target: the source may share its prefix, and taking both would deadlock.
+    let _lock = crate::claims::MutationLock::acquire(&target.prefix)?;
+    let mut claims = crate::claims::ClaimStore::load(&target.prefix)?;
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the public upstream file. The reporting project is already in the note text.
     let prefix = ctx.project.prefix.clone();
-    guarded_update(target, id, eligible, |task| {
+    let task = guarded_update(target, id, eligible, |task| {
         append_note(
             task,
             NOTE_AUTHOR,
@@ -187,7 +190,15 @@ fn recur_into(
             }
         }
         Ok(())
-    })
+    })?;
+    claims.prune_dead();
+    if let Err(error) = claims.save() {
+        ctx.warnings.push(format!(
+            "{} was saved, but stale claims could not be pruned ({error})",
+            task.id
+        ));
+    }
+    Ok(task)
 }
 
 /// Read, check `eligible`, mutate, and replace `id` in `target`, retrying from the read

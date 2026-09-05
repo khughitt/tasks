@@ -2883,6 +2883,50 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
     );
 }
 
+#[test]
+fn feedback_recurrence_serializes_against_concurrent_recurrences() {
+    let (env, target, reporter) = feedback_env();
+    let id = env.json(
+        &reporter,
+        &["feedback", "the thing is slow", "--category", "friction"],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mut handles = Vec::new();
+    for n in 0..4 {
+        let mut cmd = env.cmd(&reporter);
+        cmd.args([
+            "feedback",
+            "the thing is slow",
+            "--category",
+            "friction",
+            "--recur",
+            &id,
+            "-b",
+            &format!("detail {n}"),
+        ]);
+        handles.push(std::thread::spawn(move || cmd.output().unwrap()));
+    }
+    for handle in handles {
+        let out = handle.join().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    let raw = std::fs::read_to_string(target.join(format!("tasks/{id}.md"))).unwrap();
+    for n in 0..4 {
+        assert!(
+            raw.contains(&format!("detail {n}")),
+            "update {n} was lost: {raw}"
+        );
+    }
+}
+
 fn has_ansi(bytes: &[u8]) -> bool {
     bytes.windows(2).any(|pair| pair == b"\x1b[")
 }
