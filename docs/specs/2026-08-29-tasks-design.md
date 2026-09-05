@@ -228,8 +228,13 @@ tasks show <id>
     unresolvable_id.
 
 tasks list [--status S]... [--tag T]... [--owner O] [--all-projects] [--parent ID]
-    Default: open tasks, sorted by priority then updated desc. --all-projects walks the
-    registry and needs no local project (§6).
+           [--sort priority|updated|created] [--reverse]
+    Default: open tasks, sorted by priority then updated desc, then id. --sort updated
+    and --sort created put the most recent first, then id; --reverse flips the chosen
+    order. --all-projects walks the registry and needs no local project (§6).
+    Pretty rows carry a date column (the `YYYY-MM-DD` day, UTC): the timestamp sorted
+    on, or updated (last activity) when the order is not a date. Every command that
+    prints summary rows (ready, prime, tree) shows the updated day.
 
 tasks tree [<id>] [--all] [--all-projects]
     The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
@@ -348,7 +353,7 @@ Task = {
   notes: [{ at: string, by: string, text: string }]
 }
 
-TaskSummary = { id, title, status, priority, size, owner, updated, tags, depends }
+TaskSummary = { id, title, status, priority, size, owner, created, updated, tags, depends }
 
 show   -> { task: Task,
             spec_path: string|null,    absolute

@@ -1142,7 +1142,8 @@ fn list_defaults_to_open_and_filters() {
     assert_eq!(env.fail(&dir, &["list", "--status", "weird"]), "validation");
     let summary = &v["tasks"][0];
     for key in [
-        "id", "title", "status", "priority", "size", "owner", "updated", "tags", "depends",
+        "id", "title", "status", "priority", "size", "owner", "created", "updated", "tags",
+        "depends",
     ] {
         assert!(summary.get(key).is_some(), "summary missing {key}");
     }
@@ -3128,4 +3129,77 @@ fn projects_lists_the_registry_with_reachability_and_counts() {
     let v = fresh.json(nowhere.path(), &["projects"]);
     assert_eq!(v["projects"], serde_json::json!([]));
     assert_eq!(v["warnings"], serde_json::json!(["registry is empty"]));
+}
+
+/// Pin a task's clocks so date order is deterministic (the binary stamps real time).
+fn stamp(dir: &std::path::Path, id: &str, created: &str, updated: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text: String = text
+        .lines()
+        .map(|line| {
+            if line.starts_with("created: ") {
+                format!("created: {created}\n")
+            } else if line.starts_with("updated: ") {
+                format!("updated: {updated}\n")
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect();
+    std::fs::write(path, text).unwrap();
+}
+
+#[test]
+fn list_sorts_by_priority_updated_or_created_and_prints_the_date() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = id_of(env.json(&dir, &["add", "A", "-p", "1"]));
+    let b = id_of(env.json(&dir, &["add", "B", "-p", "2"]));
+    let c = id_of(env.json(&dir, &["add", "C", "-p", "3"]));
+    let (a, b, c) = (a.as_str(), b.as_str(), c.as_str());
+    // priority order is A B C; updated desc is C A B; created desc is B C A
+    stamp(&dir, a, "2026-01-01T00:00:00Z", "2026-02-02T00:00:00Z");
+    stamp(&dir, b, "2026-03-03T00:00:00Z", "2026-01-01T00:00:00Z");
+    stamp(&dir, c, "2026-02-02T00:00:00Z", "2026-03-03T00:00:00Z");
+    let ids = |v: serde_json::Value| -> Vec<String> {
+        v["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    assert_eq!(ids(env.json(&dir, &["list"])), [a, b, c]);
+    assert_eq!(
+        ids(env.json(&dir, &["list", "--sort", "priority"])),
+        [a, b, c]
+    );
+    assert_eq!(
+        ids(env.json(&dir, &["list", "--sort", "updated"])),
+        [c, a, b]
+    );
+    let v = env.json(&dir, &["list", "--sort", "created"]);
+    assert_eq!(v["tasks"][0]["created"], "2026-03-03T00:00:00Z");
+    assert_eq!(ids(v), [b, c, a]);
+    assert_eq!(ids(env.json(&dir, &["list", "--reverse"])), [c, b, a]);
+    assert_eq!(
+        ids(env.json(&dir, &["list", "--sort", "created", "--reverse"])),
+        [a, c, b]
+    );
+    assert_eq!(env.fail(&dir, &["list", "--sort", "weird"]), "validation");
+
+    // pretty rows carry the day of last activity, or of creation when sorting by it
+    let pretty = |args: &[&str]| -> String {
+        let out = env.cmd(&dir).arg("--pretty").args(args).output().unwrap();
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let text = pretty(&["list"]);
+    assert!(text.contains("todo    2026-02-02  A\n"), "{text}");
+    let text = pretty(&["list", "--sort", "created"]);
+    assert!(text.contains("todo    2026-01-01  A\n"), "{text}");
+    let text = pretty(&["ready"]);
+    assert!(text.contains("todo    2026-02-02  A\n"), "{text}");
 }

@@ -94,6 +94,7 @@ pub struct TaskSummary {
     pub priority: u8,
     pub size: Option<Size>,
     pub owner: Option<String>,
+    pub created: String,
     pub updated: String,
     pub tags: Vec<String>,
     pub depends: Vec<String>,
@@ -112,6 +113,7 @@ impl TaskSummary {
             priority: task.priority,
             size: task.size,
             owner: task.owner.clone(),
+            created: task.created.clone(),
             updated: task.updated.clone(),
             tags: task.tags.clone(),
             depends: task.depends.iter().map(ToString::to_string).collect(),
@@ -122,10 +124,19 @@ impl TaskSummary {
     }
 }
 
+/// Which timestamp a pretty row shows. JSON always carries both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DateColumn {
+    Updated,
+    Created,
+}
+
 #[derive(Serialize)]
 pub struct ListOut {
     pub tasks: Vec<TaskSummary>,
     pub warnings: Vec<String>,
+    #[serde(skip)]
+    pub date: DateColumn,
 }
 
 #[derive(Serialize)]
@@ -282,7 +293,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             Some(fields) => show_text(fields, painter),
             None => "nothing ready".into(),
         },
-        Output::List(o) => table(&o.tasks, painter),
+        Output::List(o) => table(&o.tasks, o.date, painter),
         Output::Prime(o) => {
             let c = &o.counts;
             let header = match &o.prefix {
@@ -297,7 +308,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "closeout:")
             ));
-            rendered.push_str(&table(&o.closeout, painter));
+            rendered.push_str(&table(&o.closeout, DateColumn::Updated, painter));
             rendered.push_str(&format!(
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "roadmap:")
@@ -311,16 +322,20 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 } else if ready_ids.contains(node.summary.id.as_str()) {
                     listed_under_ready += 1;
                 } else {
-                    rendered.push_str(&table(std::slice::from_ref(&node.summary), painter));
+                    rendered.push_str(&table(
+                        std::slice::from_ref(&node.summary),
+                        DateColumn::Updated,
+                        painter,
+                    ));
                 }
             }
             rendered.push_str(&format!(
                 "{listed_under_ready} childless root(s) are listed under ready\n"
             ));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "ready:")));
-            rendered.push_str(&table(&o.ready, painter));
+            rendered.push_str(&table(&o.ready, DateColumn::Updated, painter));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "doing:")));
-            rendered.push_str(&table(&o.doing, painter));
+            rendered.push_str(&table(&o.doing, DateColumn::Updated, painter));
             rendered
         }
         Output::Graph(o) => o.text.clone(),
@@ -402,7 +417,11 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
 fn tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter) -> String {
     let mut rendered = String::new();
     for node in nodes {
-        let row = table(std::slice::from_ref(&node.summary), painter);
+        let row = table(
+            std::slice::from_ref(&node.summary),
+            DateColumn::Updated,
+            painter,
+        );
         rendered.push_str(&"  ".repeat(depth));
         rendered.push_str(&row);
         rendered.push_str(&tree_text(&node.children, depth + 1, painter));
@@ -412,9 +431,13 @@ fn tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter) -> String {
 
 /// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every width-sensitive
 /// field is formatted to its final visible width before the painter wraps it.
-pub fn table(rows: &[TaskSummary], painter: &Painter) -> String {
+pub fn table(rows: &[TaskSummary], date: DateColumn, painter: &Painter) -> String {
     let mut rendered = String::new();
     for row in rows {
+        let date = crate::time::day(match date {
+            DateColumn::Updated => &row.updated,
+            DateColumn::Created => &row.created,
+        });
         let id = painter.paint(Style::Chrome, &row.id);
         let priority = format!("P{}", row.priority);
         let priority = if row.priority <= 1 {
@@ -438,7 +461,7 @@ pub fn table(rows: &[TaskSummary], painter: &Painter) -> String {
             .map(|owner| painter.paint(Style::Chrome, &format!(" @{owner}")))
             .unwrap_or_default();
         rendered.push_str(&format!(
-            "{id}  {priority} {size:<2} {status} {}{tags}{owner}\n",
+            "{id}  {priority} {size:<2} {status} {date}  {}{tags}{owner}\n",
             row.title
         ));
     }

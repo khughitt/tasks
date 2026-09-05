@@ -292,6 +292,8 @@ pub fn run(cli: Cli) -> Result<Output> {
             tags,
             owner,
             parent,
+            sort,
+            reverse,
             all_projects,
         } => list::list(
             open_read_ctx(dir, all_projects)?,
@@ -299,6 +301,8 @@ pub fn run(cli: Cli) -> Result<Output> {
             tags,
             owner,
             parent,
+            sort,
+            reverse,
         ),
         Command::Ready {
             size,

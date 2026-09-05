@@ -10,6 +10,11 @@ pub fn now() -> String {
         .expect("rfc3339")
 }
 
+/// The calendar day of a validated RFC 3339 UTC timestamp, `YYYY-MM-DD`.
+pub fn day(timestamp: &str) -> &str {
+    &timestamp[..10]
+}
+
 pub fn parse(s: &str) -> Result<OffsetDateTime> {
     if !s.ends_with('Z') {
         return Err(Error::Validation(format!(
@@ -36,5 +41,10 @@ mod tests {
         assert!(parse("2026-08-29T14:02:11+02:00").is_err());
         assert!(parse("2026-08-29").is_err());
         assert!(now().ends_with('Z') && !now().contains('.'));
+    }
+
+    #[test]
+    fn day_is_the_date_part() {
+        assert_eq!(day("2026-08-29T14:02:11Z"), "2026-08-29");
     }
 }
