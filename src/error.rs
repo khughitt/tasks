@@ -30,6 +30,9 @@ pub enum Error {
     DocNotFound(String),
     #[error("{0} changed on disk; {1}")]
     ConcurrentModification(String, String),
+    #[allow(dead_code)] // Used by the later claim guard.
+    #[error("{0} is claimed by {1}")]
+    Claimed(String, String),
     #[error("{0}")]
     Editor(String),
     #[error("io: {0}")]
@@ -64,6 +67,7 @@ impl Error {
             Error::ConcurrentModification(id, path) => {
                 Error::ConcurrentModification(id, path + suffix)
             }
+            Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
             Error::Editor(detail) => Error::Editor(detail + suffix),
             Error::Io(detail) => Error::Io(detail + suffix),
             error @ Error::NoProject(_) => error,
@@ -86,6 +90,7 @@ impl Error {
             Error::Ambiguous(_) => "ambiguous",
             Error::DocNotFound(_) => "doc_not_found",
             Error::ConcurrentModification(..) => "concurrent_modification",
+            Error::Claimed(..) => "claimed",
             Error::Editor(_) => "editor",
             Error::Io(_) => "io",
         }

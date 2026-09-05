@@ -10,6 +10,69 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+/// Who holds a claim, and the pid that proves it is still alive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    pub session: String,
+    pub pid: Option<u32>,
+}
+
+/// The caller's Unix session id, from `/proc/self/stat` field 6 (field 4 of the remainder
+/// after the last `)`). Stable across commands from one terminal, and itself a pid.
+pub fn unix_session_id() -> Option<u32> {
+    let text = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let (_, rest) = text.rsplit_once(") ")?;
+    rest.split_whitespace().nth(3)?.parse().ok()
+}
+
+pub fn identity() -> Result<Identity> {
+    identity_from(|key| std::env::var_os(key), unix_session_id())
+}
+
+/// Session and pid resolve as a pair from a single level. A level that yields a session
+/// but no usable pid yields `pid: None` and falls to the TTL path; it is never welded to
+/// an unrelated fallback pid.
+pub fn identity_from(
+    get: impl Fn(&str) -> Option<OsString>,
+    session_pid: Option<u32>,
+) -> Result<Identity> {
+    let var = |key: &str| {
+        get(key)
+            .and_then(|value| value.into_string().ok())
+            .filter(|value| !value.is_empty())
+    };
+    let pid_of = |key: &str| var(key).and_then(|value| value.parse().ok());
+    if let Some(session) = var("TASKS_SESSION") {
+        return Ok(Identity {
+            session,
+            pid: pid_of("TASKS_SESSION_PID"),
+        });
+    }
+    if let Some(session) = var("CLAUDE_CODE_SESSION_ID") {
+        return Ok(Identity {
+            session,
+            pid: pid_of("CLAUDE_PID"),
+        });
+    }
+    match session_pid {
+        Some(pid) => Ok(Identity {
+            session: format!("sid:{pid}"),
+            pid: Some(pid),
+        }),
+        None => Err(Error::Config(
+            "cannot determine a session identity: set TASKS_SESSION (no \
+             CLAUDE_CODE_SESSION_ID, and /proc/self/stat is unreadable)"
+                .into(),
+        )),
+    }
+}
+
+pub fn hostname() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .map(|name| name.trim().to_string())
+        .unwrap_or_else(|_| "unknown".into())
+}
+
 /// One session's advisory hold on a task. Lives outside git deliberately: a claim is
 /// ephemeral machine state, and keeping it on a branch is what made `doing` invisible
 /// across worktrees in the first place.
@@ -308,6 +371,58 @@ mod tests {
                 .find(|(k, _)| k == key)
                 .map(|(_, v)| OsString::from(v))
         }
+    }
+
+    #[test]
+    fn identity_prefers_the_explicit_pair() {
+        let id = identity_from(
+            env_of(&[
+                ("TASKS_SESSION", "explicit"),
+                ("TASKS_SESSION_PID", "7"),
+                ("CLAUDE_CODE_SESSION_ID", "claude"),
+                ("CLAUDE_PID", "9"),
+            ]),
+            Some(11),
+        )
+        .unwrap();
+        assert_eq!(id.session, "explicit");
+        assert_eq!(id.pid, Some(7));
+    }
+
+    #[test]
+    fn a_level_never_borrows_another_levels_pid() {
+        let id = identity_from(env_of(&[("CLAUDE_CODE_SESSION_ID", "claude")]), Some(11)).unwrap();
+        assert_eq!(id.session, "claude");
+        assert_eq!(
+            id.pid, None,
+            "a session without its own pid must not be welded to the fallback pid"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_unix_session_id() {
+        let id = identity_from(env_of(&[]), Some(11)).unwrap();
+        assert_eq!(id.session, "sid:11");
+        assert_eq!(id.pid, Some(11));
+    }
+
+    #[test]
+    fn an_empty_variable_does_not_count_as_set() {
+        let id = identity_from(env_of(&[("TASKS_SESSION", "")]), Some(11)).unwrap();
+        assert_eq!(
+            id.session, "sid:11",
+            "emptiness is filtered inside the helper"
+        );
+    }
+
+    #[test]
+    fn unresolvable_identity_is_an_error_not_a_shared_placeholder() {
+        let error = identity_from(env_of(&[]), None).unwrap_err();
+        assert_eq!(error.kind(), "config");
+        assert!(
+            error.to_string().contains("TASKS_SESSION"),
+            "the message names the way out: {error}"
+        );
     }
 
     #[test]
