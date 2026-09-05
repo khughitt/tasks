@@ -308,6 +308,11 @@ git commit -m "feat(complete): wire CompleteEnv and complete the fixed value set
 
 `ArgValueCompleter` receives only the value being completed. This task recovers the rest from the transport argv. Pure functions over a word list, unit-tested in-module; no argument is wired to it yet.
 
+> **Landed with Task 3.** Nothing calls this code until Task 3 attaches the completers, and
+> `cargo clippy --all-targets -- -D warnings` rejects it as dead code in the meantime —
+> `pub` does not exempt an item in a binary-only crate, and `#[cfg(test)]` callers do not
+> either. The two tasks therefore share one commit. Do not add `#[allow(dead_code)]`.
+
 **Files:**
 - Modify: `src/complete.rs`
 
@@ -412,7 +417,7 @@ mod tests {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib -- complete::tests`
+Run: `cargo test --bin tasks -- complete::tests`
 Expected: FAIL to compile — `walk`, `Line`, and `PathBuf` are not defined.
 
 - [ ] **Step 3: Implement the walk**
@@ -606,7 +611,7 @@ fn record(line: &mut Line, arg: &clap::Arg, values: &[&str]) {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --lib -- complete::tests`
+Run: `cargo test --bin tasks -- complete::tests`
 Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Run the gate and commit**
