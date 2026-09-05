@@ -4,7 +4,9 @@
 
 **Goal:** Give `doing` claims cross-worktree visibility, agent identity, and liveness, by moving the claim out of git into a per-prefix state store guarded by a per-project mutation lock.
 
-**Architecture:** A new `src/claims.rs` owns the claim record, its TOML store at `$XDG_STATE_HOME/tasks/claims/<prefix>.toml`, a `/proc`-based liveness test, and a `<prefix>.lock` mutation lock. The store is keyed by *project prefix*, which a worktree and its main checkout share while their roots differ — that is what makes claims visible across worktrees with no worktree enumeration. The guard lives in `transition()`/`save()` in `commands/mod.rs`, the chokepoint that `start`, `close`, `edit --status` and the interactive editor all already pass through.
+**Architecture:** A new `src/claims.rs` owns the claim record, its TOML store at `$XDG_STATE_HOME/tasks/claims/<prefix>.toml`, a `/proc`-based liveness test, and a `<prefix>.lock` mutation lock. The store is keyed by *project prefix*, which a worktree and its main checkout share while their roots differ — that is what makes claims visible across worktrees with no worktree enumeration.
+
+`transition()` in `commands/mod.rs` performs the **guard only** and records an intent; **all claim persistence happens inside `save()`, after every validation has passed**, with the previous claim captured and restored if the task-file write fails. Keeping persistence in one validated operation is what stops a rejected edit, a validation failure, or a failed write from mutating the store — those failure paths were spread across three places in an earlier draft of this plan and are the single most important thing to get right here.
 
 **Tech Stack:** Rust 2024, clap 4.6, serde/toml, `std::fs::File::lock`, `/proc`. No new dependencies.
 
@@ -14,6 +16,10 @@
 
 - **No new dependencies.** `File::lock` requires rustc ≥ 1.89; the project is on 1.98.1.
 - **JSON output is the contract.** Every change here is additive: new optional fields, one new error kind. Never change an existing shape.
+- **This crate has no library target.** Unit tests run as `cargo test --bin tasks <filter>`; `cargo test --lib` fails with "no library targets found".
+- **`ShowOut.fields` is `#[serde(flatten)]`** (`src/output.rs:78`), so `show` JSON exposes the claim at `v["claim"]`, *not* `v["fields"]["claim"]`. A wrong path silently passes null assertions.
+- **Errors serialize as `{"error": {"kind", "detail"}}`** (`src/output.rs:449`). There is no `message` field.
+- **Unit tests must never mutate process environment.** The gate runs tests in parallel, so `set_var` in one test corrupts another. Every environment- or path-dependent function in this plan takes an injected lookup (`*_with`, `*_at`) and the tests call those.
 - **Fail early with a typed error; no silent fallbacks.** (`AGENTS.md`)
 - **Composition > inheritance. Explicit > defensive.**
 - Conventional commits. **No AI-attribution trailers or footers.**
@@ -33,8 +39,12 @@
 - Test: `src/claims.rs` (`#[cfg(test)] mod tests`)
 
 **Interfaces:**
-- Consumes: `crate::error::{Error, Result}`, `crate::model::TaskId`, `crate::repo::atomic_write`, `crate::time`.
-- Produces: `Claim`, `ClaimStore`, `ClaimStore::{path_for, load, save, get, insert, remove, prune_with}`.
+- Consumes: `crate::error::{Error, Result}`, `crate::model::TaskId`, `crate::repo::atomic_write`.
+- Produces: `Claim`, `ClaimStore`, `ClaimStore::{path_with, path_for, load, load_from, save, get, insert, remove, prune_with, iter}`.
+
+**Path resolution is injected.** `path_with` takes the environment lookup so the tests never
+call `set_var`: the gate runs tests in parallel, and a mutated `HOME` or `XDG_STATE_HOME`
+corrupts whatever else is running.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -44,6 +54,7 @@ In a new `src/claims.rs`:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
 
     fn sample() -> Claim {
         Claim {
@@ -59,6 +70,21 @@ mod tests {
         }
     }
 
+    /// An injected environment. Returning `OsString` matches `std::env::var_os`, which is
+    /// what the production caller passes.
+    fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> + use<> {
+        let owned: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |key| {
+            owned
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| OsString::from(v))
+        }
+    }
+
     #[test]
     fn store_roundtrips_and_is_keyed_by_prefix() {
         let home = tempfile::tempdir().unwrap();
@@ -66,7 +92,7 @@ mod tests {
         let id = TaskId::parse("sci-000001").unwrap();
 
         let mut store = ClaimStore::load_from(&path).unwrap();
-        assert!(store.get(&id).is_none(), "absent store loads empty");
+        assert!(store.get(&id).is_none(), "an absent store loads empty");
         store.insert(&id, sample());
         store.save().unwrap();
 
@@ -78,9 +104,8 @@ mod tests {
     #[test]
     fn remove_reports_whether_anything_was_there() {
         let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("claims/sci.toml");
+        let mut store = ClaimStore::load_from(&home.path().join("sci.toml")).unwrap();
         let id = TaskId::parse("sci-000001").unwrap();
-        let mut store = ClaimStore::load_from(&path).unwrap();
         store.insert(&id, sample());
         assert!(store.remove(&id).is_some());
         assert!(store.remove(&id).is_none());
@@ -88,25 +113,43 @@ mod tests {
 
     #[test]
     fn path_prefers_xdg_state_home_then_home() {
-        unsafe { std::env::set_var("XDG_STATE_HOME", "/xdg") };
         assert_eq!(
-            ClaimStore::path_for("sci").unwrap(),
-            std::path::PathBuf::from("/xdg/tasks/claims/sci.toml")
+            ClaimStore::path_with("sci", env_of(&[("XDG_STATE_HOME", "/xdg")])).unwrap(),
+            PathBuf::from("/xdg/tasks/claims/sci.toml")
         );
-        unsafe { std::env::remove_var("XDG_STATE_HOME") };
-        unsafe { std::env::set_var("HOME", "/home/x") };
         assert_eq!(
-            ClaimStore::path_for("sci").unwrap(),
-            std::path::PathBuf::from("/home/x/.local/state/tasks/claims/sci.toml")
+            ClaimStore::path_with("sci", env_of(&[("HOME", "/home/x")])).unwrap(),
+            PathBuf::from("/home/x/.local/state/tasks/claims/sci.toml")
         );
+        assert_eq!(
+            ClaimStore::path_with("sci", env_of(&[]))
+                .unwrap_err()
+                .kind(),
+            "config",
+            "no state directory is a typed error, not a silent fallback"
+        );
+    }
+
+    #[test]
+    fn prune_with_drops_exactly_what_the_predicate_rejects() {
+        let home = tempfile::tempdir().unwrap();
+        let mut store = ClaimStore::load_from(&home.path().join("sci.toml")).unwrap();
+        let keep = TaskId::parse("sci-000001").unwrap();
+        let go = TaskId::parse("sci-000002").unwrap();
+        store.insert(&keep, sample());
+        store.insert(&go, Claim { pid: Some(43), ..sample() });
+        store.prune_with(|claim| claim.pid == Some(42));
+        assert!(store.get(&keep).is_some());
+        assert!(store.get(&go).is_none());
     }
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test --lib claims::`
-Expected: FAIL — `cannot find type Claim` / `ClaimStore`.
+Run: `cargo test --bin tasks claims::`
+Expected: FAIL — `cannot find type Claim` / `ClaimStore`. (Not `--lib`: this crate has no
+library target.)
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -117,10 +160,11 @@ use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::repo::atomic_write;
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 /// One session's advisory hold on a task. Lives outside git deliberately: a claim is
-/// ephemeral machine state, and putting it on a branch is what made `doing` invisible
+/// ephemeral machine state, and keeping it on a branch is what made `doing` invisible
 /// across worktrees in the first place.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Claim {
@@ -152,12 +196,15 @@ pub struct ClaimStore {
 
 impl ClaimStore {
     /// `XDG_STATE_HOME`, else `$HOME/.local/state`. Mirrors `Registry::path`, but under
-    /// state rather than config: a claim is disposable, and losing the file costs only
-    /// the overlay, never a task.
-    pub fn path_for(prefix: &str) -> Result<PathBuf> {
-        let base = if let Some(state) = std::env::var_os("XDG_STATE_HOME") {
+    /// state rather than config: a claim is disposable, and losing the file costs only the
+    /// overlay, never a task.
+    ///
+    /// The lookup is a parameter so tests can exercise resolution without `set_var`; the
+    /// gate runs tests in parallel and process environment is shared.
+    pub fn path_with(prefix: &str, get: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+        let base = if let Some(state) = get("XDG_STATE_HOME") {
             PathBuf::from(state)
-        } else if let Some(home) = std::env::var_os("HOME") {
+        } else if let Some(home) = get("HOME") {
             PathBuf::from(home).join(".local/state")
         } else {
             return Err(Error::Config(
@@ -167,14 +214,17 @@ impl ClaimStore {
         Ok(base.join(format!("tasks/claims/{prefix}.toml")))
     }
 
+    pub fn path_for(prefix: &str) -> Result<PathBuf> {
+        Self::path_with(prefix, std::env::var_os)
+    }
+
     pub fn load(prefix: &str) -> Result<ClaimStore> {
         Self::load_from(&Self::path_for(prefix)?)
     }
 
     pub fn load_from(path: &Path) -> Result<ClaimStore> {
         let claims = if path.exists() {
-            let text = std::fs::read_to_string(path)?;
-            toml::from_str::<StoreFile>(&text)
+            toml::from_str::<StoreFile>(&std::fs::read_to_string(path)?)
                 .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?
                 .claims
         } else {
@@ -214,41 +264,31 @@ impl ClaimStore {
     }
 
     /// Drops every claim `keep` rejects. The predicate is injected so liveness can be
-    /// exercised deterministically in tests; `prune_dead` in Task 2 is the real caller.
+    /// exercised deterministically; `prune_dead` in Task 2 is the real caller.
     pub fn prune_with(&mut self, keep: impl Fn(&Claim) -> bool) {
         self.claims.retain(|_, claim| keep(claim));
     }
 
-    /// Every claimed id paired with its claim, for the read paths.
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Claim)> {
         self.claims.iter()
     }
 }
 ```
 
-Register the module in `src/main.rs` alongside the existing `mod` lines:
+Add `mod claims;` to `src/main.rs` alongside the other `mod` lines.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cargo test --bin tasks claims::`
+Expected: PASS (4 tests). They pass under the default parallel runner, because none of them
+touch process environment.
+
+- [ ] **Step 5: Isolate the end-to-end test environment**
+
+`tests/common/mod.rs` must stop the suite inheriting a real state directory or a real agent
+identity. Extend the `env_remove` chain in `cmd` (`tests/common/mod.rs:22-28`):
 
 ```rust
-mod claims;
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `cargo test --lib claims::`
-Expected: PASS (3 tests).
-
-Note: `path_prefers_xdg_state_home_then_home` mutates process env, which is shared across
-threads. Run it serially if it proves flaky: `cargo test --lib claims:: -- --test-threads=1`.
-
-- [ ] **Step 5: Isolate the test environment**
-
-Every end-to-end test must be prevented from touching the developer's real state
-directory or inheriting a real agent identity. In `tests/common/mod.rs`, extend the
-`env_remove` chain in `cmd` (currently `tests/common/mod.rs:22-28`):
-
-```rust
-    pub fn cmd(&self, dir: &Path) -> Command {
-        let mut c = Command::cargo_bin("tasks").unwrap();
         c.env("HOME", self.home.path())
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
@@ -262,17 +302,24 @@ directory or inheriting a real agent identity. In `tests/common/mod.rs`, extend 
             .env_remove("NO_COLOR")
             .env("USER", "tester")
             .current_dir(dir);
-        c
-    }
 ```
 
-`HOME` already points at a temp dir, so with `XDG_STATE_HOME` removed the claim store
-lands under `$HOME/.local/state/tasks/claims/` inside that temp dir automatically.
+`HOME` already points at a temp dir, so with `XDG_STATE_HOME` removed the store lands under
+`$HOME/.local/state/tasks/claims/` inside it. Add a helper the later tasks use:
+
+```rust
+    /// The claim store file for `prefix`, inside this environment's temp HOME.
+    pub fn claim_store(&self, prefix: &str) -> PathBuf {
+        self.home
+            .path()
+            .join(format!(".local/state/tasks/claims/{prefix}.toml"))
+    }
+```
 
 - [ ] **Step 6: Verify isolation and commit**
 
 Run: `just check && cargo test`
-Expected: PASS, and no file appears under your real `~/.local/state/tasks/`.
+Expected: PASS, and nothing appears under your real `~/.local/state/tasks/`.
 
 ```bash
 git add src/claims.rs src/main.rs tests/common/mod.rs
@@ -289,36 +336,45 @@ git commit -m "feat(claims): add the per-prefix claim store"
 
 **Interfaces:**
 - Consumes: `Claim` from Task 1.
-- Produces: `Liveness`, `ProcStat`, `liveness(claim: &Claim) -> Liveness`, `liveness_with(claim, now: OffsetDateTime, boot_id: Option<&str>, stat: impl Fn(u32) -> ProcStat) -> Liveness`, `ClaimStore::prune_dead`, `TTL_HOURS`.
+- Produces: `Liveness::{Live, Stale}`, `ProcStat::{NotFound, Unreadable, Found}`, `proc_stat`, `boot_id`, `liveness`, `liveness_with`, `ClaimStore::prune_dead`, `TTL_HOURS`.
 
-The `_with` suffix follows the codebase's existing injection idiom (`atomic_write_with`,
-`create_task_with` in `src/repo.rs`).
+**Absence of evidence is never evidence of death.** Three distinct "we cannot tell" cases —
+no recorded pid, no recorded `pid_start`, unreadable `/proc` — all take the TTL path. Only
+positive evidence (the pid is gone, the recorded start time differs, a zombie, a different
+boot) makes a claim stale ahead of the TTL.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-Append to the `tests` module in `src/claims.rs`:
+Append to the `tests` module:
 
 ```rust
     fn at(s: &str) -> time::OffsetDateTime {
         crate::time::parse(s).unwrap()
     }
 
-    fn claim_seen(seen: &str) -> Claim {
+    fn seen(when: &str) -> Claim {
         Claim {
-            seen: seen.into(),
+            seen: when.into(),
             ..sample()
+        }
+    }
+
+    fn found(starttime: u64) -> impl Fn(u32) -> ProcStat {
+        move |_| ProcStat::Found {
+            state: 'S',
+            starttime,
         }
     }
 
     #[test]
     fn a_confirmed_live_process_beats_any_ttl() {
-        let c = claim_seen("2026-09-01T00:00:00Z"); // days stale by the clock
-        let live = |_| ProcStat::Found {
-            state: 'S',
-            starttime: 999,
-        };
         assert_eq!(
-            liveness_with(&c, at("2026-09-05T00:00:00Z"), Some("boot-a"), live),
+            liveness_with(
+                &seen("2026-09-01T00:00:00Z"),
+                at("2026-09-05T00:00:00Z"),
+                Some("boot-a"),
+                found(999)
+            ),
             Liveness::Live,
             "an agent that thinks for days is not dead"
         );
@@ -326,110 +382,145 @@ Append to the `tests` module in `src/claims.rs`:
 
     #[test]
     fn a_confirmed_dead_pid_is_stale_at_once_with_no_grace() {
-        let c = claim_seen("2026-09-05T00:00:00Z"); // seen one second ago
-        let gone = |_| ProcStat::NotFound;
         assert!(matches!(
-            liveness_with(&c, at("2026-09-05T00:00:01Z"), Some("boot-a"), gone),
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                |_| ProcStat::NotFound
+            ),
             Liveness::Stale(_)
         ));
     }
 
     #[test]
     fn a_recycled_pid_does_not_resurrect_a_claim() {
-        let c = claim_seen("2026-09-05T00:00:00Z");
-        let recycled = |_| ProcStat::Found {
-            state: 'S',
-            starttime: 12345, // != claim.pid_start
-        };
         assert!(matches!(
-            liveness_with(&c, at("2026-09-05T00:00:01Z"), Some("boot-a"), recycled),
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                found(12345) // != claim.pid_start
+            ),
             Liveness::Stale(_)
         ));
     }
 
     #[test]
-    fn a_reboot_invalidates_the_pid_and_starttime_pair() {
-        let c = claim_seen("2026-09-05T00:00:00Z");
-        let live = |_| ProcStat::Found {
-            state: 'S',
-            starttime: 999,
+    fn a_missing_recorded_start_time_takes_the_ttl_path_not_the_reuse_path() {
+        // Acquisition records `pid_start: None` when /proc was unreadable at the time. If
+        // /proc becomes readable later, there is still no evidence of reuse — only an
+        // absence of evidence — so the claim must not be declared stale on that basis.
+        let no_evidence = Claim {
+            pid_start: None,
+            ..seen("2026-09-05T00:00:00Z")
         };
+        assert_eq!(
+            liveness_with(
+                &no_evidence,
+                at("2026-09-05T01:00:00Z"),
+                Some("boot-a"),
+                found(999)
+            ),
+            Liveness::Live,
+            "inside the TTL"
+        );
         assert!(
             matches!(
-                liveness_with(&c, at("2026-09-05T00:00:01Z"), Some("boot-b"), live),
+                liveness_with(
+                    &no_evidence,
+                    at("2026-09-05T05:00:00Z"),
+                    Some("boot-a"),
+                    found(999)
+                ),
                 Liveness::Stale(_)
             ),
-            "starttime counts ticks since boot, so the pair means nothing across boots"
+            "and past it, by TTL rather than by a false reuse verdict"
+        );
+    }
+
+    #[test]
+    fn a_reboot_invalidates_the_pid_and_start_time_pair() {
+        assert!(
+            matches!(
+                liveness_with(
+                    &seen("2026-09-05T00:00:00Z"),
+                    at("2026-09-05T00:00:01Z"),
+                    Some("boot-b"),
+                    found(999)
+                ),
+                Liveness::Stale(_)
+            ),
+            "start time counts ticks since boot, so the pair means nothing across boots"
         );
     }
 
     #[test]
     fn a_zombie_is_dead() {
-        let c = claim_seen("2026-09-05T00:00:00Z");
-        let zombie = |_| ProcStat::Found {
-            state: 'Z',
-            starttime: 999,
-        };
         assert!(matches!(
-            liveness_with(&c, at("2026-09-05T00:00:01Z"), Some("boot-a"), zombie),
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                |_| ProcStat::Found { state: 'Z', starttime: 999 }
+            ),
             Liveness::Stale(_)
         ));
     }
 
     #[test]
     fn unreadable_proc_falls_to_ttl_rather_than_reading_as_death() {
-        let unreadable = |_| ProcStat::Unreadable;
-        let fresh = claim_seen("2026-09-05T00:00:00Z");
         assert_eq!(
-            liveness_with(&fresh, at("2026-09-05T03:59:00Z"), Some("boot-a"), unreadable),
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T03:59:00Z"),
+                Some("boot-a"),
+                |_| ProcStat::Unreadable
+            ),
             Liveness::Live,
-            "permission failure is not proof of death"
+            "a permission failure is not proof of death"
         );
-        let old = claim_seen("2026-09-05T00:00:00Z");
         assert!(matches!(
-            liveness_with(&old, at("2026-09-05T04:00:01Z"), Some("boot-a"), unreadable),
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T04:00:01Z"),
+                Some("boot-a"),
+                |_| ProcStat::Unreadable
+            ),
             Liveness::Stale(_)
         ));
     }
 
     #[test]
-    fn an_unreadable_boot_id_and_a_pidless_claim_both_fall_to_ttl() {
-        let live = |_| ProcStat::Found {
-            state: 'S',
-            starttime: 999,
-        };
-        let c = claim_seen("2026-09-05T00:00:00Z");
+    fn an_unreadable_boot_id_or_a_pidless_claim_falls_to_ttl() {
         assert_eq!(
-            liveness_with(&c, at("2026-09-05T01:00:00Z"), None, live),
+            liveness_with(&seen("2026-09-05T00:00:00Z"), at("2026-09-05T01:00:00Z"), None, found(999)),
             Liveness::Live
         );
         let pidless = Claim {
             pid: None,
-            ..claim_seen("2026-09-05T00:00:00Z")
+            ..seen("2026-09-05T00:00:00Z")
         };
         assert!(matches!(
-            liveness_with(&pidless, at("2026-09-05T05:00:00Z"), Some("boot-a"), live),
+            liveness_with(&pidless, at("2026-09-05T05:00:00Z"), Some("boot-a"), found(999)),
             Liveness::Stale(_)
         ));
     }
 
     #[test]
-    fn prune_dead_keeps_the_live_and_drops_the_rest() {
-        let home = tempfile::tempdir().unwrap();
-        let mut store = ClaimStore::load_from(&home.path().join("sci.toml")).unwrap();
-        let alive = TaskId::parse("sci-000001").unwrap();
-        let dead = TaskId::parse("sci-000002").unwrap();
-        store.insert(&alive, sample());
-        store.insert(&dead, Claim { pid: Some(43), ..sample() });
-        store.prune_with(|claim| claim.pid == Some(42));
-        assert!(store.get(&alive).is_some());
-        assert!(store.get(&dead).is_none());
+    fn proc_stat_parses_a_comm_containing_spaces_and_parentheses() {
+        assert_eq!(
+            parse_proc_stat("7 (weird ) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 x"),
+            ProcStat::Found { state: 'S', starttime: 4242 },
+            "fields are counted from after the LAST ')'"
+        );
+        assert_eq!(parse_proc_stat("garbage"), ProcStat::Unreadable);
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test --lib claims::`
+Run: `cargo test --bin tasks claims::`
 Expected: FAIL — `cannot find value liveness_with` / `ProcStat`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -437,9 +528,9 @@ Expected: FAIL — `cannot find value liveness_with` / `ProcStat`.
 Append to `src/claims.rs`:
 
 ```rust
-/// Hours a claim whose liveness cannot be established stays live. It applies *only* on
-/// the unverifiable path: a confirmed-live process outlives it, and a confirmed-dead one
-/// gets no grace at all.
+/// Hours a claim whose liveness cannot be established stays live. It applies *only* on the
+/// unverifiable path: a confirmed-live process outlives it, and a confirmed-dead one gets
+/// no grace at all.
 pub const TTL_HOURS: i64 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -456,25 +547,28 @@ pub enum ProcStat {
     Found { state: char, starttime: u64 },
 }
 
-/// Reads `/proc/<pid>/stat`. The `comm` field can contain spaces and parentheses, so the
-/// fields are taken from after the *last* `)`: in that remainder state is field 1 and
-/// starttime is field 20 (fields 3 and 22 overall).
-pub fn proc_stat(pid: u32) -> ProcStat {
-    let text = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return ProcStat::NotFound,
-        Err(_) => return ProcStat::Unreadable,
-    };
-    let Some((_, rest)) = text.rsplit_once(") ") else {
+/// The `comm` field can contain spaces and parentheses, so fields are taken from after the
+/// *last* `)`: in that remainder, state is field 1 and start time is field 20 (fields 3 and
+/// 22 of the whole line).
+pub fn parse_proc_stat(line: &str) -> ProcStat {
+    let Some((_, rest)) = line.rsplit_once(") ") else {
         return ProcStat::Unreadable;
     };
     let fields: Vec<&str> = rest.split_whitespace().collect();
-    match (fields.first(), fields.get(19)) {
-        (Some(state), Some(starttime)) => match (state.chars().next(), starttime.parse()) {
-            (Some(state), Ok(starttime)) => ProcStat::Found { state, starttime },
-            _ => ProcStat::Unreadable,
-        },
+    match (
+        fields.first().and_then(|s| s.chars().next()),
+        fields.get(19).and_then(|s| s.parse().ok()),
+    ) {
+        (Some(state), Some(starttime)) => ProcStat::Found { state, starttime },
         _ => ProcStat::Unreadable,
+    }
+}
+
+pub fn proc_stat(pid: u32) -> ProcStat {
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(text) => parse_proc_stat(&text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ProcStat::NotFound,
+        Err(_) => ProcStat::Unreadable,
     }
 }
 
@@ -505,15 +599,15 @@ pub fn liveness_with(
             "not seen for {}h",
             (now - seen).whole_hours().max(0)
         )),
-        // An unparsable timestamp is corruption, not liveness evidence; treat it as gone
-        // rather than pinning the task forever.
+        // A corrupt timestamp is not liveness evidence either way; treating it as gone at
+        // least keeps a garbled store from pinning a task forever.
         Err(_) => Liveness::Stale(format!("unreadable timestamp {:?}", claim.seen)),
     };
 
     let Some(pid) = claim.pid else { return ttl() };
     match (boot_id, &claim.boot_id) {
-        // On a different boot the pid/starttime pair is meaningless, so it is not
-        // "unverifiable" — it is positively dead.
+        // A different boot makes the pid/start-time pair meaningless: this is positive
+        // evidence of death, not an absence of evidence.
         (Some(current), Some(recorded)) if current != recorded => {
             return Liveness::Stale("recorded on an earlier boot".into());
         }
@@ -524,10 +618,14 @@ pub fn liveness_with(
         ProcStat::NotFound => Liveness::Stale(format!("pid {pid} is gone")),
         ProcStat::Unreadable => ttl(),
         ProcStat::Found { state: 'Z', .. } => Liveness::Stale(format!("pid {pid} is a zombie")),
-        ProcStat::Found { starttime, .. } if Some(starttime) != claim.pid_start => {
-            Liveness::Stale(format!("pid {pid} was reused by another process"))
-        }
-        ProcStat::Found { .. } => Liveness::Live,
+        // No recorded start time is an absence of evidence, not evidence of reuse.
+        ProcStat::Found { starttime, .. } => match claim.pid_start {
+            Some(recorded) if recorded != starttime => {
+                Liveness::Stale(format!("pid {pid} was reused by another process"))
+            }
+            Some(_) => Liveness::Live,
+            None => ttl(),
+        },
     }
 }
 
@@ -538,10 +636,10 @@ impl ClaimStore {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --lib claims::`
-Expected: PASS (11 tests).
+Run: `cargo test --bin tasks claims::`
+Expected: PASS (13 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -559,59 +657,55 @@ git commit -m "feat(claims): judge liveness by pid, boot id, and a four-hour fal
 - Test: `src/claims.rs`
 
 **Interfaces:**
-- Produces: `MutationLock`, `MutationLock::acquire(prefix: &str) -> Result<MutationLock>`, `MutationLock::path_for(prefix: &str) -> Result<PathBuf>`.
+- Produces: `MutationLock`, `MutationLock::{acquire, acquire_at, path_for}`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-Append to the `tests` module:
+Append to the `tests` module. These use `acquire_at` with a temp path, so no test touches
+process environment:
 
 ```rust
     #[test]
     fn the_lock_serializes_two_writers() {
         use std::sync::{Arc, Barrier};
-        let home = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_STATE_HOME", home.path()) };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sci.lock");
 
-        let lock = MutationLock::acquire("sci").unwrap();
-        let start = Arc::new(Barrier::new(2));
-        let other = {
-            let start = Arc::clone(&start);
-            let home = home.path().to_path_buf();
+        let held = MutationLock::acquire_at(&path).unwrap();
+        let ready = Arc::new(Barrier::new(2));
+        let waiter = {
+            let ready = Arc::clone(&ready);
+            let path = path.clone();
             std::thread::spawn(move || {
-                unsafe { std::env::set_var("XDG_STATE_HOME", &home) };
-                start.wait();
-                let _held = MutationLock::acquire("sci").unwrap();
+                ready.wait();
+                let _second = MutationLock::acquire_at(&path).unwrap();
                 std::time::Instant::now()
             })
         };
-        start.wait();
-        std::thread::sleep(std::time::Duration::from_millis(120));
-        let released = std::time::Instant::now();
-        drop(lock);
 
-        let acquired = other.join().unwrap();
+        ready.wait();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let released = std::time::Instant::now();
+        drop(held);
+
         assert!(
-            acquired >= released,
+            waiter.join().unwrap() >= released,
             "the second writer must not enter before the first leaves"
         );
-        unsafe { std::env::remove_var("XDG_STATE_HOME") };
     }
 
     #[test]
     fn the_lock_is_a_separate_file_from_the_store() {
-        let home = tempfile::tempdir().unwrap();
-        unsafe { std::env::set_var("XDG_STATE_HOME", home.path()) };
-        assert_ne!(
-            MutationLock::path_for("sci").unwrap(),
-            ClaimStore::path_for("sci").unwrap()
-        );
-        unsafe { std::env::remove_var("XDG_STATE_HOME") };
+        let store = ClaimStore::path_with("sci", env_of(&[("XDG_STATE_HOME", "/xdg")])).unwrap();
+        let lock = MutationLock::path_with("sci", env_of(&[("XDG_STATE_HOME", "/xdg")])).unwrap();
+        assert_ne!(store, lock);
+        assert_eq!(lock, PathBuf::from("/xdg/tasks/claims/sci.lock"));
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test --lib claims:: -- --test-threads=1`
+Run: `cargo test --bin tasks claims::`
 Expected: FAIL — `cannot find type MutationLock`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -622,28 +716,34 @@ Append to `src/claims.rs`:
 /// Serializes every read-modify-write against one project: the task markdown files *and*
 /// the claim store together.
 ///
-/// It has to span both. Checking ownership in `transition` and writing in `save` are
-/// separate steps, so a lock over the claim store alone leaves a takeover race in the gap
-/// between them. And `note`, whatever its append-only meaning, rewrites the whole markdown
-/// file at the storage layer, so an unserialized note can clobber a concurrent status
-/// change.
+/// It has to span both. The guard in `transition` and the write in `save` are separate
+/// steps, so a lock over the claim store alone leaves a takeover race in the gap between
+/// them. And `note`, whatever its append-only meaning, rewrites the whole markdown file at
+/// the storage layer, so an unserialized note can clobber a concurrent status change.
 ///
 /// The lock is its own file because `atomic_write` replaces the store's inode by rename:
-/// locking the store itself would leave each writer holding a lock on a file that is no
-/// longer at that path. A process that dies holding it has it released by the kernel, so
-/// there is no stale-lock recovery path.
+/// locking the store itself would leave each writer holding a lock on a file no longer at
+/// that path. A process that dies holding it has it released by the kernel, so there is no
+/// stale-lock recovery path.
 #[derive(Debug)]
 pub struct MutationLock {
     _file: std::fs::File,
 }
 
 impl MutationLock {
+    pub fn path_with(prefix: &str, get: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+        Ok(ClaimStore::path_with(prefix, get)?.with_file_name(format!("{prefix}.lock")))
+    }
+
     pub fn path_for(prefix: &str) -> Result<PathBuf> {
-        Ok(ClaimStore::path_for(prefix)?.with_file_name(format!("{prefix}.lock")))
+        Self::path_with(prefix, std::env::var_os)
     }
 
     pub fn acquire(prefix: &str) -> Result<MutationLock> {
-        let path = Self::path_for(prefix)?;
+        Self::acquire_at(&Self::path_for(prefix)?)
+    }
+
+    pub fn acquire_at(path: &Path) -> Result<MutationLock> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -651,7 +751,7 @@ impl MutationLock {
             .create(true)
             .truncate(false)
             .write(true)
-            .open(&path)?;
+            .open(path)?;
         file.lock()
             .map_err(|error| Error::Io(format!("locking {}: {error}", path.display())))?;
         Ok(MutationLock { _file: file })
@@ -662,10 +762,10 @@ impl MutationLock {
 The lock releases when `MutationLock` drops, because dropping the `File` closes the
 descriptor.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --lib claims:: -- --test-threads=1`
-Expected: PASS (13 tests).
+Run: `cargo test --bin tasks claims::`
+Expected: PASS (15 tests), under the default parallel runner.
 
 - [ ] **Step 5: Commit**
 
@@ -679,19 +779,17 @@ git commit -m "feat(claims): add the per-project mutation lock"
 ### Task 4: Wire the lock into Ctx without locking the read commands
 
 **Files:**
-- Modify: `src/commands/mod.rs:29-41` (`Ctx`, `open_ctx`), `src/commands/mod.rs:255-346` (`run`)
+- Modify: `src/commands/mod.rs:29-41` (`Ctx`, `open_ctx`), `src/commands/mod.rs:255-346` (`run`), `src/commands/edit.rs`
 - Test: `tests/cli.rs`
 
 **Interfaces:**
 - Consumes: `MutationLock` from Task 3.
-- Produces: `Ctx { project, registry, warnings, lock: Option<MutationLock>, claims: Option<ClaimStore> }`, `open_write_ctx(dir: Option<&Path>) -> Result<Ctx>`, `Ctx::claims_mut(&mut self) -> Result<&mut ClaimStore>`.
+- Produces: `Ctx { project, registry, warnings, lock: Option<MutationLock>, claims: Option<ClaimStore>, pending_claim: Option<ClaimIntent> }`, `open_write_ctx`, `Ctx::claims_mut`.
 
-`show`, `graph`, `check`, `add` and `feedback` keep the unlocked `open_ctx`. The eight
-write paths move to `open_write_ctx`.
+`show`, `graph`, `check`, `add` and `feedback` keep the unlocked `open_ctx`; the eight write
+paths move to `open_write_ctx`.
 
 - [ ] **Step 1: Write the failing test**
-
-Add to `tests/cli.rs`:
 
 ```rust
 #[test]
@@ -699,41 +797,46 @@ fn read_commands_do_not_take_the_mutation_lock() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let lock = env.claim_store("sci").with_file_name("sci.lock");
 
-    // The lock file only exists once a write command has taken it.
-    let lock = env
-        .home
-        .path()
-        .join(".local/state/tasks/claims/sci.lock");
     env.json(&sci, &["show", &id]);
     env.json(&sci, &["check"]);
+    env.json(&sci, &["graph"]);
     assert!(!lock.exists(), "read commands must not create the lock");
 
-    env.json(&sci, &["start", &id]);
-    assert!(lock.exists(), "a write command takes the lock");
+    env.json(&sci, &["note", &id, "hello"]);
+    assert!(lock.exists(), "a write command takes it");
 }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --test cli read_commands_do_not_take`
-Expected: FAIL — the lock file never appears, because nothing takes it yet.
+Run: `cargo test --bin tasks --test cli read_commands_do_not_take`
+Expected: FAIL — the lock file never appears.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `src/commands/mod.rs`, extend `Ctx` and add the locked constructor:
+In `src/commands/mod.rs`:
 
 ```rust
 use crate::claims::{ClaimStore, MutationLock};
+
+/// What `save` must do to the claim store once every validation has passed. Recorded by
+/// the guard in `transition`; **nothing is persisted until `save` acts on it.**
+pub enum ClaimIntent {
+    Acquire(crate::claims::Claim),
+    Release,
+}
 
 pub struct Ctx {
     pub project: Project,
     pub registry: Registry,
     pub warnings: Vec<String>,
-    /// Held for the life of a write command; `None` for the read commands that also take
-    /// a `Ctx` (`show`, `graph`, `check`) and for the two create-only paths.
+    /// Held for the life of a write command; `None` for the read commands that also take a
+    /// `Ctx` (`show`, `graph`, `check`) and for the two create-only paths.
     pub lock: Option<MutationLock>,
     claims: Option<ClaimStore>,
+    pending_claim: Option<(TaskId, ClaimIntent)>,
 }
 
 pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
@@ -744,15 +847,17 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
         warnings: Vec::new(),
         lock: None,
         claims: None,
+        pending_claim: None,
     })
 }
 
 /// `open_ctx` plus the project's mutation lock, held until the command ends.
 ///
-/// The lock cannot simply live in `open_ctx`: `show`, `graph` and `check` take a `Ctx`
-/// too and must stay read-only, and giving them an exclusive lock would have them block
-/// on writers and on each other. Readers need no shared lock either — `atomic_write`
-/// publishes by rename, so a reader sees one whole version or another, never a torn one.
+/// The lock cannot simply live in `open_ctx`: `show` (`mod.rs:289`), `graph`
+/// (`mod.rs:329`) and `check` (`mod.rs:330`) take a `Ctx` too and must stay read-only, and
+/// an exclusive lock would have them block on writers and on each other. Readers need no
+/// shared lock either — `atomic_write` publishes by rename, so a reader sees one whole
+/// version or another, never a torn one.
 pub fn open_write_ctx(dir: Option<&Path>) -> Result<Ctx> {
     let mut ctx = open_ctx(dir)?;
     ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
@@ -761,7 +866,7 @@ pub fn open_write_ctx(dir: Option<&Path>) -> Result<Ctx> {
 
 impl Ctx {
     /// The claim store, loaded on first use. Only reachable with the lock held, so every
-    /// read-check-write against it is inside one critical section.
+    /// read-check-write against it sits inside one critical section.
     pub fn claims_mut(&mut self) -> Result<&mut ClaimStore> {
         if self.lock.is_none() {
             return Err(Error::Io(
@@ -776,55 +881,26 @@ impl Ctx {
 }
 ```
 
-Then in `run`, switch exactly the eight write paths (leave `Show`, `Graph`, `Check`,
-`Add`, `Feedback` on `open_ctx`):
-
-```rust
-        } => edit::run(open_write_ctx(dir)?, id, title, status, force, no_parent, fields),
-        Command::Prime { all_projects } => list::prime(open_read_ctx(dir, all_projects)?),
-        Command::Note { id, text } => status::note(open_write_ctx(dir)?, id, text),
-        Command::Start { id } => status::start(open_write_ctx(dir)?, id),
-        Command::Done { id, message, force } => {
-            status::close(open_write_ctx(dir)?, id, Status::Done, message, force)
-        }
-        Command::Drop { id, message } => {
-            status::close(open_write_ctx(dir)?, id, Status::Dropped, message, false)
-        }
-        Command::Block { id, message } => status::block(open_write_ctx(dir)?, id, message),
-        Command::Unblock { id } => status::unblock(open_write_ctx(dir)?, id),
-        Command::Dep { id, on, rm } => dep::run(open_write_ctx(dir)?, id, on, rm),
-```
-
-Add the `Ctx { .. }` literal in the `Command::Add` arm (`src/commands/mod.rs:280-285`) the
-two new fields:
-
-```rust
-                    Ctx {
-                        project,
-                        registry,
-                        warnings: Vec::new(),
-                        lock: None,
-                        claims: None,
-                    }
-```
+Switch exactly the eight write paths in `run` to `open_write_ctx` — `Edit`, `Note`, `Start`,
+`Done`, `Drop`, `Block`, `Unblock`, `Dep` — leaving `Show`, `Graph`, `Check`, `Add` and
+`Feedback` on `open_ctx`. Add the three new fields to the `Ctx { .. }` literal in the
+`Command::Add` arm (`src/commands/mod.rs:280-285`).
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test --test cli read_commands_do_not_take`
-Expected: PASS. The `start` at the end creates the lock file even though it does not yet
-write a claim.
+Run: `cargo test --bin tasks --test cli read_commands_do_not_take`
+Expected: PASS.
 
 - [ ] **Step 5: Release the lock around the interactive editor**
 
-In `src/commands/edit.rs`, `editor()` waits on `$EDITOR`, which can be a human's minutes.
-Drop the lock before spawning and re-acquire before validating. The existing raw-content
-comparison at `edit.rs:134-142` already covers the unlocked window with
-`concurrent_modification`, so no new mechanism is needed. Immediately before the
-`std::process::Command::new("sh")` call:
+`editor()` waits on `$EDITOR`, which can be a human's minutes. Drop the lock before spawning
+and re-acquire before validating. Immediately before the `std::process::Command::new("sh")`
+call in `src/commands/edit.rs`:
 
 ```rust
-    // The lock must not span a human's editing session; the raw-content comparison below
-    // is what protects the gap.
+    // The lock must not span a human's editing session. The raw-content comparison further
+    // down is what protects the gap, and because no claim is persisted until `save`, a
+    // rejected concurrent edit cannot leave a claim behind either.
     let prefix = ctx.project.prefix.clone();
     ctx.lock = None;
 ```
@@ -835,15 +911,13 @@ and immediately after the `if !status.success()` block:
     ctx.lock = Some(crate::claims::MutationLock::acquire(&prefix)?);
 ```
 
-`editor` takes `mut ctx: Ctx` already, so no signature change is needed.
-
 - [ ] **Step 6: Verify and commit**
 
 Run: `just check && cargo test`
 Expected: PASS.
 
 ```bash
-git add src/commands/mod.rs src/commands/edit.rs tests/cli.rs
+git add src/commands tests/cli.rs
 git commit -m "feat(claims): hold a mutation lock for write commands only"
 ```
 
@@ -852,37 +926,32 @@ git commit -m "feat(claims): hold a mutation lock for write commands only"
 ### Task 5: Session identity and the `claimed` error kind
 
 **Files:**
-- Modify: `src/claims.rs`, `src/error.rs:3-37` (variants), `src/error.rs:74-90` (`kind`), `src/error.rs:47-71` (`with_suffix`)
+- Modify: `src/claims.rs`, `src/error.rs`
 - Test: `src/claims.rs`
 
 **Interfaces:**
-- Produces: `Identity { session: String, pid: Option<u32> }`, `identity() -> Identity`, `identity_from(get: impl Fn(&str) -> Option<String>, session_pid: Option<u32>) -> Identity`, `Error::Claimed(String, String)` with kind `"claimed"`.
+- Produces: `Identity { session, pid }`, `identity() -> Result<Identity>`, `identity_from(get, session_pid) -> Result<Identity>`, `unix_session_id`, `hostname`, `Error::Claimed(String, String)` with kind `"claimed"`.
 
-- [ ] **Step 1: Write the failing test**
+**Unresolvable identity is a typed error, never a shared default.** A placeholder session
+would make every anonymous caller pass the same-session check, defeating both the refusal
+and ownership-aware release. TTL can stand in for unavailable *liveness*; nothing stands in
+for unavailable *identity*.
 
-Append to the `tests` module in `src/claims.rs`:
+- [ ] **Step 1: Write the failing tests**
 
 ```rust
-    fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + '_ {
-        move |key| {
-            pairs
-                .iter()
-                .find(|(k, _)| *k == key)
-                .map(|(_, v)| v.to_string())
-        }
-    }
-
     #[test]
     fn identity_prefers_the_explicit_pair() {
         let id = identity_from(
-            &env_of(&[
+            env_of(&[
                 ("TASKS_SESSION", "explicit"),
                 ("TASKS_SESSION_PID", "7"),
                 ("CLAUDE_CODE_SESSION_ID", "claude"),
                 ("CLAUDE_PID", "9"),
             ]),
             Some(11),
-        );
+        )
+        .unwrap();
         assert_eq!(id.session, "explicit");
         assert_eq!(id.pid, Some(7));
     }
@@ -890,7 +959,7 @@ Append to the `tests` module in `src/claims.rs`:
     #[test]
     fn a_level_never_borrows_another_levels_pid() {
         // Claude Code old enough to export the session but not CLAUDE_PID.
-        let id = identity_from(&env_of(&[("CLAUDE_CODE_SESSION_ID", "claude")]), Some(11));
+        let id = identity_from(env_of(&[("CLAUDE_CODE_SESSION_ID", "claude")]), Some(11)).unwrap();
         assert_eq!(id.session, "claude");
         assert_eq!(
             id.pid, None,
@@ -900,26 +969,34 @@ Append to the `tests` module in `src/claims.rs`:
 
     #[test]
     fn falls_back_to_the_unix_session_id() {
-        let id = identity_from(&env_of(&[]), Some(11));
+        let id = identity_from(env_of(&[]), Some(11)).unwrap();
         assert_eq!(id.session, "sid:11");
         assert_eq!(id.pid, Some(11));
     }
 
     #[test]
-    fn an_empty_env_var_does_not_count_as_set() {
-        let id = identity_from(&env_of(&[("TASKS_SESSION", "")]), Some(11));
-        assert_eq!(id.session, "sid:11");
+    fn an_empty_variable_does_not_count_as_set() {
+        let id = identity_from(env_of(&[("TASKS_SESSION", "")]), Some(11)).unwrap();
+        assert_eq!(id.session, "sid:11", "emptiness is filtered inside the helper");
+    }
+
+    #[test]
+    fn unresolvable_identity_is_an_error_not_a_shared_placeholder() {
+        let error = identity_from(env_of(&[]), None).unwrap_err();
+        assert_eq!(error.kind(), "config");
+        assert!(
+            error.to_string().contains("TASKS_SESSION"),
+            "the message names the way out: {error}"
+        );
     }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test --lib claims::`
+Run: `cargo test --bin tasks claims::`
 Expected: FAIL — `cannot find function identity_from`.
 
 - [ ] **Step 3: Write minimal implementation**
-
-Append to `src/claims.rs`:
 
 ```rust
 /// Who holds a claim, and the pid that proves it is still alive.
@@ -937,45 +1014,57 @@ pub fn unix_session_id() -> Option<u32> {
     rest.split_whitespace().nth(3)?.parse().ok()
 }
 
-pub fn identity() -> Identity {
-    identity_from(
-        |key| std::env::var(key).ok().filter(|value| !value.is_empty()),
-        unix_session_id(),
-    )
+pub fn identity() -> Result<Identity> {
+    identity_from(std::env::var_os, unix_session_id())
 }
 
-/// Session and pid are resolved as a **pair from a single level**. A level that yields a
-/// session but no usable pid yields `pid: None` and falls to the TTL path; it is never
-/// welded to an unrelated fallback pid.
+/// Session and pid resolve as a **pair from a single level**. A level that yields a session
+/// but no usable pid yields `pid: None` and falls to the TTL path; it is never welded to an
+/// unrelated fallback pid.
 ///
 /// Level 2 names Claude Code's variables because `skills/tasks/SKILL.md` ships to agent
-/// projects, so agents are a first-class consumer and this makes claims work with no
-/// setup. `CLAUDE_PID` needs a recent Claude Code; without it level 2 still supplies the
-/// session.
+/// projects, so agents are a first-class consumer and this makes claims work with no setup.
+/// `CLAUDE_PID` needs a recent Claude Code; without it, level 2 still supplies the session.
 ///
 /// Level 3 is *terminal* identity, not agent identity: several agents can share one
 /// terminal, and a terminal outlives the agent that ran in it. Subagents inside one Claude
 /// Code process likewise share level 2. `TASKS_SESSION` is the escape hatch for both.
-pub fn identity_from(get: impl Fn(&str) -> Option<String>, session_pid: Option<u32>) -> Identity {
-    let pid_of = |key: &str| get(key).and_then(|value| value.parse().ok());
-    if let Some(session) = get("TASKS_SESSION") {
-        return Identity {
+///
+/// When nothing resolves, this is an error. A placeholder session would make every
+/// anonymous caller pass the same-session check, silently turning "no identity" into
+/// "shared ownership" and defeating both the refusal and ownership-aware release.
+pub fn identity_from(
+    get: impl Fn(&str) -> Option<OsString>,
+    session_pid: Option<u32>,
+) -> Result<Identity> {
+    let var = |key: &str| {
+        get(key)
+            .and_then(|value| value.into_string().ok())
+            .filter(|value| !value.is_empty())
+    };
+    let pid_of = |key: &str| var(key).and_then(|value| value.parse().ok());
+    if let Some(session) = var("TASKS_SESSION") {
+        return Ok(Identity {
             session,
             pid: pid_of("TASKS_SESSION_PID"),
-        };
+        });
     }
-    if let Some(session) = get("CLAUDE_CODE_SESSION_ID") {
-        return Identity {
+    if let Some(session) = var("CLAUDE_CODE_SESSION_ID") {
+        return Ok(Identity {
             session,
             pid: pid_of("CLAUDE_PID"),
-        };
+        });
     }
-    Identity {
-        session: match session_pid {
-            Some(pid) => format!("sid:{pid}"),
-            None => "unknown".into(),
-        },
-        pid: session_pid,
+    match session_pid {
+        Some(pid) => Ok(Identity {
+            session: format!("sid:{pid}"),
+            pid: Some(pid),
+        }),
+        None => Err(Error::Config(
+            "cannot determine a session identity: set TASKS_SESSION (no \
+             CLAUDE_CODE_SESSION_ID, and /proc/self/stat is unreadable)"
+                .into(),
+        )),
     }
 }
 
@@ -986,697 +1075,140 @@ pub fn hostname() -> String {
 }
 ```
 
-In `src/error.rs`, add the variant next to the other typed failures:
+In `src/error.rs` add the variant, its `kind` (`"claimed"`), and its `with_suffix` arm:
 
 ```rust
     #[error("{0} is claimed by {1}")]
     Claimed(String, String),
 ```
-
-its `kind`:
-
 ```rust
             Error::Claimed(..) => "claimed",
 ```
-
-and its `with_suffix` arm:
-
 ```rust
             Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --lib claims::`
-Expected: PASS (17 tests).
+Run: `cargo test --bin tasks claims::`
+Expected: PASS (20 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/claims.rs src/error.rs
-git commit -m "feat(claims): resolve session identity as a pair and add the claimed error"
+git commit -m "feat(claims): resolve session identity as a pair, failing when unresolvable"
 ```
-
 ---
 
-### Task 6: The guard, acquire, and destination-based release
+### Task 6: Claims in the JSON and pretty output
 
-This is the core task. It is one unit because the guard, the acquire and the release are a
-single transaction — a reviewer cannot sensibly accept one without the others.
+This comes *before* the guard so the later tasks' assertions have a contract to assert
+against. It is tested with a hand-written store fixture, so it depends on nothing but Task 1.
 
 **Files:**
-- Modify: `src/commands/mod.rs` (`transition`, `save`, new `Ctx` claim helpers), `src/commands/status.rs` (`note` heartbeat)
+- Modify: `src/output.rs` (`ClaimInfo`, `TaskSummary`, `ShowFields`, `pretty`), `src/commands/show.rs`, `src/commands/list.rs`
 - Test: `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `Ctx::claims_mut` (Task 4), `identity`, `liveness`, `Liveness`, `Claim`, `hostname` (Tasks 1-5).
-- Produces: `transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Result<()>` (now `&mut Ctx`), `save(ctx: &mut Ctx, task: &mut Task) -> Result<()>` (now `&mut Ctx`), `Ctx::describe_claim(&Claim, &Liveness) -> String`.
+- Produces: `ClaimInfo { owner, session, host, pid, worktree, started, seen, live }`, `ClaimInfo::of(&Claim)`, `TaskSummary.claim`, `ShowFields.claim`, `TaskSummary::of(task, all, Option<&ClaimStore>)`.
+- Test helper produced: `write_claim(&TestEnv, prefix, id, session, live)`.
 
-`transition` and `save` change from `&Ctx` to `&mut Ctx`. Every caller in
-`src/commands/{status,edit,add,dep}.rs` needs `mut ctx` — mechanical, and the compiler
-lists them all.
+**`ShowOut.fields` is `#[serde(flatten)]`** (`src/output.rs:78`), so `show` exposes the claim
+at `v["claim"]`. Asserting `v["fields"]["claim"]` silently passes every null assertion and
+fails every positive one.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing test**
 
-Add to `tests/cli.rs`. `two_roots` gives two temp projects sharing one prefix, which is
-what a main checkout and a worktree look like to the claim store:
+Add the fixture helper and the test to `tests/cli.rs`:
 
 ```rust
-/// Two project roots sharing one prefix: what a main checkout and a worktree look like to
-/// a store keyed by prefix. The second `init` needs `--force` because the registry refuses
-/// to re-point a prefix silently.
-fn two_roots(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {
-    let a = env.init("sci");
-    let dir = tempfile::tempdir().unwrap();
-    let b = dir.path().canonicalize().unwrap();
-    std::mem::forget(dir); // keep it alive for the test process
-    env.json(&b, &["init", "--prefix", "sci", "--force"]);
-    (a, b)
-}
-
-#[test]
-fn a_live_claim_from_another_session_refuses_start() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-
-    env.cmd(&sci)
-        .args(["start", &id])
-        .env("TASKS_SESSION", "agent-a")
-        .env("TASKS_SESSION_PID", &std::process::id().to_string())
-        .assert()
-        .success();
-
-    let out = env
-        .cmd(&sci)
-        .args(["start", &id])
-        .env("TASKS_SESSION", "agent-b")
-        .env("TASKS_SESSION_PID", &std::process::id().to_string())
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    assert_eq!(v["error"]["kind"], "claimed");
-    assert!(
-        v["error"]["message"].as_str().unwrap().contains("agent-a"),
-        "the refusal names the holder: {v}"
-    );
-}
-
-#[test]
-fn a_displaced_session_cannot_close_the_task_it_lost() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    let pid = std::process::id().to_string();
-
-    let a = |args: &[&str]| {
-        env.cmd(&sci)
-            .args(args)
-            .env("TASKS_SESSION", "agent-a")
-            .env("TASKS_SESSION_PID", &pid)
-            .output()
-            .unwrap()
+/// Writes a claim straight into the store.
+///
+/// A `live` claim carries the *test process's own* pid, start time and boot id, so the
+/// liveness rules confirm it. That matters: a fixture without this metadata is stale, and a
+/// stale claim can be pruned out from under an assertion, letting a test pass without ever
+/// exercising what it names. `seen` is deliberately ancient, which also pins the rule that a
+/// confirmed-live process beats any TTL.
+fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
+    let path = env.claim_store(prefix);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let (pid, pid_start, boot) = if live {
+        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+        let rest = stat.rsplit_once(") ").unwrap().1.to_string();
+        let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+        (std::process::id(), start, boot.trim().to_string())
+    } else {
+        (0, 1, "not-this-boot".to_string())
     };
-    let b = |args: &[&str]| {
-        env.cmd(&sci)
-            .args(args)
-            .env("TASKS_SESSION", "agent-b")
-            .env("TASKS_SESSION_PID", &pid)
-            .output()
-            .unwrap()
-    };
-
-    assert!(a(&["start", &id]).status.success());
-    assert!(b(&["start", "--force", &id]).status.success());
-
-    for args in [
-        vec!["done", &id, "landed"],
-        vec!["drop", &id, "nope"],
-        vec!["block", &id, "waiting"],
-        vec!["edit", &id, "--status", "done"],
-    ] {
-        let out = a(&args);
-        assert_eq!(out.status.code(), Some(1), "A must not close {args:?}");
-        let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-        assert_eq!(v["error"]["kind"], "claimed", "{args:?}");
-    }
-
-    // B's claim survived every one of A's attempts.
-    let v = env.json(&sci, &["show", &id]);
-    assert_eq!(v["fields"]["claim"]["session"], "agent-b");
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&format!(
+        "[claims.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\npid = {pid}\n\
+         pid_start = {pid_start}\nboot_id = \"{boot}\"\nhost = \"h\"\n\
+         worktree = \"/elsewhere\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
+         seen = \"2026-01-01T00:00:00Z\"\n"
+    ));
+    std::fs::write(&path, text).unwrap();
 }
 
 #[test]
-fn release_follows_the_claim_not_the_local_doing_status() {
-    let mut env = TestEnv::new();
-    let (a, b) = two_roots(&mut env);
-    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
-    let pid = std::process::id().to_string();
-
-    // Root A claims it. Root B's copy of the file is untouched and still reads `todo` —
-    // the ordinary cross-worktree case.
-    env.cmd(&a)
-        .args(["start", &id])
-        .env("TASKS_SESSION", "agent-a")
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-    std::fs::copy(a.join(format!("tasks/{id}.md")), b.join(format!("tasks/{id}.md")))
-        .ok();
-    std::fs::write(
-        b.join(format!("tasks/{id}.md")),
-        env.read(&a, &format!("tasks/{id}.md")).replace("status: doing", "status: todo"),
-    )
-    .unwrap();
-
-    // The same session closes it from root B, where the local status was never `doing`.
-    env.cmd(&b)
-        .args(["done", &id, "landed"])
-        .env("TASKS_SESSION", "agent-a")
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-
-    let v = env.json(&a, &["show", &id]);
-    assert!(
-        v["fields"]["claim"].is_null(),
-        "the claim must be released even though this checkout never left doing: {v}"
-    );
-}
-
-#[test]
-fn a_stale_local_done_does_not_prune_a_live_claim() {
-    let mut env = TestEnv::new();
-    let (a, b) = two_roots(&mut env);
-    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
-    let pid = std::process::id().to_string();
-
-    // Root B holds a live claim.
-    env.cmd(&b)
-        .args(["start", &id])
-        .env("TASKS_SESSION", "agent-b")
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-
-    // Root A's copy is an older `done` — a branch that closed the task before B reopened it.
-    env.json(&a, &["edit", &id, "--status", "done"]);
-
-    // A write from root A must not treat its own view as authority over the shared claim.
-    env.json(&a, &["edit", &id, "-p", "1"]);
-    let v = env.json(&b, &["show", &id]);
-    assert_eq!(
-        v["fields"]["claim"]["session"], "agent-b",
-        "one checkout's view cannot establish that a shared claim is obsolete: {v}"
-    );
-}
-
-#[test]
-fn re_running_a_close_retries_the_release() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    let pid = std::process::id().to_string();
-    let session = "agent-a";
-
-    env.cmd(&sci)
-        .args(["start", &id])
-        .env("TASKS_SESSION", session)
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-    env.cmd(&sci)
-        .args(["done", &id, "landed"])
-        .env("TASKS_SESSION", session)
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-
-    // Simulate a release that failed after the file write: the task is closed, the claim
-    // is still there. `start --force` cannot recover this — `done -> doing` is rejected.
-    let store = env.home.path().join(".local/state/tasks/claims/sci.toml");
-    std::fs::write(
-        &store,
-        format!(
-            "[claims.\"{id}\"]\nowner = \"tester\"\nsession = \"{session}\"\npid = {pid}\n\
-             host = \"h\"\nworktree = \"/tmp\"\nstarted = \"2026-09-05T00:00:00Z\"\n\
-             seen = \"2026-09-05T00:00:00Z\"\n"
-        ),
-    )
-    .unwrap();
-    assert_eq!(env.fail(&sci, &["start", "--force", &id]), "invalid_transition");
-
-    // Re-running the original closing command is the recovery: a same-status transition
-    // still attempts the release.
-    env.cmd(&sci)
-        .args(["done", &id, "landed"])
-        .env("TASKS_SESSION", session)
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-    let v = env.json(&sci, &["show", &id]);
-    assert!(v["fields"]["claim"].is_null(), "the retry released it: {v}");
-}
-
-#[test]
-fn a_stale_claim_is_taken_over_with_a_warning() {
+fn claim_appears_in_show_and_list_json() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
 
-    // pid 0 never names a live process, so this claim is confirmed dead, not merely old.
-    let store = env.home.path().join(".local/state/tasks/claims/sci.toml");
-    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    std::fs::write(
-        &store,
-        format!(
-            "[claims.\"{id}\"]\nowner = \"ghost\"\nsession = \"dead-agent\"\npid = 0\n\
-             pid_start = 1\nboot_id = \"nope\"\nhost = \"h\"\nworktree = \"/tmp\"\n\
-             started = \"2026-09-05T00:00:00Z\"\nseen = \"2026-09-05T00:00:00Z\"\n"
-        ),
-    )
-    .unwrap();
+    // ShowOut.fields is #[serde(flatten)], so the claim is at the top level.
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
 
-    let v = env.json(&sci, &["start", &id]);
-    let warnings = v["warnings"].as_array().unwrap();
+    write_claim(&env, "sci", &id, "agent-a", true);
+
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["claim"]["session"], "agent-a");
+    assert_eq!(v["claim"]["live"], true);
+    assert_eq!(v["claim"]["worktree"], "/elsewhere");
+    assert_eq!(v["claim"]["pid"], std::process::id());
+
+    let list = env.json(&sci, &["list"]);
+    assert_eq!(list["tasks"][0]["claim"]["session"], "agent-a");
+}
+
+#[test]
+fn a_dead_claim_is_reported_as_not_live() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_claim(&env, "sci", &id, "ghost", false);
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["live"], false);
+}
+
+#[test]
+fn pretty_rows_name_the_claim_holder_not_the_local_owner() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_claim(&env, "sci", &id, "agent-a", true);
+
+    let out = env.cmd(&sci).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(
-        warnings.iter().any(|w| w.as_str().unwrap().contains("dead-agent")),
-        "taking over a stale claim names the displaced holder: {v}"
+        text.contains("someone"),
+        "the claim's own owner, which the local file may not know: {text}"
     );
 }
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test --test cli claim`
-Expected: FAIL — `start` has no `--force`, `show` has no `claim` field, nothing refuses.
-
-- [ ] **Step 3: Write the implementation**
-
-In `src/commands/mod.rs`, add the claim transaction to `Ctx`:
-
-```rust
-use crate::claims::{Claim, ClaimStore, Liveness, MutationLock, identity, liveness};
-
-/// What `save` must do to the claim store once the task file is on disk.
-enum ClaimOp {
-    /// Acquired before the write; undo it if the write fails.
-    Acquired(TaskId),
-    /// Release after the write succeeds.
-    ReleaseAfterSave(TaskId),
-}
-```
-
-Add to `impl Ctx`:
-
-```rust
-    pub fn describe_claim(claim: &Claim, liveness: &Liveness) -> String {
-        let pid = match claim.pid {
-            Some(pid) => format!(" pid {pid}"),
-            None => String::new(),
-        };
-        let state = match liveness {
-            Liveness::Live => "live".to_string(),
-            Liveness::Stale(why) => format!("stale: {why}"),
-        };
-        format!(
-            "{} (session {}, owner {}, host {}{pid}, worktree {}, since {}, {state})",
-            claim.session, claim.session, claim.owner, claim.host, claim.worktree, claim.started
-        )
-    }
-
-    /// Guard and acquire, run inside `transition` while the mutation lock is held.
-    ///
-    /// Release is **destination-based**: any destination other than `doing` releases this
-    /// session's claim. It must not key off *leaving* a local `doing`, because a session
-    /// can hold the shared claim while its own checkout still reads `todo` — the ordinary
-    /// cross-worktree case — and its `done` there would otherwise strand the claim.
-    fn claim_transition(&mut self, id: &TaskId, to: Status, force: bool) -> Result<()> {
-        let me = identity();
-        let store = self.claims_mut()?;
-        let mut warning = None;
-
-        if let Some(existing) = store.get(id) {
-            let live = liveness(existing);
-            let mine = existing.session == me.session;
-            match (&live, mine) {
-                (Liveness::Live, false) if !(force && to == Status::Doing) => {
-                    return Err(Error::Claimed(
-                        id.to_string(),
-                        Ctx::describe_claim(existing, &live),
-                    ));
-                }
-                (Liveness::Live, false) => {
-                    warning = Some(format!(
-                        "took over a live claim held by {}",
-                        Ctx::describe_claim(existing, &live)
-                    ));
-                }
-                (Liveness::Stale(_), false) => {
-                    warning = Some(format!(
-                        "took over {}",
-                        Ctx::describe_claim(existing, &live)
-                    ));
-                }
-                _ => {}
-            }
-        }
-
-        // Liveness pruning is one of exactly two ways a claim goes away; the other is a
-        // successful guarded release below. Local status never prunes: this checkout's
-        // view of the task may be the older one, and another branch may have reopened and
-        // claimed it since.
-        store.prune_dead();
-
-        self.pending_claim = if to == Status::Doing {
-            let now = crate::time::now();
-            let claim = Claim {
-                owner: owner_name(&self.project)?,
-                session: me.session,
-                pid: me.pid,
-                pid_start: me.pid.and_then(|pid| match crate::claims::proc_stat(pid) {
-                    crate::claims::ProcStat::Found { starttime, .. } => Some(starttime),
-                    _ => None,
-                }),
-                boot_id: crate::claims::boot_id(),
-                host: crate::claims::hostname(),
-                worktree: self.project.root.display().to_string(),
-                started: now.clone(),
-                seen: now,
-            };
-            self.claims_mut()?.insert(id, claim);
-            self.claims_mut()?.save()?;
-            Some(ClaimOp::Acquired(id.clone()))
-        } else if self
-            .claims_mut()?
-            .get(id)
-            .is_some_and(|claim| claim.session == me.session)
-        {
-            Some(ClaimOp::ReleaseAfterSave(id.clone()))
-        } else {
-            self.claims_mut()?.save()?; // persist the pruning
-            None
-        };
-
-        if let Some(warning) = warning {
-            self.warnings.push(warning);
-        }
-        Ok(())
-    }
-
-    /// Settle the claim store once the task file write has resolved.
-    fn finish_claim(&mut self, wrote: bool) -> Result<()> {
-        match self.pending_claim.take() {
-            // Acquire failed at the file write: undo the claim so a failed `start` does
-            // not leave the task looking busy.
-            Some(ClaimOp::Acquired(id)) if !wrote => {
-                let store = self.claims_mut()?;
-                store.remove(&id);
-                if let Err(error) = store.save() {
-                    self.warnings.push(format!(
-                        "{id} is still claimed after a failed write ({error}); \
-                         run `tasks start --force {id}` to reclaim it"
-                    ));
-                }
-            }
-            Some(ClaimOp::ReleaseAfterSave(id)) if wrote => {
-                let store = self.claims_mut()?;
-                store.remove(&id);
-                if let Err(error) = store.save() {
-                    // Liveness pruning will not reclaim this while the session lives, and
-                    // `start --force` cannot: `can_transition` rejects `done -> doing`.
-                    self.warnings.push(format!(
-                        "{id} was closed but its claim was not released ({error}); \
-                         re-run the same command to retry the release"
-                    ));
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-```
-
-Add `pending_claim: Option<ClaimOp>` to `Ctx` (defaulting to `None` in both constructors
-and in the `Command::Add` literal), then thread it through `transition` and `save`:
-
-```rust
-pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Result<()> {
-    if !Status::can_transition(task.status, to) {
-        return Err(Error::InvalidTransition(
-            task.status.as_str().into(),
-            to.as_str().into(),
-        ));
-    }
-    // The claim guard runs before the dependency and descendant checks so that a session
-    // that no longer holds the task is told *that*, rather than something incidental.
-    ctx.claim_transition(&task.id, to, force)?;
-    if to == Status::Done && task.status != Status::Done && !force {
-        let open = open_deps(ctx, task)?;
-        if !open.is_empty() {
-            return Err(Error::OpenDependencies(
-                task.id.to_string(),
-                open.join(", "),
-            ));
-        }
-    }
-    let closing = matches!(to, Status::Done | Status::Dropped) && task.status != to;
-    if closing && !(force && to == Status::Done) {
-        let all = ctx.project.scan()?;
-        let open: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id)
-            .iter()
-            .map(|task| task.id.to_string())
-            .collect();
-        if !open.is_empty() {
-            return Err(Error::OpenDescendants(task.id.to_string(), open.join(", ")));
-        }
-    }
-    task.status = to;
-    Ok(())
-}
-
-pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
-    task.updated = crate::time::now();
-    validate_task(task)?;
-    ctx.project.validate_docs(task)?;
-    // Acquire is claim-then-file and release is file-then-claim, so both orders fail
-    // toward "claim held": a claim with no file update makes an idle task look busy and
-    // self-heals when the session dies, while a file update with no claim is the
-    // invisibility bug this exists to remove.
-    let wrote = ctx.project.write_task(task);
-    ctx.finish_claim(wrote.is_ok())?;
-    wrote
-}
-```
-
-`open_deps` takes `&Ctx`; calling it with a `&mut Ctx` reborrows fine.
-
-In `src/commands/status.rs`, make the callers `mut` and add the heartbeat:
-
-```rust
-pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
-    let owner = owner_name(&ctx.project)?;
-    append_note(&mut task, &owner, &text)?;
-    save(&mut ctx, &mut task)?;
-    // The heartbeat, and only on our own claim: `note` never touches a foreign one and is
-    // never refused. It is still serialized under the mutation lock, because a note
-    // rewrites the whole markdown file however append-only it is in meaning.
-    let me = crate::claims::identity();
-    let store = ctx.claims_mut()?;
-    if let Some(claim) = store.get(&task.id)
-        && claim.session == me.session
-    {
-        let mut refreshed = claim.clone();
-        refreshed.seen = crate::time::now();
-        store.insert(&task.id, refreshed);
-        store.save()?;
-    }
-    Ok(id_out(ctx, &task))
-}
-```
-
-Apply `mut ctx` and `save(&mut ctx, ...)` / `transition(&mut ctx, ...)` in `start`,
-`close`, `unblock` (`src/commands/status.rs`), `edit::run` and `editor`
-(`src/commands/edit.rs`), `add::run` (`src/commands/add.rs`) and `dep::run`
-(`src/commands/dep.rs`). The compiler names every one.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cargo test --test cli claim && cargo test`
-Expected: PASS. `a_live_claim_from_another_session_refuses_start`,
-`a_displaced_session_cannot_close_the_task_it_lost`,
-`release_follows_the_claim_not_the_local_doing_status`,
-`a_stale_local_done_does_not_prune_a_live_claim`, `re_running_a_close_retries_the_release`
-and `a_stale_claim_is_taken_over_with_a_warning` all pass once Tasks 7 and 8 land the
-`--force` flag and the `claim` output field; run them at the end of Task 8 if they fail
-only on those two.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/commands src/claims.rs tests/cli.rs
-git commit -m "feat(claims): guard status changes and release by destination"
-```
-
----
-
-### Task 7: `tasks start --force` takeover
-
-**Files:**
-- Modify: `src/cli.rs:125-126`, `src/commands/mod.rs` (`Command::Start` arm), `src/commands/status.rs` (`start`)
-- Test: `tests/cli.rs`
-
-**Interfaces:**
-- Consumes: `claim_transition(.., force)` from Task 6.
-- Produces: `Command::Start { id: String, force: bool }`; `status::start(ctx, id, force)`.
-
-- [ ] **Step 1: Write the failing test**
-
-```rust
-#[test]
-fn force_takeover_records_a_note_naming_the_displaced_session() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    let pid = std::process::id().to_string();
-
-    env.cmd(&sci)
-        .args(["start", &id])
-        .env("TASKS_SESSION", "agent-a")
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-    env.cmd(&sci)
-        .args(["start", "--force", &id])
-        .env("TASKS_SESSION", "agent-b")
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-
-    let raw = env.read(&sci, &format!("tasks/{id}.md"));
-    assert!(
-        raw.contains("agent-a"),
-        "the takeover is recorded in the task's notes: {raw}"
-    );
-    let v = env.json(&sci, &["show", &id]);
-    assert_eq!(v["fields"]["claim"]["session"], "agent-b");
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cargo test --test cli force_takeover`
-Expected: FAIL — `unexpected argument '--force'`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-In `src/cli.rs`, replace the `Start` variant:
-
-```rust
-    /// Claim a task: status=doing, owner=you.
-    Start {
-        id: String,
-        /// Take over a claim another live session holds.
-        #[arg(long)]
-        force: bool,
-    },
-```
-
-In `src/commands/mod.rs`:
-
-```rust
-        Command::Start { id, force } => status::start(open_write_ctx(dir)?, id, force),
-```
-
-In `src/commands/status.rs`:
-
-```rust
-pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
-    let before = ctx.warnings.len();
-    transition(&mut ctx, &mut task, Status::Doing, force)?;
-    task.owner = Some(owner_name(&ctx.project)?);
-    // A takeover displaces someone; the task's own record should say so, not just the
-    // ephemeral warning stream.
-    let takeovers: Vec<String> = ctx.warnings[before..].to_vec();
-    for takeover in takeovers {
-        let owner = owner_name(&ctx.project)?;
-        append_note(&mut task, &owner, &takeover)?;
-    }
-    save(&mut ctx, &mut task)?;
-    Ok(id_out(ctx, &task))
-}
-```
-
-`append_note` is already imported in `status.rs`.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `cargo test --test cli force_takeover`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/cli.rs src/commands tests/cli.rs
-git commit -m "feat(start): add --force to take over a claim"
-```
-
----
-
-### Task 8: Claims in the JSON and pretty output
-
-**Files:**
-- Modify: `src/output.rs:90-102` (`TaskSummary`), `src/output.rs:66-74` (`ShowFields`), `src/output.rs:254+` (`pretty`), `src/commands/show.rs`, `src/commands/list.rs`
-- Test: `tests/cli.rs`
-
-**Interfaces:**
-- Produces: `ClaimInfo { owner, session, host, pid, worktree, started, seen, live }`; `TaskSummary.claim: Option<ClaimInfo>`; `ShowFields.claim: Option<ClaimInfo>`; `ClaimInfo::of(&Claim) -> ClaimInfo`.
-- Consumed by Tasks 6, 7 and 9's assertions.
-
-- [ ] **Step 1: Write the failing test**
-
-```rust
-#[test]
-fn claim_appears_in_show_and_list_json() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-    let pid = std::process::id().to_string();
-
-    let unclaimed = env.json(&sci, &["show", &id]);
-    assert!(unclaimed["fields"]["claim"].is_null());
-
-    env.cmd(&sci)
-        .args(["start", &id])
-        .env("TASKS_SESSION", "agent-a")
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
-
-    let v = env.json(&sci, &["show", &id]);
-    assert_eq!(v["fields"]["claim"]["session"], "agent-a");
-    assert_eq!(v["fields"]["claim"]["live"], true);
-    assert_eq!(v["fields"]["claim"]["pid"], pid.parse::<u64>().unwrap());
-
-    let list = env.json(&sci, &["list", "--status", "doing"]);
-    assert_eq!(list["tasks"][0]["claim"]["session"], "agent-a");
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cargo test --test cli claim_appears_in_show`
-Expected: FAIL — `claim` is null after `start`.
+Run: `cargo test --bin tasks --test cli claim_appears_in_show`
+Expected: FAIL — `claim` is null even with the fixture in place.
 
 - [ ] **Step 3: Write minimal implementation**
 
 In `src/output.rs`:
 
 ```rust
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ClaimInfo {
     pub owner: String,
     pub session: String,
@@ -1704,38 +1236,45 @@ impl ClaimInfo {
 }
 ```
 
-Add `pub claim: Option<ClaimInfo>` to `TaskSummary` and `ShowFields`. `TaskSummary::of`
-gains a `claims: Option<&ClaimStore>` parameter — pass `None` from call sites that have no
-store and `Some(&store)` from `list`, `prime`, `ready` and `next`:
+Add `pub claim: Option<ClaimInfo>` to `TaskSummary` and `ShowFields`, and give
+`TaskSummary::of` a third parameter:
 
 ```rust
-impl TaskSummary {
-    pub fn of(task: &Task, all: &[Task], claims: Option<&crate::claims::ClaimStore>) -> TaskSummary {
-        // ... existing field initialisation unchanged ...
+    pub fn of(
+        task: &Task,
+        all: &[Task],
+        claims: Option<&crate::claims::ClaimStore>,
+    ) -> TaskSummary {
+        // ... existing fields unchanged ...
         claim: claims
             .and_then(|store| store.get(&task.id))
             .map(ClaimInfo::of),
     }
-}
 ```
 
-Read paths load the store read-only with `ClaimStore::load(&prefix)?` — no lock, because
-`atomic_write` publishes by rename.
+Read paths load the store with `ClaimStore::load(&prefix)?` and take **no lock**:
+`atomic_write` publishes by rename, so a reader sees one whole version or another.
 
-In `pretty`, mark a claimed row. In the `table` helper, append to the owner column:
+In the `table` helper inside `pretty`, prefer the claim's own owner. The local file's
+`owner` can be an older branch's value — the claim is the live fact:
 
 ```rust
-    let owner = match (&row.owner, &row.claim) {
-        (_, Some(claim)) if claim.live => format!("@{} [{}]", row.owner.as_deref().unwrap_or("-"), claim.session),
-        (Some(owner), _) => format!("@{owner}"),
-        (None, _) => String::new(),
+    let owner = match &row.claim {
+        // The holder as the claim records it. `row.owner` comes from this checkout's copy
+        // of the file, which may predate the claim entirely.
+        Some(claim) if claim.live => format!("@{} [{}]", claim.owner, claim.session),
+        Some(claim) => format!("@{} [{} stale]", claim.owner, claim.session),
+        None => match &row.owner {
+            Some(owner) => format!("@{owner}"),
+            None => String::new(),
+        },
     };
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --test cli claim_appears_in_show && cargo test --test cli claim`
-Expected: PASS, including the Task 6 and Task 7 tests that assert on `fields.claim`.
+Run: `cargo test --bin tasks --test cli claim && cargo test`
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1746,55 +1285,588 @@ git commit -m "feat(output): report the claim on show, list, and pretty rows"
 
 ---
 
-### Task 9: `ready`/`next` exclusion and the `prime` overlay
+### Task 7: The guard, acquire, and destination-based release
+
+The core task, and one unit: the guard, the acquire and the release are a single
+transaction that a reviewer cannot sensibly split.
+
+**The rule that shapes all of it: `transition()` guards and records an intent; `save()` is
+the only place that persists anything.** An earlier draft acquired inside `transition()`,
+which meant a later validation failure, a rejected concurrent edit, or a failed write could
+each leave the store mutated — three separate failure paths. With persistence in one
+validated operation there is one.
 
 **Files:**
-- Modify: `src/commands/list.rs:153-210` (`prime`), `ready_tasks`, `next`
+- Modify: `src/commands/mod.rs` (`transition`, `save`, `Ctx` claim helpers), `src/commands/status.rs` (`note` heartbeat)
 - Test: `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `ClaimStore`, `liveness`, `ClaimInfo` from Tasks 1, 2 and 8.
-- Produces: no new public names; `prime`'s `doing` predicate and three warning kinds.
+- Consumes: `Ctx::claims_mut`, `ClaimIntent` (Task 4), `identity`, `liveness`, `Claim`, `hostname` (Tasks 1-5), `ClaimInfo` (Task 6).
+- Produces: `transition(ctx: &mut Ctx, ..)`, `save(ctx: &mut Ctx, ..)`, `Ctx::describe_claim`.
+
+`transition` and `save` change from `&Ctx` to `&mut Ctx`; every caller in
+`src/commands/{status,edit,add,dep}.rs` needs `mut ctx`. Mechanical — the compiler lists them.
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+/// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
+/// store keyed by prefix. The second `init` needs `--force` because the registry refuses to
+/// re-point a prefix silently.
+fn two_roots(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {
+    let a = env.init("sci");
+    let b = env.init_forced("sci");
+    (a, b)
+}
+
+/// Run `tasks` as a named agent with a live pid.
+fn as_agent<'a>(env: &'a TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::Command {
+    let mut cmd = env.cmd(dir);
+    cmd.env("TASKS_SESSION", session)
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    cmd
+}
+
+fn err_kind(out: &std::process::Output) -> String {
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    v["error"]["kind"].as_str().unwrap().to_string()
+}
+
+fn err_detail(out: &std::process::Output) -> String {
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    // The error shape is {"error": {"kind", "detail"}} — there is no `message` field.
+    v["error"]["detail"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn a_live_claim_from_another_session_refuses_start() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
+
+    let out = as_agent(&env, &sci, "agent-b").args(["start", &id]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "claimed");
+    assert!(err_detail(&out).contains("agent-a"), "{}", err_detail(&out));
+}
+
+#[test]
+fn a_displaced_session_cannot_close_the_task_it_lost() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
+    as_agent(&env, &sci, "agent-b").args(["start", "--force", &id]).assert().success();
+
+    for args in [
+        vec!["done", &id, "landed"],
+        vec!["drop", &id, "nope"],
+        vec!["block", &id, "waiting"],
+        vec!["edit", &id, "--status", "done"],
+    ] {
+        let out = as_agent(&env, &sci, "agent-a").args(&args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "A must not close via {args:?}");
+        assert_eq!(err_kind(&out), "claimed", "{args:?}");
+    }
+
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-b");
+}
+
+#[test]
+fn release_follows_the_claim_not_the_local_doing_status() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+    // Root B's copy is the pre-claim file: still `todo`, the ordinary cross-worktree case.
+    std::fs::copy(a.join(format!("tasks/{id}.md")), b.join(format!("tasks/{id}.md"))).unwrap();
+
+    as_agent(&env, &a, "agent-a").args(["start", &id]).assert().success();
+    assert_eq!(env.json(&a, &["show", &id])["claim"]["session"], "agent-a");
+
+    // The same session closes it from root B, where the local status was never `doing`.
+    as_agent(&env, &b, "agent-a").args(["done", &id, "landed"]).assert().success();
+
+    assert!(
+        env.json(&a, &["show", &id])["claim"].is_null(),
+        "released even though this checkout never left doing"
+    );
+}
+
+#[test]
+fn one_checkouts_closed_copy_does_not_prune_a_live_claim() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+    std::fs::copy(a.join(format!("tasks/{id}.md")), b.join(format!("tasks/{id}.md"))).unwrap();
+
+    // Root A closed it first; root B is a branch that reopened and claimed it since. Both
+    // branch states must be established before the claim exists, or A's own close would be
+    // refused — correctly — and the test would never reach what it is about.
+    env.json(&a, &["edit", &id, "--status", "done"]);
+    as_agent(&env, &b, "agent-b").args(["start", &id]).assert().success();
+
+    // A write from root A must not treat its own stale `done` as authority over the claim.
+    // `note` is the right probe: it is never refused, and it touches the store.
+    as_agent(&env, &a, "agent-a").args(["note", &id, "still here"]).assert().success();
+
+    assert_eq!(
+        env.json(&b, &["show", &id])["claim"]["session"],
+        "agent-b",
+        "one checkout's view cannot establish that a shared claim is obsolete"
+    );
+}
+
+#[test]
+fn re_running_a_close_retries_a_failed_release() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let store = env.claim_store("sci");
+
+    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
+    // Keep the real, live claim the store now holds; a hand-built one would be stale and
+    // could be pruned away, letting this test pass without exercising owner release.
+    let live_claim = std::fs::read_to_string(&store).unwrap();
+
+    as_agent(&env, &sci, "agent-a").args(["done", &id, "landed"]).assert().success();
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
+
+    // Simulate a release that failed after the file write: the task is closed, the real
+    // claim is still there.
+    std::fs::write(&store, &live_claim).unwrap();
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["live"], true);
+
+    // `start --force` cannot recover this: can_transition rejects done -> doing.
+    let out = as_agent(&env, &sci, "agent-a").args(["start", "--force", &id]).output().unwrap();
+    assert_eq!(err_kind(&out), "invalid_transition");
+
+    // Re-running the closing command can, because a same-status transition still releases.
+    as_agent(&env, &sci, "agent-a").args(["done", &id, "landed"]).assert().success();
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
+}
+
+#[test]
+fn a_stale_claim_is_taken_over_without_force_but_with_a_warning() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_claim(&env, "sci", &id, "dead-agent", false);
+
+    let out = as_agent(&env, &sci, "agent-b").args(["start", &id]).output().unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("dead-agent")),
+        "taking over a stale claim names the displaced holder: {v}"
+    );
+}
+
+#[test]
+fn a_repeated_start_by_the_owner_keeps_the_claim() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
+    let first = env.json(&sci, &["show", &id])["claim"]["started"].clone();
+    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-a");
+    assert!(!first.is_null());
+}
+```
+
+Add `init_forced` to `tests/common/mod.rs`:
+
+```rust
+    /// A second project root under an already-registered prefix — a worktree, as far as a
+    /// prefix-keyed claim store is concerned.
+    pub fn init_forced(&mut self, prefix: &str) -> PathBuf {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap();
+        self.dirs.push(dir);
+        self.json(&path, &["init", "--prefix", prefix, "--force"]);
+        path
+    }
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cargo test --bin tasks --test cli -- claim release_follows one_checkouts re_running a_displaced a_repeated`
+Expected: FAIL — nothing refuses, nothing releases.
+
+- [ ] **Step 3: Write the implementation**
+
+In `src/commands/mod.rs`, add to `impl Ctx`:
+
+```rust
+    pub fn describe_claim(claim: &crate::claims::Claim, live: &Liveness) -> String {
+        let pid = match claim.pid {
+            Some(pid) => format!(", pid {pid}"),
+            None => String::new(),
+        };
+        let state = match live {
+            Liveness::Live => "live".to_string(),
+            Liveness::Stale(why) => format!("stale: {why}"),
+        };
+        format!(
+            "session {} (owner {}, host {}{pid}, worktree {}, since {}, {state})",
+            claim.session, claim.owner, claim.host, claim.worktree, claim.started
+        )
+    }
+
+    /// Guard only. Decides whether this session may make the change and records what
+    /// `save` should do — **and persists nothing**, so a validation failure, a rejected
+    /// concurrent edit, or a failed write cannot leave the store mutated.
+    ///
+    /// Release is destination-based: any destination other than `doing` releases this
+    /// session's claim. It must not key off *leaving* a local `doing`, because a session
+    /// can hold the shared claim while its own checkout still reads `todo` — the ordinary
+    /// cross-worktree case — and its `done` there would otherwise strand the claim.
+    fn claim_guard(&mut self, id: &TaskId, to: Status, force: bool) -> Result<()> {
+        let me = crate::claims::identity()?;
+        let owner = owner_name(&self.project)?;
+        let worktree = self.project.root.display().to_string();
+        let store = self.claims_mut()?;
+
+        let mut warning = None;
+        if let Some(existing) = store.get(id) {
+            let live = crate::claims::liveness(existing);
+            let mine = existing.session == me.session;
+            match (&live, mine) {
+                (Liveness::Live, false) if !(force && to == Status::Doing) => {
+                    return Err(Error::Claimed(
+                        id.to_string(),
+                        Ctx::describe_claim(existing, &live),
+                    ));
+                }
+                (Liveness::Live, false) => {
+                    warning = Some(format!(
+                        "took over a live claim held by {}",
+                        Ctx::describe_claim(existing, &live)
+                    ));
+                }
+                (Liveness::Stale(_), false) => {
+                    warning = Some(format!("took over {}", Ctx::describe_claim(existing, &live)));
+                }
+                _ => {}
+            }
+        }
+
+        self.pending_claim = Some(if to == Status::Doing {
+            let now = crate::time::now();
+            let started = self
+                .claims_mut()?
+                .get(id)
+                .filter(|existing| existing.session == me.session)
+                .map(|existing| existing.started.clone())
+                .unwrap_or_else(|| now.clone());
+            (
+                id.clone(),
+                ClaimIntent::Acquire(crate::claims::Claim {
+                    owner,
+                    pid_start: me.pid.and_then(|pid| match crate::claims::proc_stat(pid) {
+                        crate::claims::ProcStat::Found { starttime, .. } => Some(starttime),
+                        _ => None,
+                    }),
+                    session: me.session,
+                    pid: me.pid,
+                    boot_id: crate::claims::boot_id(),
+                    host: crate::claims::hostname(),
+                    worktree,
+                    started,
+                    seen: now,
+                }),
+            )
+        } else {
+            (id.clone(), ClaimIntent::Release)
+        });
+
+        if let Some(warning) = warning {
+            self.warnings.push(warning);
+        }
+        Ok(())
+    }
+```
+
+Then `transition` and `save`:
+
+```rust
+pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Result<()> {
+    if !Status::can_transition(task.status, to) {
+        return Err(Error::InvalidTransition(
+            task.status.as_str().into(),
+            to.as_str().into(),
+        ));
+    }
+    // Guard before the dependency and descendant checks, so a session that no longer holds
+    // the task is told *that* rather than something incidental.
+    ctx.claim_guard(&task.id, to, force)?;
+    if to == Status::Done && task.status != Status::Done && !force {
+        let open = open_deps(ctx, task)?;
+        if !open.is_empty() {
+            return Err(Error::OpenDependencies(task.id.to_string(), open.join(", ")));
+        }
+    }
+    let closing = matches!(to, Status::Done | Status::Dropped) && task.status != to;
+    if closing && !(force && to == Status::Done) {
+        let all = ctx.project.scan()?;
+        let open: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id)
+            .iter()
+            .map(|task| task.id.to_string())
+            .collect();
+        if !open.is_empty() {
+            return Err(Error::OpenDescendants(task.id.to_string(), open.join(", ")));
+        }
+    }
+    task.status = to;
+    Ok(())
+}
+
+/// The only place claim state is persisted.
+///
+/// Everything that can reject the change runs first and touches nothing. From there the
+/// store and the task file move together, in the order that fails toward "claim held": a
+/// claim with no file update makes an idle task look busy and self-heals when the session
+/// dies, while a file update with no claim is the invisibility bug this exists to remove.
+pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
+    task.updated = crate::time::now();
+    validate_task(task)?;
+    ctx.project.validate_docs(task)?;
+
+    match ctx.pending_claim.take() {
+        Some((id, ClaimIntent::Acquire(claim))) => {
+            let store = ctx.claims_mut()?;
+            // Captured, never assumed absent: a repeated `start` by the owner and a forced
+            // takeover both write over an existing claim, and a blanket removal on failure
+            // would erase work someone still holds.
+            let previous = store.get(&id).cloned();
+            store.prune_dead();
+            store.insert(&id, claim);
+            store.save()?;
+
+            let Err(error) = ctx.project.write_task(task) else {
+                return Ok(());
+            };
+            let store = ctx.claims_mut()?;
+            match previous {
+                Some(previous) => store.insert(&id, previous),
+                None => {
+                    store.remove(&id);
+                }
+            }
+            // Warnings on `Ctx` are dropped when a command returns `Err`, so recovery
+            // guidance has to travel on the error itself.
+            let suffix = match store.save() {
+                Ok(()) => String::new(),
+                Err(inner) => format!(
+                    " (the previous claim on {id} could not be restored: {inner}; \
+                     run `tasks start --force {id}` to reclaim it)"
+                ),
+            };
+            Err(error.with_suffix(&suffix))
+        }
+        Some((id, ClaimIntent::Release)) => {
+            ctx.project.write_task(task)?;
+            let store = ctx.claims_mut()?;
+            store.prune_dead();
+            store.remove(&id);
+            if let Err(error) = store.save() {
+                // The task is closed now, so `start --force` cannot recover this:
+                // `can_transition` rejects `done -> doing`. Re-running the same closing
+                // command can, because a same-status transition still releases.
+                ctx.warnings.push(format!(
+                    "{id} was closed but its claim was not released ({error}); \
+                     re-run the same command to retry the release"
+                ));
+            }
+            Ok(())
+        }
+        None => ctx.project.write_task(task),
+    }
+}
+```
+
+In `src/commands/status.rs`, make callers `mut` and add the heartbeat to `note`:
+
+```rust
+pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
+    let mut task = load(&ctx, &id)?;
+    let owner = owner_name(&ctx.project)?;
+    append_note(&mut task, &owner, &text)?;
+    save(&mut ctx, &mut task)?;
+    // The heartbeat, and only on our own claim: `note` never touches a foreign one and is
+    // never refused. It is still serialized under the mutation lock, because a note
+    // rewrites the whole markdown file however append-only it is in meaning.
+    let me = crate::claims::identity()?;
+    let store = ctx.claims_mut()?;
+    if let Some(claim) = store.get(&task.id).cloned()
+        && claim.session == me.session
+    {
+        store.insert(
+            &task.id,
+            crate::claims::Claim {
+                seen: crate::time::now(),
+                ..claim
+            },
+        );
+        store.save()?;
+    }
+    Ok(id_out(ctx, &task))
+}
+```
+
+Apply `mut ctx` and the `&mut ctx` argument in `start`, `close`, `unblock`, `edit::run`,
+`editor`, `add::run` and `dep::run`.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cargo test --bin tasks --test cli && cargo test`
+Expected: PASS. `a_displaced_session_cannot_close_the_task_it_lost` and
+`a_repeated_start_by_the_owner_keeps_the_claim` need Task 8's `--force`; run them at the end
+of Task 8 if they fail only on the unknown flag.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/commands tests
+git commit -m "feat(claims): guard status changes and persist claims inside save"
+```
+
+---
+
+### Task 8: `tasks start --force` takeover
+
+**Files:**
+- Modify: `src/cli.rs:125-126`, `src/commands/mod.rs` (`Command::Start` arm), `src/commands/status.rs`
+- Test: `tests/cli.rs`
+
+**Interfaces:**
+- Produces: `Command::Start { id, force }`, `status::start(ctx, id, force)`.
+
+- [ ] **Step 1: Write the failing test**
+
+```rust
+#[test]
+fn force_takeover_records_a_note_naming_the_displaced_session() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
+    as_agent(&env, &sci, "agent-b").args(["start", "--force", &id]).assert().success();
+
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(raw.contains("agent-a"), "the takeover is recorded in the notes: {raw}");
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-b");
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cargo test --bin tasks --test cli force_takeover`
+Expected: FAIL — `unexpected argument '--force'`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+`src/cli.rs`:
+
+```rust
+    /// Claim a task: status=doing, owner=you.
+    Start {
+        id: String,
+        /// Take over a claim another live session holds.
+        #[arg(long)]
+        force: bool,
+    },
+```
+
+`src/commands/mod.rs`:
+
+```rust
+        Command::Start { id, force } => status::start(open_write_ctx(dir)?, id, force),
+```
+
+`src/commands/status.rs`:
+
+```rust
+pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
+    let mut task = load(&ctx, &id)?;
+    let before = ctx.warnings.len();
+    transition(&mut ctx, &mut task, Status::Doing, force)?;
+    task.owner = Some(owner_name(&ctx.project)?);
+    // A takeover displaces someone; the task's own record should say so, not just the
+    // ephemeral warning stream.
+    let takeovers: Vec<String> = ctx.warnings[before..].to_vec();
+    let owner = owner_name(&ctx.project)?;
+    for takeover in takeovers {
+        append_note(&mut task, &owner, &takeover)?;
+    }
+    save(&mut ctx, &mut task)?;
+    Ok(id_out(ctx, &task))
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cargo test --bin tasks --test cli && cargo test`
+Expected: PASS, including the two Task 7 tests that needed `--force`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/cli.rs src/commands tests/cli.rs
+git commit -m "feat(start): add --force to take over a claim"
+```
+
+---
+
+### Task 9: `ready`/`next` exclusion and the `prime` overlay
+
+**Files:**
+- Modify: `src/commands/list.rs` (`ready_tasks`, `prime`), `src/commands/show.rs`
+- Test: `tests/cli.rs`
+
+**Interfaces:**
+- Produces: `ClaimSnapshot`, `ClaimSnapshot::{load, live, get, stale}`.
+
+**One snapshot per command.** Loading the store separately for the ready filter, the doing
+predicate and the stale warnings lets one `prime` contradict itself — a claim can go stale
+between two of those reads. Load each prefix once and reuse it everywhere, including under
+`--all-projects`.
+
+**`ready_tasks` already skips anything whose status is not `Todo`** (`src/commands/list.rs:87-89`).
+So a task the current session started *locally* is excluded by status before any claim logic
+runs, and no claim warning fires for it — correct, and not something to test for. The case
+that matters, and the one the exclusion exists for, is a task whose **local** file still says
+`todo` while another root holds a live claim.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
-fn ready_omits_claimed_tasks_including_your_own_and_says_why() {
+fn ready_omits_a_task_claimed_from_another_root_and_says_why() {
     let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "T", "-p", "2", "--size", "s"]));
-    let pid = std::process::id().to_string();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2", "--size", "s"]));
+    std::fs::copy(a.join(format!("tasks/{id}.md")), b.join(format!("tasks/{id}.md"))).unwrap();
 
-    assert_eq!(env.json(&sci, &["ready"])["tasks"][0]["id"], id);
+    assert_eq!(env.json(&b, &["ready"])["tasks"][0]["id"], id);
 
-    env.cmd(&sci)
-        .args(["start", &id])
-        .env("TASKS_SESSION", "agent-a")
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
+    as_agent(&env, &a, "agent-a").args(["start", &id]).assert().success();
 
-    // Even to the session that holds it: `start` is the authoritative check, and a silent
-    // omission is worse than an explained one.
-    let out = env
-        .cmd(&sci)
-        .args(["ready"])
-        .env("TASKS_SESSION", "agent-a")
-        .env("TASKS_SESSION_PID", &pid)
-        .output()
-        .unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    // Root B's copy still reads `todo`, so only the claim can exclude it.
+    let v = env.json(&b, &["ready"]);
     assert_eq!(v["tasks"].as_array().unwrap().len(), 0, "{v}");
     assert!(
-        v["warnings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|w| w.as_str().unwrap().contains(&id)),
-        "the omission is explained: {v}"
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&id) && w.contains("agent-a")
+        }),
+        "a silent omission is worse than an explained one: {v}"
     );
-    assert_eq!(env.json(&sci, &["next"])["next"], serde_json::Value::Null);
+    assert_eq!(env.json(&b, &["next"])["next"], serde_json::Value::Null);
 }
 
 #[test]
@@ -1802,16 +1874,9 @@ fn prime_shows_a_claim_made_in_another_root_and_warns_about_divergence() {
     let mut env = TestEnv::new();
     let (a, b) = two_roots(&mut env);
     let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
-    let pid = std::process::id().to_string();
-
-    // Root A claims it; root B's copy still reads `todo` — the tasks-8f4b41 sequence.
     std::fs::copy(a.join(format!("tasks/{id}.md")), b.join(format!("tasks/{id}.md"))).unwrap();
-    env.cmd(&a)
-        .args(["start", &id])
-        .env("TASKS_SESSION", "agent-a")
-        .env("TASKS_SESSION_PID", &pid)
-        .assert()
-        .success();
+
+    as_agent(&env, &a, "agent-a").args(["start", &id]).assert().success();
 
     let v = env.json(&b, &["prime"]);
     assert!(
@@ -1832,18 +1897,7 @@ fn prime_warns_about_a_stale_claim_over_a_local_todo() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-
-    let store = env.home.path().join(".local/state/tasks/claims/sci.toml");
-    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    std::fs::write(
-        &store,
-        format!(
-            "[claims.\"{id}\"]\nowner = \"ghost\"\nsession = \"dead-agent\"\npid = 0\n\
-             pid_start = 1\nboot_id = \"nope\"\nhost = \"h\"\nworktree = \"/tmp\"\n\
-             started = \"2026-09-05T00:00:00Z\"\nseen = \"2026-09-05T00:00:00Z\"\n"
-        ),
-    )
-    .unwrap();
+    write_claim(&env, "sci", &id, "dead-agent", false);
 
     let v = env.json(&sci, &["prime"]);
     // The `doing` predicate needs a *live* claim, so without this warning a stale claim
@@ -1860,60 +1914,87 @@ fn prime_warns_about_a_stale_claim_over_a_local_todo() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test --test cli ready_omits_claimed && cargo test --test cli prime_`
-Expected: FAIL — claimed tasks still appear in `ready`, no warnings.
+Run: `cargo test --bin tasks --test cli -- ready_omits prime_shows prime_warns`
+Expected: FAIL — claimed tasks still appear, no warnings.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `src/commands/list.rs`, load the store once per project in scope and filter:
+In `src/commands/list.rs`:
 
 ```rust
-/// Live claims for every project in scope, keyed by task id.
-fn live_claims(ctx: &ReadCtx) -> Result<std::collections::BTreeMap<String, Claim>> {
-    let mut live = std::collections::BTreeMap::new();
-    for project in ctx.scope.projects() {
-        let store = ClaimStore::load(&project.prefix)?;
-        for (id, claim) in store.iter() {
-            if liveness(claim) == Liveness::Live {
-                live.insert(id.clone(), claim.clone());
+/// Every claim in scope, read **once** per command.
+///
+/// Reading the store separately for the ready filter, the doing predicate and the stale
+/// warnings would let a single `prime` contradict itself, since a claim can go stale
+/// between two reads. Liveness is evaluated here, once, and reused everywhere.
+pub struct ClaimSnapshot {
+    by_id: std::collections::BTreeMap<String, (Claim, Liveness)>,
+    stores: Vec<ClaimStore>,
+}
+
+impl ClaimSnapshot {
+    pub fn load<'a>(prefixes: impl Iterator<Item = &'a str>) -> Result<ClaimSnapshot> {
+        let mut by_id = std::collections::BTreeMap::new();
+        let mut stores = Vec::new();
+        for prefix in prefixes {
+            let store = ClaimStore::load(prefix)?;
+            for (id, claim) in store.iter() {
+                by_id.insert(id.clone(), (claim.clone(), liveness(claim)));
             }
+            stores.push(store);
+        }
+        Ok(ClaimSnapshot { by_id, stores })
+    }
+
+    pub fn live(&self, id: &TaskId) -> Option<&Claim> {
+        match self.by_id.get(&id.to_string()) {
+            Some((claim, Liveness::Live)) => Some(claim),
+            _ => None,
         }
     }
-    Ok(live)
+
+    pub fn stale(&self) -> impl Iterator<Item = (&String, &Claim, &String)> {
+        self.by_id.iter().filter_map(|(id, (claim, live))| match live {
+            Liveness::Stale(why) => Some((id, claim, why)),
+            Liveness::Live => None,
+        })
+    }
+
+    /// For `TaskSummary::of`, which reads claims by id.
+    pub fn stores(&self) -> &[ClaimStore] {
+        &self.stores
+    }
 }
 ```
 
-In `ready_tasks`, after the existing filters:
+In `ready_tasks`, after the existing filters build `ready`:
 
 ```rust
-    let claimed = live_claims(ctx)?;
-    ready.retain(|task| {
-        match claimed.get(&task.id.to_string()) {
-            Some(claim) => {
-                ctx.warnings.push(format!(
-                    "{} omitted: claimed by {} in {} — `tasks start --force {}` to take it over",
-                    task.id, claim.session, claim.worktree, task.id
-                ));
-                false
-            }
-            None => true,
+    let claims = ClaimSnapshot::load(ctx.scope.prefixes().iter().map(String::as_str))?;
+    ready.retain(|task| match claims.live(&task.id) {
+        Some(claim) => {
+            warnings.push(format!(
+                "{} omitted: claimed by session {} in {} — \
+                 `tasks start --force {}` to take it over",
+                task.id, claim.session, claim.worktree, task.id
+            ));
+            false
         }
+        None => true,
     });
 ```
 
-`next` already reads the head of `ready_tasks`, so it inherits the exclusion.
+`next` reads the head of `ready_tasks`, so it inherits the exclusion.
 
-In `prime`, widen the `doing` predicate and add the two warnings:
+In `prime`, take one snapshot and use it for the predicate, the summaries and both warnings:
 
 ```rust
-    let claimed = live_claims(&ctx)?;
+    let claims = ClaimSnapshot::load(ctx.scope.prefixes().iter().map(String::as_str))?;
     let mut doing: Vec<Task> = all
         .iter()
         // Local `doing`, or a live claim: that is how a claim made in another worktree
         // surfaces here even though this checkout's file still reads `todo`.
-        .filter(|task| {
-            task.status == Status::Doing || claimed.contains_key(&task.id.to_string())
-        })
+        .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
         .cloned()
         .collect();
 ```
@@ -1922,8 +2003,7 @@ and after the uncommitted-files loop:
 
 ```rust
     for task in &all {
-        let key = task.id.to_string();
-        if let Some(claim) = claimed.get(&key)
+        if let Some(claim) = claims.live(&task.id)
             && matches!(task.status, Status::Todo | Status::Idea)
         {
             ctx.warnings.push(format!(
@@ -1935,30 +2015,29 @@ and after the uncommitted-files loop:
             ));
         }
     }
-    // A stale claim over a local `todo` matches neither the `doing` predicate above nor
-    // the divergence warning, so without this it would appear nowhere.
-    for project in ctx.scope.projects() {
-        for (id, claim) in ClaimStore::load(&project.prefix)?.iter() {
-            if let Liveness::Stale(why) = liveness(claim) {
-                ctx.warnings.push(format!(
-                    "{id} has a stale claim from {} ({why}); \
-                     `tasks start --force {id}` to take it over",
-                    claim.session
-                ));
-            }
-        }
+    for (id, claim, why) in claims.stale() {
+        // Neither the `doing` predicate nor the divergence warning above covers a stale
+        // claim, so without this it would appear nowhere.
+        ctx.warnings.push(format!(
+            "{id} has a stale claim from session {} ({why}); \
+             `tasks start --force {id}` to take it over",
+            claim.session
+        ));
     }
 ```
 
+Pass the snapshot's stores into `TaskSummary::of` at every call site in `list`, `ready`,
+`next`, `prime` and `show`.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --test cli ready_omits_claimed && cargo test --test cli prime_ && cargo test`
+Run: `cargo test --bin tasks --test cli && cargo test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/commands/list.rs tests/cli.rs
+git add src/commands tests/cli.rs
 git commit -m "feat(list): exclude claimed tasks from ready and overlay claims on prime"
 ```
 
@@ -1967,18 +2046,14 @@ git commit -m "feat(list): exclude claimed tasks from ready and overlay claims o
 ### Task 10: Lock `feedback` recurrence
 
 **Files:**
-- Modify: `src/commands/feedback.rs:199-222` (`guarded_update`) and its recurrence caller
+- Modify: `src/commands/feedback.rs` (the recurrence caller of `guarded_update`)
 - Test: `tests/cli.rs`
-
-**Interfaces:**
-- Consumes: `MutationLock` from Task 3.
-- Produces: `guarded_update` unchanged in signature; the lock is taken by its recurrence caller.
 
 `add`-style creation stays lock-free — `create_task` links the file into place exclusively,
 so it has no read-modify-write to protect. Recurrence is different: `guarded_update`
-re-reads the raw file and compares it against its snapshot (`feedback.rs:213`), but the
-window between that comparison and `write_task` (`feedback.rs:215`) is still a check-write
-race.
+(`feedback.rs:199`) re-reads the raw file and compares it against its snapshot
+(`feedback.rs:213`), but the window between that comparison and `write_task`
+(`feedback.rs:215`) is still a check-write race.
 
 Only the **target** project's lock is taken. The source `Ctx` stays unlocked, so no command
 ever holds two locks — which also keeps this correct when source and target are the same
@@ -1987,18 +2062,22 @@ same process would deadlock.
 
 - [ ] **Step 1: Write the failing test**
 
+`feedback` writes into the project registered under the `tasks` prefix, which
+`feedback_env()` (`tests/cli.rs:2261`) sets up; a test that skips it has no target at all.
+
 ```rust
 #[test]
-fn feedback_recurrence_serializes_against_a_concurrent_writer() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let first = env.json(&sci, &["feedback", "the thing is slow", "--category", "friction"]);
+fn feedback_recurrence_serializes_against_concurrent_recurrences() {
+    let (env, target, reporter) = feedback_env();
+    let first = env.json(
+        &reporter,
+        &["feedback", "the thing is slow", "--category", "friction"],
+    );
     let id = first["id"].as_str().unwrap().to_string();
 
-    // Two recurrences of the same report race; both must land.
     let mut handles = Vec::new();
-    for n in 0..2 {
-        let mut cmd = env.cmd(&sci);
+    for n in 0..4 {
+        let mut cmd = env.cmd(&reporter);
         cmd.args([
             "feedback",
             "the thing is slow",
@@ -2016,22 +2095,25 @@ fn feedback_recurrence_serializes_against_a_concurrent_writer() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
 
-    let raw = env.read(&sci, &format!("tasks/{id}.md"));
-    assert!(raw.contains("detail 0"), "first update survived: {raw}");
-    assert!(raw.contains("detail 1"), "second update survived: {raw}");
+    // The report lives in the *target* project, not the reporter's.
+    let raw = std::fs::read_to_string(target.join(format!("tasks/{id}.md"))).unwrap();
+    for n in 0..4 {
+        assert!(raw.contains(&format!("detail {n}")), "update {n} was lost: {raw}");
+    }
 }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --test cli feedback_recurrence_serializes`
-Expected: FAIL intermittently — one update lost, or `concurrent_modification`. Run it a few
-times: `for i in $(seq 20); do cargo test --test cli feedback_recurrence_serializes || break; done`
+Run: `for i in $(seq 20); do cargo test --bin tasks --test cli feedback_recurrence_serializes || break; done`
+Expected: FAIL on some iterations — a lost update, or `concurrent_modification` after eight
+rounds. If 20 iterations all pass, raise the thread count rather than concluding the race is
+absent.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `src/commands/feedback.rs`, take the target lock at the top of the recurrence path,
-before the first read, and hold it until the update returns:
+In `src/commands/feedback.rs`, take the target lock before the first read of the recurrence
+path and hold it until the update returns:
 
 ```rust
     // Recurrence is a read-modify-write, and `guarded_update`'s raw-content comparison
@@ -2043,8 +2125,8 @@ before the first read, and hold it until the update returns:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `for i in $(seq 20); do cargo test --test cli feedback_recurrence_serializes || break; done`
-Expected: PASS every time.
+Run: `for i in $(seq 20); do cargo test --bin tasks --test cli feedback_recurrence_serializes || break; done`
+Expected: PASS every iteration.
 
 - [ ] **Step 5: Commit**
 
@@ -2058,17 +2140,16 @@ git commit -m "fix(feedback): lock the target project for recurrence updates"
 ### Task 11: The uncommitted-before-branching warning
 
 **Files:**
-- Modify: `src/commands/status.rs` (`start`)
+- Modify: `src/commands/status.rs`
 - Test: `tests/cli.rs`
 
 **Interfaces:**
 - Consumes: `Project::uncommitted_task_files` (`src/repo.rs:323`).
-- Produces: one warning string from `start`.
 
 This is the narrower half of tasks-8f4b41 and covers only the *reverse* order — worktrees
 already exist, then `start`. The order actually reported (start first, worktree created
-afterwards) is covered by the divergence warning in Task 9, which fires in the new worktree
-at the moment the disagreement becomes observable.
+afterwards) is covered by Task 9's divergence warning, which fires in the new worktree at the
+moment the disagreement becomes observable, and is regression-tested in Task 12.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2093,20 +2174,15 @@ fn start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted()
     git(&["add", "-A"]);
     git(&["commit", "-qm", "seed"]);
 
-    // One worktree: nothing to diverge from yet.
     let v = env.json(&sci, &["start", &id]);
     assert!(
-        !v["warnings"].as_array().unwrap().iter().any(|w| w
-            .as_str()
-            .unwrap()
-            .contains("worktree")),
+        !v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("worktree")),
         "a single-worktree repo has nothing to warn about: {v}"
     );
     git(&["add", "-A"]);
     git(&["commit", "-qm", "start"]);
 
-    let wt = sci.join("wt");
-    git(&["worktree", "add", "-q", "-b", "side", wt.to_str().unwrap()]);
+    git(&["worktree", "add", "-q", "-b", "side", sci.join("wt").to_str().unwrap()]);
     let other = id_of(env.json(&sci, &["add", "U", "-p", "2"]));
     git(&["add", "-A"]);
     git(&["commit", "-qm", "add U"]);
@@ -2124,18 +2200,17 @@ fn start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted()
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --test cli start_warns_when_a_repo_with_several_worktrees`
+Run: `cargo test --bin tasks --test cli start_warns_when_a_repo_with_several_worktrees`
 Expected: FAIL — no such warning.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `src/commands/status.rs`, add a helper and call it at the end of `start`, after `save`:
+In `src/commands/status.rs`:
 
 ```rust
-/// Warns when `start` leaves the task file uncommitted in a repo that already has more
-/// than one worktree. Every `start` leaves the file uncommitted — the protocol commits at
-/// `done` — so warning unconditionally would be noise; the extra worktree is what makes it
-/// matter.
+/// Warns when `start` leaves the task file uncommitted in a repo that already has more than
+/// one worktree. Every `start` leaves the file uncommitted — the protocol commits at `done`
+/// — so warning unconditionally would be noise; the extra worktree is what makes it matter.
 fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) -> Result<()> {
     let Some(files) = ctx.project.uncommitted_task_files()? else {
         return Ok(()); // not a git checkout, or no git
@@ -2166,7 +2241,7 @@ fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) -> Result<()> 
 }
 ```
 
-and in `start`, immediately before `Ok(id_out(ctx, &task))`:
+and call it in `start`, immediately before `Ok(id_out(ctx, &task))`:
 
 ```rust
     warn_if_uncommitted_with_worktrees(&mut ctx, &task)?;
@@ -2174,7 +2249,7 @@ and in `start`, immediately before `Ok(id_out(ctx, &task))`:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cargo test --test cli start_warns_when_a_repo_with_several_worktrees`
+Run: `cargo test --bin tasks --test cli start_warns_when_a_repo_with_several_worktrees`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -2186,32 +2261,257 @@ git commit -m "feat(start): warn when a claim stays uncommitted in a multi-workt
 
 ---
 
-### Task 12: Documentation and closeout
+### Task 12: Concurrency and failure regressions
+
+The lock and the rollback are the two things most likely to be silently wrong, and neither
+is covered by the happy-path tests above. This task adds only tests.
+
+**Outcome-counting, not timing.** Each concurrency test asserts a property that holds under
+*every* interleaving — exactly one winner, or no update lost — rather than hoping threads
+collide. A test that merely launches two threads and hopes proves nothing when it passes.
+
+**Files:**
+- Modify: `tests/cli.rs`
+
+- [ ] **Step 1: Write the tests**
+
+```rust
+#[test]
+fn simultaneous_starts_produce_exactly_one_winner() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    let mut handles = Vec::new();
+    for n in 0..6 {
+        let mut cmd = as_agent(&env, &sci, &format!("agent-{n}"));
+        cmd.args(["start", &id]);
+        handles.push(std::thread::spawn(move || cmd.output().unwrap()));
+    }
+    let outs: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    let winners = outs.iter().filter(|o| o.status.success()).count();
+    assert_eq!(winners, 1, "exactly one session may hold the claim");
+    for out in outs.iter().filter(|o| !o.status.success()) {
+        assert_eq!(err_kind(out), "claimed");
+    }
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["live"],
+        true,
+        "and the winner's claim is the one that survived"
+    );
+}
+
+#[test]
+fn concurrent_claims_on_different_tasks_are_all_kept() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let ids: Vec<String> = (0..6)
+        .map(|n| id_of(env.json(&sci, &["add", &format!("T{n}"), "-p", "2"])))
+        .collect();
+
+    let mut handles = Vec::new();
+    for (n, id) in ids.iter().enumerate() {
+        let mut cmd = as_agent(&env, &sci, &format!("agent-{n}"));
+        cmd.args(["start", id]);
+        handles.push(std::thread::spawn(move || cmd.output().unwrap()));
+    }
+    for handle in handles {
+        assert!(handle.join().unwrap().status.success());
+    }
+
+    // The store is one whole file per prefix, so an unserialized writer would drop the
+    // claims it never read.
+    for id in &ids {
+        assert_eq!(
+            env.json(&sci, &["show", id])["claim"]["live"],
+            true,
+            "{id} lost its claim to a concurrent write"
+        );
+    }
+}
+
+#[test]
+fn concurrent_notes_and_a_status_change_lose_nothing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    let mut handles = Vec::new();
+    for n in 0..5 {
+        let mut cmd = as_agent(&env, &sci, "agent-a");
+        cmd.args(["note", &id, &format!("line {n}")]);
+        handles.push(std::thread::spawn(move || cmd.output().unwrap()));
+    }
+    let mut status = as_agent(&env, &sci, "agent-a");
+    status.args(["start", &id]);
+    handles.push(std::thread::spawn(move || status.output().unwrap()));
+
+    for handle in handles {
+        assert!(handle.join().unwrap().status.success());
+    }
+
+    // `note` rewrites the whole markdown file, so an unserialized note clobbers whatever
+    // landed between its read and its write.
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    for n in 0..5 {
+        assert!(raw.contains(&format!("line {n}")), "note {n} was lost: {raw}");
+    }
+    assert!(raw.contains("status: doing"), "the status change was lost: {raw}");
+}
+
+#[test]
+fn a_concurrent_edit_during_an_interactive_edit_is_rejected_and_leaks_no_claim() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    // An EDITOR that sets the status to doing, slowly, so another writer lands first.
+    let script = sci.join("slow-editor.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nsleep 1\nsed -i 's/^status: todo/status: doing/' \"$1\"\n",
+    )
+    .unwrap();
+    std::os::unix::fs::PermissionsExt::set_mode(
+        &mut std::fs::metadata(&script).unwrap().permissions().clone(),
+        0o755,
+    );
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut editing = as_agent(&env, &sci, "agent-a");
+    editing.args(["edit", &id]).env("EDITOR", script.to_str().unwrap());
+    let editor = std::thread::spawn(move || editing.output().unwrap());
+
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    as_agent(&env, &sci, "agent-b").args(["note", &id, "landed first"]).assert().success();
+
+    let out = editor.join().unwrap();
+    assert_eq!(err_kind(&out), "concurrent_modification");
+    // The editor's `transition` ran before the comparison. Because no claim is persisted
+    // until `save`, the rejected edit must not have left one behind.
+    assert!(
+        env.json(&sci, &["show", &id])["claim"].is_null(),
+        "a rejected edit acquired a claim"
+    );
+}
+
+#[test]
+fn a_failed_task_write_leaves_no_claim_behind() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    // Read still works; `atomic_write` cannot create its temp file.
+    let tasks_dir = sci.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+    let out = as_agent(&env, &sci, "agent-a").args(["start", &id]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+
+    std::fs::set_permissions(&tasks_dir, original).unwrap();
+    assert!(
+        env.json(&sci, &["show", &id])["claim"].is_null(),
+        "acquire is rolled back when the task write fails"
+    );
+}
+
+#[test]
+fn a_failed_takeover_restores_the_previous_owners_claim() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
+
+    let tasks_dir = sci.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let out = as_agent(&env, &sci, "agent-b").args(["start", "--force", &id]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    std::fs::set_permissions(&tasks_dir, original).unwrap();
+
+    // Rollback restores what was there; a blanket removal would unclaim A's live work.
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "agent-a",
+        "a failed takeover must not unclaim the previous holder"
+    );
+}
+
+#[test]
+fn the_reported_sequence_start_then_create_the_worktree() {
+    let mut env = TestEnv::new();
+    let a = env.init("sci");
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+
+    // The bytes a later worktree would branch from: captured *before* the claim exists.
+    let committed = env.read(&a, &format!("tasks/{id}.md"));
+    as_agent(&env, &a, "agent-a").args(["start", &id]).assert().success();
+
+    // Only now does the second worktree come into being, from the pre-start state.
+    let b = env.init_forced("sci");
+    std::fs::write(b.join(format!("tasks/{id}.md")), &committed).unwrap();
+
+    let v = env.json(&b, &["prime"]);
+    assert!(
+        v["doing"].as_array().unwrap().iter().any(|t| t["id"] == id.as_str()),
+        "the claim is visible in a worktree created after the start: {v}"
+    );
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&id) && w.contains("conflict")
+        }),
+        "and the divergence is called out: {v}"
+    );
+}
+```
+
+- [ ] **Step 2: Run the tests**
+
+Run: `cargo test --bin tasks --test cli -- simultaneous concurrent a_failed a_concurrent_edit the_reported_sequence`
+Expected: PASS. Then repeat, since concurrency tests that pass once prove less than
+concurrency tests that pass twenty times:
+`for i in $(seq 20); do cargo test --bin tasks --test cli -- simultaneous concurrent || break; done`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/cli.rs
+git commit -m "test(claims): cover simultaneous claims, note races, and rollback"
+```
+
+---
+
+### Task 13: Documentation and closeout
 
 **Files:**
 - Modify: `skills/tasks/SKILL.md`, `AGENTS.md`, `docs/specs/2026-08-29-tasks-design.md`, `docs/specs/2026-09-05-work-claims-design.md`
-- Test: `just gate`
 
 - [ ] **Step 1: Document the claim protocol in the shipped skill**
 
 `skills/tasks/SKILL.md` goes out to other projects, so it is where agents learn this. Add
-to the session protocol section, after the `tasks start` step:
+after the `tasks start` step of the session protocol:
 
 ```markdown
 - `tasks start` records a claim outside git — visible from every worktree of the project,
-  carrying your session identity and a liveness handle. Starting a task another live
-  session holds fails with `claimed`; `tasks start --force <id>` takes it over and records
-  the takeover in the task's notes. `ready` and `next` omit claimed tasks and say so in
-  their warnings.
+  carrying your session identity and a liveness handle. Starting a task another live session
+  holds fails with `claimed`; `tasks start --force <id>` takes it over and records the
+  takeover in the task's notes. `ready` and `next` omit claimed tasks and say so in their
+  warnings.
 - Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, if you have a long-lived process id) when
-  several agents share one terminal or one harness process. Without it, agents that share
-  a session id are indistinguishable to the claim store, which is the case this exists to
+  several agents share one terminal or one harness process. Without it, agents that share a
+  session id are indistinguishable to the claim store — which is the case this exists to
   prevent.
 ```
 
-- [ ] **Step 2: Note the gates in AGENTS.md**
+- [ ] **Step 2: Note the new module in AGENTS.md**
 
-Under `## Layout`, add `src/claims.rs` to the module list:
+Under `## Layout`, in the `src/` list:
 
 ```markdown
   `claims.rs` (out-of-git work claims: the per-prefix store, liveness, the mutation lock),
@@ -2219,8 +2519,8 @@ Under `## Layout`, add `src/claims.rs` to the module list:
 
 - [ ] **Step 3: Correct the design doc of record**
 
-`docs/specs/2026-08-29-tasks-design.md:112` describes `owner` as the whole claim story.
-Add a pointer next to it so the two docs do not drift:
+`docs/specs/2026-08-29-tasks-design.md:112` describes `owner` as the whole claim story. Add
+a pointer so the two docs do not drift:
 
 ```markdown
 | `owner`    | string              | no       | Advisory claim; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
@@ -2228,8 +2528,8 @@ Add a pointer next to it so the two docs do not drift:
 
 - [ ] **Step 4: Correct this design's own status header**
 
-In `docs/specs/2026-09-05-work-claims-design.md`, change the header to reflect what landed
-and confirm each "Known gaps" entry is still true:
+In `docs/specs/2026-09-05-work-claims-design.md`, set the header to what actually landed and
+re-read "Known gaps" to confirm each entry is still true:
 
 ```markdown
 Status: implemented (2026-09-05)
@@ -2255,16 +2555,25 @@ git commit -m "docs(claims): document the claim protocol and close the reports"
 
 ## Self-Review
 
-**Spec coverage:** Store and prefix keying → Task 1. Locking → Tasks 3, 4, 10. Identity →
-Task 5. Liveness → Task 2. Command behaviour, destination-based release, write ordering,
-pruning → Task 6. `start --force` → Task 7. JSON contract → Task 8. `ready`/`prime` and all
-three warnings → Task 9. `feedback` recurrence → Task 10. The tasks-8f4b41 warning → Task
-11. Docs and the "Known gaps" recheck → Task 12. The three known gaps are deliberately not
-implemented and are recorded as such.
+**Spec coverage:** Store and prefix keying → Task 1. Liveness → Task 2. Locking → Tasks 3, 4,
+10. Identity → Task 5. JSON contract → Task 6. Command behaviour, destination-based release,
+write ordering, pruning → Task 7. `start --force` → Task 8. `ready`/`prime` and all three
+warnings → Task 9. `feedback` recurrence → Task 10. The tasks-8f4b41 warning → Task 11.
+Concurrency and rollback → Task 12. Docs and the "Known gaps" recheck → Task 13. The three
+known gaps are deliberately unimplemented and recorded as such.
 
-**Type consistency:** `ClaimStore::{path_for, load, load_from, save, get, insert, remove,
-prune_with, prune_dead, iter}`, `Claim`, `Liveness::{Live, Stale}`, `ProcStat::{NotFound,
-Unreadable, Found}`, `Identity {session, pid}`, `MutationLock::{path_for, acquire}`,
-`ClaimInfo::of`, `Error::Claimed` are used under those exact names throughout.
-`TaskSummary::of` gains a third parameter in Task 8; Task 9's call sites pass `Some(&store)`.
-`transition` and `save` take `&mut Ctx` from Task 6 onward.
+**Ordering:** Task 6 (output shapes) precedes Task 7 (the guard) so the guard's tests have a
+contract to assert against; it is testable on its own through a hand-written store fixture.
+No task commits a test that a later task is required to make pass, except the two `--force`
+tests in Task 7, which Step 4 flags explicitly.
+
+**Type consistency:** `ClaimStore::{path_with, path_for, load, load_from, save, get, insert,
+remove, prune_with, prune_dead, iter}`, `Claim`, `Liveness::{Live, Stale}`,
+`ProcStat::{NotFound, Unreadable, Found}`, `parse_proc_stat`, `Identity {session, pid}`,
+`identity() -> Result<Identity>`, `MutationLock::{path_with, path_for, acquire, acquire_at}`,
+`ClaimInfo::of`, `ClaimSnapshot::{load, live, stale, stores}`, `ClaimIntent::{Acquire,
+Release}`, `Error::Claimed` are used under those exact names throughout. `TaskSummary::of`
+takes three parameters from Task 6 onward. `transition` and `save` take `&mut Ctx` from Task
+7 onward. Test helpers `write_claim`, `two_roots`, `as_agent`, `err_kind`, `err_detail` are
+defined in Tasks 6, 7 and 7 respectively and used thereafter; `TestEnv::{claim_store,
+init_forced}` in Tasks 1 and 7.
