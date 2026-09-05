@@ -133,6 +133,52 @@ impl ClaimStore {
     }
 }
 
+/// Serializes every read-modify-write against one project: the task markdown files *and*
+/// the claim store together.
+///
+/// It has to span both. The guard in `transition` and the write in `save` are separate
+/// steps, so a lock over the claim store alone leaves a takeover race in the gap between
+/// them. And `note`, whatever its append-only meaning, rewrites the whole markdown file at
+/// the storage layer, so an unserialized note can clobber a concurrent status change.
+///
+/// The lock is its own file because `atomic_write` replaces the store's inode by rename:
+/// locking the store itself would leave each writer holding a lock on a file no longer at
+/// that path. A process that dies holding it has it released by the kernel, so there is no
+/// stale-lock recovery path.
+#[derive(Debug)]
+pub struct MutationLock {
+    _file: std::fs::File,
+}
+
+impl MutationLock {
+    pub fn path_with(prefix: &str, get: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+        Ok(ClaimStore::path_with(prefix, get)?.with_file_name(format!("{prefix}.lock")))
+    }
+
+    pub fn path_for(prefix: &str) -> Result<PathBuf> {
+        // A closure, for the same higher-ranked-lifetime reason as `ClaimStore::path_for`.
+        Self::path_with(prefix, |key| std::env::var_os(key))
+    }
+
+    pub fn acquire(prefix: &str) -> Result<MutationLock> {
+        Self::acquire_at(&Self::path_for(prefix)?)
+    }
+
+    pub fn acquire_at(path: &Path) -> Result<MutationLock> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)?;
+        file.lock()
+            .map_err(|error| Error::Io(format!("locking {}: {error}", path.display())))?;
+        Ok(MutationLock { _file: file })
+    }
+}
+
 /// Hours a claim whose liveness cannot be established stays live. It applies *only* on the
 /// unverifiable path: a confirmed-live process outlives it, and a confirmed-dead one gets
 /// no grace at all.
@@ -262,6 +308,43 @@ mod tests {
                 .find(|(k, _)| k == key)
                 .map(|(_, v)| OsString::from(v))
         }
+    }
+
+    #[test]
+    fn the_lock_serializes_two_writers() {
+        use std::sync::{Arc, Barrier};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sci.lock");
+
+        let held = MutationLock::acquire_at(&path).unwrap();
+        let ready = Arc::new(Barrier::new(2));
+        let waiter = {
+            let ready = Arc::clone(&ready);
+            let path = path.clone();
+            std::thread::spawn(move || {
+                ready.wait();
+                let _second = MutationLock::acquire_at(&path).unwrap();
+                std::time::Instant::now()
+            })
+        };
+
+        ready.wait();
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let released = std::time::Instant::now();
+        drop(held);
+
+        assert!(
+            waiter.join().unwrap() >= released,
+            "the second writer must not enter before the first leaves"
+        );
+    }
+
+    #[test]
+    fn the_lock_is_a_separate_file_from_the_store() {
+        let store = ClaimStore::path_with("sci", env_of(&[("XDG_STATE_HOME", "/xdg")])).unwrap();
+        let lock = MutationLock::path_with("sci", env_of(&[("XDG_STATE_HOME", "/xdg")])).unwrap();
+        assert_ne!(store, lock);
+        assert_eq!(lock, PathBuf::from("/xdg/tasks/claims/sci.lock"));
     }
 
     #[test]
