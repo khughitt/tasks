@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use clap_complete::ArgValueCandidates;
+use clap_complete::{ArgValueCandidates, ArgValueCompleter};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -92,7 +92,10 @@ pub enum Command {
     /// The registry: every project, whether it is reachable, and its status counts.
     Projects,
     /// The registered root of the project an id belongs to.
-    Root { id: String },
+    Root {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+    },
     /// Create a task.
     Add {
         title: String,
@@ -110,7 +113,10 @@ pub enum Command {
         fields: FieldArgs,
     },
     /// Show one task with resolved links and dependencies.
-    Show { id: String },
+    Show {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+    },
     /// List tasks (open by default).
     List {
         #[arg(long = "status", add = ArgValueCandidates::new(crate::complete::statuses))]
@@ -150,14 +156,20 @@ pub enum Command {
     },
     /// Edit fields, or open the task in $EDITOR when no field flags are given.
     Edit {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
         #[command(flatten)]
         args: EditArgs,
     },
     /// Append a timestamped note.
-    Note { id: String, text: String },
+    Note {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        text: String,
+    },
     /// Claim a task: status=doing, owner=you.
     Start {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
         /// Take over a claim another live session holds.
         #[arg(long)]
@@ -165,19 +177,32 @@ pub enum Command {
     },
     /// Close a task as done.
     Done {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
         message: Option<String>,
         #[arg(long)]
         force: bool,
     },
     /// Close a task as dropped.
-    Drop { id: String, message: Option<String> },
+    Drop {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        message: Option<String>,
+    },
     /// Mark a task blocked.
-    Block { id: String, message: Option<String> },
+    Block {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        message: Option<String>,
+    },
     /// Return a blocked task to todo.
-    Unblock { id: String },
+    Unblock {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+    },
     /// Add or remove dependencies.
     Dep {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
         #[arg(long = "on", conflicts_with = "rm", required_unless_present = "rm", num_args = 1..)]
         on: Vec<String>,

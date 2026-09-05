@@ -148,4 +148,21 @@ impl TestEnv {
             .map(str::to_string)
             .collect()
     }
+
+    /// Like `complete`, but drops the still-available global flags (`-C`, `--pretty`,
+    /// `--color`, `--help`) that clap_complete appends after the real candidates when
+    /// completing a bare positional with an empty word. Use this whenever the assertion
+    /// checks the candidate list itself (equality, emptiness) rather than membership.
+    pub fn complete_values(
+        &self,
+        dir: &Path,
+        shell: &str,
+        index: usize,
+        words: &[&str],
+    ) -> Vec<String> {
+        self.complete(dir, shell, index, words)
+            .into_iter()
+            .filter(|candidate| !candidate.starts_with('-'))
+            .collect()
+    }
 }
