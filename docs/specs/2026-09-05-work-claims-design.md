@@ -51,16 +51,38 @@ overlay, never a task.
 
 ### Locking
 
-Every mutation is a read-check-write over the whole file, so `atomic_write` alone is not
-enough: two simultaneous `start`s could both pass their checks, and the loser's write would
-drop the winner's unrelated claims. A persistent `<prefix>.lock` beside the TOML is opened
-and exclusively locked with `std::fs::File::lock` for the whole operation. Available on the
-project's toolchain (rustc 1.98.1); no new dependency.
+The lock is not a claim-store lock; it is a **per-project mutation lock**, and it covers the
+task file and the claim store together.
+
+Two reasons it has to be that wide. First, checking ownership in `transition()` and writing
+in `save()` are separate steps, so a lock spanning only the claim store leaves a takeover
+race in the gap between them: B could take the claim after A's guard passed and before A's
+file write landed. Second, `note` is not conflict-free at the storage layer — it reads and
+rewrites the whole markdown file, so a foreign note racing a status change silently
+overwrites it. Both are fixed by the same lock, and only by one that spans guard, task-file
+persistence, and claim mutation as a single critical section.
+
+A persistent `<prefix>.lock` sits beside the TOML, opened and exclusively locked with
+`std::fs::File::lock`. Available on the project's toolchain (rustc 1.98.1); no new
+dependency. It is acquired in `open_ctx()` and held in `Ctx` for the life of the command, so
+every write path — `note`, `start`, `done`, `drop`, `block`, `edit`, `dep` — is serialized
+without each having to remember to take it. `ReadCtx` takes no lock.
 
 The lock is a separate file *because* `atomic_write` replaces the TOML's inode — locking the
 TOML itself would leave each writer holding a lock on a file no longer at that path. A
 process that dies holding the lock releases it to the kernel, so there is no stale-lock
 recovery path to write.
+
+Two exceptions, both deliberate:
+
+- **The interactive editor** would otherwise hold the lock for as long as a human keeps
+  `$EDITOR` open. It drops the lock around the editor invocation and re-acquires it before
+  validating and writing. The gap is already covered by the raw-content comparison at
+  `edit.rs:134`, which fails with `concurrent_modification` and keeps the edit.
+- **`add` and `feedback` take no lock at all.** `create_task` links the file into place
+  exclusively, so it has no read-modify-write to protect. This also means no command ever
+  holds two locks — `feedback` writes into another project — so there is no lock-ordering
+  deadlock to reason about.
 
 ## Identity
 
@@ -134,10 +156,16 @@ the shared chokepoint covers all four paths at once.
   already means "`--status done` despite the same". Overloading either with a second,
   unrelated meaning would make a single flag mean two different overrides. Takeover is a
   separate act, so it gets a separate command.
-- **Leaving `doing`** having passed that guard releases the claim.
-- **`note`** refreshes `seen`, but only on a claim held by this session; it never touches a
-  foreign claim, and it is never refused, since notes are append-only and conflict with
-  nothing.
+- **Release is destination-based, not origin-based.** Once the ownership check passes, a
+  status change whose destination is anything other than `doing` releases this session's
+  claim. It must not be conditioned on *leaving* a local `doing`: a session can hold the
+  shared claim while its own checkout still reads `todo` — that is the ordinary
+  cross-worktree case — and its `done` there would otherwise leave the claim behind forever.
+- **`note`** refreshes `seen`, but only on a claim held by this session, and never touches a
+  foreign claim. It is never refused. It is nonetheless serialized under the same lock as
+  every other mutation: notes are append-only in *meaning*, but at the storage layer `note`
+  rewrites the whole markdown file, so an unserialized foreign note can clobber a concurrent
+  status change.
 - **`ready` / `next`** omit every task under a live claim, **including this session's own**,
   and say so in the existing `warnings` array (and the pretty warnings block), so the
   omission is always explainable. `start` remains the authoritative check.
@@ -146,16 +174,31 @@ the shared chokepoint covers all four paths at once.
 
 ### Write ordering
 
-Both orders fail toward "claim held", which is the safe direction: a claim without a file
-update makes a task look busy when it is idle, and it self-heals when the session dies. A
-file update without a claim is the invisibility bug this design exists to remove.
+Under the lock there is no race left between these two writes; the ordering below is about
+what a crash or an I/O failure leaves behind. Both orders fail toward "claim held", which is
+the safe direction: a claim without a file update makes a task look busy when it is idle, and
+it self-heals when the session dies. A file update without a claim is the invisibility bug
+this design exists to remove.
 
 - **Acquire**: claim first, then `save()` the task file. If `save()` fails, release the
   just-acquired claim best-effort and return the original error. If that release also fails,
   add a warning naming the orphaned claim and `tasks start --force` as the recovery.
 - **Release**: `save()` the task file first, then release the claim. A failed release leaves
-  a claim on a closed task; reads ignore claims on non-open tasks and prune them on the next
-  write.
+  a claim held by a session that is still alive, so liveness pruning will not reclaim it
+  until that session ends; it warns, naming the task and `tasks start --force` as the
+  immediate recovery.
+
+### Pruning
+
+A claim is removed by exactly two things: a **successful guarded release** by its owner, and
+**liveness-based pruning** on the next write.
+
+Local status never prunes. It is tempting to have a checkout that reads `done` drop the claim
+as obviously obsolete, but that checkout's `done` may be the *older* state — another branch
+can have reopened the task and claimed it since. One checkout's view of a task cannot
+establish that a shared claim is obsolete. Local status may govern local presentation; it may
+not delete. A live claim on a locally-closed task is therefore reported, not hidden and not
+pruned.
 
 ## Warnings
 
@@ -214,6 +257,12 @@ End-to-end in `tests/cli.rs`, using two `Project` roots that share one prefix an
 - the displaced owner's `done` after a `--force` takeover is refused, and B's claim survives
 - `edit --status done` and an interactive edit are refused on a foreign-claimed task
 - release on `done`, `drop`, `block`; `unblock` does not re-claim
+- destination-based release: a session holding the claim while its own checkout still reads
+  `todo` releases it on `done` — the claim does not survive
+- a checkout whose local file reads `done` does not prune a live claim made from the other
+  root
+- a `note` racing a status change loses neither: both are serialized, and the interactive
+  editor still reports `concurrent_modification` across its unlocked window
 - `ready` and `next` omit claimed tasks and warn, including for the caller's own claim
 - `prime` shows a claim made in the other root, and warns on a stale claim over a local `todo`
 - the exact tasks-8f4b41 sequence: `start`, then create the second root, then observe the
