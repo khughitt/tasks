@@ -1,6 +1,6 @@
 # Shell completions: commands, flags, values, and task ids
 
-Status: designed (2026-09-05)
+Status: implemented (2026-09-05)
 Task: tasks-ea07fb
 
 ## Problem
