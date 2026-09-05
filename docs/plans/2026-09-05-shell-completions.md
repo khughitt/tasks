@@ -632,9 +632,48 @@ Adds the scan-and-present path and the `IdDirected` scope: local first, foreign 
 
 **Interfaces:**
 - Consumes: `Line`/`line()` from Task 2; `crate::repo::Project`, `crate::scope::{is_reachable, open_registered, Origin}`, `crate::model::is_valid_prefix`.
-- Produces: `complete::id_directed(&OsStr) -> Vec<CompletionCandidate>`; internal `open_local(&Line)`, `open_prefix(&Registry, &str)`, `typed_prefix(&str)`, `local_or_foreign(&Registry, Option<Project>, &str)`, `described(&str, Option<&Task>)`, `candidates(Vec<Task>, &str)` for Task 4.
+- Produces: `complete::id_directed(&OsStr) -> Vec<CompletionCandidate>`; internal `open_local(&Line)`, `open_prefix(&Registry, &str)`, `typed_prefix(&str)`, `local_or_foreign(&Registry, Option<Project>, &str)`, `described(&str, Option<&Task>)`, `candidates(Vec<Task>, &str)` for Task 4. `TestEnv::complete_values(&self, dir: &Path, shell: &str, index: usize, words: &[&str]) -> Vec<String>`.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Add the value-only test helper**
+
+Completing a **bare positional with an empty word** also offers the still-unused global
+flags — `-C`, `--pretty`, `--color`, `--help` — after the positional's own candidates.
+That is correct behavior (`tasks show --help` is a real command line) and it does not
+happen when completing a flag's value, nor when the word is non-empty, because the typed
+text filters the flags out. Every assertion in this task is about the id candidates, so
+add a helper that drops flag-shaped candidates. Put it in `tests/common/mod.rs`, right
+after `complete`:
+
+```rust
+    /// `complete`, minus the flag candidates. Completing a bare positional with an empty
+    /// word also offers the flags still available on that command line, which is correct
+    /// and irrelevant to every assertion about ids: a task id never starts with `-`.
+    pub fn complete_values(
+        &self,
+        dir: &Path,
+        shell: &str,
+        index: usize,
+        words: &[&str],
+    ) -> Vec<String> {
+        self.complete(dir, shell, index, words)
+            .into_iter()
+            .filter(|candidate| !candidate.starts_with('-'))
+            .collect()
+    }
+```
+
+Then replace the inline filter Task 1 left in
+`completion_offers_the_fixed_value_sets_and_registry_prefixes` (the `unregister` case,
+which hit this first) with a call to the new helper, so one mechanism covers every site:
+
+```rust
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "unregister", ""]),
+        ["fam", "sci"]
+    );
+```
+
+- [ ] **Step 2: Write the failing tests**
 
 Append to `tests/cli.rs`:
 
@@ -648,7 +687,7 @@ fn completion_offers_task_ids_open_first_with_descriptions() {
     env.json(&sci, &["done", &closed, "landed"]);
 
     // open before closed, whatever the ids sort to
-    let ids = env.complete(&sci, "bash", 2, &["tasks", "show", ""]);
+    let ids = env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]);
     assert_eq!(ids, [open.clone(), closed.clone()], "open task must come first");
 
     // the prefix filters
@@ -658,13 +697,13 @@ fn completion_offers_task_ids_open_first_with_descriptions() {
     );
 
     // zsh carries `value:description`; bash emits bare values
-    let described = env.complete(&sci, "zsh", 2, &["tasks", "show", ""]);
+    let described = env.complete_values(&sci, "zsh", 2, &["tasks", "show", ""]);
     assert_eq!(described[0], format!("{open}:todo  Still open"));
     assert_eq!(described[1], format!("{closed}:done  Finished"));
 
     // every id-taking write uses the same source
     for command in ["edit", "note", "start", "done", "drop", "block", "unblock", "dep", "root"] {
-        let ids = env.complete(&sci, "bash", 2, &["tasks", command, ""]);
+        let ids = env.complete_values(&sci, "bash", 2, &["tasks", command, ""]);
         assert!(ids.contains(&open), "{command}: {ids:?}");
     }
 }
@@ -718,21 +757,21 @@ fn completion_is_silent_when_anything_is_wrong() {
     let nowhere = tempfile::tempdir().unwrap();
 
     // outside every project
-    assert!(env.complete(nowhere.path(), "bash", 2, &["tasks", "show", ""]).is_empty());
+    assert!(env.complete_values(nowhere.path(), "bash", 2, &["tasks", "show", ""]).is_empty());
     // an unregistered prefix
-    assert!(env.complete(&sci, "bash", 2, &["tasks", "show", "zzz-"]).is_empty());
+    assert!(env.complete_values(&sci, "bash", 2, &["tasks", "show", "zzz-"]).is_empty());
     // a malformed task file
     std::fs::write(sci.join("tasks/sci-bad001.md"), "not a task").unwrap();
-    env.complete(&sci, "bash", 2, &["tasks", "show", ""]);
+    env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]);
     // a malformed registry
     std::fs::write(env.home.path().join(".config/tasks/projects.toml"), "not toml = [").unwrap();
-    env.complete(&sci, "bash", 2, &["tasks", "show", ""]);
+    env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]);
     // an unreadable tasks directory
     let locked = env.init("lck");
     let mut perms = std::fs::metadata(locked.join("tasks")).unwrap().permissions();
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
     std::fs::set_permissions(locked.join("tasks"), perms.clone()).unwrap();
-    let out = env.complete(&locked, "bash", 2, &["tasks", "show", ""]);
+    let out = env.complete_values(&locked, "bash", 2, &["tasks", "show", ""]);
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
     std::fs::set_permissions(locked.join("tasks"), perms).unwrap();
     assert!(out.is_empty(), "{out:?}");
@@ -741,12 +780,12 @@ fn completion_is_silent_when_anything_is_wrong() {
 
 `TestEnv::complete` already asserts exit 0 and an empty stderr, so every case above proves silence rather than an error.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 3: Run the tests to verify they fail**
 
 Run: `cargo test --test cli -- completion_offers_task_ids completion_follows_a_typed completion_is_silent`
 Expected: FAIL — empty candidate lists (nothing is wired to an id completer yet).
 
-- [ ] **Step 3: Implement the scan and presentation**
+- [ ] **Step 4: Implement the scan and presentation**
 
 Add to the imports in `src/complete.rs`:
 
@@ -837,7 +876,7 @@ pub fn id_directed(current: &OsStr) -> Vec<CompletionCandidate> {
 }
 ```
 
-- [ ] **Step 4: Attach the completer**
+- [ ] **Step 5: Attach the completer**
 
 In `src/cli.rs`, add `ArgValueCompleter` to the import:
 
@@ -854,12 +893,12 @@ Give the `id` positional of `Show`, `Root`, `Edit`, `Note`, `Start`, `Done`, `Dr
 
 For the ones declared inline as `Show { id: String }` and `Root { id: String }`, expand them to the braced form with the attribute on `id`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- completion_offers_task_ids completion_follows_a_typed completion_is_silent`
 Expected: PASS, 3 tests.
 
-- [ ] **Step 6: Run the gate and commit**
+- [ ] **Step 7: Run the gate and commit**
 
 Run: `just gate`
 Expected: exit 0.
@@ -898,7 +937,7 @@ fn completion_scopes_ids_to_what_each_argument_accepts() {
     let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
 
     // Scoped: tree and list --parent are local, until --all-projects widens list
-    assert!(env.complete(&sci, "bash", 2, &["tasks", "tree", "fam-"]).is_empty());
+    assert!(env.complete_values(&sci, "bash", 2, &["tasks", "tree", "fam-"]).is_empty());
     assert_eq!(env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", ""]), [local.clone()]);
     let mut wide = env.complete(&sci, "bash", 4, &["tasks", "list", "--all-projects", "--parent", ""]);
     wide.sort();
