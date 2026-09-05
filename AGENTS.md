@@ -16,9 +16,14 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 
 ## Gates
 
-    cargo test
-    cargo fmt --check
-    cargo clippy --all-targets -- -D warnings
+    just gate
+
+`just check` is the seconds-long part (`cargo fmt --check`, `cargo clippy --all-targets
+-- -D warnings`, `tasks check`); `just test` is `cargo test`. Every recipe runs through
+the vendored timing wrapper `tools/tt`, which records the run for the cross-project test
+and CI audit (ops `docs/specs/2026-09-04-test-ci-audit-design.md`). The git hooks in
+`.githooks/` run `check` at pre-commit and `gate` at pre-push; on a fresh clone, run
+`git config core.hooksPath .githooks` once.
 
 Rebuild and reinstall after CLI changes so the tracker used above is the code under test:
 `cargo install --path .`
@@ -30,6 +35,7 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
   `resolve.rs` (spec/plan links), `query.rs`, `output.rs` / `format.rs` (JSON default, `--pretty`),
   `hierarchy.rs` (parent validation, subtree walks, forest).
 - `tests/cli.rs` — end-to-end tests against the built binary in temp repos.
+- `justfile`, `tools/tt`, `.githooks/` — the test front door and its timing wrapper (see Gates).
 - `skills/tasks/SKILL.md` — the agent skill shipped to other projects; keep it in step with CLI changes.
 - `docs/specs/`, `docs/plans/` — design and plan docs; tasks link to them with `--spec` / `--plan --step`.
 
