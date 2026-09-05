@@ -705,6 +705,31 @@ fn add_resolves_specs_from_supported_directories() {
 }
 
 #[test]
+fn add_resolves_plans_from_supported_directories() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for (topic, rel) in [
+        ("root-plans", "docs/plans/2026-09-04-root-plans.md"),
+        (
+            "superpowers-plans",
+            "docs/superpowers/plans/2026-09-04-superpowers-plans.md",
+        ),
+    ] {
+        write_doc(&dir, rel, "# Plan\n\n### Task 1: bank\n");
+        let id = env.json(
+            &dir,
+            &["add", topic, "--plan", topic, "--step", "Task 1: bank"],
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let shown = env.json(&dir, &["show", &id]);
+        assert_eq!(shown["task"]["plan"], rel);
+        assert_eq!(shown["step_found"], true);
+    }
+}
+
+#[test]
 fn bare_spec_names_are_ambiguous_across_supported_directories() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

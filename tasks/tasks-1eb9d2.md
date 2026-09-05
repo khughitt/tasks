@@ -1,11 +1,12 @@
 ---
 id: tasks-1eb9d2
 title: "Default plan roots omit docs/superpowers/plans, unlike the default spec roots"
-status: todo
+status: done
 priority: 2
 size: xs
+owner: main
 created: 2026-09-04T14:50:00Z
-updated: 2026-09-04T21:25:29Z
+updated: 2026-09-05T08:19:23Z
 depends: []
 tags: [feedback, gap, "from:beliefs", cli]
 ---
@@ -15,3 +16,4 @@ tags: [feedback, gap, "from:beliefs", cli]
 ## Notes
 
 - 2026-09-04T21:25:16Z (main): triage: redacted the reporter's ids and paths; promoted to todo xs: add docs/superpowers/plans to DEFAULT_PLAN_DIRS
+- 2026-09-05T08:19:23Z (main): DEFAULT_PLAN_DIRS now includes docs/superpowers/plans, mirroring the spec defaults; README updated; test add_resolves_plans_from_supported_directories covers both roots

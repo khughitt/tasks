@@ -61,7 +61,7 @@ pub const DEFAULT_SPEC_DIRS: &[&str] = &[
     "docs/superpowers/specs",
     "docs/superpowers/designs",
 ];
-pub const DEFAULT_PLAN_DIRS: &[&str] = &["docs/plans"];
+pub const DEFAULT_PLAN_DIRS: &[&str] = &["docs/plans", "docs/superpowers/plans"];
 
 #[derive(Debug, Clone)]
 pub struct Project {
