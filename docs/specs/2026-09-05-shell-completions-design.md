@@ -88,7 +88,7 @@ context the candidates depend on therefore have to be recovered by the completer
 - **`--project <prefix>`**, which selects the destination of `add`.
 
 Both are available: the completing process's own `std::env::args_os()` is the full
-transport argv, `tasks -- tasks -C /path show tasks-`. `complete::words()` drops `argv[0]`
+transport argv, `tasks -- tasks -C /path show tasks-`. `complete::line()` drops `argv[0]`
 and takes everything after the first `--` — the same split `CompleteEnv::try_complete_`
 makes — returning the user's command line, minus the word under the cursor so a half-typed
 token is never read as context.
@@ -97,8 +97,8 @@ Reading that line requires walking it the way clap does, not grepping it. A flat
 token that looks like an id" scan is wrong twice over: it reads the title in
 `tasks add fam-000001 --parent <TAB>` as a subject and selects `fam` instead of the local
 project, and it reads the value in `tasks edit --body fam-000001 tasks-abcdef --parent
-<TAB>` as the subject instead of `tasks-abcdef`. So `complete::walk()` classifies each
-word:
+<TAB>` as the subject instead of `tasks-abcdef`. So `complete::line()` classifies each
+word and returns a `Line` struct:
 
 1. The first non-option word is the **subcommand**. Look it up in `Cli::command()`; an
    unrecognized one ends the walk with no context.
@@ -110,15 +110,16 @@ word:
    following non-option word.
 4. Anything else is a **positional**, in declaration order.
 
-From that walk:
+From that walk, `Line` carries:
 
-- `effective_dir()` — the last `-C` value, else the process's current directory. The
-  starting point for every `Project::locate`.
-- `selected_project()` — the `--project` value.
-- `subject_id()` — the **first positional of a subcommand whose first positional is an id**:
+- `dir` — the last `-C` value, else `None` (the calling process's current directory serves
+  as the fallback). The starting point for every `Project::locate`.
+- `project` — the `--project` value, else `None`.
+- `subject` — the **first positional of a subcommand whose first positional is an id**:
   `show`, `root`, `tree`, `edit`, `note`, `start`, `done`, `drop`, `block`, `unblock`,
-  `dep`. For any other subcommand — `add`, whose first positional is a title — there is no
-  subject, and callers fall back rather than guess.
+  `dep`. For any other subcommand — `add`, whose first positional is a title — `subject`
+  is `None`, and callers fall back rather than guess.
+- `all_projects` — whether `--all-projects` is present.
 
 **Ambiguity yields no candidates.** An unrecognized subcommand, a first positional that
 does not parse as a `TaskId` where one is expected, a `-C` whose value is the word being
