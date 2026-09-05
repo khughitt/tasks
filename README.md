@@ -48,6 +48,11 @@ Each step is idempotent.
 Never edit `tasks/*.md` by hand. `tasks --help` lists every command; add `--pretty` to any
 command for human-readable output.
 
+`start` also writes a per-project claim outside git, so every worktree sees the session and
+its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
+`TASKS_SESSION` per agent when agents share a terminal or harness process; use
+`tasks start --force <id>` for an explicit, recorded takeover.
+
 ## Install
 
 From a checkout:

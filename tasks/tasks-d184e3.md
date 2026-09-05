@@ -1,11 +1,11 @@
 ---
 id: tasks-d184e3
 title: `doing` claims are invisible across worktrees and carry no agent identity or liveness
-status: todo
+status: done
 priority: 2
 size: l
 created: 2026-09-04T14:15:45Z
-updated: 2026-09-05T10:21:31Z
+updated: 2026-09-05T13:12:26Z
 depends: []
 tags: [feedback, friction, "from:beliefs"]
 spec: docs/specs/2026-09-05-work-claims-design.md
@@ -18,3 +18,4 @@ Task files live on the feature branch, so `tasks prime` in the main checkout sho
 
 - 2026-09-04T21:25:16Z (main): triage: redacted the reporter's project and worktree; kept as idea pending a design session on agent identity, liveness, and cross-worktree visibility of doing
 - 2026-09-05T10:02:15Z (feat/doing-claims): spec revised after review: project-wide mutation lock spanning guard/file/claim, destination-based release, local status never prunes a shared claim
+- 2026-09-05T13:12:26Z (feat/doing-claims): claims moved out of git: per-prefix store, session identity, pid liveness, mutation lock, ready/prime overlay, and documented known gaps

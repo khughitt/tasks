@@ -32,6 +32,7 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 
 - `src/` — `main.rs` / `cli.rs` (clap), `commands/` (one module per subcommand), `model.rs`
   (task record), `frontmatter.rs`, `repo.rs` (tasks/ dir), `registry.rs` (`~/.config/tasks/projects.toml`),
+  `claims.rs` (out-of-git work claims: the per-prefix store, liveness, and mutation lock),
   `resolve.rs` (spec/plan links), `query.rs`, `output.rs` / `format.rs` (JSON default, `--pretty`),
   `hierarchy.rs` (parent validation, subtree walks, forest).
 - `tests/cli.rs` — end-to-end tests against the built binary in temp repos.

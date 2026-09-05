@@ -1,5 +1,7 @@
 # Work Claims Implementation Plan
 
+**Status:** implemented (2026-09-05)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give `doing` claims cross-worktree visibility, agent identity, and liveness, by moving the claim out of git into a per-prefix state store guarded by a per-project mutation lock.
@@ -46,7 +48,7 @@
 call `set_var`: the gate runs tests in parallel, and a mutated `HOME` or `XDG_STATE_HOME`
 corrupts whatever else is running.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In a new `src/claims.rs`:
 
@@ -145,13 +147,13 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --bin tasks claims::`
 Expected: FAIL — `cannot find type Claim` / `ClaimStore`. (Not `--lib`: this crate has no
 library target.)
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 At the top of `src/claims.rs`:
 
@@ -301,13 +303,13 @@ impl ClaimStore {
 
 Add `mod claims;` to `src/main.rs` alongside the other `mod` lines.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --bin tasks claims::`
 Expected: PASS (4 tests). They pass under the default parallel runner, because none of them
 touch process environment.
 
-- [ ] **Step 5: Isolate the end-to-end test environment**
+- [x] **Step 5: Isolate the end-to-end test environment**
 
 `tests/common/mod.rs` must stop the suite inheriting a real state directory or a real agent
 identity. Extend the `env_remove` chain in `cmd` (`tests/common/mod.rs:22-28`):
@@ -353,7 +355,7 @@ environment chain:
     }
 ```
 
-- [ ] **Step 6: Verify isolation and commit**
+- [x] **Step 6: Verify isolation and commit**
 
 Run: `just check && cargo test`
 Expected: PASS, and nothing appears under your real `~/.local/state/tasks/`.
@@ -380,7 +382,7 @@ no recorded pid, no recorded `pid_start`, unreadable `/proc` — all take the TT
 positive evidence (the pid is gone, the recorded start time differs, a zombie, a different
 boot) makes a claim stale ahead of the TTL.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to the `tests` module:
 
@@ -570,12 +572,12 @@ Append to the `tests` module:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --bin tasks claims::`
 Expected: FAIL — `cannot find value liveness_with` / `ProcStat`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `src/claims.rs`:
 
@@ -690,12 +692,12 @@ impl ClaimStore {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --bin tasks claims::`
 Expected: PASS (13 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/claims.rs
@@ -713,7 +715,7 @@ git commit -m "feat(claims): judge liveness by pid, boot id, and a four-hour fal
 **Interfaces:**
 - Produces: `MutationLock`, `MutationLock::{acquire, acquire_at, path_for}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to the `tests` module. These use `acquire_at` with a temp path, so no test touches
 process environment:
@@ -757,12 +759,12 @@ process environment:
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --bin tasks claims::`
 Expected: FAIL — `cannot find type MutationLock`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Append to `src/claims.rs`:
 
@@ -817,12 +819,12 @@ impl MutationLock {
 The lock releases when `MutationLock` drops, because dropping the `File` closes the
 descriptor.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --bin tasks claims::`
 Expected: PASS (15 tests), under the default parallel runner.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/claims.rs
@@ -839,12 +841,14 @@ git commit -m "feat(claims): add the per-project mutation lock"
 
 **Interfaces:**
 - Consumes: `MutationLock` from Task 3.
-- Produces: `Ctx { project, registry, warnings, lock: Option<MutationLock>, claims: Option<ClaimStore>, pending_claim: Option<ClaimIntent> }`, `open_write_ctx`, `Ctx::claims_mut`.
+- Produces in this task: `Ctx { project, registry, warnings, lock: Option<MutationLock> }`
+  and `open_write_ctx`. `ClaimIntent`, the claim-store fields, and `Ctx::claims_mut` landed
+  with their first consumer in Task 7.
 
 `show`, `graph`, `check`, `add` and `feedback` keep the unlocked `open_ctx`; the eight write
 paths move to `open_write_ctx`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -864,12 +868,12 @@ fn read_commands_do_not_take_the_mutation_lock() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test --bin tasks --test cli read_commands_do_not_take`
 Expected: FAIL — the lock file never appears.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `src/commands/mod.rs`:
 
@@ -918,12 +922,12 @@ Switch exactly the eight write paths in `run` to `open_write_ctx` — `Edit`, `N
 `Feedback` on `open_ctx`. Add `lock: None` to the `Ctx { .. }` literal in the `Command::Add`
 arm (`src/commands/mod.rs:280-285`).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test --bin tasks --test cli read_commands_do_not_take`
 Expected: PASS.
 
-- [ ] **Step 5: Release the lock around the interactive editor**
+- [x] **Step 5: Release the lock around the interactive editor**
 
 `editor()` waits on `$EDITOR`, which can be a human's minutes. Drop the lock before spawning
 and re-acquire before validating. Immediately before the `std::process::Command::new("sh")`
@@ -943,7 +947,7 @@ and immediately after the `if !status.success()` block:
     ctx.lock = Some(crate::claims::MutationLock::acquire(&prefix)?);
 ```
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 Run: `just check && cargo test`
 Expected: PASS.
@@ -969,7 +973,7 @@ would make every anonymous caller pass the same-session check, defeating both th
 and ownership-aware release. TTL can stand in for unavailable *liveness*; nothing stands in
 for unavailable *identity*.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
     #[test]
@@ -1023,12 +1027,12 @@ for unavailable *identity*.
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --bin tasks claims::`
 Expected: FAIL — `cannot find function identity_from`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```rust
 /// Who holds a claim, and the pid that proves it is still alive.
@@ -1121,12 +1125,12 @@ In `src/error.rs` add the variant, its `kind` (`"claimed"`), and its `with_suffi
             Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --bin tasks claims::`
 Expected: PASS (20 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/claims.rs src/error.rs
@@ -1158,7 +1162,7 @@ around the cached result, and that is exactly how one `prime` ends up contradict
 **`ShowOut.fields` is `#[serde(flatten)]`** (`src/output.rs:78`), so `show` exposes the claim
 at `v["claim"]`. Asserting `v["fields"]["claim"]` silently passes every null assertion.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/cli.rs`:
 
@@ -1237,12 +1241,12 @@ fn pretty_rows_name_the_claim_holder_not_the_local_owner() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --bin tasks --test cli claim_appears_in_show`
 Expected: FAIL — `claim` is null even with the fixture in place.
 
-- [ ] **Step 3: Write the snapshot**
+- [x] **Step 3: Write the snapshot**
 
 In `src/claims.rs`:
 
@@ -1350,12 +1354,12 @@ this checkout's copy of the file, which may predate the claim entirely:
     };
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --bin tasks --test cli claim && just check && cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/claims.rs src/output.rs src/commands tests/cli.rs
@@ -1390,7 +1394,7 @@ validated operation there is one.
 `transition` and `save` change from `&Ctx` to `&mut Ctx`; every caller in
 `src/commands/{status,edit,add,dep}.rs` needs `mut ctx`. Mechanical — the compiler lists them.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add `init_forced` to `tests/common/mod.rs`:
 
@@ -1600,12 +1604,12 @@ fn note_fails_before_appending_when_identity_cannot_be_resolved() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --bin tasks --test cli`
 Expected: FAIL — no `--force` flag, nothing refuses, nothing releases.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Delete the module-level `#![allow(dead_code)]` from the top of `src/claims.rs`. Every item is
 reachable from here on, and Step 4 proves it.
@@ -1919,12 +1923,12 @@ pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
 Apply `mut ctx` and the `&mut ctx` argument in `close`, `unblock`, `edit::run`, `editor`,
 `add::run` and `dep::run`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --bin tasks --test cli && just check && cargo test`
 Expected: PASS, with clippy clean now that the `allow(dead_code)` is gone.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/claims.rs src/cli.rs src/commands tests
@@ -1953,7 +1957,7 @@ runs, and no claim warning fires for it — correct, and not something to test f
 that matters is a task whose **local** file still says `todo` while another root holds a live
 claim.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -2041,12 +2045,12 @@ fn one_prime_never_contradicts_itself_about_a_claim() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test --bin tasks --test cli -- ready_omits prime_shows prime_warns one_prime_never`
 Expected: FAIL — claimed tasks still appear, no warnings.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 First add the two snapshot accessors, held back from Task 6 so they arrive with their only
 caller and never sit unused under `clippy -D warnings`. In `src/claims.rs`:
@@ -2142,12 +2146,12 @@ and after the uncommitted-files loop:
 Every `TaskSummary::of` call in `prime`, `ready`, `next`, `list` and `show` takes
 `Some(&claims)` from that same snapshot.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --bin tasks --test cli && just check && cargo test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/claims.rs src/commands tests/cli.rs
@@ -2175,7 +2179,7 @@ ever holds two locks — which also keeps this correct when source and target ar
 project, as they are in this repository, since a second `flock` on the same file from the
 same process would deadlock.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `feedback` writes into the project registered under the `tasks` prefix, which `feedback_env()`
 (`tests/cli.rs:2261`) sets up; a test that skips it has no target at all.
@@ -2214,14 +2218,14 @@ fn feedback_recurrence_serializes_against_concurrent_recurrences() {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `for i in $(seq 20); do cargo test --bin tasks --test cli feedback_recurrence_serializes || break; done`
 Expected: FAIL on some iterations — a lost update, or `concurrent_modification` after eight
 rounds. This one *is* scheduling-dependent, which is why it is run repeatedly; Task 11 adds
 the deterministic lock-contention test that does not rely on collisions happening.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In the recurrence path of `src/commands/feedback.rs`, before the first read:
 
@@ -2233,12 +2237,12 @@ In the recurrence path of `src/commands/feedback.rs`, before the first read:
     let task = guarded_update(target, &id, eligible, mutate)?;
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `for i in $(seq 20); do cargo test --bin tasks --test cli feedback_recurrence_serializes || break; done`
 Expected: PASS every iteration.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/commands/feedback.rs tests/cli.rs
@@ -2259,7 +2263,7 @@ This is the narrower half of tasks-8f4b41 and covers only the *reverse* order �
 already exist, then `start`. The order actually reported (start first, worktree created
 afterwards) is covered by Task 8's divergence warning and regression-tested in Task 11.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -2306,12 +2310,12 @@ fn start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted()
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cargo test --bin tasks --test cli start_warns_when_a_repo_with_several_worktrees`
 Expected: FAIL — no such warning.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `src/commands/status.rs`:
 
@@ -2355,12 +2359,12 @@ and call it in `start`, immediately before `Ok(id_out(ctx, &task))`:
     warn_if_uncommitted_with_worktrees(&mut ctx, &task)?;
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cargo test --bin tasks --test cli start_warns_when_a_repo_with_several_worktrees`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/commands/status.rs tests/cli.rs
@@ -2396,7 +2400,7 @@ plain booleans, the lock is released, and only then does anything assert.
 **Files:**
 - Modify: `tests/cli.rs`
 
-- [ ] **Step 1: Write the deterministic contention tests**
+- [x] **Step 1: Write the deterministic contention tests**
 
 ```rust
 use std::fs::File;
@@ -2758,14 +2762,14 @@ fn the_reported_sequence_start_then_create_the_worktree() {
 }
 ```
 
-- [ ] **Step 2: Run the tests**
+- [x] **Step 2: Run the tests**
 
 Run: `cargo test --bin tasks --test cli -- a_write_command_waits simultaneous concurrent a_failed the_reported_sequence`
 Expected: PASS. Then repeat, since a concurrency test that passes once proves less than one
 that passes twenty times:
 `for i in $(seq 20); do cargo test --bin tasks --test cli -- a_write_command_waits simultaneous concurrent || break; done`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/cli.rs
@@ -2779,7 +2783,7 @@ git commit -m "test(claims): force lock contention and cover rollback"
 **Files:**
 - Modify: `skills/tasks/SKILL.md`, `AGENTS.md`, `docs/specs/2026-08-29-tasks-design.md`, `docs/specs/2026-09-05-work-claims-design.md`
 
-- [ ] **Step 1: Document the claim protocol in the shipped skill**
+- [x] **Step 1: Document the claim protocol in the shipped skill**
 
 `skills/tasks/SKILL.md` goes out to other projects, so it is where agents learn this. Add
 after the `tasks start` step of the session protocol:
@@ -2796,7 +2800,7 @@ after the `tasks start` step of the session protocol:
   prevent.
 ```
 
-- [ ] **Step 2: Note the new module in AGENTS.md**
+- [x] **Step 2: Note the new module in AGENTS.md**
 
 Under `## Layout`, in the `src/` list:
 
@@ -2804,7 +2808,7 @@ Under `## Layout`, in the `src/` list:
   `claims.rs` (out-of-git work claims: the per-prefix store, liveness, the mutation lock),
 ```
 
-- [ ] **Step 3: Correct the design doc of record**
+- [x] **Step 3: Correct the design doc of record**
 
 `docs/specs/2026-08-29-tasks-design.md:112` describes `owner` as the whole claim story. Add a
 pointer so the two docs do not drift:
@@ -2813,7 +2817,7 @@ pointer so the two docs do not drift:
 | `owner`    | string              | no       | Advisory claim; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
 ```
 
-- [ ] **Step 4: Correct this design's own status header**
+- [x] **Step 4: Correct this design's own status header**
 
 In `docs/specs/2026-09-05-work-claims-design.md`, set the header to what actually landed and
 re-read "Known gaps" to confirm each entry is still true:
@@ -2822,7 +2826,7 @@ re-read "Known gaps" to confirm each entry is still true:
 Status: implemented (2026-09-05)
 ```
 
-- [ ] **Step 5: Reinstall, run the full gate, and close the tasks**
+- [x] **Step 5: Reinstall, run the full gate, and close the tasks**
 
 ```bash
 cargo install --path .
@@ -2831,7 +2835,7 @@ tasks done tasks-8f4b41 "start's claim is visible from every worktree; the diver
 tasks done tasks-d184e3 "claims moved out of git: per-prefix store, session identity, pid liveness, mutation lock, ready/prime overlay"
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add skills AGENTS.md docs tasks
@@ -2841,6 +2845,12 @@ git commit -m "docs(claims): document the claim protocol and close the reports"
 ---
 
 ## Self-Review
+
+**Execution deviations:** Task 4 landed only the lock plumbing; Task 7 added the claim
+fields and intent with their consumers. Successful locked mutations also prune stale claims,
+and feedback recurrence prunes under the target lock; lock-free task creation does not touch
+claims. Installation used the worktree-local `.superpowers/cargo` root because the sandbox
+does not permit a global install.
 
 **Spec coverage:** Store and prefix keying → Task 1. Liveness and load-time timestamp
 validation → Task 2. Locking → Tasks 3, 4, 9. Identity → Task 5. Snapshot and JSON contract →

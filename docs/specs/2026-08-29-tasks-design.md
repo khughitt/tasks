@@ -27,7 +27,9 @@ Non-goals (deliberately):
 
 - No database, cache, or index. Every command scans `tasks/*.md`.
 - No task kinds and no scheduling math; hierarchy is one `parent` field (docs/specs/2026-09-03-task-hierarchy-design.md).
-- No locking or atomic claims; claims are advisory and git is the arbiter.
+- No locking was part of the original tracked-file design. Work claims are still advisory,
+  but now use an out-of-git store and a per-project mutation lock; see
+  `2026-09-05-work-claims-design.md`.
 - No delete; `drop` closes a task and keeps its history.
 
 ## 2. Storage layout
@@ -109,7 +111,7 @@ Free-form markdown body.
 | `status`   | enum                | yes      | `idea`, `todo`, `doing`, `blocked`, `done`, `dropped`. |
 | `priority` | int 0–4             | yes      | 0 = most urgent. Default 2. |
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
-| `owner`    | string              | no       | Advisory claim; set by `start`; `[A-Za-z0-9._/@+-]+`. |
+| `owner`    | string              | no       | Advisory tracked-file owner; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
 | `updated`  | RFC 3339 UTC        | yes      | Set by every write command. |
 | `depends`  | list of ids         | yes      | May be empty. Foreign prefixes allowed (§6). |
@@ -257,8 +259,10 @@ tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
 tasks note <id> <text>
     Append a timestamped bullet under ## Notes.
 
-tasks start <id>
-    status=doing, owner=$TASKS_OWNER, else the current git branch name, else $USER.
+tasks start [--force] <id>
+    status=doing, owner=$TASKS_OWNER, else the current git branch name, else $USER. Also
+    records a per-prefix, out-of-git claim with session identity and liveness. A live claim
+    held by another session refuses with claimed; --force records a takeover note.
 
 tasks done <id> [message] [--force]
     status=done; message appended as a note. Refuses under the open-work rule.
@@ -348,9 +352,13 @@ Task = {
   notes: [{ at: string, by: string, text: string }]
 }
 
-TaskSummary = { id, title, status, priority, size, owner, updated, tags, depends }
+ClaimInfo = { owner, session, host, pid, worktree, started, seen, live }
+
+TaskSummary = { id, title, status, priority, size, owner, updated, tags, depends,
+                claim: ClaimInfo|null }
 
 show   -> { task: Task,
+            claim: ClaimInfo|null,
             spec_path: string|null,    absolute
             plan_path: string|null,    absolute
             step_found: bool|null,     null when no step

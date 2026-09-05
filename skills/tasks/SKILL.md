@@ -17,6 +17,13 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    With nothing in hand, `tasks next` prints the first ready task in full; `tasks next
    --all-projects` does the same across every registered project.
 3. `tasks start <id>` before changing code. It records you as owner.
+   `start` also records a claim outside git, visible from every worktree of the project,
+   with the session identity and a liveness handle. A task claimed by another live session
+   fails with `claimed`; `tasks start --force <id>` takes it over and records that in the
+   task's notes. `ready` and `next` omit live claims and explain each omission in warnings.
+   Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, when a long-lived process id is available)
+   when several agents share one terminal or harness process; otherwise agents that resolve
+   to the same session id are indistinguishable to the claim store.
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
 5. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are
    still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.

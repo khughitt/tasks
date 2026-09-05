@@ -1,6 +1,6 @@
 # Work claims: cross-worktree visibility, agent identity, and liveness
 
-Status: designed, not implemented (2026-09-05)
+Status: implemented (2026-09-05)
 Tasks: tasks-d184e3 (claims), tasks-8f4b41 (worktree divergence)
 
 ## Problem
@@ -48,6 +48,9 @@ claimed task:
 
 State, not configuration: it is per-machine, disposable, and losing it costs only the
 overlay, never a task.
+
+If the hostname cannot be read, `host` is recorded as `"unknown"`. This degrades display
+metadata only; liveness uses the pid, process start time, boot id, and TTL described below.
 
 ### Locking
 
