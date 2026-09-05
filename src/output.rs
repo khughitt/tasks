@@ -71,6 +71,7 @@ pub struct ShowFields {
     pub depends_on: Vec<DepInfo>,
     pub parent: Option<Related>,
     pub children: Vec<Related>,
+    pub claim: Option<ClaimInfo>,
 }
 
 #[derive(Serialize)]
@@ -100,11 +101,43 @@ pub struct TaskSummary {
     pub parent: Option<String>,
     pub child_count: usize,
     pub open_descendant_count: usize,
+    pub claim: Option<ClaimInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClaimInfo {
+    pub owner: String,
+    pub session: String,
+    pub host: String,
+    pub pid: Option<u32>,
+    pub worktree: String,
+    pub started: String,
+    pub seen: String,
+    pub live: bool,
+}
+
+impl ClaimInfo {
+    pub fn of(claim: &crate::claims::Claim, live: &crate::claims::Liveness) -> ClaimInfo {
+        ClaimInfo {
+            owner: claim.owner.clone(),
+            session: claim.session.clone(),
+            host: claim.host.clone(),
+            pid: claim.pid,
+            worktree: claim.worktree.clone(),
+            started: claim.started.clone(),
+            seen: claim.seen.clone(),
+            live: live == &crate::claims::Liveness::Live,
+        }
+    }
 }
 
 impl TaskSummary {
     /// `all` is the scan the row came from; counts are computed against it.
-    pub fn of(task: &Task, all: &[Task]) -> TaskSummary {
+    pub fn of(
+        task: &Task,
+        all: &[Task],
+        claims: Option<&crate::claims::ClaimSnapshot>,
+    ) -> TaskSummary {
         TaskSummary {
             id: task.id.to_string(),
             title: task.title.clone(),
@@ -118,6 +151,9 @@ impl TaskSummary {
             parent: task.parent.as_ref().map(ToString::to_string),
             child_count: crate::hierarchy::children(all, &task.id).len(),
             open_descendant_count: crate::hierarchy::open_descendants(all, &task.id).len(),
+            claim: claims
+                .and_then(|snapshot| snapshot.get(&task.id))
+                .map(|(claim, live)| ClaimInfo::of(claim, live)),
         }
     }
 }
@@ -432,11 +468,16 @@ pub fn table(rows: &[TaskSummary], painter: &Painter) -> String {
         } else {
             painter.paint(Style::Chrome, &format!(" [{}]", row.tags.join(", ")))
         };
-        let owner = row
-            .owner
-            .as_ref()
-            .map(|owner| painter.paint(Style::Chrome, &format!(" @{owner}")))
-            .unwrap_or_default();
+        let owner = match &row.claim {
+            Some(claim) if claim.live => format!(" @{} [{}]", claim.owner, claim.session),
+            Some(claim) => format!(" @{} [{} stale]", claim.owner, claim.session),
+            None => row
+                .owner
+                .as_ref()
+                .map(|owner| format!(" @{owner}"))
+                .unwrap_or_default(),
+        };
+        let owner = painter.paint(Style::Chrome, &owner);
         rendered.push_str(&format!(
             "{id}  {priority} {size:<2} {status} {}{tags}{owner}\n",
             row.title

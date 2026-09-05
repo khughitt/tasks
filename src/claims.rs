@@ -253,6 +253,28 @@ pub enum Liveness {
     Stale(String),
 }
 
+/// Every claim in scope, with its liveness verdict, read once per command.
+#[derive(Debug, Default)]
+pub struct ClaimSnapshot {
+    by_id: BTreeMap<String, (Claim, Liveness)>,
+}
+
+impl ClaimSnapshot {
+    pub fn load<'a>(prefixes: impl Iterator<Item = &'a str>) -> Result<ClaimSnapshot> {
+        let mut by_id = BTreeMap::new();
+        for prefix in prefixes {
+            for (id, claim) in ClaimStore::load(prefix)?.iter() {
+                by_id.insert(id.clone(), (claim.clone(), liveness(claim)));
+            }
+        }
+        Ok(ClaimSnapshot { by_id })
+    }
+
+    pub fn get(&self, id: &TaskId) -> Option<&(Claim, Liveness)> {
+        self.by_id.get(&id.to_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcStat {
     NotFound,

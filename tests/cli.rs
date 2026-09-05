@@ -215,6 +215,69 @@ fn id_of(value: serde_json::Value) -> String {
     value["id"].as_str().unwrap().to_string()
 }
 
+/// Writes a claim straight into the store.
+fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
+    let path = env.claim_store(prefix);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let (pid, pid_start, boot) = if live {
+        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+        let rest = stat.rsplit_once(") ").unwrap().1.to_string();
+        let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+        (std::process::id(), start, boot.trim().to_string())
+    } else {
+        (0, 1, "not-this-boot".to_string())
+    };
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&format!(
+        "[claims.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\npid = {pid}\n\
+         pid_start = {pid_start}\nboot_id = \"{boot}\"\nhost = \"h\"\n\
+         worktree = \"/elsewhere\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
+         seen = \"2026-01-01T00:00:00Z\"\n"
+    ));
+    std::fs::write(&path, text).unwrap();
+}
+
+#[test]
+fn claim_appears_in_show_and_list_json() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
+
+    write_claim(&env, "sci", &id, "agent-a", true);
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["claim"]["session"], "agent-a");
+    assert_eq!(v["claim"]["live"], true);
+    assert_eq!(v["claim"]["worktree"], "/elsewhere");
+    assert_eq!(v["claim"]["pid"], std::process::id());
+    assert_eq!(
+        env.json(&sci, &["list"])["tasks"][0]["claim"]["session"],
+        "agent-a"
+    );
+}
+
+#[test]
+fn a_dead_claim_is_reported_as_not_live() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_claim(&env, "sci", &id, "ghost", false);
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["live"], false);
+}
+
+#[test]
+fn pretty_rows_name_the_claim_holder_not_the_local_owner() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_claim(&env, "sci", &id, "agent-a", true);
+
+    let out = env.cmd(&sci).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(text.contains("someone"), "the claim's own owner: {text}");
+}
+
 #[test]
 fn read_commands_do_not_take_the_mutation_lock() {
     let mut env = TestEnv::new();

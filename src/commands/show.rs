@@ -18,7 +18,15 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     };
     let task = project.read_task(&id)?;
     let all = project.scan()?;
-    let fields = describe(project, &ctx.registry, task, &all, &mut ctx.warnings)?;
+    let claims = crate::claims::ClaimSnapshot::load(std::iter::once(project.prefix.as_str()))?;
+    let fields = describe(
+        project,
+        &ctx.registry,
+        task,
+        &all,
+        Some(&claims),
+        &mut ctx.warnings,
+    )?;
     Ok(Output::Show(Box::new(ShowOut {
         fields,
         warnings: ctx.warnings,
@@ -34,6 +42,7 @@ pub fn describe(
     registry: &Registry,
     task: Task,
     all: &[Task],
+    claims: Option<&crate::claims::ClaimSnapshot>,
     warnings: &mut Vec<String>,
 ) -> Result<ShowFields> {
     let resolver = Resolver::new(project, registry);
@@ -92,6 +101,9 @@ pub fn describe(
         depends_on,
         parent,
         children,
+        claim: claims
+            .and_then(|snapshot| snapshot.get(&task.id))
+            .map(|(claim, live)| crate::output::ClaimInfo::of(claim, live)),
         task,
     })
 }

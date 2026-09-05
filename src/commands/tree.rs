@@ -16,7 +16,7 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
         {
             return Err(Error::TaskNotFound(root.to_string()));
         }
-        nodes.extend(crate::hierarchy::forest(&tasks, root.as_ref(), all));
+        nodes.extend(crate::hierarchy::forest(&tasks, root.as_ref(), all, None));
     }
     Ok(Output::Tree(TreeOut {
         nodes,

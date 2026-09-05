@@ -26,6 +26,8 @@ pub fn list(
         .collect::<Result<Vec<_>>>()?;
     let mut tasks = ctx.scope.scan()?;
     let all = tasks.clone();
+    let prefixes = ctx.scope.prefixes();
+    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
     let parent = parent.as_deref().map(TaskId::parse).transpose()?;
     if let Some(parent) = &parent
         && !all.iter().any(|task| &task.id == parent)
@@ -61,7 +63,7 @@ pub fn list(
     Ok(Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
             .collect(),
         warnings: ctx.warnings,
     }))
@@ -108,6 +110,8 @@ pub fn ready_tasks(ctx: &mut ReadCtx, all: &[Task]) -> Result<Vec<Task>> {
 pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Result<Output> {
     let size = size.map(|size| Size::parse(&size)).transpose()?;
     let all = ctx.scope.scan()?;
+    let prefixes = ctx.scope.prefixes();
+    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
     let mut tasks = ready_tasks(&mut ctx, &all)?;
     if let Some(size) = size {
         tasks.retain(|task| task.size == Some(size));
@@ -118,7 +122,7 @@ pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Re
     Ok(Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
             .collect(),
         warnings: ctx.warnings,
     }))
@@ -128,6 +132,8 @@ pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Re
 /// lookup. Nothing ready is a normal state: null, warnings, exit 0.
 pub fn next(mut ctx: ReadCtx) -> Result<Output> {
     let all = ctx.scope.scan()?;
+    let prefixes = ctx.scope.prefixes();
+    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
     let ready = ready_tasks(&mut ctx, &all)?;
     let next = match ready.into_iter().next() {
         None => None,
@@ -139,7 +145,14 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
                 .find(|project| project.prefix == task.id.prefix)
                 .expect("a ready task was scanned from a project in scope");
             let mut warnings = Vec::new();
-            let fields = super::show::describe(project, &ctx.registry, task, &all, &mut warnings)?;
+            let fields = super::show::describe(
+                project,
+                &ctx.registry,
+                task,
+                &all,
+                Some(&claims),
+                &mut warnings,
+            )?;
             ctx.warnings.extend(warnings);
             Some(fields)
         }
@@ -152,6 +165,8 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
 
 pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
     let all = ctx.scope.scan()?;
+    let prefixes = ctx.scope.prefixes();
+    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
     let counts = Counts::of(&all);
     let ready = ready_tasks(&mut ctx, &all)?;
     let mut doing: Vec<Task> = all
@@ -160,7 +175,7 @@ pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
         .cloned()
         .collect();
     sort_list(&mut doing);
-    let roadmap = crate::hierarchy::forest(&all, None, false);
+    let roadmap = crate::hierarchy::forest(&all, None, false, Some(&claims));
     let mut closeout: Vec<Task> = all
         .iter()
         .filter(|task| {
@@ -194,16 +209,16 @@ pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
         counts,
         ready: ready
             .iter()
-            .map(|task| TaskSummary::of(task, &all))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
             .collect(),
         doing: doing
             .iter()
-            .map(|task| TaskSummary::of(task, &all))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
             .collect(),
         roadmap,
         closeout: closeout
             .iter()
-            .map(|task| TaskSummary::of(task, &all))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
             .collect(),
         warnings: ctx.warnings,
     }))

@@ -103,7 +103,12 @@ pub fn open_descendants<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
 /// stays visible as context. Roots and siblings are in ready order. A task whose parent is
 /// missing from `all` is treated as a root; members of a parent cycle are not shown at all
 /// (`check` reports them as `parent_cycle`).
-pub fn forest(all: &[Task], root: Option<&TaskId>, include_closed: bool) -> Vec<TreeNode> {
+pub fn forest(
+    all: &[Task],
+    root: Option<&TaskId>,
+    include_closed: bool,
+    claims: Option<&crate::claims::ClaimSnapshot>,
+) -> Vec<TreeNode> {
     let mut tops: Vec<&Task> = match root {
         Some(id) => all.iter().filter(|task| &task.id == id).collect(),
         None => all
@@ -122,6 +127,7 @@ pub fn forest(all: &[Task], root: Option<&TaskId>, include_closed: bool) -> Vec<
                 all,
                 task,
                 include_closed,
+                claims,
                 &mut std::collections::HashSet::new(),
             )
         })
@@ -132,6 +138,7 @@ fn node(
     all: &[Task],
     task: &Task,
     include_closed: bool,
+    claims: Option<&crate::claims::ClaimSnapshot>,
     visited: &mut std::collections::HashSet<TaskId>,
 ) -> Option<TreeNode> {
     if !visited.insert(task.id.clone()) {
@@ -145,10 +152,10 @@ fn node(
     let mut kids = children(all, &task.id);
     kids.sort_by(|a, b| ready_order(a, b));
     Some(TreeNode {
-        summary: TaskSummary::of(task, all),
+        summary: TaskSummary::of(task, all, claims),
         children: kids
             .into_iter()
-            .filter_map(|child| node(all, child, include_closed, visited))
+            .filter_map(|child| node(all, child, include_closed, claims, visited))
             .collect(),
     })
 }
@@ -251,7 +258,7 @@ mod tests {
         let closed_mid = task("xx-000003", Some("xx-000001"), Status::Done);
         let open_deep = task("xx-000004", Some("xx-000003"), Status::Todo);
         let all = [root, closed_leaf, closed_mid, open_deep];
-        let nodes = forest(&all, None, false);
+        let nodes = forest(&all, None, false, None);
         assert_eq!(nodes.len(), 1);
         let kids: Vec<&str> = nodes[0]
             .children
@@ -260,9 +267,9 @@ mod tests {
             .collect();
         assert_eq!(kids, ["xx-000003"]);
         assert_eq!(nodes[0].children[0].children[0].summary.id, "xx-000004");
-        assert_eq!(forest(&all, None, true)[0].children.len(), 2);
+        assert_eq!(forest(&all, None, true, None)[0].children.len(), 2);
         assert_eq!(
-            forest(&all, Some(&all[2].id), true)[0].summary.id,
+            forest(&all, Some(&all[2].id), true, None)[0].summary.id,
             "xx-000003"
         );
     }
