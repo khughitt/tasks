@@ -409,10 +409,51 @@ fn pretty(out: &Output, painter: &Painter) -> String {
     }
 }
 
+/// The `serialize_task` text for `task`, with its frontmatter values painted in the roles
+/// the `list` table gives the same fields. Keys, the `---` delimiters, the body, and the
+/// notes are returned verbatim: that is prose and file text, and it stays copy-pasteable.
+///
+/// Painting the writer's output rather than teaching `serialize_task` about a painter keeps
+/// escape sequences unreachable from the code that writes task files to disk, and leaves one
+/// serializer to maintain: a field added later is simply unpainted until it is named below.
+fn paint_frontmatter(text: &str, task: &Task, painter: &Painter) -> String {
+    // Same split as `format::parse_task`: no frontmatter line is ever exactly `---`, so the
+    // first `\n---\n` is the closing delimiter.
+    let Some((fields, rest)) = text
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---\n"))
+    else {
+        return text.into();
+    };
+    let mut rendered = String::from("---\n");
+    for line in fields.lines() {
+        rendered.push_str(&paint_field(line, task, painter));
+        rendered.push('\n');
+    }
+    rendered.push_str("---\n");
+    rendered.push_str(rest);
+    rendered
+}
+
+/// One `key: value` frontmatter line. The value is painted, never the key, and a key with
+/// no role in the table is left alone.
+fn paint_field(line: &str, task: &Task, painter: &Painter) -> String {
+    let Some((key, value)) = line.split_once(": ") else {
+        return line.into();
+    };
+    let style = match key {
+        // an id is chrome wherever it appears, including `show`'s own footers below
+        "id" | "parent" | "depends" => Style::Chrome,
+        "owner" | "tags" => Style::Chrome,
+        "status" => Style::Status(task.status),
+        "priority" if task.priority <= 1 => Style::Emphasis,
+        _ => return line.into(),
+    };
+    format!("{key}: {}", painter.paint(style, value))
+}
+
 fn show_text(o: &ShowFields, painter: &Painter) -> String {
-    let mut rendered = crate::format::serialize_task(&o.task);
-    // Footer rows only. The serialize_task text above stays plain: it is file
-    // text and has to remain copy-pasteable.
+    let mut rendered = paint_frontmatter(&crate::format::serialize_task(&o.task), &o.task, painter);
     let related_row = |id: &str, status: Option<Status>, title: &str| {
         let status = match status {
             Some(status) => painter.paint(Style::Status(status), status.as_str()),

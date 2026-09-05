@@ -1,6 +1,8 @@
 # Color output for pretty views — design
 
 **Status:** implemented (2026-09-03); see docs/plans/2026-09-03-color-output.md.
+§3 amended 2026-09-05 (tasks-9a001b): `show`'s frontmatter values are colored; the
+original decision to leave the whole task text plain is recorded there.
 
 ## 1. Problem
 
@@ -112,12 +114,22 @@ Elsewhere:
 - **`show`'s footers:** the `# depends on`, `# parent`, and `# children` lists each print a
   `[status]` and an id. Those take the same status hue and the same dim id as a table row
   does, because a status means the same thing wherever it appears.
+- **`show`'s frontmatter values:** `id`, `parent` and `depends` dim; `status` hued;
+  `priority` bold at P0 and P1; `owner` and `tags` dim. Same fields, same roles as a table
+  row, for the same reason the footers take them. The value is painted, never the key.
 
 Not colored, deliberately:
 
 - `graph` output. Mermaid and dot are machine-readable text that happens to print.
-- The task text `show --pretty` prints ahead of those footers, which is `serialize_task`
-  output: frontmatter, body, and notes. That is file text, and it stays copy-pasteable.
+- The frontmatter keys and `---` delimiters, and the body and notes below them. Prose does
+  not carry a role, and the block stays recognisable as the file it came from.
+
+Originally the whole `serialize_task` block was plain, on the grounds that it is file text
+and has to stay copy-pasteable. tasks-9a001b overturned that for the values: color is opt-in
+and off in every non-terminal stream, so text copied out of a pipe is unaffected, and a
+human reading a task wants the same status cue `list` gives. The `serialize_task` writer
+itself is untouched — `output::paint_frontmatter` paints its output — so no escape sequence
+is reachable from the code that writes task files.
 
 ## 4. Shape
 
@@ -188,6 +200,6 @@ function.
 ## 6. Out of scope
 
 Per-status or per-tag palette configuration; 256-color or truecolor output; terminal
-capability detection beyond `IsTerminal`; colored `graph` output; coloring the task file
-text in `show`; a `--color` value of `auto` meaning anything other than "the output stream
-is a tty".
+capability detection beyond `IsTerminal`; colored `graph` output; coloring the body, notes,
+frontmatter keys or delimiters of `show`'s task text; a `--color` value of `auto` meaning
+anything other than "the output stream is a tty".

@@ -744,14 +744,9 @@ fn add_resolves_spec_plan_and_step() {
         .output()
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
-    let marker = "\n\x1b[31m# step MISSING\x1b[0m\n";
-    let at = text
-        .find(marker)
-        .unwrap_or_else(|| panic!("no painted step marker: {text:?}"));
     assert!(
-        !text[..at].contains("\x1b["),
-        "the serialized task text stays plain: {:?}",
-        &text[..at]
+        text.contains("\n\x1b[31m# step MISSING\x1b[0m\n"),
+        "no painted step marker: {text:?}"
     );
 }
 
@@ -3210,6 +3205,95 @@ fn colored_tables_use_semantic_roles_without_changing_layout() {
     assert_eq!(
         strip_ansi(&String::from_utf8(colored_ready.stdout).unwrap()),
         String::from_utf8(plain_ready.stdout).unwrap()
+    );
+}
+
+#[test]
+fn colored_show_paints_frontmatter_values_with_table_roles() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let dep = id_of(env.json(&dir, &["add", "Dep"]));
+    let parent = id_of(env.json(&dir, &["add", "Goal"]));
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Painted",
+            "-p",
+            "0",
+            "--size",
+            "m",
+            "--tag",
+            "now",
+            "--parent",
+            &parent,
+            "-b",
+            // the words a naive whole-text substitution would repaint
+            "Body mentioning doing and todo and tags.",
+        ],
+    ));
+    env.json(&dir, &["dep", &id, "--on", &dep]);
+    env.json(&dir, &["start", &id]);
+    env.json(&dir, &["note", &id, "doing the work"]);
+    let task = env.json(&dir, &["show", &id]);
+    let owner = task["task"]["owner"].as_str().unwrap().to_string();
+    let created = task["task"]["created"].as_str().unwrap().to_string();
+
+    let show = |args: &[&str]| {
+        let out = env.cmd(&dir).args(args).output().unwrap();
+        assert!(out.status.success(), "{args:?} failed");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let plain = show(&["--pretty", "show", &id]);
+    let colored = show(&["--pretty", "--color", "always", "show", &id]);
+
+    // color is decoration only: the same visible text either way
+    assert_eq!(strip_ansi(&colored), plain);
+    assert!(
+        !plain.contains("\x1b["),
+        "--pretty alone stays plain: {plain:?}"
+    );
+    assert!(
+        !show(&["--color", "always", "show", &id]).contains("\x1b["),
+        "JSON never carries escapes"
+    );
+
+    // painted values take the roles the list table gives the same fields
+    for span in [
+        format!("id: \x1b[2m{id}\x1b[0m\n"),
+        "status: \x1b[33mdoing\x1b[0m\n".to_string(),
+        "priority: \x1b[1m0\x1b[0m\n".to_string(),
+        format!("owner: \x1b[2m{owner}\x1b[0m\n"),
+        format!("parent: \x1b[2m{parent}\x1b[0m\n"),
+        format!("depends: \x1b[2m[{dep}]\x1b[0m\n"),
+        "tags: \x1b[2m[now]\x1b[0m\n".to_string(),
+    ] {
+        assert!(colored.contains(&span), "missing {span:?}: {colored:?}");
+    }
+
+    // the rest of the file text stays plain
+    for span in [
+        "title: Painted\n".to_string(),
+        "size: m\n".to_string(),
+        format!("created: {created}\n"),
+    ] {
+        assert!(
+            colored.contains(&span),
+            "{span:?} must stay plain: {colored:?}"
+        );
+    }
+    let (_, after) = colored.split_once("\n---\n").unwrap();
+    let body = after.split("\n# ").next().unwrap();
+    assert!(
+        !body.contains("\x1b["),
+        "body and notes stay plain: {body:?}"
+    );
+
+    // emphasis is for P0/P1 only, exactly as in the table
+    let ordinary = show(&["--pretty", "--color", "always", "show", &dep]);
+    assert!(
+        ordinary.contains("priority: 2\n"),
+        "an ordinary priority stays plain: {ordinary:?}"
     );
 }
 

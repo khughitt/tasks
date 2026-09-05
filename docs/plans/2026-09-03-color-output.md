@@ -23,6 +23,8 @@
 - Escape sequences never span a newline. Paint the line content, then append `\n` outside the
   painted span, so the reset always lands before the break.
 - Do not color graph output or the serialized task text at the start of `show --pretty`.
+  (Superseded 2026-09-05 by tasks-9a001b, which colors that text's frontmatter values;
+  see §3 of the design.)
 - Each task below is one tracker task; close it with `tasks done <id> "<what landed>"` in its commit.
 - The final task updates the design status and closes parent goal `tasks-4737b6` in the same commit.
 - Conventional commits; no AI-attribution trailers.
