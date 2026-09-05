@@ -128,12 +128,14 @@ impl ClaimStore {
     }
 
     pub fn load_from(path: &Path) -> Result<ClaimStore> {
-        let claims = if path.exists() {
-            toml::from_str::<StoreFile>(&std::fs::read_to_string(path)?)
-                .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?
-                .claims
-        } else {
-            BTreeMap::new()
+        let claims = match std::fs::read_to_string(path) {
+            Ok(text) => {
+                toml::from_str::<StoreFile>(&text)
+                    .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?
+                    .claims
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(error) => return Err(error.into()),
         };
         for (id, claim) in &claims {
             for (field, value) in [("started", &claim.started), ("seen", &claim.seen)] {
@@ -509,6 +511,23 @@ mod tests {
         let reloaded = ClaimStore::load_from(&path).unwrap();
         assert_eq!(reloaded.get(&id).unwrap().session, "s1");
         assert_eq!(reloaded.get(&id).unwrap().pid, Some(42));
+    }
+
+    #[test]
+    fn an_unreadable_store_parent_is_an_io_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = tempfile::tempdir().unwrap();
+        let parent = home.path().join("claims");
+        let path = parent.join("sci.toml");
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::write(&path, "claims = {}").unwrap();
+        let original = std::fs::metadata(&parent).unwrap().permissions();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let result = ClaimStore::load_from(&path);
+        std::fs::set_permissions(&parent, original).unwrap();
+
+        assert_eq!(result.unwrap_err().kind(), "io");
     }
 
     #[test]

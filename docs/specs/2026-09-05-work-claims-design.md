@@ -86,7 +86,7 @@ TOML itself would leave each writer holding a lock on a file no longer at that p
 process that dies holding the lock releases it to the kernel, so there is no stale-lock
 recovery path to write.
 
-Two exceptions, both deliberate:
+Three exceptions, all deliberate:
 
 - **The interactive editor** would otherwise hold the lock for as long as a human keeps
   `$EDITOR` open. It drops the lock around the editor invocation and re-acquires it before
