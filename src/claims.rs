@@ -3,8 +3,6 @@
 // the pre-commit hook runs `just check`, so without this the intermediate commits could not
 // land. Task 7 deletes the attribute and proves clippy is clean without it.
 #![allow(dead_code)]
-// compile_error!("TDD RED probe");
-
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::repo::atomic_write;
@@ -129,6 +127,109 @@ impl ClaimStore {
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Claim)> {
         self.claims.iter()
     }
+
+    pub fn prune_dead(&mut self) {
+        self.prune_with(|claim| liveness(claim) == Liveness::Live);
+    }
+}
+
+/// Hours a claim whose liveness cannot be established stays live. It applies *only* on the
+/// unverifiable path: a confirmed-live process outlives it, and a confirmed-dead one gets
+/// no grace at all.
+pub const TTL_HOURS: i64 = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Liveness {
+    Live,
+    Stale(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcStat {
+    NotFound,
+    /// The process may exist; we could not tell. Not evidence of death.
+    Unreadable,
+    Found {
+        state: char,
+        starttime: u64,
+    },
+}
+
+/// The `comm` field can contain spaces and parentheses, so fields are taken from after the
+/// *last* `)`: in that remainder, state is field 1 and start time is field 20 (fields 3 and
+/// 22 of the whole line).
+pub fn parse_proc_stat(line: &str) -> ProcStat {
+    let Some((_, rest)) = line.rsplit_once(") ") else {
+        return ProcStat::Unreadable;
+    };
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    match (
+        fields.first().and_then(|s| s.chars().next()),
+        fields.get(19).and_then(|s| s.parse().ok()),
+    ) {
+        (Some(state), Some(starttime)) => ProcStat::Found { state, starttime },
+        _ => ProcStat::Unreadable,
+    }
+}
+
+pub fn proc_stat(pid: u32) -> ProcStat {
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(text) => parse_proc_stat(&text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ProcStat::NotFound,
+        Err(_) => ProcStat::Unreadable,
+    }
+}
+
+pub fn boot_id() -> Option<String> {
+    std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .ok()
+        .map(|id| id.trim().to_string())
+}
+
+pub fn liveness(claim: &Claim) -> Liveness {
+    liveness_with(
+        claim,
+        time::OffsetDateTime::now_utc(),
+        boot_id().as_deref(),
+        proc_stat,
+    )
+}
+
+pub fn liveness_with(
+    claim: &Claim,
+    now: time::OffsetDateTime,
+    boot_id: Option<&str>,
+    stat: impl Fn(u32) -> ProcStat,
+) -> Liveness {
+    let ttl = || match crate::time::parse(&claim.seen) {
+        Ok(seen) if now - seen <= time::Duration::hours(TTL_HOURS) => Liveness::Live,
+        Ok(seen) => Liveness::Stale(format!(
+            "not seen for {}h",
+            (now - seen).whole_hours().max(0)
+        )),
+        Err(_) => Liveness::Live,
+    };
+
+    let Some(pid) = claim.pid else { return ttl() };
+    match (boot_id, &claim.boot_id) {
+        (Some(current), Some(recorded)) if current != recorded => {
+            return Liveness::Stale("recorded on an earlier boot".into());
+        }
+        (None, _) | (_, None) => return ttl(),
+        _ => {}
+    }
+    match stat(pid) {
+        ProcStat::NotFound => Liveness::Stale(format!("pid {pid} is gone")),
+        ProcStat::Unreadable => ttl(),
+        ProcStat::Found { state: 'Z', .. } => Liveness::Stale(format!("pid {pid} is a zombie")),
+        ProcStat::Found { starttime, .. } => match claim.pid_start {
+            Some(recorded) if recorded != starttime => {
+                Liveness::Stale(format!("pid {pid} was reused by another process"))
+            }
+            Some(_) => Liveness::Live,
+            None => ttl(),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -225,5 +326,214 @@ mod tests {
         store.prune_with(|claim| claim.pid == Some(42));
         assert!(store.get(&keep).is_some());
         assert!(store.get(&go).is_none());
+    }
+
+    fn at(s: &str) -> time::OffsetDateTime {
+        crate::time::parse(s).unwrap()
+    }
+
+    fn seen(when: &str) -> Claim {
+        Claim {
+            seen: when.into(),
+            ..sample()
+        }
+    }
+
+    fn found(starttime: u64) -> impl Fn(u32) -> ProcStat {
+        move |_| ProcStat::Found {
+            state: 'S',
+            starttime,
+        }
+    }
+
+    #[test]
+    fn a_confirmed_live_process_beats_any_ttl() {
+        assert_eq!(
+            liveness_with(
+                &seen("2026-09-01T00:00:00Z"),
+                at("2026-09-05T00:00:00Z"),
+                Some("boot-a"),
+                found(999)
+            ),
+            Liveness::Live,
+            "an agent that thinks for days is not dead"
+        );
+    }
+
+    #[test]
+    fn a_confirmed_dead_pid_is_stale_at_once_with_no_grace() {
+        assert!(matches!(
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                |_| ProcStat::NotFound
+            ),
+            Liveness::Stale(_)
+        ));
+    }
+
+    #[test]
+    fn a_recycled_pid_does_not_resurrect_a_claim() {
+        assert!(matches!(
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                found(12345)
+            ),
+            Liveness::Stale(_)
+        ));
+    }
+
+    #[test]
+    fn a_missing_recorded_start_time_takes_the_ttl_path_not_the_reuse_path() {
+        let no_evidence = Claim {
+            pid_start: None,
+            ..seen("2026-09-05T00:00:00Z")
+        };
+        assert_eq!(
+            liveness_with(
+                &no_evidence,
+                at("2026-09-05T01:00:00Z"),
+                Some("boot-a"),
+                found(999)
+            ),
+            Liveness::Live,
+            "inside the TTL"
+        );
+        assert!(
+            matches!(
+                liveness_with(
+                    &no_evidence,
+                    at("2026-09-05T05:00:00Z"),
+                    Some("boot-a"),
+                    found(999)
+                ),
+                Liveness::Stale(_)
+            ),
+            "and past it, by TTL rather than by a false reuse verdict"
+        );
+    }
+
+    #[test]
+    fn a_reboot_invalidates_the_pid_and_start_time_pair() {
+        assert!(
+            matches!(
+                liveness_with(
+                    &seen("2026-09-05T00:00:00Z"),
+                    at("2026-09-05T00:00:01Z"),
+                    Some("boot-b"),
+                    found(999)
+                ),
+                Liveness::Stale(_)
+            ),
+            "start time counts ticks since boot, so the pair means nothing across boots"
+        );
+    }
+
+    #[test]
+    fn a_zombie_is_dead() {
+        assert!(matches!(
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                |_| ProcStat::Found {
+                    state: 'Z',
+                    starttime: 999
+                }
+            ),
+            Liveness::Stale(_)
+        ));
+    }
+
+    #[test]
+    fn unreadable_proc_falls_to_ttl_rather_than_reading_as_death() {
+        assert_eq!(
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T03:59:00Z"),
+                Some("boot-a"),
+                |_| ProcStat::Unreadable
+            ),
+            Liveness::Live,
+            "a permission failure is not proof of death"
+        );
+        assert_eq!(
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T04:00:00Z"),
+                Some("boot-a"),
+                |_| ProcStat::Unreadable
+            ),
+            Liveness::Live,
+            "exactly four hours is still inside the TTL"
+        );
+        assert!(matches!(
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T04:00:01Z"),
+                Some("boot-a"),
+                |_| ProcStat::Unreadable
+            ),
+            Liveness::Stale(_)
+        ));
+    }
+
+    #[test]
+    fn an_unreadable_boot_id_or_a_pidless_claim_falls_to_ttl() {
+        assert_eq!(
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T01:00:00Z"),
+                None,
+                found(999)
+            ),
+            Liveness::Live
+        );
+        let pidless = Claim {
+            pid: None,
+            ..seen("2026-09-05T00:00:00Z")
+        };
+        assert!(matches!(
+            liveness_with(
+                &pidless,
+                at("2026-09-05T05:00:00Z"),
+                Some("boot-a"),
+                found(999)
+            ),
+            Liveness::Stale(_)
+        ));
+    }
+
+    #[test]
+    fn a_corrupt_timestamp_is_rejected_on_load_rather_than_read_as_stale() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("sci.toml");
+        std::fs::write(
+            &path,
+            "[claims.\"sci-000001\"]\nowner = \"o\"\nsession = \"s\"\nhost = \"h\"\n\
+             worktree = \"/w\"\nstarted = \"2026-09-05T00:00:00Z\"\nseen = \"garbage\"\n",
+        )
+        .unwrap();
+        let error = ClaimStore::load_from(&path).unwrap_err();
+        assert_eq!(error.kind(), "config");
+        assert!(error.to_string().contains("seen"), "{error}");
+    }
+
+    #[test]
+    fn proc_stat_parses_a_comm_containing_spaces_and_parentheses() {
+        assert_eq!(
+            parse_proc_stat(
+                "7 (weird ) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 x"
+            ),
+            ProcStat::Found {
+                state: 'S',
+                starttime: 4242
+            },
+            "fields are counted from after the LAST ')'"
+        );
+        assert_eq!(parse_proc_stat("garbage"), ProcStat::Unreadable);
     }
 }
