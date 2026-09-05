@@ -3,36 +3,78 @@ use crate::error::{Error, Result};
 use crate::model::Status;
 use crate::output::Output;
 
-pub fn note(ctx: Ctx, id: String, text: String) -> Result<Output> {
+pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
+    let before = ctx.warnings.len();
+    transition(&mut ctx, &mut task, Status::Doing, force)?;
     let owner = owner_name(&ctx.project)?;
-    append_note(&mut task, &owner, &text)?;
-    save(&ctx, &mut task)?;
+    task.owner = Some(owner.clone());
+    // A takeover displaces someone; the task's own record should say so, not just the
+    // ephemeral warning stream.
+    for takeover in &ctx.warnings[before..] {
+        append_note(&mut task, &owner, takeover)?;
+    }
+    save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }
 
-pub fn start(ctx: Ctx, id: String) -> Result<Output> {
+pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
-    transition(&ctx, &mut task, Status::Doing, false)?;
-    task.owner = Some(owner_name(&ctx.project)?);
-    save(&ctx, &mut task)?;
+    let owner = owner_name(&ctx.project)?;
+    append_note(&mut task, &owner, &text)?;
+    // Identity and the store are resolved *before* the file write. Doing it afterwards
+    // means an unresolvable identity or a corrupt store returns an error after the note has
+    // already landed, and the obvious retry then duplicates it.
+    let me = crate::claims::identity()?;
+    ctx.claims_mut()?;
+    save(&mut ctx, &mut task)?;
+
+    // Use the pruned store so a note cannot revive a stale claim.
+    let mine = ctx
+        .claims_mut()?
+        .get(&task.id)
+        .cloned()
+        .filter(|claim| claim.session == me.session);
+
+    // The heartbeat, and only on our own claim: `note` never touches a foreign one and is
+    // never refused. It is still serialized under the mutation lock, because a note rewrites
+    // the whole markdown file however append-only it is in meaning.
+    if let Some(claim) = mine {
+        let store = ctx.claims_mut()?;
+        store.insert(
+            &task.id,
+            crate::claims::Claim {
+                seen: crate::time::now(),
+                ..claim
+            },
+        );
+        if let Err(error) = store.save() {
+            // The note is on disk, so this cannot be an error — say plainly what did and
+            // did not happen, as the release-failure path does.
+            ctx.warnings.push(format!(
+                "the note landed, but the claim heartbeat on {} was not refreshed \
+                 ({error}); the claim may look stale to other sessions",
+                task.id
+            ));
+        }
+    }
     Ok(id_out(ctx, &task))
 }
 
 pub fn close(
-    ctx: Ctx,
+    mut ctx: Ctx,
     id: String,
     to: Status,
     message: Option<String>,
     force: bool,
 ) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
-    transition(&ctx, &mut task, to, force)?;
+    transition(&mut ctx, &mut task, to, force)?;
     if let Some(message) = message {
         let owner = owner_name(&ctx.project)?;
         append_note(&mut task, &owner, &message)?;
     }
-    save(&ctx, &mut task)?;
+    save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }
 
@@ -40,7 +82,7 @@ pub fn block(ctx: Ctx, id: String, message: Option<String>) -> Result<Output> {
     close(ctx, id, Status::Blocked, message, false)
 }
 
-pub fn unblock(ctx: Ctx, id: String) -> Result<Output> {
+pub fn unblock(mut ctx: Ctx, id: String) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
     if task.status != Status::Blocked {
         return Err(Error::InvalidTransition(
@@ -48,7 +90,7 @@ pub fn unblock(ctx: Ctx, id: String) -> Result<Output> {
             "todo (unblock requires blocked)".into(),
         ));
     }
-    transition(&ctx, &mut task, Status::Todo, false)?;
-    save(&ctx, &mut task)?;
+    transition(&mut ctx, &mut task, Status::Todo, false)?;
+    save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }

@@ -3208,3 +3208,414 @@ fn projects_lists_the_registry_with_reachability_and_counts() {
     assert_eq!(v["projects"], serde_json::json!([]));
     assert_eq!(v["warnings"], serde_json::json!(["registry is empty"]));
 }
+
+/// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
+/// store keyed by prefix.
+fn two_roots(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {
+    (env.init("sci"), env.init_forced("sci"))
+}
+
+/// Run `tasks` as a named agent with a live pid.
+fn as_agent(env: &TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::Command {
+    let mut cmd = env.cmd(dir);
+    cmd.env("TASKS_SESSION", session)
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    cmd
+}
+
+// The error shape is {"error": {"kind", "detail"}} — there is no `message` field.
+fn err_kind(out: &std::process::Output) -> String {
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    v["error"]["kind"].as_str().unwrap().to_string()
+}
+
+fn err_detail(out: &std::process::Output) -> String {
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    v["error"]["detail"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn a_live_claim_from_another_session_refuses_start() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "claimed");
+    assert!(err_detail(&out).contains("agent-a"), "{}", err_detail(&out));
+}
+
+#[test]
+fn force_takeover_records_a_note_naming_the_displaced_session() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-b")
+        .args(["start", "--force", &id])
+        .assert()
+        .success();
+
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        raw.contains("agent-a"),
+        "the takeover is recorded in the notes: {raw}"
+    );
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "agent-b"
+    );
+}
+
+#[test]
+fn a_displaced_session_cannot_close_the_task_it_lost() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-b")
+        .args(["start", "--force", &id])
+        .assert()
+        .success();
+
+    for args in [
+        vec!["done", &id, "landed"],
+        vec!["drop", &id, "nope"],
+        vec!["block", &id, "waiting"],
+        vec!["edit", &id, "--status", "done"],
+    ] {
+        let out = as_agent(&env, &sci, "agent-a")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "A must not close via {args:?}");
+        assert_eq!(err_kind(&out), "claimed", "{args:?}");
+    }
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "agent-b"
+    );
+}
+
+#[test]
+fn release_follows_the_claim_not_the_local_doing_status() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+    // Root B's copy is the pre-claim file: still `todo`, the ordinary cross-worktree case.
+    std::fs::copy(
+        a.join(format!("tasks/{id}.md")),
+        b.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+
+    as_agent(&env, &a, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    // The same session closes it from root B, where the local status was never `doing`.
+    as_agent(&env, &b, "agent-a")
+        .args(["done", &id, "landed"])
+        .assert()
+        .success();
+
+    assert!(
+        env.json(&a, &["show", &id])["claim"].is_null(),
+        "released even though this checkout never left doing"
+    );
+}
+
+#[test]
+fn one_checkouts_closed_copy_does_not_prune_a_live_claim() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+    std::fs::copy(
+        a.join(format!("tasks/{id}.md")),
+        b.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+
+    // Both branch states are established *before* the claim exists. Otherwise A's own close
+    // is refused — correctly — and the test never reaches what it is about.
+    env.json(&a, &["edit", &id, "--status", "done"]);
+    as_agent(&env, &b, "agent-b")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    // `note` is the right probe from A: never refused, and it touches the store.
+    as_agent(&env, &a, "agent-a")
+        .args(["note", &id, "still here"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        env.json(&b, &["show", &id])["claim"]["session"],
+        "agent-b",
+        "one checkout's view cannot establish that a shared claim is obsolete"
+    );
+}
+
+#[test]
+fn re_running_a_close_retries_a_failed_release() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let store = env.claim_store("sci");
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    // Keep the real, live claim the store now holds; a hand-built one would be stale and
+    // could be pruned away, letting this test pass without exercising owner release.
+    let live_claim = std::fs::read_to_string(&store).unwrap();
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["done", &id, "landed"])
+        .assert()
+        .success();
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
+
+    // A release that failed after the file write: task closed, real claim still present.
+    std::fs::write(&store, &live_claim).unwrap();
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["live"], true);
+
+    // `start --force` cannot recover this: can_transition rejects done -> doing.
+    let out = as_agent(&env, &sci, "agent-a")
+        .args(["start", "--force", &id])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "invalid_transition");
+
+    // Re-running the closing command can, because a same-status transition still releases.
+    as_agent(&env, &sci, "agent-a")
+        .args(["done", &id, "landed"])
+        .assert()
+        .success();
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
+}
+
+#[test]
+fn a_stale_claim_is_taken_over_without_force_but_with_a_warning() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_claim(&env, "sci", &id, "dead-agent", false);
+
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("dead-agent")),
+        "taking over a stale claim names the displaced holder: {v}"
+    );
+}
+
+#[test]
+fn a_repeated_start_by_the_owner_keeps_the_claim() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "agent-a"
+    );
+}
+
+#[test]
+fn note_fails_before_appending_when_identity_cannot_be_resolved() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let before = env.read(&sci, &format!("tasks/{id}.md"));
+
+    // A corrupt store is the reachable version of "the heartbeat cannot proceed".
+    let path = env.claim_store("sci");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "not valid toml = [").unwrap();
+
+    let out = env.cmd(&sci).args(["note", &id, "hello"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        env.read(&sci, &format!("tasks/{id}.md")),
+        before,
+        "a note that reports failure must not have landed; a retry would duplicate it"
+    );
+}
+
+#[test]
+fn closure_force_never_authorizes_a_foreign_claim() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    as_agent(&env, &dir, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let before = env.read(&dir, &format!("tasks/{id}.md"));
+    for args in [
+        vec!["done", "--force", &id],
+        vec!["edit", &id, "--force", "--status", "done"],
+        vec!["edit", &id, "--status", "doing"],
+    ] {
+        let out = as_agent(&env, &dir, "agent-b")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "claimed", "{args:?}");
+    }
+    let out = as_agent(&env, &dir, "agent-b")
+        .args(["edit", &id, "--force", "--status", "doing"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "validation");
+    let editor = editor_script(&dir, "sed -i 's/^status: doing$/status: done/' \"$1\"");
+    let out = as_agent(&env, &dir, "agent-b")
+        .env("EDITOR", editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    assert_eq!(env.read(&dir, &format!("tasks/{id}.md")), before);
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["session"],
+        "agent-a"
+    );
+}
+
+#[test]
+fn ordinary_locked_writes_prune_stale_claims_without_reviving_them() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let stale = id_of(env.json(&dir, &["add", "Stale"]));
+    let other = id_of(env.json(&dir, &["add", "Other"]));
+    for args in [
+        vec!["note", stale.as_str(), "heartbeat"],
+        vec!["note", other.as_str(), "unrelated"],
+        vec!["edit", other.as_str(), "--title", "Edited"],
+        vec!["dep", other.as_str(), "--on", stale.as_str()],
+    ] {
+        write_claim(&env, "sci", &stale, "dead-agent", false);
+        as_agent(&env, &dir, "dead-agent")
+            .args(&args)
+            .assert()
+            .success();
+        assert!(
+            env.json(&dir, &["show", &stale])["claim"].is_null(),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn rejected_close_and_editor_do_not_persist_claim_intent() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let dependency = id_of(env.json(&dir, &["add", "Dependency"]));
+    let id = id_of(env.json(&dir, &["add", "T", "--depends", &dependency]));
+    as_agent(&env, &dir, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let store = env.claim_store("sci");
+    let before = std::fs::read_to_string(&store).unwrap();
+    let out = as_agent(&env, &dir, "agent-a")
+        .args(["done", &id])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "open_dependencies");
+    assert_eq!(std::fs::read_to_string(&store).unwrap(), before);
+    let editor = editor_script(
+        &dir,
+        &format!(
+            "sed -i 's/^title: .*/title: Racer/' tasks/{dependency}.md\nsed -i 's/^status: todo$/status: doing/' \"$1\""
+        ),
+    );
+    let out = as_agent(&env, &dir, "agent-a")
+        .env("EDITOR", editor)
+        .args(["edit", &dependency])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "concurrent_modification");
+    assert_eq!(std::fs::read_to_string(&store).unwrap(), before);
+}
+
+#[test]
+fn closing_releases_and_unblock_does_not_acquire() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for close in ["done", "drop", "block"] {
+        let id = id_of(env.json(&dir, &["add", "T"]));
+        as_agent(&env, &dir, "agent-a")
+            .args(["start", &id])
+            .assert()
+            .success();
+        assert_eq!(
+            env.json(&dir, &["show", &id])["claim"]["session"],
+            "agent-a"
+        );
+        as_agent(&env, &dir, "agent-a")
+            .args([close, &id])
+            .assert()
+            .success();
+        assert!(env.json(&dir, &["show", &id])["claim"].is_null());
+        if close == "block" {
+            as_agent(&env, &dir, "agent-a")
+                .args(["unblock", &id])
+                .assert()
+                .success();
+            assert!(env.json(&dir, &["show", &id])["claim"].is_null());
+        }
+    }
+}
+
+#[test]
+fn invalid_parent_does_not_persist_acquire_or_stale_pruning() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    write_claim(&env, "sci", "sci-ffffff", "dead-agent", false);
+    let store = env.claim_store("sci");
+    let before = std::fs::read_to_string(&store).unwrap();
+    let out = as_agent(&env, &dir, "agent-a")
+        .args(["edit", &id, "--status", "doing", "--parent", "sci-ffffff"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unresolvable_id");
+    assert_eq!(std::fs::read_to_string(store).unwrap(), before);
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "todo");
+}

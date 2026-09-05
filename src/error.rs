@@ -30,7 +30,6 @@ pub enum Error {
     DocNotFound(String),
     #[error("{0} changed on disk; {1}")]
     ConcurrentModification(String, String),
-    #[allow(dead_code)] // Used by the later claim guard.
     #[error("{0} is claimed by {1}")]
     Claimed(String, String),
     #[error("{0}")]

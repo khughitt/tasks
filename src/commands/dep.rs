@@ -26,7 +26,7 @@ pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
     Ok(())
 }
 
-pub fn run(ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result<Output> {
+pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
     if !on.is_empty() {
         let resolver = Resolver::new(&ctx.project, &ctx.registry);
@@ -56,6 +56,6 @@ pub fn run(ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result<Out
             }
         }
     }
-    save(&ctx, &mut task)?;
+    save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }

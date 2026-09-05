@@ -1,8 +1,3 @@
-// Removed in Task 7, whose guard is the first consumer of the whole surface. Until then
-// this is a binary crate's unreachable `pub` API, which `clippy -D warnings` rejects — and
-// the pre-commit hook runs `just check`, so without this the intermediate commits could not
-// land. Task 7 deletes the attribute and proves clippy is clean without it.
-#![allow(dead_code)]
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::repo::atomic_write;

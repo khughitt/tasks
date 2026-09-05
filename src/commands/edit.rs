@@ -24,7 +24,7 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
 }
 
 pub fn run(
-    ctx: Ctx,
+    mut ctx: Ctx,
     id: String,
     title: Option<String>,
     status: Option<String>,
@@ -65,9 +65,9 @@ pub fn run(
     }
     apply_fields(&ctx, &mut task, &fields)?;
     if let Some(status) = status {
-        transition(&ctx, &mut task, Status::parse(&status)?, force)?;
+        transition(&mut ctx, &mut task, Status::parse(&status)?, force)?;
     }
-    save(&ctx, &mut task)?;
+    save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }
 
@@ -91,6 +91,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     // The raw-content comparison below protects this unlocked editing window.
     let prefix = ctx.project.prefix.clone();
     ctx.lock = None;
+    ctx.claims = None;
     let status = std::process::Command::new("sh")
         .arg("-c")
         .arg(format!("{editor} \"$1\""))
@@ -133,7 +134,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     super::dep::ensure_acyclic(&ctx, &edited).map_err(keep)?;
     let status = edited.status;
     edited.status = original.status;
-    transition(&ctx, &mut edited, status, false).map_err(keep)?;
+    transition(&mut ctx, &mut edited, status, false).map_err(keep)?;
 
     match ctx.project.read_raw(&original.id) {
         Ok(current) if current == original_raw => {}
@@ -145,7 +146,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         }
         Err(error) => return Err(keep(error)),
     }
-    save(&ctx, &mut edited).map_err(keep)?;
+    save(&mut ctx, &mut edited).map_err(keep)?;
     if let Err(error) = std::fs::remove_file(&tmp) {
         ctx.warnings.push(format!(
             "edit saved, but could not remove {tmp_display}: {error}"

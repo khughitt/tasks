@@ -123,7 +123,12 @@ pub enum Command {
     /// Append a timestamped note.
     Note { id: String, text: String },
     /// Claim a task: status=doing, owner=you.
-    Start { id: String },
+    Start {
+        id: String,
+        /// Take over a claim another live session holds.
+        #[arg(long)]
+        force: bool,
+    },
     /// Close a task as done.
     Done {
         id: String,

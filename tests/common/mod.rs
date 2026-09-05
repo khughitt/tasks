@@ -69,6 +69,16 @@ impl TestEnv {
         path
     }
 
+    /// A second project root under an already-registered prefix — a worktree, as far as a
+    /// prefix-keyed claim store is concerned.
+    pub fn init_forced(&mut self, prefix: &str) -> PathBuf {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap();
+        self.dirs.push(dir);
+        self.json(&path, &["init", "--prefix", prefix, "--force"]);
+        path
+    }
+
     pub fn json(&self, dir: &Path, args: &[&str]) -> serde_json::Value {
         let out = self.cmd(dir).args(args).output().unwrap();
         assert!(
