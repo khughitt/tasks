@@ -393,13 +393,23 @@ pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
         return Vec::new();
     };
     let resolver = crate::resolve::Resolver::new(&project, &registry);
-    task.depends
+    let mut resolved: Vec<(TaskId, Option<Task>)> = task
+        .depends
         .iter()
         .filter(|id| id.to_string().starts_with(current))
-        .map(|id| {
-            let found = resolver.resolve_task(id).ok().flatten();
-            described(&id.to_string(), found.as_ref())
-        })
+        .map(|id| (id.clone(), resolver.resolve_task(id).ok().flatten()))
+        .collect();
+    // Open dependencies before closed-or-unresolvable, each group by id ascending —
+    // the same ordering `candidates()` applies, with an unresolvable dependency (no
+    // status to be "open" with) sorted alongside the closed ones.
+    resolved.sort_by(|(a_id, a_task), (b_id, b_task)| {
+        let a_open = a_task.as_ref().is_some_and(|task| task.status.is_open());
+        let b_open = b_task.as_ref().is_some_and(|task| task.status.is_open());
+        b_open.cmp(&a_open).then_with(|| a_id.cmp(b_id))
+    });
+    resolved
+        .into_iter()
+        .map(|(id, task)| described(&id.to_string(), task.as_ref()))
         .collect()
 }
 

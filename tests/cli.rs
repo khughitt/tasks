@@ -5005,6 +5005,32 @@ fn dep_rm_offers_only_current_dependencies_including_unreachable_ones() {
 }
 
 #[test]
+fn dependencies_are_ordered_open_before_closed_or_unresolvable_each_by_id() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let unr = env.init("unr");
+    let subject = id_of(env.json(&sci, &["add", "Subject"]));
+    let open = id_of(env.json(&sci, &["add", "Open dep"]));
+    let closed = id_of(env.json(&fam, &["add", "Closed dep"]));
+    env.json(&fam, &["done", &closed, "fixed"]);
+    let unreachable = id_of(env.json(&unr, &["add", "Unreachable dep"]));
+    // insertion order is deliberately the reverse of the expected output order, so a
+    // completer that merely echoes `depends` back cannot pass by accident
+    env.json(
+        &sci,
+        &["dep", &subject, "--on", &unreachable, &closed, &open],
+    );
+    // unregister last: the dependency is still offered, just unresolvable and sorted
+    // with the closed ones — "fam" < "unr" so this also proves the id-ascending
+    // tiebreak within that group, not just the open/closed split
+    env.json(&sci, &["unregister", "unr"]);
+
+    let ids = env.complete(&sci, "bash", 4, &["tasks", "dep", &subject, "--rm", ""]);
+    assert_eq!(ids, [open.as_str(), closed.as_str(), unreachable.as_str()]);
+}
+
+#[test]
 fn feedback_recur_offers_open_feedback_from_the_registered_tasks_root() {
     let mut env = TestEnv::new();
     let upstream = env.init("tasks");
