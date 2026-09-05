@@ -317,9 +317,16 @@ environment chain:
 
 ```rust
     /// A raw command with this environment applied. `cmd` wraps it; Task 11 spawns it.
+    ///
+    /// Both streams are piped explicitly. `Command::output()` would do that for itself, but
+    /// `spawn()` inherits by default, and an inherited stream makes `wait_with_output()`
+    /// hand back empty buffers — so every `err_kind` assertion on a spawned child would
+    /// fail to find any JSON at all.
     pub fn raw(&self, dir: &Path) -> std::process::Command {
         let mut c = std::process::Command::new(assert_cmd::cargo::cargo_bin("tasks"));
-        c.env("HOME", self.home.path())
+        c.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .env("HOME", self.home.path())
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
             .env_remove("TASKS_FORMAT")
@@ -866,15 +873,12 @@ Expected: FAIL — the lock file never appears.
 
 In `src/commands/mod.rs`:
 
-```rust
-use crate::claims::{ClaimStore, MutationLock};
+Only the lock lands here. `ClaimIntent`, the `claims` and `pending_claim` fields and
+`claims_mut()` all live in `commands/mod.rs`, which the `claims.rs` allowance does not cover
+— adding them before Task 7 consumes them means `clippy -D warnings` rejects the commit.
 
-/// What `save` must do to the claim store once every validation has passed. Recorded by
-/// the guard in `transition`; **nothing is persisted until `save` acts on it.**
-pub enum ClaimIntent {
-    Acquire(crate::claims::Claim),
-    Release,
-}
+```rust
+use crate::claims::MutationLock;
 
 pub struct Ctx {
     pub project: Project,
@@ -883,8 +887,6 @@ pub struct Ctx {
     /// Held for the life of a write command; `None` for the read commands that also take a
     /// `Ctx` (`show`, `graph`, `check`) and for the two create-only paths.
     pub lock: Option<MutationLock>,
-    claims: Option<ClaimStore>,
-    pending_claim: Option<(TaskId, ClaimIntent)>,
 }
 
 pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
@@ -894,8 +896,6 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
         registry: Registry::load()?,
         warnings: Vec::new(),
         lock: None,
-        claims: None,
-        pending_claim: None,
     })
 }
 
@@ -911,28 +911,12 @@ pub fn open_write_ctx(dir: Option<&Path>) -> Result<Ctx> {
     ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
     Ok(ctx)
 }
-
-impl Ctx {
-    /// The claim store, loaded on first use. Only reachable with the lock held, so every
-    /// read-check-write against it sits inside one critical section.
-    pub fn claims_mut(&mut self) -> Result<&mut ClaimStore> {
-        if self.lock.is_none() {
-            return Err(Error::Io(
-                "claim store touched without the mutation lock".into(),
-            ));
-        }
-        if self.claims.is_none() {
-            self.claims = Some(ClaimStore::load(&self.project.prefix)?);
-        }
-        Ok(self.claims.as_mut().expect("just loaded"))
-    }
-}
 ```
 
 Switch exactly the eight write paths in `run` to `open_write_ctx` — `Edit`, `Note`, `Start`,
 `Done`, `Drop`, `Block`, `Unblock`, `Dep` — leaving `Show`, `Graph`, `Check`, `Add` and
-`Feedback` on `open_ctx`. Add the three new fields to the `Ctx { .. }` literal in the
-`Command::Add` arm (`src/commands/mod.rs:280-285`).
+`Feedback` on `open_ctx`. Add `lock: None` to the `Ctx { .. }` literal in the `Command::Add`
+arm (`src/commands/mod.rs:280-285`).
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1163,7 +1147,7 @@ already exist.
 - Test: `tests/cli.rs`
 
 **Interfaces:**
-- Produces: `ClaimSnapshot`, `ClaimSnapshot::{load, get, live, stale}`, `ClaimInfo`, `ClaimInfo::of(&Claim, &Liveness)`, `TaskSummary.claim`, `ShowFields.claim`, `TaskSummary::of(task, all, Option<&ClaimSnapshot>)`.
+- Produces: `ClaimSnapshot`, `ClaimSnapshot::{load, get}` — `live` and `stale` arrive in Task 8 with their only consumer, because Task 7 removes the lint allowance and an unused method would fail the gate in between. `ClaimInfo`, `ClaimInfo::of(&Claim, &Liveness)`, `TaskSummary.claim`, `ShowFields.claim`, `TaskSummary::of(task, all, Option<&ClaimSnapshot>)`.
 - Test helper produced: `write_claim(&TestEnv, prefix, id, session, live)`.
 
 **Liveness is evaluated once per command and never recomputed.** The snapshot holds the
@@ -1293,23 +1277,12 @@ impl ClaimSnapshot {
         self.by_id.get(&id.to_string())
     }
 
-    pub fn live(&self, id: &TaskId) -> Option<&Claim> {
-        match self.get(id) {
-            Some((claim, Liveness::Live)) => Some(claim),
-            _ => None,
-        }
-    }
-
-    pub fn stale(&self) -> impl Iterator<Item = (&String, &Claim, &String)> {
-        self.by_id
-            .iter()
-            .filter_map(|(id, (claim, live))| match live {
-                Liveness::Stale(why) => Some((id, claim, why)),
-                Liveness::Live => None,
-            })
-    }
 }
 ```
+
+`live()` and `stale()` are deliberately **not** added here. Task 7 deletes the
+`#![allow(dead_code)]`, and a method whose only caller arrives in Task 8 would fail
+`clippy -D warnings` in between; Task 8 adds them alongside the code that uses them.
 
 In `src/output.rs`:
 
@@ -1636,6 +1609,48 @@ Expected: FAIL — no `--force` flag, nothing refuses, nothing releases.
 
 Delete the module-level `#![allow(dead_code)]` from the top of `src/claims.rs`. Every item is
 reachable from here on, and Step 4 proves it.
+
+First, the `Ctx` plumbing that Task 4 deliberately left out — it lives in
+`src/commands/mod.rs`, which the `claims.rs` allowance never covered, so it could only land
+in the task that consumes it:
+
+```rust
+use crate::claims::{ClaimStore, Liveness};
+
+/// What `save` must do to the claim store once every validation has passed. Recorded by the
+/// guard in `transition`; **nothing is persisted until `save` acts on it.**
+pub enum ClaimIntent {
+    Acquire(crate::claims::Claim),
+    Release,
+}
+```
+
+Add both fields to `Ctx`, `None` for each in `open_ctx` and in the `Command::Add` literal:
+
+```rust
+    claims: Option<ClaimStore>,
+    pending_claim: Option<(TaskId, ClaimIntent)>,
+```
+
+and the accessor:
+
+```rust
+impl Ctx {
+    /// The claim store, loaded on first use. Only reachable with the lock held, so every
+    /// read-check-write against it sits inside one critical section.
+    pub fn claims_mut(&mut self) -> Result<&mut ClaimStore> {
+        if self.lock.is_none() {
+            return Err(Error::Io(
+                "claim store touched without the mutation lock".into(),
+            ));
+        }
+        if self.claims.is_none() {
+            self.claims = Some(ClaimStore::load(&self.project.prefix)?);
+        }
+        Ok(self.claims.as_mut().expect("just loaded"))
+    }
+}
+```
 
 `src/cli.rs`:
 
@@ -2033,7 +2048,30 @@ Expected: FAIL — claimed tasks still appear, no warnings.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Change `ready_tasks` to take the snapshot rather than loading one:
+First add the two snapshot accessors, held back from Task 6 so they arrive with their only
+caller and never sit unused under `clippy -D warnings`. In `src/claims.rs`:
+
+```rust
+impl ClaimSnapshot {
+    pub fn live(&self, id: &TaskId) -> Option<&Claim> {
+        match self.get(id) {
+            Some((claim, Liveness::Live)) => Some(claim),
+            _ => None,
+        }
+    }
+
+    pub fn stale(&self) -> impl Iterator<Item = (&String, &Claim, &String)> {
+        self.by_id
+            .iter()
+            .filter_map(|(id, (claim, live))| match live {
+                Liveness::Stale(why) => Some((id, claim, why)),
+                Liveness::Live => None,
+            })
+    }
+}
+```
+
+Then change `ready_tasks` to take the snapshot rather than loading one:
 
 ```rust
 pub fn ready_tasks(
@@ -2338,11 +2376,20 @@ covered by the happy-path tests. This task adds only tests.
 
 **Contention is forced, not hoped for.** Launching N processes and asserting on outcomes
 proves nothing when they happen to run serially — an implementation with no lock at all
-passes every such assertion. The first test below therefore *holds the project lock from the
-test process* and proves a write command blocks on it, which fails immediately against an
-unlocked implementation and gets *more* reliable on slow machines rather than less. The
-outcome-counting tests are kept as a second layer, and the editor test uses a file handshake
-instead of a sleep.
+passes every such assertion. The tests below therefore hold the project lock *from the test
+process* so the children are genuinely queued behind it.
+
+**Two honest caveats about the blocking check.** It is a **timing-based heuristic**, not a
+proof: it observes that a writer has not finished yet, which an unlocked writer that simply
+has not got there yet also satisfies. It can therefore false-positive on a heavily loaded
+machine. Proving the writer actually reached lock acquisition would need instrumentation the
+binary does not have; the assertion is kept because it fails reliably against an unlocked
+implementation, which is what it is for, and its wording says what it is.
+
+Second, **nothing may be asserted while the lock is held.** A synchronous call that blocks
+under a regression would hang the suite before ever reaching the assertion or releasing the
+lock. Every child is waited on with a bounded `wait_bounded`, observations are collected into
+plain booleans, the lock is released, and only then does anything assert.
 
 **Depends on Tasks 7, 8 and 10.**
 
@@ -2364,6 +2411,21 @@ fn hold_project_lock(env: &TestEnv, prefix: &str) -> File {
     file
 }
 
+/// Wait for a child, but never forever: a regression that makes a command block must fail
+/// the assertion, not hang the suite while still holding the lock.
+fn wait_bounded(child: &mut std::process::Child, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn a_write_command_waits_for_the_project_lock_and_a_read_command_does_not() {
     let mut env = TestEnv::new();
@@ -2373,31 +2435,36 @@ fn a_write_command_waits_for_the_project_lock_and_a_read_command_does_not() {
     let held = hold_project_lock(&env, "sci");
 
     let mut writer = env.raw(&sci);
-    writer.args(["start", &id])
+    writer
+        .args(["start", &id])
         .env("TASKS_SESSION", "agent-a")
         .env("TASKS_SESSION_PID", std::process::id().to_string());
-    let mut child = writer.spawn().unwrap();
+    let mut writing = writer.spawn().unwrap();
 
-    // A lower bound on blocking, which is the safe direction: an implementation that takes
-    // no lock finishes well inside this window and fails here, while a slow machine only
-    // makes the child later still.
-    std::thread::sleep(Duration::from_millis(500));
-    assert!(
-        child.try_wait().unwrap().is_none(),
-        "a write command must wait while the project lock is held"
-    );
+    // Spawned, not called synchronously: if a regression made reads take the lock, a
+    // synchronous call here would deadlock against the lock this test is holding.
+    let mut reader = env.raw(&sci);
+    reader.args(["show", &id]);
+    let mut reading = reader.spawn().unwrap();
 
-    // Reads must not be blocked by it at all.
-    let read_started = Instant::now();
-    env.json(&sci, &["show", &id]);
-    env.json(&sci, &["prime"]);
-    assert!(
-        read_started.elapsed() < Duration::from_secs(5),
-        "read commands must not take the mutation lock"
-    );
+    // Observations only — no assertions while the lock is held.
+    let read_finished = wait_bounded(&mut reading, Duration::from_secs(10));
+    // Timing-based, and deliberately so: this says the writer has not finished, which a
+    // slow unlocked writer would also satisfy. It fails reliably against an implementation
+    // that takes no lock, which is what it is for.
+    let writer_still_blocked = writing.try_wait().unwrap().is_none();
 
     drop(held);
-    assert!(child.wait_with_output().unwrap().status.success());
+
+    let _ = reading.wait();
+    let wrote = writing.wait_with_output().unwrap();
+
+    assert!(read_finished, "read commands must not take the mutation lock");
+    assert!(
+        writer_still_blocked,
+        "a write command must wait while the project lock is held"
+    );
+    assert!(wrote.status.success(), "{}", String::from_utf8_lossy(&wrote.stderr));
     assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-a");
 }
 
@@ -2537,19 +2604,37 @@ fn a_concurrent_edit_during_an_interactive_edit_is_rejected_and_leaks_no_claim()
         .env("EDITOR", &script)
         .env("TASKS_SESSION", "agent-a")
         .env("TASKS_SESSION_PID", std::process::id().to_string());
-    let child = editing.spawn().unwrap();
+    let mut child = editing.spawn().unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(30);
     while !ready.exists() {
-        assert!(Instant::now() < deadline, "the editor never started");
+        if Instant::now() >= deadline {
+            // Release and reap before failing, so a stuck editor cannot outlive the test.
+            std::fs::write(&go, "").unwrap();
+            let _ = child.wait();
+            panic!("the editor never started");
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
 
-    // The editor is holding no lock now, so this must succeed rather than block.
-    as_agent(&env, &sci, "agent-b").args(["note", &id, "landed first"]).assert().success();
-    std::fs::write(&go, "").unwrap();
+    // The editor is holding no lock now, so this must succeed rather than block — but it is
+    // spawned and bounded anyway, because if a regression made it block, a synchronous call
+    // would hang here with the editor child still parked on its handshake.
+    let mut noting = env.raw(&sci);
+    noting
+        .args(["note", &id, "landed first"])
+        .env("TASKS_SESSION", "agent-b")
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    let mut noting = noting.spawn().unwrap();
+    let note_finished = wait_bounded(&mut noting, Duration::from_secs(30));
 
+    // Release the editor whatever happened, so the child is always reaped.
+    std::fs::write(&go, "").unwrap();
     let out = child.wait_with_output().unwrap();
+    let note_out = noting.wait_with_output().unwrap();
+
+    assert!(note_finished, "the concurrent note blocked; the editor holds no lock here");
+    assert!(note_out.status.success(), "{}", String::from_utf8_lossy(&note_out.stderr));
     assert_eq!(err_kind(&out), "concurrent_modification");
     // The editor's `transition` ran before the comparison. Because no claim is persisted
     // until `save`, the rejected edit must not have left one behind.
@@ -2726,10 +2811,18 @@ recheck → Task 12. The three known gaps are deliberately unimplemented and rec
 
 **Every commit is green.** `src/claims.rs` carries a module-level `#![allow(dead_code)]` from
 Task 1 until Task 7 deletes it, because this is a binary crate: a `pub` item unreachable from
-`main` fails `clippy -D warnings`, and the pre-commit hook runs `just check`. Task 7's Step 4
-proves clippy is clean once the attribute is gone. No task commits a test that a later task
-is required to make pass — `--force` moved into Task 7 with the guard that already takes it,
-and Task 6 precedes the guard so its output contract exists first.
+`main` fails `clippy -D warnings`, and the pre-commit hook runs `just check`.
+
+That allowance covers `claims.rs` and nothing else, so anything it does not cover has to land
+with its consumer. Task 4 therefore adds only `Ctx.lock` and `open_write_ctx`; `ClaimIntent`,
+the `claims` and `pending_claim` fields and `claims_mut()` all live in `commands/mod.rs` and
+move to Task 7. For the same reason `ClaimSnapshot::live` and `::stale` are held back from
+Task 6 to Task 8 — Task 7 removes the allowance, and an unused method would fail the gate in
+between. Task 7's Step 4 proves clippy is clean once the attribute is gone.
+
+No task commits a test that a later task is required to make pass — `--force` moved into Task
+7 with the guard that already takes it, and Task 6 precedes the guard so its output contract
+exists first.
 
 **Dependency order:** 1 → 2 → {3, 6}; 3 → {4, 9}; {2, 4, 5, 6} → 7; 7 → {8, 10}; {7, 8, 10} →
 11; everything → 12.
@@ -2738,10 +2831,13 @@ and Task 6 precedes the guard so its output contract exists first.
 remove, prune_with, prune_dead, iter}`, `Claim`, `Liveness::{Live, Stale}`,
 `ProcStat::{NotFound, Unreadable, Found}`, `parse_proc_stat`, `Identity {session, pid}`,
 `identity() -> Result<Identity>`, `MutationLock::{path_with, path_for, acquire, acquire_at}`,
-`ClaimSnapshot::{load, get, live, stale}`, `ClaimInfo::of(&Claim, &Liveness)`,
+`ClaimSnapshot::{load, get}` (Task 6) and `::{live, stale}` (Task 8),
+`ClaimInfo::of(&Claim, &Liveness)`,
 `ClaimIntent::{Acquire, Release}`, `Error::Claimed` are used under those exact names
 throughout. `TaskSummary::of` takes three parameters from Task 6 onward; `ready_tasks` takes
 the snapshot from Task 8 onward; `transition` and `save` take `&mut Ctx` from Task 7 onward.
 Test helpers: `TestEnv::{raw, cmd, claim_store, init_forced}` (Tasks 1 and 7), `write_claim`
-(Task 6), `two_roots`/`as_agent`/`err_kind`/`err_detail` (Task 7), `hold_project_lock`
-(Task 11).
+(Task 6), `two_roots`/`as_agent`/`err_kind`/`err_detail` (Task 7), `hold_project_lock` and
+`wait_bounded` (Task 11). `TestEnv::raw` pipes both streams, without which
+`wait_with_output` on a spawned child returns empty buffers and every `err_kind` assertion on
+one fails.
