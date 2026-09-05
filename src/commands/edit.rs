@@ -1,5 +1,5 @@
 use super::{Ctx, apply_fields, id_out, load, save, transition};
-use crate::cli::FieldArgs;
+use crate::cli::EditArgs;
 use crate::error::{Error, Result};
 use crate::format::parse_task;
 use crate::model::{Status, Task, TaskId};
@@ -23,20 +23,13 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
     Ok(())
 }
 
-pub fn run(
-    mut ctx: Ctx,
-    id: String,
-    title: Option<String>,
-    status: Option<String>,
-    force: bool,
-    no_parent: bool,
-    mut fields: FieldArgs,
-) -> Result<Output> {
-    if force && status.as_deref() != Some("done") {
+pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
+    if args.force && args.status.as_deref() != Some("done") {
         return Err(Error::Validation("--force requires --status done".into()));
     }
-    let has_flags = title.is_some()
-        || status.is_some()
+    let fields = &args.fields;
+    let has_flags = args.title.is_some()
+        || args.status.is_some()
         || fields.body.is_some()
         || fields.priority.is_some()
         || fields.size.is_some()
@@ -46,26 +39,43 @@ pub fn run(
         || fields.plan.is_some()
         || fields.step.is_some()
         || fields.parent.is_some()
-        || no_parent;
+        || args.no_parent
+        || args.no_tags
+        || !args.rm_tags.is_empty();
     if !has_flags {
         return editor(ctx, id);
     }
 
     let mut task = load(&ctx, &id)?;
-    if fields.body.as_deref() == Some("-") {
+    if args.fields.body.as_deref() == Some("-") {
         let mut body = String::new();
         std::io::stdin().read_to_string(&mut body)?;
-        fields.body = Some(body);
+        args.fields.body = Some(body);
     }
-    if let Some(title) = title {
+    if let Some(title) = args.title {
         task.title = title;
     }
-    if no_parent {
+    if args.no_parent {
         task.parent = None;
     }
-    apply_fields(&ctx, &mut task, &fields)?;
-    if let Some(status) = status {
-        transition(&mut ctx, &mut task, Status::parse(&status)?, force)?;
+    // Clear, then remove, then let `apply_fields` append: `--no-tags --tag x` is the
+    // wholesale replace `--tag` used to perform by itself.
+    if args.no_tags {
+        task.tags.clear();
+    }
+    for tag in &args.rm_tags {
+        let before = task.tags.len();
+        task.tags.retain(|existing| existing != tag);
+        if task.tags.len() == before {
+            return Err(Error::Validation(format!(
+                "{} is not tagged {tag:?}",
+                task.id
+            )));
+        }
+    }
+    apply_fields(&ctx, &mut task, &args.fields)?;
+    if let Some(status) = args.status {
+        transition(&mut ctx, &mut task, Status::parse(&status)?, args.force)?;
     }
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))

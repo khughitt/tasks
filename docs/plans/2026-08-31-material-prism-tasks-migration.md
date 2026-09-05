@@ -61,7 +61,7 @@ and Task 5 records the fresh exact-eight completion and cleanup evidence.
   `TASKS_OWNER=debug/overview-drag-frost` only for the verified active Material outcome.
   Never inherit ownership from a migration branch or shell.
 - Give every created task the complete initial tag set in its single `tasks add` call,
-  including `migration`. Later `edit --tag` replaces all tags.
+  including `migration`. (`edit --tag` replaced all tags when this ran; it now adds.)
 - Task bodies state outcome, acceptance evidence, source documents, and uncertainty.
   They contain no bare `## Notes` line. Note and close/block messages are single-line.
 - Add dependencies only for genuine delivery blockers. A Material-to-not-yet-created

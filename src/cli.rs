@@ -30,6 +30,7 @@ pub struct FieldArgs {
     pub priority: Option<u8>,
     #[arg(long)]
     pub size: Option<String>,
+    /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
     #[arg(long = "depends")]
@@ -43,6 +44,28 @@ pub struct FieldArgs {
     /// Make this task part of another task (same project).
     #[arg(long)]
     pub parent: Option<String>,
+}
+
+/// The flags `edit` adds to the shared field flags.
+#[derive(Args, Debug)]
+pub struct EditArgs {
+    #[arg(long)]
+    pub title: Option<String>,
+    #[arg(long)]
+    pub status: Option<String>,
+    #[arg(long)]
+    pub force: bool,
+    /// Detach from the parent.
+    #[arg(long, conflicts_with = "parent")]
+    pub no_parent: bool,
+    /// Remove a tag (repeatable); `--tag` adds one.
+    #[arg(long = "rm-tag", value_name = "TAG", conflicts_with = "no_tags")]
+    pub rm_tags: Vec<String>,
+    /// Clear every tag; with `--tag`, replaces the list wholesale.
+    #[arg(long)]
+    pub no_tags: bool,
+    #[command(flatten)]
+    pub fields: FieldArgs,
 }
 
 #[derive(Subcommand, Debug)]
@@ -115,17 +138,8 @@ pub enum Command {
     /// Edit fields, or open the task in $EDITOR when no field flags are given.
     Edit {
         id: String,
-        #[arg(long)]
-        title: Option<String>,
-        #[arg(long)]
-        status: Option<String>,
-        #[arg(long)]
-        force: bool,
-        /// Detach from the parent.
-        #[arg(long, conflicts_with = "parent")]
-        no_parent: bool,
         #[command(flatten)]
-        fields: FieldArgs,
+        args: EditArgs,
     },
     /// Append a timestamped note.
     Note { id: String, text: String },

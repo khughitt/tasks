@@ -166,8 +166,17 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
     })
 }
 
-pub fn open_write_ctx(dir: Option<&Path>) -> Result<Ctx> {
+/// The write context for the project an id names. A prefix matching the local project
+/// keeps that checkout, so `-C` and worktrees still win; any other prefix is followed
+/// through the registry, the rule `show` and `root` already use. A local project is
+/// still required, so a cwd outside every project fails exactly as before. The lock and
+/// the claim store key off `ctx.project`, so both follow the id to its project.
+pub fn open_id_write_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
+    let id = TaskId::parse(id)?;
     let mut ctx = open_ctx(dir)?;
+    if id.prefix != ctx.project.prefix {
+        ctx.project = crate::scope::open_registered(&ctx.registry, &id.prefix, Origin::Id(&id))?;
+    }
     ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
     Ok(ctx)
 }
@@ -236,8 +245,12 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
     if let Some(size) = &fields.size {
         task.size = Some(Size::parse(size)?);
     }
-    if !fields.tags.is_empty() {
-        task.tags = fields.tags.clone();
+    // Additive, never a replacement: a triage `--tag` must not silently drop the tags a
+    // task already carries. `edit` removes with `--rm-tag` / `--no-tags`.
+    for tag in &fields.tags {
+        if !task.tags.contains(tag) {
+            task.tags.push(tag.clone());
+        }
     }
     if !fields.depends.is_empty() {
         let mut dependencies = Vec::new();
@@ -518,34 +531,27 @@ pub fn run(cli: Cli) -> Result<Output> {
             all_projects,
         } => list::ready(open_read_ctx(dir, all_projects)?, size, limit),
         Command::Next { all_projects } => list::next(open_read_ctx(dir, all_projects)?),
-        Command::Edit {
-            id,
-            title,
-            status,
-            force,
-            no_parent,
-            fields,
-        } => edit::run(
-            open_write_ctx(dir)?,
-            id,
-            title,
-            status,
-            force,
-            no_parent,
-            fields,
-        ),
+        Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
         Command::Prime { all_projects } => list::prime(open_read_ctx(dir, all_projects)?),
-        Command::Note { id, text } => status::note(open_write_ctx(dir)?, id, text),
-        Command::Start { id, force } => status::start(open_write_ctx(dir)?, id, force),
-        Command::Done { id, message, force } => {
-            status::close(open_write_ctx(dir)?, id, Status::Done, message, force)
-        }
-        Command::Drop { id, message } => {
-            status::close(open_write_ctx(dir)?, id, Status::Dropped, message, false)
-        }
-        Command::Block { id, message } => status::block(open_write_ctx(dir)?, id, message),
-        Command::Unblock { id } => status::unblock(open_write_ctx(dir)?, id),
-        Command::Dep { id, on, rm } => dep::run(open_write_ctx(dir)?, id, on, rm),
+        Command::Note { id, text } => status::note(open_id_write_ctx(dir, &id)?, id, text),
+        Command::Start { id, force } => status::start(open_id_write_ctx(dir, &id)?, id, force),
+        Command::Done { id, message, force } => status::close(
+            open_id_write_ctx(dir, &id)?,
+            id,
+            Status::Done,
+            message,
+            force,
+        ),
+        Command::Drop { id, message } => status::close(
+            open_id_write_ctx(dir, &id)?,
+            id,
+            Status::Dropped,
+            message,
+            false,
+        ),
+        Command::Block { id, message } => status::block(open_id_write_ctx(dir, &id)?, id, message),
+        Command::Unblock { id } => status::unblock(open_id_write_ctx(dir, &id)?, id),
+        Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
         Command::Tree {

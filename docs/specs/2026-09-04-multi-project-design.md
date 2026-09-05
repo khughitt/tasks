@@ -40,6 +40,10 @@ visiting each checkout in turn.
   names its target explicitly and locates no local project (§4.3). Dispatch must therefore
   open the local project lazily for `add`, after the flag is known, rather than eagerly
   for every command as it does today.
+
+  Superseded in part: a write command that takes an existing id now writes to the project
+  that id's prefix names, still requiring a local project but no longer requiring it to be
+  the target. See §6 of docs/specs/2026-08-29-tasks-design.md.
 - **`next` answers "what do I do now" in one call.** It is the head of `ready` in the
   `show` shape, per project or across all of them.
 - **Tags get visibility, not a vocabulary.** `tags --all-projects` shows which tags are
