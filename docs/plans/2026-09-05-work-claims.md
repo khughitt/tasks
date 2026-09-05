@@ -1939,7 +1939,7 @@ git commit -m "feat(claims): guard status changes, persist inside save, and add 
 actually record a claim.
 
 **Files:**
-- Modify: `src/commands/list.rs`
+- Modify: `src/claims.rs` (`ClaimSnapshot::live`, `::stale`), `src/commands/list.rs`
 - Test: `tests/cli.rs`
 
 **One snapshot per command, threaded all the way through.** `prime` builds the snapshot once
@@ -2150,7 +2150,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/commands tests/cli.rs
+git add src/claims.rs src/commands tests/cli.rs
 git commit -m "feat(list): exclude claimed tasks from ready and overlay claims on prime"
 ```
 
@@ -2426,6 +2426,25 @@ fn wait_bounded(child: &mut std::process::Child, limit: Duration) -> bool {
     }
 }
 
+/// Collect a child's output, killing it if it outlives `limit`. `None` means it had to be
+/// killed.
+///
+/// Every *final* wait goes through this too, not just the ones being measured. Releasing a
+/// handshake or dropping the test's lock only removes the blocker the test knows about; a
+/// command that deadlocks for some other reason — an editor path that kept the lock and then
+/// tries to reacquire it, say — would still park a bare `wait()` forever and hang the suite
+/// with the failure invisible.
+fn reap(mut child: std::process::Child, limit: Duration) -> Option<std::process::Output> {
+    if wait_bounded(&mut child, limit) {
+        return Some(child.wait_with_output().expect("already exited"));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    None
+}
+
+const REAP: Duration = Duration::from_secs(30);
+
 #[test]
 fn a_write_command_waits_for_the_project_lock_and_a_read_command_does_not() {
     let mut env = TestEnv::new();
@@ -2456,10 +2475,12 @@ fn a_write_command_waits_for_the_project_lock_and_a_read_command_does_not() {
 
     drop(held);
 
-    let _ = reading.wait();
-    let wrote = writing.wait_with_output().unwrap();
+    let read = reap(reading, REAP);
+    let wrote = reap(writing, REAP);
 
     assert!(read_finished, "read commands must not take the mutation lock");
+    assert!(read.is_some(), "the read command never exited");
+    let wrote = wrote.expect("the write command never exited after the lock was released");
     assert!(
         writer_still_blocked,
         "a write command must wait while the project lock is held"
@@ -2489,7 +2510,10 @@ fn simultaneous_starts_produce_exactly_one_winner() {
     std::thread::sleep(Duration::from_millis(300));
     drop(held);
 
-    let outs: Vec<_> = children.into_iter().map(|c| c.wait_with_output().unwrap()).collect();
+    let outs: Vec<_> = children
+        .into_iter()
+        .map(|c| reap(c, REAP).expect("a queued start never exited"))
+        .collect();
     assert_eq!(
         outs.iter().filter(|o| o.status.success()).count(),
         1,
@@ -2525,7 +2549,8 @@ fn concurrent_claims_on_different_tasks_are_all_kept() {
     drop(held);
 
     for child in children {
-        assert!(child.wait_with_output().unwrap().status.success());
+        let out = reap(child, REAP).expect("a queued start never exited");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
     // The store is one whole file per prefix, so an unserialized writer drops the claims it
     // never read.
@@ -2563,7 +2588,8 @@ fn concurrent_notes_and_a_status_change_lose_nothing() {
     drop(held);
 
     for child in children {
-        assert!(child.wait_with_output().unwrap().status.success());
+        let out = reap(child, REAP).expect("a queued write never exited");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
     // `note` rewrites the whole markdown file, so an unserialized note clobbers whatever
     // landed between its read and its write.
@@ -2610,8 +2636,10 @@ fn a_concurrent_edit_during_an_interactive_edit_is_rejected_and_leaks_no_claim()
     while !ready.exists() {
         if Instant::now() >= deadline {
             // Release and reap before failing, so a stuck editor cannot outlive the test.
+            // Bounded, because writing `go` releases this test's handshake but cannot
+            // guarantee the command exits.
             std::fs::write(&go, "").unwrap();
-            let _ = child.wait();
+            reap(child, REAP);
             panic!("the editor never started");
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -2626,14 +2654,17 @@ fn a_concurrent_edit_during_an_interactive_edit_is_rejected_and_leaks_no_claim()
         .env("TASKS_SESSION", "agent-b")
         .env("TASKS_SESSION_PID", std::process::id().to_string());
     let mut noting = noting.spawn().unwrap();
-    let note_finished = wait_bounded(&mut noting, Duration::from_secs(30));
+    let note_finished = wait_bounded(&mut noting, REAP);
 
-    // Release the editor whatever happened, so the child is always reaped.
+    // Release the editor whatever happened, so the child is always reaped. Bounded, because
+    // the handshake is the only blocker this test controls: an editor path that kept the
+    // lock and then tried to reacquire it would deadlock past the `go` file.
     std::fs::write(&go, "").unwrap();
-    let out = child.wait_with_output().unwrap();
-    let note_out = noting.wait_with_output().unwrap();
+    let out = reap(child, REAP).expect("the editor never exited after the handshake");
+    let note_out = reap(noting, REAP);
 
     assert!(note_finished, "the concurrent note blocked; the editor holds no lock here");
+    let note_out = note_out.expect("the concurrent note never exited");
     assert!(note_out.status.success(), "{}", String::from_utf8_lossy(&note_out.stderr));
     assert_eq!(err_kind(&out), "concurrent_modification");
     // The editor's `transition` ran before the comparison. Because no claim is persisted
@@ -2837,7 +2868,8 @@ remove, prune_with, prune_dead, iter}`, `Claim`, `Liveness::{Live, Stale}`,
 throughout. `TaskSummary::of` takes three parameters from Task 6 onward; `ready_tasks` takes
 the snapshot from Task 8 onward; `transition` and `save` take `&mut Ctx` from Task 7 onward.
 Test helpers: `TestEnv::{raw, cmd, claim_store, init_forced}` (Tasks 1 and 7), `write_claim`
-(Task 6), `two_roots`/`as_agent`/`err_kind`/`err_detail` (Task 7), `hold_project_lock` and
-`wait_bounded` (Task 11). `TestEnv::raw` pipes both streams, without which
+(Task 6), `two_roots`/`as_agent`/`err_kind`/`err_detail` (Task 7), `hold_project_lock`,
+`wait_bounded` and `reap` (Task 11) — every process wait in the suite goes through one of the
+last two, so no regression can hang the gate instead of failing it. `TestEnv::raw` pipes both streams, without which
 `wait_with_output` on a spawned child returns empty buffers and every `err_kind` assertion on
 one fails.
