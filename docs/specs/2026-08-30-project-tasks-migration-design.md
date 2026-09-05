@@ -172,8 +172,9 @@ relationships stay in task bodies.
 
 Tasks receive the `migration` tag. Add another tag only when it supports a real project
 query, and pass the complete initial tag set as repeated `--tag` arguments in the single
-`add` command. `edit --tag` replaces the entire tag list; any later tag edit must repeat
-the complete desired set, including `migration`. Task bodies state the outcome,
+`add` command. (When this ran, `edit --tag` replaced the entire tag list, so a later tag
+edit had to repeat the complete desired set, including `migration`; `--tag` now adds, and
+`--rm-tag`/`--no-tags` remove.) Task bodies state the outcome,
 acceptance evidence, source documents, and any audit uncertainty. A body cannot contain
 a bare line equal to `## Notes`; quote that historical heading as `> ## Notes` or mention
 it inline. Note and close/block messages are single-line summaries with no newline or

@@ -256,10 +256,13 @@ tasks ready [--size S] [-n N] [--all-projects]
     on everything else).
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
-           [--parent ID | --no-parent]
+           [--parent ID | --no-parent] [--rm-tag T]... [--no-tags]
     With flags: update those fields. Without flags: open an editable copy in $EDITOR
     (§5.2). Either way the result is validated against §3 and the invariants in §5.3
-    before it replaces the original.
+    before it replaces the original. --tag adds (repeats are no-ops) rather than
+    replacing the list, so triage cannot silently drop the tags a task arrived with;
+    --rm-tag removes one and is a validation error when the task lacks it, --no-tags
+    clears the list, and the two conflict. --no-tags with --tag is a wholesale replace.
 
 tasks note <id> <text>
     Append a timestamped bullet under ## Notes.
@@ -461,6 +464,15 @@ branch — accepted as the right approximation.
 A prefix is *unreachable* when it is not registered, or its path or the task file does not
 exist. Unreachable ids are warnings in `show`/`list`/`check` and errors (`unresolvable_id`)
 in `dep --on` and `add --depends`.
+
+A write command that takes an existing id (`edit`, `note`, `start`, `done`, `drop`,
+`block`, `unblock`, `dep`) writes to the project that id's prefix names, by the rule
+`show` and `root` already use: a prefix matching the local project keeps that checkout, so
+`-C` and worktrees still win over the registered root; any other prefix is followed through
+the registry, and an unregistered or unreachable one is `unresolvable_id`. The mutation lock
+and the claim store key off the resolved project, so a cross-project write locks and claims
+in the target, not the caller. A local project is still required — only `add --project` and
+`--all-projects` run without one.
 
 `--all-projects` (on list, ready, prime, tree, next, tags) reads the registry and locates
 no local project: a missing root or config is a warning and the entry is skipped; a

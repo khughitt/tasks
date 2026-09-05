@@ -4548,3 +4548,109 @@ fn list_sorts_by_priority_updated_or_created_and_prints_the_date() {
     let text = pretty(&["ready"]);
     assert!(text.contains("todo    2026-02-02  A\n"), "{text}");
 }
+
+#[test]
+fn write_commands_follow_the_id_prefix_across_projects() {
+    let mut env = TestEnv::new();
+    let ops = env.init("ops");
+    let fam = env.init("fam");
+    let groundwork = id_of(env.json(&ops, &["add", "Groundwork"]));
+    let piece = id_of(env.json(&ops, &["add", "Fam piece", "--project", "fam"]));
+
+    // every id-taking write runs from the hub, against the project the prefix names
+    env.json(&ops, &["note", &piece, "from the hub"]);
+    env.json(&ops, &["dep", &piece, "--on", &groundwork]);
+    env.json(&ops, &["edit", &piece, "--tag", "audit"]);
+    env.json(&ops, &["start", &piece]);
+    env.json(&ops, &["block", &piece, "waiting"]);
+    env.json(&ops, &["unblock", &piece]);
+
+    let shown = env.json(&fam, &["show", &piece]);
+    assert_eq!(shown["task"]["tags"][0], "audit");
+    assert_eq!(shown["task"]["depends"][0], groundwork);
+    assert_eq!(shown["task"]["notes"][0]["text"], "from the hub");
+    assert_eq!(shown["task"]["status"], "todo");
+
+    // the claim landed in the target project's store, not the caller's
+    env.json(&ops, &["start", &piece]);
+    let claims = std::fs::read_to_string(env.claim_store("fam")).unwrap();
+    assert!(claims.contains(&piece), "{claims}");
+    assert!(!env.claim_store("ops").exists());
+    env.json(&ops, &["done", &groundwork]);
+    env.json(&ops, &["done", &piece, "landed"]);
+    assert_eq!(env.json(&fam, &["show", &piece])["task"]["status"], "done");
+
+    // a matching prefix uses the local checkout, not the registry root
+    let displaced = env.init_forced("ops");
+    let local = id_of(env.json(&displaced, &["add", "Local"]));
+    env.json(&displaced, &["note", &local, "stays put"]);
+    assert!(displaced.join(format!("tasks/{local}.md")).is_file());
+    assert!(!ops.join(format!("tasks/{local}.md")).exists());
+
+    // an id whose prefix no project claims is unresolvable, not task_not_found
+    assert_eq!(
+        env.fail(&ops, &["note", "zzz-000001", "x"]),
+        "unresolvable_id"
+    );
+    // a foreign id is still resolved through the registry, so a missing file is that
+    assert_eq!(
+        env.fail(&ops, &["note", "fam-000001", "x"]),
+        "task_not_found"
+    );
+    // and a local project is still required
+    let nowhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.fail(nowhere.path(), &["note", &piece, "x"]),
+        "no_project"
+    );
+}
+
+#[test]
+fn edit_tags_append_and_remove_instead_of_replacing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let tags = |env: &TestEnv, id: &str| env.json(&sci, &["show", id])["task"]["tags"].clone();
+    let id = id_of(env.json(
+        &sci,
+        &["add", "Triage me", "--tag", "feedback", "--tag", "gap"],
+    ));
+    assert_eq!(tags(&env, &id), serde_json::json!(["feedback", "gap"]));
+
+    // the reported bug: adding one tag kept the provenance tags
+    env.json(&sci, &["edit", &id, "--tag", "cli"]);
+    assert_eq!(
+        tags(&env, &id),
+        serde_json::json!(["feedback", "gap", "cli"])
+    );
+    // appending is idempotent
+    env.json(&sci, &["edit", &id, "--tag", "cli", "--tag", "gap"]);
+    assert_eq!(
+        tags(&env, &id),
+        serde_json::json!(["feedback", "gap", "cli"])
+    );
+
+    // removal is explicit, and naming a tag the task lacks is an error
+    env.json(&sci, &["edit", &id, "--rm-tag", "gap"]);
+    assert_eq!(tags(&env, &id), serde_json::json!(["feedback", "cli"]));
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--rm-tag", "gap"]),
+        "validation"
+    );
+
+    // --no-tags clears, and pairs with --tag to reproduce a wholesale replace
+    env.json(&sci, &["edit", &id, "--no-tags", "--tag", "cli"]);
+    assert_eq!(tags(&env, &id), serde_json::json!(["cli"]));
+    env.json(&sci, &["edit", &id, "--no-tags"]);
+    assert_eq!(tags(&env, &id), serde_json::json!([]));
+
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id, "--no-tags", "--rm-tag", "cli"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "--no-tags and --rm-tag conflict"
+    );
+}

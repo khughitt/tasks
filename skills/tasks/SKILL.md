@@ -38,6 +38,13 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 
 Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
+`--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
+`--rm-tag <tag>` removes one and `--no-tags` clears them all.
+
+Every command that takes an id writes to the project that id's prefix names, so
+`tasks note`, `tasks dep`, `tasks edit`, and the status commands work on a task in another
+registered project without leaving the current one. A prefix matching the current project
+always means this checkout.
 
 ## Recording work
 

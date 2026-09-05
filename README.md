@@ -78,6 +78,8 @@ from a clone):
     tasks next --all-projects        # the same across every registered project
     tasks projects                   # the registry: reachable? counts?
     tasks add "Piece" --project fam  # create in another registered project
+    tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
+    tasks edit sci-4f2a9c --tag cli --rm-tag triage  # --tag adds; --rm-tag/--no-tags remove
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
     tasks --pretty --color auto ready # color when stdout is a terminal
     tasks start sci-4f2a9c
