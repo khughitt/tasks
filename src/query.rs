@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
+use crate::output::DateColumn;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
@@ -134,12 +135,50 @@ pub fn is_ready(task: &Task, has_children: bool, lookup: &dyn Fn(&TaskId) -> Opt
         && task.depends.iter().all(|d| lookup(d) == Some(true))
 }
 
+/// The order `list` prints in. `Priority` is the default (priority, updated desc, id);
+/// the date keys put the most recent first, then id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortKey {
+    Priority,
+    Updated,
+    Created,
+}
+
+impl SortKey {
+    pub fn parse(value: &str) -> Result<SortKey> {
+        match value {
+            "priority" => Ok(SortKey::Priority),
+            "updated" => Ok(SortKey::Updated),
+            "created" => Ok(SortKey::Created),
+            other => Err(Error::Validation(format!(
+                "unknown sort key {other:?}; expected priority, updated, or created"
+            ))),
+        }
+    }
+
+    /// The date a row shows when listed in this order: the one being sorted on, or the
+    /// last activity when the order is not a date.
+    pub fn date_column(self) -> DateColumn {
+        match self {
+            SortKey::Created => DateColumn::Created,
+            SortKey::Priority | SortKey::Updated => DateColumn::Updated,
+        }
+    }
+}
+
 pub fn sort_list(tasks: &mut [Task]) {
-    tasks.sort_by(|a, b| {
-        a.priority
+    sort_by_key(tasks, SortKey::Priority);
+}
+
+pub fn sort_by_key(tasks: &mut [Task], key: SortKey) {
+    tasks.sort_by(|a, b| match key {
+        SortKey::Priority => a
+            .priority
             .cmp(&b.priority)
             .then_with(|| b.updated.cmp(&a.updated))
-            .then_with(|| a.id.cmp(&b.id))
+            .then_with(|| a.id.cmp(&b.id)),
+        SortKey::Updated => b.updated.cmp(&a.updated).then_with(|| a.id.cmp(&b.id)),
+        SortKey::Created => b.created.cmp(&a.created).then_with(|| a.id.cmp(&b.id)),
     });
 }
 
@@ -219,6 +258,27 @@ mod tests {
         sort_ready(&mut v);
         let ids: Vec<String> = v.iter().map(|t| t.id.hex.clone()).collect();
         assert_eq!(ids, ["000003", "000002", "000004", "000001"]);
+    }
+
+    #[test]
+    fn date_sorts_put_the_most_recent_first_and_break_ties_on_id() {
+        let mut older = t("xx-000002", Status::Todo, 3, None, &[]);
+        older.updated = "2026-08-28T00:00:00Z".into();
+        let mut tasks = vec![
+            t("xx-000009", Status::Todo, 0, None, &[]),
+            older,
+            t("xx-000001", Status::Todo, 1, None, &[]),
+        ];
+        sort_by_key(&mut tasks, SortKey::Updated);
+        let ids: Vec<&str> = tasks.iter().map(|task| task.id.hex.as_str()).collect();
+        assert_eq!(ids, ["000001", "000009", "000002"]);
+        // created is priority-seconds in `t`, so higher priority is newer
+        sort_by_key(&mut tasks, SortKey::Created);
+        let ids: Vec<&str> = tasks.iter().map(|task| task.id.hex.as_str()).collect();
+        assert_eq!(ids, ["000002", "000001", "000009"]);
+        assert!(SortKey::parse("size").is_err());
+        assert_eq!(SortKey::Created.date_column(), DateColumn::Created);
+        assert_eq!(SortKey::Updated.date_column(), DateColumn::Updated);
     }
 
     #[test]

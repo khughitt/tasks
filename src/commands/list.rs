@@ -1,8 +1,8 @@
 use super::ReadCtx;
 use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
-use crate::output::{Counts, ListOut, NextOut, Output, PrimeOut, TaskSummary};
-use crate::query::{is_ready, sort_list, sort_ready};
+use crate::output::{Counts, DateColumn, ListOut, NextOut, Output, PrimeOut, TaskSummary};
+use crate::query::{SortKey, is_ready, sort_by_key, sort_list, sort_ready};
 use crate::scope::Scope;
 use std::collections::HashMap;
 
@@ -19,7 +19,13 @@ pub fn list(
     tags: Vec<String>,
     owner: Option<String>,
     parent: Option<String>,
+    sort: Option<String>,
+    reverse: bool,
 ) -> Result<Output> {
+    let sort = match sort {
+        Some(key) => SortKey::parse(&key)?,
+        None => SortKey::Priority,
+    };
     let statuses = statuses
         .iter()
         .map(|status| Status::parse(status))
@@ -59,13 +65,17 @@ pub fn list(
             }
         }
     }
-    sort_list(&mut tasks);
+    sort_by_key(&mut tasks, sort);
+    if reverse {
+        tasks.reverse();
+    }
     Ok(Output::List(ListOut {
         tasks: tasks
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims)))
             .collect(),
         warnings: ctx.warnings,
+        date: sort.date_column(),
     }))
 }
 
@@ -139,6 +149,7 @@ pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Re
             .map(|task| TaskSummary::of(task, &all, Some(&claims)))
             .collect(),
         warnings: ctx.warnings,
+        date: DateColumn::Updated,
     }))
 }
 

@@ -86,6 +86,13 @@ pub enum Command {
         /// Only direct children of this task.
         #[arg(long)]
         parent: Option<String>,
+        /// Order: priority (default: priority, then last activity), updated, or created
+        /// (most recent first). Pretty rows show the date sorted on, else last activity.
+        #[arg(long)]
+        sort: Option<String>,
+        /// Reverse the chosen order.
+        #[arg(long)]
+        reverse: bool,
         #[arg(long)]
         all_projects: bool,
     },

@@ -13,6 +13,8 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 1. `tasks prime` — roadmap (the open goal tree), closeout (goals whose work is all
    done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
+   `tasks list` is the wider view: open tasks by priority, or `--sort updated` /
+   `--sort created` for the most recently touched or added first (`--reverse` flips it).
    Never pick a task with children; those are goals. `ready` already omits them.
    With nothing in hand, `tasks next` prints the first ready task in full; `tasks next
    --all-projects` does the same across every registered project.
