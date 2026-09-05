@@ -3003,9 +3003,12 @@ fn feedback_recurrence_serializes_against_concurrent_recurrences() {
         .unwrap()
         .to_string();
 
-    let mut handles = Vec::new();
+    let held = hold_project_lock(&env, "tasks");
+    let mut children = Vec::new();
     for n in 0..4 {
-        let mut cmd = env.cmd(&reporter);
+        // Include source == target: taking its lock twice would deadlock.
+        let source = if n % 2 == 0 { &reporter } else { &target };
+        let mut cmd = env.raw(source);
         cmd.args([
             "feedback",
             "the thing is slow",
@@ -3016,10 +3019,19 @@ fn feedback_recurrence_serializes_against_concurrent_recurrences() {
             "-b",
             &format!("detail {n}"),
         ]);
-        handles.push(std::thread::spawn(move || cmd.output().unwrap()));
+        children.push(cmd.spawn().unwrap());
     }
-    for handle in handles {
-        let out = handle.join().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    // Timing heuristic: a heavily loaded unlocked writer can also remain unfinished.
+    let blocked: Vec<_> = children.iter_mut().map(|c| c.try_wait()).collect();
+    drop(held);
+    let reaped: Vec<_> = children.into_iter().map(|c| reap(c, REAP)).collect();
+    assert!(
+        blocked.into_iter().all(|r| r.unwrap().is_none()),
+        "feedback must wait on the target mutation lock"
+    );
+    assert!(reaped.iter().all(Option::is_some), "feedback never exited");
+    for out in reaped.into_iter().flatten() {
         assert!(
             out.status.success(),
             "{}",
@@ -3709,19 +3721,33 @@ fn re_running_a_close_retries_a_failed_release() {
         .args(["start", &id])
         .assert()
         .success();
-    // Keep the real, live claim the store now holds; a hand-built one would be stale and
-    // could be pruned away, letting this test pass without exercising owner release.
-    let live_claim = std::fs::read_to_string(&store).unwrap();
-
-    as_agent(&env, &sci, "agent-a")
+    use std::os::unix::fs::PermissionsExt;
+    // The existing lock is writable, but a new atomic store temp file cannot be created.
+    let state_dir = store.parent().unwrap();
+    let original = std::fs::metadata(state_dir).unwrap().permissions();
+    std::fs::set_permissions(state_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let out = as_agent(&env, &sci, "agent-a")
         .args(["done", &id, "landed"])
-        .assert()
-        .success();
-    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
-
-    // A release that failed after the file write: task closed, real claim still present.
-    std::fs::write(&store, &live_claim).unwrap();
-    assert_eq!(env.json(&sci, &["show", &id])["claim"]["live"], true);
+        .output();
+    std::fs::set_permissions(state_dir, original).unwrap();
+    let out = out.unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        result["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains("re-run the same command to retry the release")
+        }),
+        "{result}"
+    );
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["status"], "done");
+    assert_eq!(shown["claim"]["session"], "agent-a");
+    assert_eq!(shown["claim"]["live"], true);
 
     // `start --force` cannot recover this: can_transition rejects done -> doing.
     let out = as_agent(&env, &sci, "agent-a")
@@ -3942,4 +3968,425 @@ fn invalid_parent_does_not_persist_acquire_or_stale_pruning() {
     assert_eq!(err_kind(&out), "unresolvable_id");
     assert_eq!(std::fs::read_to_string(store).unwrap(), before);
     assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "todo");
+}
+
+use std::fs::File;
+use std::time::{Duration, Instant};
+
+/// Hold the project's mutation lock from the test process itself.
+fn hold_project_lock(env: &TestEnv, prefix: &str) -> File {
+    let path = env
+        .claim_store(prefix)
+        .with_file_name(format!("{prefix}.lock"));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let file = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    file.lock().unwrap();
+    file
+}
+
+/// Wait for a child, but never forever: a regression that makes a command block must fail
+/// the assertion, not hang the suite while still holding the lock.
+fn wait_bounded(child: &mut std::process::Child, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Collect a child's output, killing it if it outlives `limit`. `None` means it had to be
+/// killed.
+///
+/// Every *final* wait goes through this too, not just the ones being measured. Releasing a
+/// handshake or dropping the test's lock only removes the blocker the test knows about; a
+/// command that deadlocks for some other reason — an editor path that kept the lock and then
+/// tries to reacquire it, say — would still park a bare `wait()` forever and hang the suite
+/// with the failure invisible.
+fn reap(mut child: std::process::Child, limit: Duration) -> Option<std::process::Output> {
+    if wait_bounded(&mut child, limit) {
+        return Some(child.wait_with_output().expect("already exited"));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    None
+}
+
+const REAP: Duration = Duration::from_secs(30);
+
+// Reap every child *before* asserting or unwrapping anything. A panic partway through
+// leaves the children behind it running, which outlives the test and can wedge whatever
+// runs next.
+
+#[test]
+fn a_write_command_waits_for_the_project_lock_and_a_read_command_does_not() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    let held = hold_project_lock(&env, "sci");
+
+    let mut writer = env.raw(&sci);
+    writer
+        .args(["start", &id])
+        .env("TASKS_SESSION", "agent-a")
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    let mut writing = writer.spawn().unwrap();
+
+    // Spawned, not called synchronously: if a regression made reads take the lock, a
+    // synchronous call here would deadlock against the lock this test is holding.
+    let mut reader = env.raw(&sci);
+    reader.args(["show", &id]);
+    let mut reading = reader.spawn().unwrap();
+
+    // Observations only — no assertions while the lock is held.
+    let read_finished = wait_bounded(&mut reading, Duration::from_secs(10));
+    // Timing-based, and deliberately so: this says the writer has not finished, which a
+    // slow unlocked writer would also satisfy. It fails reliably against an implementation
+    // that takes no lock, which is what it is for.
+    let writer_still_blocked = !wait_bounded(&mut writing, Duration::from_millis(300));
+
+    drop(held);
+
+    let read = reap(reading, REAP);
+    let wrote = reap(writing, REAP);
+
+    assert!(
+        read_finished,
+        "read commands must not take the mutation lock"
+    );
+    assert!(
+        read.expect("the read command never exited")
+            .status
+            .success()
+    );
+    let wrote = wrote.expect("the write command never exited after the lock was released");
+    assert!(
+        writer_still_blocked,
+        "a write command must wait while the project lock is held"
+    );
+    assert!(
+        wrote.status.success(),
+        "{}",
+        String::from_utf8_lossy(&wrote.stderr)
+    );
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "agent-a"
+    );
+}
+
+#[test]
+fn simultaneous_starts_produce_exactly_one_winner() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    // Spawn under the held lock to force contention; scheduling still determines
+    // whether every child reaches acquisition before release.
+    let held = hold_project_lock(&env, "sci");
+    let children: Vec<_> = (0..6)
+        .map(|n| {
+            let mut cmd = env.raw(&sci);
+            cmd.args(["start", &id])
+                .env("TASKS_SESSION", format!("agent-{n}"))
+                .env("TASKS_SESSION_PID", std::process::id().to_string());
+            cmd.spawn().unwrap()
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    drop(held);
+
+    // Reap them all first: a panic inside the map would strand the children behind it.
+    let reaped: Vec<_> = children.into_iter().map(|c| reap(c, REAP)).collect();
+    assert!(
+        reaped.iter().all(Option::is_some),
+        "a queued start never exited"
+    );
+    let outs: Vec<_> = reaped.into_iter().flatten().collect();
+    assert_eq!(
+        outs.iter().filter(|o| o.status.success()).count(),
+        1,
+        "exactly one session may hold the claim"
+    );
+    for out in outs.iter().filter(|o| !o.status.success()) {
+        assert_eq!(err_kind(out), "claimed");
+    }
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["live"], true);
+}
+
+#[test]
+fn concurrent_claims_on_different_tasks_are_all_kept() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let ids: Vec<String> = (0..6)
+        .map(|n| id_of(env.json(&sci, &["add", &format!("T{n}"), "-p", "2"])))
+        .collect();
+
+    let held = hold_project_lock(&env, "sci");
+    let children: Vec<_> = ids
+        .iter()
+        .enumerate()
+        .map(|(n, id)| {
+            let mut cmd = env.raw(&sci);
+            cmd.args(["start", id])
+                .env("TASKS_SESSION", format!("agent-{n}"))
+                .env("TASKS_SESSION_PID", std::process::id().to_string());
+            cmd.spawn().unwrap()
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    drop(held);
+
+    let reaped: Vec<_> = children.into_iter().map(|c| reap(c, REAP)).collect();
+    assert!(
+        reaped.iter().all(Option::is_some),
+        "a queued start never exited"
+    );
+    for out in reaped.into_iter().flatten() {
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    // The store is one whole file per prefix, so an unserialized writer drops the claims it
+    // never read.
+    for id in &ids {
+        assert_eq!(
+            env.json(&sci, &["show", id])["claim"]["live"],
+            true,
+            "{id} lost its claim to a concurrent write"
+        );
+    }
+}
+
+#[test]
+fn concurrent_notes_and_a_status_change_lose_nothing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    let held = hold_project_lock(&env, "sci");
+    let mut children: Vec<_> = (0..5)
+        .map(|n| {
+            let mut cmd = env.raw(&sci);
+            cmd.args(["note", &id, &format!("line {n}")])
+                .env("TASKS_SESSION", "agent-a")
+                .env("TASKS_SESSION_PID", std::process::id().to_string());
+            cmd.spawn().unwrap()
+        })
+        .collect();
+    let mut status = env.raw(&sci);
+    status
+        .args(["start", &id])
+        .env("TASKS_SESSION", "agent-a")
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    children.push(status.spawn().unwrap());
+    std::thread::sleep(Duration::from_millis(300));
+    drop(held);
+
+    let reaped: Vec<_> = children.into_iter().map(|c| reap(c, REAP)).collect();
+    assert!(
+        reaped.iter().all(Option::is_some),
+        "a queued write never exited"
+    );
+    for out in reaped.into_iter().flatten() {
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    // `note` rewrites the whole markdown file, so an unserialized note clobbers whatever
+    // landed between its read and its write.
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    for n in 0..5 {
+        assert!(
+            raw.contains(&format!("line {n}")),
+            "note {n} was lost: {raw}"
+        );
+    }
+    assert!(
+        raw.contains("status: doing"),
+        "the status change was lost: {raw}"
+    );
+}
+
+#[test]
+fn a_concurrent_edit_during_an_interactive_edit_is_rejected_and_leaks_no_claim() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    // A handshake, not a sleep: the editor announces that it is inside its unlocked window
+    // and waits to be released, so the test never depends on how fast the machine is.
+    let ready = sci.join("editor-ready");
+    let go = sci.join("editor-go");
+    let script = editor_script(
+        &sci,
+        &format!(
+            "touch '{}'\nwhile [ ! -e '{}' ]; do sleep 0.02; done\nsed -i 's/^status: todo/status: doing/' \"$1\"",
+            ready.display(),
+            go.display()
+        ),
+    );
+
+    let mut editing = env.raw(&sci);
+    editing
+        .args(["edit", &id])
+        .env("EDITOR", &script)
+        .env("TASKS_SESSION", "agent-a")
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    let child = editing.spawn().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !ready.exists() {
+        if Instant::now() >= deadline {
+            // Release and reap before failing, so a stuck editor cannot outlive the test.
+            // Bounded, because writing `go` releases this test's handshake but cannot
+            // guarantee the command exits.
+            std::fs::write(&go, "").unwrap();
+            reap(child, REAP);
+            panic!("the editor never started");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // The editor is holding no lock now, so this must succeed rather than block — but it is
+    // spawned and bounded anyway, because if a regression made it block, a synchronous call
+    // would hang here with the editor child still parked on its handshake.
+    let mut noting = env.raw(&sci);
+    noting
+        .args(["note", &id, "landed first"])
+        .env("TASKS_SESSION", "agent-b")
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    let mut noting = noting.spawn().unwrap();
+    let note_finished = wait_bounded(&mut noting, REAP);
+
+    // Release the editor whatever happened, so the child is always reaped. Bounded, because
+    // the handshake is the only blocker this test controls: an editor path that kept the
+    // lock and then tried to reacquire it would deadlock past the `go` file.
+    std::fs::write(&go, "").unwrap();
+    // Both children are reaped before anything can panic. An `expect` on the first would
+    // abandon the second, leaving a live process behind for the rest of the suite.
+    let edited = reap(child, REAP);
+    let noted = reap(noting, REAP);
+
+    assert!(
+        note_finished,
+        "the concurrent note blocked; the editor holds no lock here"
+    );
+    let out = edited.expect("the editor never exited after the handshake");
+    let note_out = noted.expect("the concurrent note never exited");
+    assert!(
+        note_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&note_out.stderr)
+    );
+    assert_eq!(err_kind(&out), "concurrent_modification");
+    // The editor's `transition` ran before the comparison. Because no claim is persisted
+    // until `save`, the rejected edit must not have left one behind.
+    assert!(
+        env.json(&sci, &["show", &id])["claim"].is_null(),
+        "a rejected edit acquired a claim"
+    );
+}
+
+#[test]
+fn a_failed_task_write_leaves_no_claim_behind() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    // Read still works; `atomic_write` cannot create its temp file.
+    let tasks_dir = sci.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let out = as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .output();
+    std::fs::set_permissions(&tasks_dir, original).unwrap();
+    let out = out.unwrap();
+    assert_eq!(out.status.code(), Some(1));
+
+    assert!(
+        env.json(&sci, &["show", &id])["claim"].is_null(),
+        "acquire is rolled back when the task write fails"
+    );
+}
+
+#[test]
+fn a_failed_takeover_restores_the_previous_owners_claim() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    let tasks_dir = sci.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["start", "--force", &id])
+        .output();
+    std::fs::set_permissions(&tasks_dir, original).unwrap();
+    let out = out.unwrap();
+    assert_eq!(out.status.code(), Some(1));
+
+    // Rollback restores what was there; a blanket removal would unclaim A's live work.
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "agent-a",
+        "a failed takeover must not unclaim the previous holder"
+    );
+}
+
+#[test]
+fn the_reported_sequence_start_then_create_the_worktree() {
+    let mut env = TestEnv::new();
+    let a = env.init("sci");
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+
+    // The bytes a later worktree would branch from: captured *before* the claim exists.
+    let committed = env.read(&a, &format!("tasks/{id}.md"));
+    as_agent(&env, &a, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    // Only now does the second worktree come into being, from the pre-start state.
+    let b = env.init_forced("sci");
+    std::fs::write(b.join(format!("tasks/{id}.md")), &committed).unwrap();
+
+    let v = env.json(&b, &["prime"]);
+    assert!(
+        v["doing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == id.as_str()),
+        "the claim is visible in a worktree created after the start: {v}"
+    );
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&id) && w.contains("conflict")
+        }),
+        "and the divergence is called out: {v}"
+    );
 }
