@@ -2445,6 +2445,10 @@ fn reap(mut child: std::process::Child, limit: Duration) -> Option<std::process:
 
 const REAP: Duration = Duration::from_secs(30);
 
+// Reap every child *before* asserting or unwrapping anything. A panic partway through
+// leaves the children behind it running, which outlives the test and can wedge whatever
+// runs next.
+
 #[test]
 fn a_write_command_waits_for_the_project_lock_and_a_read_command_does_not() {
     let mut env = TestEnv::new();
@@ -2510,10 +2514,10 @@ fn simultaneous_starts_produce_exactly_one_winner() {
     std::thread::sleep(Duration::from_millis(300));
     drop(held);
 
-    let outs: Vec<_> = children
-        .into_iter()
-        .map(|c| reap(c, REAP).expect("a queued start never exited"))
-        .collect();
+    // Reap them all first: a panic inside the map would strand the children behind it.
+    let reaped: Vec<_> = children.into_iter().map(|c| reap(c, REAP)).collect();
+    assert!(reaped.iter().all(Option::is_some), "a queued start never exited");
+    let outs: Vec<_> = reaped.into_iter().flatten().collect();
     assert_eq!(
         outs.iter().filter(|o| o.status.success()).count(),
         1,
@@ -2548,8 +2552,9 @@ fn concurrent_claims_on_different_tasks_are_all_kept() {
     std::thread::sleep(Duration::from_millis(300));
     drop(held);
 
-    for child in children {
-        let out = reap(child, REAP).expect("a queued start never exited");
+    let reaped: Vec<_> = children.into_iter().map(|c| reap(c, REAP)).collect();
+    assert!(reaped.iter().all(Option::is_some), "a queued start never exited");
+    for out in reaped.into_iter().flatten() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
     // The store is one whole file per prefix, so an unserialized writer drops the claims it
@@ -2587,8 +2592,9 @@ fn concurrent_notes_and_a_status_change_lose_nothing() {
     std::thread::sleep(Duration::from_millis(300));
     drop(held);
 
-    for child in children {
-        let out = reap(child, REAP).expect("a queued write never exited");
+    let reaped: Vec<_> = children.into_iter().map(|c| reap(c, REAP)).collect();
+    assert!(reaped.iter().all(Option::is_some), "a queued write never exited");
+    for out in reaped.into_iter().flatten() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
     // `note` rewrites the whole markdown file, so an unserialized note clobbers whatever
@@ -2660,11 +2666,14 @@ fn a_concurrent_edit_during_an_interactive_edit_is_rejected_and_leaks_no_claim()
     // the handshake is the only blocker this test controls: an editor path that kept the
     // lock and then tried to reacquire it would deadlock past the `go` file.
     std::fs::write(&go, "").unwrap();
-    let out = reap(child, REAP).expect("the editor never exited after the handshake");
-    let note_out = reap(noting, REAP);
+    // Both children are reaped before anything can panic. An `expect` on the first would
+    // abandon the second, leaving a live process behind for the rest of the suite.
+    let edited = reap(child, REAP);
+    let noted = reap(noting, REAP);
 
     assert!(note_finished, "the concurrent note blocked; the editor holds no lock here");
-    let note_out = note_out.expect("the concurrent note never exited");
+    let out = edited.expect("the editor never exited after the handshake");
+    let note_out = noted.expect("the concurrent note never exited");
     assert!(note_out.status.success(), "{}", String::from_utf8_lossy(&note_out.stderr));
     assert_eq!(err_kind(&out), "concurrent_modification");
     // The editor's `transition` ran before the comparison. Because no claim is persisted
