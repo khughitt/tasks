@@ -1,0 +1,14 @@
+---
+id: tasks-7a7386
+title: "Wire the lock into Ctx, read commands unlocked"
+status: todo
+priority: 2
+size: s
+created: 2026-09-05T10:21:31Z
+updated: 2026-09-05T10:21:31Z
+depends: [tasks-8dcf64]
+parent: tasks-d184e3
+tags: [claims]
+plan: docs/plans/2026-09-05-work-claims.md
+step: "Task 4: Wire the lock into Ctx without locking the read commands"
+---
