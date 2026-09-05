@@ -64,9 +64,19 @@ persistence, and claim mutation as a single critical section.
 
 A persistent `<prefix>.lock` sits beside the TOML, opened and exclusively locked with
 `std::fs::File::lock`. Available on the project's toolchain (rustc 1.98.1); no new
-dependency. It is acquired in `open_ctx()` and held in `Ctx` for the life of the command, so
-every write path — `note`, `start`, `done`, `drop`, `block`, `edit`, `dep` — is serialized
-without each having to remember to take it. `ReadCtx` takes no lock.
+dependency. It is held in `Ctx` for the life of the command, so every write path — `note`,
+`start`, `done`, `drop`, `block`, `unblock`, `edit`, `dep` — is serialized without each
+having to remember to take it.
+
+It cannot simply be acquired in `open_ctx()`, because `show` (`mod.rs:289`), `graph`
+(`mod.rs:329`) and `check` (`mod.rs:330`) take a `Ctx` too and must stay read-only; making
+them take an exclusive lock would have them block on writers and on each other. So `Ctx`
+carries `lock: Option<MutationLock>` and there are two constructors: `open_ctx` unlocked, and
+`open_write_ctx` locked. `show`, `graph`, `check`, `add` and `feedback` keep `open_ctx`;
+the eight write paths above move to `open_write_ctx`. `ReadCtx` takes no lock.
+
+Readers need no shared lock either: `atomic_write` publishes both the task file and the claim
+store by rename, so a reader sees one whole version or the other, never a torn one.
 
 The lock is a separate file *because* `atomic_write` replaces the TOML's inode — locking the
 TOML itself would leave each writer holding a lock on a file no longer at that path. A
@@ -79,10 +89,16 @@ Two exceptions, both deliberate:
   `$EDITOR` open. It drops the lock around the editor invocation and re-acquires it before
   validating and writing. The gap is already covered by the raw-content comparison at
   `edit.rs:134`, which fails with `concurrent_modification` and keeps the edit.
-- **`add` and `feedback` take no lock at all.** `create_task` links the file into place
-  exclusively, so it has no read-modify-write to protect. This also means no command ever
-  holds two locks — `feedback` writes into another project — so there is no lock-ordering
-  deadlock to reason about.
+- **`add` takes no lock**: `create_task` links the file into place exclusively, so there is
+  no read-modify-write to protect.
+- **`feedback` is lock-free only when it creates.** Recurrence is not: `guarded_update`
+  (`feedback.rs:199`) re-reads the raw file and compares it against its snapshot, but the
+  window between that comparison (`feedback.rs:213`) and `write_task` (`feedback.rs:215`) is
+  still a check-write race. Recurrence therefore acquires the **target** project's mutation
+  lock. Its source `Ctx` stays unlocked, so only one lock is ever held — which also keeps
+  this correct when source and target are the same project, as they are in this repository,
+  since a second `flock` on the same file from the same process would deadlock. No command
+  holding two locks means there is no lock ordering to reason about.
 
 ## Identity
 
@@ -185,8 +201,16 @@ this design exists to remove.
   add a warning naming the orphaned claim and `tasks start --force` as the recovery.
 - **Release**: `save()` the task file first, then release the claim. A failed release leaves
   a claim held by a session that is still alive, so liveness pruning will not reclaim it
-  until that session ends; it warns, naming the task and `tasks start --force` as the
-  immediate recovery.
+  until that session ends. The recovery is to **retry the original closing command**, and the
+  warning says so.
+
+  It is specifically *not* `start --force`: `can_transition` (`model.rs:164`) rejects
+  `done -> doing`, so a claim orphaned over an already-closed task cannot be re-taken that
+  way. The retry works because a same-status transition is permitted (`from == to` returns
+  early), which makes it an explicit rule rather than an accident: **a status change whose
+  destination equals the current status must still attempt release of the caller's claim.**
+  An implementation that short-circuits "nothing changed" before touching the claim store
+  would strand the claim permanently.
 
 ### Pruning
 
@@ -268,3 +292,7 @@ End-to-end in `tests/cli.rs`, using two `Project` roots that share one prefix an
 - the exact tasks-8f4b41 sequence: `start`, then create the second root, then observe the
   divergence warning
 - acquire rollback: a failing `save()` leaves no claim behind
+- release rollback: a `done` whose claim release fails leaves the task closed and the claim
+  held, and re-running the same `done` — a same-status transition — releases it
+- `feedback --recur` into a task being concurrently rewritten neither loses an update nor
+  trips `concurrent_modification`
