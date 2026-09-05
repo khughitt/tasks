@@ -1185,6 +1185,115 @@ fn start_done_drop_block_unblock_transitions() {
 }
 
 #[test]
+fn start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&sci)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@e")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@e")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "seed"]);
+
+    let v = env.json(&sci, &["start", &id]);
+    assert!(
+        !v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("worktree")),
+        "a single-worktree repo has nothing to warn about: {v}"
+    );
+    git(&["commit", "-qam", "start"]);
+
+    git(&[
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "side",
+        sci.join("wt").to_str().unwrap(),
+    ]);
+    let other = id_of(env.json(&sci, &["add", "U", "-p", "2"]));
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "add U"]);
+
+    let v = env.json(&sci, &["start", &other]);
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&other) && w.contains("worktree")
+        }),
+        "{v}"
+    );
+}
+
+#[test]
+fn start_reports_a_git_worktree_inspection_failure_as_a_warning() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&sci)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@e")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@e")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "seed"]);
+
+    let bin = tempfile::tempdir().unwrap();
+    let fake_git = bin.path().join("git");
+    std::fs::write(
+        &fake_git,
+        "#!/bin/sh\nif [ \"$1 $2\" = \"worktree list\" ]; then echo broken >&2; exit 42; fi\nPATH=${PATH#*:} exec git \"$@\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake_git, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+
+    let output = env
+        .cmd(&sci)
+        .env("PATH", path)
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&id) && w.contains("worktree list failed") && w.contains("broken")
+        }),
+        "{v}"
+    );
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "doing");
+}
+
+#[test]
 fn list_defaults_to_open_and_filters() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

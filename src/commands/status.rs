@@ -1,6 +1,6 @@
 use super::{Ctx, append_note, id_out, load, owner_name, save, transition};
 use crate::error::{Error, Result};
-use crate::model::Status;
+use crate::model::{Status, Task};
 use crate::output::Output;
 
 pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
@@ -15,7 +15,59 @@ pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
         append_note(&mut task, &owner, takeover)?;
     }
     save(&mut ctx, &mut task)?;
+    warn_if_uncommitted_with_worktrees(&mut ctx, &task);
     Ok(id_out(ctx, &task))
+}
+
+fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {
+    let files = match ctx.project.uncommitted_task_files() {
+        Ok(Some(files)) => files,
+        Ok(None) => return,
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "task {} was started, but git could not inspect its uncommitted file ({error})",
+                task.id
+            ));
+            return;
+        }
+    };
+    let file = format!("tasks/{}.md", task.id);
+    if !files.contains(&file) {
+        return;
+    }
+    let listed = match std::process::Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .env("LC_ALL", "C")
+        .current_dir(&ctx.project.root)
+        .output()
+    {
+        Ok(listed) => listed,
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "task {} was started, but git could not list worktrees ({error})",
+                task.id
+            ));
+            return;
+        }
+    };
+    if !listed.status.success() {
+        ctx.warnings.push(format!(
+            "task {} was started, but git worktree list failed ({}): {}",
+            task.id,
+            listed.status,
+            String::from_utf8_lossy(&listed.stderr).trim()
+        ));
+        return;
+    }
+    let count = String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .filter(|line| line.starts_with("worktree "))
+        .count();
+    if count > 1 {
+        ctx.warnings.push(format!(
+            "{file} is uncommitted and this repo has {count} worktrees; commit it before branching or the copies diverge"
+        ));
+    }
 }
 
 pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
