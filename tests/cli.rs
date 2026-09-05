@@ -3223,6 +3223,177 @@ fn as_agent(env: &TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::
     cmd
 }
 
+#[test]
+fn ready_omits_a_task_claimed_from_another_root_and_says_why() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2", "--size", "s"]));
+    std::fs::copy(
+        a.join(format!("tasks/{id}.md")),
+        b.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+
+    assert_eq!(env.json(&b, &["ready"])["tasks"][0]["id"], id);
+
+    as_agent(&env, &a, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    for v in [
+        env.json(&b, &["ready"]),
+        serde_json::from_slice(
+            &as_agent(&env, &b, "agent-a")
+                .args(["ready"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap(),
+    ] {
+        assert_eq!(v["tasks"].as_array().unwrap().len(), 0, "{v}");
+        assert!(
+            v["warnings"].as_array().unwrap().iter().any(|w| {
+                let w = w.as_str().unwrap();
+                w.contains(&id) && w.contains("agent-a")
+            }),
+            "a silent omission is worse than an explained one: {v}"
+        );
+    }
+    let v: serde_json::Value = serde_json::from_slice(
+        &as_agent(&env, &b, "agent-a")
+            .args(["next"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    assert_eq!(v["next"], serde_json::Value::Null, "{v}");
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("agent-a")),
+        "{v}"
+    );
+}
+
+#[test]
+fn prime_shows_a_claim_made_in_another_root_and_warns_about_divergence() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+    std::fs::copy(
+        a.join(format!("tasks/{id}.md")),
+        b.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+
+    as_agent(&env, &a, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    let v = env.json(&b, &["prime"]);
+    assert!(
+        v["doing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == id.as_str()),
+        "a claim made in another worktree shows as doing here: {v}"
+    );
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&id) && w.contains("conflict")
+        }),
+        "the divergent copies are called out: {v}"
+    );
+}
+
+#[test]
+fn prime_warns_about_a_stale_claim_over_a_local_todo() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_claim(&env, "sci", &id, "dead-agent", false);
+
+    let v = env.json(&sci, &["prime"]);
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains("dead-agent") && w.contains(&id)
+        }),
+        "{v}"
+    );
+}
+
+#[test]
+fn one_prime_never_contradicts_itself_about_a_claim() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2", "--size", "s"]));
+    std::fs::copy(
+        a.join(format!("tasks/{id}.md")),
+        b.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+    as_agent(&env, &a, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    let v = env.json(&b, &["prime"]);
+    let row = v["doing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == id.as_str())
+        .unwrap();
+    assert_eq!(row["claim"]["live"], true, "{v}");
+    assert!(
+        !v["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == id.as_str()),
+        "and the ready list agrees: {v}"
+    );
+}
+
+#[test]
+fn prime_keeps_a_live_claim_on_a_locally_closed_task() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+    std::fs::copy(
+        a.join(format!("tasks/{id}.md")),
+        b.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+    env.cmd(&b)
+        .args(["done", &id, "closed here"])
+        .assert()
+        .success();
+    as_agent(&env, &a, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    let v = env.json(&b, &["prime"]);
+    let row = v["doing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == id.as_str())
+        .unwrap();
+    assert_eq!(row["status"], "done", "{v}");
+    assert_eq!(row["claim"]["live"], true, "{v}");
+}
+
 // The error shape is {"error": {"kind", "detail"}} — there is no `message` field.
 fn err_kind(out: &std::process::Output) -> String {
     let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();

@@ -268,6 +268,22 @@ impl ClaimSnapshot {
     pub fn get(&self, id: &TaskId) -> Option<&(Claim, Liveness)> {
         self.by_id.get(&id.to_string())
     }
+
+    pub fn live(&self, id: &TaskId) -> Option<&Claim> {
+        match self.get(id) {
+            Some((claim, Liveness::Live)) => Some(claim),
+            _ => None,
+        }
+    }
+
+    pub fn stale(&self) -> impl Iterator<Item = (&String, &Claim, &String)> {
+        self.by_id
+            .iter()
+            .filter_map(|(id, (claim, live))| match live {
+                Liveness::Stale(why) => Some((id, claim, why)),
+                Liveness::Live => None,
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

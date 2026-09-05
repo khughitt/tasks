@@ -70,7 +70,11 @@ pub fn list(
 }
 
 /// Ready tasks in ready order; pushes a warning per unreachable dependency.
-pub fn ready_tasks(ctx: &mut ReadCtx, all: &[Task]) -> Result<Vec<Task>> {
+pub fn ready_tasks(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &crate::claims::ClaimSnapshot,
+) -> Result<Vec<Task>> {
     let mut warnings = Vec::new();
     let mut closed: HashMap<TaskId, Option<bool>> = HashMap::new();
     for task in all.iter().filter(|task| task.status == Status::Todo) {
@@ -103,6 +107,16 @@ pub fn ready_tasks(ctx: &mut ReadCtx, all: &[Task]) -> Result<Vec<Task>> {
         }
     }
     sort_ready(&mut ready);
+    ready.retain(|task| match claims.live(&task.id) {
+        Some(claim) => {
+            warnings.push(format!(
+                "{} omitted: claimed by session {} in {} — `tasks start --force {}` to take it over",
+                task.id, claim.session, claim.worktree, task.id
+            ));
+            false
+        }
+        None => true,
+    });
     ctx.warnings.extend(warnings);
     Ok(ready)
 }
@@ -112,7 +126,7 @@ pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Re
     let all = ctx.scope.scan()?;
     let prefixes = ctx.scope.prefixes();
     let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
-    let mut tasks = ready_tasks(&mut ctx, &all)?;
+    let mut tasks = ready_tasks(&mut ctx, &all, &claims)?;
     if let Some(size) = size {
         tasks.retain(|task| task.size == Some(size));
     }
@@ -134,7 +148,7 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
     let all = ctx.scope.scan()?;
     let prefixes = ctx.scope.prefixes();
     let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
-    let ready = ready_tasks(&mut ctx, &all)?;
+    let ready = ready_tasks(&mut ctx, &all, &claims)?;
     let next = match ready.into_iter().next() {
         None => None,
         Some(task) => {
@@ -168,10 +182,10 @@ pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
     let prefixes = ctx.scope.prefixes();
     let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
     let counts = Counts::of(&all);
-    let ready = ready_tasks(&mut ctx, &all)?;
+    let ready = ready_tasks(&mut ctx, &all, &claims)?;
     let mut doing: Vec<Task> = all
         .iter()
-        .filter(|task| task.status == Status::Doing)
+        .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
         .cloned()
         .collect();
     sort_list(&mut doing);
@@ -199,6 +213,24 @@ pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
                 message
             });
         }
+    }
+    for task in &all {
+        if let Some(claim) = claims.live(&task.id)
+            && matches!(task.status, Status::Todo | Status::Idea)
+        {
+            ctx.warnings.push(format!(
+                "{} is claimed as doing in {} but this checkout's copy says {}; the two copies will conflict on merge",
+                task.id,
+                claim.worktree,
+                task.status.as_str()
+            ));
+        }
+    }
+    for (id, claim, why) in claims.stale() {
+        ctx.warnings.push(format!(
+            "{id} has a stale claim from session {} ({why}); `tasks start --force {id}` to take it over",
+            claim.session
+        ));
     }
     Ok(Output::Prime(PrimeOut {
         prefix: match &ctx.scope {
