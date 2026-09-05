@@ -24,7 +24,7 @@ pub fn locate_target(registry: &Registry) -> Result<Project> {
 
 pub const NOTE_AUTHOR: &str = "feedback";
 
-fn is_open_feedback(task: &Task) -> bool {
+pub fn is_open_feedback(task: &Task) -> bool {
     task.status.is_open() && task.tags.iter().any(|tag| tag == "feedback")
 }
 

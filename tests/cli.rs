@@ -4654,3 +4654,435 @@ fn edit_tags_append_and_remove_instead_of_replacing() {
         "--no-tags and --rm-tag conflict"
     );
 }
+
+#[test]
+fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+
+    // every status on edit, but only the two `add` accepts
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            4,
+            &["tasks", "edit", "sci-000001", "--status", ""]
+        ),
+        ["idea", "todo", "doing", "blocked", "done", "dropped"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--status", ""]),
+        ["idea", "todo"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "ready", "--size", ""]),
+        ["xs", "s", "m", "l", "xl"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--sort", ""]),
+        ["priority", "updated", "created"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--color", ""]),
+        ["auto", "always", "never"]
+    );
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            4,
+            &["tasks", "feedback", "S", "--category", ""]
+        ),
+        ["friction", "gap", "idea", "positive"]
+    );
+
+    // registry prefixes, in registry order
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--project", ""]),
+        ["fam", "sci"]
+    );
+    // `unregister`'s prefix is a bare positional with nothing preceding it, so
+    // clap_complete also offers the still-unused global flags alongside it;
+    // `complete_values` drops those to check the prefix candidates specifically.
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "unregister", ""]),
+        ["fam", "sci"]
+    );
+
+    // subcommands come from the derive, and a prefix narrows them
+    let subs = env.complete(&sci, "bash", 1, &["tasks", "re"]);
+    assert!(subs.contains(&"ready".to_string()), "{subs:?}");
+}
+
+#[test]
+fn completion_offers_task_ids_open_first_with_descriptions() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let open = id_of(env.json(&sci, &["add", "Still open"]));
+    let closed = id_of(env.json(&sci, &["add", "Finished"]));
+    env.json(&sci, &["done", &closed, "landed"]);
+
+    // open before closed, whatever the ids sort to
+    let ids = env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]);
+    assert_eq!(
+        ids,
+        [open.clone(), closed.clone()],
+        "open task must come first"
+    );
+
+    // the prefix filters
+    assert_eq!(
+        env.complete(&sci, "bash", 2, &["tasks", "show", &open[..5]]),
+        [open.as_str()]
+    );
+
+    // zsh carries `value:description`; bash emits bare values
+    let described = env.complete(&sci, "zsh", 2, &["tasks", "show", ""]);
+    assert_eq!(described[0], format!("{open}:todo  Still open"));
+    assert_eq!(described[1], format!("{closed}:done  Finished"));
+
+    // every id-taking write uses the same source
+    for command in [
+        "edit", "note", "start", "done", "drop", "block", "unblock", "dep", "root",
+    ] {
+        let ids = env.complete_values(&sci, "bash", 2, &["tasks", command, ""]);
+        assert!(ids.contains(&open), "{command}: {ids:?}");
+    }
+}
+
+#[test]
+fn completion_follows_a_typed_prefix_and_prefers_the_local_checkout() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+
+    // a foreign prefix reaches that project
+    assert_eq!(
+        env.complete(&sci, "bash", 2, &["tasks", "note", "fam-"]),
+        [foreign.as_str()]
+    );
+    // the local one stays local
+    assert_eq!(
+        env.complete(&sci, "bash", 2, &["tasks", "note", "sci-"]),
+        [local.as_str()]
+    );
+
+    // a second root under the same prefix holds different tasks; standing in it, the
+    // local checkout wins over the registered root
+    let displaced = env.init_forced("sci");
+    let displaced_id = id_of(env.json(&displaced, &["add", "Displaced"]));
+    assert_eq!(
+        env.complete(&displaced, "bash", 2, &["tasks", "note", "sci-"]),
+        [displaced_id.as_str()]
+    );
+
+    // -C selects the project, overriding the process's directory
+    let dir = displaced.to_str().unwrap();
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "-C", dir, "note", "sci-"]),
+        [displaced_id.as_str()]
+    );
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            3,
+            &["tasks", &format!("-C{dir}"), "note", "sci-"]
+        ),
+        [displaced_id]
+    );
+
+    // `root` resolves through the registry and needs no local project
+    let nowhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.complete(nowhere.path(), "bash", 2, &["tasks", "root", "fam-"]),
+        [foreign]
+    );
+}
+
+#[test]
+fn completion_is_silent_when_anything_is_wrong() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fine = id_of(env.json(&sci, &["add", "Fine"]));
+    let nowhere = tempfile::tempdir().unwrap();
+
+    // outside every project
+    assert!(
+        env.complete_values(nowhere.path(), "bash", 2, &["tasks", "show", ""])
+            .is_empty()
+    );
+    // an unregistered prefix
+    assert!(
+        env.complete(&sci, "bash", 2, &["tasks", "show", "zzz-"])
+            .is_empty()
+    );
+    // a malformed task file does not wipe the rest of the menu: the good id is still
+    // offered, the bad file is silently skipped
+    std::fs::write(sci.join("tasks/sci-bad001.md"), "not a task").unwrap();
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]),
+        [fine.as_str()],
+        "a malformed sibling file must not hide a valid id"
+    );
+    // an unreadable tasks directory (registered before the registry below is corrupted,
+    // since `init` itself needs a readable registry)
+    let locked = env.init("lck");
+    let mut perms = std::fs::metadata(locked.join("tasks"))
+        .unwrap()
+        .permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
+    std::fs::set_permissions(locked.join("tasks"), perms.clone()).unwrap();
+    let out = env.complete_values(&locked, "bash", 2, &["tasks", "show", ""]);
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(locked.join("tasks"), perms).unwrap();
+    assert!(out.is_empty(), "{out:?}");
+    // a malformed registry does not disable the local project: it is opened by walking
+    // up from the effective directory, not through the registry, so its ids are still
+    // offered even though the registry itself cannot be read
+    std::fs::write(
+        env.home.path().join(".config/tasks/projects.toml"),
+        "not toml = [",
+    )
+    .unwrap();
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]),
+        [fine.as_str()],
+        "a malformed registry must not disable the local project"
+    );
+}
+
+#[test]
+fn completion_stub_is_emitted_and_the_hook_is_otherwise_inert() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    // no words after `--`: the registration stub, naming the binary
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_COMPLETE", "bash")
+        .arg("--")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stub = String::from_utf8_lossy(&out.stdout);
+    assert!(stub.contains("complete "), "{stub}");
+    assert!(stub.contains("TASKS_COMPLETE"), "{stub}");
+
+    // an unsupported shell name is an error, not a silent stub
+    let bad = env
+        .cmd(&sci)
+        .env("TASKS_COMPLETE", "notashell")
+        .arg("--")
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+
+    // with the variable unset, an ordinary argv runs the ordinary command
+    let v = env.json(&sci, &["list"]);
+    assert_eq!(v["tasks"], serde_json::json!([]));
+}
+
+#[test]
+fn completion_scopes_ids_to_what_each_argument_accepts() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+
+    // Scoped: tree and list --parent are local, until --all-projects widens list
+    assert!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "tree", "fam-"])
+            .is_empty()
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", ""]),
+        [local.as_str()]
+    );
+    let mut wide = env.complete(
+        &sci,
+        "bash",
+        4,
+        &["tasks", "list", "--all-projects", "--parent", ""],
+    );
+    wide.sort();
+    let mut both = [foreign.clone(), local.clone()];
+    both.sort();
+    assert_eq!(
+        wide, both,
+        "--all-projects widens the scope to the registry"
+    );
+
+    // a second task in each project — enough to prove a scope excludes the subject's
+    // own id while still offering everything else
+    let sci_peer = id_of(env.json(&sci, &["add", "Sci peer"]));
+    let fam_peer = id_of(env.json(&fam, &["add", "Fam peer"]));
+    let mut fam_ids = [foreign.clone(), fam_peer.clone()];
+    fam_ids.sort();
+    let mut sci_ids = [local.clone(), sci_peer.clone()];
+    sci_ids.sort();
+
+    // Destination: --parent follows --project, and the subject id on edit — but never
+    // the subject's own id, which `apply_fields` rejects as a task's own parent
+    let mut via_project = env.complete(
+        &sci,
+        "bash",
+        6,
+        &["tasks", "add", "T", "--project", "fam", "--parent", ""],
+    );
+    via_project.sort();
+    assert_eq!(via_project, fam_ids);
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            4,
+            &["tasks", "edit", &foreign, "--parent", ""]
+        ),
+        [fam_peer.as_str()],
+        "a task must not be offered as its own parent"
+    );
+    // add's title is not a subject: --parent stays local
+    let mut via_add_title =
+        env.complete(&sci, "bash", 4, &["tasks", "add", &foreign, "--parent", ""]);
+    via_add_title.sort();
+    assert_eq!(via_add_title, sci_ids);
+
+    // Resolvable: --depends and dep --on reach any registered project — but never offer
+    // the subject as its own dependency, which `dep`/`apply_fields` reject as a cycle
+    let mut via_depends =
+        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--depends", "fam-"]);
+    via_depends.sort();
+    assert_eq!(via_depends, fam_ids);
+    let mut via_dep_on = env.complete(&sci, "bash", 4, &["tasks", "dep", &local, "--on", "fam-"]);
+    via_dep_on.sort();
+    assert_eq!(via_dep_on, fam_ids);
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "dep", &local, "--on", ""]),
+        [sci_peer.as_str()],
+        "a task must not be offered as its own dependency"
+    );
+}
+
+#[test]
+fn resolvable_starts_from_the_destination_project() {
+    let mut env = TestEnv::new();
+    let fam = env.init("fam");
+    let registered = id_of(env.json(&fam, &["add", "In the registered root"]));
+
+    // a second `fam` root with different tasks: `add --project fam` validates against the
+    // registered root, so completion must offer that one's ids, not this checkout's
+    let worktree = env.init_forced("fam");
+    env.json(&worktree, &["add", "Only in the worktree"]);
+    // `init --force` repointed the registry; put it back so `fam` names the first root
+    env.json(&fam, &["init", "--prefix", "fam", "--force"]);
+
+    assert_eq!(
+        env.complete(
+            &worktree,
+            "bash",
+            6,
+            &["tasks", "add", "T", "--project", "fam", "--depends", "fam-"]
+        ),
+        [registered.as_str()]
+    );
+
+    // and it works with no local project at all
+    let nowhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.complete(
+            nowhere.path(),
+            "bash",
+            6,
+            &["tasks", "add", "T", "--project", "fam", "--depends", "fam-"]
+        ),
+        [registered]
+    );
+}
+
+#[test]
+fn dep_rm_offers_only_current_dependencies_including_unreachable_ones() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let subject = id_of(env.json(&sci, &["add", "Subject"]));
+    let other = id_of(env.json(&sci, &["add", "Not a dependency"]));
+    let reachable = id_of(env.json(&fam, &["add", "Reachable dep"]));
+    env.json(&sci, &["dep", &subject, "--on", &reachable]);
+
+    let ids = env.complete(&sci, "bash", 4, &["tasks", "dep", &subject, "--rm", ""]);
+    assert_eq!(ids, [reachable.as_str()]);
+    assert!(!ids.contains(&other), "{ids:?}");
+
+    // unregister fam: the dependency is now unreachable but still removable, so it stays
+    // a candidate — described in zsh only while its task can be read
+    let zsh = env.complete(&sci, "zsh", 4, &["tasks", "dep", &subject, "--rm", ""]);
+    assert_eq!(zsh, [format!("{reachable}:todo  Reachable dep")]);
+    env.json(&sci, &["unregister", "fam"]);
+    assert_eq!(
+        env.complete(&sci, "zsh", 4, &["tasks", "dep", &subject, "--rm", ""]),
+        [reachable],
+        "an unreachable dependency is offered bare, not dropped"
+    );
+}
+
+#[test]
+fn dependencies_are_ordered_open_before_closed_or_unresolvable_each_by_id() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let unr = env.init("unr");
+    let subject = id_of(env.json(&sci, &["add", "Subject"]));
+    let open = id_of(env.json(&sci, &["add", "Open dep"]));
+    let closed = id_of(env.json(&fam, &["add", "Closed dep"]));
+    env.json(&fam, &["done", &closed, "fixed"]);
+    let unreachable = id_of(env.json(&unr, &["add", "Unreachable dep"]));
+    // insertion order is deliberately the reverse of the expected output order, so a
+    // completer that merely echoes `depends` back cannot pass by accident
+    env.json(
+        &sci,
+        &["dep", &subject, "--on", &unreachable, &closed, &open],
+    );
+    // unregister last: the dependency is still offered, just unresolvable and sorted
+    // with the closed ones — "fam" < "unr" so this also proves the id-ascending
+    // tiebreak within that group, not just the open/closed split
+    env.json(&sci, &["unregister", "unr"]);
+
+    let ids = env.complete(&sci, "bash", 4, &["tasks", "dep", &subject, "--rm", ""]);
+    assert_eq!(ids, [open.as_str(), closed.as_str(), unreachable.as_str()]);
+}
+
+#[test]
+fn feedback_recur_offers_open_feedback_from_the_registered_tasks_root() {
+    let mut env = TestEnv::new();
+    let upstream = env.init("tasks");
+    let sci = env.init("sci");
+    let open = id_of(env.json(&upstream, &["add", "Open report", "--tag", "feedback"]));
+    let closed = id_of(env.json(&upstream, &["add", "Closed report", "--tag", "feedback"]));
+    env.json(&upstream, &["done", &closed, "fixed"]);
+    let untagged = id_of(env.json(&upstream, &["add", "Not feedback"]));
+
+    let ids = env.complete(&sci, "bash", 4, &["tasks", "feedback", "S", "--recur", ""]);
+    assert_eq!(ids, [open.as_str()]);
+    assert!(
+        !ids.contains(&closed) && !ids.contains(&untagged),
+        "{ids:?}"
+    );
+
+    // a worktree of the upstream does not leak its own records
+    let worktree = env.init_forced("tasks");
+    let only_here = id_of(env.json(&worktree, &["add", "Local only", "--tag", "feedback"]));
+    env.json(&upstream, &["init", "--prefix", "tasks", "--force"]);
+    let ids = env.complete(
+        &worktree,
+        "bash",
+        4,
+        &["tasks", "feedback", "S", "--recur", ""],
+    );
+    assert_eq!(ids, [open]);
+    assert!(!ids.contains(&only_here), "{ids:?}");
+}

@@ -90,6 +90,30 @@ from a clone):
 
 Run `tasks --help` for the full command list.
 
+## Completions
+
+Bash and zsh complete subcommands, flags, `--status`/`--size`/`--sort`/`--color`
+values, registered project prefixes, and task ids — `tasks show sci-4f<TAB>`. The id
+candidates come from the project the command would actually act on, so `-C`,
+`--project`, and a typed foreign prefix all steer them.
+
+Bash, in `~/.bashrc`:
+
+    source <(TASKS_COMPLETE=bash tasks)
+
+Zsh, in `~/.zshrc`, **after** completion is initialized — the stub calls `compdef`, so
+sourcing it before `compinit` fails with `command not found: compdef`:
+
+    autoload -Uz compinit && compinit      # or your framework's own init
+    source <(TASKS_COMPLETE=zsh tasks)
+
+Under oh-my-zsh, prezto, or a plugin manager, the same rule applies: the stub goes after
+that framework's initialization.
+
+Re-source the stub or open a new shell after upgrading `tasks`; a running shell keeps the
+function it loaded at startup. Fish, elvish, and powershell use the same mechanism with
+their own syntax. `TASKS_COMPLETE=` or `TASKS_COMPLETE=0` disables completion.
+
 Color is off unless you ask for it. `--color auto|always|never`, or `TASKS_COLOR` with the
 same three values, styles `--pretty` output only; JSON never carries escape sequences.
 `auto` colors a stream only when that stream is a terminal, so putting `TASKS_COLOR=auto`

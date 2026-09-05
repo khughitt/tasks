@@ -485,6 +485,11 @@ unregistered or without a config is unresolvable_id, mismatched is config. On su
 emits the unregistered-current-project warning; an empty registry cannot produce a
 successful root lookup. See docs/specs/2026-09-04-multi-project-design.md.
 
+Shell completion is activated by `TASKS_COMPLETE=<shell> tasks`, which prints a stub for a
+shell rc to source; the stub calls the binary back on each TAB. Candidates for an id
+argument come from the project that argument's command would act on, which is not always
+the local one. See docs/specs/2026-09-05-shell-completions-design.md.
+
 ### 6.1 Cycle detection
 
 `dep --on`, `add --depends`, and `check` detect cycles by depth-first traversal of

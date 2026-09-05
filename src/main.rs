@@ -1,6 +1,7 @@
 mod claims;
 mod cli;
 mod commands;
+mod complete;
 mod error;
 mod format;
 mod frontmatter;
@@ -16,11 +17,17 @@ mod similarity;
 mod style;
 mod time;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use output::Format;
 use std::io::IsTerminal;
 
 fn main() {
+    // Must run before anything writes to stdout. Returns immediately unless
+    // TASKS_COMPLETE is set, so an ordinary run pays one getenv.
+    clap_complete::CompleteEnv::with_factory(cli::Cli::command)
+        .var("TASKS_COMPLETE")
+        .complete();
+
     let cli = cli::Cli::parse();
     let format = match (cli.pretty, std::env::var("TASKS_FORMAT").ok().as_deref()) {
         (true, _) | (false, Some("pretty")) => Format::Pretty,

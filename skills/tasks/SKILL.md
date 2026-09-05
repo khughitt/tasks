@@ -63,6 +63,8 @@ always means this checkout.
   closes; verify and `tasks done` it then. `tasks root <id>` prints where a piece lives.
 - Id collision after a merge (git add/add conflict on the same `tasks/<id>.md`): keep one file, rename the other to a fresh id, fix its `id` field, then run `tasks check` and repair any `depends` it reports.
 - `tasks tree [<id>]` shows the hierarchy; `tasks edit <id> --parent <goal>` / `--no-parent` moves a task.
+- Tab completion for ids and flags: `source <(TASKS_COMPLETE=bash tasks)` in `~/.bashrc`,
+  or the same with `zsh` in `~/.zshrc` after `compinit`. See the README.
 - Throwaway projects get a throwaway registry: `tasks init` registers globally in
   `~/.config/tasks/projects.toml`, and that entry outlives the scratch directory it
   names. For a demo, a smoke test, or anything under a temp dir, run
