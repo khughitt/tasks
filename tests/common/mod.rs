@@ -20,13 +20,44 @@ impl TestEnv {
         let mut c = Command::cargo_bin("tasks").unwrap();
         c.env("HOME", self.home.path())
             .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_STATE_HOME")
             .env_remove("TASKS_FORMAT")
             .env_remove("TASKS_OWNER")
+            .env_remove("TASKS_SESSION")
+            .env_remove("TASKS_SESSION_PID")
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("CLAUDE_PID")
             .env_remove("TASKS_COLOR")
             .env_remove("NO_COLOR")
             .env("USER", "tester")
             .current_dir(dir);
         c
+    }
+
+    pub fn raw(&self, dir: &Path) -> std::process::Command {
+        let mut c = std::process::Command::new(assert_cmd::cargo::cargo_bin("tasks"));
+        c.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .env("HOME", self.home.path())
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_STATE_HOME")
+            .env_remove("TASKS_FORMAT")
+            .env_remove("TASKS_OWNER")
+            .env_remove("TASKS_SESSION")
+            .env_remove("TASKS_SESSION_PID")
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("CLAUDE_PID")
+            .env_remove("TASKS_COLOR")
+            .env_remove("NO_COLOR")
+            .env("USER", "tester")
+            .current_dir(dir);
+        c
+    }
+
+    pub fn claim_store(&self, prefix: &str) -> PathBuf {
+        self.home
+            .path()
+            .join(format!(".local/state/tasks/claims/{prefix}.toml"))
     }
 
     /// New temp project directory, `tasks init --prefix <prefix>` already run.

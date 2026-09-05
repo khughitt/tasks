@@ -1,3 +1,4 @@
+mod claims;
 mod cli;
 mod commands;
 mod error;
