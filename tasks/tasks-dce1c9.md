@@ -5,10 +5,10 @@ status: todo
 priority: 2
 size: xs
 created: 2026-09-05T10:21:31Z
-updated: 2026-09-05T10:21:32Z
+updated: 2026-09-05T10:59:42Z
 depends: [tasks-8dcf64]
 parent: tasks-d184e3
 tags: [claims]
 plan: docs/plans/2026-09-05-work-claims.md
-step: "Task 10: Lock `feedback` recurrence"
+step: "Task 9: Lock `feedback` recurrence"
 ---

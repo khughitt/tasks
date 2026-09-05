@@ -5,13 +5,13 @@ status: todo
 priority: 2
 size: s
 created: 2026-09-05T08:32:43Z
-updated: 2026-09-05T10:21:32Z
-depends: [tasks-7a7386]
+updated: 2026-09-05T10:59:42Z
+depends: [tasks-315c38]
 parent: tasks-d184e3
 tags: [feedback, friction, "from:material"]
 spec: docs/specs/2026-09-05-work-claims-design.md
 plan: docs/plans/2026-09-05-work-claims.md
-step: "Task 11: The uncommitted-before-branching warning"
+step: "Task 10: The uncommitted-before-branching warning"
 ---
 
 tasks start <id> in the main checkout, then git worktree add and tasks note <id> in the worktree: the worktree's copy stays status todo with no owner, the main checkout has an uncommitted doing/owner edit, and git merge refuses until one side is discarded. Expected either start to be committed automatically or a warning that the file is uncommitted.

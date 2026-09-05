@@ -156,6 +156,12 @@ library target.)
 At the top of `src/claims.rs`:
 
 ```rust
+// Removed in Task 7, whose guard is the first consumer of the whole surface. Until then
+// this is a binary crate's unreachable `pub` API, which `clippy -D warnings` rejects — and
+// the pre-commit hook runs `just check`, so without this the intermediate commits could not
+// land. Task 7 deletes the attribute and proves clippy is clean without it.
+#![allow(dead_code)]
+
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::repo::atomic_write;
@@ -215,7 +221,10 @@ impl ClaimStore {
     }
 
     pub fn path_for(prefix: &str) -> Result<PathBuf> {
-        Self::path_with(prefix, std::env::var_os)
+        // Wrapped in a closure, not passed directly: `std::env::var_os` is generic over
+        // `AsRef<OsStr>`, so handing it to an `impl Fn(&str)` parameter fails with
+        // "implementation of `Fn` is not general enough".
+        Self::path_with(prefix, |key| std::env::var_os(key))
     }
 
     pub fn load(prefix: &str) -> Result<ClaimStore> {
@@ -230,6 +239,21 @@ impl ClaimStore {
         } else {
             BTreeMap::new()
         };
+        // Timestamps are validated here, on the way in, so corruption is a typed error at
+        // the boundary rather than something the liveness rules must interpret. A garbled
+        // `seen` must never read as "stale": that would let the next writer discard an
+        // unverifiable claim without `--force`, the exact opposite of the
+        // absence-of-evidence rule everything else here follows.
+        for (id, claim) in &claims {
+            for (field, value) in [("started", &claim.started), ("seen", &claim.seen)] {
+                crate::time::parse(value).map_err(|error| {
+                    Error::Config(format!(
+                        "{}: claim {id} has an unreadable {field}: {error}",
+                        path.display()
+                    ))
+                })?;
+            }
+        }
         Ok(ClaimStore {
             path: path.to_path_buf(),
             claims,
@@ -288,7 +312,13 @@ touch process environment.
 `tests/common/mod.rs` must stop the suite inheriting a real state directory or a real agent
 identity. Extend the `env_remove` chain in `cmd` (`tests/common/mod.rs:22-28`):
 
+Split `cmd` so a later task can spawn and inspect a child process without duplicating the
+environment chain:
+
 ```rust
+    /// A raw command with this environment applied. `cmd` wraps it; Task 11 spawns it.
+    pub fn raw(&self, dir: &Path) -> std::process::Command {
+        let mut c = std::process::Command::new(assert_cmd::cargo::cargo_bin("tasks"));
         c.env("HOME", self.home.path())
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
@@ -508,6 +538,21 @@ Append to the `tests` module:
     }
 
     #[test]
+    fn a_corrupt_timestamp_is_rejected_on_load_rather_than_read_as_stale() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("sci.toml");
+        std::fs::write(
+            &path,
+            "[claims.\"sci-000001\"]\nowner = \"o\"\nsession = \"s\"\nhost = \"h\"\n\
+             worktree = \"/w\"\nstarted = \"2026-09-05T00:00:00Z\"\nseen = \"garbage\"\n",
+        )
+        .unwrap();
+        let error = ClaimStore::load_from(&path).unwrap_err();
+        assert_eq!(error.kind(), "config");
+        assert!(error.to_string().contains("seen"), "{error}");
+    }
+
+    #[test]
     fn proc_stat_parses_a_comm_containing_spaces_and_parentheses() {
         assert_eq!(
             parse_proc_stat("7 (weird ) name) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 x"),
@@ -599,9 +644,11 @@ pub fn liveness_with(
             "not seen for {}h",
             (now - seen).whole_hours().max(0)
         )),
-        // A corrupt timestamp is not liveness evidence either way; treating it as gone at
-        // least keeps a garbled store from pinning a task forever.
-        Err(_) => Liveness::Stale(format!("unreadable timestamp {:?}", claim.seen)),
+        // Unreachable in production: `load_from` rejects a corrupt timestamp as a config
+        // error before liveness ever sees it. Reachable only from a hand-built `Claim` in a
+        // test, and `Live` is the conservative direction — an unreadable timestamp is an
+        // absence of evidence, so it must not authorize an automatic takeover.
+        Err(_) => Liveness::Live,
     };
 
     let Some(pid) = claim.pid else { return ttl() };
@@ -736,7 +783,8 @@ impl MutationLock {
     }
 
     pub fn path_for(prefix: &str) -> Result<PathBuf> {
-        Self::path_with(prefix, std::env::var_os)
+        // A closure, for the same higher-ranked-lifetime reason as `ClaimStore::path_for`.
+        Self::path_with(prefix, |key| std::env::var_os(key))
     }
 
     pub fn acquire(prefix: &str) -> Result<MutationLock> {
@@ -1015,7 +1063,8 @@ pub fn unix_session_id() -> Option<u32> {
 }
 
 pub fn identity() -> Result<Identity> {
-    identity_from(std::env::var_os, unix_session_id())
+    // A closure, for the same higher-ranked-lifetime reason as `ClaimStore::path_for`.
+    identity_from(|key| std::env::var_os(key), unix_session_id())
 }
 
 /// Session and pid resolve as a **pair from a single level**. A level that yields a session
@@ -1101,26 +1150,33 @@ git commit -m "feat(claims): resolve session identity as a pair, failing when un
 ```
 ---
 
-### Task 6: Claims in the JSON and pretty output
+### Task 6: One claim snapshot, and claims in the output
 
-This comes *before* the guard so the later tasks' assertions have a contract to assert
-against. It is tested with a hand-written store fixture, so it depends on nothing but Task 1.
+Placed before the guard so the guard's tests have a contract to assert against; testable on
+its own through a hand-written store fixture.
+
+**Depends on Tasks 1 and 2** — the snapshot evaluates liveness, so the liveness rules must
+already exist.
 
 **Files:**
-- Modify: `src/output.rs` (`ClaimInfo`, `TaskSummary`, `ShowFields`, `pretty`), `src/commands/show.rs`, `src/commands/list.rs`
+- Modify: `src/claims.rs` (`ClaimSnapshot`), `src/output.rs`, `src/commands/show.rs`, `src/commands/list.rs`
 - Test: `tests/cli.rs`
 
 **Interfaces:**
-- Produces: `ClaimInfo { owner, session, host, pid, worktree, started, seen, live }`, `ClaimInfo::of(&Claim)`, `TaskSummary.claim`, `ShowFields.claim`, `TaskSummary::of(task, all, Option<&ClaimStore>)`.
+- Produces: `ClaimSnapshot`, `ClaimSnapshot::{load, get, live, stale}`, `ClaimInfo`, `ClaimInfo::of(&Claim, &Liveness)`, `TaskSummary.claim`, `ShowFields.claim`, `TaskSummary::of(task, all, Option<&ClaimSnapshot>)`.
 - Test helper produced: `write_claim(&TestEnv, prefix, id, session, live)`.
 
+**Liveness is evaluated once per command and never recomputed.** The snapshot holds the
+verdict beside the claim, and `ClaimInfo::of` takes that verdict rather than re-deriving it.
+It deliberately keeps no `ClaimStore`s: a second handle on the raw store is a second route
+around the cached result, and that is exactly how one `prime` ends up contradicting itself.
+
 **`ShowOut.fields` is `#[serde(flatten)]`** (`src/output.rs:78`), so `show` exposes the claim
-at `v["claim"]`. Asserting `v["fields"]["claim"]` silently passes every null assertion and
-fails every positive one.
+at `v["claim"]`. Asserting `v["fields"]["claim"]` silently passes every null assertion.
 
 - [ ] **Step 1: Write the failing test**
 
-Add the fixture helper and the test to `tests/cli.rs`:
+Add to `tests/cli.rs`:
 
 ```rust
 /// Writes a claim straight into the store.
@@ -1169,8 +1225,7 @@ fn claim_appears_in_show_and_list_json() {
     assert_eq!(v["claim"]["worktree"], "/elsewhere");
     assert_eq!(v["claim"]["pid"], std::process::id());
 
-    let list = env.json(&sci, &["list"]);
-    assert_eq!(list["tasks"][0]["claim"]["session"], "agent-a");
+    assert_eq!(env.json(&sci, &["list"])["tasks"][0]["claim"]["session"], "agent-a");
 }
 
 #[test]
@@ -1203,7 +1258,58 @@ fn pretty_rows_name_the_claim_holder_not_the_local_owner() {
 Run: `cargo test --bin tasks --test cli claim_appears_in_show`
 Expected: FAIL — `claim` is null even with the fixture in place.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Write the snapshot**
+
+In `src/claims.rs`:
+
+```rust
+/// Every claim in scope, with its liveness verdict, read **once** per command.
+///
+/// Reading the store separately for the ready filter, the doing predicate, the stale
+/// warnings and the row summaries would let a single `prime` contradict itself, since a
+/// claim can go stale between two reads. Liveness is evaluated here, once, and every
+/// consumer uses the stored verdict.
+///
+/// It holds no `ClaimStore`: keeping one would be a second handle on the raw claims and a
+/// second route around the cached verdict, which is the bug this type exists to prevent.
+#[derive(Debug, Default)]
+pub struct ClaimSnapshot {
+    by_id: BTreeMap<String, (Claim, Liveness)>,
+}
+
+impl ClaimSnapshot {
+    pub fn load<'a>(prefixes: impl Iterator<Item = &'a str>) -> Result<ClaimSnapshot> {
+        let mut by_id = BTreeMap::new();
+        for prefix in prefixes {
+            for (id, claim) in ClaimStore::load(prefix)?.iter() {
+                let live = liveness(claim);
+                by_id.insert(id.clone(), (claim.clone(), live));
+            }
+        }
+        Ok(ClaimSnapshot { by_id })
+    }
+
+    pub fn get(&self, id: &TaskId) -> Option<&(Claim, Liveness)> {
+        self.by_id.get(&id.to_string())
+    }
+
+    pub fn live(&self, id: &TaskId) -> Option<&Claim> {
+        match self.get(id) {
+            Some((claim, Liveness::Live)) => Some(claim),
+            _ => None,
+        }
+    }
+
+    pub fn stale(&self) -> impl Iterator<Item = (&String, &Claim, &String)> {
+        self.by_id
+            .iter()
+            .filter_map(|(id, (claim, live))| match live {
+                Liveness::Stale(why) => Some((id, claim, why)),
+                Liveness::Live => None,
+            })
+    }
+}
+```
 
 In `src/output.rs`:
 
@@ -1221,7 +1327,8 @@ pub struct ClaimInfo {
 }
 
 impl ClaimInfo {
-    pub fn of(claim: &crate::claims::Claim) -> ClaimInfo {
+    /// Takes the verdict rather than recomputing it, so every row in one command agrees.
+    pub fn of(claim: &crate::claims::Claim, live: &crate::claims::Liveness) -> ClaimInfo {
         ClaimInfo {
             owner: claim.owner.clone(),
             session: claim.session.clone(),
@@ -1230,7 +1337,7 @@ impl ClaimInfo {
             worktree: claim.worktree.clone(),
             started: claim.started.clone(),
             seen: claim.seen.clone(),
-            live: crate::claims::liveness(claim) == crate::claims::Liveness::Live,
+            live: *live == crate::claims::Liveness::Live,
         }
     }
 }
@@ -1243,25 +1350,24 @@ Add `pub claim: Option<ClaimInfo>` to `TaskSummary` and `ShowFields`, and give
     pub fn of(
         task: &Task,
         all: &[Task],
-        claims: Option<&crate::claims::ClaimStore>,
+        claims: Option<&crate::claims::ClaimSnapshot>,
     ) -> TaskSummary {
         // ... existing fields unchanged ...
         claim: claims
-            .and_then(|store| store.get(&task.id))
-            .map(ClaimInfo::of),
+            .and_then(|snapshot| snapshot.get(&task.id))
+            .map(|(claim, live)| ClaimInfo::of(claim, live)),
     }
 ```
 
-Read paths load the store with `ClaimStore::load(&prefix)?` and take **no lock**:
-`atomic_write` publishes by rename, so a reader sees one whole version or another.
+`show`, `list`, `ready`, `next` and `prime` each build **one** `ClaimSnapshot` at the top and
+pass `Some(&snapshot)` to every `TaskSummary::of` call in that command. Read paths take **no
+lock**: `atomic_write` publishes by rename, so a reader sees one whole version or another.
 
-In the `table` helper inside `pretty`, prefer the claim's own owner. The local file's
-`owner` can be an older branch's value — the claim is the live fact:
+In the `table` helper inside `pretty`, prefer the claim's own owner — `row.owner` comes from
+this checkout's copy of the file, which may predate the claim entirely:
 
 ```rust
     let owner = match &row.claim {
-        // The holder as the claim records it. `row.owner` comes from this checkout's copy
-        // of the file, which may predate the claim entirely.
         Some(claim) if claim.live => format!("@{} [{}]", claim.owner, claim.session),
         Some(claim) => format!("@{} [{} stale]", claim.owner, claim.session),
         None => match &row.owner {
@@ -1273,22 +1379,24 @@ In the `table` helper inside `pretty`, prefer the claim's own owner. The local f
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --bin tasks --test cli claim && cargo test`
+Run: `cargo test --bin tasks --test cli claim && just check && cargo test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/output.rs src/commands tests/cli.rs
+git add src/claims.rs src/output.rs src/commands tests/cli.rs
 git commit -m "feat(output): report the claim on show, list, and pretty rows"
 ```
 
 ---
 
-### Task 7: The guard, acquire, and destination-based release
+### Task 7: The guard, the transaction, and `start --force`
 
-The core task, and one unit: the guard, the acquire and the release are a single
-transaction that a reviewer cannot sensibly split.
+The core task, and one unit. The guard, the acquire, the release and the takeover flag are a
+single transaction — `claim_guard` already takes `force`, so shipping the guard without the
+flag would commit tests that cannot pass, and a reviewer cannot sensibly accept a refusal
+with no sanctioned way through it.
 
 **The rule that shapes all of it: `transition()` guards and records an intent; `save()` is
 the only place that persists anything.** An earlier draft acquired inside `transition()`,
@@ -1296,37 +1404,53 @@ which meant a later validation failure, a rejected concurrent edit, or a failed 
 each leave the store mutated — three separate failure paths. With persistence in one
 validated operation there is one.
 
+**Depends on Tasks 2, 4, 5 and 6.**
+
 **Files:**
-- Modify: `src/commands/mod.rs` (`transition`, `save`, `Ctx` claim helpers), `src/commands/status.rs` (`note` heartbeat)
+- Modify: `src/claims.rs` (delete the module-level `#![allow(dead_code)]`), `src/commands/mod.rs`, `src/commands/status.rs`, `src/cli.rs:125-126`
 - Test: `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `Ctx::claims_mut`, `ClaimIntent` (Task 4), `identity`, `liveness`, `Claim`, `hostname` (Tasks 1-5), `ClaimInfo` (Task 6).
-- Produces: `transition(ctx: &mut Ctx, ..)`, `save(ctx: &mut Ctx, ..)`, `Ctx::describe_claim`.
+- Produces: `transition(ctx: &mut Ctx, ..)`, `save(ctx: &mut Ctx, ..)`, `Ctx::describe_claim`, `Command::Start { id, force }`, `status::start(ctx, id, force)`.
+- Test helpers produced: `two_roots`, `as_agent`, `err_kind`, `err_detail`, `TestEnv::init_forced`.
 
 `transition` and `save` change from `&Ctx` to `&mut Ctx`; every caller in
 `src/commands/{status,edit,add,dep}.rs` needs `mut ctx`. Mechanical — the compiler lists them.
 
 - [ ] **Step 1: Write the failing tests**
 
+Add `init_forced` to `tests/common/mod.rs`:
+
+```rust
+    /// A second project root under an already-registered prefix — a worktree, as far as a
+    /// prefix-keyed claim store is concerned.
+    pub fn init_forced(&mut self, prefix: &str) -> PathBuf {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().canonicalize().unwrap();
+        self.dirs.push(dir);
+        self.json(&path, &["init", "--prefix", prefix, "--force"]);
+        path
+    }
+```
+
+and to `tests/cli.rs`:
+
 ```rust
 /// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
-/// store keyed by prefix. The second `init` needs `--force` because the registry refuses to
-/// re-point a prefix silently.
+/// store keyed by prefix.
 fn two_roots(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {
-    let a = env.init("sci");
-    let b = env.init_forced("sci");
-    (a, b)
+    (env.init("sci"), env.init_forced("sci"))
 }
 
 /// Run `tasks` as a named agent with a live pid.
-fn as_agent<'a>(env: &'a TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::Command {
+fn as_agent(env: &TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::Command {
     let mut cmd = env.cmd(dir);
     cmd.env("TASKS_SESSION", session)
         .env("TASKS_SESSION_PID", std::process::id().to_string());
     cmd
 }
 
+// The error shape is {"error": {"kind", "detail"}} — there is no `message` field.
 fn err_kind(out: &std::process::Output) -> String {
     let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
     v["error"]["kind"].as_str().unwrap().to_string()
@@ -1334,7 +1458,6 @@ fn err_kind(out: &std::process::Output) -> String {
 
 fn err_detail(out: &std::process::Output) -> String {
     let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    // The error shape is {"error": {"kind", "detail"}} — there is no `message` field.
     v["error"]["detail"].as_str().unwrap().to_string()
 }
 
@@ -1350,6 +1473,20 @@ fn a_live_claim_from_another_session_refuses_start() {
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(err_kind(&out), "claimed");
     assert!(err_detail(&out).contains("agent-a"), "{}", err_detail(&out));
+}
+
+#[test]
+fn force_takeover_records_a_note_naming_the_displaced_session() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
+    as_agent(&env, &sci, "agent-b").args(["start", "--force", &id]).assert().success();
+
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(raw.contains("agent-a"), "the takeover is recorded in the notes: {raw}");
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-b");
 }
 
 #[test]
@@ -1371,7 +1508,6 @@ fn a_displaced_session_cannot_close_the_task_it_lost() {
         assert_eq!(out.status.code(), Some(1), "A must not close via {args:?}");
         assert_eq!(err_kind(&out), "claimed", "{args:?}");
     }
-
     assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-b");
 }
 
@@ -1384,8 +1520,6 @@ fn release_follows_the_claim_not_the_local_doing_status() {
     std::fs::copy(a.join(format!("tasks/{id}.md")), b.join(format!("tasks/{id}.md"))).unwrap();
 
     as_agent(&env, &a, "agent-a").args(["start", &id]).assert().success();
-    assert_eq!(env.json(&a, &["show", &id])["claim"]["session"], "agent-a");
-
     // The same session closes it from root B, where the local status was never `doing`.
     as_agent(&env, &b, "agent-a").args(["done", &id, "landed"]).assert().success();
 
@@ -1402,14 +1536,12 @@ fn one_checkouts_closed_copy_does_not_prune_a_live_claim() {
     let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
     std::fs::copy(a.join(format!("tasks/{id}.md")), b.join(format!("tasks/{id}.md"))).unwrap();
 
-    // Root A closed it first; root B is a branch that reopened and claimed it since. Both
-    // branch states must be established before the claim exists, or A's own close would be
-    // refused — correctly — and the test would never reach what it is about.
+    // Both branch states are established *before* the claim exists. Otherwise A's own close
+    // is refused — correctly — and the test never reaches what it is about.
     env.json(&a, &["edit", &id, "--status", "done"]);
     as_agent(&env, &b, "agent-b").args(["start", &id]).assert().success();
 
-    // A write from root A must not treat its own stale `done` as authority over the claim.
-    // `note` is the right probe: it is never refused, and it touches the store.
+    // `note` is the right probe from A: never refused, and it touches the store.
     as_agent(&env, &a, "agent-a").args(["note", &id, "still here"]).assert().success();
 
     assert_eq!(
@@ -1434,8 +1566,7 @@ fn re_running_a_close_retries_a_failed_release() {
     as_agent(&env, &sci, "agent-a").args(["done", &id, "landed"]).assert().success();
     assert!(env.json(&sci, &["show", &id])["claim"].is_null());
 
-    // Simulate a release that failed after the file write: the task is closed, the real
-    // claim is still there.
+    // A release that failed after the file write: task closed, real claim still present.
     std::fs::write(&store, &live_claim).unwrap();
     assert_eq!(env.json(&sci, &["show", &id])["claim"]["live"], true);
 
@@ -1470,35 +1601,59 @@ fn a_repeated_start_by_the_owner_keeps_the_claim() {
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
     as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
-    let first = env.json(&sci, &["show", &id])["claim"]["started"].clone();
     as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
     assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-a");
-    assert!(!first.is_null());
 }
-```
 
-Add `init_forced` to `tests/common/mod.rs`:
+#[test]
+fn note_fails_before_appending_when_identity_cannot_be_resolved() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let before = env.read(&sci, &format!("tasks/{id}.md"));
 
-```rust
-    /// A second project root under an already-registered prefix — a worktree, as far as a
-    /// prefix-keyed claim store is concerned.
-    pub fn init_forced(&mut self, prefix: &str) -> PathBuf {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().canonicalize().unwrap();
-        self.dirs.push(dir);
-        self.json(&path, &["init", "--prefix", prefix, "--force"]);
-        path
-    }
+    // A corrupt store is the reachable version of "the heartbeat cannot proceed".
+    let path = env.claim_store("sci");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "not valid toml = [").unwrap();
+
+    let out = env.cmd(&sci).args(["note", &id, "hello"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        env.read(&sci, &format!("tasks/{id}.md")),
+        before,
+        "a note that reports failure must not have landed; a retry would duplicate it"
+    );
+}
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test --bin tasks --test cli -- claim release_follows one_checkouts re_running a_displaced a_repeated`
-Expected: FAIL — nothing refuses, nothing releases.
+Run: `cargo test --bin tasks --test cli`
+Expected: FAIL — no `--force` flag, nothing refuses, nothing releases.
 
 - [ ] **Step 3: Write the implementation**
 
-In `src/commands/mod.rs`, add to `impl Ctx`:
+Delete the module-level `#![allow(dead_code)]` from the top of `src/claims.rs`. Every item is
+reachable from here on, and Step 4 proves it.
+
+`src/cli.rs`:
+
+```rust
+    /// Claim a task: status=doing, owner=you.
+    Start {
+        id: String,
+        /// Take over a claim another live session holds.
+        #[arg(long)]
+        force: bool,
+    },
+```
+
+`src/commands/mod.rs` — the `run` arm, then the guard:
+
+```rust
+        Command::Start { id, force } => status::start(open_write_ctx(dir)?, id, force),
+```
 
 ```rust
     pub fn describe_claim(claim: &crate::claims::Claim, live: &Liveness) -> String {
@@ -1516,13 +1671,13 @@ In `src/commands/mod.rs`, add to `impl Ctx`:
         )
     }
 
-    /// Guard only. Decides whether this session may make the change and records what
-    /// `save` should do — **and persists nothing**, so a validation failure, a rejected
-    /// concurrent edit, or a failed write cannot leave the store mutated.
+    /// Guard only. Decides whether this session may make the change and records what `save`
+    /// should do — **and persists nothing**, so a validation failure, a rejected concurrent
+    /// edit, or a failed write cannot leave the store mutated.
     ///
     /// Release is destination-based: any destination other than `doing` releases this
-    /// session's claim. It must not key off *leaving* a local `doing`, because a session
-    /// can hold the shared claim while its own checkout still reads `todo` — the ordinary
+    /// session's claim. It must not key off *leaving* a local `doing`, because a session can
+    /// hold the shared claim while its own checkout still reads `todo` — the ordinary
     /// cross-worktree case — and its `done` there would otherwise strand the claim.
     fn claim_guard(&mut self, id: &TaskId, to: Status, force: bool) -> Result<()> {
         let me = crate::claims::identity()?;
@@ -1590,8 +1745,6 @@ In `src/commands/mod.rs`, add to `impl Ctx`:
     }
 ```
 
-Then `transition` and `save`:
-
 ```rust
 pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Result<()> {
     if !Status::can_transition(task.status, to) {
@@ -1640,7 +1793,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             let store = ctx.claims_mut()?;
             // Captured, never assumed absent: a repeated `start` by the owner and a forced
             // takeover both write over an existing claim, and a blanket removal on failure
-            // would erase work someone still holds.
+            // would unclaim work someone still holds.
             let previous = store.get(&id).cloned();
             store.prune_dead();
             store.insert(&id, claim);
@@ -1688,22 +1841,45 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
 }
 ```
 
-In `src/commands/status.rs`, make callers `mut` and add the heartbeat to `note`:
+`src/commands/status.rs` — `start`, and `note` with the heartbeat ordered correctly:
 
 ```rust
+pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
+    let mut task = load(&ctx, &id)?;
+    let before = ctx.warnings.len();
+    transition(&mut ctx, &mut task, Status::Doing, force)?;
+    let owner = owner_name(&ctx.project)?;
+    task.owner = Some(owner.clone());
+    // A takeover displaces someone; the task's own record should say so, not just the
+    // ephemeral warning stream.
+    for takeover in ctx.warnings[before..].to_vec() {
+        append_note(&mut task, &owner, &takeover)?;
+    }
+    save(&mut ctx, &mut task)?;
+    Ok(id_out(ctx, &task))
+}
+
 pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
     append_note(&mut task, &owner, &text)?;
-    save(&mut ctx, &mut task)?;
-    // The heartbeat, and only on our own claim: `note` never touches a foreign one and is
-    // never refused. It is still serialized under the mutation lock, because a note
-    // rewrites the whole markdown file however append-only it is in meaning.
+    // Identity and the store are resolved *before* the file write. Doing it afterwards
+    // means an unresolvable identity or a corrupt store returns an error after the note has
+    // already landed, and the obvious retry then duplicates it.
     let me = crate::claims::identity()?;
-    let store = ctx.claims_mut()?;
-    if let Some(claim) = store.get(&task.id).cloned()
-        && claim.session == me.session
-    {
+    let mine = ctx
+        .claims_mut()?
+        .get(&task.id)
+        .cloned()
+        .filter(|claim| claim.session == me.session);
+
+    save(&mut ctx, &mut task)?;
+
+    // The heartbeat, and only on our own claim: `note` never touches a foreign one and is
+    // never refused. It is still serialized under the mutation lock, because a note rewrites
+    // the whole markdown file however append-only it is in meaning.
+    if let Some(claim) = mine {
+        let store = ctx.claims_mut()?;
         store.insert(
             &task.id,
             crate::claims::Claim {
@@ -1711,136 +1887,56 @@ pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
                 ..claim
             },
         );
-        store.save()?;
+        if let Err(error) = store.save() {
+            // The note is on disk, so this cannot be an error — say plainly what did and
+            // did not happen, as the release-failure path does.
+            ctx.warnings.push(format!(
+                "the note landed, but the claim heartbeat on {} was not refreshed \
+                 ({error}); the claim may look stale to other sessions",
+                task.id
+            ));
+        }
     }
     Ok(id_out(ctx, &task))
 }
 ```
 
-Apply `mut ctx` and the `&mut ctx` argument in `start`, `close`, `unblock`, `edit::run`,
-`editor`, `add::run` and `dep::run`.
+Apply `mut ctx` and the `&mut ctx` argument in `close`, `unblock`, `edit::run`, `editor`,
+`add::run` and `dep::run`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --bin tasks --test cli && cargo test`
-Expected: PASS. `a_displaced_session_cannot_close_the_task_it_lost` and
-`a_repeated_start_by_the_owner_keeps_the_claim` need Task 8's `--force`; run them at the end
-of Task 8 if they fail only on the unknown flag.
+Run: `cargo test --bin tasks --test cli && just check && cargo test`
+Expected: PASS, with clippy clean now that the `allow(dead_code)` is gone.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/commands tests
-git commit -m "feat(claims): guard status changes and persist claims inside save"
+git add src/claims.rs src/cli.rs src/commands tests
+git commit -m "feat(claims): guard status changes, persist inside save, and add start --force"
 ```
 
 ---
 
-### Task 8: `tasks start --force` takeover
+### Task 8: `ready`/`next` exclusion and the `prime` overlay
+
+**Depends on Tasks 6 and 7** — its tests use `two_roots` and `as_agent`, and need `start` to
+actually record a claim.
 
 **Files:**
-- Modify: `src/cli.rs:125-126`, `src/commands/mod.rs` (`Command::Start` arm), `src/commands/status.rs`
+- Modify: `src/commands/list.rs`
 - Test: `tests/cli.rs`
 
-**Interfaces:**
-- Produces: `Command::Start { id, force }`, `status::start(ctx, id, force)`.
+**One snapshot per command, threaded all the way through.** `prime` builds the snapshot once
+and hands the same reference to `ready_tasks`, to the doing predicate, to both warning loops
+and to every `TaskSummary::of`. `ready_tasks` therefore takes it as a parameter rather than
+loading its own.
 
-- [ ] **Step 1: Write the failing test**
-
-```rust
-#[test]
-fn force_takeover_records_a_note_naming_the_displaced_session() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
-
-    as_agent(&env, &sci, "agent-a").args(["start", &id]).assert().success();
-    as_agent(&env, &sci, "agent-b").args(["start", "--force", &id]).assert().success();
-
-    let raw = env.read(&sci, &format!("tasks/{id}.md"));
-    assert!(raw.contains("agent-a"), "the takeover is recorded in the notes: {raw}");
-    assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-b");
-}
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cargo test --bin tasks --test cli force_takeover`
-Expected: FAIL — `unexpected argument '--force'`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-`src/cli.rs`:
-
-```rust
-    /// Claim a task: status=doing, owner=you.
-    Start {
-        id: String,
-        /// Take over a claim another live session holds.
-        #[arg(long)]
-        force: bool,
-    },
-```
-
-`src/commands/mod.rs`:
-
-```rust
-        Command::Start { id, force } => status::start(open_write_ctx(dir)?, id, force),
-```
-
-`src/commands/status.rs`:
-
-```rust
-pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
-    let before = ctx.warnings.len();
-    transition(&mut ctx, &mut task, Status::Doing, force)?;
-    task.owner = Some(owner_name(&ctx.project)?);
-    // A takeover displaces someone; the task's own record should say so, not just the
-    // ephemeral warning stream.
-    let takeovers: Vec<String> = ctx.warnings[before..].to_vec();
-    let owner = owner_name(&ctx.project)?;
-    for takeover in takeovers {
-        append_note(&mut task, &owner, &takeover)?;
-    }
-    save(&mut ctx, &mut task)?;
-    Ok(id_out(ctx, &task))
-}
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cargo test --bin tasks --test cli && cargo test`
-Expected: PASS, including the two Task 7 tests that needed `--force`.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/cli.rs src/commands tests/cli.rs
-git commit -m "feat(start): add --force to take over a claim"
-```
-
----
-
-### Task 9: `ready`/`next` exclusion and the `prime` overlay
-
-**Files:**
-- Modify: `src/commands/list.rs` (`ready_tasks`, `prime`), `src/commands/show.rs`
-- Test: `tests/cli.rs`
-
-**Interfaces:**
-- Produces: `ClaimSnapshot`, `ClaimSnapshot::{load, live, get, stale}`.
-
-**One snapshot per command.** Loading the store separately for the ready filter, the doing
-predicate and the stale warnings lets one `prime` contradict itself — a claim can go stale
-between two of those reads. Load each prefix once and reuse it everywhere, including under
-`--all-projects`.
-
-**`ready_tasks` already skips anything whose status is not `Todo`** (`src/commands/list.rs:87-89`).
-So a task the current session started *locally* is excluded by status before any claim logic
+**`ready_tasks` already skips anything whose status is not `Todo`** (`src/commands/list.rs:87-89`),
+so a task the current session started *locally* is excluded by status before any claim logic
 runs, and no claim warning fires for it — correct, and not something to test for. The case
-that matters, and the one the exclusion exists for, is a task whose **local** file still says
-`todo` while another root holds a live claim.
+that matters is a task whose **local** file still says `todo` while another root holds a live
+claim.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1900,8 +1996,8 @@ fn prime_warns_about_a_stale_claim_over_a_local_todo() {
     write_claim(&env, "sci", &id, "dead-agent", false);
 
     let v = env.json(&sci, &["prime"]);
-    // The `doing` predicate needs a *live* claim, so without this warning a stale claim
-    // over a local `todo` would appear nowhere at all.
+    // The `doing` predicate needs a *live* claim, so without this warning a stale claim over
+    // a local `todo` would appear nowhere at all.
     assert!(
         v["warnings"].as_array().unwrap().iter().any(|w| {
             let w = w.as_str().unwrap();
@@ -1910,67 +2006,46 @@ fn prime_warns_about_a_stale_claim_over_a_local_todo() {
         "{v}"
     );
 }
+
+#[test]
+fn one_prime_never_contradicts_itself_about_a_claim() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2", "--size", "s"]));
+    std::fs::copy(a.join(format!("tasks/{id}.md")), b.join(format!("tasks/{id}.md"))).unwrap();
+    as_agent(&env, &a, "agent-a").args(["start", &id]).assert().success();
+
+    let v = env.json(&b, &["prime"]);
+    let row = v["doing"].as_array().unwrap().iter().find(|t| t["id"] == id.as_str()).unwrap();
+    // Same verdict in the predicate that put it here and in the row it produced.
+    assert_eq!(row["claim"]["live"], true, "{v}");
+    assert!(
+        !v["ready"].as_array().unwrap().iter().any(|t| t["id"] == id.as_str()),
+        "and the ready list agrees: {v}"
+    );
+}
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cargo test --bin tasks --test cli -- ready_omits prime_shows prime_warns`
+Run: `cargo test --bin tasks --test cli -- ready_omits prime_shows prime_warns one_prime_never`
 Expected: FAIL — claimed tasks still appear, no warnings.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `src/commands/list.rs`:
+Change `ready_tasks` to take the snapshot rather than loading one:
 
 ```rust
-/// Every claim in scope, read **once** per command.
-///
-/// Reading the store separately for the ready filter, the doing predicate and the stale
-/// warnings would let a single `prime` contradict itself, since a claim can go stale
-/// between two reads. Liveness is evaluated here, once, and reused everywhere.
-pub struct ClaimSnapshot {
-    by_id: std::collections::BTreeMap<String, (Claim, Liveness)>,
-    stores: Vec<ClaimStore>,
-}
-
-impl ClaimSnapshot {
-    pub fn load<'a>(prefixes: impl Iterator<Item = &'a str>) -> Result<ClaimSnapshot> {
-        let mut by_id = std::collections::BTreeMap::new();
-        let mut stores = Vec::new();
-        for prefix in prefixes {
-            let store = ClaimStore::load(prefix)?;
-            for (id, claim) in store.iter() {
-                by_id.insert(id.clone(), (claim.clone(), liveness(claim)));
-            }
-            stores.push(store);
-        }
-        Ok(ClaimSnapshot { by_id, stores })
-    }
-
-    pub fn live(&self, id: &TaskId) -> Option<&Claim> {
-        match self.by_id.get(&id.to_string()) {
-            Some((claim, Liveness::Live)) => Some(claim),
-            _ => None,
-        }
-    }
-
-    pub fn stale(&self) -> impl Iterator<Item = (&String, &Claim, &String)> {
-        self.by_id.iter().filter_map(|(id, (claim, live))| match live {
-            Liveness::Stale(why) => Some((id, claim, why)),
-            Liveness::Live => None,
-        })
-    }
-
-    /// For `TaskSummary::of`, which reads claims by id.
-    pub fn stores(&self) -> &[ClaimStore] {
-        &self.stores
-    }
-}
+pub fn ready_tasks(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &ClaimSnapshot,
+) -> Result<Vec<Task>> {
 ```
 
-In `ready_tasks`, after the existing filters build `ready`:
+and after it has built `ready`:
 
 ```rust
-    let claims = ClaimSnapshot::load(ctx.scope.prefixes().iter().map(String::as_str))?;
     ready.retain(|task| match claims.live(&task.id) {
         Some(claim) => {
             warnings.push(format!(
@@ -1984,12 +2059,12 @@ In `ready_tasks`, after the existing filters build `ready`:
     });
 ```
 
-`next` reads the head of `ready_tasks`, so it inherits the exclusion.
-
-In `prime`, take one snapshot and use it for the predicate, the summaries and both warnings:
+`next` reads the head of `ready_tasks`, so it inherits the exclusion. In `prime`, build the
+one snapshot and use it everywhere:
 
 ```rust
     let claims = ClaimSnapshot::load(ctx.scope.prefixes().iter().map(String::as_str))?;
+    let ready = ready_tasks(&mut ctx, &all, &claims)?;
     let mut doing: Vec<Task> = all
         .iter()
         // Local `doing`, or a live claim: that is how a claim made in another worktree
@@ -2026,12 +2101,12 @@ and after the uncommitted-files loop:
     }
 ```
 
-Pass the snapshot's stores into `TaskSummary::of` at every call site in `list`, `ready`,
-`next`, `prime` and `show`.
+Every `TaskSummary::of` call in `prime`, `ready`, `next`, `list` and `show` takes
+`Some(&claims)` from that same snapshot.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test --bin tasks --test cli && cargo test`
+Run: `cargo test --bin tasks --test cli && just check && cargo test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -2043,10 +2118,12 @@ git commit -m "feat(list): exclude claimed tasks from ready and overlay claims o
 
 ---
 
-### Task 10: Lock `feedback` recurrence
+### Task 9: Lock `feedback` recurrence
+
+**Depends on Task 3.**
 
 **Files:**
-- Modify: `src/commands/feedback.rs` (the recurrence caller of `guarded_update`)
+- Modify: `src/commands/feedback.rs`
 - Test: `tests/cli.rs`
 
 `add`-style creation stays lock-free — `create_task` links the file into place exclusively,
@@ -2062,31 +2139,27 @@ same process would deadlock.
 
 - [ ] **Step 1: Write the failing test**
 
-`feedback` writes into the project registered under the `tasks` prefix, which
-`feedback_env()` (`tests/cli.rs:2261`) sets up; a test that skips it has no target at all.
+`feedback` writes into the project registered under the `tasks` prefix, which `feedback_env()`
+(`tests/cli.rs:2261`) sets up; a test that skips it has no target at all.
 
 ```rust
 #[test]
 fn feedback_recurrence_serializes_against_concurrent_recurrences() {
     let (env, target, reporter) = feedback_env();
-    let first = env.json(
+    let id = env.json(
         &reporter,
         &["feedback", "the thing is slow", "--category", "friction"],
-    );
-    let id = first["id"].as_str().unwrap().to_string();
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let mut handles = Vec::new();
     for n in 0..4 {
         let mut cmd = env.cmd(&reporter);
         cmd.args([
-            "feedback",
-            "the thing is slow",
-            "--category",
-            "friction",
-            "--recur",
-            &id,
-            "-b",
-            &format!("detail {n}"),
+            "feedback", "the thing is slow", "--category", "friction",
+            "--recur", &id, "-b", &format!("detail {n}"),
         ]);
         handles.push(std::thread::spawn(move || cmd.output().unwrap()));
     }
@@ -2107,18 +2180,17 @@ fn feedback_recurrence_serializes_against_concurrent_recurrences() {
 
 Run: `for i in $(seq 20); do cargo test --bin tasks --test cli feedback_recurrence_serializes || break; done`
 Expected: FAIL on some iterations — a lost update, or `concurrent_modification` after eight
-rounds. If 20 iterations all pass, raise the thread count rather than concluding the race is
-absent.
+rounds. This one *is* scheduling-dependent, which is why it is run repeatedly; Task 11 adds
+the deterministic lock-contention test that does not rely on collisions happening.
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `src/commands/feedback.rs`, take the target lock before the first read of the recurrence
-path and hold it until the update returns:
+In the recurrence path of `src/commands/feedback.rs`, before the first read:
 
 ```rust
-    // Recurrence is a read-modify-write, and `guarded_update`'s raw-content comparison
-    // still leaves a window between the check and `write_task`. Only the target's lock is
-    // needed; the source `Ctx` stays unlocked, so no command ever holds two.
+    // Recurrence is a read-modify-write, and `guarded_update`'s raw-content comparison still
+    // leaves a window between the check and `write_task`. Only the target's lock is needed;
+    // the source `Ctx` stays unlocked, so no command ever holds two.
     let _lock = crate::claims::MutationLock::acquire(&target.prefix)?;
     let task = guarded_update(target, &id, eligible, mutate)?;
 ```
@@ -2137,19 +2209,17 @@ git commit -m "fix(feedback): lock the target project for recurrence updates"
 
 ---
 
-### Task 11: The uncommitted-before-branching warning
+### Task 10: The uncommitted-before-branching warning
+
+**Depends on Task 7.**
 
 **Files:**
 - Modify: `src/commands/status.rs`
 - Test: `tests/cli.rs`
 
-**Interfaces:**
-- Consumes: `Project::uncommitted_task_files` (`src/repo.rs:323`).
-
 This is the narrower half of tasks-8f4b41 and covers only the *reverse* order — worktrees
 already exist, then `start`. The order actually reported (start first, worktree created
-afterwards) is covered by Task 9's divergence warning, which fires in the new worktree at the
-moment the disagreement becomes observable, and is regression-tested in Task 12.
+afterwards) is covered by Task 8's divergence warning and regression-tested in Task 11.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2261,45 +2331,107 @@ git commit -m "feat(start): warn when a claim stays uncommitted in a multi-workt
 
 ---
 
-### Task 12: Concurrency and failure regressions
+### Task 11: Concurrency and failure regressions
 
-The lock and the rollback are the two things most likely to be silently wrong, and neither
-is covered by the happy-path tests above. This task adds only tests.
+The lock and the rollback are the two things most likely to be silently wrong, and neither is
+covered by the happy-path tests. This task adds only tests.
 
-**Outcome-counting, not timing.** Each concurrency test asserts a property that holds under
-*every* interleaving — exactly one winner, or no update lost — rather than hoping threads
-collide. A test that merely launches two threads and hopes proves nothing when it passes.
+**Contention is forced, not hoped for.** Launching N processes and asserting on outcomes
+proves nothing when they happen to run serially — an implementation with no lock at all
+passes every such assertion. The first test below therefore *holds the project lock from the
+test process* and proves a write command blocks on it, which fails immediately against an
+unlocked implementation and gets *more* reliable on slow machines rather than less. The
+outcome-counting tests are kept as a second layer, and the editor test uses a file handshake
+instead of a sleep.
+
+**Depends on Tasks 7, 8 and 10.**
 
 **Files:**
 - Modify: `tests/cli.rs`
 
-- [ ] **Step 1: Write the tests**
+- [ ] **Step 1: Write the deterministic contention tests**
 
 ```rust
+use std::fs::File;
+use std::time::{Duration, Instant};
+
+/// Hold the project's mutation lock from the test process itself.
+fn hold_project_lock(env: &TestEnv, prefix: &str) -> File {
+    let path = env.claim_store(prefix).with_file_name(format!("{prefix}.lock"));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let file = File::options().create(true).truncate(false).write(true).open(&path).unwrap();
+    file.lock().unwrap();
+    file
+}
+
+#[test]
+fn a_write_command_waits_for_the_project_lock_and_a_read_command_does_not() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    let held = hold_project_lock(&env, "sci");
+
+    let mut writer = env.raw(&sci);
+    writer.args(["start", &id])
+        .env("TASKS_SESSION", "agent-a")
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    let mut child = writer.spawn().unwrap();
+
+    // A lower bound on blocking, which is the safe direction: an implementation that takes
+    // no lock finishes well inside this window and fails here, while a slow machine only
+    // makes the child later still.
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "a write command must wait while the project lock is held"
+    );
+
+    // Reads must not be blocked by it at all.
+    let read_started = Instant::now();
+    env.json(&sci, &["show", &id]);
+    env.json(&sci, &["prime"]);
+    assert!(
+        read_started.elapsed() < Duration::from_secs(5),
+        "read commands must not take the mutation lock"
+    );
+
+    drop(held);
+    assert!(child.wait_with_output().unwrap().status.success());
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["session"], "agent-a");
+}
+
 #[test]
 fn simultaneous_starts_produce_exactly_one_winner() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
 
-    let mut handles = Vec::new();
-    for n in 0..6 {
-        let mut cmd = as_agent(&env, &sci, &format!("agent-{n}"));
-        cmd.args(["start", &id]);
-        handles.push(std::thread::spawn(move || cmd.output().unwrap()));
-    }
-    let outs: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    // Every process is spawned while the lock is held, so they are all genuinely queued on
+    // it before any of them runs — real contention, not a hoped-for collision.
+    let held = hold_project_lock(&env, "sci");
+    let children: Vec<_> = (0..6)
+        .map(|n| {
+            let mut cmd = env.raw(&sci);
+            cmd.args(["start", &id])
+                .env("TASKS_SESSION", format!("agent-{n}"))
+                .env("TASKS_SESSION_PID", std::process::id().to_string());
+            cmd.spawn().unwrap()
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    drop(held);
 
-    let winners = outs.iter().filter(|o| o.status.success()).count();
-    assert_eq!(winners, 1, "exactly one session may hold the claim");
+    let outs: Vec<_> = children.into_iter().map(|c| c.wait_with_output().unwrap()).collect();
+    assert_eq!(
+        outs.iter().filter(|o| o.status.success()).count(),
+        1,
+        "exactly one session may hold the claim"
+    );
     for out in outs.iter().filter(|o| !o.status.success()) {
         assert_eq!(err_kind(out), "claimed");
     }
-    assert_eq!(
-        env.json(&sci, &["show", &id])["claim"]["live"],
-        true,
-        "and the winner's claim is the one that survived"
-    );
+    assert_eq!(env.json(&sci, &["show", &id])["claim"]["live"], true);
 }
 
 #[test]
@@ -2310,18 +2442,26 @@ fn concurrent_claims_on_different_tasks_are_all_kept() {
         .map(|n| id_of(env.json(&sci, &["add", &format!("T{n}"), "-p", "2"])))
         .collect();
 
-    let mut handles = Vec::new();
-    for (n, id) in ids.iter().enumerate() {
-        let mut cmd = as_agent(&env, &sci, &format!("agent-{n}"));
-        cmd.args(["start", id]);
-        handles.push(std::thread::spawn(move || cmd.output().unwrap()));
-    }
-    for handle in handles {
-        assert!(handle.join().unwrap().status.success());
-    }
+    let held = hold_project_lock(&env, "sci");
+    let children: Vec<_> = ids
+        .iter()
+        .enumerate()
+        .map(|(n, id)| {
+            let mut cmd = env.raw(&sci);
+            cmd.args(["start", id])
+                .env("TASKS_SESSION", format!("agent-{n}"))
+                .env("TASKS_SESSION_PID", std::process::id().to_string());
+            cmd.spawn().unwrap()
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    drop(held);
 
-    // The store is one whole file per prefix, so an unserialized writer would drop the
-    // claims it never read.
+    for child in children {
+        assert!(child.wait_with_output().unwrap().status.success());
+    }
+    // The store is one whole file per prefix, so an unserialized writer drops the claims it
+    // never read.
     for id in &ids {
         assert_eq!(
             env.json(&sci, &["show", id])["claim"]["live"],
@@ -2337,20 +2477,27 @@ fn concurrent_notes_and_a_status_change_lose_nothing() {
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
 
-    let mut handles = Vec::new();
-    for n in 0..5 {
-        let mut cmd = as_agent(&env, &sci, "agent-a");
-        cmd.args(["note", &id, &format!("line {n}")]);
-        handles.push(std::thread::spawn(move || cmd.output().unwrap()));
-    }
-    let mut status = as_agent(&env, &sci, "agent-a");
-    status.args(["start", &id]);
-    handles.push(std::thread::spawn(move || status.output().unwrap()));
+    let held = hold_project_lock(&env, "sci");
+    let mut children: Vec<_> = (0..5)
+        .map(|n| {
+            let mut cmd = env.raw(&sci);
+            cmd.args(["note", &id, &format!("line {n}")])
+                .env("TASKS_SESSION", "agent-a")
+                .env("TASKS_SESSION_PID", std::process::id().to_string());
+            cmd.spawn().unwrap()
+        })
+        .collect();
+    let mut status = env.raw(&sci);
+    status.args(["start", &id])
+        .env("TASKS_SESSION", "agent-a")
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    children.push(status.spawn().unwrap());
+    std::thread::sleep(Duration::from_millis(300));
+    drop(held);
 
-    for handle in handles {
-        assert!(handle.join().unwrap().status.success());
+    for child in children {
+        assert!(child.wait_with_output().unwrap().status.success());
     }
-
     // `note` rewrites the whole markdown file, so an unserialized note clobbers whatever
     // landed between its read and its write.
     let raw = env.read(&sci, &format!("tasks/{id}.md"));
@@ -2362,31 +2509,47 @@ fn concurrent_notes_and_a_status_change_lose_nothing() {
 
 #[test]
 fn a_concurrent_edit_during_an_interactive_edit_is_rejected_and_leaks_no_claim() {
+    use std::os::unix::fs::PermissionsExt;
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
 
-    // An EDITOR that sets the status to doing, slowly, so another writer lands first.
-    let script = sci.join("slow-editor.sh");
+    // A handshake, not a sleep: the editor announces that it is inside its unlocked window
+    // and waits to be released, so the test never depends on how fast the machine is.
+    let ready = sci.join("editor-ready");
+    let go = sci.join("editor-go");
+    let script = sci.join("editor.sh");
     std::fs::write(
         &script,
-        "#!/bin/sh\nsleep 1\nsed -i 's/^status: todo/status: doing/' \"$1\"\n",
+        format!(
+            "#!/bin/sh\ntouch {ready}\nwhile [ ! -e {go} ]; do sleep 0.02; done\n\
+             sed -i 's/^status: todo/status: doing/' \"$1\"\n",
+            ready = ready.display(),
+            go = go.display()
+        ),
     )
     .unwrap();
-    std::os::unix::fs::PermissionsExt::set_mode(
-        &mut std::fs::metadata(&script).unwrap().permissions().clone(),
-        0o755,
-    );
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    let mut editing = as_agent(&env, &sci, "agent-a");
-    editing.args(["edit", &id]).env("EDITOR", script.to_str().unwrap());
-    let editor = std::thread::spawn(move || editing.output().unwrap());
+    let mut editing = env.raw(&sci);
+    editing
+        .args(["edit", &id])
+        .env("EDITOR", &script)
+        .env("TASKS_SESSION", "agent-a")
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    let child = editing.spawn().unwrap();
 
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !ready.exists() {
+        assert!(Instant::now() < deadline, "the editor never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // The editor is holding no lock now, so this must succeed rather than block.
     as_agent(&env, &sci, "agent-b").args(["note", &id, "landed first"]).assert().success();
+    std::fs::write(&go, "").unwrap();
 
-    let out = editor.join().unwrap();
+    let out = child.wait_with_output().unwrap();
     assert_eq!(err_kind(&out), "concurrent_modification");
     // The editor's `transition` ran before the comparison. Because no claim is persisted
     // until `save`, the rejected edit must not have left one behind.
@@ -2407,11 +2570,10 @@ fn a_failed_task_write_leaves_no_claim_behind() {
     let tasks_dir = sci.join("tasks");
     let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
     std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
-
     let out = as_agent(&env, &sci, "agent-a").args(["start", &id]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
-
     std::fs::set_permissions(&tasks_dir, original).unwrap();
+
     assert!(
         env.json(&sci, &["show", &id])["claim"].is_null(),
         "acquire is rolled back when the task write fails"
@@ -2473,21 +2635,21 @@ fn the_reported_sequence_start_then_create_the_worktree() {
 
 - [ ] **Step 2: Run the tests**
 
-Run: `cargo test --bin tasks --test cli -- simultaneous concurrent a_failed a_concurrent_edit the_reported_sequence`
-Expected: PASS. Then repeat, since concurrency tests that pass once prove less than
-concurrency tests that pass twenty times:
-`for i in $(seq 20); do cargo test --bin tasks --test cli -- simultaneous concurrent || break; done`
+Run: `cargo test --bin tasks --test cli -- a_write_command_waits simultaneous concurrent a_failed the_reported_sequence`
+Expected: PASS. Then repeat, since a concurrency test that passes once proves less than one
+that passes twenty times:
+`for i in $(seq 20); do cargo test --bin tasks --test cli -- a_write_command_waits simultaneous concurrent || break; done`
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add tests/cli.rs
-git commit -m "test(claims): cover simultaneous claims, note races, and rollback"
+git commit -m "test(claims): force lock contention and cover rollback"
 ```
 
 ---
 
-### Task 13: Documentation and closeout
+### Task 12: Documentation and closeout
 
 **Files:**
 - Modify: `skills/tasks/SKILL.md`, `AGENTS.md`, `docs/specs/2026-08-29-tasks-design.md`, `docs/specs/2026-09-05-work-claims-design.md`
@@ -2519,8 +2681,8 @@ Under `## Layout`, in the `src/` list:
 
 - [ ] **Step 3: Correct the design doc of record**
 
-`docs/specs/2026-08-29-tasks-design.md:112` describes `owner` as the whole claim story. Add
-a pointer so the two docs do not drift:
+`docs/specs/2026-08-29-tasks-design.md:112` describes `owner` as the whole claim story. Add a
+pointer so the two docs do not drift:
 
 ```markdown
 | `owner`    | string              | no       | Advisory claim; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
@@ -2555,25 +2717,31 @@ git commit -m "docs(claims): document the claim protocol and close the reports"
 
 ## Self-Review
 
-**Spec coverage:** Store and prefix keying → Task 1. Liveness → Task 2. Locking → Tasks 3, 4,
-10. Identity → Task 5. JSON contract → Task 6. Command behaviour, destination-based release,
-write ordering, pruning → Task 7. `start --force` → Task 8. `ready`/`prime` and all three
-warnings → Task 9. `feedback` recurrence → Task 10. The tasks-8f4b41 warning → Task 11.
-Concurrency and rollback → Task 12. Docs and the "Known gaps" recheck → Task 13. The three
-known gaps are deliberately unimplemented and recorded as such.
+**Spec coverage:** Store and prefix keying → Task 1. Liveness and load-time timestamp
+validation → Task 2. Locking → Tasks 3, 4, 9. Identity → Task 5. Snapshot and JSON contract →
+Task 6. Command behaviour, destination-based release, write ordering, pruning, `--force` →
+Task 7. `ready`/`prime` and all three warnings → Task 8. `feedback` recurrence → Task 9. The
+tasks-8f4b41 warning → Task 10. Contention and rollback → Task 11. Docs and the "Known gaps"
+recheck → Task 12. The three known gaps are deliberately unimplemented and recorded as such.
 
-**Ordering:** Task 6 (output shapes) precedes Task 7 (the guard) so the guard's tests have a
-contract to assert against; it is testable on its own through a hand-written store fixture.
-No task commits a test that a later task is required to make pass, except the two `--force`
-tests in Task 7, which Step 4 flags explicitly.
+**Every commit is green.** `src/claims.rs` carries a module-level `#![allow(dead_code)]` from
+Task 1 until Task 7 deletes it, because this is a binary crate: a `pub` item unreachable from
+`main` fails `clippy -D warnings`, and the pre-commit hook runs `just check`. Task 7's Step 4
+proves clippy is clean once the attribute is gone. No task commits a test that a later task
+is required to make pass — `--force` moved into Task 7 with the guard that already takes it,
+and Task 6 precedes the guard so its output contract exists first.
+
+**Dependency order:** 1 → 2 → {3, 6}; 3 → {4, 9}; {2, 4, 5, 6} → 7; 7 → {8, 10}; {7, 8, 10} →
+11; everything → 12.
 
 **Type consistency:** `ClaimStore::{path_with, path_for, load, load_from, save, get, insert,
 remove, prune_with, prune_dead, iter}`, `Claim`, `Liveness::{Live, Stale}`,
 `ProcStat::{NotFound, Unreadable, Found}`, `parse_proc_stat`, `Identity {session, pid}`,
 `identity() -> Result<Identity>`, `MutationLock::{path_with, path_for, acquire, acquire_at}`,
-`ClaimInfo::of`, `ClaimSnapshot::{load, live, stale, stores}`, `ClaimIntent::{Acquire,
-Release}`, `Error::Claimed` are used under those exact names throughout. `TaskSummary::of`
-takes three parameters from Task 6 onward. `transition` and `save` take `&mut Ctx` from Task
-7 onward. Test helpers `write_claim`, `two_roots`, `as_agent`, `err_kind`, `err_detail` are
-defined in Tasks 6, 7 and 7 respectively and used thereafter; `TestEnv::{claim_store,
-init_forced}` in Tasks 1 and 7.
+`ClaimSnapshot::{load, get, live, stale}`, `ClaimInfo::of(&Claim, &Liveness)`,
+`ClaimIntent::{Acquire, Release}`, `Error::Claimed` are used under those exact names
+throughout. `TaskSummary::of` takes three parameters from Task 6 onward; `ready_tasks` takes
+the snapshot from Task 8 onward; `transition` and `save` take `&mut Ctx` from Task 7 onward.
+Test helpers: `TestEnv::{raw, cmd, claim_store, init_forced}` (Tasks 1 and 7), `write_claim`
+(Task 6), `two_roots`/`as_agent`/`err_kind`/`err_detail` (Task 7), `hold_project_lock`
+(Task 11).
