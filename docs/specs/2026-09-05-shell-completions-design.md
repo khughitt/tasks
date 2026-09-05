@@ -88,54 +88,93 @@ context the candidates depend on therefore have to be recovered by the completer
 - **`--project <prefix>`**, which selects the destination of `add`.
 
 Both are available: the completing process's own `std::env::args_os()` is the full
-transport argv, `tasks -- tasks -C /path show tasks-`. `complete::words()` drops `argv[0]`,
-takes everything after the first `--` — the same split `CompleteEnv::try_complete_` makes —
-and returns the user's command line. From it:
+transport argv, `tasks -- tasks -C /path show tasks-`. `complete::words()` drops `argv[0]`
+and takes everything after the first `--` — the same split `CompleteEnv::try_complete_`
+makes — returning the user's command line, minus the word under the cursor so a half-typed
+token is never read as context.
 
-- `complete::effective_dir()` scans for `-C <dir>`, `-C<dir>`, or `-C=<dir>` and returns
-  the last one, else the process's current directory. This is the starting point for
-  every `Project::locate`.
-- `complete::selected_project()` scans for `--project <prefix>` / `--project=<prefix>`.
-- `complete::subject_id()` returns the first positional that parses as a `TaskId`, which is
-  the task an `edit`/`dep` invocation is acting on.
+Reading that line requires walking it the way clap does, not grepping it. A flat "first
+token that looks like an id" scan is wrong twice over: it reads the title in
+`tasks add fam-000001 --parent <TAB>` as a subject and selects `fam` instead of the local
+project, and it reads the value in `tasks edit --body fam-000001 tasks-abcdef --parent
+<TAB>` as the subject instead of `tasks-abcdef`. So `complete::walk()` classifies each
+word:
 
-This is a scan of a flat word list, not a second parser: it recognizes exactly the three
-forms clap accepts for these two arguments and gives up otherwise. That is sound here
-because a miss costs candidates, never correctness — completion cannot write anything, and
-§Failure is silence already makes an empty list the failure mode. The word under the
-cursor is excluded from the scan so a half-typed `-C` cannot be read as a directory.
+1. The first non-option word is the **subcommand**. Look it up in `Cli::command()`; an
+   unrecognized one ends the walk with no context.
+2. After a `--` the user typed, every remaining word is positional.
+3. A word starting with `-` is an **option**. `--long=value` and `-Cvalue` carry their own
+   value. Otherwise, whether it consumes following words comes from the subcommand's own
+   `Arg`: `get_action().takes_values()`, and `get_num_args()` for how many — an option
+   declared `num_args = 1..`, as `dep --on` and `dep --rm` are, greedily consumes every
+   following non-option word.
+4. Anything else is a **positional**, in declaration order.
+
+From that walk:
+
+- `effective_dir()` — the last `-C` value, else the process's current directory. The
+  starting point for every `Project::locate`.
+- `selected_project()` — the `--project` value.
+- `subject_id()` — the **first positional of a subcommand whose first positional is an id**:
+  `show`, `root`, `tree`, `edit`, `note`, `start`, `done`, `drop`, `block`, `unblock`,
+  `dep`. For any other subcommand — `add`, whose first positional is a title — there is no
+  subject, and callers fall back rather than guess.
+
+**Ambiguity yields no candidates.** An unrecognized subcommand, a first positional that
+does not parse as a `TaskId` where one is expected, a `-C` whose value is the word being
+completed: each ends the walk with nothing to offer. Read-only execution keeps a wrong
+guess from mutating anything, but that is not the standard — offering an id the command
+will reject is a defect in this feature's own contract, so the walk is exact where it can
+be and silent where it cannot.
 
 ## Candidate scopes
 
 Arguments that take an id do not all accept the same ids. Applying one resolver everywhere
-would offer candidates the command then rejects. Five scopes, sharing one scan-and-filter
+would offer candidates the command then rejects. Six scopes, sharing one scan-and-filter
 implementation that differs only in which projects it opens and which tasks it keeps:
 
-**`Local`** — the project at the effective directory, and only that one. Used by
-`tree <id>` and `list --parent`, which resolve inside a single scan and return
-`task_not_found` for anything else (`tree::run`).
+A missing local project is never an error in any scope: it simply contributes no local
+candidates, leaving whatever the typed prefix reaches. That is what lets `tasks root
+fam-<TAB>` and `tasks add --project fam --depends fam-<TAB>` work from outside every
+project, as both commands do.
+
+**`Scoped`** — the project at the effective directory, and only that one, unless
+`--all-projects` is among the words, in which case every reachable registered project.
+Used by `tree <id>` and `list --parent`, which both validate against the scope's own scan
+and return `task_not_found` for anything outside it (`tree.rs`, `list.rs`). The
+`--all-projects` upgrade matters only for `list`: `tree` declares `<id>` in conflict with
+the flag, so a `tree` id is always local.
 
 **`IdDirected`** — local first, then foreign by typed prefix: the project at the effective
 directory, unless the text before `-` in the current value is a valid prefix that is
 neither that project's nor unregistered-or-unreachable, in which case the project that
 prefix names. This is exactly the write-side rule in §6 of `2026-08-29-tasks-design.md`,
 including its precedence: a prefix matching the local project completes from *this*
-checkout, not the registered root. Used by `show`, `root`, and every id-taking write —
-`edit`, `note`, `start`, `done`, `drop`, `block`, `unblock`, `dep <id>`.
+checkout, not the registered root. Used by `show` and every id-taking write — `edit`,
+`note`, `start`, `done`, `drop`, `block`, `unblock`, `dep <id>` — and by `root`, which
+resolves purely through the registry, so its local half is a convenience and its foreign
+half is the whole point.
 
 **`Destination`** — the project a new or edited task will land in, which is not always the
-local one: `--project <prefix>` if present, else the project of the subject id if the words
-carry one (`edit fam-0c3d7e --parent <TAB>` must offer `fam` ids), else the effective
-directory's project. Used by `--parent`, because a parent must live in the same project as
-its child.
+local one: `--project <prefix>` if present, else the project of the subject id if the
+subcommand has one (`edit fam-0c3d7e --parent <TAB>` must offer `fam` ids), else the
+effective directory's project. Used by `--parent`, because a parent must live in the same
+project as its child.
 
-**`Resolvable`** — the effective directory's project plus any registered, reachable
-project, since `Resolver::resolve_task` follows a foreign prefix. Used by `--depends` and
-`dep --on`. A bare `<TAB>` offers local ids; typing a foreign prefix reaches that project.
+**`Resolvable`** — `Destination`, plus any registered, reachable project reached by a typed
+prefix. Used by `--depends` and `dep --on`. The base is the destination and *not* the
+effective directory because that is how the command validates: `apply_fields` and
+`dep::run` both build `Resolver::new(&ctx.project, …)` on the project being written to. So
+from a `fam` worktree, `tasks add --project fam --depends fam-<TAB>` must offer the
+registered `fam` root's ids — the worktree's own are exactly the ones the command would
+reject.
 
 **`Dependencies`** — the ids already in the subject task's `depends` list, read from the
 words. Used by `dep --rm`, which errors with "does not depend on" for anything else, so
-the full id set would be actively misleading.
+the full id set would be actively misleading. Removal does not resolve ids, so a dangling
+or unreachable dependency is still removable and stays a candidate; the shared presentation
+path must therefore tolerate a candidate whose task cannot be read, emitting the id with no
+description rather than dropping it.
 
 **`UpstreamFeedback`** — the project registered as `tasks`, opened through the registry and
 never from the local directory, filtered to open tasks tagged `feedback`. Used by
@@ -150,7 +189,7 @@ worktree, records that do not exist upstream.
 | subcommands, flag names, `--help` | the `Cli` derive | built in |
 | `show`/`root` `<id>` | task ids | `IdDirected` |
 | `edit`/`note`/`start`/`done`/`drop`/`block`/`unblock`/`dep` `<id>` | task ids | `IdDirected` |
-| `tree <id>`, `list --parent` | task ids | `Local` |
+| `tree <id>`, `list --parent` | task ids | `Scoped` |
 | `--parent` | task ids | `Destination` |
 | `--depends`, `dep --on` | task ids | `Resolvable` |
 | `dep --rm` | task ids | `Dependencies` |
@@ -182,7 +221,9 @@ current value, then:
   can still act on come first;
 - **describes** each candidate with `<status>  <title>` as help. Zsh emits `value:help`
   and shows it beside the id; bash's adapter writes values only and drops it. This is what
-  makes a menu of hex ids usable in zsh, and costs nothing in bash.
+  makes a menu of hex ids usable in zsh, and costs nothing in bash. A candidate whose task
+  cannot be read — the dangling dependencies `Dependencies` must still offer — is emitted
+  bare, with no description.
 
 **Failure is silence.** Any error — no project at the effective directory, an unreadable
 `tasks/`, a malformed task file, a registry that will not parse — yields an empty candidate
@@ -226,6 +267,7 @@ end to end like everything else — set `TASKS_COMPLETE` and `_CLAP_COMPLETE_IND
 values.
 
 - ids for a partial id, open-before-closed, and under zsh each carrying status and title;
+- `root fam-<TAB>` from outside every project offers `fam`'s ids;
 - `IdDirected`: a foreign registered prefix offers that project's ids; a prefix equal to
   the local project's completes from the local checkout, not the registered root — asserted
   with two roots sharing a prefix (`init_forced`) holding **different** tasks;
@@ -233,8 +275,19 @@ values.
   project's ids from a shell sitting in the first. Covered for `-C <dir>` and `-C<dir>`;
 - `Destination`: `add --project fam --parent <TAB>` offers `fam` ids and no local ones;
   `edit fam-… --parent <TAB>` likewise;
-- `Local`: `tree <TAB>` offers no foreign ids even when a foreign prefix is typed;
-- `Dependencies`: `dep <id> --rm <TAB>` offers only that task's current dependencies;
+- the walk: `add fam-000001 --parent <TAB>` offers *local* ids, because `add`'s first
+  positional is a title and not a subject; `edit --body fam-000001 tasks-… --parent <TAB>`
+  offers the subject's project, because `--body` consumes its value; `dep <id> --on a b
+  --rm <TAB>` still finds the subject past a `num_args = 1..` option; an unrecognized
+  subcommand offers nothing;
+- `Scoped`: `tree <TAB>` offers no foreign ids even when a foreign prefix is typed;
+  `list --parent <TAB>` offers local ids only, and `list --all-projects --parent <TAB>`
+  offers every reachable project's;
+- `Resolvable`: from a `fam` worktree whose tasks differ from the registered `fam` root,
+  `add --project fam --depends fam-<TAB>` offers the registered root's ids, not the
+  worktree's; and the same command offers them from outside any project at all;
+- `Dependencies`: `dep <id> --rm <TAB>` offers only that task's current dependencies, and
+  a dependency whose project is unregistered is still offered, without a description;
 - `UpstreamFeedback`: `feedback --recur <TAB>` offers only open `feedback`-tagged tasks
   from the registered `tasks` root, and does not offer a task that exists only in a local
   worktree of it;
