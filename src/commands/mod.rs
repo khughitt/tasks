@@ -14,6 +14,7 @@ pub mod tags;
 pub mod tree;
 pub mod unregister;
 
+use crate::claims::MutationLock;
 use crate::cli::{Cli, Command, FieldArgs};
 use crate::error::{Error, Result};
 use crate::format::{validate_body, validate_note_text, validate_task};
@@ -29,6 +30,8 @@ pub struct Ctx {
     pub project: Project,
     pub registry: Registry,
     pub warnings: Vec<String>,
+    /// Held for a write command; absent from read and create-only commands.
+    pub lock: Option<MutationLock>,
 }
 
 pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
@@ -37,7 +40,14 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
         project: Project::locate(&start)?,
         registry: Registry::load()?,
         warnings: Vec::new(),
+        lock: None,
     })
+}
+
+pub fn open_write_ctx(dir: Option<&Path>) -> Result<Ctx> {
+    let mut ctx = open_ctx(dir)?;
+    ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
+    Ok(ctx)
 }
 
 pub struct ReadCtx {
@@ -280,6 +290,7 @@ pub fn run(cli: Cli) -> Result<Output> {
                         project,
                         registry,
                         warnings: Vec::new(),
+                        lock: None,
                     }
                 }
                 None => open_ctx(dir)?,
@@ -313,19 +324,27 @@ pub fn run(cli: Cli) -> Result<Output> {
             force,
             no_parent,
             fields,
-        } => edit::run(open_ctx(dir)?, id, title, status, force, no_parent, fields),
+        } => edit::run(
+            open_write_ctx(dir)?,
+            id,
+            title,
+            status,
+            force,
+            no_parent,
+            fields,
+        ),
         Command::Prime { all_projects } => list::prime(open_read_ctx(dir, all_projects)?),
-        Command::Note { id, text } => status::note(open_ctx(dir)?, id, text),
-        Command::Start { id } => status::start(open_ctx(dir)?, id),
+        Command::Note { id, text } => status::note(open_write_ctx(dir)?, id, text),
+        Command::Start { id } => status::start(open_write_ctx(dir)?, id),
         Command::Done { id, message, force } => {
-            status::close(open_ctx(dir)?, id, Status::Done, message, force)
+            status::close(open_write_ctx(dir)?, id, Status::Done, message, force)
         }
         Command::Drop { id, message } => {
-            status::close(open_ctx(dir)?, id, Status::Dropped, message, false)
+            status::close(open_write_ctx(dir)?, id, Status::Dropped, message, false)
         }
-        Command::Block { id, message } => status::block(open_ctx(dir)?, id, message),
-        Command::Unblock { id } => status::unblock(open_ctx(dir)?, id),
-        Command::Dep { id, on, rm } => dep::run(open_ctx(dir)?, id, on, rm),
+        Command::Block { id, message } => status::block(open_write_ctx(dir)?, id, message),
+        Command::Unblock { id } => status::unblock(open_write_ctx(dir)?, id),
+        Command::Dep { id, on, rm } => dep::run(open_write_ctx(dir)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
         Command::Tree {

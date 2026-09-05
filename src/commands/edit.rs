@@ -88,6 +88,9 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let suffix = format!(" (edit kept at {tmp_display})");
     let keep = |error: Error| error.with_suffix(&suffix);
 
+    // The raw-content comparison below protects this unlocked editing window.
+    let prefix = ctx.project.prefix.clone();
+    ctx.lock = None;
     let status = std::process::Command::new("sh")
         .arg("-c")
         .arg(format!("{editor} \"$1\""))
@@ -100,6 +103,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             "{editor} exited with {status}; edit kept at {tmp_display}"
         )));
     }
+    ctx.lock = Some(crate::claims::MutationLock::acquire(&prefix)?);
 
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
     let mut edited = parse_task(&edited_raw, &tmp_display).map_err(keep)?;

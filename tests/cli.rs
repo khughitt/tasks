@@ -216,6 +216,22 @@ fn id_of(value: serde_json::Value) -> String {
 }
 
 #[test]
+fn read_commands_do_not_take_the_mutation_lock() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let lock = env.claim_store("sci").with_file_name("sci.lock");
+
+    env.json(&sci, &["show", &id]);
+    env.json(&sci, &["check"]);
+    env.json(&sci, &["graph"]);
+    assert!(!lock.exists(), "read commands must not create the lock");
+
+    env.json(&sci, &["note", &id, "hello"]);
+    assert!(lock.exists(), "a write command takes it");
+}
+
+#[test]
 fn add_project_creates_in_the_named_project_from_anywhere() {
     let mut env = TestEnv::new();
     let ops = env.init("ops");
