@@ -39,7 +39,7 @@ pub struct FieldArgs {
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
-    #[arg(long = "depends")]
+    #[arg(long = "depends", add = ArgValueCompleter::new(crate::complete::resolvable))]
     pub depends: Vec<String>,
     #[arg(long)]
     pub spec: Option<String>,
@@ -48,7 +48,7 @@ pub struct FieldArgs {
     #[arg(long)]
     pub step: Option<String>,
     /// Make this task part of another task (same project).
-    #[arg(long)]
+    #[arg(long, add = ArgValueCompleter::new(crate::complete::destination_ids))]
     pub parent: Option<String>,
 }
 
@@ -126,7 +126,7 @@ pub enum Command {
         #[arg(long)]
         owner: Option<String>,
         /// Only direct children of this task.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(crate::complete::scoped))]
         parent: Option<String>,
         /// Order: priority (default: priority, then last activity), updated, or created
         /// (most recent first). Pretty rows show the date sorted on, else last activity.
@@ -204,9 +204,15 @@ pub enum Command {
     Dep {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
-        #[arg(long = "on", conflicts_with = "rm", required_unless_present = "rm", num_args = 1..)]
+        #[arg(
+            long = "on",
+            conflicts_with = "rm",
+            required_unless_present = "rm",
+            num_args = 1..,
+            add = ArgValueCompleter::new(crate::complete::resolvable)
+        )]
         on: Vec<String>,
-        #[arg(long = "rm", num_args = 1..)]
+        #[arg(long = "rm", num_args = 1.., add = ArgValueCompleter::new(crate::complete::dependencies))]
         rm: Vec<String>,
     },
     /// Dependency graph as mermaid or dot.
@@ -233,7 +239,11 @@ pub enum Command {
         #[arg(short = 'b', long)]
         body: Option<String>,
         /// Append to this open feedback task instead of matching titles.
-        #[arg(long, conflicts_with = "new")]
+        #[arg(
+            long,
+            conflicts_with = "new",
+            add = ArgValueCompleter::new(crate::complete::upstream_feedback)
+        )]
         recur: Option<String>,
         /// Create a new entry even if a similar one exists.
         #[arg(long)]
@@ -241,6 +251,7 @@ pub enum Command {
     },
     /// The task hierarchy as nested nodes (open work only unless --all).
     Tree {
+        #[arg(add = ArgValueCompleter::new(crate::complete::scoped))]
         id: Option<String>,
         #[arg(long)]
         all: bool,

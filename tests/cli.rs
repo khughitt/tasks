@@ -4874,3 +4874,163 @@ fn completion_stub_is_emitted_and_the_hook_is_otherwise_inert() {
     let v = env.json(&sci, &["list"]);
     assert_eq!(v["tasks"], serde_json::json!([]));
 }
+
+#[test]
+fn completion_scopes_ids_to_what_each_argument_accepts() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+
+    // Scoped: tree and list --parent are local, until --all-projects widens list
+    assert!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "tree", "fam-"])
+            .is_empty()
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", ""]),
+        [local.as_str()]
+    );
+    let mut wide = env.complete(
+        &sci,
+        "bash",
+        4,
+        &["tasks", "list", "--all-projects", "--parent", ""],
+    );
+    wide.sort();
+    let mut both = [foreign.clone(), local.clone()];
+    both.sort();
+    assert_eq!(
+        wide, both,
+        "--all-projects widens the scope to the registry"
+    );
+
+    // Destination: --parent follows --project, and the subject id on edit
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            6,
+            &["tasks", "add", "T", "--project", "fam", "--parent", ""]
+        ),
+        [foreign.as_str()]
+    );
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            4,
+            &["tasks", "edit", &foreign, "--parent", ""]
+        ),
+        [foreign.as_str()]
+    );
+    // add's title is not a subject: --parent stays local
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "add", &foreign, "--parent", ""]),
+        [local.as_str()]
+    );
+
+    // Resolvable: --depends and dep --on reach any registered project
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--depends", "fam-"]),
+        [foreign.as_str()]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "dep", &local, "--on", "fam-"]),
+        [foreign.as_str()]
+    );
+}
+
+#[test]
+fn resolvable_starts_from_the_destination_project() {
+    let mut env = TestEnv::new();
+    let fam = env.init("fam");
+    let registered = id_of(env.json(&fam, &["add", "In the registered root"]));
+
+    // a second `fam` root with different tasks: `add --project fam` validates against the
+    // registered root, so completion must offer that one's ids, not this checkout's
+    let worktree = env.init_forced("fam");
+    env.json(&worktree, &["add", "Only in the worktree"]);
+    // `init --force` repointed the registry; put it back so `fam` names the first root
+    env.json(&fam, &["init", "--prefix", "fam", "--force"]);
+
+    assert_eq!(
+        env.complete(
+            &worktree,
+            "bash",
+            6,
+            &["tasks", "add", "T", "--project", "fam", "--depends", "fam-"]
+        ),
+        [registered.as_str()]
+    );
+
+    // and it works with no local project at all
+    let nowhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.complete(
+            nowhere.path(),
+            "bash",
+            6,
+            &["tasks", "add", "T", "--project", "fam", "--depends", "fam-"]
+        ),
+        [registered]
+    );
+}
+
+#[test]
+fn dep_rm_offers_only_current_dependencies_including_unreachable_ones() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let subject = id_of(env.json(&sci, &["add", "Subject"]));
+    let other = id_of(env.json(&sci, &["add", "Not a dependency"]));
+    let reachable = id_of(env.json(&fam, &["add", "Reachable dep"]));
+    env.json(&sci, &["dep", &subject, "--on", &reachable]);
+
+    let ids = env.complete(&sci, "bash", 4, &["tasks", "dep", &subject, "--rm", ""]);
+    assert_eq!(ids, [reachable.as_str()]);
+    assert!(!ids.contains(&other), "{ids:?}");
+
+    // unregister fam: the dependency is now unreachable but still removable, so it stays
+    // a candidate — described in zsh only while its task can be read
+    let zsh = env.complete(&sci, "zsh", 4, &["tasks", "dep", &subject, "--rm", ""]);
+    assert_eq!(zsh, [format!("{reachable}:todo  Reachable dep")]);
+    env.json(&sci, &["unregister", "fam"]);
+    assert_eq!(
+        env.complete(&sci, "zsh", 4, &["tasks", "dep", &subject, "--rm", ""]),
+        [reachable],
+        "an unreachable dependency is offered bare, not dropped"
+    );
+}
+
+#[test]
+fn feedback_recur_offers_open_feedback_from_the_registered_tasks_root() {
+    let mut env = TestEnv::new();
+    let upstream = env.init("tasks");
+    let sci = env.init("sci");
+    let open = id_of(env.json(&upstream, &["add", "Open report", "--tag", "feedback"]));
+    let closed = id_of(env.json(&upstream, &["add", "Closed report", "--tag", "feedback"]));
+    env.json(&upstream, &["done", &closed, "fixed"]);
+    let untagged = id_of(env.json(&upstream, &["add", "Not feedback"]));
+
+    let ids = env.complete(&sci, "bash", 4, &["tasks", "feedback", "S", "--recur", ""]);
+    assert_eq!(ids, [open.as_str()]);
+    assert!(
+        !ids.contains(&closed) && !ids.contains(&untagged),
+        "{ids:?}"
+    );
+
+    // a worktree of the upstream does not leak its own records
+    let worktree = env.init_forced("tasks");
+    let only_here = id_of(env.json(&worktree, &["add", "Local only", "--tag", "feedback"]));
+    env.json(&upstream, &["init", "--prefix", "tasks", "--force"]);
+    let ids = env.complete(
+        &worktree,
+        "bash",
+        4,
+        &["tasks", "feedback", "S", "--recur", ""],
+    );
+    assert_eq!(ids, [open]);
+    assert!(!ids.contains(&only_here), "{ids:?}");
+}

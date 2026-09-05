@@ -311,6 +311,118 @@ pub fn id_directed(current: &OsStr) -> Vec<CompletionCandidate> {
     )
 }
 
+/// The project a new or edited task lands in: `--project`, else the subject id's project,
+/// else the effective directory's. A subject whose prefix matches the local project keeps
+/// the local checkout, as the write path does.
+fn destination(registry: &Registry, line: &Line) -> Option<Project> {
+    if let Some(prefix) = &line.project {
+        return open_prefix(registry, prefix);
+    }
+    let local = open_local(line);
+    let Some(subject) = &line.subject else {
+        return local;
+    };
+    if local
+        .as_ref()
+        .is_some_and(|project| project.prefix == subject.prefix)
+    {
+        return local;
+    }
+    open_prefix(registry, &subject.prefix)
+}
+
+/// `tree <id>` and `list --parent`: the scope the command itself scans, which
+/// `--all-projects` widens to the registry (`list.rs` validates the parent against it).
+pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+    let line = line();
+    let registry = Registry::load().unwrap_or_default();
+    let mut tasks = Vec::new();
+    if line.all_projects {
+        for prefix in registry.projects.keys() {
+            if let Some(project) = open_prefix(&registry, prefix) {
+                tasks.extend(project.scan().unwrap_or_default());
+            }
+        }
+    } else if let Some(project) = open_local(&line) {
+        tasks.extend(project.scan().unwrap_or_default());
+    }
+    candidates(tasks, current)
+}
+
+/// `--parent`: a parent must live in the same project as its child.
+pub fn destination_ids(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+    let line = line();
+    let registry = Registry::load().unwrap_or_default();
+    let tasks = destination(&registry, &line)
+        .map(|project| project.scan().unwrap_or_default())
+        .unwrap_or_default();
+    candidates(tasks, current)
+}
+
+/// `--depends` and `dep --on`: whatever `Resolver` can reach *from the destination*.
+/// `apply_fields` and `dep::run` both build their `Resolver` on the project being written
+/// to, so a worktree's own ids are the ones `add --project` would reject.
+pub fn resolvable(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+    let line = line();
+    let registry = Registry::load().unwrap_or_default();
+    let base = destination(&registry, &line);
+    candidates(local_or_foreign(&registry, base, current), current)
+}
+
+/// `dep --rm`: only what the task already depends on. Removal does not resolve ids, so an
+/// unreachable dependency stays a candidate and simply loses its description.
+pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+    let line = line();
+    let registry = Registry::load().unwrap_or_default();
+    let (Some(subject), Some(project)) = (&line.subject, destination(&registry, &line)) else {
+        return Vec::new();
+    };
+    let Ok(task) = project.read_task(subject) else {
+        return Vec::new();
+    };
+    let resolver = crate::resolve::Resolver::new(&project, &registry);
+    task.depends
+        .iter()
+        .filter(|id| id.to_string().starts_with(current))
+        .map(|id| {
+            let found = resolver.resolve_task(id).ok().flatten();
+            described(&id.to_string(), found.as_ref())
+        })
+        .collect()
+}
+
+/// `feedback --recur`: open, `feedback`-tagged tasks in the project registered as
+/// `tasks`, never the local directory — `feedback::locate_target` resolves the same way,
+/// so a worktree of the upstream must not suggest records it has not pushed.
+pub fn upstream_feedback(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(current) = current.to_str() else {
+        return Vec::new();
+    };
+    let registry = Registry::load().unwrap_or_default();
+    let Some(project) = open_prefix(&registry, crate::commands::feedback::TARGET_PREFIX) else {
+        return Vec::new();
+    };
+    let tasks = project
+        .scan()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(crate::commands::feedback::is_open_feedback)
+        .collect();
+    candidates(tasks, current)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
