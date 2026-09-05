@@ -22,6 +22,7 @@ impl TestEnv {
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
             .env_remove("TASKS_FORMAT")
+            .env_remove("TASKS_COMPLETE")
             .env_remove("TASKS_OWNER")
             .env_remove("TASKS_SESSION")
             .env_remove("TASKS_SESSION_PID")
@@ -42,6 +43,7 @@ impl TestEnv {
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
             .env_remove("TASKS_FORMAT")
+            .env_remove("TASKS_COMPLETE")
             .env_remove("TASKS_OWNER")
             .env_remove("TASKS_SESSION")
             .env_remove("TASKS_SESSION_PID")
@@ -114,5 +116,36 @@ impl TestEnv {
 
     pub fn read(&self, dir: &Path, rel: &str) -> String {
         std::fs::read_to_string(dir.join(rel)).unwrap()
+    }
+
+    /// One completion request over the `CompleteEnv` transport. The shell invokes
+    /// `tasks -- <words…>` with the cursor on `index`; `words[0]` is the binary name, so
+    /// `complete(dir, "bash", 2, &["tasks", "show", "sci-"])` completes `sci-`.
+    /// Returns one string per candidate; under `"zsh"` each is `value:description`.
+    pub fn complete(&self, dir: &Path, shell: &str, index: usize, words: &[&str]) -> Vec<String> {
+        let out = self
+            .cmd(dir)
+            .env("TASKS_COMPLETE", shell)
+            .env("_CLAP_COMPLETE_INDEX", index.to_string())
+            .arg("--")
+            .args(words)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "completion for {words:?} failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            out.stderr.is_empty(),
+            "completion wrote to stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 }

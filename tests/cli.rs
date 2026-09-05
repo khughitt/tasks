@@ -4654,3 +4654,97 @@ fn edit_tags_append_and_remove_instead_of_replacing() {
         "--no-tags and --rm-tag conflict"
     );
 }
+
+#[test]
+fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+
+    // every status on edit, but only the two `add` accepts
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            4,
+            &["tasks", "edit", "sci-000001", "--status", ""]
+        ),
+        ["idea", "todo", "doing", "blocked", "done", "dropped"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--status", ""]),
+        ["idea", "todo"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "ready", "--size", ""]),
+        ["xs", "s", "m", "l", "xl"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--sort", ""]),
+        ["priority", "updated", "created"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--color", ""]),
+        ["auto", "always", "never"]
+    );
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            4,
+            &["tasks", "feedback", "S", "--category", ""]
+        ),
+        ["friction", "gap", "idea", "positive"]
+    );
+
+    // registry prefixes, in registry order
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--project", ""]),
+        ["fam", "sci"]
+    );
+    // `unregister`'s prefix is a bare positional with nothing preceding it, so
+    // clap_complete also offers the still-unused global flags alongside it; filter
+    // those out to check the prefix candidates specifically.
+    let unregister_candidates = env.complete(&sci, "bash", 2, &["tasks", "unregister", ""]);
+    let unregister_prefixes: Vec<_> = unregister_candidates
+        .iter()
+        .filter(|c| !c.starts_with('-'))
+        .cloned()
+        .collect();
+    assert_eq!(unregister_prefixes, ["fam", "sci"]);
+
+    // subcommands come from the derive, and a prefix narrows them
+    let subs = env.complete(&sci, "bash", 1, &["tasks", "re"]);
+    assert!(subs.contains(&"ready".to_string()), "{subs:?}");
+}
+
+#[test]
+fn completion_stub_is_emitted_and_the_hook_is_otherwise_inert() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    // no words after `--`: the registration stub, naming the binary
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_COMPLETE", "bash")
+        .arg("--")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stub = String::from_utf8_lossy(&out.stdout);
+    assert!(stub.contains("complete "), "{stub}");
+    assert!(stub.contains("TASKS_COMPLETE"), "{stub}");
+
+    // an unsupported shell name is an error, not a silent stub
+    let bad = env
+        .cmd(&sci)
+        .env("TASKS_COMPLETE", "notashell")
+        .arg("--")
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+
+    // with the variable unset, an ordinary argv runs the ordinary command
+    let v = env.json(&sci, &["list"]);
+    assert_eq!(v["tasks"], serde_json::json!([]));
+}

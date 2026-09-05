@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use clap_complete::ArgValueCandidates;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -16,7 +17,12 @@ pub struct Cli {
     pub pretty: bool,
     /// Color pretty output: auto (when the stream is a terminal), always, or never.
     /// Also TASKS_COLOR. Off unless asked for; never applies to JSON.
-    #[arg(long, global = true, value_name = "WHEN")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "WHEN",
+        add = ArgValueCandidates::new(crate::complete::colors)
+    )]
     pub color: Option<String>,
     #[command(subcommand)]
     pub command: Command,
@@ -28,7 +34,7 @@ pub struct FieldArgs {
     pub body: Option<String>,
     #[arg(short = 'p', long)]
     pub priority: Option<u8>,
-    #[arg(long)]
+    #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
     pub size: Option<String>,
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
@@ -51,7 +57,7 @@ pub struct FieldArgs {
 pub struct EditArgs {
     #[arg(long)]
     pub title: Option<String>,
-    #[arg(long)]
+    #[arg(long, add = ArgValueCandidates::new(crate::complete::statuses))]
     pub status: Option<String>,
     #[arg(long)]
     pub force: bool,
@@ -79,7 +85,10 @@ pub enum Command {
         force: bool,
     },
     /// Remove a prefix from the registry. Project files are left untouched.
-    Unregister { prefix: String },
+    Unregister {
+        #[arg(add = ArgValueCandidates::new(crate::complete::prefixes))]
+        prefix: String,
+    },
     /// The registry: every project, whether it is reachable, and its status counts.
     Projects,
     /// The registered root of the project an id belongs to.
@@ -87,11 +96,15 @@ pub enum Command {
     /// Create a task.
     Add {
         title: String,
-        #[arg(long, default_value = "todo")]
+        #[arg(
+            long,
+            default_value = "todo",
+            add = ArgValueCandidates::new(crate::complete::add_statuses)
+        )]
         status: String,
         /// Create it in this registered project instead of the current one; needs no
         /// local project. Every field is validated against that project.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(crate::complete::prefixes))]
         project: Option<String>,
         #[command(flatten)]
         fields: FieldArgs,
@@ -100,7 +113,7 @@ pub enum Command {
     Show { id: String },
     /// List tasks (open by default).
     List {
-        #[arg(long = "status")]
+        #[arg(long = "status", add = ArgValueCandidates::new(crate::complete::statuses))]
         statuses: Vec<String>,
         #[arg(long = "tag")]
         tags: Vec<String>,
@@ -111,7 +124,7 @@ pub enum Command {
         parent: Option<String>,
         /// Order: priority (default: priority, then last activity), updated, or created
         /// (most recent first). Pretty rows show the date sorted on, else last activity.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(crate::complete::sorts))]
         sort: Option<String>,
         /// Reverse the chosen order.
         #[arg(long)]
@@ -121,7 +134,7 @@ pub enum Command {
     },
     /// Actionable tasks: todo with all dependencies closed.
     Ready {
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
         size: Option<String>,
         #[arg(short = 'n', long)]
         limit: Option<usize>,
@@ -190,7 +203,7 @@ pub enum Command {
     Feedback {
         summary: String,
         /// friction | gap | idea | positive
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(crate::complete::categories))]
         category: String,
         #[arg(short = 'b', long)]
         body: Option<String>,
@@ -212,7 +225,7 @@ pub enum Command {
     },
     /// Tag frequencies (open tasks unless --status), per project.
     Tags {
-        #[arg(long = "status")]
+        #[arg(long = "status", add = ArgValueCandidates::new(crate::complete::statuses))]
         statuses: Vec<String>,
         /// Every reachable registered project; needs no local project.
         #[arg(long)]
