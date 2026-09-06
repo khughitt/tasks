@@ -5086,3 +5086,51 @@ fn feedback_recur_offers_open_feedback_from_the_registered_tasks_root() {
     assert_eq!(ids, [open]);
     assert!(!ids.contains(&only_here), "{ids:?}");
 }
+
+#[test]
+fn parallel_is_set_by_flag_and_cleared_by_no_parallel() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+
+    let plain = id_of(env.json(&dir, &["add", "Plain"]));
+    assert_eq!(env.json(&dir, &["show", &plain])["task"]["parallel"], false);
+
+    let marked = id_of(env.json(&dir, &["add", "Marked", "--parallel"]));
+    assert_eq!(env.json(&dir, &["show", &marked])["task"]["parallel"], true);
+    assert!(
+        env.read(&dir, &format!("tasks/{marked}.md"))
+            .contains("\nparallel: true\n"),
+        "the key is written unquoted"
+    );
+
+    // An unrelated edit must not disturb the flag.
+    env.json(&dir, &["edit", &marked, "-p", "1"]);
+    assert_eq!(env.json(&dir, &["show", &marked])["task"]["parallel"], true);
+
+    env.json(&dir, &["edit", &marked, "--no-parallel"]);
+    assert_eq!(
+        env.json(&dir, &["show", &marked])["task"]["parallel"],
+        false
+    );
+    assert!(
+        !env.read(&dir, &format!("tasks/{marked}.md"))
+            .contains("parallel"),
+        "the key is dropped, not written false"
+    );
+
+    env.json(&dir, &["edit", &plain, "--parallel"]);
+    assert_eq!(env.json(&dir, &["show", &plain])["task"]["parallel"], true);
+}
+
+#[test]
+fn parallel_and_no_parallel_conflict() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "A"]));
+    let out = env
+        .cmd(&dir)
+        .args(["edit", &id, "--parallel", "--no-parallel"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "clap must reject the pair");
+}

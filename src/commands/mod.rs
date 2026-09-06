@@ -245,6 +245,10 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
     if let Some(size) = &fields.size {
         task.size = Some(Size::parse(size)?);
     }
+    // Setting only. `edit --no-parallel` clears it before this runs, mirroring --no-tags.
+    if fields.parallel {
+        task.parallel = true;
+    }
     // Additive, never a replacement: a triage `--tag` must not silently drop the tags a
     // task already carries. `edit` removes with `--rm-tag` / `--no-tags`.
     for tag in &fields.tags {

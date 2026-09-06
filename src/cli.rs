@@ -36,6 +36,10 @@ pub struct FieldArgs {
     pub priority: Option<u8>,
     #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
     pub size: Option<String>,
+    /// Mark as safe to run beside other tasks marked parallel. On `edit` this sets the
+    /// flag; see `--no-parallel` to clear it.
+    #[arg(long)]
+    pub parallel: bool,
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
@@ -64,6 +68,9 @@ pub struct EditArgs {
     /// Detach from the parent.
     #[arg(long, conflicts_with = "parent")]
     pub no_parent: bool,
+    /// Clear the parallel marker.
+    #[arg(long, conflicts_with = "parallel")]
+    pub no_parallel: bool,
     /// Remove a tag (repeatable); `--tag` adds one.
     #[arg(long = "rm-tag", value_name = "TAG", conflicts_with = "no_tags")]
     pub rm_tags: Vec<String>,
