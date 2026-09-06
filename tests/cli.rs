@@ -3531,6 +3531,46 @@ fn ready_omits_a_task_claimed_from_another_root_and_says_why() {
 }
 
 #[test]
+fn ready_parallel_filters_and_still_honours_limit() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    // C outranks both marked tasks, so it heads the unfiltered ready list. That is what
+    // makes the -n 1 assertion below able to catch a truncate-before-filter regression:
+    // with the filter in the wrong place, `--parallel -n 1` truncates to [C] and then
+    // filters to nothing. Give them distinct priorities — equal priority and size would
+    // fall through to `created`, and whenever a marked task happened to sort first the
+    // broken order would still pass.
+    env.json(&dir, &["add", "C", "-p", "0"]);
+    let a = id_of(env.json(&dir, &["add", "A", "-p", "1", "--parallel"]));
+    let b = id_of(env.json(&dir, &["add", "B", "-p", "2", "--parallel"]));
+
+    let ids = |v: serde_json::Value| -> Vec<String> {
+        v["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    assert_eq!(ids(env.json(&dir, &["ready"])).len(), 3);
+    assert_eq!(
+        ids(env.json(&dir, &["ready", "--parallel"])),
+        [a.clone(), b.clone()],
+        "marked only, in the usual ready order"
+    );
+    assert_eq!(
+        ids(env.json(&dir, &["ready", "--parallel", "-n", "1"])),
+        [a],
+        "the limit applies after the filter"
+    );
+
+    // A doing task is not ready, so it never joins the marked set.
+    env.json(&dir, &["start", &b]);
+    assert_eq!(ids(env.json(&dir, &["ready", "--parallel"])).len(), 1);
+}
+
+#[test]
 fn prime_shows_a_claim_made_in_another_root_and_warns_about_divergence() {
     let mut env = TestEnv::new();
     let (a, b) = two_roots(&mut env);
@@ -5085,4 +5125,142 @@ fn feedback_recur_offers_open_feedback_from_the_registered_tasks_root() {
     );
     assert_eq!(ids, [open]);
     assert!(!ids.contains(&only_here), "{ids:?}");
+}
+
+#[test]
+fn parallel_is_set_by_flag_and_cleared_by_no_parallel() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+
+    let plain = id_of(env.json(&dir, &["add", "Plain"]));
+    assert_eq!(env.json(&dir, &["show", &plain])["task"]["parallel"], false);
+
+    let marked = id_of(env.json(&dir, &["add", "Marked", "--parallel"]));
+    assert_eq!(env.json(&dir, &["show", &marked])["task"]["parallel"], true);
+    assert!(
+        env.read(&dir, &format!("tasks/{marked}.md"))
+            .contains("\nparallel: true\n"),
+        "the key is written unquoted"
+    );
+
+    // An unrelated edit must not disturb the flag.
+    env.json(&dir, &["edit", &marked, "-p", "1"]);
+    assert_eq!(env.json(&dir, &["show", &marked])["task"]["parallel"], true);
+
+    env.json(&dir, &["edit", &marked, "--no-parallel"]);
+    assert_eq!(
+        env.json(&dir, &["show", &marked])["task"]["parallel"],
+        false
+    );
+    assert!(
+        !env.read(&dir, &format!("tasks/{marked}.md"))
+            .contains("parallel"),
+        "the key is dropped, not written false"
+    );
+
+    env.json(&dir, &["edit", &plain, "--parallel"]);
+    assert_eq!(env.json(&dir, &["show", &plain])["task"]["parallel"], true);
+}
+
+#[test]
+fn parallel_and_no_parallel_conflict() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "A"]));
+    let out = env
+        .cmd(&dir)
+        .args(["edit", &id, "--parallel", "--no-parallel"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "clap must reject the pair");
+}
+
+#[test]
+fn pretty_rows_show_the_parallel_marker_only_when_something_is_marked() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(&dir, &["add", "Plain", "-p", "1"]);
+
+    let out = env.cmd(&dir).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        !text.contains("||"),
+        "no column when nothing is marked:\n{text}"
+    );
+
+    env.json(&dir, &["add", "Marked", "-p", "0", "--parallel"]);
+    let out = env.cmd(&dir).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    // `table` ends each row with '\n' and `println!` adds one more, so pretty output
+    // always carries a trailing blank line; trim it before counting rows.
+    let lines: Vec<&str> = text.trim_end().lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    assert!(lines[0].contains("|| "), "{}", lines[0]);
+    assert!(!lines[1].contains("||"), "{}", lines[1]);
+    assert_eq!(
+        lines[0].find("Marked"),
+        lines[1].find("Plain"),
+        "titles must start in the same column:\n{text}"
+    );
+
+    // The JSON key rides on every summary.
+    let v = env.json(&dir, &["list"]);
+    let flags: Vec<bool> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["parallel"].as_bool().unwrap())
+        .collect();
+    assert_eq!(flags, [true, false]);
+}
+
+#[test]
+fn prime_aligns_the_parallel_column_across_all_its_blocks() {
+    // prime's ready and doing blocks are rendered by separate `table` calls, but the
+    // decision to reserve the `||` column is made once for all of prime's blocks together
+    // (src/output.rs, the `Output::Prime` arm) so a mark in one block doesn't shift dates
+    // out of alignment with an unmarked row in another block.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let marked = id_of(env.json(&dir, &["add", "Marked", "--parallel"]));
+    let plain = id_of(env.json(&dir, &["add", "Plain"]));
+    env.json(&dir, &["start", &plain]);
+
+    let out = env.cmd(&dir).args(["--pretty", "prime"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+
+    let ready_block = text
+        .split("\nready:\n")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no ready section:\n{text}"))
+        .split("\ndoing:\n")
+        .next()
+        .unwrap();
+    let doing_block = text
+        .split("\ndoing:\n")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no doing section:\n{text}"));
+
+    let ready_line = ready_block
+        .lines()
+        .find(|line| line.contains(&marked))
+        .unwrap_or_else(|| panic!("marked task missing from ready:\n{text}"));
+    let doing_line = doing_block
+        .lines()
+        .find(|line| line.contains(&plain))
+        .unwrap_or_else(|| panic!("plain task missing from doing:\n{text}"));
+
+    assert!(ready_line.contains("|| "), "{ready_line}");
+    assert!(!doing_line.contains("||"), "{doing_line}");
+
+    // Each row's own date (the first 10 chars of its `updated` timestamp) must start in
+    // the same column in both blocks.
+    let v = env.json(&dir, &["prime"]);
+    let ready_date = &v["ready"][0]["updated"].as_str().unwrap()[..10];
+    let doing_date = &v["doing"][0]["updated"].as_str().unwrap()[..10];
+    assert_eq!(
+        ready_line.find(ready_date),
+        doing_line.find(doing_date),
+        "dates must start in the same column across prime's blocks:\n{text}"
+    );
 }

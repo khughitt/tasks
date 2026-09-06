@@ -33,6 +33,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || fields.body.is_some()
         || fields.priority.is_some()
         || fields.size.is_some()
+        || fields.parallel
+        || args.no_parallel
         || !fields.tags.is_empty()
         || !fields.depends.is_empty()
         || fields.spec.is_some()
@@ -57,6 +59,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     if args.no_parent {
         task.parent = None;
+    }
+    if args.no_parallel {
+        task.parallel = false;
     }
     // Clear, then remove, then let `apply_fields` append: `--no-tags --tag x` is the
     // wholesale replace `--tag` used to perform by itself.

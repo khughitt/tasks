@@ -216,6 +216,9 @@ pub struct Task {
     pub status: Status,
     pub priority: u8,
     pub size: Option<Size>,
+    /// Marked safe to run beside any other task marked parallel. Hand-set; nothing
+    /// infers or validates it. See docs/specs/2026-09-06-parallel-candidates-design.md.
+    pub parallel: bool,
     pub owner: Option<String>,
     pub created: String,
     pub updated: String,

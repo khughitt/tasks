@@ -245,6 +245,10 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
     if let Some(size) = &fields.size {
         task.size = Some(Size::parse(size)?);
     }
+    // Setting only. `edit --no-parallel` clears it before this runs, mirroring --no-tags.
+    if fields.parallel {
+        task.parallel = true;
+    }
     // Additive, never a replacement: a triage `--tag` must not silently drop the tags a
     // task already carries. `edit` removes with `--rm-tag` / `--no-tags`.
     for tag in &fields.tags {
@@ -527,9 +531,10 @@ pub fn run(cli: Cli) -> Result<Output> {
         ),
         Command::Ready {
             size,
+            parallel,
             limit,
             all_projects,
-        } => list::ready(open_read_ctx(dir, all_projects)?, size, limit),
+        } => list::ready(open_read_ctx(dir, all_projects)?, size, parallel, limit),
         Command::Next { all_projects } => list::next(open_read_ctx(dir, all_projects)?),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
         Command::Prime { all_projects } => list::prime(open_read_ctx(dir, all_projects)?),

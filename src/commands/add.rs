@@ -16,6 +16,7 @@ pub fn blank(project: &Project, title: String, status: Status) -> Result<Task> {
         status,
         priority: 2,
         size: None,
+        parallel: false,
         owner: None,
         created: now.clone(),
         updated: now,
