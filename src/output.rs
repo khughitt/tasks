@@ -103,6 +103,7 @@ pub struct TaskSummary {
     pub child_count: usize,
     pub open_descendant_count: usize,
     pub claim: Option<ClaimInfo>,
+    pub parallel: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -156,6 +157,7 @@ impl TaskSummary {
             claim: claims
                 .and_then(|snapshot| snapshot.get(&task.id))
                 .map(|(claim, live)| ClaimInfo::of(claim, live)),
+            parallel: task.parallel,
         }
     }
 }
@@ -329,8 +331,14 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             Some(fields) => show_text(fields, painter),
             None => "nothing ready".into(),
         },
-        Output::List(o) => table(&o.tasks, o.date, painter),
+        Output::List(o) => table(&o.tasks, o.date, painter, any_parallel(&o.tasks)),
         Output::Prime(o) => {
+            // One decision for the whole output: prime's blocks align today only because
+            // every width is fixed, and a per-section decision would break that.
+            let parallel_column = any_parallel(&o.closeout)
+                || any_parallel_tree(&o.roadmap)
+                || any_parallel(&o.ready)
+                || any_parallel(&o.doing);
             let c = &o.counts;
             let header = match &o.prefix {
                 Some(prefix) => format!("project {prefix}"),
@@ -344,7 +352,12 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "closeout:")
             ));
-            rendered.push_str(&table(&o.closeout, DateColumn::Updated, painter));
+            rendered.push_str(&table(
+                &o.closeout,
+                DateColumn::Updated,
+                painter,
+                parallel_column,
+            ));
             rendered.push_str(&format!(
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "roadmap:")
@@ -354,7 +367,12 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             let mut listed_under_ready = 0;
             for node in &o.roadmap {
                 if node.summary.child_count > 0 {
-                    rendered.push_str(&tree_text(std::slice::from_ref(node), 0, painter));
+                    rendered.push_str(&tree_text(
+                        std::slice::from_ref(node),
+                        0,
+                        painter,
+                        parallel_column,
+                    ));
                 } else if ready_ids.contains(node.summary.id.as_str()) {
                     listed_under_ready += 1;
                 } else {
@@ -362,6 +380,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                         std::slice::from_ref(&node.summary),
                         DateColumn::Updated,
                         painter,
+                        parallel_column,
                     ));
                 }
             }
@@ -369,9 +388,19 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 "{listed_under_ready} childless root(s) are listed under ready\n"
             ));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "ready:")));
-            rendered.push_str(&table(&o.ready, DateColumn::Updated, painter));
+            rendered.push_str(&table(
+                &o.ready,
+                DateColumn::Updated,
+                painter,
+                parallel_column,
+            ));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "doing:")));
-            rendered.push_str(&table(&o.doing, DateColumn::Updated, painter));
+            rendered.push_str(&table(
+                &o.doing,
+                DateColumn::Updated,
+                painter,
+                parallel_column,
+            ));
             rendered
         }
         Output::Graph(o) => o.text.clone(),
@@ -391,7 +420,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             }
             rendered
         }
-        Output::Tree(o) => tree_text(&o.nodes, 0, painter),
+        Output::Tree(o) => tree_text(&o.nodes, 0, painter, any_parallel_tree(&o.nodes)),
         Output::Tags(o) => {
             let mut rendered = String::new();
             for row in &o.tags {
@@ -491,24 +520,48 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
     rendered
 }
 
-fn tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter) -> String {
+fn tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter, parallel_column: bool) -> String {
     let mut rendered = String::new();
     for node in nodes {
         let row = table(
             std::slice::from_ref(&node.summary),
             DateColumn::Updated,
             painter,
+            parallel_column,
         );
         rendered.push_str(&"  ".repeat(depth));
         rendered.push_str(&row);
-        rendered.push_str(&tree_text(&node.children, depth + 1, painter));
+        rendered.push_str(&tree_text(
+            &node.children,
+            depth + 1,
+            painter,
+            parallel_column,
+        ));
     }
     rendered
 }
 
+/// Whether a pretty rendering must reserve the parallel column. Decided once per command
+/// output and passed into `table`: `tree_text` and `prime`'s roadmap call `table` one row
+/// at a time, so a per-call decision would shift dates between adjacent siblings.
+pub fn any_parallel(rows: &[TaskSummary]) -> bool {
+    rows.iter().any(|row| row.parallel)
+}
+
+pub fn any_parallel_tree(nodes: &[TreeNode]) -> bool {
+    nodes
+        .iter()
+        .any(|node| node.summary.parallel || any_parallel_tree(&node.children))
+}
+
 /// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every width-sensitive
 /// field is formatted to its final visible width before the painter wraps it.
-pub fn table(rows: &[TaskSummary], date: DateColumn, painter: &Painter) -> String {
+pub fn table(
+    rows: &[TaskSummary],
+    date: DateColumn,
+    painter: &Painter,
+    parallel_column: bool,
+) -> String {
     let mut rendered = String::new();
     for row in rows {
         let date = crate::time::day(match date {
@@ -542,8 +595,15 @@ pub fn table(rows: &[TaskSummary], date: DateColumn, painter: &Painter) -> Strin
                 .unwrap_or_default(),
         };
         let owner = painter.paint(Style::Chrome, &owner);
+        // Unpainted: it is already distinct, and painting the blank spacer would wrap
+        // whitespace in ANSI for no gain.
+        let mark = match (parallel_column, row.parallel) {
+            (false, _) => "",
+            (true, true) => "|| ",
+            (true, false) => "   ",
+        };
         rendered.push_str(&format!(
-            "{id}  {priority} {size:<2} {status} {date}  {}{tags}{owner}\n",
+            "{id}  {priority} {size:<2} {status} {mark}{date}  {}{tags}{owner}\n",
             row.title
         ));
     }
@@ -579,5 +639,84 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Tree(o) => o.warnings.clone(),
         Output::Tags(o) => o.warnings.clone(),
         Output::Feedback(o) => o.warnings.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::style::ColorMode;
+
+    fn row(id: &str, parallel: bool) -> TaskSummary {
+        TaskSummary {
+            id: id.into(),
+            title: format!("title {id}"),
+            status: Status::Todo,
+            priority: 2,
+            size: None,
+            owner: None,
+            created: "2026-09-06T00:00:00Z".into(),
+            updated: "2026-09-06T00:00:00Z".into(),
+            tags: vec![],
+            depends: vec![],
+            parent: None,
+            child_count: 0,
+            open_descendant_count: 0,
+            claim: None,
+            parallel,
+        }
+    }
+
+    fn plain() -> Painter {
+        Painter::new(ColorMode::Never, Format::Pretty, false)
+    }
+
+    #[test]
+    fn the_marker_column_is_absent_when_nothing_is_marked() {
+        let rows = [row("xx-000001", false), row("xx-000002", false)];
+        assert!(!any_parallel(&rows));
+        let text = table(&rows, DateColumn::Updated, &plain(), false);
+        assert!(!text.contains("||"), "{text}");
+        assert!(text.contains("todo    2026-09-06"), "{text}");
+    }
+
+    #[test]
+    fn mixed_siblings_share_one_column_layout() {
+        // The case a per-call decision inside `table` gets wrong: an unmarked sibling
+        // must reserve the same width as its marked neighbour, or the date and title
+        // shift between adjacent lines.
+        let nodes = vec![
+            TreeNode {
+                summary: row("xx-000001", true),
+                children: vec![],
+            },
+            TreeNode {
+                summary: row("xx-000002", false),
+                children: vec![],
+            },
+        ];
+        assert!(any_parallel_tree(&nodes));
+        let text = tree_text(&nodes, 0, &plain(), true);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "{text}");
+        assert!(lines[0].contains("todo    || 2026-09-06"), "{}", lines[0]);
+        assert!(lines[1].contains("todo       2026-09-06"), "{}", lines[1]);
+        assert_eq!(
+            lines[0].find("2026-09-06"),
+            lines[1].find("2026-09-06"),
+            "dates must land in the same column:\n{text}"
+        );
+    }
+
+    #[test]
+    fn any_parallel_tree_finds_a_marked_descendant() {
+        let nodes = vec![TreeNode {
+            summary: row("xx-000001", false),
+            children: vec![TreeNode {
+                summary: row("xx-000002", true),
+                children: vec![],
+            }],
+        }];
+        assert!(any_parallel_tree(&nodes));
     }
 }

@@ -5174,3 +5174,42 @@ fn parallel_and_no_parallel_conflict() {
         .unwrap();
     assert!(!out.status.success(), "clap must reject the pair");
 }
+
+#[test]
+fn pretty_rows_show_the_parallel_marker_only_when_something_is_marked() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(&dir, &["add", "Plain", "-p", "1"]);
+
+    let out = env.cmd(&dir).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        !text.contains("||"),
+        "no column when nothing is marked:\n{text}"
+    );
+
+    env.json(&dir, &["add", "Marked", "-p", "0", "--parallel"]);
+    let out = env.cmd(&dir).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    // `table` ends each row with '\n' and `println!` adds one more, so pretty output
+    // always carries a trailing blank line; trim it before counting rows.
+    let lines: Vec<&str> = text.trim_end().lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    assert!(lines[0].contains("|| "), "{}", lines[0]);
+    assert!(!lines[1].contains("||"), "{}", lines[1]);
+    assert_eq!(
+        lines[0].find("Marked"),
+        lines[1].find("Plain"),
+        "titles must start in the same column:\n{text}"
+    );
+
+    // The JSON key rides on every summary.
+    let v = env.json(&dir, &["list"]);
+    let flags: Vec<bool> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["parallel"].as_bool().unwrap())
+        .collect();
+    assert_eq!(flags, [true, false]);
+}
