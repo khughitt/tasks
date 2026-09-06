@@ -12,17 +12,23 @@ pub fn run(dir: Option<&Path>) -> Result<Output> {
     let mut rows = Vec::new();
     for (prefix, root) in &registry.projects {
         let reachable = is_reachable(root)?;
-        let counts = if reachable {
+        let (counts, total, last_activity) = if reachable {
             let project = open_registered(&registry, prefix, Origin::Prefix)?;
-            Some(Counts::of(&project.scan()?))
+            let tasks = project.scan()?;
+            // Timestamps are fixed-width UTC with no fractional part, so the lexical max
+            // is the chronological one.
+            let last = tasks.iter().map(|task| task.updated.clone()).max();
+            (Some(Counts::of(&tasks)), Some(tasks.len()), last)
         } else {
-            None
+            (None, None, None)
         };
         rows.push(ProjectRow {
             prefix: prefix.clone(),
             root: root.display().to_string(),
             reachable,
             counts,
+            total,
+            last_activity,
         });
     }
     Ok(Output::Projects(ProjectsOut {

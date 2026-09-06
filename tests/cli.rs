@@ -3459,6 +3459,45 @@ fn projects_lists_the_registry_with_reachability_and_counts() {
     assert_eq!(v["warnings"], serde_json::json!(["registry is empty"]));
 }
 
+#[test]
+fn projects_total_and_activity_count_closed_tasks() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let a = id_of(env.json(&sci, &["add", "A"]));
+    env.json(&sci, &["done", &a]);
+    let closed = env.json(&sci, &["show", &a]);
+    let nowhere = tempfile::tempdir().unwrap();
+
+    // the project's only task is done: a total or an activity date that skipped closed
+    // tasks would report 0 and null here.
+    let v = env.json(nowhere.path(), &["projects"]);
+    let row = &v["projects"][0];
+    assert_eq!(row["total"], 1, "{v}");
+    assert_eq!(row["last_activity"], closed["task"]["updated"], "{v}");
+}
+
+#[test]
+fn projects_total_and_activity_report_absence_apart_from_emptiness() {
+    let mut env = TestEnv::new();
+    let empty = env.init("fam");
+    let gone = env.init("sci");
+    std::fs::remove_file(gone.join("tasks/.config.toml")).unwrap();
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let v = env.json(nowhere.path(), &["projects"]);
+    let rows = v["projects"].as_array().unwrap();
+    assert_eq!(rows[0]["prefix"], "fam");
+    assert_eq!(rows[0]["root"], empty.to_str().unwrap());
+    // registered and scanned, holding nothing: a real zero and no activity yet
+    assert_eq!(rows[0]["total"], 0, "{v}");
+    assert_eq!(rows[0]["last_activity"], serde_json::Value::Null, "{v}");
+    // never scanned: absent data, reported the way `counts` already reports it
+    assert_eq!(rows[1]["prefix"], "sci");
+    assert_eq!(rows[1]["reachable"], false);
+    assert_eq!(rows[1]["total"], serde_json::Value::Null, "{v}");
+    assert_eq!(rows[1]["last_activity"], serde_json::Value::Null, "{v}");
+}
+
 /// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
 /// store keyed by prefix.
 fn two_roots(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {

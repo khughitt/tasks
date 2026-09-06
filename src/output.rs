@@ -36,6 +36,14 @@ pub struct ProjectRow {
     pub reachable: bool,
     /// Present only for a reachable project.
     pub counts: Option<Counts>,
+    /// Every task whatever its status, so it exceeds the sum of the open counts on
+    /// purpose: this is the project's size. Absent for an unreachable project, the way
+    /// `counts` is - nothing was scanned, which is not the same as a zero.
+    pub total: Option<usize>,
+    /// The most recent `updated` across every task, closed ones included: closing a task
+    /// is activity. Absent when nothing was scanned, and when a scanned project holds no
+    /// tasks at all.
+    pub last_activity: Option<String>,
 }
 
 #[derive(Serialize)]
