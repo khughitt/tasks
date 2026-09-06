@@ -475,6 +475,7 @@ mod tests {
             status: Status::Todo,
             priority: 2,
             size: None,
+            parallel: false,
             owner: None,
             created: crate::time::now(),
             updated: crate::time::now(),
