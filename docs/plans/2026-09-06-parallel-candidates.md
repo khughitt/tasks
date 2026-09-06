@@ -211,10 +211,10 @@ fn parallel_is_set_by_flag_and_cleared_by_no_parallel() {
     let dir = env.init("sci");
 
     let plain = id_of(env.json(&dir, &["add", "Plain"]));
-    assert_eq!(env.json(&dir, &["show", &plain])["parallel"], false);
+    assert_eq!(env.json(&dir, &["show", &plain])["task"]["parallel"], false);
 
     let marked = id_of(env.json(&dir, &["add", "Marked", "--parallel"]));
-    assert_eq!(env.json(&dir, &["show", &marked])["parallel"], true);
+    assert_eq!(env.json(&dir, &["show", &marked])["task"]["parallel"], true);
     assert!(
         env.read(&dir, &format!("tasks/{marked}.md"))
             .contains("\nparallel: true\n"),
@@ -223,17 +223,17 @@ fn parallel_is_set_by_flag_and_cleared_by_no_parallel() {
 
     // An unrelated edit must not disturb the flag.
     env.json(&dir, &["edit", &marked, "-p", "1"]);
-    assert_eq!(env.json(&dir, &["show", &marked])["parallel"], true);
+    assert_eq!(env.json(&dir, &["show", &marked])["task"]["parallel"], true);
 
     env.json(&dir, &["edit", &marked, "--no-parallel"]);
-    assert_eq!(env.json(&dir, &["show", &marked])["parallel"], false);
+    assert_eq!(env.json(&dir, &["show", &marked])["task"]["parallel"], false);
     assert!(
         !env.read(&dir, &format!("tasks/{marked}.md")).contains("parallel"),
         "the key is dropped, not written false"
     );
 
     env.json(&dir, &["edit", &plain, "--parallel"]);
-    assert_eq!(env.json(&dir, &["show", &plain])["parallel"], true);
+    assert_eq!(env.json(&dir, &["show", &plain])["task"]["parallel"], true);
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn parallel_and_no_parallel_conflict() {
 }
 ```
 
-`ShowOut.fields` is `#[serde(flatten)]` (`src/output.rs:78-82`), so the key is at `v["parallel"]`, not `v["fields"]["parallel"]`.
+**The path is `v["task"]["parallel"]`.** `ShowOut.fields` is `#[serde(flatten)]` (`src/output.rs:78-82`), which lifts `ShowFields`' own members to the top level — so `claim` sits at `v["claim"]`. But `ShowFields.task` (`src/output.rs:67`) is an ordinary nested field, so everything from the task record stays one level down. `tests/cli.rs:328` reads `shown["task"]["parent"]` for the same reason. A wrong path here compares `null` against `false` and passes whether or not the feature works.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -342,9 +342,15 @@ Add to `tests/cli.rs`:
 fn ready_parallel_filters_and_still_honours_limit() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    let a = id_of(env.json(&dir, &["add", "A", "-p", "0", "--parallel"]));
-    let b = id_of(env.json(&dir, &["add", "B", "-p", "1", "--parallel"]));
+    // C outranks both marked tasks, so it heads the unfiltered ready list. That is what
+    // makes the -n 1 assertion below able to catch a truncate-before-filter regression:
+    // with the filter in the wrong place, `--parallel -n 1` truncates to [C] and then
+    // filters to nothing. Give them distinct priorities — equal priority and size would
+    // fall through to `created`, and whenever a marked task happened to sort first the
+    // broken order would still pass.
     env.json(&dir, &["add", "C", "-p", "0"]);
+    let a = id_of(env.json(&dir, &["add", "A", "-p", "1", "--parallel"]));
+    let b = id_of(env.json(&dir, &["add", "B", "-p", "2", "--parallel"]));
 
     let ids = |v: serde_json::Value| -> Vec<String> {
         v["tasks"]
@@ -449,7 +455,7 @@ git commit -m "feat(ready): filter to parallel candidates with --parallel"
 - Test: `src/output.rs` (a new `mod tests` at the end of the file), `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `Task.parallel` from Task 1.
+- Consumes: `Task.parallel` from Task 1, and **`add --parallel` from Task 2** — the end-to-end test in Step 8 has no other way to mark a task, so this task cannot pass its gate until Task 2 has landed.
 - Produces: `TaskSummary.parallel: bool`; `table(rows, date, painter, parallel_column: bool)`; `tree_text(nodes, depth, painter, parallel_column: bool)`; `fn any_parallel(&[TaskSummary]) -> bool` and `fn any_parallel_tree(&[TreeNode]) -> bool`.
 
 - [ ] **Step 1: Write the failing unit test**
