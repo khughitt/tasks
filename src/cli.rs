@@ -98,6 +98,13 @@ pub enum Command {
     },
     /// The registry: every project, whether it is reachable, and its status counts.
     Projects {
+        /// Order: prefix (default), size (most tasks first), or activity (most recent
+        /// first). Unreachable projects stay last whatever the order.
+        #[arg(long, add = ArgValueCandidates::new(crate::complete::project_sorts))]
+        sort: Option<String>,
+        /// Reverse the chosen order.
+        #[arg(long)]
+        reverse: bool,
         /// Also show the done and dropped columns.
         #[arg(long)]
         closed: bool,

@@ -482,7 +482,12 @@ pub fn run(cli: Cli) -> Result<Output> {
     match cli.command {
         Command::Init { prefix, force } => init::run(dir, prefix, force),
         Command::Unregister { prefix } => unregister::run(prefix),
-        Command::Projects { closed, paths } => projects::run(dir, closed, paths),
+        Command::Projects {
+            sort,
+            reverse,
+            closed,
+            paths,
+        } => projects::run(dir, sort.as_deref(), reverse, closed, paths),
         Command::Root { id } => root::run(id, dir),
         Command::Add {
             title,

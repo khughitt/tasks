@@ -317,13 +317,18 @@ tasks prime [--all-projects] [--closed]
 tasks tags [--status S]... [--all-projects]
     Tag frequencies over open tasks (or the given statuses), with a count per project.
 
-tasks projects [--closed] [--paths]
+tasks projects [--sort prefix|size|activity] [--reverse] [--closed] [--paths]
     Every registry entry: root, reachability, and, when reachable, status counts, the
     total task count, and the date of last activity. Needs no project. --pretty prints a
     header row, one aligned column per open status, then total and activity; --closed
     adds done and dropped, --paths adds the registered root as a final column. An
     unreachable row shows a dash per count and says so in the activity column. Column
-    visibility is pretty-only: the JSON carries every field either way.
+    visibility is pretty-only: the JSON carries every field either way. --sort and
+    --reverse are command-level and reorder the JSON array too; size is most tasks first
+    and activity most recent first, both tie-broken on prefix. A row that lacks the
+    chosen key sinks to the bottom in prefix order whatever the direction, so --reverse
+    never promotes an unreachable project; under prefix every row has the key, so the
+    listing stays alphabetical.
 
 tasks root <id>
     The registered root of the id's project. Needs no project; unregistered prefix is

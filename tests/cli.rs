@@ -3649,6 +3649,40 @@ fn projects_pretty_paints_counts_by_status_and_dims_zeros() {
     assert!(tail.starts_with("      1  2"), "{row:?}");
 }
 
+#[test]
+fn projects_sort_is_command_level_and_reorders_the_json() {
+    let mut env = TestEnv::new();
+    let small = env.init("aaa");
+    let big = env.init("zzz");
+    env.json(&small, &["add", "one"]);
+    for title in ["one", "two", "three"] {
+        env.json(&big, &["add", title]);
+    }
+    let nowhere = tempfile::tempdir().unwrap();
+    let prefixes = |v: &serde_json::Value| -> Vec<String> {
+        v["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["prefix"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let v = env.json(nowhere.path(), &["projects"]);
+    assert_eq!(prefixes(&v), ["aaa", "zzz"], "prefix is the default order");
+    // the reorder reaches JSON, not just the table: this is a command-level option
+    let v = env.json(nowhere.path(), &["projects", "--sort", "size"]);
+    assert_eq!(prefixes(&v), ["zzz", "aaa"]);
+    let v = env.json(nowhere.path(), &["projects", "--sort", "size", "--reverse"]);
+    assert_eq!(prefixes(&v), ["aaa", "zzz"]);
+
+    // the task-shaped keys are not project keys
+    assert_eq!(
+        env.fail(nowhere.path(), &["projects", "--sort", "updated"]),
+        "validation"
+    );
+}
+
 /// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
 /// store keyed by prefix.
 fn two_roots(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {

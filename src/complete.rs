@@ -44,6 +44,12 @@ pub fn sorts() -> Vec<CompletionCandidate> {
     plain(["priority", "updated", "created"])
 }
 
+/// The keys `commands::projects::ProjectSort::parse` accepts. Separate from `sorts`:
+/// projects rank by size and activity, tasks by priority and their own dates.
+pub fn project_sorts() -> Vec<CompletionCandidate> {
+    plain(["prefix", "size", "activity"])
+}
+
 /// The modes `style::ColorMode::resolve` accepts.
 pub fn colors() -> Vec<CompletionCandidate> {
     plain(["auto", "always", "never"])
