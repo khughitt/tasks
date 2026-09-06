@@ -50,6 +50,12 @@ pub struct ProjectRow {
 pub struct ProjectsOut {
     pub projects: Vec<ProjectRow>,
     pub warnings: Vec<String>,
+    /// Which columns the table shows. JSON carries every field either way, so column
+    /// visibility never reaches the contract.
+    #[serde(skip)]
+    pub closed: bool,
+    #[serde(skip)]
+    pub paths: bool,
 }
 
 #[derive(Serialize)]
@@ -237,6 +243,113 @@ impl Counts {
         }
         counts
     }
+
+    pub fn total(&self) -> usize {
+        self.idea + self.todo + self.doing + self.blocked + self.done + self.dropped
+    }
+}
+
+/// One column of a status-count row: its header label, the value, and the role the value
+/// is painted in. Values come back unpadded and unpainted because ANSI bytes count toward
+/// `{:<n}` widths - the caller pads to the column width first, then paints.
+pub struct CountColumn {
+    pub label: &'static str,
+    pub value: usize,
+    pub style: Option<Style>,
+}
+
+/// The status columns of a counts row, in display order. `total` is always last and always
+/// counts every status, so hiding the closed columns never loses a task. One definition for
+/// `projects` and `prime`, so the two cannot drift.
+pub fn count_columns(counts: &Counts, closed: bool) -> Vec<CountColumn> {
+    let mut columns = vec![
+        count_column("idea", counts.idea, Status::Idea),
+        count_column("todo", counts.todo, Status::Todo),
+        count_column("doing", counts.doing, Status::Doing),
+        count_column("blocked", counts.blocked, Status::Blocked),
+    ];
+    if closed {
+        columns.push(count_column("done", counts.done, Status::Done));
+        columns.push(count_column("dropped", counts.dropped, Status::Dropped));
+    }
+    columns.push(CountColumn {
+        label: "total",
+        value: counts.total(),
+        style: None,
+    });
+    columns
+}
+
+/// A zero is dimmed whatever its status: a red `0` under `blocked` reads as an alarm.
+fn count_column(label: &'static str, value: usize, status: Status) -> CountColumn {
+    CountColumn {
+        label,
+        value,
+        style: Some(if value == 0 {
+            Style::Chrome
+        } else {
+            Style::Status(status)
+        }),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Align {
+    Left,
+    Right,
+}
+
+struct Cell {
+    text: String,
+    align: Align,
+    style: Option<Style>,
+}
+
+fn cell(text: impl Into<String>, align: Align, style: Option<Style>) -> Cell {
+    Cell {
+        text: text.into(),
+        align,
+        style,
+    }
+}
+
+/// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every cell reaches its
+/// column's visible width before the painter wraps it. The last cell of a row is never
+/// padded, so no line carries trailing whitespace.
+fn grid_text(grid: &[Vec<Cell>], painter: &Painter) -> String {
+    let columns = grid.iter().map(Vec::len).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..columns)
+        .map(|index| {
+            grid.iter()
+                .filter_map(|row| row.get(index))
+                .map(|cell| cell.text.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let mut rendered = String::new();
+    for row in grid {
+        for (index, cell) in row.iter().enumerate() {
+            if index > 0 {
+                rendered.push_str("  ");
+            }
+            let width = widths[index];
+            let padded = if index + 1 == row.len() {
+                cell.text.clone()
+            } else {
+                match cell.align {
+                    Align::Left => format!("{:<width$}", cell.text),
+                    Align::Right => format!("{:>width$}", cell.text),
+                }
+            };
+            rendered.push_str(&match cell.style {
+                Some(style) => painter.paint(style, &padded),
+                None => padded,
+            });
+        }
+        rendered.push('\n');
+    }
+    rendered
 }
 
 #[derive(Serialize)]
@@ -246,6 +359,9 @@ pub struct PrimeOut {
     /// Every prefix in scope; one entry locally.
     pub projects: Vec<String>,
     pub counts: Counts,
+    /// Pretty-only, like `ProjectsOut`: JSON always carries every count.
+    #[serde(skip)]
+    pub closed: bool,
     pub ready: Vec<TaskSummary>,
     pub doing: Vec<TaskSummary>,
     pub roadmap: Vec<TreeNode>,
@@ -313,26 +429,46 @@ fn pretty(out: &Output, painter: &Painter) -> String {
         Output::Init(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Root(o) => o.root.clone(),
+        Output::Projects(o) if o.projects.is_empty() => String::new(),
         Output::Projects(o) => {
-            let width = o
-                .projects
-                .iter()
-                .map(|row| row.prefix.len())
-                .max()
-                .unwrap_or(0);
-            let mut rendered = String::new();
-            for row in &o.projects {
-                let prefix = painter.paint(Style::Chrome, &format!("{:<width$}", row.prefix));
-                let state = match &row.counts {
-                    Some(c) => format!(
-                        "idea {}  todo {}  doing {}  blocked {}  done {}  dropped {}",
-                        c.idea, c.todo, c.doing, c.blocked, c.done, c.dropped
-                    ),
-                    None => painter.paint(Style::Error, "unreachable"),
-                };
-                rendered.push_str(&format!("{prefix}  {}  {state}\n", row.root));
+            // Header labels come from the same call the rows use, so a column can never
+            // appear in one and not the other.
+            let mut header = vec![cell("project", Align::Left, Some(Style::Chrome))];
+            for column in count_columns(&Counts::default(), o.closed) {
+                header.push(cell(column.label, Align::Right, Some(Style::Chrome)));
             }
-            rendered
+            header.push(cell("activity", Align::Left, Some(Style::Chrome)));
+            if o.paths {
+                header.push(cell("root", Align::Left, Some(Style::Chrome)));
+            }
+            let mut grid = vec![header];
+            for row in &o.projects {
+                let mut cells = vec![cell(&row.prefix, Align::Left, Some(Style::Chrome))];
+                match &row.counts {
+                    Some(counts) => {
+                        cells.extend(count_columns(counts, o.closed).into_iter().map(|column| {
+                            cell(column.value.to_string(), Align::Right, column.style)
+                        }))
+                    }
+                    None => cells.extend(
+                        count_columns(&Counts::default(), o.closed)
+                            .iter()
+                            .map(|_| cell("-", Align::Right, Some(Style::Chrome))),
+                    ),
+                }
+                // An unreachable project has no activity to report, so that column says
+                // why instead of printing a dash the eye would skip.
+                cells.push(match (&row.counts, &row.last_activity) {
+                    (None, _) => cell("unreachable", Align::Left, Some(Style::Error)),
+                    (Some(_), Some(at)) => cell(crate::time::day(at), Align::Left, None),
+                    (Some(_), None) => cell("-", Align::Left, Some(Style::Chrome)),
+                });
+                if o.paths {
+                    cells.push(cell(&row.root, Align::Left, None));
+                }
+                grid.push(cells);
+            }
+            grid_text(&grid, painter)
         }
         Output::Show(o) => show_text(&o.fields, painter),
         Output::Next(o) => match &o.next {
@@ -347,15 +483,24 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 || any_parallel_tree(&o.roadmap)
                 || any_parallel(&o.ready)
                 || any_parallel(&o.doing);
-            let c = &o.counts;
             let header = match &o.prefix {
                 Some(prefix) => format!("project {prefix}"),
                 None => format!("projects {}", o.projects.join(", ")),
             };
-            let mut rendered = format!(
-                "{header}\nidea {}  todo {}  doing {}  blocked {}  done {}  dropped {}\n",
-                c.idea, c.todo, c.doing, c.blocked, c.done, c.dropped
-            );
+            // One row, so labels stay beside their values instead of over them - but the
+            // columns and their colors are the same definition `projects` renders.
+            let counts: Vec<String> = count_columns(&o.counts, o.closed)
+                .into_iter()
+                .map(|column| {
+                    let value = column.value.to_string();
+                    let value = match column.style {
+                        Some(style) => painter.paint(style, &value),
+                        None => value,
+                    };
+                    format!("{} {value}", column.label)
+                })
+                .collect();
+            let mut rendered = format!("{header}\n{}\n", counts.join("  "));
             rendered.push_str(&format!(
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "closeout:")

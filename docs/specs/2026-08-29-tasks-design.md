@@ -302,7 +302,7 @@ tasks check
 tasks next [--all-projects]
     The first task of ready in the show shape, or null when nothing is ready (exit 0).
 
-tasks prime [--all-projects]
+tasks prime [--all-projects] [--closed]
     Agent session context: prefix, counts by status, the ready list, doing tasks
     with owners, the roadmap (open forest) and closeout list. Intended to be run at
     the start of every agent session. Warns about uncommitted files under tasks/
@@ -310,13 +310,20 @@ tasks prime [--all-projects]
     root is not inside a git repository or git is absent. --all-projects: the same over
     every reachable registered project; prefix is null, projects lists the scope, and the
     uncommitted-files warning is emitted per project, prefixed with its prefix.
+    The pretty counts line shows the open statuses and a total; --closed adds done and
+    dropped. Same columns, same colors, and same default as tasks projects: one
+    definition renders both.
 
 tasks tags [--status S]... [--all-projects]
     Tag frequencies over open tasks (or the given statuses), with a count per project.
 
-tasks projects
-    Every registry entry: root, reachability, and status counts when reachable. Needs no
-    project.
+tasks projects [--closed] [--paths]
+    Every registry entry: root, reachability, and, when reachable, status counts, the
+    total task count, and the date of last activity. Needs no project. --pretty prints a
+    header row, one aligned column per open status, then total and activity; --closed
+    adds done and dropped, --paths adds the registered root as a final column. An
+    unreachable row shows a dash per count and says so in the activity column. Column
+    visibility is pretty-only: the JSON carries every field either way.
 
 tasks root <id>
     The registered root of the id's project. Needs no project; unregistered prefix is
@@ -403,7 +410,12 @@ prime       += projects: [string]; prefix is string|null (null under --all-proje
 next        -> { next: ShowFields|null, warnings }   ShowFields = show without warnings
 root        -> { prefix, root, warnings }
 tags        -> { tags: [{ tag, count, projects: { <prefix>: int } }], warnings }
-projects    -> { projects: [{ prefix, root, reachable: bool, counts: Counts|null }], warnings }
+projects    -> { projects: [{ prefix, root, reachable: bool, counts: Counts|null,
+                 total: int|null, last_activity: string|null }], warnings }
+               total counts every status, so it exceeds the sum of the open counts;
+               last_activity is the newest updated across all tasks, closed included.
+               Both are null when unreachable, and last_activity is null for a project
+               that holds no tasks.
 
 feedback    -> { id, action: "created"|"recurred", path, warnings }
                path is the absolute task file in the target project

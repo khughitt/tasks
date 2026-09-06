@@ -1,11 +1,12 @@
 ---
 id: tasks-1dba40
 title: "Render projects as an aligned, colored column table"
-status: todo
+status: done
 priority: 2
 size: m
+owner: projects-table
 created: 2026-09-06T10:13:57Z
-updated: 2026-09-06T10:13:57Z
+updated: 2026-09-06T10:45:34Z
 depends: [tasks-a52e0f]
 parent: tasks-fe4716
 tags: [cli, output]
@@ -20,3 +21,7 @@ Also extract the counts rendering. `prime` hand-writes the identical `idea N tod
 Watch the existing invariant: pad first, paint last. ANSI bytes count toward `{:<n}` widths, which is why `table()` formats to final visible width before wrapping in a painter call. Whatever shared helper this grows must keep that ordering or every colored column silently misaligns - a test with `--color always` asserting on byte-exact rows is the cheap guard.
 
 Flags here are pretty-only: `--closed` adds done and dropped, `--paths` appends the root column. JSON keeps every field either way.
+
+## Notes
+
+- 2026-09-06T10:45:34Z (projects-table): projects renders an aligned header-row table with per-status colors, zeros dimmed, --closed and --paths; count_columns is one definition shared with prime, which gains --closed

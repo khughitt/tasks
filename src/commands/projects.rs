@@ -6,7 +6,7 @@ use std::path::Path;
 
 /// The registry as rows. Missing roots/configs are unreachable rows; malformed reachable
 /// configs still error because a listed project must agree with its registered prefix.
-pub fn run(dir: Option<&Path>) -> Result<Output> {
+pub fn run(dir: Option<&Path>, closed: bool, paths: bool) -> Result<Output> {
     let registry = Registry::load()?;
     let warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
     let mut rows = Vec::new();
@@ -34,5 +34,7 @@ pub fn run(dir: Option<&Path>) -> Result<Output> {
     Ok(Output::Projects(ProjectsOut {
         projects: rows,
         warnings,
+        closed,
+        paths,
     }))
 }

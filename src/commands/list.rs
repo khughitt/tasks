@@ -196,7 +196,7 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
     })))
 }
 
-pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
+pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let all = ctx.scope.scan()?;
     let prefixes = ctx.scope.prefixes();
     let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
@@ -258,6 +258,7 @@ pub fn prime(mut ctx: ReadCtx) -> Result<Output> {
         },
         projects: ctx.scope.prefixes(),
         counts,
+        closed,
         ready: ready
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims)))

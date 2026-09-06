@@ -97,7 +97,14 @@ pub enum Command {
         prefix: String,
     },
     /// The registry: every project, whether it is reachable, and its status counts.
-    Projects,
+    Projects {
+        /// Also show the done and dropped columns.
+        #[arg(long)]
+        closed: bool,
+        /// Show each project's registered root as a final column.
+        #[arg(long)]
+        paths: bool,
+    },
     /// The registered root of the project an id belongs to.
     Root {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
@@ -239,6 +246,9 @@ pub enum Command {
         /// Every reachable registered project; needs no local project.
         #[arg(long)]
         all_projects: bool,
+        /// Also show the done and dropped counts.
+        #[arg(long)]
+        closed: bool,
     },
     /// File feedback about the tasks tool itself into the upstream tasks project.
     Feedback {

@@ -482,7 +482,7 @@ pub fn run(cli: Cli) -> Result<Output> {
     match cli.command {
         Command::Init { prefix, force } => init::run(dir, prefix, force),
         Command::Unregister { prefix } => unregister::run(prefix),
-        Command::Projects => projects::run(dir),
+        Command::Projects { closed, paths } => projects::run(dir, closed, paths),
         Command::Root { id } => root::run(id, dir),
         Command::Add {
             title,
@@ -537,7 +537,10 @@ pub fn run(cli: Cli) -> Result<Output> {
         } => list::ready(open_read_ctx(dir, all_projects)?, size, parallel, limit),
         Command::Next { all_projects } => list::next(open_read_ctx(dir, all_projects)?),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
-        Command::Prime { all_projects } => list::prime(open_read_ctx(dir, all_projects)?),
+        Command::Prime {
+            all_projects,
+            closed,
+        } => list::prime(open_read_ctx(dir, all_projects)?, closed),
         Command::Note { id, text } => status::note(open_id_write_ctx(dir, &id)?, id, text),
         Command::Start { id, force } => status::start(open_id_write_ctx(dir, &id)?, id, force),
         Command::Done { id, message, force } => status::close(

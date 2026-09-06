@@ -98,6 +98,20 @@ impl TestEnv {
         })
     }
 
+    pub fn pretty(&self, dir: &Path, args: &[&str]) -> String {
+        let mut all = vec!["--pretty"];
+        all.extend_from_slice(args);
+        let out = self.cmd(dir).args(&all).output().unwrap();
+        assert!(
+            out.status.success(),
+            "tasks --pretty {:?} failed:\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
     pub fn fail(&self, dir: &Path, args: &[&str]) -> String {
         let out = self.cmd(dir).args(args).output().unwrap();
         assert_eq!(

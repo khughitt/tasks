@@ -3447,7 +3447,15 @@ fn projects_lists_the_registry_with_reachability_and_counts() {
         text.contains("fam") && text.contains("unreachable"),
         "{text}"
     );
-    assert!(text.contains("sci") && text.contains("idea 1"), "{text}");
+    assert!(
+        text.lines().next().unwrap().starts_with("project"),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("idea").count(),
+        1,
+        "one header, not one per row: {text}"
+    );
 
     std::fs::write(fam.join("tasks/.config.toml"), "not toml = [").unwrap();
     assert_eq!(env.fail(nowhere.path(), &["projects"]), "config");
@@ -3496,6 +3504,149 @@ fn projects_total_and_activity_report_absence_apart_from_emptiness() {
     assert_eq!(rows[1]["reachable"], false);
     assert_eq!(rows[1]["total"], serde_json::Value::Null, "{v}");
     assert_eq!(rows[1]["last_activity"], serde_json::Value::Null, "{v}");
+}
+
+#[test]
+fn projects_pretty_prints_one_header_and_aligned_columns() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "B", "--status", "idea"]);
+    let a = id_of(env.json(&sci, &["add", "A"]));
+    env.json(&sci, &["done", &a]);
+    let day = env.json(&sci, &["show", &a])["task"]["updated"]
+        .as_str()
+        .unwrap()[..10]
+        .to_string();
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let text = env.pretty(nowhere.path(), &["projects"]);
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        "project  idea  todo  doing  blocked  total  activity"
+    );
+    // header-width columns, two-space gutters, counts right-aligned under their labels
+    assert_eq!(
+        lines.next().unwrap(),
+        format!(
+            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>5}  {day}",
+            "sci", 1, 0, 0, 0, 2
+        )
+    );
+}
+
+#[test]
+fn projects_pretty_marks_an_unreachable_row_without_breaking_the_grid() {
+    let mut env = TestEnv::new();
+    env.init("sci");
+    let gone = env.init("fam");
+    std::fs::remove_file(gone.join("tasks/.config.toml")).unwrap();
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let text = env.pretty(nowhere.path(), &["projects"]);
+    let row = text.lines().find(|l| l.starts_with("fam")).unwrap();
+    assert_eq!(
+        row,
+        format!(
+            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>5}  unreachable",
+            "fam", "-", "-", "-", "-", "-"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn projects_pretty_reveals_closed_columns_on_request() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let a = id_of(env.json(&sci, &["add", "A"]));
+    env.json(&sci, &["done", &a]);
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let plain = env.pretty(nowhere.path(), &["projects"]);
+    assert!(
+        !plain.contains("done"),
+        "closed columns are hidden: {plain}"
+    );
+    assert!(!plain.contains("dropped"), "{plain}");
+    // the one done task is still accounted for, in total
+    assert!(plain.lines().nth(1).unwrap().contains(" 1"), "{plain}");
+
+    let opened = env.pretty(nowhere.path(), &["projects", "--closed"]);
+    assert_eq!(
+        opened.lines().next().unwrap(),
+        "project  idea  todo  doing  blocked  done  dropped  total  activity"
+    );
+}
+
+#[test]
+fn projects_pretty_reveals_roots_on_request() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let plain = env.pretty(nowhere.path(), &["projects"]);
+    assert!(!plain.contains(sci.to_str().unwrap()), "{plain}");
+
+    let with_paths = env.pretty(nowhere.path(), &["projects", "--paths"]);
+    assert!(
+        with_paths.lines().next().unwrap().ends_with("root"),
+        "{with_paths}"
+    );
+    assert!(
+        with_paths
+            .lines()
+            .nth(1)
+            .unwrap()
+            .ends_with(sci.to_str().unwrap()),
+        "{with_paths}"
+    );
+}
+
+#[test]
+fn prime_counts_line_uses_the_same_columns_as_projects() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "Open"]);
+    let a = id_of(env.json(&sci, &["add", "A"]));
+    env.json(&sci, &["done", &a]);
+
+    // prime is a single row, so it keeps label-value pairs rather than a header - but the
+    // columns, their order, and the closed-by-default rule come from one definition.
+    let text = env.pretty(&sci, &["prime"]);
+    assert_eq!(
+        text.lines().nth(1).unwrap(),
+        "idea 0  todo 1  doing 0  blocked 0  total 2"
+    );
+
+    let opened = env.pretty(&sci, &["prime", "--closed"]);
+    assert_eq!(
+        opened.lines().nth(1).unwrap(),
+        "idea 0  todo 1  doing 0  blocked 0  done 1  dropped 0  total 2"
+    );
+}
+
+#[test]
+fn projects_pretty_paints_counts_by_status_and_dims_zeros() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "B", "--status", "idea"]);
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let out = env
+        .cmd(nowhere.path())
+        .args(["--pretty", "--color", "always", "projects"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let row = text.lines().nth(1).unwrap();
+    // idea is 1: painted in the idea role, the same blue `list` and `show` use
+    assert!(row.contains("\u{1b}[34m   1\u{1b}[0m"), "{row:?}");
+    // blocked is 0: dimmed whatever the column, so a red 0 does not read as an alarm
+    assert!(row.contains("\u{1b}[2m      0\u{1b}[0m"), "{row:?}");
+    // total and activity carry no status, so nothing after the last reset is painted
+    let tail = row.rsplit("\u{1b}[0m").next().unwrap();
+    assert!(tail.starts_with("      1  2"), "{row:?}");
 }
 
 /// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
