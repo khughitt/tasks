@@ -37,7 +37,8 @@ their keep, they can be added beside the boolean without changing what it means.
 
 The cost of the simpler model is that the flag is a promise about *the whole marked set*,
 not about a pair. It has to be set conservatively — self-contained, touching nothing
-central. That constraint belongs in the docs, not in the schema.
+central. That constraint belongs in the docs, not in the schema; the next section states
+exactly what it covers.
 
 ### A first-class field, not a reserved tag
 
@@ -49,6 +50,36 @@ uninterpreted everywhere else in the tool, so one magic value would be the singl
 exception — silently changing behaviour for anyone who tagged `parallel` meaning something
 else, with no validation and nothing for `check` to catch. Fail-early and explicit-over-
 implicit both point at a real field.
+
+### What the promise covers
+
+`parallel: true` asserts one thing: **this task, as currently scoped, can run beside any
+other task marked `parallel` without touching the same files or state.**
+
+It is silent about everything else, and the gaps matter more than the guarantee:
+
+- **Unmarked tasks.** Nothing is claimed against them. A marked task may well collide with
+  an unmarked one; that is not a violation of the promise.
+- **Work already in flight.** `is_ready` requires `todo`, so anything `doing` is absent
+  from `ready` by construction and takes no part in the marked set's mutual guarantee. A
+  filtered list is safe *against itself*, not against what is already running. A
+  dispatcher must read `prime`'s `doing` list before treating the list as safe to hand
+  out. `ready` additionally omits tasks another live session claims, but a stale claim is
+  no protection.
+- **Blocked tasks.** A `blocked` task is not ready and so is never dispatched, but it
+  keeps its marker. It re-enters the marked set on `unblock` without anyone re-examining
+  it, which is one of the ways a marker goes stale below.
+- **Other projects.** Under `ready --all-projects` the marked set spans registered
+  projects, which are separate roots, so file collisions across them are impossible by
+  construction. The residual risk is shared external state — the registry, the claim
+  store, a shared library — not the tree.
+
+**Lifetime.** The marker describes the task *as scoped when it was set*, so anything that
+changes the scope invalidates it: a widening note, a new parent, a different spec, a
+dependency closing and revealing more work. Whoever changes the scope re-examines the
+marker in the same breath — `tasks note` on a scope change is already the protocol hook
+for this, so the rule adds a habit rather than a mechanism. Nothing enforces it: a marker
+is an assertion by a person, and a stale one is a wrong assertion, not a bug.
 
 ### Hand-set, with no inference
 
@@ -84,13 +115,20 @@ shape of the work rather than its state — and is written only when true:
 | value in file | result |
 |---|---|
 | key absent | `false` |
-| `parallel: true` | `true` |
-| `parallel: false` | `false`, and the key is dropped on the next write |
+| `parallel: true` or `parallel: "true"` | `true` |
+| `parallel: false` or `parallel: "false"` | `false`, and the key is dropped on the next write |
 | anything else | parse error: `parallel must be true or false` |
 
-The value must be emitted as `Value::Raw("true")`. `frontmatter::needs_quotes` quotes the
-literal `true`, so a `Value::Scalar` would round-trip as `parallel: "true"` and then fail
-to read back as a boolean.
+Both spellings are accepted because the parser cannot tell them apart: `parse_scalar`
+takes the quoted branch for `"true"` and returns `Value::Scalar("true")`, byte-identical
+to what the bare word yields. Quoting is discarded at parse time, so no parser change is
+needed and none is proposed.
+
+Emission is canonical and unquoted, which does require care: `needs_quotes` quotes the
+literal `true`, so `Value::Scalar` would write `parallel: "true"`. Use `Value::Raw("true")`,
+as `priority` already does. That is a readability choice, not a correctness one — the
+quoted form would round-trip correctly, it would just be ugly and drift from how every
+other scalar in the file is written.
 
 ## CLI
 
@@ -120,10 +158,30 @@ Pretty tables get a marker column between status and date, rendered as ASCII `||
     tasks-a14f0d  P3 xs todo    || 2026-09-04  Validate TASKS_FORMAT ... [cli]
     tasks-120a02  P3 s  todo       2026-09-05  Completion scope contradiction [cli]
 
-The column is present only when at least one row in that table is marked. Rendering it
+The column is present only when something in the output is marked. Rendering it
 unconditionally would widen every `list` and `prime` row by two characters in service of a
 flag that is usually unset. ASCII rather than `∥` keeps pretty chrome to the ASCII range
 it uses everywhere else.
+
+**Visibility is decided once per command output, by the caller, not inside `table`.**
+`table` cannot decide for itself, because it is not always given the whole picture:
+`tree_text` calls it one node at a time (`output.rs:497`), and `prime`'s roadmap calls it
+per childless root (`output.rs:361`). A per-call decision would give a marked task a
+wider row than its unmarked sibling, shifting dates and titles between adjacent lines.
+
+So `table` takes the visibility as a parameter, and each pretty branch computes it once
+over every summary it is about to render:
+
+- `list` and `ready` — over their rows.
+- `tree` — over the whole forest, recursively through `TreeNode::children`.
+- `prime` — over `closeout`, `roadmap` (recursively), `ready`, and `doing` together.
+
+Per *output* rather than per section, so that `prime`'s four blocks keep a single column
+layout; they align today only because every width is fixed, and a per-section decision
+would break that.
+
+This needs two helpers next to `table`: one over `&[TaskSummary]` and one over
+`&[TreeNode]` that recurses into children.
 
 ## Not in scope
 
@@ -144,11 +202,15 @@ absent key reads as `false`.
 
 Test-first, in this order:
 
-1. `format.rs` units — round-trip a task with `parallel: true`; `parallel: maybe` is a
-   parse error; `parallel: false` reads as false and is dropped on write; `true` is
-   emitted unquoted.
+1. `format.rs` units — round-trip a task with `parallel: true`; `"true"` and `"false"`
+   read the same as their bare spellings; `parallel: maybe` is a parse error;
+   `parallel: false` reads as false and is dropped on write; `true` is emitted unquoted.
 2. `output.rs` unit — the marker column appears when a row is marked and is absent from
-   every row when none is.
+   every row when none is. It must cover **mixed siblings**: a tree whose marked and
+   unmarked nodes sit at the same depth, asserting that both rows carry the column and
+   their dates and titles stay in the same character positions. That is the case a
+   per-call decision inside `table` would get wrong, so it is the case that pins the
+   design down.
 3. `tests/cli.rs` end-to-end — `add --parallel`; `edit --no-parallel` clears it;
    `ready --parallel` filters and still honours `-n`; the `parallel` key is present on
    summary JSON.
@@ -159,7 +221,9 @@ Test-first, in this order:
   field table, the `add`/`edit`/`ready` synopses, and the `Task` and `TaskSummary` JSON
   shapes.
 - `skills/tasks/SKILL.md` — a line under "Recording work" on marking parallel candidates
-  and dispatching with `ready --parallel -n N`. AGENTS.md requires the shipped skill stay
-  in step with CLI changes.
+  and dispatching with `ready --parallel -n N`, carrying the two rules from "What the
+  promise covers": check `prime`'s `doing` list before dispatching, and re-examine the
+  marker whenever a task's scope changes. AGENTS.md requires the shipped skill stay in
+  step with CLI changes.
 - `README.md` — "## Use" carries examples rather than a field table, so it needs a line
   only if the dispatch flow reads as worth showing there.
