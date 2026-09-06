@@ -1,11 +1,11 @@
 ---
 id: tasks-fe4716
 title: Rework the projects output into a scannable table
-status: todo
+status: done
 priority: 2
 size: m
 created: 2026-09-06T10:13:28Z
-updated: 2026-09-06T10:13:28Z
+updated: 2026-09-06T10:48:55Z
 depends: []
 tags: [cli, output]
 ---
@@ -27,3 +27,7 @@ Agreed shape:
 Dividing rule for where an option lives: sorting is command-level because it reorders the JSON array too; column visibility is pretty-only because JSON always carries every field. JSON is the contract.
 
 `prime` prints a byte-identical `idea N todo N ...` line, hand-written a second time in output.rs. One counts renderer serves both, so the column set and colors cannot drift, and `prime` honors `--closed` the same way.
+
+## Notes
+
+- 2026-09-06T10:48:55Z (projects-table): projects prints an aligned, colored, sortable table: header row, open statuses plus total and activity, --closed/--paths to widen, --sort/--reverse at the command level; prime shares the counts columns
