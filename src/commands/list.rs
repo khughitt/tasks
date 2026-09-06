@@ -131,7 +131,12 @@ pub fn ready_tasks(
     Ok(ready)
 }
 
-pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Result<Output> {
+pub fn ready(
+    mut ctx: ReadCtx,
+    size: Option<String>,
+    parallel: bool,
+    limit: Option<usize>,
+) -> Result<Output> {
     let size = size.map(|size| Size::parse(&size)).transpose()?;
     let all = ctx.scope.scan()?;
     let prefixes = ctx.scope.prefixes();
@@ -139,6 +144,9 @@ pub fn ready(mut ctx: ReadCtx, size: Option<String>, limit: Option<usize>) -> Re
     let mut tasks = ready_tasks(&mut ctx, &all, &claims)?;
     if let Some(size) = size {
         tasks.retain(|task| task.size == Some(size));
+    }
+    if parallel {
+        tasks.retain(|task| task.parallel);
     }
     if let Some(limit) = limit {
         tasks.truncate(limit);

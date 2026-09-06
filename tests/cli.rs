@@ -3531,6 +3531,46 @@ fn ready_omits_a_task_claimed_from_another_root_and_says_why() {
 }
 
 #[test]
+fn ready_parallel_filters_and_still_honours_limit() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    // C outranks both marked tasks, so it heads the unfiltered ready list. That is what
+    // makes the -n 1 assertion below able to catch a truncate-before-filter regression:
+    // with the filter in the wrong place, `--parallel -n 1` truncates to [C] and then
+    // filters to nothing. Give them distinct priorities — equal priority and size would
+    // fall through to `created`, and whenever a marked task happened to sort first the
+    // broken order would still pass.
+    env.json(&dir, &["add", "C", "-p", "0"]);
+    let a = id_of(env.json(&dir, &["add", "A", "-p", "1", "--parallel"]));
+    let b = id_of(env.json(&dir, &["add", "B", "-p", "2", "--parallel"]));
+
+    let ids = |v: serde_json::Value| -> Vec<String> {
+        v["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    assert_eq!(ids(env.json(&dir, &["ready"])).len(), 3);
+    assert_eq!(
+        ids(env.json(&dir, &["ready", "--parallel"])),
+        [a.clone(), b.clone()],
+        "marked only, in the usual ready order"
+    );
+    assert_eq!(
+        ids(env.json(&dir, &["ready", "--parallel", "-n", "1"])),
+        [a],
+        "the limit applies after the filter"
+    );
+
+    // A doing task is not ready, so it never joins the marked set.
+    env.json(&dir, &["start", &b]);
+    assert_eq!(ids(env.json(&dir, &["ready", "--parallel"])).len(), 1);
+}
+
+#[test]
 fn prime_shows_a_claim_made_in_another_root_and_warns_about_divergence() {
     let mut env = TestEnv::new();
     let (a, b) = two_roots(&mut env);

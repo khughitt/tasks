@@ -531,9 +531,10 @@ pub fn run(cli: Cli) -> Result<Output> {
         ),
         Command::Ready {
             size,
+            parallel,
             limit,
             all_projects,
-        } => list::ready(open_read_ctx(dir, all_projects)?, size, limit),
+        } => list::ready(open_read_ctx(dir, all_projects)?, size, parallel, limit),
         Command::Next { all_projects } => list::next(open_read_ctx(dir, all_projects)?),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
         Command::Prime { all_projects } => list::prime(open_read_ctx(dir, all_projects)?),

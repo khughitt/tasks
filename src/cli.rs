@@ -149,6 +149,9 @@ pub enum Command {
     Ready {
         #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
         size: Option<String>,
+        /// Only tasks marked safe to run beside each other.
+        #[arg(long)]
+        parallel: bool,
         #[arg(short = 'n', long)]
         limit: Option<usize>,
         /// Every reachable registered project; needs no local project.
