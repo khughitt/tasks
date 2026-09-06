@@ -14,7 +14,7 @@ tt := "python3 tools/tt"
 # durations; a curated subset is the follow-up if that gap costs too much.
 fast_cmd := "cargo test"
 test_cmd := "cargo test"
-check_cmd := "cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
+check_cmd := "python3 tools/ops-check && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
 
 # The inner loop; here, the whole suite.
 test-fast:

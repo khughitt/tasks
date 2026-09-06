@@ -21,7 +21,7 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 `just check` is the seconds-long part (`cargo fmt --check`, `cargo clippy --all-targets
 -- -D warnings`, `tasks check`); `just test` is `cargo test`. Every recipe runs through
 the vendored timing wrapper `tools/tt`, which records the run for the cross-project test
-and CI audit (ops `docs/specs/2026-09-04-test-ci-audit-design.md`). The git hooks in
+and CI audit (see ops `docs/specs/2026-09-04-test-ci-audit-design.md`). The git hooks in
 `.githooks/` run `check` at pre-commit and `gate` at pre-push; on a fresh clone, run
 `git config core.hooksPath .githooks` once.
 
@@ -30,7 +30,7 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 
 ## Layout
 
-- `src/` — `main.rs` / `cli.rs` (clap), `commands/` (one module per subcommand), `model.rs`
+- `src/` — `main.rs` / `cli.rs` (clap), `src/commands/` (one module per subcommand), `model.rs`
   (task record), `frontmatter.rs`, `repo.rs` (tasks/ dir), `registry.rs` (`~/.config/tasks/projects.toml`),
   `claims.rs` (out-of-git work claims: the per-prefix store, liveness, and mutation lock),
   `resolve.rs` (spec/plan links), `complete.rs` (shell completion candidates; best-effort, never errors), `query.rs`, `output.rs` / `format.rs` (JSON default, `--pretty`),

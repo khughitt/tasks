@@ -150,9 +150,9 @@ so a person here reviews each uncommitted file before it becomes public.
 
 ## Adopting in an existing project
 
-1. Keep historical docs in place. By default spec links accept `docs/specs/`,
-   `docs/designs/`, `docs/superpowers/specs/`, and `docs/superpowers/designs/`; plan links
-   accept `docs/plans/` and `docs/superpowers/plans/`. If the project keeps them elsewhere,
+1. Keep historical docs in place. By default spec links accept docs/specs/,
+   docs/designs/, docs/superpowers/specs/, and docs/superpowers/designs/; plan links
+   accept docs/plans/ and docs/superpowers/plans/. If the project keeps them elsewhere,
    say so before `init`:
 
        mkdir -p tasks && cat > tasks/.config.toml <<'EOF'
