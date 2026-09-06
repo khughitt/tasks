@@ -83,6 +83,7 @@ title: Bank the holdings ledger
 status: todo
 priority: 2
 size: m
+parallel: true
 owner: keith
 created: 2026-08-29T14:02:11Z
 updated: 2026-08-29T14:02:11Z
@@ -111,6 +112,7 @@ Free-form markdown body.
 | `status`   | enum                | yes      | `idea`, `todo`, `doing`, `blocked`, `done`, `dropped`. |
 | `priority` | int 0–4             | yes      | 0 = most urgent. Default 2. |
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
+| `parallel` | bool                | no       | Safe to run beside other tasks marked `parallel`. Omitted when false. |
 | `owner`    | string              | no       | Advisory tracked-file owner; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
 | `updated`  | RFC 3339 UTC        | yes      | Set by every write command. |
@@ -212,7 +214,7 @@ tasks unregister <prefix>
     an unregistered prefix is an error, not a no-op. Project files are untouched; only
     ~/.config/tasks/projects.toml changes.
 
-tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S]
+tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
           [--parent ID] [--project PREFIX]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
@@ -248,7 +250,7 @@ tasks tree [<id>] [--all] [--all-projects]
     forest per reachable registered project, concatenated in registry order; <id>
     conflicts with it.
 
-tasks ready [--size S] [-n N] [--all-projects]
+tasks ready [--size S] [--parallel] [-n N] [--all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
     priority, then size (xs first, unsized last), then created, then id.
     --all-projects: the same order over every reachable registered project; no project
@@ -256,7 +258,7 @@ tasks ready [--size S] [-n N] [--all-projects]
     on everything else).
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
-           [--parent ID | --no-parent] [--rm-tag T]... [--no-tags]
+           [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
     With flags: update those fields. Without flags: open an editable copy in $EDITOR
     (§5.2). Either way the result is validated against §3 and the invariants in §5.3
     before it replaces the original. --tag adds (repeats are no-ops) rather than
@@ -354,7 +356,7 @@ Shapes (all fields always present; optional fields are `null`):
 
 ```
 Task = {
-  id, title, status, priority, size, owner, created, updated,
+  id, title, status, priority, size, parallel: bool, owner, created, updated,
   depends: [string], tags: [string], spec, plan, step,
   body: string,
   notes: [{ at: string, by: string, text: string }]
@@ -362,8 +364,8 @@ Task = {
 
 ClaimInfo = { owner, session, host, pid, worktree, started, seen, live }
 
-TaskSummary = { id, title, status, priority, size, owner, created, updated, tags, depends,
-                claim: ClaimInfo|null }
+TaskSummary = { id, title, status, priority, size, parallel: bool, owner, created, updated,
+                tags, depends, claim: ClaimInfo|null }
 
 show   -> { task: Task,
             claim: ClaimInfo|null,

@@ -1,6 +1,6 @@
 # Parallel candidates: marking tasks safe to hand out at once
 
-Status: designed (2026-09-06)
+Status: implemented (2026-09-06)
 Task: tasks-cf1bda
 
 ## Problem
