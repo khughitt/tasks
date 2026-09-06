@@ -56,6 +56,12 @@ always means this checkout.
   descendant is open (`--force` overrides); `drop` refuses while any descendant is
   open and has no override — drop or reparent the subtree first
   (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
+- Dispatching several agents at once: mark each self-contained task with
+  `tasks edit <id> --parallel`, then `tasks ready --parallel -n <N>` for the set to hand
+  out. The marker asserts only that marked tasks do not collide with *each other* — it
+  says nothing about unmarked tasks or about work already in flight, so read `prime`'s
+  `doing` list before dispatching. Re-examine a task's marker whenever its scope changes;
+  a stale marker is a wrong assertion. `--no-parallel` clears it.
 - Blocking on another project: `tasks dep <id> --on <prefix>-<hex>`; the other project must be registered (`tasks init` there).
 - Work spanning projects: a goal in the hub project, then one
   `tasks add "<piece>" --project <prefix>` per affected project and one

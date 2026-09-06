@@ -94,6 +94,7 @@ mod tests {
             status: crate::model::Status::Idea,
             priority: 2,
             size: None,
+            parallel: false,
             owner: None,
             created: "2026-09-03T00:00:00Z".into(),
             updated: "2026-09-03T00:00:00Z".into(),

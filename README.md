@@ -73,6 +73,7 @@ from a clone):
     tasks add "Bank the ledger" -p 1 --size m --tag ledger
     tasks add "Emit rows" --parent sci-4f2a9c
     tasks ready                      # what can be worked on now (JSON)
+    tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
     tasks tree                       # the goal hierarchy
     tasks next                       # the first ready task, in full
     tasks next --all-projects        # the same across every registered project

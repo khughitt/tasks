@@ -3,9 +3,9 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Note, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 14] = [
-    "id", "title", "status", "priority", "size", "owner", "created", "updated", "depends",
-    "parent", "tags", "spec", "plan", "step",
+const KEYS: [&str; 15] = [
+    "id", "title", "status", "priority", "size", "parallel", "owner", "created", "updated",
+    "depends", "parent", "tags", "spec", "plan", "step",
 ];
 
 fn perr(file: &str, detail: impl Into<String>) -> Error {
@@ -65,6 +65,15 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             }
         }
     };
+    // Absent is false; a value that is neither boolean is an error, never a falsy default.
+    let boolean = |k: &str| -> Result<bool> {
+        match scalar(k)? {
+            None => Ok(false),
+            Some(v) if v == "true" => Ok(true),
+            Some(v) if v == "false" => Ok(false),
+            Some(v) => Err(perr(file, format!("{k} must be true or false, not {v:?}"))),
+        }
+    };
     let priority: u8 = required("priority")?
         .parse()
         .map_err(|_| perr(file, "priority must be an integer 0-4"))?;
@@ -90,6 +99,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             .map(|s| Size::parse(&s))
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
+        parallel: boolean("parallel")?,
         owner: scalar("owner")?,
         created,
         updated,
@@ -269,6 +279,11 @@ pub fn serialize_task(t: &Task) -> String {
     if let Some(z) = t.size {
         pairs.push(("size".into(), s(z.as_str())));
     }
+    // Raw, not Scalar: needs_quotes quotes the literal `true`, which would write
+    // `parallel: "true"` — readable back, but out of step with every other scalar.
+    if t.parallel {
+        pairs.push(("parallel".into(), Value::Raw("true".into())));
+    }
     if let Some(o) = &t.owner {
         pairs.push(("owner".into(), s(o)));
     }
@@ -357,6 +372,59 @@ mod tests {
         assert!(parse_task(&MINIMAL.replace("status: idea", "status: soon"), "x").is_err());
         assert!(parse_task(&MINIMAL.replace("depends: []", "depends: [nope]"), "x").is_err());
         assert!(parse_task(&MINIMAL.replace("tags: []", "tags: []\nstep: only"), "x").is_err());
+    }
+
+    #[test]
+    fn parallel_round_trips_and_is_omitted_when_false() {
+        let mut t = parse_task(MINIMAL, "x").unwrap();
+        assert!(!t.parallel, "absent key reads as false");
+        assert!(
+            !serialize_task(&t).contains("parallel"),
+            "false is never written"
+        );
+
+        t.parallel = true;
+        let text = serialize_task(&t);
+        assert!(
+            text.contains("\nparallel: true\n"),
+            "emitted unquoted: {text}"
+        );
+        assert!(parse_task(&text, "x").unwrap().parallel);
+    }
+
+    #[test]
+    fn parallel_accepts_both_spellings_and_rejects_anything_else() {
+        // frontmatter::parse discards quoting, so the quoted forms are indistinguishable
+        // from the bare words by the time parse_task sees them.
+        for (value, expected) in [
+            ("true", true),
+            ("\"true\"", true),
+            ("false", false),
+            ("\"false\"", false),
+        ] {
+            let text = MINIMAL.replace("depends: []", &format!("parallel: {value}\ndepends: []"));
+            assert_eq!(
+                parse_task(&text, "x").unwrap().parallel,
+                expected,
+                "parallel: {value}"
+            );
+        }
+        for bad in ["maybe", "1", "True", "yes"] {
+            let text = MINIMAL.replace("depends: []", &format!("parallel: {bad}\ndepends: []"));
+            let err = parse_task(&text, "x").unwrap_err().to_string();
+            assert!(
+                err.contains("parallel must be true or false"),
+                "parallel: {bad} gave {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn parallel_false_in_a_file_is_dropped_on_the_next_write() {
+        let text = MINIMAL.replace("depends: []", "parallel: false\ndepends: []");
+        let t = parse_task(&text, "x").unwrap();
+        assert!(!t.parallel);
+        assert!(!serialize_task(&t).contains("parallel"));
     }
 
     #[test]
