@@ -94,6 +94,7 @@ pub struct TaskSummary {
     pub status: Status,
     pub priority: u8,
     pub size: Option<Size>,
+    pub parallel: bool,
     pub owner: Option<String>,
     pub created: String,
     pub updated: String,
@@ -103,7 +104,6 @@ pub struct TaskSummary {
     pub child_count: usize,
     pub open_descendant_count: usize,
     pub claim: Option<ClaimInfo>,
-    pub parallel: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -146,6 +146,7 @@ impl TaskSummary {
             status: task.status,
             priority: task.priority,
             size: task.size,
+            parallel: task.parallel,
             owner: task.owner.clone(),
             created: task.created.clone(),
             updated: task.updated.clone(),
@@ -157,7 +158,6 @@ impl TaskSummary {
             claim: claims
                 .and_then(|snapshot| snapshot.get(&task.id))
                 .map(|(claim, live)| ClaimInfo::of(claim, live)),
-            parallel: task.parallel,
         }
     }
 }

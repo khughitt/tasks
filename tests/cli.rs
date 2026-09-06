@@ -5213,3 +5213,54 @@ fn pretty_rows_show_the_parallel_marker_only_when_something_is_marked() {
         .collect();
     assert_eq!(flags, [true, false]);
 }
+
+#[test]
+fn prime_aligns_the_parallel_column_across_all_its_blocks() {
+    // prime's ready and doing blocks are rendered by separate `table` calls, but the
+    // decision to reserve the `||` column is made once for all of prime's blocks together
+    // (src/output.rs, the `Output::Prime` arm) so a mark in one block doesn't shift dates
+    // out of alignment with an unmarked row in another block.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let marked = id_of(env.json(&dir, &["add", "Marked", "--parallel"]));
+    let plain = id_of(env.json(&dir, &["add", "Plain"]));
+    env.json(&dir, &["start", &plain]);
+
+    let out = env.cmd(&dir).args(["--pretty", "prime"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+
+    let ready_block = text
+        .split("\nready:\n")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no ready section:\n{text}"))
+        .split("\ndoing:\n")
+        .next()
+        .unwrap();
+    let doing_block = text
+        .split("\ndoing:\n")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no doing section:\n{text}"));
+
+    let ready_line = ready_block
+        .lines()
+        .find(|line| line.contains(&marked))
+        .unwrap_or_else(|| panic!("marked task missing from ready:\n{text}"));
+    let doing_line = doing_block
+        .lines()
+        .find(|line| line.contains(&plain))
+        .unwrap_or_else(|| panic!("plain task missing from doing:\n{text}"));
+
+    assert!(ready_line.contains("|| "), "{ready_line}");
+    assert!(!doing_line.contains("||"), "{doing_line}");
+
+    // Each row's own date (the first 10 chars of its `updated` timestamp) must start in
+    // the same column in both blocks.
+    let v = env.json(&dir, &["prime"]);
+    let ready_date = &v["ready"][0]["updated"].as_str().unwrap()[..10];
+    let doing_date = &v["doing"][0]["updated"].as_str().unwrap()[..10];
+    assert_eq!(
+        ready_line.find(ready_date),
+        doing_line.find(doing_date),
+        "dates must start in the same column across prime's blocks:\n{text}"
+    );
+}
