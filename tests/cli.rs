@@ -4995,9 +4995,16 @@ fn completion_offers_task_ids_open_first_with_descriptions() {
         "open task must come first"
     );
 
-    // the prefix filters
+    // the prefix filters, tested at the two ends that do not depend on the random hex:
+    // a prefix both ids share narrows nothing, and one only the open id has narrows to it.
+    // `&open[..5]` used to stand in for the second case, but that is `sci-` plus a single
+    // hex digit, which the closed id also matches one run in sixteen.
     assert_eq!(
-        env.complete(&sci, "bash", 2, &["tasks", "show", &open[..5]]),
+        env.complete(&sci, "bash", 2, &["tasks", "show", "sci-"]),
+        [open.as_str(), closed.as_str()]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 2, &["tasks", "show", &open]),
         [open.as_str()]
     );
 
