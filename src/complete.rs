@@ -340,7 +340,10 @@ fn destination(registry: &Registry, line: &Line) -> Option<Project> {
 }
 
 /// `tree <id>` and `list --parent`: the scope the command itself scans, which
-/// `--all-projects` widens to the registry (`list.rs` validates the parent against it).
+/// `--all-projects` widens to the registry (`list.rs` validates the parent against it)
+/// and `--project` moves to one registered root. The three arms mirror
+/// `open_read_ctx`; unlike `destination`, a named project wins over a worktree of the
+/// same prefix, because the read scope is the registered root.
 pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();
@@ -354,8 +357,14 @@ pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
                 tasks.extend(project.scan_lenient().0);
             }
         }
-    } else if let Some(project) = open_local(&line) {
-        tasks.extend(project.scan_lenient().0);
+    } else {
+        let project = match &line.project {
+            Some(prefix) => open_prefix(&registry, prefix),
+            None => open_local(&line),
+        };
+        if let Some(project) = project {
+            tasks.extend(project.scan_lenient().0);
+        }
     }
     candidates(tasks, current)
 }

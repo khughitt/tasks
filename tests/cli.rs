@@ -1076,6 +1076,173 @@ fn all_projects_rejects_a_prefix_mismatch() {
 }
 
 #[test]
+fn project_reads_one_named_registered_project() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "S"]);
+    env.json(&fam, &["add", "F"]);
+
+    // from inside another project, and from no project at all
+    for dir in [sci.as_path(), tempfile::tempdir().unwrap().path()] {
+        let v = env.json(dir, &["list", "--project", "fam"]);
+        let tasks = v["tasks"].as_array().unwrap();
+        assert_eq!(tasks.len(), 1, "{v}");
+        assert_eq!(tasks[0]["title"], "F");
+        assert_eq!(v["warnings"], serde_json::json!([]));
+    }
+}
+
+#[test]
+fn project_scope_covers_every_read_command() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "S", "--tag", "sci-only"]);
+    let goal = id_of(env.json(&fam, &["add", "F goal"]));
+    let child = id_of(env.json(
+        &fam,
+        &["add", "F child", "--parent", &goal, "--tag", "fam-only"],
+    ));
+
+    let v = env.json(&sci, &["ready", "--project", "fam"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1, "{v}");
+    assert_eq!(v["tasks"][0]["id"], child, "the goal has a child");
+
+    let v = env.json(&sci, &["next", "--project", "fam"]);
+    assert_eq!(v["next"]["task"]["id"], child, "{v}");
+
+    let v = env.json(&sci, &["prime", "--project", "fam"]);
+    assert_eq!(v["prefix"], "fam", "a named project is a local scope");
+    assert_eq!(v["projects"], serde_json::json!(["fam"]));
+    assert_eq!(v["counts"]["todo"], 2, "{v}");
+
+    let v = env.json(&sci, &["tree", "--project", "fam"]);
+    let nodes = v["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "{v}");
+    assert_eq!(nodes[0]["id"], goal);
+    assert_eq!(nodes[0]["children"][0]["id"], child);
+
+    // an id the local project has never heard of, read from the project that owns it
+    let v = env.json(&sci, &["tree", "--project", "fam", &goal]);
+    assert_eq!(v["nodes"][0]["id"], goal, "{v}");
+    assert_eq!(env.fail(&sci, &["tree", &goal]), "task_not_found");
+
+    let v = env.json(&sci, &["tags", "--project", "fam"]);
+    assert_eq!(
+        v["tags"],
+        serde_json::json!([{ "tag": "fam-only", "count": 1, "projects": { "fam": 1 } }])
+    );
+}
+
+#[test]
+fn project_and_all_projects_conflict_on_every_read_command() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+    for command in ["list", "ready", "next", "prime", "tree", "tags"] {
+        let out = env
+            .cmd(&sci)
+            .args([command, "--project", "fam", "--all-projects"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{command}: --project and --all-projects conflict"
+        );
+    }
+}
+
+#[test]
+fn project_scope_reports_an_unusable_prefix_as_config() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    assert_eq!(env.fail(&sci, &["list", "--project", "zzz"]), "config");
+
+    std::fs::write(fam.join("tasks/.config.toml"), "prefix = \"nope\"\n").unwrap();
+    assert_eq!(env.fail(&sci, &["list", "--project", "fam"]), "config");
+
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    assert_eq!(
+        env.fail(&sci, &["list", "--project", "fam"]),
+        "config",
+        "unreachable is a warning registry-wide, but an error when named"
+    );
+}
+
+#[test]
+fn project_scope_takes_the_registered_root_over_a_worktree_of_the_same_prefix() {
+    let mut env = TestEnv::new();
+    let fam = env.init("fam");
+    env.json(&fam, &["add", "Registered"]);
+    // a second checkout of fam that the registry does not point at
+    let worktree = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(worktree.path().join("tasks")).unwrap();
+    std::fs::write(
+        worktree.path().join("tasks/.config.toml"),
+        "prefix = \"fam\"\n",
+    )
+    .unwrap();
+    env.json(worktree.path(), &["add", "Worktree"]);
+
+    let v = env.json(worktree.path(), &["list"]);
+    assert_eq!(v["tasks"][0]["title"], "Worktree", "the default is local");
+    let v = env.json(worktree.path(), &["list", "--project", "fam"]);
+    let tasks = v["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "{v}");
+    assert_eq!(tasks[0]["title"], "Registered", "--project names a root");
+}
+
+#[test]
+fn project_scope_never_looks_at_the_current_directory() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&fam, &["add", "F"]);
+    std::fs::write(sci.join("tasks/.config.toml"), "not toml = [").unwrap();
+
+    let v = env.json(&sci, &["list", "--project", "fam"]);
+    assert_eq!(v["tasks"][0]["title"], "F", "{v}");
+}
+
+#[test]
+fn completion_follows_the_named_project_scope() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+
+    assert_eq!(
+        env.complete_values(&sci, "bash", 4, &["tasks", "tree", "--project", "fam", ""]),
+        [foreign.as_str()],
+        "tree's id comes from the named project"
+    );
+    assert_eq!(
+        env.complete(
+            &sci,
+            "bash",
+            5,
+            &["tasks", "list", "--project", "fam", "--parent", ""]
+        ),
+        [foreign.as_str()],
+        "list --parent follows the same scope"
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--parent", ""]),
+        [local.as_str()],
+        "and the default is still local"
+    );
+    assert!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--project", ""])
+            .contains(&"fam".to_string()),
+        "the prefix itself completes"
+    );
+}
+
+#[test]
 fn list_warns_about_unreachable_dependencies() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

@@ -28,6 +28,23 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// The three read scopes: the current project (neither flag), one named registered
+/// project, or every reachable one. `--project` opens the registered root through the
+/// same path `add --project` uses, so a worktree of that prefix does not displace it.
+#[derive(Args, Debug)]
+pub struct ScopeArgs {
+    /// Read this registered project instead of the current one; needs no local project.
+    #[arg(
+        long,
+        conflicts_with = "all_projects",
+        add = ArgValueCandidates::new(crate::complete::prefixes)
+    )]
+    pub project: Option<String>,
+    /// Every reachable registered project; needs no local project.
+    #[arg(long)]
+    pub all_projects: bool,
+}
+
 #[derive(Args, Debug, Default, Clone)]
 pub struct FieldArgs {
     #[arg(short = 'b', long)]
@@ -163,8 +180,8 @@ pub enum Command {
         /// Reverse the chosen order.
         #[arg(long)]
         reverse: bool,
-        #[arg(long)]
-        all_projects: bool,
+        #[command(flatten)]
+        scope: ScopeArgs,
     },
     /// Actionable tasks: todo with all dependencies closed.
     Ready {
@@ -175,15 +192,13 @@ pub enum Command {
         parallel: bool,
         #[arg(short = 'n', long)]
         limit: Option<usize>,
-        /// Every reachable registered project; needs no local project.
-        #[arg(long)]
-        all_projects: bool,
+        #[command(flatten)]
+        scope: ScopeArgs,
     },
     /// The first ready task, in the show shape; null when nothing is ready.
     Next {
-        /// Every reachable registered project; needs no local project.
-        #[arg(long)]
-        all_projects: bool,
+        #[command(flatten)]
+        scope: ScopeArgs,
     },
     /// Edit fields, or open the task in $EDITOR when no field flags are given.
     Edit {
@@ -257,9 +272,8 @@ pub enum Command {
     Check,
     /// Session context for agents.
     Prime {
-        /// Every reachable registered project; needs no local project.
-        #[arg(long)]
-        all_projects: bool,
+        #[command(flatten)]
+        scope: ScopeArgs,
         /// Also show the done and dropped counts.
         #[arg(long)]
         closed: bool,
@@ -285,20 +299,22 @@ pub enum Command {
     },
     /// The task hierarchy as nested nodes (open work only unless --all).
     Tree {
-        #[arg(add = ArgValueCompleter::new(crate::complete::scoped))]
+        /// One forest per project in scope, so `--all-projects` and an id conflict.
+        #[arg(
+            conflicts_with = "all_projects",
+            add = ArgValueCompleter::new(crate::complete::scoped)
+        )]
         id: Option<String>,
         #[arg(long)]
         all: bool,
-        /// Every reachable registered project, one forest each; needs no local project.
-        #[arg(long, conflicts_with = "id")]
-        all_projects: bool,
+        #[command(flatten)]
+        scope: ScopeArgs,
     },
     /// Tag frequencies (open tasks unless --status), per project.
     Tags {
         #[arg(long = "status", add = ArgValueCandidates::new(crate::complete::statuses))]
         statuses: Vec<String>,
-        /// Every reachable registered project; needs no local project.
-        #[arg(long)]
-        all_projects: bool,
+        #[command(flatten)]
+        scope: ScopeArgs,
     },
 }

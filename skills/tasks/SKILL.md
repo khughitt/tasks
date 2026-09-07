@@ -17,7 +17,8 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    `--sort created` for the most recently touched or added first (`--reverse` flips it).
    Never pick a task with children; those are goals. `ready` already omits them.
    With nothing in hand, `tasks next` prints the first ready task in full; `tasks next
-   --all-projects` does the same across every registered project.
+   --all-projects` does the same across every registered project, and `tasks next
+   --project <prefix>` reads one of them.
 3. `tasks start <id>` before changing code. It records you as owner.
    `start` also records a claim outside git, visible from every worktree of the project,
    with the session identity and a liveness handle. A task claimed by another live session
@@ -46,6 +47,13 @@ Every command that takes an id writes to the project that id's prefix names, so
 `tasks note`, `tasks dep`, `tasks edit`, and the status commands work on a task in another
 registered project without leaving the current one. A prefix matching the current project
 always means this checkout.
+
+The read commands say where to look instead of inferring it from an id: `list`, `ready`,
+`next`, `prime`, `tree`, and `tags` each take `--project <prefix>` for one registered
+project or `--all-projects` for every reachable one. Either works from anywhere, including
+outside every project. `--project` reads that project's *registered* root, so from a
+worktree it is how you ask for the main checkout. Reading another project's subtree is
+`tasks tree --project <prefix> <id>` — a bare id in `tree` is not routed by its prefix.
 
 ## Recording work
 

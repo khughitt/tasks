@@ -15,7 +15,7 @@ pub mod tree;
 pub mod unregister;
 
 use crate::claims::{ClaimStore, Liveness, MutationLock};
-use crate::cli::{Cli, Command, FieldArgs};
+use crate::cli::{Cli, Command, FieldArgs, ScopeArgs};
 use crate::error::{Error, Result};
 use crate::format::{validate_body, validate_line, validate_note_text, validate_task};
 use crate::model::{Note, Size, Status, Task, TaskId};
@@ -200,11 +200,15 @@ pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
     })
 }
 
-/// Read commands: the local project, or with `all_projects` every reachable registered
-/// project and no local lookup at all (spec §3.2).
-pub fn open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx> {
+/// Read commands: the local project, one named registered project, or with
+/// `all_projects` every reachable one. Both flags skip the local lookup entirely
+/// (spec §3.2), so either works from a directory inside no project at all. A named
+/// project is a `Local` scope like any other, so every command's output is what it
+/// would be run inside that project's registered root — a worktree sharing the prefix
+/// does not displace it, matching `add --project`.
+pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
     let start = start_dir(dir)?;
-    if all_projects {
+    if scope.all_projects {
         let registry = Registry::load()?;
         let (scope, warnings) = Scope::open_all(&registry, &start)?;
         return Ok(ReadCtx {
@@ -213,10 +217,19 @@ pub fn open_read_ctx(dir: Option<&Path>, all_projects: bool) -> Result<ReadCtx> 
             warnings,
         });
     }
-    let project = Project::locate(&start)?;
+    // The local arm locates before loading the registry, so a cwd outside every project
+    // still reports `no_project` rather than a malformed registry's `config`.
+    let (project, registry) = match &scope.project {
+        Some(prefix) => {
+            let registry = Registry::load()?;
+            let project = crate::scope::open_registered(&registry, prefix, Origin::Prefix)?;
+            (project, registry)
+        }
+        None => (Project::locate(&start)?, Registry::load()?),
+    };
     Ok(ReadCtx {
         scope: Scope::Local(project),
-        registry: Registry::load()?,
+        registry,
         warnings: Vec::new(),
     })
 }
@@ -528,9 +541,9 @@ pub fn run(cli: Cli) -> Result<Output> {
             parent,
             sort,
             reverse,
-            all_projects,
+            scope,
         } => list::list(
-            open_read_ctx(dir, all_projects)?,
+            open_read_ctx(dir, &scope)?,
             statuses,
             tags,
             owner,
@@ -542,14 +555,11 @@ pub fn run(cli: Cli) -> Result<Output> {
             size,
             parallel,
             limit,
-            all_projects,
-        } => list::ready(open_read_ctx(dir, all_projects)?, size, parallel, limit),
-        Command::Next { all_projects } => list::next(open_read_ctx(dir, all_projects)?),
+            scope,
+        } => list::ready(open_read_ctx(dir, &scope)?, size, parallel, limit),
+        Command::Next { scope } => list::next(open_read_ctx(dir, &scope)?),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
-        Command::Prime {
-            all_projects,
-            closed,
-        } => list::prime(open_read_ctx(dir, all_projects)?, closed),
+        Command::Prime { scope, closed } => list::prime(open_read_ctx(dir, &scope)?, closed),
         Command::Note { id, text } => status::note(open_id_write_ctx(dir, &id)?, id, text),
         Command::Start { id, force } => status::start(open_id_write_ctx(dir, &id)?, id, force),
         Command::Done { id, message, force } => status::close(
@@ -571,15 +581,8 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
-        Command::Tree {
-            id,
-            all,
-            all_projects,
-        } => tree::run(open_read_ctx(dir, all_projects)?, id, all),
-        Command::Tags {
-            statuses,
-            all_projects,
-        } => tags::run(open_read_ctx(dir, all_projects)?, statuses),
+        Command::Tree { id, all, scope } => tree::run(open_read_ctx(dir, &scope)?, id, all),
+        Command::Tags { statuses, scope } => tags::run(open_read_ctx(dir, &scope)?, statuses),
         Command::Feedback {
             summary,
             category,

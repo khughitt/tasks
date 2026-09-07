@@ -232,16 +232,17 @@ tasks show <id>
     paths resolved against that project's root; an unregistered or unreachable prefix is
     unresolvable_id.
 
-tasks list [--status S]... [--tag T]... [--owner O] [--all-projects] [--parent ID]
-           [--sort priority|updated|created] [--reverse]
+tasks list [--status S]... [--tag T]... [--owner O] [--project P | --all-projects]
+           [--parent ID] [--sort priority|updated|created] [--reverse]
     Default: open tasks, sorted by priority then updated desc, then id. --sort updated
     and --sort created put the most recent first, then id; --reverse flips the chosen
-    order. --all-projects walks the registry and needs no local project (§6).
+    order. --project reads one registered project and --all-projects walks the whole
+    registry; both need no local project (§6).
     Pretty rows carry a date column (the `YYYY-MM-DD` day, UTC): the timestamp sorted
     on, or updated (last activity) when the order is not a date. Every command that
     prints summary rows (ready, prime, tree) shows the updated day.
 
-tasks tree [<id>] [--all] [--all-projects]
+tasks tree [<id>] [--all] [--project P | --all-projects]
     The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
     the read side of parent, as graph is of depends. Without --all the forest is pruned
     to nodes that are open or have an open descendant, so a closed ancestor of open work
@@ -249,9 +250,11 @@ tasks tree [<id>] [--all] [--all-projects]
     beneath it. --all includes every task. Roots and siblings are in ready order
     (priority, size, created); a parent precedes its children. With --all-projects, one
     forest per reachable registered project, concatenated in registry order; <id>
-    conflicts with it.
+    conflicts with it. --project takes one project's forest, and is the only way to read
+    a subtree of another project: <id> is still looked up in the scope, not routed by its
+    own prefix.
 
-tasks ready [--size S] [--parallel] [-n N] [--all-projects]
+tasks ready [--size S] [--parallel] [-n N] [--project P | --all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
     priority, then size (xs first, unsized last), then created, then id.
     --all-projects: the same order over every reachable registered project; no project
@@ -301,10 +304,10 @@ tasks check
     section. Exit 1 on any error. Unresolvable foreign ids (unregistered or unreachable
     prefix) are warnings.
 
-tasks next [--all-projects]
+tasks next [--project P | --all-projects]
     The first task of ready in the show shape, or null when nothing is ready (exit 0).
 
-tasks prime [--all-projects] [--closed]
+tasks prime [--project P | --all-projects] [--closed]
     Agent session context: prefix, counts by status, the ready list, doing tasks
     with owners, the roadmap (open forest) and closeout list. Intended to be run at
     the start of every agent session. Warns about uncommitted files under tasks/
@@ -316,7 +319,7 @@ tasks prime [--all-projects] [--closed]
     dropped. Same columns, same colors, and same default as tasks projects: one
     definition renders both.
 
-tasks tags [--status S]... [--all-projects]
+tasks tags [--status S]... [--project P | --all-projects]
     Tag frequencies over open tasks (or the given statuses), with a count per project.
 
 tasks projects [--sort prefix|size|activity] [--reverse] [--closed] [--paths]
@@ -486,6 +489,10 @@ A prefix is *unreachable* when it is not registered, or its path or the task fil
 exist. Unreachable ids are warnings in `show`/`list`/`check` and errors (`unresolvable_id`)
 in `dep --on` and `add --depends`.
 
+Read scope is explicit, never inferred from an id: `--project` and `--all-projects` are
+the only way a read command leaves the local project. Id routing is a separate rule, and
+`tree <id>` does not have it.
+
 A write command that takes an existing id (`edit`, `note`, `start`, `done`, `drop`,
 `block`, `unblock`, `dep`) writes to the project that id's prefix names, by the rule
 `show` and `root` already use: a prefix matching the local project keeps that checkout, so
@@ -493,11 +500,21 @@ A write command that takes an existing id (`edit`, `note`, `start`, `done`, `dro
 the registry, and an unregistered or unreachable one is `unresolvable_id`. The mutation lock
 and the claim store key off the resolved project, so a cross-project write locks and claims
 in the target, not the caller. A local project is still required — only `add --project` and
-`--all-projects` run without one.
+the two read-scope flags run without one.
 
-`--all-projects` (on list, ready, prime, tree, next, tags) reads the registry and locates
-no local project: a missing root or config is a warning and the entry is skipped; a
-malformed config or a prefix that disagrees with the registry key is a config error.
+The same six read commands (list, ready, prime, tree, next, tags) take `--project <p>`
+and `--all-projects`, which conflict. Both locate no local project.
+
+`--project <p>` reads that one registered project through the rule `add --project` uses:
+the *registered root*, so a worktree sharing the prefix does not displace it, and the
+scope is `Local` like any other — same output shape, same `prime.prefix`, same claim
+store, same per-project warnings as running the command inside that root. Anything that
+makes the prefix unusable is a `config` error, unreachability included: named explicitly,
+a project that cannot be read is a failure, not an entry to skip.
+
+`--all-projects` reads the registry: a missing root or config is a warning and the entry
+is skipped; a malformed config or a prefix that disagrees with the registry key is a
+config error.
 `projects` applies the same test but reports an unreachable entry as a row with
 reachable=false rather than a warning, since the row is the report; a malformed entry is
 still a config error and emits the two wide-scope warnings (empty registry; current
