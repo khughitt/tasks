@@ -1,30 +1,16 @@
 ---
 id: tasks-13a0b6
-title: "Quick add: low-friction ingest of thoughts, tasks, and ideas across mind6 and tasks"
-status: idea
+title: "Task source field: opaque origin reference set at add, editable, in JSON"
+status: todo
 priority: 2
+size: s
 created: 2026-09-06T21:51:32Z
-updated: 2026-09-06T22:41:11Z
-depends: [mind6-c1c960]
+updated: 2026-09-07T00:07:39Z
+depends: []
 tags: [quick-add, capture, cross-project]
 ---
 
-Given rough, unstructured notes (phone notes, Keep, a pasted list), capture them in a useful form with as little friction as possible. Meta exploration spanning mind6 and tasks; scope into pieces per project once the routing story is clear.
-
-Intake paths:
-1. Copy + paste (e.g. phone notes -> a claude code session). Targets: mindful v6, tasks. Open question: share one tag system across mind6/tasks (ops owns the shared conventions?).
-2. Google Takeout dump. Related earlier draft: keep repo, worktree keep-import, docs/superpowers/plans/2026-08-30-keep-import.md (Takeout JSON -> clustering -> curation packets -> validated import into mindful v3 via POST /thoughts). Revisit against v6.
-
-Possible routing for parsed items:
-- project mentions (tasks, ideas, questions) -> tasks
-- personal: reminders -> leave in Keep; music -> mindful; others -> learn from data / ask the user
-
-Interactive quick add inside a claude code session:
-- "Please create tasks for ..." or a /tasks slash command
-- obvious items: the agent files in batches
-- less obvious: present to the user and ask
-
-Related: mind6-710dcc (atomic linked capture from the CLI).
+Section 3 of the quick-add design (ops docs/specs/2026-09-06-quick-add-design.md, goal ops-a46c09). Add an optional single-line, non-empty source string to the task record: frontmatter between tags and spec, JSON field null when absent (authorized contract change), add --source, edit --source / --no-source, flag completion, README field table, 2026-08-29 design field list, and the shipped skill. tasks never interprets the value; the documented convention is a scheme prefix such as mindful:<id>. No filter flag yet.
 
 ## Notes
 
