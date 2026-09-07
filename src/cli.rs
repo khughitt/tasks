@@ -54,6 +54,10 @@ pub struct FieldArgs {
     /// Make this task part of another task (same project).
     #[arg(long, add = ArgValueCompleter::new(crate::complete::destination_ids))]
     pub parent: Option<String>,
+    /// Where the task came from: an opaque, single-line reference such as a URL or a
+    /// message id. Never interpreted. On `edit` this replaces; see `--no-source`.
+    #[arg(long)]
+    pub source: Option<String>,
 }
 
 /// The flags `edit` adds to the shared field flags.
@@ -71,6 +75,9 @@ pub struct EditArgs {
     /// Clear the parallel marker.
     #[arg(long, conflicts_with = "parallel")]
     pub no_parallel: bool,
+    /// Clear the source.
+    #[arg(long, conflicts_with = "source")]
+    pub no_source: bool,
     /// Remove a tag (repeatable); `--tag` adds one.
     #[arg(long = "rm-tag", value_name = "TAG", conflicts_with = "no_tags")]
     pub rm_tags: Vec<String>,

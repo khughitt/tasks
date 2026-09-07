@@ -4920,6 +4920,85 @@ fn edit_tags_append_and_remove_instead_of_replacing() {
 }
 
 #[test]
+fn source_is_set_by_add_replaced_and_cleared_by_edit() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+
+    let id = id_of(env.json(
+        &dir,
+        &["add", "From mail", "--source", "mail:<42@example.org>"],
+    ));
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["source"],
+        "mail:<42@example.org>"
+    );
+    let raw = env.read(&dir, &format!("tasks/{id}.md"));
+    assert!(
+        raw.contains("tags: []\nsource: \"mail:<42@example.org>\"\n"),
+        "{raw}"
+    );
+    let pretty = env.pretty(&dir, &["show", &id]);
+    assert!(
+        pretty.contains("source: \"mail:<42@example.org>\""),
+        "{pretty}"
+    );
+
+    env.json(
+        &dir,
+        &["edit", &id, "--source", "https://example.org/issues/7"],
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["source"],
+        "https://example.org/issues/7"
+    );
+
+    env.json(&dir, &["edit", &id, "--no-source"]);
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["source"],
+        serde_json::Value::Null
+    );
+    assert!(
+        !env.read(&dir, &format!("tasks/{id}.md"))
+            .contains("source:")
+    );
+
+    // absent is null, never a missing key
+    let plain = id_of(env.json(&dir, &["add", "Plain"]));
+    let shown = env.json(&dir, &["show", &plain]);
+    assert!(shown["task"].get("source").is_some(), "{shown}");
+    assert_eq!(shown["task"]["source"], serde_json::Value::Null);
+
+    // empty and multi-line are validation errors on both write paths
+    assert_eq!(
+        env.fail(&dir, &["add", "Bad", "--source", ""]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&dir, &["add", "Bad", "--source", "a\nb"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&dir, &["edit", &plain, "--source", ""]),
+        "validation"
+    );
+    // clap rejects the conflicting pair before any command runs
+    env.cmd(&dir)
+        .args(["edit", &plain, "--source", "x", "--no-source"])
+        .assert()
+        .code(2);
+
+    // a repository with sourced tasks passes check
+    let check = env.json(&dir, &["check"]);
+    assert_eq!(check["errors"], serde_json::json!([]), "{check}");
+
+    // the flag completes; nothing in complete.rs mentions it
+    let flags = env.complete(&dir, "bash", 3, &["tasks", "add", "T", "--sou"]);
+    assert_eq!(flags, ["--source"]);
+    let flags = env.complete(&dir, "bash", 3, &["tasks", "edit", &plain, "--no-s"]);
+    assert_eq!(flags, ["--no-source"]);
+}
+
+#[test]
 fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
