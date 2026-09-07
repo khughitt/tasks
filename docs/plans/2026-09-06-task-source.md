@@ -22,6 +22,7 @@
 - **`:` is a reserved frontmatter character** (`src/frontmatter.rs:11`), so `render_scalar` quotes any value containing one and `parse_scalar` strips the quotes. Most sources contain `:`; the tests assert both spellings round-trip.
 - **`Task` is constructed as a full struct literal in six places** (`src/commands/add.rs:13`, `src/format.rs:93`, and test helpers in `src/similarity.rs:91`, `src/hierarchy.rs:176`, `src/query.rs:208`, `src/repo.rs:472`). Adding the field breaks all six until each gains `source: None` (or the parsed value).
 - **Gates.** `just check` before every commit (fmt, clippy `-D warnings`, `tasks check`); `just test` is `cargo test`. Rebuild and reinstall after CLI changes: `cargo install --path .`.
+- **Each plan task has a step child under `tasks-13a0b6`** (Task 1: `tasks-6ddc18`, Task 2: `tasks-8480d6`, Task 3: `tasks-db2d78`, Task 4: `tasks-e3f36d`). `tasks start <step>` before its first step and `tasks done <step> "<what landed>"` in the same commit as its code; the commit blocks below include the `done`. The parent refuses `done` while any child is open, so Task 4 cannot close without them.
 - **Composition > inheritance. Explicit > defensive.** No paths like `/home/<user>` in comments or docs.
 - Conventional commits. **No AI-attribution trailers or footers.**
 
@@ -31,7 +32,7 @@
 
 **Files:**
 - Modify: `src/model.rs:227` (the `Task` struct, after `tags`)
-- Modify: `src/format.rs:6-9` (`KEYS`), `:93-118` (parse literal), `:227-265` (`validate_task`), `:280-312` (`serialize_task`)
+- Modify: `src/format.rs:6-10` (`KEYS`), `:93-118` (parse literal), `:227-265` (`validate_task`), `:280-312` (`serialize_task`)
 - Modify: `src/commands/add.rs:13-30` (`blank`)
 - Modify: `src/similarity.rs:91`, `src/hierarchy.rs:176`, `src/query.rs:208`, `src/repo.rs:472` (test helpers)
 - Test: `src/format.rs` tests module (after `parallel_false_in_a_file_is_dropped_on_the_next_write`)
@@ -166,7 +167,8 @@ Run: `just check && just test`
 Expected: clean. `tasks check` passes because no task file in `tasks/` carries `source` yet.
 
 ```bash
-git add src/model.rs src/format.rs src/commands/add.rs src/similarity.rs src/hierarchy.rs src/query.rs src/repo.rs
+tasks done tasks-6ddc18 "source on Task, parsed/validated/written after tags"
+git add src/model.rs src/format.rs src/commands/add.rs src/similarity.rs src/hierarchy.rs src/query.rs src/repo.rs tasks/
 git commit -m "feat(model): optional source field, parsed and written after tags"
 ```
 
@@ -326,7 +328,8 @@ Run: `just check && just test && cargo install --path .`
 Expected: clean; the installed `tasks` now accepts `--source`.
 
 ```bash
-git add src/cli.rs src/commands/mod.rs src/commands/edit.rs tests/cli.rs
+tasks done tasks-8480d6 "--source on add/edit, --no-source on edit, end-to-end test"
+git add src/cli.rs src/commands/mod.rs src/commands/edit.rs tests/cli.rs tasks/
 git commit -m "feat(cli): --source on add and edit, --no-source on edit"
 ```
 
@@ -403,7 +406,8 @@ Expected: PASS. Pretty tables are built from named columns in `table`, so no col
 Run: `just check && just test`
 
 ```bash
-git add src/output.rs tests/cli.rs
+tasks done tasks-db2d78 "source on TaskSummary for list/ready/prime/tree"
+git add src/output.rs tests/cli.rs tasks/
 git commit -m "feat(output): source on summary rows"
 ```
 
@@ -416,7 +420,7 @@ git commit -m "feat(output): source on summary rows"
 - Modify: `docs/specs/2026-09-06-task-source-design.md:3` (status)
 - Modify: `docs/plans/2026-09-06-task-source.md:3` (status)
 - Modify: `skills/tasks/SKILL.md:39`
-- Modify: `README.md:83` (usage examples)
+- Modify: `README.md:74` (usage examples; insert after the `--parent` line)
 
 - [ ] **Step 1: Field table and usage in the main design spec**
 
@@ -471,6 +475,7 @@ In `README.md`, after the `tasks add "Emit rows" --parent sci-4f2a9c` line:
 - [ ] **Step 4: Close the task and commit**
 
 ```bash
+tasks done tasks-e3f36d "field table, usage blocks, skill, README, status lines"
 tasks done tasks-13a0b6 "source field on the record, --source/--no-source, JSON on Task and TaskSummary"
 just check
 git add docs/specs/2026-08-29-tasks-design.md docs/specs/2026-09-06-task-source-design.md docs/plans/2026-09-06-task-source.md skills/tasks/SKILL.md README.md tasks/
