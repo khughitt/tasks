@@ -50,7 +50,7 @@ always means this checkout.
 ## Recording work
 
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --tag <group> [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
   for ordering between the pieces. A goal that is committed work is a `todo` with a
   body, however large; `idea` is for uncommitted thoughts. `done` refuses while any

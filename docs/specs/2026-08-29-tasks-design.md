@@ -371,7 +371,7 @@ Shapes (all fields always present; optional fields are `null`):
 ```
 Task = {
   id, title, status, priority, size, parallel: bool, owner, created, updated,
-  depends: [string], tags: [string], spec, plan, step,
+  depends: [string], tags: [string], source, spec, plan, step,
   body: string,
   notes: [{ at: string, by: string, text: string }]
 }
@@ -379,7 +379,7 @@ Task = {
 ClaimInfo = { owner, session, host, pid, worktree, started, seen, live }
 
 TaskSummary = { id, title, status, priority, size, parallel: bool, owner, created, updated,
-                tags, depends, claim: ClaimInfo|null }
+                tags, source, depends, claim: ClaimInfo|null }
 
 show   -> { task: Task,
             claim: ClaimInfo|null,
