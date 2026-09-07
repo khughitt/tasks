@@ -1,11 +1,12 @@
 ---
 id: tasks-a22dd9
 title: "Built-in duplicate check on add --source: same source and title"
-status: todo
+status: done
 priority: 2
 size: s
+owner: quick-add-primitives
 created: 2026-09-07T08:29:07Z
-updated: 2026-09-07T10:39:15Z
+updated: 2026-09-07T15:56:07Z
 depends: []
 tags: [cli, quick-add]
 ---
@@ -15,3 +16,4 @@ The quick-add skill (ops docs/specs/2026-09-06-quick-add-design.md section 4.2) 
 ## Notes
 
 - 2026-09-07T10:39:15Z (main): No longer speculative: the quick-add skill hand-rolls exactly this, listing every status in the target project and comparing (source, title) in Python before each add.
+- 2026-09-07T15:56:07Z (quick-add-primitives): add --source reuses a task with the same source and title in any status, returning action=reused under the project write lock

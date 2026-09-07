@@ -22,6 +22,18 @@ pub struct IdOut {
     pub warnings: Vec<String>,
 }
 
+/// `add`'s own shape: the id plus what happened to it. `add` is the one write that can
+/// decline to write -- a sourced add whose origin and title already exist reuses that
+/// record -- so the caller needs to tell a fresh id from an old one without parsing
+/// warnings. Same `id, action, warnings` shape `feedback` already returns.
+#[derive(Serialize)]
+pub struct AddOut {
+    pub id: String,
+    /// `created`, or `reused` when `--source` matched an existing task.
+    pub action: String,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Serialize)]
 pub struct RootOut {
     pub prefix: String,
@@ -406,6 +418,7 @@ pub struct CheckOut {
 pub enum Output {
     Init(InitOut),
     Id(IdOut),
+    Add(AddOut),
     Root(RootOut),
     Projects(ProjectsOut),
     Show(Box<ShowOut>),
@@ -430,6 +443,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
     match out {
         Output::Init(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
+        Output::Add(o) => o.id.clone(),
         Output::Root(o) => o.root.clone(),
         Output::Projects(o) if o.projects.is_empty() => String::new(),
         Output::Projects(o) => {
@@ -779,6 +793,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
     match out {
         Output::Init(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
+        Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),
         Output::Projects(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),

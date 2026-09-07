@@ -73,6 +73,8 @@ from a clone):
     tasks add "Bank the ledger" -p 1 --size m --tag ledger
     tasks add "Emit rows" --parent sci-4f2a9c
     tasks add "Reply to Dana" --source "mail:<42@example.org>"  # where it came from; never interpreted
+    tasks add "Reply to Dana" --source "mail:<42@example.org>"  # again: reuses the id, writes nothing
+    tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)
     tasks ready                      # what can be worked on now (JSON)
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
     tasks tree                       # the goal hierarchy

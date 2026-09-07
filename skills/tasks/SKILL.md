@@ -42,6 +42,11 @@ updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates th
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all.
 `--source <ref>` records where a task came from (a URL, a message id, a note); tasks never interprets it.
+`tasks list --source <ref>` finds everything filed from one reference, matched exactly.
+A sourced `add` is idempotent: when the project already holds a task with that same source
+*and* title, in any status, the existing id comes back as `action: "reused"` and nothing is
+written, so refiling a batch from one origin never duplicates. The other flags on a reused
+call are ignored, not merged — `tasks edit` that id if the record should change.
 
 Every command that takes an id writes to the project that id's prefix names, so
 `tasks note`, `tasks dep`, `tasks edit`, and the status commands work on a task in another

@@ -2,7 +2,7 @@
 
 **Status:** implemented (2026-08-29; spec roots extended 2026-09-02; doc roots made
 configurable per project 2026-09-03; hierarchy 2026-09-03; feedback 2026-09-03;
-color 2026-09-03; source 2026-09-06); see
+color 2026-09-03; source 2026-09-06; source dedup and filter 2026-09-07); see
 docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
@@ -224,6 +224,13 @@ tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--par
     --step headings are validated before anything is written. --project creates the
     task in that registered project instead of the current one, validating every field
     against it; no local project is needed. An unregistered prefix is config.
+    With --source, the add is idempotent: if the target project already holds a task
+    with exactly that source and that title, in any status, its id is returned with
+    action "reused" and a warning, and nothing is written — the other flags on that
+    call are ignored, not merged. The scan and the create run under the project write
+    lock, so concurrent reruns cannot both miss; an unsourced add reads nothing and
+    keeps its lock-free path. A malformed task file in the project makes the scan, and
+    so the add, fail rather than file a duplicate it could not see.
 
 tasks show <id>
     The full task with resolved spec/plan paths, each dependency's title and status,
@@ -232,9 +239,13 @@ tasks show <id>
     paths resolved against that project's root; an unregistered or unreachable prefix is
     unresolvable_id.
 
-tasks list [--status S]... [--tag T]... [--owner O] [--project P | --all-projects]
+tasks list [--status S]... [--tag T]... [--owner O] [--source REF]
+           [--project P | --all-projects]
            [--parent ID] [--sort priority|updated|created] [--reverse]
-    Default: open tasks, sorted by priority then updated desc, then id. --sort updated
+    Default: open tasks, sorted by priority then updated desc, then id. --source keeps
+    only tasks whose source equals REF byte for byte — no prefix, substring, or
+    case-folded matching — so it answers "what came from this reference"; closed ones
+    need --status as everywhere. Filters combine as AND. --sort updated
     and --sort created put the most recent first, then id; --reverse flips the chosen
     order. --project reads one registered project and --all-projects walks the whole
     registry; both need no local project (§6).
@@ -400,8 +411,10 @@ prime  -> { prefix, counts: { idea, todo, doing, blocked, done, dropped },
             ready: [TaskSummary], doing: [TaskSummary], warnings }
 init, unregister
        -> { prefix, root, warnings }    unregister reports the root it removed
-add, edit, note, start, done, drop, block, unblock, dep
+edit, note, start, done, drop, block, unblock, dep
        -> { id, warnings }
+add    -> { id, action: "created"|"reused", warnings }
+          "reused" only under --source; see the command above
 
 Task        += parent: string|null
 TaskSummary += parent: string|null,

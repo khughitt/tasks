@@ -1,11 +1,12 @@
 ---
 id: tasks-cc41e7
 title: list --source <ref> filter
-status: todo
+status: done
 priority: 2
 size: xs
+owner: quick-add-primitives
 created: 2026-09-07T08:29:07Z
-updated: 2026-09-07T10:39:15Z
+updated: 2026-09-07T15:56:07Z
 depends: []
 tags: [cli, quick-add]
 ---
@@ -15,3 +16,4 @@ Deferred in docs/specs/2026-09-06-task-source-design.md: list JSON through jq an
 ## Notes
 
 - 2026-09-07T10:39:15Z (main): No longer speculative: the quick-add skill needs to find everything filed from one seed, and today that means listing all statuses and filtering client-side.
+- 2026-09-07T15:56:07Z (quick-add-primitives): list --source <ref> filters on exact equality; composes with the other filters and both read scopes

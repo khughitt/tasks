@@ -13,11 +13,13 @@ fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn list(
     mut ctx: ReadCtx,
     statuses: Vec<String>,
     tags: Vec<String>,
     owner: Option<String>,
+    source: Option<String>,
     parent: Option<String>,
     sort: Option<String>,
     reverse: bool,
@@ -50,10 +52,13 @@ pub fn list(
         let owner_ok = owner
             .as_ref()
             .is_none_or(|value| task.owner.as_ref() == Some(value));
+        let source_ok = source
+            .as_ref()
+            .is_none_or(|value| task.source.as_ref() == Some(value));
         let parent_ok = parent
             .as_ref()
             .is_none_or(|p| task.parent.as_ref() == Some(p));
-        status_ok && tags_ok && owner_ok && parent_ok
+        status_ok && tags_ok && owner_ok && source_ok && parent_ok
     });
     for task in &tasks {
         for dependency in &task.depends {

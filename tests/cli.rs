@@ -5193,6 +5193,142 @@ fn source_is_set_by_add_replaced_and_cleared_by_edit() {
 }
 
 #[test]
+fn a_sourced_add_reuses_the_record_that_origin_and_title_already_made() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+
+    let first = env.json(&dir, &["add", "Ship it", "--source", "note:abc", "-p", "1"]);
+    assert_eq!(first["action"], "created", "{first}");
+    let id = id_of(first);
+
+    // same origin, same title: the existing id comes back and nothing is written
+    let again = env.json(&dir, &["add", "Ship it", "--source", "note:abc", "-p", "4"]);
+    assert_eq!(again["action"], "reused", "{again}");
+    assert_eq!(again["id"], id);
+    assert!(
+        again["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("already carries this source")),
+        "{again}"
+    );
+    // reuse is not a merge: the second call's fields are ignored, not applied
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["priority"], 1);
+    assert_eq!(
+        env.json(&dir, &["list"])["tasks"].as_array().unwrap().len(),
+        1
+    );
+
+    // a closed task still counts; refiling what is already done is the duplicate
+    env.json(&dir, &["done", &id, "shipped"]);
+    let after_done = env.json(&dir, &["add", "Ship it", "--source", "note:abc"]);
+    assert_eq!(after_done["action"], "reused", "{after_done}");
+    assert_eq!(after_done["id"], id);
+
+    // either half differing files afresh, and an unsourced add never dedupes
+    let other_source = env.json(&dir, &["add", "Ship it", "--source", "note:xyz"]);
+    assert_eq!(other_source["action"], "created", "{other_source}");
+    let other_title = env.json(&dir, &["add", "Ship it later", "--source", "note:abc"]);
+    assert_eq!(other_title["action"], "created", "{other_title}");
+    let plain = id_of(env.json(&dir, &["add", "Twice"]));
+    let plain_again = env.json(&dir, &["add", "Twice"]);
+    assert_eq!(plain_again["action"], "created", "{plain_again}");
+    assert_ne!(plain_again["id"], plain);
+
+    // the check follows `--project` to the project actually written
+    let fam = env.init("fam");
+    let piece = env.json(
+        &dir,
+        &["add", "Piece", "--project", "fam", "--source", "note:abc"],
+    );
+    assert_eq!(piece["action"], "created", "{piece}");
+    let piece_again = env.json(
+        &dir,
+        &["add", "Piece", "--project", "fam", "--source", "note:abc"],
+    );
+    assert_eq!(piece_again["action"], "reused", "{piece_again}");
+    assert_eq!(piece_again["id"], piece["id"]);
+    assert_eq!(
+        env.json(&fam, &["list"])["tasks"].as_array().unwrap().len(),
+        1
+    );
+
+    // pretty: the id on stdout as ever, the reuse on stderr, exit 0 either way
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "add", "Ship it", "--source", "note:abc"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), id);
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(stderr.contains("reused it, wrote nothing"), "{stderr}");
+}
+
+#[test]
+fn list_filters_by_exact_source() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let fam = env.init("fam");
+
+    let one = id_of(env.json(&dir, &["add", "One", "--source", "note:abc", "--tag", "x"]));
+    let two = id_of(env.json(&dir, &["add", "Two", "--source", "note:abc"]));
+    env.json(&dir, &["add", "Three", "--source", "note:xyz"]);
+    env.json(&dir, &["add", "Plain"]);
+    let far = id_of(env.json(&fam, &["add", "Far", "--source", "note:abc"]));
+
+    let ids = |v: serde_json::Value| -> Vec<String> {
+        let mut ids: Vec<String> = v["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect();
+        ids.sort();
+        ids
+    };
+    let mut want = vec![one.clone(), two.clone()];
+    want.sort();
+    assert_eq!(ids(env.json(&dir, &["list", "--source", "note:abc"])), want);
+
+    // exact: never a prefix, a substring, or a case-folded match
+    for near in ["note:", "abc", "note:ABC", "note:abcd"] {
+        let v = env.json(&dir, &["list", "--source", near]);
+        assert!(v["tasks"].as_array().unwrap().is_empty(), "{near}: {v}");
+    }
+
+    // composes with the other filters, with the statuses, and with the read scopes
+    assert_eq!(
+        ids(env.json(&dir, &["list", "--source", "note:abc", "--tag", "x"])),
+        vec![one.clone()]
+    );
+    env.json(&dir, &["done", &one, "landed"]);
+    assert_eq!(
+        ids(env.json(&dir, &["list", "--source", "note:abc"])),
+        vec![two.clone()]
+    );
+    assert_eq!(
+        ids(env.json(&dir, &["list", "--source", "note:abc", "--status", "done"])),
+        vec![one.clone()]
+    );
+    assert_eq!(
+        ids(env.json(&fam, &["list", "--project", "sci", "--source", "note:abc"])),
+        vec![two.clone()]
+    );
+    let mut across = vec![two.clone(), far.clone()];
+    across.sort();
+    assert_eq!(
+        ids(env.json(&dir, &["list", "--all-projects", "--source", "note:abc"])),
+        across
+    );
+
+    // the flag completes; nothing in complete.rs mentions it
+    let flags = env.complete(&dir, "bash", 2, &["tasks", "list", "--sour"]);
+    assert_eq!(flags, ["--source"]);
+}
+
+#[test]
 fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

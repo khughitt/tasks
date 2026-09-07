@@ -1,7 +1,7 @@
 # Task source: an opaque origin reference
 
-Status: implemented (2026-09-06)
-Task: tasks-13a0b6
+Status: implemented (2026-09-06); the two deferrals below landed 2026-09-07
+Task: tasks-13a0b6; follow-ups tasks-a22dd9, tasks-cc41e7
 
 ## Problem
 
@@ -39,5 +39,17 @@ validation beyond the rule below.
   clap, so `--source` completes with no completion code.
 - **Pretty output.** `show --pretty` prints the frontmatter line. Tables do not gain a
   column; the JSON carries the field.
-- **Not included.** No filter flag. `tasks list` JSON through `jq` answers "which tasks
-  came from this reference" until that is routine.
+- **Filter.** `tasks list --source <ref>` keeps only tasks whose source equals `<ref>`
+  byte for byte. Exact, like the field itself: no prefix, substring, or case-folded
+  matching, and no interpretation. It combines with the other `list` filters and with
+  both read scopes. `ready` does not gain it; readiness is about what can be worked on,
+  not where it came from.
+- **Duplicate check.** `tasks add --source <ref>` is idempotent. If the target project
+  already holds a task with that exact source *and* that exact title, in any status, the
+  add returns that id with `action: "reused"` and a warning, and writes nothing. Both
+  halves of the key are what a caller can reproduce byte for byte; nothing fuzzy, and no
+  merging of the ignored flags. This makes rerunning a batch filed from one origin safe
+  for every caller, which is why it lives in the tracker rather than in each of them.
+
+  Deferred (2026-09-06) and landed 2026-09-07 once the first real batches showed exact
+  title equality was the right key.

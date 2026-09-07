@@ -170,6 +170,10 @@ pub enum Command {
         tags: Vec<String>,
         #[arg(long)]
         owner: Option<String>,
+        /// Only tasks whose source is exactly this reference; matched byte for byte,
+        /// never interpreted, so it answers "what came from here" for any origin.
+        #[arg(long)]
+        source: Option<String>,
         /// Only direct children of this task.
         #[arg(long, add = ArgValueCompleter::new(crate::complete::scoped))]
         parent: Option<String>,
