@@ -21,7 +21,7 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 `just check` is the seconds-long part (`cargo fmt --check`, `cargo clippy --all-targets
 -- -D warnings`, `tasks check`); `just test` is `cargo test`. Every recipe runs through
 the vendored timing wrapper `tools/tt`, which records the run for the cross-project test
-and CI audit (see ops `docs/specs/2026-09-04-test-ci-audit-design.md`). The git hooks in
+and CI audit (ops `docs/specs/2026-09-04-test-ci-audit-design.md`). The git hooks in
 `.githooks/` run `check` at pre-commit and `gate` at pre-push; on a fresh clone, run
 `git config core.hooksPath .githooks` once.
 
