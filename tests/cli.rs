@@ -4996,6 +4996,33 @@ fn source_is_set_by_add_replaced_and_cleared_by_edit() {
     assert_eq!(flags, ["--source"]);
     let flags = env.complete(&dir, "bash", 3, &["tasks", "edit", &plain, "--no-s"]);
     assert_eq!(flags, ["--no-source"]);
+
+    // summary rows carry it too, so `list` can answer "what came from this reference"
+    let sourced = id_of(env.json(&dir, &["add", "Sourced", "--source", "note:abc"]));
+    let rows = env.json(&dir, &["list"]);
+    let row = rows["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == sourced)
+        .unwrap();
+    assert_eq!(row["source"], "note:abc");
+    let plain_row = rows["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == plain)
+        .unwrap();
+    assert_eq!(plain_row["source"], serde_json::Value::Null);
+    let ready = env.json(&dir, &["ready"]);
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r.get("source").is_some()),
+        "{ready}"
+    );
 }
 
 #[test]
