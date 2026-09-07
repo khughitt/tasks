@@ -1,14 +1,19 @@
 ---
 id: tasks-6ddc18
 title: "Task 1: The source field in the model and on disk"
-status: todo
+status: done
 priority: 2
 size: s
+owner: main
 created: 2026-09-07T01:02:28Z
-updated: 2026-09-07T01:02:28Z
+updated: 2026-09-07T01:35:19Z
 depends: []
 parent: tasks-13a0b6
 tags: [quick-add]
 plan: docs/plans/2026-09-06-task-source.md
 step: "Task 1: The `source` field in the model and on disk"
 ---
+
+## Notes
+
+- 2026-09-07T01:35:19Z (main): source on Task, parsed/validated/written after tags

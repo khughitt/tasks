@@ -482,6 +482,7 @@ mod tests {
             depends: vec![],
             parent: None,
             tags: vec![],
+            source: None,
             spec: None,
             plan: None,
             step: None,

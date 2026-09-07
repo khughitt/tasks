@@ -218,6 +218,7 @@ mod tests {
             depends: deps.iter().map(|d| TaskId::parse(d).unwrap()).collect(),
             parent: None,
             tags: vec![],
+            source: None,
             spec: None,
             plan: None,
             step: None,

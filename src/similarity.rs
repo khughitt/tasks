@@ -101,6 +101,7 @@ mod tests {
             depends: vec![],
             parent: None,
             tags: vec!["feedback".into()],
+            source: None,
             spec: None,
             plan: None,
             step: None,

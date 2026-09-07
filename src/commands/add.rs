@@ -23,6 +23,7 @@ pub fn blank(project: &Project, title: String, status: Status) -> Result<Task> {
         depends: vec![],
         parent: None,
         tags: vec![],
+        source: None,
         spec: None,
         plan: None,
         step: None,

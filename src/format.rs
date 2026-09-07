@@ -3,9 +3,9 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Note, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 15] = [
+const KEYS: [&str; 16] = [
     "id", "title", "status", "priority", "size", "parallel", "owner", "created", "updated",
-    "depends", "parent", "tags", "spec", "plan", "step",
+    "depends", "parent", "tags", "source", "spec", "plan", "step",
 ];
 
 fn perr(file: &str, detail: impl Into<String>) -> Error {
@@ -109,6 +109,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
         tags: list("tags")?,
+        source: scalar("source")?,
         spec: scalar("spec")?,
         plan: scalar("plan")?,
         step: scalar("step")?,
@@ -256,6 +257,9 @@ pub fn validate_task(t: &Task) -> Result<()> {
     for tag in &t.tags {
         validate_line("tag", tag)?;
     }
+    if let Some(source) = &t.source {
+        validate_line("source", source)?;
+    }
     if t.depends.contains(&t.id) {
         return Err(Error::Validation("task cannot depend on itself".into()));
     }
@@ -299,6 +303,9 @@ pub fn serialize_task(t: &Task) -> String {
         pairs.push(("parent".into(), s(&parent.to_string())));
     }
     pairs.push((String::from("tags"), Value::List(t.tags.clone())));
+    if let Some(v) = &t.source {
+        pairs.push(("source".into(), s(v)));
+    }
     if let Some(v) = &t.spec {
         pairs.push(("spec".into(), s(v)));
     }
@@ -524,5 +531,68 @@ mod tests {
             hex: "000001".into(),
         });
         assert!(validate_task(&task).is_err());
+    }
+
+    #[test]
+    fn source_round_trips_bare_and_sits_after_tags() {
+        let text = MINIMAL.replace("tags: []", "tags: []\nsource: keep-note-42");
+        let t = parse_task(&text, "x").unwrap();
+        assert_eq!(t.source.as_deref(), Some("keep-note-42"));
+        let out = serialize_task(&t);
+        assert!(
+            out.contains("tags: []\nsource: keep-note-42\n---\n"),
+            "{out}"
+        );
+        assert_eq!(parse_task(&out, "x").unwrap(), t);
+    }
+
+    #[test]
+    fn source_with_a_colon_is_quoted_on_write_and_unquoted_on_read() {
+        let text = FULL.replace(
+            "tags: [world-index, cut-12]",
+            "tags: [world-index, cut-12]\nsource: \"mail:<42@example.org>\"",
+        );
+        let t = parse_task(&text, "x").unwrap();
+        assert_eq!(t.source.as_deref(), Some("mail:<42@example.org>"));
+        let out = serialize_task(&t);
+        // written after tags, before spec, quoted because of the colon
+        assert!(
+            out.contains(
+                "tags: [world-index, cut-12]\nsource: \"mail:<42@example.org>\"\nspec: docs/specs/"
+            ),
+            "{out}"
+        );
+        assert_eq!(parse_task(&out, "x").unwrap(), t);
+    }
+
+    #[test]
+    fn source_is_omitted_when_absent() {
+        let t = parse_task(MINIMAL, "x").unwrap();
+        assert_eq!(t.source, None);
+        assert!(!serialize_task(&t).contains("source:"));
+    }
+
+    #[test]
+    fn rejects_empty_or_multiline_source() {
+        let err =
+            parse_task(&MINIMAL.replace("tags: []", "tags: []\nsource: \"\""), "x").unwrap_err();
+        assert!(
+            err.to_string().contains("source must not be empty"),
+            "{err}"
+        );
+
+        let mut t = parse_task(MINIMAL, "x").unwrap();
+        t.source = Some("a\nb".into());
+        let err = validate_task(&t).unwrap_err();
+        assert!(
+            err.to_string().contains("source must be a single line"),
+            "{err}"
+        );
+        t.source = Some(String::new());
+        let err = validate_task(&t).unwrap_err();
+        assert!(
+            err.to_string().contains("source must not be empty"),
+            "{err}"
+        );
     }
 }

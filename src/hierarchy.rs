@@ -186,6 +186,7 @@ mod tests {
             depends: vec![],
             parent: parent.map(|p| TaskId::parse(p).unwrap()),
             tags: vec![],
+            source: None,
             spec: None,
             plan: None,
             step: None,

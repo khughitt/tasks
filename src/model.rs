@@ -225,6 +225,10 @@ pub struct Task {
     pub depends: Vec<TaskId>,
     pub parent: Option<TaskId>,
     pub tags: Vec<String>,
+    /// Where the task came from: an opaque, single-line reference such as a URL or a
+    /// message id. Stored and returned, never interpreted or resolved. See
+    /// docs/specs/2026-09-06-task-source-design.md.
+    pub source: Option<String>,
     pub spec: Option<String>,
     pub plan: Option<String>,
     pub step: Option<String>,
