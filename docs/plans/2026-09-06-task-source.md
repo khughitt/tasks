@@ -1,6 +1,6 @@
 # Task Source Implementation Plan
 
-**Status:** not started (2026-09-06)
+**Status:** implemented (2026-09-06)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -40,7 +40,7 @@
 **Interfaces:**
 - Produces: `Task.source: Option<String>`; frontmatter key `source`; `validate_task` rejects empty/multi-line.
 
-- [ ] **Step 1: Write the failing unit tests**
+- [x] **Step 1: Write the failing unit tests**
 
 Add to the `tests` module at the bottom of `src/format.rs`, after `parallel_false_in_a_file_is_dropped_on_the_next_write`:
 
@@ -97,12 +97,12 @@ Add to the `tests` module at the bottom of `src/format.rs`, after `parallel_fals
     }
 ```
 
-- [ ] **Step 2: Run them to verify they fail to compile**
+- [x] **Step 2: Run them to verify they fail to compile**
 
 Run: `cargo test --bin tasks source_`
 Expected: compile error, `no field 'source' on type Task`.
 
-- [ ] **Step 3: Add the field to the model**
+- [x] **Step 3: Add the field to the model**
 
 In `src/model.rs`, inside `pub struct Task`, after `pub tags: Vec<String>,`:
 
@@ -113,7 +113,7 @@ In `src/model.rs`, inside `pub struct Task`, after `pub tags: Vec<String>,`:
     pub source: Option<String>,
 ```
 
-- [ ] **Step 4: Parse, validate, and write it**
+- [x] **Step 4: Parse, validate, and write it**
 
 In `src/format.rs`:
 
@@ -150,18 +150,18 @@ In `serialize_task`, right after `pairs.push((String::from("tags"), Value::List(
 
 `s` is the existing `Value::Scalar` closure; `render_scalar` quotes the value when it contains a reserved character, which is what the colon test asserts.
 
-- [ ] **Step 5: Fix every `Task` literal**
+- [x] **Step 5: Fix every `Task` literal**
 
 Run: `cargo build --all-targets 2>&1 | grep -n 'missing field'`
 
 Add `source: None,` after the `tags:` line in each literal the compiler names. There are five besides `parse_task`: `blank` in `src/commands/add.rs`, and the test helpers `feedback_task` in `src/similarity.rs`, `task` in `src/hierarchy.rs`, `t` in `src/query.rs`, `sample` in `src/repo.rs`. Rerun the build until it is clean.
 
-- [ ] **Step 6: Run the unit tests**
+- [x] **Step 6: Run the unit tests**
 
 Run: `cargo test --bin tasks source_ && cargo test --bin tasks format::`
 Expected: the four new tests pass; every existing `format::tests` test still passes. The `FULL` fixture is unchanged, so `full_roundtrip` is unaffected.
 
-- [ ] **Step 7: Run the gate and commit**
+- [x] **Step 7: Run the gate and commit**
 
 Run: `just check && just test`
 Expected: clean. `tasks check` passes because no task file in `tasks/` carries `source` yet.
@@ -186,7 +186,7 @@ git commit -m "feat(model): optional source field, parsed and written after tags
 - Consumes: `Task.source` from Task 1.
 - Produces: `FieldArgs.source: Option<String>`, `EditArgs.no_source: bool`.
 
-- [ ] **Step 1: Write the failing end-to-end test**
+- [x] **Step 1: Write the failing end-to-end test**
 
 Append to `tests/cli.rs`:
 
@@ -259,12 +259,12 @@ fn source_is_set_by_add_replaced_and_cleared_by_edit() {
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cargo test --test cli source_is_set`
 Expected: FAIL. `add` exits with a clap error, `unexpected argument '--source'`, so the first `env.json` panics.
 
-- [ ] **Step 3: Add the flags**
+- [x] **Step 3: Add the flags**
 
 In `src/cli.rs`, inside `FieldArgs` after the `parent` field:
 
@@ -283,7 +283,7 @@ Inside `EditArgs`, after `no_parallel`:
     pub no_source: bool,
 ```
 
-- [ ] **Step 4: Apply the flags**
+- [x] **Step 4: Apply the flags**
 
 In `src/commands/mod.rs`, extend the import on line 20:
 
@@ -317,12 +317,12 @@ and after the `if args.no_parallel { task.parallel = false; }` block:
 
 `apply_fields` runs after this, so `--no-source` alone clears and `--source` alone replaces; clap forbids both together.
 
-- [ ] **Step 5: Run the test**
+- [x] **Step 5: Run the test**
 
 Run: `cargo test --test cli source_is_set`
 Expected: PASS. Bash completion emits bare values (zsh is the shell that appends `:description`), and `--sou` / `--no-s` are prefixes only these two flags match on `add` / `edit`, so the two completion assertions hold with no change to `src/complete.rs`.
 
-- [ ] **Step 6: Run the gate and commit**
+- [x] **Step 6: Run the gate and commit**
 
 Run: `just check && just test && cargo install --path .`
 Expected: clean; the installed `tasks` now accepts `--source`.
@@ -345,7 +345,7 @@ git commit -m "feat(cli): --source on add and edit, --no-source on edit"
 - Consumes: `Task.source`.
 - Produces: `TaskSummary.source: Option<String>`, so `list`, `ready`, `prime`, and `tree` rows carry it.
 
-- [ ] **Step 1: Write the failing assertions**
+- [x] **Step 1: Write the failing assertions**
 
 Add to the end of `source_is_set_by_add_replaced_and_cleared_by_edit` in `tests/cli.rs`:
 
@@ -377,12 +377,12 @@ Add to the end of `source_is_set_by_add_replaced_and_cleared_by_edit` in `tests/
     );
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cargo test --test cli source_is_set`
 Expected: FAIL at `assert_eq!(row["source"], "note:abc")` with `Null`.
 
-- [ ] **Step 3: Add the summary field**
+- [x] **Step 3: Add the summary field**
 
 In `src/output.rs`, inside `pub struct TaskSummary` after `pub tags: Vec<String>,`:
 
@@ -396,12 +396,12 @@ In `TaskSummary::of`, after `tags: task.tags.clone(),`:
             source: task.source.clone(),
 ```
 
-- [ ] **Step 4: Run the test**
+- [x] **Step 4: Run the test**
 
 Run: `cargo test --test cli source_is_set`
 Expected: PASS. Pretty tables are built from named columns in `table`, so no column appears and no pretty snapshot changes.
 
-- [ ] **Step 5: Run the gate and commit**
+- [x] **Step 5: Run the gate and commit**
 
 Run: `just check && just test`
 
@@ -422,7 +422,7 @@ git commit -m "feat(output): source on summary rows"
 - Modify: `skills/tasks/SKILL.md:39`
 - Modify: `README.md:74` (usage examples; insert after the `--parent` line)
 
-- [ ] **Step 1: Field table and usage in the main design spec**
+- [x] **Step 1: Field table and usage in the main design spec**
 
 In `docs/specs/2026-08-29-tasks-design.md` §3.1, insert after the `tags` row:
 
@@ -448,7 +448,7 @@ tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
 
 Extend the status header on line 3-6 with `source 2026-09-06` inside the parenthetical list, after `color 2026-09-03`.
 
-- [ ] **Step 2: Skill and README**
+- [x] **Step 2: Skill and README**
 
 In `skills/tasks/SKILL.md` line 39, extend the flag list:
 
@@ -468,11 +468,11 @@ In `README.md`, after the `tasks add "Emit rows" --parent sci-4f2a9c` line:
     tasks add "Reply to Dana" --source "mail:<42@example.org>"  # where it came from; never interpreted
 ```
 
-- [ ] **Step 3: Status lines**
+- [x] **Step 3: Status lines**
 
 `docs/specs/2026-09-06-task-source-design.md` line 3: `Status: implemented (2026-09-06)` with the actual date. `docs/plans/2026-09-06-task-source.md` line 3: `**Status:** implemented (<date>)`.
 
-- [ ] **Step 4: Close the task and commit**
+- [x] **Step 4: Close the task and commit**
 
 ```bash
 tasks done tasks-e3f36d "field table, usage blocks, skill, README, status lines"

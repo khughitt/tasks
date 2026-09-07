@@ -1,11 +1,11 @@
 ---
 id: tasks-13a0b6
 title: "Task source field: opaque origin reference set at add, editable, in JSON"
-status: todo
+status: done
 priority: 2
 size: s
 created: 2026-09-06T21:51:32Z
-updated: 2026-09-07T01:02:28Z
+updated: 2026-09-07T01:56:15Z
 depends: []
 tags: [quick-add, capture, cross-project]
 spec: docs/specs/2026-09-06-task-source-design.md
@@ -17,3 +17,4 @@ Section 3 of the quick-add design (ops docs/specs/2026-09-06-quick-add-design.md
 ## Notes
 
 - 2026-09-06T22:41:11Z (main): Defer the Google Takeout path: earlier plan and the 2026-08-30 Takeout dataset live in the keep repo's keep-import worktree; revisit after paste + interactive quick add
+- 2026-09-07T01:56:15Z (main): source field on the record, --source/--no-source, JSON on Task and TaskSummary

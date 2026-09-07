@@ -36,10 +36,11 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 7. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all.
+`--source <ref>` records where a task came from (a URL, a message id, a note); tasks never interprets it.
 
 Every command that takes an id writes to the project that id's prefix names, so
 `tasks note`, `tasks dep`, `tasks edit`, and the status commands work on a task in another

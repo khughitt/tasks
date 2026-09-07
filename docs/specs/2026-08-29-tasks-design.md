@@ -2,7 +2,7 @@
 
 **Status:** implemented (2026-08-29; spec roots extended 2026-09-02; doc roots made
 configurable per project 2026-09-03; hierarchy 2026-09-03; feedback 2026-09-03;
-color 2026-09-03); see
+color 2026-09-03; source 2026-09-06); see
 docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
@@ -119,6 +119,7 @@ Free-form markdown body.
 | `depends`  | list of ids         | yes      | May be empty. Foreign prefixes allowed (§6). |
 | `parent`   | task id             | no       | Same project; must exist; a task cannot be its own ancestor. Written after `depends`. |
 | `tags`     | list of strings     | yes      | May be empty. The only grouping mechanism. |
+| `source`   | string              | no       | Opaque origin reference (a URL, a message id); single line; never interpreted. Written after `tags`. See `2026-09-06-task-source-design.md`. |
 | `spec`     | repo-relative path  | no       | Must be an existing file under one of the project's spec roots (§2). |
 | `plan`     | repo-relative path  | no       | Must be an existing file under one of the project's plan roots (§2). |
 | `step`     | string              | no       | Exact text of a heading inside `plan`. Requires `plan`. |
@@ -216,7 +217,7 @@ tasks unregister <prefix>
 
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
-          [--parent ID] [--project PREFIX]
+          [--source REF] [--parent ID] [--project PREFIX]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
     repo-relative path under a configured root or a bare name resolved as the unique
     match across the configured roots (error on 0 or >1 matches). --depends ids and
@@ -259,6 +260,7 @@ tasks ready [--size S] [--parallel] [-n N] [--all-projects]
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
            [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
+           [--source REF | --no-source]
     With flags: update those fields. Without flags: open an editable copy in $EDITOR
     (§5.2). Either way the result is validated against §3 and the invariants in §5.3
     before it replaces the original. --tag adds (repeats are no-ops) rather than

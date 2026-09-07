@@ -1,6 +1,6 @@
 # Task source: an opaque origin reference
 
-Status: designed (2026-09-06); not implemented
+Status: implemented (2026-09-06)
 Task: tasks-13a0b6
 
 ## Problem
