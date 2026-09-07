@@ -5,9 +5,10 @@ status: done
 priority: 2
 size: s
 created: 2026-09-06T21:51:32Z
-updated: 2026-09-07T01:56:15Z
+updated: 2026-09-07T08:21:06Z
 depends: []
 tags: [quick-add, capture, cross-project]
+source: "mindful:thought:455894a15b734fdf93dec0d9d84e20ab"
 spec: docs/specs/2026-09-06-task-source-design.md
 plan: docs/plans/2026-09-06-task-source.md
 ---
