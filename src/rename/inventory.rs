@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Persisted by the rename command in Task 11.
-
 use crate::error::{Error, Result};
 use crate::model::{TaskId, is_valid_prefix};
 use crate::repo::{CONFIG_REL, Project, atomic_write};
@@ -51,6 +49,7 @@ pub fn rewrite_config_prefix(text: &str, target: &str) -> Result<String> {
 }
 
 impl Inventory {
+    #[allow(dead_code)] // The rename command builds the baseline in Task 11.
     pub fn build(project: &Project, target: &str) -> Result<Inventory> {
         validate_prefix(&project.prefix)?;
         validate_prefix(target)?;
@@ -130,6 +129,7 @@ impl Inventory {
         Ok(base.join(format!("tasks/rename/{source}.toml")))
     }
 
+    #[allow(dead_code)] // The rename command loads pending baselines in Task 11.
     pub fn load(source: &str) -> Result<Option<Inventory>> {
         Self::load_from(&Self::path(source)?)
     }
@@ -153,6 +153,7 @@ impl Inventory {
         Ok(Some(inventory))
     }
 
+    #[allow(dead_code)] // The rename command persists the baseline in Task 11.
     pub fn save(&self) -> Result<()> {
         self.save_to(&Self::path(&self.source)?)
     }
@@ -170,6 +171,7 @@ impl Inventory {
         )
     }
 
+    #[allow(dead_code)] // The rename command removes the baseline in Task 11.
     pub fn remove(&self) -> Result<()> {
         Self::remove_from(&Self::path(&self.source)?)
     }
@@ -182,6 +184,7 @@ impl Inventory {
         }
     }
 
+    #[allow(dead_code)] // The rename command checks pending names in Task 11.
     pub fn pending() -> Result<Vec<Inventory>> {
         let directory = Self::path("aa")?
             .parent()

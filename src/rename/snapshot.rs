@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Consumed by the recovery classifier and rename command in Tasks 10-11.
-
 use crate::error::{Error, Result};
 use crate::model::{TaskId, is_valid_prefix};
 use crate::registry::Registry;
@@ -64,6 +62,7 @@ struct ConfigPrefix {
     prefix: String,
 }
 
+#[allow(dead_code)] // The rename command observes before classification in Task 11.
 pub fn observe(
     registry: &Registry,
     invocation: &Invocation,

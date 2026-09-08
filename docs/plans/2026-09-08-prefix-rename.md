@@ -1287,7 +1287,7 @@ Pure: no filesystem, no locks. Refusals R1–R8 are decided **before** the table
 earlier row that is too broad swallows a bad state the trailing row can then never see.
 R1–R6 apply only when the inventory is present; R7–R8 read the registry and always apply.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `src/rename/classify.rs` — the enumeration is the point, so build snapshots directly:
 
@@ -1407,12 +1407,12 @@ of length 0, 1, and 2 over `source` × 3 and `dest` × 3. Include inventory-abse
 carrying entries and inventory-present ones carrying none, so a predicate reaching for a
 baseline that is not there is caught rather than assumed away.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --bin tasks rename::classify`
 Expected: FAIL — module does not exist.
 
-- [ ] **Step 3: Implement refusals first, then the table**
+- [x] **Step 3: Implement refusals first, then the table**
 
 ```rust
 pub fn classify(snap: &Snapshot) -> Recovery {
@@ -1446,12 +1446,12 @@ pub fn classify(snap: &Snapshot) -> Recovery {
 
 `refusal` implements R1–R8 in order, each returning its own sentence naming what it saw.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --bin tasks rename::classify` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
