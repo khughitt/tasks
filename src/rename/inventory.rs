@@ -254,10 +254,17 @@ pub(crate) fn task_paths(directory: &Path) -> Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for entry in std::fs::read_dir(directory)? {
         let path = entry?.path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        if path.extension() != Some(std::ffi::OsStr::new("md")) {
             continue;
-        };
-        if !name.starts_with('.') && name.ends_with(".md") {
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| Error::Parse {
+                file: path.display().to_string(),
+                detail: "filename is not valid UTF-8".into(),
+            })?;
+        if !name.starts_with('.') {
             paths.push(path);
         }
     }
