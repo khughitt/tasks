@@ -188,26 +188,55 @@ between those two specific values.
 ### 5.3 Resume
 
 There is no journal. A journal could not be trusted here in any case: `atomic_write` does
-no `fsync` (§9), so a marker file is no more durable than the state it describes. The
-three interruption states are instead distinguishable from the world itself:
+no `fsync` (§9), so a marker file is no more durable than the state it describes. Recovery
+state is derived from the world instead.
 
-| Observed | Meaning | Action |
-|---|---|---|
-| config `old`, some files carry `new` | interrupted in P2/P3 | finish the file pass, then P3 |
-| config `new`, registry key `old` | interrupted at P4 | finish the registry (reached only by opening the recorded root directly, §5.2) |
-| config `new`, registry `new`, alias recorded | already complete | report and exit 0 |
+The derivation is a **pure function**, `classify(snapshot) -> Recovery`, borrowed in shape
+from atoms' A3 executable recovery model
+(`python/src/atoms/core/recovery/classifier.py`). It touches no filesystem: the caller
+observes once, and the classifier decides. That is what makes the recovery model testable
+as a unit over its whole state space rather than only at the boundaries an integration
+test happens to interrupt at (§8).
+
+```
+Snapshot = { registry_key: Old | New | Absent,
+             config_prefix: Old | New | Other,
+             files: [(hex, source: Present | Absent,
+                           dest: Absent | Expected | Conflicting)],
+             dirty: [path] }
+
+Recovery = Fresh | ResumeFiles | ResumeRegistry | Complete | Refuse(reason)
+```
+
+| Observed | Recovery |
+|---|---|
+| config `old`, no file carries `new`, `tasks/` clean | `Fresh` |
+| config `old`, some files carry `new` | `ResumeFiles` — finish the file pass, then P3 |
+| config `new`, registry key `old` | `ResumeRegistry` (reached only by opening the recorded root directly, §5.2) |
+| config `new`, registry `new`, alias recorded | `Complete` — report and exit 0 |
+| anything else | `Refuse`, naming what was observed |
+
+**The set is closed.** The final row is not a formality: any observation that does not
+match an enumerated state is a refusal that says what it saw, never a best-effort guess.
+This is the difference between "we thought of these cases" and "unlisted cases fail
+loudly", and it is the property the exhaustive unit tests in §8 actually check.
+
+**Classification is separate from authorization.** `classify` decides *what happened*; it
+is pure, needs no locks, and can be run to explain a situation. Acting on its verdict is a
+second decision, taken only while holding both prefix locks and after post-lock
+revalidation (§6). A `Recovery` value is never itself permission to write.
 
 The dirty check is **verified on resume, not skipped**. An alias alone is not evidence of
 an interrupted rename — it equally describes a completed one — so skipping the check
 whenever an alias exists would wave unrelated edits through. Instead every dirty path must
 be an expected member of the rename set: a deleted `old-<hex>.md`, an added `new-<hex>.md`
 whose bytes equal the expected transformation of its source, or the modified
-`.config.toml`. Anything else refuses and names the file. Content, not a marker, is what
-separates an interrupted rename from a conflicting edit.
+`.config.toml`. Anything else classifies as `Refuse` and names the file. Content, not a
+marker, is what separates an interrupted rename from a conflicting edit.
 
-At a file boundary a crash can leave both source and destination present. On resume the
-source is removed only if the destination equals the expected transformation of it;
-otherwise the command refuses, naming both paths.
+At a file boundary a crash can leave both source and destination present: that is the
+`dest: Expected` case, and the source is removed only if the destination equals the
+expected transformation of it. `dest: Conflicting` is a `Refuse` naming both paths.
 
 ### 5.4 `unregister` and `init`
 
@@ -254,6 +283,13 @@ the re-resolved context.
 
 Claims are checked under the lock, not before it.
 
+**Authorization is the second decision.** §5.3's `classify` says what happened; it is pure,
+holds nothing, and may be run at any time — including to explain a situation to a human. It
+never confers permission. Authorization is separate and requires all three: both prefix
+locks held, the registry and config re-resolved under them, and the snapshot re-observed
+after the locks were taken, since the snapshot that produced the verdict may predate them.
+A `Recovery` value computed before the locks is a diagnosis, not a warrant.
+
 ## 7. Command surface and JSON contract
 
 ```
@@ -289,6 +325,21 @@ Unit: `canonical_prefix` and `canonical_id` (alias hit, miss, live prefix unchan
 `load_from` rejects a dangling alias target and an alias colliding with a live prefix; a
 registry with no `[aliases]` table loads unchanged.
 
+**The recovery classifier is unit-tested over its whole state space, not sampled.** Because
+`classify` (§5.3) is pure, its input is small enough to enumerate: `registry_key` × 3,
+`config_prefix` × 3, and a file list whose entries range over `source` × 2 and `dest` × 3.
+Tests generate every combination up to a small file count and assert two properties:
+
+- every enumerated state maps to the `Recovery` the §5.3 table names
+- **every state outside that table maps to `Refuse`** — asserted by construction over the
+  generated space, not by listing the cases someone thought of
+
+This is the property the closed set exists for, and it is why the classifier is pure: the
+end-to-end interruption tests below can only sample the boundaries an integration test
+happens to stop at, whereas this covers the space. The two are complementary — the
+enumeration proves the classifier total, the interruption tests prove the observer feeds it
+the truth.
+
 End to end (`tests/cli.rs`):
 
 - ids, filenames, and local `depends` / `parent` rewritten; body and notes byte-identical,
@@ -311,7 +362,9 @@ End to end (`tests/cli.rs`):
   `init --prefix <alias>` is refused
 - **interruption after every mutation boundary**: mid file pass, between the file pass and
   the config write, between the config write and the registry write, and between the
-  registry write and the claim-store removal — each resumed by re-running the command
+  registry write and the claim-store removal — each resumed by re-running the command.
+  These check that the *observer* reports the world faithfully; that the classifier then
+  decides correctly is the enumerated unit test's job, not theirs
 - a conflicting duplicate at a resumed file boundary refuses and names both paths
 - dirty recovery: an unrelated edit present alongside a half-finished rename refuses
 - concurrent writers: a writer waiting on the prefix lock during a rename re-resolves and
