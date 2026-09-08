@@ -836,7 +836,7 @@ git commit -m "feat(registry): drop a project's aliases with the project"
 `Registry::load` → mutate → `save` is an unserialized read-modify-write: atomic replacement
 prevents a torn file, not a lost update.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 The window is microseconds wide, so spawning two processes and hoping they collide is not a
 test. Hold the registry lock from the test, start both children, confirm they are blocked,
@@ -880,13 +880,13 @@ fn concurrent_registry_writes_do_not_lose_each_other() {
 
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli -- concurrent_registry_writes`
 Expected: FAIL deterministically — with no `projects.lock` taken by the binary the children
 do not block, so `try_wait` finds one already finished.
 
-- [ ] **Step 3: Serialize the registry and lock `add`**
+- [x] **Step 3: Serialize the registry and lock `add`**
 
 In `src/registry.rs`:
 
@@ -991,12 +991,12 @@ Each builds its `Ctx` with `lock: None`, then calls `lock_and_revalidate(&mut ct
 The freeze (`reject_pending_rename`) is **not** called here yet — it arrives with the command
 it protects, in Task 11, which adds the call to this helper. Task 7 must compile on its own.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- concurrent_registry_writes` — Expected: PASS, repeatedly.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code

@@ -16,6 +16,7 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
         Some(prefix) => prefix,
         None => default_prefix(&root)?,
     };
+    let _lock = Registry::lock()?;
     let mut registry = Registry::load()?;
     // The registry is only mutated in memory here: `save` runs after `Project::init`, so
     // an init that fails leaves the registry exactly as it was.

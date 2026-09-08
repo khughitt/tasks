@@ -317,6 +317,8 @@ fn read_commands_do_not_take_the_mutation_lock() {
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
     let lock = env.claim_store("sci").with_file_name("sci.lock");
+    // The setup add took the lock; reads must not create it again.
+    std::fs::remove_file(&lock).unwrap();
 
     env.json(&sci, &["show", &id]);
     env.json(&sci, &["check"]);
@@ -6510,4 +6512,254 @@ fn tree_routes_a_bare_id_by_its_prefix_like_show() {
     let here = id_of(env.json(&sci, &["add", "Here", "-p", "2"]));
     let v = env.json(&sci, &["tree", &here]);
     assert_eq!(v["nodes"][0]["id"], here, "{v}");
+}
+
+#[test]
+fn concurrent_registry_writes_do_not_lose_each_other() {
+    let env = TestEnv::new();
+    let dirs: Vec<_> = (0..2).map(|_| tempfile::tempdir().unwrap()).collect();
+    let lock_path = env.home.path().join(".config/tasks/projects.lock");
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let held = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(lock_path)
+        .unwrap();
+    held.lock().unwrap();
+    let mut children: Vec<_> = ["aaa", "bbb"]
+        .iter()
+        .zip(&dirs)
+        .map(|(prefix, dir)| {
+            env.raw(dir.path())
+                .args(["init", "--prefix", prefix])
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    let blocked = children
+        .iter_mut()
+        .all(|child| child.try_wait().unwrap().is_none());
+    drop(held);
+    let outputs: Vec<_> = children
+        .into_iter()
+        .map(|child| reap(child, REAP))
+        .collect();
+    assert!(blocked, "a registry writer ran without the lock");
+    for output in outputs {
+        assert!(output.unwrap().status.success());
+    }
+    let text = env.read(env.home.path(), ".config/tasks/projects.toml");
+    assert!(text.contains("aaa = ") && text.contains("bbb = "), "{text}");
+}
+
+#[test]
+fn unregister_reloads_the_registry_after_waiting_for_its_lock() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let held = File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(env.home.path().join(".config/tasks/projects.lock"))
+        .unwrap();
+    held.lock().unwrap();
+    let mut child = env.raw(&sci).args(["unregister", "sci"]).spawn().unwrap();
+    let blocked = !wait_bounded(&mut child, Duration::from_millis(300));
+    alias_registry(&env, "family", "fam");
+    drop(held);
+    let out = reap(child, REAP).unwrap();
+    assert!(blocked, "unregister ignored the registry lock");
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        env.json(&fam, &["root", "family-000001"])["root"],
+        fam.to_str().unwrap()
+    );
+}
+
+#[test]
+fn add_revalidates_local_config_and_registered_routing_after_locking() {
+    for (registered, sourced) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut env = TestEnv::new();
+        let local = env.init("sci");
+        let root = env.init_forced("sci");
+        let held = hold_project_lock(&env, "sci");
+        let mut command = env.raw(&local);
+        command.args(["add", "Waiting"]);
+        if sourced {
+            command.args(["--source", "test"]);
+        }
+        if registered {
+            command.args(["--project", "sci"]);
+        }
+        let mut child = command.spawn().unwrap();
+        let blocked = !wait_bounded(&mut child, Duration::from_millis(300));
+        let target = if registered { &root } else { &local };
+        std::fs::write(target.join("tasks/.config.toml"), "prefix = \"fresh\"\n").unwrap();
+        if registered {
+            let path = env.home.path().join(".config/tasks/projects.toml");
+            std::fs::write(
+                path,
+                format!(
+                    "[projects]\nfresh = {:?}\n[aliases]\nsci = \"fresh\"\n",
+                    root.to_str().unwrap()
+                ),
+            )
+            .unwrap();
+        }
+        drop(held);
+        let out = reap(child, REAP).unwrap();
+        assert!(blocked, "add ignored the project lock");
+        assert!(out.status.success(), "{out:?}");
+        let output: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let id = output["id"].as_str().unwrap();
+        assert!(id.starts_with("fresh-"), "{output}");
+        assert!(target.join(format!("tasks/{id}.md")).exists());
+        let other = if registered { &local } else { &root };
+        assert!(!other.join(format!("tasks/{id}.md")).exists());
+    }
+}
+
+#[test]
+fn feedback_create_and_recur_revalidate_only_the_registered_target() {
+    for recur in [false, true] {
+        let (env, target, source) = feedback_env();
+        let original = env.json(
+            &source,
+            &["feedback", "Original report", "--category", "gap", "--new"],
+        );
+        let id = original["id"].as_str().unwrap();
+        let original_raw = env.read(&target, &format!("tasks/{id}.md"));
+        let source_held = hold_project_lock(&env, "sci");
+        let held = hold_project_lock(&env, "tasks");
+        let mut command = env.raw(&source);
+        command.args(["feedback", "Another report", "--category", "gap"]);
+        if recur {
+            command.args(["--recur", id]);
+        } else {
+            command.arg("--new");
+        }
+        let mut child = command.spawn().unwrap();
+        let blocked = !wait_bounded(&mut child, Duration::from_millis(300));
+        let new_id = id.replacen("tasks-", "tracker-", 1);
+        std::fs::write(target.join("tasks/.config.toml"), "prefix = \"tracker\"\n").unwrap();
+        std::fs::rename(
+            target.join(format!("tasks/{id}.md")),
+            target.join(format!("tasks/{new_id}.md")),
+        )
+        .unwrap();
+        std::fs::write(
+            target.join(format!("tasks/{new_id}.md")),
+            original_raw.replacen(id, &new_id, 1),
+        )
+        .unwrap();
+        let path = env.home.path().join(".config/tasks/projects.toml");
+        let text = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("tasks = ", "tracker = ");
+        std::fs::write(&path, text).unwrap();
+        alias_registry(&env, "tasks", "tracker");
+        drop(held);
+        let out = reap(child, REAP);
+        drop(source_held);
+        assert!(blocked, "feedback ignored the target lock");
+        let out = out.expect("feedback took the source lock or deadlocked");
+        assert!(out.status.success(), "{out:?}");
+        let output: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let result_id = output["id"].as_str().unwrap();
+        assert!(result_id.starts_with("tracker-"), "{output}");
+        let raw = env.read(&target, &format!("tasks/{result_id}.md"));
+        assert!(raw.contains("from:sci"), "{raw}");
+        if recur {
+            assert!(raw.contains("feedback from sci: Another report"), "{raw}");
+        }
+        // Starting with the retired target name must also work.
+        env.json(
+            &source,
+            &["feedback", "Third report", "--category", "gap", "--new"],
+        );
+    }
+}
+
+#[test]
+fn editor_revalidation_keeps_the_edit_when_the_local_prefix_is_retired() {
+    let mut env = TestEnv::new();
+    let local = env.init("sci");
+    let live = env.init("fresh");
+    let id = id_of(env.json(&local, &["add", "Original"]));
+    let original = env.read(&local, &format!("tasks/{id}.md"));
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let editor = editor_script(
+        &local,
+        &format!(
+            "sed -i 's/^title: Original$/title: Edited/' \"$1\"\nprintf '[projects]\\nfresh = \"{}\"\\n[aliases]\\nsci = \"fresh\"\\n' > \"{}\"",
+            live.display(),
+            registry.display()
+        ),
+    );
+    let out = env
+        .cmd(&local)
+        .env("EDITOR", editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "editor wrote after its prefix was retired"
+    );
+    assert_eq!(err_kind(&out), "config");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(".edit.md"),
+        "{error}"
+    );
+    assert_eq!(env.read(&local, &format!("tasks/{id}.md")), original);
+    assert!(
+        std::fs::read_dir(local.join("tasks"))
+            .unwrap()
+            .any(|entry| {
+                let path = entry.unwrap().path();
+                path.to_string_lossy().ends_with(".edit.md")
+                    && std::fs::read_to_string(path)
+                        .unwrap()
+                        .contains("title: Edited")
+            })
+    );
+}
+
+#[test]
+fn id_writer_revalidates_doc_roots_even_when_identity_is_unchanged() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Original"]));
+    std::fs::create_dir(dir.join("changed")).unwrap();
+    std::fs::write(dir.join("changed/new-spec.md"), "# New spec\n").unwrap();
+    let held = hold_project_lock(&env, "sci");
+    let mut child = env
+        .raw(&dir)
+        .args(["edit", &id, "--spec", "new-spec"])
+        .spawn()
+        .unwrap();
+    let blocked = !wait_bounded(&mut child, Duration::from_millis(300));
+    std::fs::write(
+        dir.join("tasks/.config.toml"),
+        "prefix = \"sci\"\nspec_dirs = [\"changed\"]\n",
+    )
+    .unwrap();
+    drop(held);
+    let out = reap(child, REAP).unwrap();
+    assert!(blocked);
+    assert!(
+        out.status.success(),
+        "writer used stale document roots: {out:?}"
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["spec"],
+        "changed/new-spec.md"
+    );
 }

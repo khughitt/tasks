@@ -37,8 +37,9 @@ pub struct Ctx {
     pub project: Project,
     pub registry: Registry,
     pub warnings: Vec<String>,
-    /// Held for a write command; absent from read and create-only commands.
+    /// Held for a write command; absent from reads and during an interactive edit.
     pub lock: Option<MutationLock>,
+    routing: Routing,
     claims: Option<ClaimStore>,
     pending_claim: Option<(TaskId, ClaimIntent)>,
 }
@@ -164,6 +165,7 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
         registry,
         warnings: Vec::new(),
         lock: None,
+        routing: Routing::Local,
         claims: None,
         pending_claim: None,
     })
@@ -192,11 +194,50 @@ pub fn reject_stale_local(registry: &Registry, project: &Project) -> Result<()> 
 pub fn open_id_write_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
     let mut ctx = open_ctx(dir)?;
     let id = parse_id(&ctx.registry, id)?;
-    if id.prefix != ctx.project.prefix {
+    let routing = if id.prefix == ctx.project.prefix {
+        Routing::Local
+    } else {
         ctx.project = crate::scope::open_registered(&ctx.registry, &id.prefix, Origin::Id(&id))?;
-    }
-    ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
+        Routing::Registered(id.prefix)
+    };
+    lock_and_revalidate(&mut ctx, &routing)?;
     Ok(ctx)
+}
+
+/// Preserve the caller's checkout for local writes; follow the registry for explicit
+/// project targets and ids belonging to another project.
+#[derive(Clone)]
+pub enum Routing {
+    Local,
+    Registered(String),
+}
+
+/// Re-resolve after acquiring the lock: a rename may have completed while we waited.
+/// Retry a changed identity without holding both projects' locks at once.
+pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
+    for _ in 0..4 {
+        ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
+        let registry = Registry::load()?;
+        let project = match routing {
+            Routing::Local => Project::open(&ctx.project.root)?,
+            Routing::Registered(prefix) => {
+                let live = registry.canonical_prefix(prefix);
+                crate::scope::open_registered(&registry, live, Origin::Prefix)?
+            }
+        };
+        if project.prefix == ctx.project.prefix && project.root == ctx.project.root {
+            reject_stale_local(&registry, &project)?;
+            ctx.project = project;
+            ctx.registry = registry;
+            ctx.routing = routing.clone();
+            return Ok(());
+        }
+        ctx.lock = None;
+        ctx.project = project;
+    }
+    Err(Error::Io(
+        "the project's identity kept changing while acquiring its lock; retry".into(),
+    ))
 }
 
 /// A read command that takes an id: the id's prefix routes to its registered project, the
@@ -625,7 +666,8 @@ pub fn run(cli: Cli) -> Result<Output> {
             // The one write command that may run without a local project (spec §2):
             // an explicit target replaces the lookup, and the unchanged `add` validates
             // every field against whichever project it is handed.
-            let ctx = match project {
+            let routing = project.clone().map_or(Routing::Local, Routing::Registered);
+            let mut ctx = match project {
                 Some(prefix) => {
                     let registry = Registry::load()?;
                     let project =
@@ -635,12 +677,14 @@ pub fn run(cli: Cli) -> Result<Output> {
                         registry,
                         warnings: Vec::new(),
                         lock: None,
+                        routing: routing.clone(),
                         claims: None,
                         pending_claim: None,
                     }
                 }
                 None => open_ctx(dir)?,
             };
+            lock_and_revalidate(&mut ctx, &routing)?;
             add::run(ctx, title, status, fields)
         }
         Command::Show { id } => show::run(open_ctx(dir)?, id),

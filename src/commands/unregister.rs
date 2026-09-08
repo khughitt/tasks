@@ -5,6 +5,7 @@ use crate::registry::Registry;
 /// Takes no project context: the directory a stale prefix points at may be one you no
 /// longer want to enter, or one that no longer exists.
 pub fn run(prefix: String) -> Result<Output> {
+    let _lock = Registry::lock()?;
     let mut registry = Registry::load()?;
     let (root, aliases) = registry.unregister(&prefix)?;
     registry.save()?;

@@ -1,5 +1,4 @@
 use super::{Ctx, apply_fields, create};
-use crate::claims::MutationLock;
 use crate::cli::FieldArgs;
 use crate::error::{Error, Result};
 use crate::format::validate_line;
@@ -55,42 +54,33 @@ pub fn run(mut ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Re
             "add accepts --status idea or todo".into(),
         ));
     }
-    // A sourced add is idempotent. Same origin, same title means this add already
-    // happened, so the existing record is reused and nothing is written -- rerunning a
-    // batch filed from one note files nothing twice. The scan and the create sit under
-    // the project write lock, so two concurrent reruns cannot both find nothing. An
-    // unsourced add reads nothing and keeps its lock-free path.
-    let _lock = match &fields.source {
-        Some(source) => {
-            validate_line("source", source)?;
-            let lock = MutationLock::acquire(&ctx.project.prefix)?;
-            let existing = duplicates_of(&ctx.project, source, &title)?;
-            if let Some(task) = existing.first() {
+    // The context's lock keeps the duplicate check and create in one critical section.
+    if let Some(source) = &fields.source {
+        validate_line("source", source)?;
+        let existing = duplicates_of(&ctx.project, source, &title)?;
+        if let Some(task) = existing.first() {
+            ctx.warnings.push(format!(
+                "{} already carries this source and title; reused it, wrote nothing",
+                task.id
+            ));
+            if existing.len() > 1 {
+                let rest: Vec<String> = existing[1..]
+                    .iter()
+                    .map(|task| task.id.to_string())
+                    .collect();
                 ctx.warnings.push(format!(
-                    "{} already carries this source and title; reused it, wrote nothing",
-                    task.id
+                    "{} other task(s) carry the same source and title: {}",
+                    rest.len(),
+                    rest.join(", ")
                 ));
-                if existing.len() > 1 {
-                    let rest: Vec<String> = existing[1..]
-                        .iter()
-                        .map(|task| task.id.to_string())
-                        .collect();
-                    ctx.warnings.push(format!(
-                        "{} other task(s) carry the same source and title: {}",
-                        rest.len(),
-                        rest.join(", ")
-                    ));
-                }
-                return Ok(Output::Add(AddOut {
-                    id: task.id.to_string(),
-                    action: "reused".into(),
-                    warnings: ctx.warnings,
-                }));
             }
-            Some(lock)
+            return Ok(Output::Add(AddOut {
+                id: task.id.to_string(),
+                action: "reused".into(),
+                warnings: ctx.warnings,
+            }));
         }
-        None => None,
-    };
+    }
     let mut task = blank(&ctx.project, title, status)?;
     apply_fields(&ctx, &mut task, &fields)?;
     create(&ctx.project, &ctx.registry, &mut task)?;

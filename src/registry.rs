@@ -27,6 +27,11 @@ impl Registry {
         ))
     }
 
+    /// Serialize the full read-modify-write; atomic replacement alone can lose updates.
+    pub fn lock() -> Result<crate::claims::MutationLock> {
+        crate::claims::MutationLock::acquire_at(&Self::path()?.with_file_name("projects.lock"))
+    }
+
     pub fn load() -> Result<Registry> {
         Self::load_from(&Self::path()?)
     }

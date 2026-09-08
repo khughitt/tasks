@@ -14,7 +14,10 @@ pub const CATEGORIES: [&str; 4] = ["friction", "gap", "idea", "positive"];
 /// The upstream project: the registry entry whose prefix is `tasks`. The unregistered
 /// case gets a hint the generic resolver cannot know: where the upstream lives.
 pub fn locate_target(registry: &Registry) -> Result<Project> {
-    if registry.project_root(TARGET_PREFIX).is_none() {
+    if registry
+        .project_root(registry.canonical_prefix(TARGET_PREFIX))
+        .is_none()
+    {
         return Err(Error::Config(format!(
             "no project registered as {TARGET_PREFIX:?}; clone the upstream tasks repository and run `tasks init` there"
         )));
@@ -50,8 +53,12 @@ pub fn run(
     }
     let body = body.unwrap_or_default();
     validate_body(&body)?;
-    let target = locate_target(&ctx.registry)?;
-    let from = format!("from:{}", ctx.project.prefix);
+    let prefix = ctx.project.prefix.clone();
+    let from = format!("from:{prefix}");
+    ctx.project = locate_target(&ctx.registry)?;
+    // Only the target is locked, even when the reporter shares its prefix.
+    super::lock_and_revalidate(&mut ctx, &super::Routing::Registered(TARGET_PREFIX.into()))?;
+    let target = &ctx.project;
 
     // (id, automatic): an automatic match must still carry the same title when written.
     // Only the automatic branch scans the target; --recur reads one task and --new reads
@@ -100,20 +107,20 @@ pub fn run(
     let (task, action) = match existing {
         Some((id, automatic)) => (
             recur_into(
-                &mut ctx, &target, &id, automatic, &summary, &body, &category, &from,
+                &mut ctx, &id, automatic, &summary, &body, &category, &from, &prefix,
             )?,
             "recurred",
         ),
         None => (
-            create(&target, &ctx.registry, summary, body, &category, &from)?,
+            create(&ctx.project, &ctx.registry, summary, body, &category, &from)?,
             "created",
         ),
     };
-    let path = target.task_path(&task.id);
+    let path = ctx.project.task_path(&task.id);
     ctx.warnings.push(format!(
         "filed as uncommitted {} in {}; a maintainer there reviews and commits it",
         path.display(),
-        target.root.display()
+        ctx.project.root.display()
     ));
     Ok(Output::Feedback(FeedbackOut {
         id: task.id.to_string(),
@@ -141,13 +148,13 @@ fn create(
 #[allow(clippy::too_many_arguments)]
 fn recur_into(
     ctx: &mut Ctx,
-    target: &Project,
     id: &TaskId,
     automatic: bool,
     summary: &str,
     body: &str,
     category: &str,
     from: &str,
+    prefix: &str,
 ) -> Result<Task> {
     if !body.is_empty() {
         validate_note_text(body)?;
@@ -173,13 +180,10 @@ fn recur_into(
         }
         Ok(())
     };
-    // Lock only the target: the source may share its prefix, and taking both would deadlock.
-    let _lock = crate::claims::MutationLock::acquire(&target.prefix)?;
-    let mut claims = crate::claims::ClaimStore::load(&target.prefix)?;
+    let mut claims = crate::claims::ClaimStore::load(&ctx.project.prefix)?;
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the public upstream file. The reporting project is already in the note text.
-    let prefix = ctx.project.prefix.clone();
-    let task = guarded_update(target, &ctx.registry, id, eligible, |task| {
+    let task = guarded_update(&ctx.project, &ctx.registry, id, eligible, |task| {
         append_note(
             task,
             NOTE_AUTHOR,
