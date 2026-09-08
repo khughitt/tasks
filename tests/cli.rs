@@ -2228,6 +2228,36 @@ fn check_reports_unparsable_foreign_dependency_as_warning() {
 }
 
 #[test]
+fn check_nudges_a_depends_naming_a_retired_prefix() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let far = id_of(env.json(&fam, &["add", "Far", "-p", "2"]));
+    let here = id_of(env.json(&sci, &["add", "Here", "-p", "2"]));
+    env.json(&sci, &["dep", &here, "--on", &far]);
+    alias_registry(&env, "old", "fam");
+
+    let path = sci.join(format!("tasks/{here}.md"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("fam-", "old-");
+    std::fs::write(&path, text).unwrap();
+
+    let v = env.json(&sci, &["check"]);
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            w["kind"] == "retired_prefix" && w["detail"].as_str().unwrap().contains(&far)
+        }),
+        "{v}"
+    );
+    assert!(v["errors"].as_array().unwrap().is_empty(), "{v}");
+    assert_eq!(
+        env.json(&fam, &["check"])["warnings"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
 fn check_does_not_call_an_existing_malformed_local_dependency_dangling() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

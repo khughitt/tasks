@@ -67,6 +67,17 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         let file = format!("tasks/{}.md", task.id);
         for dependency in &task.depends {
             let dependency_id = ctx.registry.canonical_id(dependency);
+            if &dependency_id != dependency {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "retired_prefix",
+                    format!(
+                        "depends on {dependency} through retired prefix {:?}; it is now {dependency_id}",
+                        dependency.prefix
+                    ),
+                ));
+            }
             if dependency_id.prefix == ctx.project.prefix {
                 if !ctx.project.task_path(&dependency_id).try_exists()? {
                     errors.push(finding(
