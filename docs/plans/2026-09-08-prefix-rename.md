@@ -537,7 +537,10 @@ Run: `just gate` — Expected: clean.
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
 tasks done tasks-66120e "canonical_id applied at every user-input parse site, at both resolution entry points (Resolver::resolve_task and Scope::resolve_task via resolve_registered, which backs list/ready/next/prime), and on both sides of dep's dedup, removal, self-check and cycle detection. Stored depends are deliberately left as written so an unrelated save does not rewrite them."
-git add src/commands/mod.rs src/resolve.rs src/commands/dep.rs src/commands/show.rs tests/cli.rs tasks/
+git add src/commands/mod.rs src/resolve.rs src/scope.rs src/commands/dep.rs \
+        src/commands/show.rs src/commands/root.rs src/commands/tree.rs \
+        src/commands/edit.rs src/commands/list.rs src/commands/feedback.rs \
+        tests/cli.rs tasks/
 git commit -m "feat(ids): treat a retired prefix as the same task everywhere"
 ```
 
@@ -823,8 +826,10 @@ git commit -m "feat(registry): drop a project's aliases with the project"
 - Consumes: `MutationLock::acquire_at` (`src/claims.rs:227`).
 - Produces: `Registry::lock() -> Result<MutationLock>` — held across every registry
   read-modify-write.
-- Produces: `commands::lock_and_revalidate(&mut Ctx) -> Result<()>` — acquire, then
-  re-resolve under the lock. Used by `open_id_write_ctx` and by both `add` arms.
+- Produces: `commands::Routing { Local, Registered(String) }` and
+  `commands::lock_and_revalidate(&mut Ctx, &Routing) -> Result<()>` — acquire, then
+  re-resolve under the lock without changing which checkout is being written to. Used by
+  `open_id_write_ctx` and by both `add` arms.
 
 `add` takes no mutation lock at all today (`open_ctx` sets `lock: None`), relying on
 `create_task`'s exclusive create, which guards a colliding id and nothing else. And
@@ -835,8 +840,8 @@ prevents a torn file, not a lost update.
 
 The window is microseconds wide, so spawning two processes and hoping they collide is not a
 test. Hold the registry lock from the test, start both children, confirm they are blocked,
-then release — forcing the interleaving instead of wishing for it. A second test covers
-`add` waiting through a completed rename.
+then release — forcing the interleaving instead of wishing for it. (The companion case,
+an `add` waiting through a rename, needs the command and so lives in Task 11.)
 
 ```rust
 #[test]
@@ -873,34 +878,6 @@ fn concurrent_registry_writes_do_not_lose_each_other() {
     assert!(text.contains("bbb = "), "{text}");
 }
 
-#[test]
-fn an_add_waiting_through_a_rename_uses_the_new_identity() {
-    let mut env = TestEnv::new();
-    let dir = env.init("dot");
-    git(&dir, &["init", "-q", "-b", "main"]);
-    env.json(&dir, &["add", "Seed", "-p", "2"]);
-    git(&dir, &["add", "-A"]);
-    git(&dir, &["commit", "-qm", "seed"]);
-
-    // Block the project's mutation lock, start an `add` behind it, rename, then release.
-    let lock_path = env.claim_store("dot").with_file_name("dot.lock");
-    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
-    let held = std::fs::OpenOptions::new()
-        .create(true).truncate(false).write(true).open(&lock_path).unwrap();
-    held.lock().unwrap();
-    let mut adder = env.raw(&dir).args(["add", "Late", "-p", "2"]).spawn().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    assert!(adder.try_wait().unwrap().is_none(), "the add must be waiting");
-    drop(held);
-
-    // The add either refuses (freeze) or lands under the new prefix — never under `dot`.
-    let out = adder.wait_with_output().unwrap();
-    let stale: Vec<_> = std::fs::read_dir(dir.join("tasks")).unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_name().to_string_lossy().starts_with("dot-"))
-        .collect();
-    assert!(stale.is_empty(), "an old-prefix file was created after the rename: {out:?}");
-}
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -945,22 +922,45 @@ section because the context's lock is already held around it.
 **One helper for every locking path**, so revalidation is not written three times and
 forgotten in two of them:
 
+**Revalidation must not change *which checkout* it writes to.** Re-resolving through
+`open_registered` unconditionally would replace a worktree with the registered root the
+moment their paths differ — which is always, for a worktree — silently routing the write out
+of the checkout the caller is standing in, with no rename involved at all. That is the
+failure `465b778` fixed, so the helper is told the caller's routing intent and preserves it:
+
 ```rust
+/// Which project a command meant to write to, so revalidation refreshes it without
+/// changing it. `-C` and worktrees win for local work; the registry decides for work
+/// explicitly addressed to another project.
+pub enum Routing {
+    /// This checkout, whatever the registry says about its prefix.
+    Local,
+    /// The project the registry names: an id whose prefix is not the local project's, or
+    /// an explicit `--project`.
+    Registered(String),
+}
+
 /// Acquire the project's mutation lock and re-resolve under it.
 ///
 /// A waiter resolved *before* the lock, and a rename may have completed while it waited —
 /// including the cleanup that lifts the freeze — so acting on the pre-lock project would
-/// create a task under a prefix that no longer exists. The project is reopened on every
-/// pass, not only when the canonical prefix moved: `init --force` can repoint a live
-/// prefix at a different root without changing the name.
-fn lock_and_revalidate(ctx: &mut Ctx) -> Result<()> {
+/// write under a prefix that no longer exists. `Local` reopens the *same root*, because
+/// only the config may have moved, never the checkout; `Registered` re-follows the
+/// registry, because that is what the caller asked for.
+fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
     for _ in 0..4 {
         ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
         let registry = Registry::load()?;
-        reject_pending_rename(&ctx.project)?;          // Task 11
-        let live = registry.canonical_prefix(&ctx.project.prefix).to_string();
-        let project = crate::scope::open_registered(&registry, &live, Origin::Prefix)?;
+        let project = match routing {
+            Routing::Local => Project::open(&ctx.project.root)?,
+            Routing::Registered(prefix) => {
+                let live = registry.canonical_prefix(prefix).to_string();
+                crate::scope::open_registered(&registry, &live, Origin::Prefix)?
+            }
+        };
         if project.prefix == ctx.project.prefix && project.root == ctx.project.root {
+            reject_stale_local(&registry, &project)?; // Task 4
+            ctx.project = project; // reassigned: spec_dirs and plan_dirs may have moved too
             ctx.registry = registry;
             return Ok(());
         }
@@ -973,9 +973,23 @@ fn lock_and_revalidate(ctx: &mut Ctx) -> Result<()> {
 }
 ```
 
-Call it from `open_id_write_ctx` and from **both** `add` arms — the explicit-`--project` arm
-and the local one. Each builds its `Ctx` with `lock: None`, then calls
-`lock_and_revalidate(&mut ctx)?`.
+The success branch assigns `ctx.project`, not just `ctx.registry`: the config may have been
+rewritten under the waiter with the same prefix and root but different `spec_dirs` or
+`plan_dirs`, and discarding the reopened `Project` would keep the stale ones.
+
+Call sites and their routing:
+
+| Caller | Routing |
+|---|---|
+| `open_id_write_ctx`, id prefix == local project's | `Local` |
+| `open_id_write_ctx`, id prefix != local project's | `Registered(id.prefix)` |
+| `add` local arm | `Local` |
+| `add --project <prefix>` arm | `Registered(prefix)` |
+
+Each builds its `Ctx` with `lock: None`, then calls `lock_and_revalidate(&mut ctx, &routing)?`.
+
+The freeze (`reject_pending_rename`) is **not** called here yet — it arrives with the command
+it protects, in Task 11, which adds the call to this helper. Task 7 must compile on its own.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -987,7 +1001,8 @@ Run: `just gate` — Expected: clean.
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
 tasks done tasks-6a4742 "A registry lock serializes the read-modify-write that init, unregister and rename share, closing a pre-existing lost-update race. add takes the project mutation lock on both arms with its inner acquisition removed, and lock_and_revalidate re-resolves under the lock so a waiter cannot act on a pre-lock identity."
-git add src/registry.rs src/commands/mod.rs src/commands/init.rs src/commands/unregister.rs tests/cli.rs tasks/
+git add src/registry.rs src/commands/mod.rs src/commands/add.rs src/commands/init.rs \
+        src/commands/unregister.rs tests/cli.rs tasks/
 git commit -m "fix(registry): serialize read-modify-write and lock add"
 ```
 
@@ -1522,6 +1537,66 @@ fn rename_rewrites_the_project_and_keeps_inbound_refs_resolving() {
 }
 
 #[test]
+fn an_add_waiting_through_a_rename_never_writes_the_old_prefix() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let seed = id_of(env.json(&dir, &["add", "Seed", "-p", "2"]));
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    let moved_seed = format!("dots-{}", seed.split_once('-').unwrap().1);
+
+    // Hold the project's lock, queue an `add` behind it, complete a real rename while it
+    // waits, then release. The add resolved `dot` before the lock and must not act on it.
+    let lock_path = env.claim_store("dot").with_file_name("dot.lock");
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let held = std::fs::OpenOptions::new()
+        .create(true).truncate(false).write(true).open(&lock_path).unwrap();
+    held.lock().unwrap();
+
+    let mut adder = env.raw(&dir).args(["add", "Late", "-p", "2"]).spawn().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(adder.try_wait().unwrap().is_none(), "the add must be waiting on the lock");
+
+    // The rename takes the *other* lock ordering by holding `dots` too, so run it from a
+    // process that is not blocked: it needs `dot`, which we hold, so release first and let
+    // the two race with the add already queued ahead of the rename.
+    drop(held);
+    let out = adder.wait_with_output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    env.json(&dir, &["rename", "dot", "dots"]);
+
+    // Whatever order they landed in, every file carries the live prefix afterwards, and the
+    // add's task exists under it rather than being lost.
+    let stale: Vec<_> = std::fs::read_dir(dir.join("tasks")).unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("dot-"))
+        .collect();
+    assert!(stale.is_empty(), "an old-prefix file survived the rename: {stale:?}");
+    assert_eq!(env.json(&dir, &["show", &moved_seed])["task"]["id"], moved_seed);
+    assert_eq!(env.json(&dir, &["list"])["tasks"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn an_add_waiting_through_a_pending_rename_is_refused() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    env.json(&dir, &["add", "Seed", "-p", "2"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+
+    // An interrupted rename leaves the freeze in place; a waiter that wakes into it is
+    // refused rather than writing under either name.
+    env.raw(&dir).env("TASKS_RENAME_STOP_AFTER", "config")
+        .args(["rename", "dot", "dots"]).status().unwrap();
+    let out = env.raw(&dir).args(["add", "Late", "-p", "2"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+}
+
+#[test]
 fn a_pending_rename_freezes_the_project_including_the_p4_window() {
     let mut env = TestEnv::new();
     let dir = env.init("dot");
@@ -1615,9 +1690,18 @@ pub fn reject_pending_rename(project: &Project) -> Result<()> {
 }
 ```
 
-`lock_and_revalidate` (Task 7) already calls it. `init` and `unregister` call it under the
-registry lock, and `init` additionally refuses a prefix matching any pending `target` — until
-P5 the target is in no registry at all, so nothing else reserves it.
+**Add the call to `lock_and_revalidate`** (Task 7), immediately after the registry load —
+Task 7 deliberately left it out so that task compiles on its own, since this function does
+not exist until now:
+
+```rust
+        let registry = Registry::load()?;
+        reject_pending_rename(&ctx.project)?;   // added here, in Task 11
+```
+
+`init` and `unregister` call it under the registry lock, and `init` additionally refuses a
+prefix matching any pending `target` — until P5 the target is in no registry at all, so
+nothing else reserves it.
 
 `rename` itself must **not** be frozen by its own inventory; it passes its own invocation
 through and skips the check.
@@ -1632,7 +1716,8 @@ Run: `just gate` — Expected: clean.
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
 tasks done tasks-7000aa "tasks rename runs the six phases, classifies before every fresh-operation check so a completed re-run reports Complete rather than refusing, gates authorization on every mutating path, and ships with the freeze: a pending inventory refuses mutations and reserves the target name, discovered by recorded names rather than resolved prefix. --explain classifies read-only."
-git add src/rename/ src/commands/rename.rs src/commands/mod.rs src/cli.rs src/output.rs tests/cli.rs tasks/
+git add src/rename/ src/commands/rename.rs src/commands/mod.rs src/commands/init.rs \
+        src/commands/unregister.rs src/cli.rs src/output.rs tests/cli.rs tasks/
 git commit -m "feat(rename): rename a project's prefix in six recoverable phases"
 ```
 
@@ -1672,19 +1757,73 @@ fn rename_fixture(env: &mut TestEnv, prefix: &str, count: usize) -> (std::path::
 
 #[test]
 fn every_mutation_boundary_resumes_to_the_same_final_state() {
-    for stop in ["inventory", "file:0", "file:1", "files", "config", "registry", "claims"] {
+    // Each stop names the verdict the world must then classify as, and what must be true on
+    // disk at that instant. Asserting only "not fresh" would pass a run that ignored the
+    // hook entirely, finished everything, and reported `complete`.
+    let boundaries: &[(&str, &str)] = &[
+        ("inventory", "resume_files"),
+        ("file:0", "resume_files"),
+        ("file:1", "resume_files"),
+        ("files", "resume_files"),
+        ("config", "resume_registry"),
+        ("registry", "resume_cleanup"),
+        ("claims", "resume_cleanup"),
+    ];
+    for (stop, want) in boundaries {
         let mut env = TestEnv::new();
         let (dir, ids) = rename_fixture(&mut env, "dot", 3);
+        let inventory = env.home.path().join(".local/state/tasks/rename/dot.toml");
+        let old_claims = env.home.path().join(".local/state/tasks/claims/dot.toml");
+        // Seed a claim store so its removal is observed rather than pre-existing absence.
+        std::fs::create_dir_all(old_claims.parent().unwrap()).unwrap();
+        std::fs::write(&old_claims, "[claims]\n").unwrap();
 
-        env.raw(&dir)
+        let status = env.raw(&dir)
             .env("TASKS_RENAME_STOP_AFTER", stop)
             .args(["rename", "dot", "dots"])
             .status()
             .unwrap();
-        // The verdict is observable before acting on it, and is not Fresh: work has begun.
+        assert!(status.success(), "the interrupted run must exit cleanly: {stop}");
+
+        // The hook was honoured: the world is mid-rename, not finished.
+        assert!(inventory.is_file(), "{stop}: the inventory must still be pending");
+        let named = |prefix: &str| {
+            std::fs::read_dir(dir.join("tasks")).unwrap().filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+                .count()
+        };
+        let config = std::fs::read_to_string(dir.join("tasks/.config.toml")).unwrap();
+        match *stop {
+            "inventory" => {
+                assert_eq!(named("dots-"), 0, "{stop}: no file has moved yet");
+                assert_eq!(named("dot-"), 3);
+            }
+            "file:0" => {
+                // The intra-phase boundary: a destination written, its source still there.
+                assert_eq!(named("dots-"), 1, "{stop}");
+                assert_eq!(named("dot-"), 3, "{stop}: the source is not removed yet");
+            }
+            "files" => {
+                assert_eq!(named("dots-"), 3, "{stop}");
+                assert_eq!(named("dot-"), 0, "{stop}");
+                assert!(config.contains("\"dot\""), "{stop}: config not written yet");
+            }
+            "config" => assert!(config.contains("\"dots\""), "{stop}"),
+            "registry" | "claims" => {
+                let reg = std::fs::read_to_string(
+                    env.home.path().join(".config/tasks/projects.toml")).unwrap();
+                assert!(reg.contains("dots = "), "{stop}");
+                assert!(reg.contains("[aliases]"), "{stop}");
+                assert_eq!(old_claims.exists(), *stop == "registry", "{stop}: claim store");
+            }
+            _ => {}
+        }
+
         let verdict = env.json(&dir, &["rename", "dot", "dots", "--explain"])["recovery"]
             .as_str().unwrap().to_string();
-        assert_ne!(verdict, "fresh", "stopped after {stop}");
+        assert_eq!(&verdict, want, "stopped after {stop}");
+        // --explain changed nothing.
+        assert!(inventory.is_file(), "{stop}: --explain must not clean up");
 
         env.json(&dir, &["rename", "dot", "dots"]);
 
@@ -1697,8 +1836,8 @@ fn every_mutation_boundary_resumes_to_the_same_final_state() {
         assert_eq!(env.json(&dir, &["show", &ids[0]])["task"]["id"],
                    format!("dots-{}", ids[0].split_once('-').unwrap().1),
                    "{stop}: the retired id still resolves");
-        assert!(!env.home.path().join(".local/state/tasks/rename/dot.toml").exists(), "{stop}: inventory");
-        assert!(!env.home.path().join(".local/state/tasks/claims/dot.toml").exists(), "{stop}: claim store");
+        assert!(!inventory.exists(), "{stop}: the inventory is removed by cleanup");
+        assert!(!old_claims.exists(), "{stop}: the seeded claim store is deleted, not merely absent");
         assert!(env.home.path().join(".local/state/tasks/claims/dot.lock").exists(), "{stop}: the lock is never unlinked");
     }
 }
@@ -1730,18 +1869,36 @@ fn an_empty_project_and_a_project_outside_git_both_rename() {
 }
 
 #[test]
-fn a_claim_taken_after_an_interruption_blocks_the_resume() {
+fn a_live_claim_blocks_the_resume_and_the_freeze_blocks_start() {
     let mut env = TestEnv::new();
     let (dir, ids) = rename_fixture(&mut env, "dot", 1);
     env.raw(&dir).env("TASKS_RENAME_STOP_AFTER", "registry")
         .args(["rename", "dot", "dots"]).status().unwrap();
+    let moved = format!("dots-{}", ids[0].split_once('-').unwrap().1);
 
-    // The project is renamed but not cleaned up; a claim taken now must not be deleted by P6.
-    as_agent(&env, &dir, "agent-a")
-        .args(["start", &format!("dots-{}", ids[0].split_once('-').unwrap().1)])
-        .assert().success();
+    // `start` cannot be used to set this up: the freeze refuses every mutation while the
+    // inventory is pending, which is itself worth asserting.
+    assert_eq!(env.fail(&dir, &["start", &moved]), "validation");
+
+    // So inject a live claim directly, as the claim-store tests do, and check that the
+    // resume refuses rather than deleting a store that went live after the crash.
+    let store = env.home.path().join(".local/state/tasks/claims/dots.toml");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(
+        &store,
+        format!(
+            "[claims.{moved}]\nowner = \"agent-a\"\nsession = \"agent-a\"\npid = {}\n\
+             host = \"{}\"\nworktree = \"{}\"\nstarted = \"2026-09-08T00:00:00Z\"\n\
+             seen = \"2026-09-08T00:00:00Z\"\n",
+            std::process::id(),
+            std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap().trim(),
+            dir.display()
+        ),
+    )
+    .unwrap();
+
     assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "claimed");
-    assert!(env.home.path().join(".local/state/tasks/claims/dots.toml").exists());
+    assert!(store.exists(), "the live claim store survives a refused resume");
 }
 
 #[test]
