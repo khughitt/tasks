@@ -1123,10 +1123,12 @@ fn project_scope_covers_every_read_command() {
     assert_eq!(nodes[0]["id"], goal);
     assert_eq!(nodes[0]["children"][0]["id"], child);
 
-    // an id the local project has never heard of, read from the project that owns it
+    // an id the local project has never heard of, read from the project that owns it --
+    // named explicitly, or left to the id's own prefix to route
     let v = env.json(&sci, &["tree", "--project", "fam", &goal]);
     assert_eq!(v["nodes"][0]["id"], goal, "{v}");
-    assert_eq!(env.fail(&sci, &["tree", &goal]), "task_not_found");
+    let v = env.json(&sci, &["tree", &goal]);
+    assert_eq!(v["nodes"][0]["id"], goal, "{v}");
 
     let v = env.json(&sci, &["tags", "--project", "fam"]);
     assert_eq!(
@@ -6261,4 +6263,35 @@ fn closeout_omits_a_goal_its_dependencies_still_hold_and_says_why() {
         "{v}"
     );
     env.json(&dir, &["done", &goal, "met"]);
+}
+
+#[test]
+fn tree_routes_a_bare_id_by_its_prefix_like_show() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let goal = id_of(env.json(&fam, &["add", "Goal", "-p", "2"]));
+    let kid = id_of(env.json(&fam, &["add", "Kid", "-p", "2", "--parent", &goal]));
+
+    // The subtree of an id is read from that id's own project (multi-project design §4),
+    // the way `show` and every write command already route it.
+    let v = env.json(&sci, &["tree", &goal]);
+    assert_eq!(v["nodes"][0]["id"], goal, "{v}");
+    assert_eq!(v["nodes"][0]["children"][0]["id"], kid, "{v}");
+
+    // The errors `show` gives for the same ids, rather than a misleading task_not_found
+    // for a prefix that names no project at all.
+    assert_eq!(env.fail(&sci, &["tree", "zzz-000001"]), "unresolvable_id");
+    assert_eq!(env.fail(&sci, &["tree", "fam-ffffff"]), "task_not_found");
+
+    // An explicit --project is the caller naming the scope, and wins over the prefix.
+    assert_eq!(
+        env.fail(&sci, &["tree", "--project", "sci", &goal]),
+        "task_not_found"
+    );
+
+    // A local id still reads locally.
+    let here = id_of(env.json(&sci, &["add", "Here", "-p", "2"]));
+    let v = env.json(&sci, &["tree", &here]);
+    assert_eq!(v["nodes"][0]["id"], here, "{v}");
 }

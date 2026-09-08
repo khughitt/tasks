@@ -57,8 +57,10 @@ The read commands say where to look instead of inferring it from an id: `list`, 
 `next`, `prime`, `tree`, and `tags` each take `--project <prefix>` for one registered
 project or `--all-projects` for every reachable one. Either works from anywhere, including
 outside every project. `--project` reads that project's *registered* root, so from a
-worktree it is how you ask for the main checkout. Reading another project's subtree is
-`tasks tree --project <prefix> <id>` — a bare id in `tree` is not routed by its prefix.
+worktree it is how you ask for the main checkout. `tree <id>` is the exception that needs
+no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
+`tasks tree <other-prefix>-<hex>` reads that subtree from wherever you are. Passing
+`--project` alongside an id names the scope explicitly and wins over the prefix.
 
 ## Recording work
 

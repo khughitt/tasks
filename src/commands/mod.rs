@@ -181,6 +181,39 @@ pub fn open_id_write_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
     Ok(ctx)
 }
 
+/// A read command that takes an id: the id's prefix routes to its registered project, the
+/// way `show` and every write command route. Routing is what the multi-project design
+/// already specifies -- the subtree of an id is read from that id's own project -- and
+/// `open_registered` is the same call `show` makes, so a prefix naming no project gives
+/// `show`'s error rather than a misleading `task_not_found`.
+///
+/// An explicit `--project` or `--all-projects` is the caller naming the scope and wins
+/// over the prefix.
+pub fn open_id_read_ctx(
+    dir: Option<&Path>,
+    scope: &ScopeArgs,
+    id: Option<&str>,
+) -> Result<ReadCtx> {
+    let mut ctx = open_read_ctx(dir, scope)?;
+    if scope.project.is_some() || scope.all_projects {
+        return Ok(ctx);
+    }
+    let Some(id) = id else {
+        return Ok(ctx);
+    };
+    let id = TaskId::parse(id)?;
+    if let Scope::Local(project) = &ctx.scope
+        && id.prefix != project.prefix
+    {
+        ctx.scope = Scope::Local(crate::scope::open_registered(
+            &ctx.registry,
+            &id.prefix,
+            Origin::Id(&id),
+        )?);
+    }
+    Ok(ctx)
+}
+
 pub struct ReadCtx {
     pub scope: Scope,
     pub registry: Registry,
@@ -632,7 +665,9 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
-        Command::Tree { id, all, scope } => tree::run(open_read_ctx(dir, &scope)?, id, all),
+        Command::Tree { id, all, scope } => {
+            tree::run(open_id_read_ctx(dir, &scope, id.as_deref())?, id, all)
+        }
         Command::Tags { statuses, scope } => tags::run(open_read_ctx(dir, &scope)?, statuses),
         Command::Feedback {
             summary,
