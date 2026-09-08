@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use crate::model::TaskId;
 use crate::repo::atomic_write;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,10 @@ use std::path::{Path, PathBuf};
 pub struct Registry {
     #[serde(default)]
     pub projects: BTreeMap<String, PathBuf>,
+    /// Retired prefix -> the live prefix it now resolves to. Never chains: every target is
+    /// a live prefix, enforced on load, so resolution is always one hop.
+    #[serde(default)]
+    pub aliases: BTreeMap<String, String>,
 }
 
 impl Registry {
@@ -39,6 +44,20 @@ impl Registry {
                     Error::Config(format!("project {prefix} uses ~ but HOME is not set"))
                 })?;
                 *root = PathBuf::from(home).join(rest);
+            }
+        }
+        for (alias, target) in &registry.aliases {
+            if registry.projects.contains_key(alias) {
+                return Err(Error::Config(format!(
+                    "{}: alias {alias:?} collides with a live prefix",
+                    path.display()
+                )));
+            }
+            if !registry.projects.contains_key(target) {
+                return Err(Error::Config(format!(
+                    "{}: alias {alias:?} targets {target:?}, which is not a registered project",
+                    path.display()
+                )));
             }
         }
         Ok(registry)
@@ -98,11 +117,39 @@ impl Registry {
     pub fn project_root(&self, prefix: &str) -> Option<&Path> {
         self.projects.get(prefix).map(PathBuf::as_path)
     }
+
+    /// The live prefix `prefix` resolves to. One hop: aliases never chain (§2).
+    #[allow(dead_code)]
+    pub fn canonical_prefix<'a>(&'a self, prefix: &'a str) -> &'a str {
+        self.aliases.get(prefix).map_or(prefix, String::as_str)
+    }
+
+    /// The same rule applied to an id. Only the prefix component moves; the hex is
+    /// preserved by a rename, which is what makes this a rule rather than an index.
+    #[allow(dead_code)]
+    pub fn canonical_id(&self, id: &TaskId) -> TaskId {
+        let prefix = self.canonical_prefix(&id.prefix);
+        if prefix == id.prefix {
+            return id.clone();
+        }
+        TaskId {
+            prefix: prefix.to_string(),
+            hex: id.hex.clone(),
+        }
+    }
+
+    /// Whether a prefix may be claimed: a live prefix and a retired one are both taken,
+    /// because an id must never mean two projects.
+    #[allow(dead_code)]
+    pub fn is_taken(&self, prefix: &str) -> bool {
+        self.projects.contains_key(prefix) || self.aliases.contains_key(prefix)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::TaskId;
 
     #[test]
     fn roundtrip_and_conflict() {
@@ -169,5 +216,61 @@ mod tests {
             r.project_root("sci").unwrap(),
             home.path().join("d/science")
         );
+    }
+
+    #[test]
+    fn aliases_canonicalize_and_reserve_names() {
+        let mut r = Registry::default();
+        r.register("dots", Path::new("/tmp/dotfiles")).unwrap();
+        r.aliases.insert("dot".into(), "dots".into());
+
+        assert_eq!(r.canonical_prefix("dot"), "dots");
+        assert_eq!(r.canonical_prefix("dots"), "dots");
+        assert_eq!(
+            r.canonical_prefix("nope"),
+            "nope",
+            "an unknown prefix is left alone"
+        );
+
+        let retired = TaskId::parse("dot-a00088").unwrap();
+        assert_eq!(r.canonical_id(&retired).to_string(), "dots-a00088");
+        let live = TaskId::parse("dots-a00088").unwrap();
+        assert_eq!(r.canonical_id(&live).to_string(), "dots-a00088");
+
+        assert!(r.is_taken("dots"), "a live prefix is taken");
+        assert!(r.is_taken("dot"), "an alias is taken");
+        assert!(!r.is_taken("free"));
+    }
+
+    #[test]
+    fn load_rejects_a_dangling_or_colliding_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+
+        std::fs::write(
+            &path,
+            "[projects]\ndots = \"/tmp/d\"\n\n[aliases]\ndot = \"gone\"\n",
+        )
+        .unwrap();
+        let error = Registry::load_from(&path).unwrap_err();
+        assert_eq!(error.kind(), "config");
+        assert!(error.to_string().contains("dot"), "{error}");
+
+        std::fs::write(
+            &path,
+            "[projects]\ndots = \"/tmp/d\"\n\n[aliases]\ndots = \"dots\"\n",
+        )
+        .unwrap();
+        assert_eq!(Registry::load_from(&path).unwrap_err().kind(), "config");
+    }
+
+    #[test]
+    fn a_registry_without_an_aliases_table_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        std::fs::write(&path, "[projects]\nsci = \"/tmp/a\"\n").unwrap();
+        let r = Registry::load_from(&path).unwrap();
+        assert!(r.aliases.is_empty());
+        assert_eq!(r.project_root("sci").unwrap(), Path::new("/tmp/a"));
     }
 }
