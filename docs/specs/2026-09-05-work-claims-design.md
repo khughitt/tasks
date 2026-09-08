@@ -1,7 +1,8 @@
 # Work claims: cross-worktree visibility, agent identity, and liveness
 
 Status: implemented (2026-09-05)
-Tasks: tasks-d184e3 (claims), tasks-8f4b41 (worktree divergence)
+Tasks: tasks-d184e3 (claims), tasks-8f4b41 (worktree divergence),
+tasks-76671b (a newer copy in another checkout)
 
 ## Problem
 
@@ -229,6 +230,19 @@ pruned.
 
 ## Warnings
 
+- **A newer copy elsewhere** (tasks-76671b): every write of an existing record compares the
+  `updated` stamp it loaded against the same record in every other worktree, found through
+  `git worktree list --porcelain -z` and read at the project's offset below the repository
+  top level. A checkout whose stamp is *newer* holds something this write will leave behind,
+  and is named. A checkout merely behind — the resting state of any long-lived worktree —
+  says nothing, because a line that fires constantly is a line nobody reads. Unlike the two
+  below this covers every writing command, not just `start`, so it catches the `done` that
+  closes a record from a stale copy. A copy that cannot be read or parsed is reported rather
+  than skipped; a git failure is a warning, never a refusal. Two accepted limits: `updated`
+  is second-precision, so same-second writes in two checkouts compare equal; and once this
+  write lands its stamp beats the sibling's, so the warning fires once per divergence and
+  then falls quiet until the sibling writes again. Closing that second one means comparing
+  content, which reintroduces exactly the noise the newer-only rule exists to avoid.
 - **Divergent copies** (tasks-8f4b41): a live claim whose task's *local* file disagrees
   (local `todo` or `idea`, claim says `doing`) warns that the copies will conflict on merge,
   naming the holding worktree. Unlike a worktree-count test, this fires in the order actually
@@ -294,6 +308,11 @@ End-to-end in `tests/cli.rs`, using two `Project` roots that share one prefix an
 - `prime` shows a claim made in the other root, and warns on a stale claim over a local `todo`
 - the exact tasks-8f4b41 sequence: `start`, then create the second root, then observe the
   divergence warning
+- against real git worktrees: a `done` in the worktree warns when the main checkout's copy is
+  newer; a checkout merely behind stays silent; a project below the repository root finds its
+  sibling at the same offset; an unreadable sibling copy warns while a missing one is silent;
+  a hand-edited `updated:` in the interactive editor cannot suppress the check; a failing
+  `git worktree list` warns without refusing the write
 - acquire rollback: a failing `save()` leaves no claim behind
 - release rollback: a `done` whose claim release fails leaves the task closed and the claim
   held, and re-running the same `done` — a same-status transition — releases it

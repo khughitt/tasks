@@ -4906,6 +4906,243 @@ fn the_reported_sequence_start_then_create_the_worktree() {
         "and the divergence is called out: {v}"
     );
 }
+/// Run git in `dir` under a fixed identity, asserting success.
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+}
+
+/// A project that is its own git repository, with one task committed, plus a second
+/// worktree branched from that commit. Returns the two project roots and the task id.
+fn repo_with_worktree(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    (main, side, id)
+}
+
+fn warnings_of(v: &serde_json::Value) -> Vec<String> {
+    v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_write_warns_when_another_checkout_holds_a_newer_copy() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+
+    // The reported sequence: the main checkout moved on after the worktree branched, so
+    // the worktree is about to close a record that is missing what main already wrote.
+    // Explicit stamps -- `updated` has second precision, and a real-clock race here would
+    // make the test flaky rather than wrong.
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+
+    let v = env.json(&side, &["done", &id, "landed"]);
+    let expected = format!("tasks/{id}.md in {} is newer", main.display());
+    let warnings = warnings_of(&v);
+    assert!(
+        warnings.iter().any(|w| w.starts_with(&expected)
+            && w.contains("2026-09-07T10:00:00Z")
+            && w.contains("2026-09-05T09:00:00Z")
+            && w.contains("reconcile")),
+        "{warnings:?}"
+    );
+    // Advisory only: the write still lands.
+    assert_eq!(env.json(&side, &["show", &id])["task"]["status"], "done");
+}
+
+#[test]
+fn a_checkout_that_is_merely_behind_is_not_worth_a_warning() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+
+    // Writing in the *newer* checkout: the other copy holds nothing this one lacks, which
+    // is the normal state of any long-lived worktree and must stay silent.
+    let v = env.json(&main, &["note", &id, "onward"]);
+    let warnings = warnings_of(&v);
+    assert!(
+        !warnings.iter().any(|w| w.contains("is newer")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn a_project_below_the_repository_root_finds_its_sibling_copies() {
+    let env = TestEnv::new();
+    let held = tempfile::tempdir().unwrap();
+    let repo = held.path().canonicalize().unwrap();
+    let sub = repo.join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    env.json(&sub, &["init", "--prefix", "sci"]);
+
+    git(&repo, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&sub, &["add", "T", "-p", "2"]));
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "seed"]);
+    let side = repo.join("wt");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+
+    stamp(&sub, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    stamp(
+        &side.join("sub"),
+        &id,
+        "2026-09-01T00:00:00Z",
+        "2026-09-05T09:00:00Z",
+    );
+
+    // The sibling's project root is the worktree root plus the project's path below the
+    // repository top level, not the worktree root itself.
+    let v = env.json(&side.join("sub"), &["note", &id, "in the worktree"]);
+    let expected = format!("tasks/{id}.md in {} is newer", sub.display());
+    let warnings = warnings_of(&v);
+    assert!(
+        warnings.iter().any(|w| w.starts_with(&expected)),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn a_sibling_copy_that_cannot_be_read_is_a_warning_and_a_missing_one_is_silent() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let sibling = side.join(format!("tasks/{id}.md"));
+
+    std::fs::write(&sibling, "not a task file").unwrap();
+    let v = env.json(&main, &["note", &id, "first"]);
+    let warnings = warnings_of(&v);
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains(side.to_str().unwrap()) && w.contains("could not be read")),
+        "a copy we cannot compare is not a copy we know to agree: {warnings:?}"
+    );
+
+    // A worktree branched before the task existed simply has nothing to say.
+    std::fs::remove_file(&sibling).unwrap();
+    let v = env.json(&main, &["note", &id, "second"]);
+    let warnings = warnings_of(&v);
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.contains("could not be read") || w.contains("is newer")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn a_hand_edited_updated_stamp_cannot_suppress_the_warning() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+
+    // The baseline is the stamp of the copy on disk, not whatever the editor left behind:
+    // a far-future `updated:` would otherwise make every sibling look stale.
+    let editor = editor_script(
+        &main,
+        "sed -i 's/^updated: .*/updated: 2030-01-01T00:00:00Z/; s/^title: T$/title: Edited/' \"$1\"",
+    );
+    let out = env
+        .cmd(&main)
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let warnings = warnings_of(&v);
+    assert!(
+        warnings.iter().any(|w| w.contains("is newer")),
+        "{warnings:?}"
+    );
+    let saved = env.json(&main, &["show", &id]);
+    assert_eq!(saved["task"]["title"], "Edited");
+    assert_ne!(saved["task"]["updated"], "2030-01-01T00:00:00Z");
+}
+
+#[test]
+fn a_failure_to_inspect_other_checkouts_is_a_warning_not_a_refusal() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut env = TestEnv::new();
+    let (main, _side, id) = repo_with_worktree(&mut env);
+
+    let bin = tempfile::tempdir().unwrap();
+    let fake_git = bin.path().join("git");
+    std::fs::write(
+        &fake_git,
+        "#!/bin/sh\nif [ \"$1 $2\" = \"worktree list\" ]; then echo broken >&2; exit 42; fi\nPATH=${PATH#*:} exec git \"$@\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake_git, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+
+    let out = env
+        .cmd(&main)
+        .env("PATH", path)
+        .args(["note", &id, "still lands"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let warnings = warnings_of(&v);
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains(&id) && w.contains("other checkouts") && w.contains("broken")),
+        "{warnings:?}"
+    );
+    assert_eq!(
+        env.json(&main, &["show", &id])["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
 
 /// Pin a task's clocks so date order is deterministic (the binary stamps real time).
 fn stamp(dir: &std::path::Path, id: &str, created: &str, updated: &str) {

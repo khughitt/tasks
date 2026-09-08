@@ -1,20 +1,32 @@
 ---
 id: tasks-76671b
 title: "note/start write the record in whichever checkout they run from, so a worktree and its main checkout diverge silently"
-status: idea
+status: done
 priority: 2
+size: s
+owner: feat/worktree-divergence-warning
 created: 2026-09-07T12:51:11Z
-updated: 2026-09-07T12:51:11Z
+updated: 2026-09-08T02:02:11Z
 depends: []
-tags: [feedback, gap, "from:forge"]
+tags: [feedback, gap, "from:forge", cli, correctness]
 ---
 
-Commands run: 'tasks start <id>' and 'tasks note <id>' in a repository's main checkout, then a git worktree was created from that checkout's HEAD, then 'tasks done <id>' inside the worktree.
+Warn when another checkout of this project holds a newer copy of the record being written.
 
-What happened: start and note wrote tasks/<id>.md in the main checkout, leaving it dirty and uncommitted. The worktree was branched from HEAD, so its copy of the record predated both writes. 'done' in the worktree updated that stale copy, which was then committed and merged. The note written before the worktree existed was never in the branch, and the merge required discarding the main checkout's dirty copy to proceed. One note was lost; nothing warned at any step.
+Mechanism: in save() (src/commands/mod.rs), before the updated bump on line 402, the task still carries the stamp it was loaded with. Compare that against every sibling worktree's copy. New Project::sibling_task_copies() in src/repo.rs, modelled on uncommitted_task_files: git worktree list --porcelain -z, LC_ALL=C, Ok(None) only for the two documented skips (no git binary, not a repository), every other git failure a typed error. Map paths through rev-parse --show-toplevel so a project nested below the repo root resolves. Parse each sibling's bytes with parse_task so the stamp is frontmatter-only and validated; a missing sibling file is skipped, an unreadable or malformed one becomes a warning.
 
-What I expected: some signal that the record I was writing had a divergent copy in another checkout of the same project -- either at start (this project has a worktree whose copy differs) or at note/done. Not a refusal; a warning would be enough.
+Warn only when a sibling's stamp is newer than the one we loaded. A worktree merely behind is the normal state and stays silent. Never blocks a write; a git failure is a warning, as in warn_if_uncommitted_with_worktrees.
 
-Why it looks addressable: the claim store already lives outside git and is visible from every worktree, with a session identity and a liveness handle, so the tool already knows other checkouts of a project exist and can be consulted. The markdown record does not get the same treatment. There is also already an escape hatch in the read path (--project resolves the registered root, which from a worktree is how you ask for the main checkout), so the concept of 'this checkout vs the registered one' is present in the CLI's vocabulary.
+edit: restore original.updated onto the parsed record before save (src/commands/edit.rs:169), so a hand-edited updated: line cannot suppress the warning. No observable change, since save overwrites it anyway.
 
-Not asking for writes to be routed to the registered root -- landing the record change in the same commit as the code is the point of working in a worktree. Just for the divergence not to be silent.
+Out of scope, deliberately: feedback's guarded_update (src/commands/feedback.rs:216) bumps updated and calls write_task directly, bypassing save. Its read-verify-retry loop guards within a checkout, and it writes to the upstream feedback repo, which is not a worktree-branching workflow. Covering it would mean hoisting the check into write_task and dragging in create_task.
+
+Known limits, to be documented in the code, not fixed: (1) updated is second-precision, so two writes to one record in the same second in two checkouts compare equal and slip through; (2) after the first warned write our stamp is now(), which beats the sibling's, so the warning fires once per divergence and goes quiet while the divergence stands, until the sibling writes again. Fixing (2) means content comparison, which is the noisy option rejected in design.
+
+Leaves the existing start-time warn_if_uncommitted_with_worktrees alone: it is shape-based and would double up.
+
+Catches the reported sequence at done in the worktree: it loaded a copy stamped T1, the main checkout's copy is T2, theirs is newer, warn. start and note in main run before the worktree exists and are correctly silent.
+
+## Notes
+
+- 2026-09-08T02:02:11Z (feat/worktree-divergence-warning): Every write of an existing record now warns when another worktree holds a copy with a newer updated stamp: Project::sibling_task_copies (git worktree list --porcelain -z, read at the project's offset below the repo top level, parsed with parse_task) plus a check in save() reading the pre-bump stamp as its baseline. edit restores original.updated so a hand-edited stamp cannot suppress it. A checkout merely behind stays silent; unreadable copies warn; git failure warns without refusing. feedback's guarded_update stays out of scope. Documented in the work-claims design doc with both accepted limits.

@@ -21,7 +21,7 @@ use crate::format::{validate_body, validate_line, validate_note_text, validate_t
 use crate::model::{Note, Size, Status, Task, TaskId};
 use crate::output::Output;
 use crate::registry::Registry;
-use crate::repo::Project;
+use crate::repo::{Project, SiblingCopy};
 use crate::resolve::{DocKind, Resolver};
 use crate::scope::{Origin, Scope};
 use std::path::{Path, PathBuf};
@@ -398,11 +398,60 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
 /// store and the task file move together, in the order that fails toward "claim held": a
 /// claim with no file update makes an idle task look busy and self-heals when the session
 /// dies, while a file update with no claim is the invisibility bug this exists to remove.
+/// Warn when another checkout of this repository holds a copy of `id` whose `updated` is
+/// newer than `loaded`, the stamp on the copy this command read. That copy carries
+/// something the write about to land does not, and a merge has to drop one of the two.
+///
+/// A checkout that is merely behind says nothing: that is the resting state of any
+/// long-lived worktree, and warning on it would train the reader to skip the line.
+///
+/// Two limits, chosen rather than overlooked. `updated` has second precision, so two writes
+/// to one record in the same second in two checkouts compare equal and slip through. And
+/// once this write lands, our stamp is `now()` and beats the sibling's, so the warning
+/// fires once per divergence and then falls quiet until the sibling writes again. Closing
+/// the second gap means comparing content, which warns on every worktree that is merely
+/// behind -- noise that would cost more than it catches.
+///
+/// Never refuses a write: the report this answers asked for a signal, not a gate.
+fn warn_on_newer_sibling_copies(ctx: &mut Ctx, id: &TaskId, loaded: &str) {
+    let copies = match ctx.project.sibling_task_copies(id) {
+        Ok(Some(copies)) => copies,
+        Ok(None) => return,
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "could not check other checkouts for a newer copy of {id} ({error})"
+            ));
+            return;
+        }
+    };
+    for copy in copies {
+        match copy {
+            SiblingCopy::Found { root, updated } if updated.as_str() > loaded => {
+                ctx.warnings.push(format!(
+                    "tasks/{id}.md in {} is newer than this copy ({updated} there, {loaded} \
+                     here); this write may omit changes from that copy; reconcile the copies \
+                     before merging",
+                    root.display()
+                ));
+            }
+            SiblingCopy::Found { .. } => {}
+            SiblingCopy::Unreadable { root, detail } => ctx.warnings.push(format!(
+                "tasks/{id}.md in {} could not be read ({detail}); whether that copy has \
+                 diverged from this one is unknown",
+                root.display()
+            )),
+        }
+    }
+}
+
 pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
-    task.updated = crate::time::now();
+    // Until this line the record still carries the stamp it was loaded with, which is the
+    // only baseline the divergence check below has; the bump destroys it.
+    let loaded = std::mem::replace(&mut task.updated, crate::time::now());
     validate_task(task)?;
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, task)?;
+    warn_on_newer_sibling_copies(ctx, &task.id, &loaded);
 
     match ctx.pending_claim.take() {
         Some((id, ClaimIntent::Acquire(claim))) => {

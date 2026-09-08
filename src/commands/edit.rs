@@ -129,6 +129,10 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
     let mut edited = parse_task(&edited_raw, &tmp_display).map_err(keep)?;
     check_invariants(&original, &edited).map_err(keep)?;
+    // `save` overwrites `updated`, so restoring it changes nothing in the record -- but it
+    // is also the baseline `save` compares other checkouts against, and a hand-edited stamp
+    // must not be able to talk that check out of firing.
+    edited.updated = original.updated.clone();
 
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
     if let Some(spec) = &edited.spec {

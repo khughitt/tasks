@@ -73,6 +73,15 @@ pub struct Project {
     pub plan_dirs: Vec<String>,
 }
 
+/// One other checkout's copy of a record, as `sibling_task_copies` found it.
+#[derive(Debug)]
+pub enum SiblingCopy {
+    /// The project root the copy was found in, and the `updated` stamp it carries there.
+    Found { root: PathBuf, updated: String },
+    /// The copy is present but could not be read or parsed.
+    Unreadable { root: PathBuf, detail: String },
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Config {
     prefix: String,
@@ -311,43 +320,130 @@ impl Project {
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
     }
 
-    /// Project-relative paths of changed or untracked files under tasks/, or `None` in
+    fn git(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
+        std::process::Command::new("git")
+            .args(args)
+            .env("LC_ALL", "C")
+            .current_dir(&self.root)
+            .output()
+    }
+
+    /// git's own repository discovery from this project's root, canonicalized. `None` in
     /// exactly two documented cases: git itself says the root is not inside a repository,
     /// or there is no git executable. Any other git failure (permissions, a corrupt index,
     /// an unexpected exit) is an `io` error, not a skip.
     ///
-    /// Discovery is git's: `rev-parse --show-toplevel`. A repository whose HEAD is
-    /// unreadable is reported by git as "not a git repository" and is treated the same
-    /// way, since distinguishing the two would mean reimplementing discovery. `LC_ALL=C`
-    /// pins git's messages to English so that the one string match is stable.
-    pub fn uncommitted_task_files(&self) -> Result<Option<Vec<String>>> {
-        let git = |args: &[&str]| {
-            std::process::Command::new("git")
-                .args(args)
-                .env("LC_ALL", "C")
-                .current_dir(&self.root)
-                .output()
-        };
-        let toplevel = match git(&["rev-parse", "--show-toplevel"]) {
+    /// A repository whose HEAD is unreadable is reported by git as "not a git repository"
+    /// and is treated the same way, since distinguishing the two would mean reimplementing
+    /// discovery. `LC_ALL=C` pins git's messages to English so that the one string match
+    /// is stable.
+    fn git_toplevel(&self) -> Result<Option<PathBuf>> {
+        match self.git(&["rev-parse", "--show-toplevel"]) {
             Ok(output) if output.status.success() => {
-                PathBuf::from(String::from_utf8_lossy(&output.stdout).trim_end())
+                let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim_end());
+                Ok(Some(path.canonicalize().unwrap_or(path)))
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 if stderr.contains("not a git repository") {
                     return Ok(None);
                 }
-                return Err(Error::Io(format!(
+                Err(Error::Io(format!(
                     "git rev-parse in {} failed ({}): {}",
                     self.root.display(),
                     output.status,
                     stderr.trim()
-                )));
+                )))
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// This record as it stands in every *other* worktree of the repository. `None` in the
+    /// two cases `git_toplevel` documents.
+    ///
+    /// A worktree holding no copy of the record is absent from the result: it branched
+    /// before the task existed and has nothing to say. A worktree whose copy cannot be read
+    /// or parsed is reported rather than dropped, because a copy we cannot compare is not a
+    /// copy we know to agree.
+    pub fn sibling_task_copies(&self, id: &TaskId) -> Result<Option<Vec<SiblingCopy>>> {
+        let Some(toplevel) = self.git_toplevel()? else {
+            return Ok(None);
         };
-        let output = git(&[
+        // A nested project sits at the same offset below the top level in every worktree.
+        let Ok(offset) = self.root.strip_prefix(&toplevel) else {
+            return Err(Error::Io(format!(
+                "git reports {} as the top level, which does not contain {}",
+                toplevel.display(),
+                self.root.display()
+            )));
+        };
+        let listed = self.git(&["worktree", "list", "--porcelain", "-z"])?;
+        if !listed.status.success() {
+            return Err(Error::Io(format!(
+                "git worktree list in {} failed ({}): {}",
+                self.root.display(),
+                listed.status,
+                String::from_utf8_lossy(&listed.stderr).trim()
+            )));
+        }
+        // porcelain with -z: NUL-terminated fields, paths verbatim (no quoting of spaces or
+        // non-ASCII). Every record opens with a `worktree <path>` field; the rest describe
+        // the checkout's head and are not ours to read.
+        let stdout = String::from_utf8_lossy(&listed.stdout);
+        let file = format!("tasks/{id}.md");
+        let mut copies = Vec::new();
+        for field in stdout.split('\0') {
+            let Some(listed) = field.strip_prefix("worktree ") else {
+                continue;
+            };
+            let listed = PathBuf::from(listed);
+            // A worktree git still lists but that is no longer on disk canonicalizes to
+            // nothing; leave the path as given and let the read below skip it.
+            let worktree = listed.canonicalize().unwrap_or(listed);
+            if worktree == toplevel {
+                continue;
+            }
+            // `join` on an empty offset would leave a trailing separator on the path
+            // that goes into every warning.
+            let root = if offset.as_os_str().is_empty() {
+                worktree
+            } else {
+                worktree.join(offset)
+            };
+            let raw = match std::fs::read_to_string(root.join(&file)) {
+                Ok(raw) => raw,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    copies.push(SiblingCopy::Unreadable {
+                        root,
+                        detail: error.to_string(),
+                    });
+                    continue;
+                }
+            };
+            match parse_task(&raw, &file) {
+                Ok(task) => copies.push(SiblingCopy::Found {
+                    root,
+                    updated: task.updated,
+                }),
+                Err(error) => copies.push(SiblingCopy::Unreadable {
+                    root,
+                    detail: error.to_string(),
+                }),
+            }
+        }
+        Ok(Some(copies))
+    }
+
+    /// Project-relative paths of changed or untracked files under tasks/, or `None` in the
+    /// two cases `git_toplevel` documents.
+    pub fn uncommitted_task_files(&self) -> Result<Option<Vec<String>>> {
+        let Some(toplevel) = self.git_toplevel()? else {
+            return Ok(None);
+        };
+        let output = self.git(&[
             "status",
             "--porcelain=v1",
             "-z",
