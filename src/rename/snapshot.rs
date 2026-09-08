@@ -373,4 +373,18 @@ parent: dot-b11111\ntags: []\n---\n";
         assert_eq!(error.kind(), "parse");
         assert!(error.to_string().contains("valid UTF-8"), "{error}");
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn hidden_invalid_utf8_markdown_filename_is_ignored() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let name = std::ffi::OsString::from_vec(vec![b'.', 0xff, b'.', b'm', b'd']);
+        std::fs::write(project.tasks_dir().join(name), "---\n").unwrap();
+
+        let inventory = Inventory::build(&project, "dots").unwrap();
+        assert!(inventory.entries.is_empty());
+    }
 }
