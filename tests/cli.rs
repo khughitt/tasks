@@ -215,6 +215,18 @@ fn id_of(value: serde_json::Value) -> String {
     value["id"].as_str().unwrap().to_string()
 }
 
+/// Register `alias` as a retired prefix of `target` by writing the registry directly.
+/// Until Task 11 there is no command that does this.
+fn alias_registry(env: &TestEnv, alias: &str, target: &str) {
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    if !text.contains("[aliases]") {
+        text.push_str("\n[aliases]\n");
+    }
+    text.push_str(&format!("{alias} = {target:?}\n"));
+    std::fs::write(&path, text).unwrap();
+}
+
 /// Writes a claim straight into the store.
 fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
     let path = env.claim_store(prefix);
@@ -3582,6 +3594,23 @@ fn root_prints_the_registered_root_of_an_id() {
         v["warnings"],
         serde_json::json!(["current project lon is not registered"])
     );
+}
+
+#[test]
+fn a_retired_prefix_resolves_to_its_live_project() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&fam, &["add", "Far", "-p", "2"]));
+    alias_registry(&env, "old", "fam");
+
+    let retired = format!("old-{}", id.split_once('-').unwrap().1);
+    // `root` resolves the *project* from the prefix, which is all this task delivers.
+    assert_eq!(env.json(&sci, &["root", &retired])["prefix"], "fam");
+
+    // --project takes a retired name too: it is a name of the project.
+    let v = env.json(&sci, &["list", "--project", "old"]);
+    assert_eq!(v["tasks"][0]["id"], id, "{v}");
 }
 
 #[test]

@@ -29,19 +29,23 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
         Origin::Id(id) => Error::UnresolvableId(format!("{id}: {detail}")),
         Origin::Prefix => Error::Config(detail),
     };
-    let Some(root) = registry.project_root(prefix) else {
+    // A retired prefix is a name of the project, so it resolves like the live one. The
+    // guard below then compares against the *canonical* prefix, so it keeps catching a
+    // registry that points a name at the wrong root.
+    let live = registry.canonical_prefix(prefix);
+    let Some(root) = registry.project_root(live) else {
         return Err(fail(format!("no project registered as {prefix:?}")));
     };
     if !has_config(root)? {
         return Err(fail(format!(
-            "project {prefix:?} at {} has no {CONFIG_REL}; run `tasks init` there",
+            "project {live:?} at {} has no {CONFIG_REL}; run `tasks init` there",
             root.display()
         )));
     }
     let project = Project::open(root)?;
-    if project.prefix != prefix {
+    if project.prefix != live {
         return Err(Error::Config(format!(
-            "registry maps {prefix:?} to {}, whose prefix is {:?}; fix the registry",
+            "registry maps {live:?} to {}, whose prefix is {:?}; fix the registry",
             root.display(),
             project.prefix
         )));

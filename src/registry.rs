@@ -119,7 +119,6 @@ impl Registry {
     }
 
     /// The live prefix `prefix` resolves to. One hop: aliases never chain (§2).
-    #[allow(dead_code)]
     pub fn canonical_prefix<'a>(&'a self, prefix: &'a str) -> &'a str {
         self.aliases.get(prefix).map_or(prefix, String::as_str)
     }
