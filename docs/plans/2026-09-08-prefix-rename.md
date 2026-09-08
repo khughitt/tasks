@@ -3,7 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rename a project's prefix with one command, keeping every existing reference to
-the old name resolving through a permanent alias.
+the old name resolving through a retired-prefix alias that lives as long as the project's
+registration does.
 
 **Architecture:** A retired prefix becomes an alias in the registry; because a rename
 preserves the hex, resolution rewrites only the prefix component of an id, so no other
@@ -32,6 +33,13 @@ observation of the world plus that baseline.
   alternative is storing whole file bodies in the inventory, which is a spec change.
 - **`tasks check` must stay clean.** This plan's `### Task N:` headings are linked to child
   tasks of `tasks-8c9398`; renaming a heading without updating its task fails the gate.
+- **There is no library target.** Unit tests in `src/` run under the binary:
+  `cargo test --bin tasks <filter>`. `cargo test --lib` fails with
+  "no library targets found in package `tasks`".
+- **Every task ends by reinstalling and closing its task, in the same commit as the code**
+  (AGENTS.md): `cargo install --path .` so the `tasks` binary used by the next task is the
+  code under test, then `tasks done <id> "<what landed>"`. Each task's final step spells
+  out both with its own id.
 
 ## File Structure
 
@@ -128,7 +136,7 @@ Add `use crate::model::TaskId;` to the test module if it is not already in scope
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib registry::`
+Run: `cargo test --bin tasks registry::`
 Expected: FAIL — `no method named canonical_prefix`, `no field aliases`.
 
 - [ ] **Step 3: Add the field, the invariants, and the primitives**
@@ -196,13 +204,15 @@ Add `use crate::model::TaskId;` to the module imports.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --lib registry::` — Expected: PASS.
+Run: `cargo test --bin tasks registry::` — Expected: PASS.
 Run: `just check` — Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/registry.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-590d4d "Registry gains an aliases table with load-time invariants (every target live, no collision with a live prefix), plus canonical_prefix, canonical_id and is_taken. Purely additive: no caller changed."
+git add src/registry.rs tasks/
 git commit -m "feat(registry): record retired prefixes as aliases"
 ```
 
@@ -217,6 +227,12 @@ git commit -m "feat(registry): record retired prefixes as aliases"
 **Interfaces:**
 - Consumes: `Registry::canonical_prefix`, `Registry::is_taken` (Task 1).
 - Produces: `open_registered` accepts a retired prefix and opens its live project.
+
+**Scope note:** this task resolves the *project* from a retired prefix. Reading a *task*
+through a retired id additionally needs `canonical_id` at the input, which is Task 3 —
+`show old-a00088` would otherwise open the right project and then look for
+`tasks/old-a00088.md`, which does not exist. The test below therefore exercises `root` and
+`--project`, and Task 3's test covers `show`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -245,7 +261,7 @@ fn a_retired_prefix_resolves_to_its_live_project() {
     alias_registry(&env, "old", "fam");
 
     let retired = format!("old-{}", id.split_once('-').unwrap().1);
-    assert_eq!(env.json(&sci, &["show", &retired])["task"]["id"], id);
+    // `root` resolves the *project* from the prefix, which is all this task delivers.
     assert_eq!(env.json(&sci, &["root", &retired])["prefix"], "fam");
 
     // --project takes a retired name too: it is a name of the project.
@@ -299,10 +315,12 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
 Run: `cargo test --test cli -- a_retired_prefix_resolves` — Expected: PASS.
 Run: `just gate` — Expected: clean; no existing test regresses.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/scope.rs tests/cli.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-03a9c2 "open_registered follows an alias to its live project, so a retired prefix names the project in root and --project. Its misconfiguration guard now compares against the canonical prefix, so it still catches a registry pointing a name at the wrong root."
+git add src/scope.rs tests/cli.rs tasks/
 git commit -m "feat(scope): resolve a retired prefix to its live project"
 ```
 
@@ -337,6 +355,11 @@ fn a_retired_id_is_one_task_for_routing_dedup_and_removal() {
     alias_registry(&env, "old", "sci");
     let retired_a = format!("old-{}", a.split_once('-').unwrap().1);
     let retired_b = format!("old-{}", b.split_once('-').unwrap().1);
+
+    // Reading a task through a retired id (deferred here from Task 2).
+    assert_eq!(env.json(&sci, &["show", &retired_a])["task"]["id"], a);
+    // And through the list-backed resolution path, which Scope::resolve_task serves.
+    assert_eq!(env.json(&sci, &["list", "--parent", &retired_a])["tasks"], serde_json::json!([]));
 
     // Routing: a retired id of the *current* project stays in this checkout.
     env.json(&sci, &["note", &retired_a, "written through the retired name"]);
@@ -398,8 +421,52 @@ pub fn open_id_write_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
 Apply the same change in `open_id_read_ctx` (Task: `tree`'s router) — canonicalize before
 comparing against the local project's prefix.
 
-In `src/resolve.rs`, at the top of `resolve_task`, canonicalize the id before looking it up,
-so a reference *stored* with a retired prefix still resolves.
+In `src/resolve.rs`, canonicalize in **both** resolution entry points. `Resolver::resolve_task`
+is only half of it: `Scope::resolve_task` (`src/scope.rs:141`) backs `list`, `ready`, `next`,
+and `prime`, it compares `project.prefix == id.prefix` raw, and its fallback reaches
+`resolve_registered` (`src/resolve.rs:125`), whose first act is a raw
+`registry.project_root(&id.prefix)` that returns `None` for an alias and bails long before
+the alias-aware `open_registered` of Task 2 is ever called.
+
+```rust
+// src/resolve.rs
+pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
+    let id = &registry.canonical_id(id);
+    let Some(root) = registry.project_root(&id.prefix) else {
+        return Ok(None);
+    };
+    // … unchanged from here
+}
+```
+
+```rust
+// src/scope.rs
+    pub fn resolve_task(&self, registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
+        let id = &registry.canonical_id(id);
+        match self.projects().iter().find(|p| p.prefix == id.prefix) {
+            Some(project) => crate::resolve::read_present(project, id),
+            None => crate::resolve::resolve_registered(registry, id),
+        }
+    }
+```
+
+**Every user-input parse site uses `parse_id`.** The ones that reparse a retired id and would
+otherwise keep failing:
+
+| Site | Command surface |
+|---|---|
+| `src/commands/mod.rs:361` (`load`) | every write command's task lookup |
+| `src/commands/mod.rs:308`, `:323` (`apply_fields`) | `--depends`, `--parent` on `add` and `edit` |
+| `src/commands/show.rs:11` | `show` |
+| `src/commands/root.rs:11` | `root` |
+| `src/commands/tree.rs:12` | `tree <id>` |
+| `src/commands/edit.rs:95` | `edit` |
+| `src/commands/list.rs:39` | `list --parent` |
+| `src/commands/feedback.rs:61` | `feedback --recur` |
+| `src/commands/dep.rs:34`, `:48` | `dep --on`, `dep --rm` |
+
+`apply_fields` and `load` take a `&Ctx`, so the registry is already to hand; `list.rs` takes
+a `ReadCtx`. None needs a new parameter.
 
 In `src/commands/dep.rs`, canonicalize both sides of every comparison:
 
@@ -465,10 +532,12 @@ Update `show::run` and `root` to use `parse_id` as well.
 Run: `cargo test --test cli -- a_retired_id_is_one_task` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/commands/mod.rs src/resolve.rs src/commands/dep.rs src/commands/show.rs tests/cli.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-66120e "canonical_id applied at every user-input parse site, at both resolution entry points (Resolver::resolve_task and Scope::resolve_task via resolve_registered, which backs list/ready/next/prime), and on both sides of dep's dedup, removal, self-check and cycle detection. Stored depends are deliberately left as written so an unrelated save does not rewrite them."
+git add src/commands/mod.rs src/resolve.rs src/commands/dep.rs src/commands/show.rs tests/cli.rs tasks/
 git commit -m "feat(ids): treat a retired prefix as the same task everywhere"
 ```
 
@@ -548,10 +617,12 @@ Call it in `open_ctx` after loading the registry, and in `open_read_ctx`'s local
 Run: `cargo test --test cli -- a_checkout_still_using_a_retired` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/commands/mod.rs tests/cli.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-bdde89 "Every command checks its local project prefix against the registry and refuses when the registry has retired it. Nothing else saw this: open_registered validates the registered destination and Project::locate never reads the registry."
+git add src/commands/mod.rs tests/cli.rs tasks/
 git commit -m "feat(scope): refuse a checkout whose prefix the registry retired"
 ```
 
@@ -631,10 +702,12 @@ In `src/commands/check.rs`, in the dependency loop, before the reachability matc
 Run: `cargo test --test cli -- check_nudges_a_depends` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/commands/check.rs tests/cli.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-52ffa3 "check raises retired_prefix in the referring project on a depends entry naming a retired prefix, quoting the current id. Prose is never examined."
+git add src/commands/check.rs tests/cli.rs tasks/
 git commit -m "feat(check): nudge a depends naming a retired prefix"
 ```
 
@@ -728,10 +801,12 @@ Run: `cargo test --test cli -- unregister_takes_the_aliases` — Expected: PASS.
 Run: `just gate` — Expected: clean. Fix `registry.rs`'s existing
 `unregister_removes_once_and_then_reports_the_prefix_is_absent` for the new return type.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/registry.rs src/commands/unregister.rs src/commands/init.rs src/output.rs tests/cli.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-6725e3 "unregister removes a project with every alias targeting it and names them in its output; unregistering an alias is refused with a pointer to the live name; init refuses a prefix taken as either a live prefix or an alias."
+git add src/registry.rs src/commands/unregister.rs src/commands/init.rs src/output.rs tests/cli.rs tasks/
 git commit -m "feat(registry): drop a project's aliases with the project"
 ```
 
@@ -748,6 +823,8 @@ git commit -m "feat(registry): drop a project's aliases with the project"
 - Consumes: `MutationLock::acquire_at` (`src/claims.rs:227`).
 - Produces: `Registry::lock() -> Result<MutationLock>` — held across every registry
   read-modify-write.
+- Produces: `commands::lock_and_revalidate(&mut Ctx) -> Result<()>` — acquire, then
+  re-resolve under the lock. Used by `open_id_write_ctx` and by both `add` arms.
 
 `add` takes no mutation lock at all today (`open_ctx` sets `lock: None`), relying on
 `create_task`'s exclusive create, which guards a colliding id and nothing else. And
@@ -756,21 +833,38 @@ prevents a torn file, not a lost update.
 
 - [ ] **Step 1: Write the failing test**
 
+The window is microseconds wide, so spawning two processes and hoping they collide is not a
+test. Hold the registry lock from the test, start both children, confirm they are blocked,
+then release — forcing the interleaving instead of wishing for it. A second test covers
+`add` waiting through a completed rename.
+
 ```rust
 #[test]
 fn concurrent_registry_writes_do_not_lose_each_other() {
+    use std::fs::File;
     let env = TestEnv::new();
-    let a = tempfile::tempdir().unwrap();
-    let b = tempfile::tempdir().unwrap();
-    let mut children: Vec<_> = [("aaa", a.path()), ("bbb", b.path())]
-        .into_iter()
+    let dirs: Vec<_> = (0..2).map(|_| tempfile::tempdir().unwrap()).collect();
+
+    let lock_path = env.home.path().join(".config/tasks/projects.lock");
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let held: File = std::fs::OpenOptions::new()
+        .create(true).truncate(false).write(true).open(&lock_path).unwrap();
+    held.lock().unwrap();
+
+    let mut children: Vec<_> = ["aaa", "bbb"]
+        .iter()
+        .zip(&dirs)
         .map(|(prefix, dir)| {
-            env.raw(dir)
-                .args(["init", "--prefix", prefix])
-                .spawn()
-                .unwrap()
+            env.raw(dir.path()).args(["init", "--prefix", prefix]).spawn().unwrap()
         })
         .collect();
+    // Asserting that progress does NOT happen; there is no event to wait for.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    for child in &mut children {
+        assert!(child.try_wait().unwrap().is_none(), "a child ran without the lock");
+    }
+    drop(held);
+
     for child in &mut children {
         assert!(child.wait().unwrap().success());
     }
@@ -778,13 +872,42 @@ fn concurrent_registry_writes_do_not_lose_each_other() {
     assert!(text.contains("aaa = "), "{text}");
     assert!(text.contains("bbb = "), "{text}");
 }
+
+#[test]
+fn an_add_waiting_through_a_rename_uses_the_new_identity() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    env.json(&dir, &["add", "Seed", "-p", "2"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+
+    // Block the project's mutation lock, start an `add` behind it, rename, then release.
+    let lock_path = env.claim_store("dot").with_file_name("dot.lock");
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let held = std::fs::OpenOptions::new()
+        .create(true).truncate(false).write(true).open(&lock_path).unwrap();
+    held.lock().unwrap();
+    let mut adder = env.raw(&dir).args(["add", "Late", "-p", "2"]).spawn().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(adder.try_wait().unwrap().is_none(), "the add must be waiting");
+    drop(held);
+
+    // The add either refuses (freeze) or lands under the new prefix — never under `dot`.
+    let out = adder.wait_with_output().unwrap();
+    let stale: Vec<_> = std::fs::read_dir(dir.join("tasks")).unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("dot-"))
+        .collect();
+    assert!(stale.is_empty(), "an old-prefix file was created after the rename: {out:?}");
+}
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli -- concurrent_registry_writes`
-Expected: FLAKY/FAIL — one registration is lost under contention. Run it a few times:
-`cargo test --test cli -- concurrent_registry_writes --test-threads=1` repeated.
+Expected: FAIL deterministically — with no `projects.lock` taken by the binary the children
+do not block, so `try_wait` finds one already finished.
 
 - [ ] **Step 3: Serialize the registry and lock `add`**
 
@@ -801,53 +924,70 @@ In `src/registry.rs`:
 
 Take it in `init`, `unregister`, and (Task 11) `rename`, around load-mutate-save.
 
-In `src/commands/mod.rs`, give `add` the mutation lock on both arms:
+**First remove `add`'s inner lock.** `add::run` acquires the same prefix lock itself when
+`--source` is given (`src/commands/add.rs:63-66`), to make the duplicate check and the write
+one critical section. `MutationLock` is an flock, and a second open of the same inode blocks
+even within one process, so handing the context a lock without removing that one deadlocks
+every sourced `add`. Delete the inner acquisition; the duplicate check keeps its critical
+section because the context's lock is already held around it.
 
 ```rust
-                Some(prefix) => {
-                    let registry = Registry::load()?;
-                    let project =
-                        crate::scope::open_registered(&registry, &prefix, Origin::Prefix)?;
-                    let lock = Some(MutationLock::acquire(&project.prefix)?);
-                    Ctx { project, registry, warnings: Vec::new(), lock, claims: None, pending_claim: None }
-                }
-                None => {
-                    let mut ctx = open_ctx(dir)?;
-                    ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
-                    ctx
-                }
+// src/commands/add.rs — was `let _lock = match &fields.source { Some(source) => { … acquire … } }`
+    // The context holds this project's mutation lock, so the duplicate check and the
+    // create below are already one critical section.
+    if let Some(source) = &fields.source {
+        validate_line("source", source)?;
+        let existing = duplicates_of(&ctx.project, source, &title)?;
+        // … unchanged from here
+    }
 ```
 
-In `open_id_write_ctx`, re-resolve after acquiring, and reacquire if identity moved:
+**One helper for every locking path**, so revalidation is not written three times and
+forgotten in two of them:
 
 ```rust
-    // A waiter resolved before the lock; the world may have moved under it. Re-resolve
-    // under the lock, and if the identity changed we are holding the wrong lock.
+/// Acquire the project's mutation lock and re-resolve under it.
+///
+/// A waiter resolved *before* the lock, and a rename may have completed while it waited —
+/// including the cleanup that lifts the freeze — so acting on the pre-lock project would
+/// create a task under a prefix that no longer exists. The project is reopened on every
+/// pass, not only when the canonical prefix moved: `init --force` can repoint a live
+/// prefix at a different root without changing the name.
+fn lock_and_revalidate(ctx: &mut Ctx) -> Result<()> {
     for _ in 0..4 {
-        let registry = Registry::load()?;
-        let live = registry.canonical_prefix(&ctx.project.prefix).to_string();
-        if live == ctx.project.prefix {
-            ctx.registry = registry;
-            return Ok(ctx);
-        }
-        ctx.lock = None; // released before the next acquire, never held crossed
-        ctx.project = crate::scope::open_registered(&registry, &live, Origin::Prefix)?;
         ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
+        let registry = Registry::load()?;
+        reject_pending_rename(&ctx.project)?;          // Task 11
+        let live = registry.canonical_prefix(&ctx.project.prefix).to_string();
+        let project = crate::scope::open_registered(&registry, &live, Origin::Prefix)?;
+        if project.prefix == ctx.project.prefix && project.root == ctx.project.root {
+            ctx.registry = registry;
+            return Ok(());
+        }
+        ctx.lock = None; // released before the next acquire; never held crossed
+        ctx.project = project;
     }
     Err(Error::Io(
         "the project's identity kept changing while acquiring its lock; retry".into(),
     ))
+}
 ```
+
+Call it from `open_id_write_ctx` and from **both** `add` arms — the explicit-`--project` arm
+and the local one. Each builds its `Ctx` with `lock: None`, then calls
+`lock_and_revalidate(&mut ctx)?`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- concurrent_registry_writes` — Expected: PASS, repeatedly.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/registry.rs src/commands/mod.rs src/commands/init.rs src/commands/unregister.rs tests/cli.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-6a4742 "A registry lock serializes the read-modify-write that init, unregister and rename share, closing a pre-existing lost-update race. add takes the project mutation lock on both arms with its inner acquisition removed, and lock_and_revalidate re-resolves under the lock so a waiter cannot act on a pre-lock identity."
+git add src/registry.rs src/commands/mod.rs src/commands/init.rs src/commands/unregister.rs tests/cli.rs tasks/
 git commit -m "fix(registry): serialize read-modify-write and lock add"
 ```
 
@@ -906,7 +1046,7 @@ depends: [dot-b11111, ops-c22222]\ntags: []\n---\n\n\nBody   with  odd    spacin
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib rename::rewrite`
+Run: `cargo test --bin tasks rename::rewrite`
 Expected: FAIL — module does not exist.
 
 - [ ] **Step 3: Implement**
@@ -980,13 +1120,15 @@ Create `src/rename/mod.rs` with `pub mod rewrite;` and add `mod rename;` to `src
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --lib rename::rewrite` — Expected: PASS.
+Run: `cargo test --bin tasks rename::rewrite` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/rename/ src/format.rs src/main.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-4107c8 "rewrite_prefix moves a task's id and its local depends/parent through the frontmatter only, preserving every byte after the closing delimiter. The created/updated pre-quote and Raw-emit pair is factored out of parse_task and serialize_task and shared."
+git add src/rename/ src/format.rs src/main.rs tasks/
 git commit -m "feat(rename): rewrite a task's prefix without touching its body"
 ```
 
@@ -1002,8 +1144,17 @@ git commit -m "feat(rename): rewrite a task's prefix without touching its body"
 - Produces: `Inventory { source, target, root, config_from, config_to, entries }`,
   `InventoryEntry { hex, from, to }`, `Inventory::path(source) -> PathBuf`,
   `Inventory::load/save/remove`.
-- Produces: `Snapshot { registry, config, inventory, entries, named, strays }` and
-  `observe(&Registry, root, source, target) -> Result<Snapshot>`.
+- Produces: `Snapshot { invocation, registry, config, inventory, entries, named, strays }`
+  and `observe(&Registry, invocation: &Invocation, inventory: Option<Inventory>) -> Result<Snapshot>`,
+  where `Invocation { source: String, target: String, root: PathBuf }`.
+
+**One signature for both regimes.** Observation happens before *and* after an inventory
+exists, so the inventory is an `Option` argument and the invocation carries the names and
+root the caller asked for. `Snapshot.invocation` is what R1 compares an inventory against —
+without it the classifier cannot tell whether the inventory on disk belongs to this rename —
+and it is what the inventory-absent rows use to decide whether the config's parsed prefix is
+the source or the target. With no inventory, `entries` is empty and only `named`, `config`,
+and `registry` carry information.
 - Produces: `digest(bytes: &[u8]) -> String` — lowercase hex SHA-256.
 
 The inventory lives at `~/.local/state/tasks/rename/<source>.toml`, beside claims: it is
@@ -1035,7 +1186,8 @@ created: 2026-09-01T00:00:00Z\nupdated: 2026-09-01T00:00:00Z\ndepends: []\ntags:
         assert_ne!(inventory.entries[0].from, inventory.entries[0].to);
 
         let registry = crate::registry::Registry::default();
-        let snap = observe(&registry, &project.root, &inventory).unwrap();
+        let invocation = Invocation { source: "dot".into(), target: "dots".into(), root: project.root.clone() };
+        let snap = observe(&registry, &invocation, Some(inventory.clone())).unwrap();
         assert_eq!(snap.named.source, 1);
         assert_eq!(snap.named.target, 0);
         assert!(snap.strays.is_empty());
@@ -1049,15 +1201,30 @@ created: 2026-09-01T00:00:00Z\nupdated: 2026-09-01T00:00:00Z\ndepends: []\ntags:
         let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
         let inventory = Inventory::build(&project, "dots").unwrap();
         std::fs::write(project.tasks_dir().join("dot-ffffff.md"), "---\n").unwrap();
-        let snap = observe(&crate::registry::Registry::default(), &project.root, &inventory).unwrap();
+        let invocation = Invocation { source: "dot".into(), target: "dots".into(), root: project.root.clone() };
+        let snap = observe(&crate::registry::Registry::default(), &invocation, Some(inventory)).unwrap();
         assert_eq!(snap.strays.len(), 1, "{:?}", snap.strays);
+    }
+
+    #[test]
+    fn observing_without_an_inventory_still_counts_files_by_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        std::fs::write(project.tasks_dir().join("dot-a00088.md"), MINIMAL_TASK).unwrap();
+        let invocation = Invocation { source: "dot".into(), target: "dots".into(), root: project.root.clone() };
+        let snap = observe(&crate::registry::Registry::default(), &invocation, None).unwrap();
+        assert!(snap.inventory.is_none());
+        assert!(snap.entries.is_empty(), "no baseline means no entries");
+        assert_eq!(snap.named.source, 1);
+        assert_eq!(snap.named.target, 0);
+        assert!(snap.strays.is_empty(), "without a baseline nothing is a stray");
     }
 }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib rename::snapshot`
+Run: `cargo test --bin tasks rename::snapshot`
 Expected: FAIL — modules do not exist.
 
 - [ ] **Step 3: Implement**
@@ -1076,13 +1243,15 @@ a destination, or a stray, and reads the config.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --lib rename::` — Expected: PASS.
+Run: `cargo test --bin tasks rename::` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add Cargo.toml Cargo.lock src/rename/
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-bddcab "The inventory records source, target, root, config digests and per-task from/to digests under the state directory, and observe reads the world against it -- or without it, from the config's parsed prefix and a filename scan. sha2 added for a digest stable across Rust releases."
+git add Cargo.toml Cargo.lock src/rename/ tasks/
 git commit -m "feat(rename): record a baseline inventory and observe against it"
 ```
 
@@ -1147,23 +1316,76 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_classifier_is_total_over_a_bounded_enumeration() {
-        // Every snapshot the enumeration produces classifies; nothing panics, and anything
-        // outside the table is a Refuse rather than a guess.
-        let mut seen_non_refuse = 0;
-        for snap in enumerate_snapshots() {
-            match classify(&snap) {
-                Recovery::Refuse(reason) => assert!(!reason.is_empty()),
-                _ => seen_non_refuse += 1,
-            }
+    /// The spec's table and refusal list, transcribed independently of the implementation.
+    /// Written from §5.3 rather than from `classify`, so agreeing with it is evidence.
+    fn expected(snap: &Snapshot) -> Recovery {
+        // R1-R6 need a baseline; R7-R8 read the registry alone.
+        if snap.registry.two_roots() || snap.registry.foreign_new_key(&snap.invocation.root) {
+            return Recovery::Refuse("registry".into());
         }
-        assert!(seen_non_refuse > 0, "the enumeration must reach the table, not only refusals");
+        if let Some(inv) = &snap.inventory {
+            if !inv.matches(&snap.invocation)
+                || snap.entries.iter().any(|e| e.source_edited() || e.dest_conflicts() || e.missing())
+                || !snap.strays.is_empty()
+                || !snap.config.matches_either(inv)
+            {
+                return Recovery::Refuse("baseline".into());
+            }
+            return if snap.config.is_from(inv) && snap.registry.is_old(&snap.invocation) {
+                Recovery::ResumeFiles
+            } else if snap.files_done() && snap.config.is_to(inv) && snap.registry.is_old(&snap.invocation) {
+                Recovery::ResumeRegistry
+            } else if snap.files_done() && snap.config.is_to(inv) && snap.registry.is_new(&snap.invocation) {
+                Recovery::ResumeCleanup
+            } else {
+                Recovery::Refuse("unresumable".into())
+            };
+        }
+        if snap.named.target == 0
+            && snap.config.prefix_is(&snap.invocation.source)
+            && snap.registry.is_old(&snap.invocation)
+        {
+            Recovery::Fresh
+        } else if snap.named.source == 0
+            && snap.config.prefix_is(&snap.invocation.target)
+            && snap.registry.is_new(&snap.invocation)
+        {
+            Recovery::Complete
+        } else {
+            Recovery::Refuse("unsettled".into())
+        }
+    }
+
+    #[test]
+    fn every_enumerated_snapshot_gets_the_verdict_the_spec_names() {
+        let mut counts = std::collections::BTreeMap::new();
+        for snap in enumerate_snapshots() {
+            let got = classify(&snap);
+            let want = expected(&snap);
+            assert_eq!(
+                std::mem::discriminant(&got),
+                std::mem::discriminant(&want),
+                "snapshot {snap:?}\n  classify -> {got:?}\n  spec     -> {want:?}"
+            );
+            if let Recovery::Refuse(reason) = &got {
+                assert!(!reason.is_empty(), "a refusal must say what it saw: {snap:?}");
+            }
+            *counts.entry(format!("{got:?}").split('(').next().unwrap().to_string())
+                .or_insert(0usize) += 1;
+        }
+        // Every verdict must be reachable, or the enumeration is not exercising the table.
+        for verdict in ["Fresh", "ResumeFiles", "ResumeRegistry", "ResumeCleanup", "Complete", "Refuse"] {
+            assert!(counts.get(verdict).copied().unwrap_or(0) > 0, "{verdict} unreached: {counts:?}");
+        }
     }
 }
 ```
 
-Write `fixture(Stage)` and `enumerate_snapshots()` in the same test module.
+Write `fixture(Stage)`, `expected(&Snapshot)`, and `enumerate_snapshots()` in the same test
+module. `expected` is the load-bearing one: transcribe it from the spec's §5.3 table and
+refusal list, **not** from the implementation, or the test proves only that `classify`
+agrees with itself. The reachability assertion is what stops a classifier that returns one
+verdict for everything from passing.
 `enumerate_snapshots` iterates: `registry` over its three fields, `config` prefix × 3 and
 digest × 3, `inventory` × 2, `named` over zero/non-zero each, `strays` × 2, and entry lists
 of length 0, 1, and 2 over `source` × 3 and `dest` × 3. Include inventory-absent snapshots
@@ -1172,7 +1394,7 @@ baseline that is not there is caught rather than assumed away.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib rename::classify`
+Run: `cargo test --bin tasks rename::classify`
 Expected: FAIL — module does not exist.
 
 - [ ] **Step 3: Implement refusals first, then the table**
@@ -1211,13 +1433,15 @@ pub fn classify(snap: &Snapshot) -> Recovery {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --lib rename::classify` — Expected: PASS.
+Run: `cargo test --bin tasks rename::classify` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/rename/classify.rs src/rename/mod.rs
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-425ef7 "classify is pure: refusals R1-R8 decided before the table, R1-R6 scoped to inventory-present, and every row naming file, config and registry state exactly. Verified by bounded enumeration against an oracle transcribed from the spec, with every verdict asserted reachable."
+git add src/rename/classify.rs src/rename/mod.rs tasks/
 git commit -m "feat(rename): classify recovery from a snapshot and its baseline"
 ```
 
@@ -1227,13 +1451,22 @@ git commit -m "feat(rename): classify recovery from a snapshot and its baseline"
 
 **Files:**
 - Create: `src/commands/rename.rs`
-- Modify: `src/rename/mod.rs` (phases), `src/cli.rs`, `src/commands/mod.rs`, `src/output.rs`
+- Modify: `src/rename/mod.rs` (phases), `src/cli.rs`, `src/commands/mod.rs`, `src/output.rs`,
+  `src/commands/init.rs`
 - Test: `tests/cli.rs`
 
 **Interfaces:**
 - Consumes: everything from Tasks 1, 6, 7, 8, 9, 10.
 - Produces: `tasks rename <old> <new> [--explain]`;
   `RenameOut { prefix, previous, root, tasks, aliases, recovery, warnings }`.
+- Produces: `commands::reject_pending_rename(&Project) -> Result<()>` — the freeze, called
+  by `lock_and_revalidate` (Task 7) and under the registry lock by `init` and `unregister`.
+
+**The freeze ships with the command, not after it.** A `rename` that can be interrupted but
+whose interruption nothing protects is worse than no command: locks die with the process, so
+between the crash and its recovery the world looks like an ordinary project under its old
+name and any `add` walks into it. Task 12 keeps the broader interruption matrix and the
+docs, but the freeze and the pending-name reservation are part of this commit.
 
 Phases: P1 preflight, P2 inventory, P3 file pass, P4 config, P5 registry, P6 cleanup.
 Classification precedes every fresh-operation check: after P5, `<old>` canonicalizes to
@@ -1275,6 +1508,47 @@ fn rename_rewrites_the_project_and_keeps_inbound_refs_resolving() {
     // A completed re-run reports Complete rather than tripping a fresh-operation refusal.
     let v = env.json(&dots, &["rename", "dot", "dots"]);
     assert_eq!(v["recovery"], "complete");
+
+    // --explain writes nothing and reports the same verdict.
+    let before = std::fs::read_to_string(env.home.path().join(".config/tasks/projects.toml")).unwrap();
+    assert_eq!(
+        env.json(&dots, &["rename", "dot", "dots", "--explain"])["recovery"],
+        "complete"
+    );
+    assert_eq!(
+        std::fs::read_to_string(env.home.path().join(".config/tasks/projects.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn a_pending_rename_freezes_the_project_including_the_p4_window() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    env.json(&dir, &["add", "T", "-p", "2"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+
+    // Stop after the config write: files and config renamed, registry untouched. This is
+    // the window where a lookup by resolved prefix would miss rename/dot.toml entirely.
+    env.raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "config")
+        .args(["rename", "dot", "dots"])
+        .status()
+        .unwrap();
+
+    assert_eq!(env.fail(&dir, &["add", "New", "-p", "2"]), "validation");
+    assert_eq!(env.fail(&dir, &["unregister", "dot"]), "validation");
+    assert!(env.json(&dir, &["list"])["tasks"].is_array(), "reads still work");
+
+    // The target is reserved even though it is in no registry yet.
+    let fresh = tempfile::tempdir().unwrap();
+    assert_eq!(env.fail(fresh.path(), &["init", "--prefix", "dots"]), "config");
+
+    // And the rename completes on a re-run.
+    assert_eq!(env.json(&dir, &["rename", "dot", "dots"])["recovery"], "resume_registry");
+    assert!(env.json(&dir, &["add", "New", "-p", "2"])["id"].as_str().unwrap().starts_with("dots-"));
 }
 
 #[test]
@@ -1299,6 +1573,12 @@ Expected: FAIL — unrecognized subcommand `rename`.
 
 - [ ] **Step 3: Implement the phases and wire the command**
 
+`src/rename/mod.rs` reads `TASKS_RENAME_STOP_AFTER` and returns early after the named
+boundary — `inventory`, `file:<n>` (after the nth destination write, before its source is
+removed), `files`, `config`, `registry`, `claims` — which is the only way to test
+interruption without killing a process mid-write. It is production code that exists for
+tests; the alternative is spawning and killing real processes, which is slower and racier.
+
 `src/rename/mod.rs` gains `run(project, registry, source, target, explain) -> Result<RenameOut>`:
 observe, classify, and then execute from the phase the verdict names. On `Fresh`, run the
 §5.2 preflight refusals first. Authorization — live claims and the worktree count — runs on
@@ -1308,101 +1588,7 @@ every mutating verdict, and not at all under `--explain`.
 `RenameOut` and its `Output::Rename` variant, its `pretty` arm (the new prefix, as `init`
 prints its prefix), and its `warnings_of` arm.
 
-- [ ] **Step 4: Run the tests to verify they pass**
-
-Run: `cargo test --test cli -- rename_` — Expected: PASS.
-Run: `just gate` — Expected: clean.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/rename/ src/commands/rename.rs src/commands/mod.rs src/cli.rs src/output.rs tests/cli.rs
-git commit -m "feat(rename): rename a project's prefix in six recoverable phases"
-```
-
----
-
-### Task 12: The freeze, interruption coverage, and the docs
-
-**Files:**
-- Modify: `src/commands/mod.rs` (the freeze check), `src/commands/init.rs`
-- Modify: `skills/tasks/SKILL.md`, `README.md`, `docs/specs/2026-09-08-prefix-rename-design.md`
-- Test: `tests/cli.rs`
-
-**Interfaces:**
-- Consumes: `Inventory::pending()` (Task 9).
-- Produces: `commands::reject_pending_rename(&Project) -> Result<()>`.
-
-Discovery scans the pending directory and matches on the recorded `source`, `target`, and
-`root` — **not** on the caller's resolved prefix. Between P4 and P5 the config says `new`
-while the registry still says `old` with no alias, so a lookup by resolved prefix misses
-`rename/<old>.toml` entirely and an `add` sails into a project mid-rename.
-
-- [ ] **Step 1: Write the failing tests**
-
-```rust
-#[test]
-fn a_pending_rename_freezes_the_project_including_the_p4_window() {
-    let mut env = TestEnv::new();
-    let dir = env.init("dot");
-    git(&dir, &["init", "-q", "-b", "main"]);
-    env.json(&dir, &["add", "T", "-p", "2"]);
-    git(&dir, &["add", "-A"]);
-    git(&dir, &["commit", "-qm", "seed"]);
-
-    // Simulate the P4-P5 window: files and config renamed, registry untouched.
-    interrupt_rename_after_config(&mut env, &dir, "dot", "dots");
-
-    // Writes refuse; the freeze found the inventory by its recorded names, not by
-    // resolving the caller's prefix.
-    assert_eq!(env.fail(&dir, &["add", "New", "-p", "2"]), "validation");
-    assert_eq!(env.fail(&dir, &["unregister", "dot"]), "validation");
-    // Reads still work.
-    assert!(env.json(&dir, &["list"])["tasks"].is_array());
-    // The target name is reserved even though it is in no registry yet.
-    let fresh = tempfile::tempdir().unwrap();
-    assert_eq!(env.fail(fresh.path(), &["init", "--prefix", "dots"]), "config");
-
-    // And the rename completes on a re-run.
-    assert_eq!(env.json(&dir, &["rename", "dot", "dots"])["recovery"], "resume_registry");
-}
-
-#[test]
-fn every_interruption_boundary_resumes_to_the_same_final_state() {
-    for stop_after in ["inventory", "files", "config", "registry"] {
-        let mut env = TestEnv::new();
-        let dir = env.init("dot");
-        git(&dir, &["init", "-q", "-b", "main"]);
-        let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
-        git(&dir, &["add", "-A"]);
-        git(&dir, &["commit", "-qm", "seed"]);
-
-        interrupt_rename(&mut env, &dir, "dot", "dots", stop_after);
-        env.json(&dir, &["rename", "dot", "dots"]);
-
-        let moved = format!("dots-{}", id.split_once('-').unwrap().1);
-        assert!(dir.join(format!("tasks/{moved}.md")).is_file(), "{stop_after}");
-        assert_eq!(env.json(&dir, &["show", &moved])["task"]["id"], moved, "{stop_after}");
-        assert!(
-            !env.home.path().join(".local/state/tasks/rename/dot.toml").exists(),
-            "the inventory is removed by cleanup: {stop_after}"
-        );
-        assert!(
-            !env.home.path().join(".local/state/tasks/claims/dot.toml").exists(),
-            "the old claim store is removed: {stop_after}"
-        );
-    }
-}
-```
-
-Write `interrupt_rename` using the `TASKS_RENAME_STOP_AFTER` env var added in Step 3.
-
-- [ ] **Step 2: Run the tests to verify they fail**
-
-Run: `cargo test --test cli -- a_pending_rename_freezes every_interruption_boundary`
-Expected: FAIL — `add` succeeds; no stop hook.
-
-- [ ] **Step 3: Implement the freeze and the test hook**
+**The freeze**, in `src/commands/mod.rs`:
 
 ```rust
 /// A rename that has begun and not finished freezes the project it names. Locks die with
@@ -1429,28 +1615,184 @@ pub fn reject_pending_rename(project: &Project) -> Result<()> {
 }
 ```
 
-Call it wherever a mutation lock is taken (`open_id_write_ctx`, `add`'s two arms) and in
-`init`/`unregister` under the registry lock. `init` also refuses a prefix matching any
-pending `target`.
+`lock_and_revalidate` (Task 7) already calls it. `init` and `unregister` call it under the
+registry lock, and `init` additionally refuses a prefix matching any pending `target` — until
+P5 the target is in no registry at all, so nothing else reserves it.
 
-In `src/rename/mod.rs`, read `TASKS_RENAME_STOP_AFTER` and return early after the named
-phase — the only way to test interruption without killing a process mid-write.
+`rename` itself must **not** be frozen by its own inventory; it passes its own invocation
+through and skips the check.
 
-- [ ] **Step 4: Run the tests, then the whole gate**
+- [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cargo test --test cli -- a_pending_rename_freezes every_interruption_boundary` — PASS.
+Run: `cargo test --test cli -- rename_` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Update the docs and commit**
-
-In `skills/tasks/SKILL.md`, under the registry paragraph, add: renaming a prefix is
-`tasks rename <old> <new>`; the old prefix keeps resolving forever, so references in other
-projects and in prose need no edit. In `README.md`, add `rename` to the command list. Set
-the design doc's status line to `implemented (<date>)`.
+- [ ] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
-git add src/commands/mod.rs src/commands/init.rs src/rename/ skills/tasks/SKILL.md README.md docs/specs/2026-09-08-prefix-rename-design.md tests/cli.rs
-git commit -m "feat(rename): freeze a project while its rename is unfinished"
+cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
+tasks done tasks-7000aa "tasks rename runs the six phases, classifies before every fresh-operation check so a completed re-run reports Complete rather than refusing, gates authorization on every mutating path, and ships with the freeze: a pending inventory refuses mutations and reserves the target name, discovered by recorded names rather than resolved prefix. --explain classifies read-only."
+git add src/rename/ src/commands/rename.rs src/commands/mod.rs src/cli.rs src/output.rs tests/cli.rs tasks/
+git commit -m "feat(rename): rename a project's prefix in six recoverable phases"
+```
+
+---
+
+### Task 12: The freeze, interruption coverage, and the docs
+
+**Files:**
+- Modify: `skills/tasks/SKILL.md`, `README.md`, `docs/specs/2026-09-08-prefix-rename-design.md`
+- Test: `tests/cli.rs`
+
+**Interfaces:**
+- Consumes: everything. Adds no new interface.
+
+The freeze itself shipped with the command in Task 11. This task is the verification matrix
+the spec's §8 promises and the user-facing documentation.
+
+- [ ] **Step 1: Write the failing tests**
+
+Stopping only after whole phases misses the boundaries where a crash actually hurts: a
+destination written with its source still present, partial progress across several files,
+and each of the two cleanup operations. `TASKS_RENAME_STOP_AFTER` accepts `file:<n>` for the
+first, so the matrix covers every mutation boundary rather than every phase.
+
+```rust
+/// Build a three-task project inside a git repo, committed, and return (root, ids).
+fn rename_fixture(env: &mut TestEnv, prefix: &str, count: usize) -> (std::path::PathBuf, Vec<String>) {
+    let dir = env.init(prefix);
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let ids: Vec<String> = (0..count)
+        .map(|n| id_of(env.json(&dir, &["add", &format!("T{n}"), "-p", "2"])))
+        .collect();
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    (dir, ids)
+}
+
+#[test]
+fn every_mutation_boundary_resumes_to_the_same_final_state() {
+    for stop in ["inventory", "file:0", "file:1", "files", "config", "registry", "claims"] {
+        let mut env = TestEnv::new();
+        let (dir, ids) = rename_fixture(&mut env, "dot", 3);
+
+        env.raw(&dir)
+            .env("TASKS_RENAME_STOP_AFTER", stop)
+            .args(["rename", "dot", "dots"])
+            .status()
+            .unwrap();
+        // The verdict is observable before acting on it, and is not Fresh: work has begun.
+        let verdict = env.json(&dir, &["rename", "dot", "dots", "--explain"])["recovery"]
+            .as_str().unwrap().to_string();
+        assert_ne!(verdict, "fresh", "stopped after {stop}");
+
+        env.json(&dir, &["rename", "dot", "dots"]);
+
+        for id in &ids {
+            let moved = format!("dots-{}", id.split_once('-').unwrap().1);
+            assert!(dir.join(format!("tasks/{moved}.md")).is_file(), "{stop}: {moved}");
+            assert!(!dir.join(format!("tasks/{id}.md")).exists(), "{stop}: {id} survived");
+            assert_eq!(env.json(&dir, &["show", &moved])["task"]["id"], moved, "{stop}");
+        }
+        assert_eq!(env.json(&dir, &["show", &ids[0]])["task"]["id"],
+                   format!("dots-{}", ids[0].split_once('-').unwrap().1),
+                   "{stop}: the retired id still resolves");
+        assert!(!env.home.path().join(".local/state/tasks/rename/dot.toml").exists(), "{stop}: inventory");
+        assert!(!env.home.path().join(".local/state/tasks/claims/dot.toml").exists(), "{stop}: claim store");
+        assert!(env.home.path().join(".local/state/tasks/claims/dot.lock").exists(), "{stop}: the lock is never unlinked");
+    }
+}
+
+#[test]
+fn an_empty_project_and_a_project_outside_git_both_rename() {
+    // Empty: files_done is vacuously true at every boundary, so config and registry alone
+    // must decide the verdict.
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    env.raw(&dir).env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "dot", "dots"]).status().unwrap();
+    assert_eq!(env.json(&dir, &["rename", "dot", "dots"])["recovery"], "resume_files");
+
+    // Outside git: no dirty check, no undo, and recovery must still work from the baseline.
+    let mut env = TestEnv::new();
+    let (bare, ids) = (env.init("bare"), ());
+    let _ = ids;
+    let id = id_of(env.json(&bare, &["add", "T", "-p", "2"]));
+    env.raw(&bare).env("TASKS_RENAME_STOP_AFTER", "file:0")
+        .args(["rename", "bare", "bares"]).status().unwrap();
+    let v = env.json(&bare, &["rename", "bare", "bares"]);
+    assert_eq!(v["recovery"], "resume_files");
+    let moved = format!("bares-{}", id.split_once('-').unwrap().1);
+    assert!(bare.join(format!("tasks/{moved}.md")).is_file());
+}
+
+#[test]
+fn a_claim_taken_after_an_interruption_blocks_the_resume() {
+    let mut env = TestEnv::new();
+    let (dir, ids) = rename_fixture(&mut env, "dot", 1);
+    env.raw(&dir).env("TASKS_RENAME_STOP_AFTER", "registry")
+        .args(["rename", "dot", "dots"]).status().unwrap();
+
+    // The project is renamed but not cleaned up; a claim taken now must not be deleted by P6.
+    as_agent(&env, &dir, "agent-a")
+        .args(["start", &format!("dots-{}", ids[0].split_once('-').unwrap().1)])
+        .assert().success();
+    assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "claimed");
+    assert!(env.home.path().join(".local/state/tasks/claims/dots.toml").exists());
+}
+
+#[test]
+fn each_refusal_fires_end_to_end() {
+    let mut env = TestEnv::new();
+    let (dir, ids) = rename_fixture(&mut env, "dot", 1);
+    env.raw(&dir).env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "dot", "dots"]).status().unwrap();
+
+    // R5: a task file the rename never knew about.
+    std::fs::write(dir.join("tasks/dot-ffffff.md"), MINIMAL_TASK).unwrap();
+    assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "validation");
+    std::fs::remove_file(dir.join("tasks/dot-ffffff.md")).unwrap();
+
+    // R2: a source edited after the baseline was taken.
+    let path = dir.join(format!("tasks/{}.md", ids[0]));
+    let text = std::fs::read_to_string(&path).unwrap().replace("title: T0", "title: edited");
+    std::fs::write(&path, text).unwrap();
+    assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "validation");
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `cargo test --test cli -- every_mutation_boundary an_empty_project a_claim_taken each_refusal_fires`
+Expected: FAIL — `file:<n>` and `claims` stops are unrecognized; refusals not wired end to end.
+
+- [ ] **Step 3: Extend the stop hook and close the gaps the tests find**
+
+Add the `file:<n>` and `claims` boundaries to `TASKS_RENAME_STOP_AFTER`. Fix whatever the
+matrix exposes — most likely the ordering inside P3 (write destination, *then* remove
+source, never the reverse) and P6 removing the claim store before the inventory.
+
+- [ ] **Step 4: Run the whole gate**
+
+Run: `just gate` — Expected: clean, 12 tasks' worth of tests passing.
+
+- [ ] **Step 5: Update the docs, reinstall, close the task, and commit**
+
+In `skills/tasks/SKILL.md`, under the registry paragraph: renaming a prefix is
+`tasks rename <old> <new>`; the retired prefix keeps resolving **for as long as the project
+stays registered**, so references in other projects and in prose need no edit. Do not write
+"forever" — §2 scopes the guarantee to registration, and `unregister` drops a project's
+aliases with it. In `README.md`, add `rename` to the command list. Set the design doc's
+status line to `implemented (<date>)`.
+
+```bash
+cargo install --path .
+tasks done tasks-70c72f "Interruption matrix across every mutation boundary including intra-phase and both cleanup steps, empty-project and non-git runs, a claim taken after an interruption blocking the resume, and end-to-end refusals. Docs updated; the alias guarantee is registration-scoped, not forever."
+git add src/rename/ skills/tasks/SKILL.md README.md docs/specs/2026-09-08-prefix-rename-design.md tests/cli.rs tasks/
+git commit -m "test(rename): cover every mutation boundary and document the command"
 ```
 
 ---
@@ -1459,10 +1801,16 @@ git commit -m "feat(rename): freeze a project while its rename is unfinished"
 
 **Spec coverage.** §2 model → Tasks 1, 2. §3 registry format → Task 1. §4 canonicalization
 → Tasks 3, 4. §5.1/5.1.1 phases and inventory → Tasks 9, 11. §5.2 preflight → Task 11.
-§5.3 classifier → Task 10. §5.4 unregister/init → Task 6. §5.5 byte preservation → Task 8.
-§5.6 undo and `--explain` → Task 11 (`--explain`), Task 12 (docs). §5.7 freeze → Task 12.
-§6 concurrency → Task 7. §7 surface and JSON → Task 11. §8 testing → distributed. §9 limits
-→ documented, not implemented.
+§5.3 classifier → Task 10. §5.4 unregister/init → Tasks 6, 11 (pending-name reservation).
+§5.5 byte preservation → Task 8. §5.6 undo and `--explain` → Task 11 (`--explain`), Task 12
+(docs). §5.7 freeze → Task 11 (the mechanism, shipped with the command it protects),
+Task 12 (its verification). §6 concurrency → Task 7. §7 surface and JSON → Task 11.
+§8 testing → distributed, with the interruption matrix in Task 12. §9 limits → documented,
+not implemented.
+
+**Ordering constraint.** No task exposes a mutation whose protection lands later. The freeze
+moved into Task 11 for exactly this reason: shipping `rename` first would leave a window in
+which an interrupted rename is unprotected, which is worse than having no command.
 
 **Type consistency.** `canonical_prefix`/`canonical_id`/`is_taken` (Task 1) are used under
 those names in Tasks 2–5. `parse_id` (Task 3) is used in Tasks 3 and 11. `rewrite_prefix`
