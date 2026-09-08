@@ -1546,8 +1546,8 @@ fn an_add_waiting_through_a_rename_never_writes_the_old_prefix() {
     git(&dir, &["commit", "-qm", "seed"]);
     let moved_seed = format!("dots-{}", seed.split_once('-').unwrap().1);
 
-    // Hold the project's lock, queue an `add` behind it, complete a real rename while it
-    // waits, then release. The add resolved `dot` before the lock and must not act on it.
+    // This tests revalidation, not the rename executor (covered separately above).
+    // Hold the lock and establish a completed-rename fixture while the add waits.
     let lock_path = env.claim_store("dot").with_file_name("dot.lock");
     std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
     let held = std::fs::OpenOptions::new()
@@ -1555,19 +1555,54 @@ fn an_add_waiting_through_a_rename_never_writes_the_old_prefix() {
     held.lock().unwrap();
 
     let mut adder = env.raw(&dir).args(["add", "Late", "-p", "2"]).spawn().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    assert!(adder.try_wait().unwrap().is_none(), "the add must be waiting on the lock");
+    // Seeing its lock descriptor proves the child constructed its old-prefix context
+    // and reached lock acquisition. A sleep alone could leave it not yet started.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        assert!(adder.try_wait().unwrap().is_none(), "the add exited before acquiring its lock");
+        let opened = std::fs::read_dir(format!("/proc/{}/fd", adder.id())).unwrap()
+            .any(|entry| {
+                // Other descriptors can close while /proc is being inspected.
+                std::fs::read_link(entry.unwrap().path()).is_ok_and(|path| path == lock_path)
+            });
+        if opened {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "the add never opened its lock");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 
-    // The rename takes the *other* lock ordering by holding `dots` too, so run it from a
-    // process that is not blocked: it needs `dot`, which we hold, so release first and let
-    // the two race with the add already queued ahead of the rename.
+    // Only this one seed task exists. Install its renamed file, config and registry
+    // directly while the lock is held; invoking rename here would wait on our lock too.
+    let source = dir.join(format!("tasks/{seed}.md"));
+    let text = std::fs::read_to_string(&source).unwrap();
+    std::fs::write(
+        dir.join(format!("tasks/{moved_seed}.md")),
+        text.replacen(&format!("id: {seed}\n"), &format!("id: {moved_seed}\n"), 1),
+    ).unwrap();
+    std::fs::remove_file(source).unwrap();
+    let config_path = dir.join("tasks/.config.toml");
+    let mut config: toml::Value = std::fs::read_to_string(&config_path).unwrap().parse().unwrap();
+    config["prefix"] = toml::Value::String("dots".into());
+    std::fs::write(config_path, toml::to_string(&config).unwrap()).unwrap();
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value = std::fs::read_to_string(&registry_path).unwrap().parse().unwrap();
+    let projects = registry["projects"].as_table_mut().unwrap();
+    let root = projects.remove("dot").unwrap();
+    projects.insert("dots".into(), root);
+    std::fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    alias_registry(&env, "dot", "dots");
+    assert!(dir.join(format!("tasks/{moved_seed}.md")).is_file());
+
     drop(held);
     let out = adder.wait_with_output().unwrap();
     assert!(out.status.success(), "{out:?}");
-    env.json(&dir, &["rename", "dot", "dots"]);
+    let added: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let late = added["id"].as_str().unwrap();
+    assert!(late.starts_with("dots-"), "the queued add must use the refreshed prefix: {added}");
+    assert_eq!(env.json(&dir, &["show", late])["task"]["title"], "Late");
 
-    // Whatever order they landed in, every file carries the live prefix afterwards, and the
-    // add's task exists under it rather than being lost.
+    // No later rename can mask a stale write: only the queued add ran after the fixture.
     let stale: Vec<_> = std::fs::read_dir(dir.join("tasks")).unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().starts_with("dot-"))
@@ -1803,6 +1838,11 @@ fn every_mutation_boundary_resumes_to_the_same_final_state() {
                 assert_eq!(named("dots-"), 1, "{stop}");
                 assert_eq!(named("dot-"), 3, "{stop}: the source is not removed yet");
             }
+            "file:1" => {
+                assert_eq!(named("dots-"), 2, "{stop}: two destinations written");
+                assert_eq!(named("dot-"), 2, "{stop}: only the first source removed");
+                assert!(config.contains("\"dot\""), "{stop}: config not written yet");
+            }
             "files" => {
                 assert_eq!(named("dots-"), 3, "{stop}");
                 assert_eq!(named("dot-"), 0, "{stop}");
@@ -1816,7 +1856,7 @@ fn every_mutation_boundary_resumes_to_the_same_final_state() {
                 assert!(reg.contains("[aliases]"), "{stop}");
                 assert_eq!(old_claims.exists(), *stop == "registry", "{stop}: claim store");
             }
-            _ => {}
+            _ => panic!("missing intermediate-state assertions for {stop}"),
         }
 
         let verdict = env.json(&dir, &["rename", "dot", "dots", "--explain"])["recovery"]
@@ -1880,22 +1920,11 @@ fn a_live_claim_blocks_the_resume_and_the_freeze_blocks_start() {
     // inventory is pending, which is itself worth asserting.
     assert_eq!(env.fail(&dir, &["start", &moved]), "validation");
 
-    // So inject a live claim directly, as the claim-store tests do, and check that the
-    // resume refuses rather than deleting a store that went live after the crash.
-    let store = env.home.path().join(".local/state/tasks/claims/dots.toml");
-    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    std::fs::write(
-        &store,
-        format!(
-            "[claims.{moved}]\nowner = \"agent-a\"\nsession = \"agent-a\"\npid = {}\n\
-             host = \"{}\"\nworktree = \"{}\"\nstarted = \"2026-09-08T00:00:00Z\"\n\
-             seen = \"2026-09-08T00:00:00Z\"\n",
-            std::process::id(),
-            std::fs::read_to_string("/proc/sys/kernel/hostname").unwrap().trim(),
-            dir.display()
-        ),
-    )
-    .unwrap();
+    // Reuse the existing helper's PID/start-time/boot-ID evidence. A PID alone would
+    // fall back to the TTL; this claim stays live for the test process's lifetime.
+    write_claim(&env, "dots", &moved, "agent-a", true);
+    let store = env.claim_store("dots");
+    assert_eq!(env.json(&dir, &["show", &moved])["claim"]["live"], true);
 
     assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "claimed");
     assert!(store.exists(), "the live claim store survives a refused resume");
@@ -1923,7 +1952,7 @@ fn each_refusal_fires_end_to_end() {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --test cli -- every_mutation_boundary an_empty_project a_claim_taken each_refusal_fires`
+Run: `cargo test --test cli -- every_mutation_boundary an_empty_project a_live_claim_blocks_the_resume each_refusal_fires`
 Expected: FAIL — `file:<n>` and `claims` stops are unrecognized; refusals not wired end to end.
 
 - [ ] **Step 3: Extend the stop hook and close the gaps the tests find**
