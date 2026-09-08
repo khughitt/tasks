@@ -156,14 +156,32 @@ impl Ctx {
 
 pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
     let start = start_dir(dir)?;
+    let project = Project::locate(&start)?;
+    let registry = Registry::load()?;
+    reject_stale_local(&registry, &project)?;
     Ok(Ctx {
-        project: Project::locate(&start)?,
-        registry: Registry::load()?,
+        project,
+        registry,
         warnings: Vec::new(),
         lock: None,
         claims: None,
         pending_claim: None,
     })
+}
+
+/// A checkout whose own prefix the registry has retired. Nothing else sees this:
+/// `open_registered` validates the registered destination, which after a rename is
+/// perfectly consistent, and `Project::locate` never reads the registry at all.
+pub fn reject_stale_local(registry: &Registry, project: &Project) -> Result<()> {
+    let live = registry.canonical_prefix(&project.prefix);
+    if live != project.prefix {
+        return Err(Error::Config(format!(
+            "this checkout's tasks/.config.toml says {:?}, which was renamed to {live:?}; \
+             update the checkout (merge or rebase onto the rename) before using it here",
+            project.prefix
+        )));
+    }
+    Ok(())
 }
 
 /// The write context for the project an id names. A prefix matching the local project
@@ -263,7 +281,12 @@ pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
             let project = crate::scope::open_registered(&registry, prefix, Origin::Prefix)?;
             (project, registry)
         }
-        None => (Project::locate(&start)?, Registry::load()?),
+        None => {
+            let project = Project::locate(&start)?;
+            let registry = Registry::load()?;
+            reject_stale_local(&registry, &project)?;
+            (project, registry)
+        }
     };
     Ok(ReadCtx {
         scope: Scope::Local(project),

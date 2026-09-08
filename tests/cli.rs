@@ -227,6 +227,27 @@ fn alias_registry(env: &TestEnv, alias: &str, target: &str) {
     std::fs::write(&path, text).unwrap();
 }
 
+#[test]
+fn a_checkout_still_using_a_retired_prefix_refuses() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    // A second root under the retired name: what a branch predating the rename looks like.
+    let stale = env.init_forced("dots");
+    std::fs::write(stale.join("tasks/.config.toml"), "prefix = \"dot\"\n").unwrap();
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text = text.replace(
+        &format!("dots = {:?}", stale.to_str().unwrap()),
+        &format!("dots = {:?}", dots.to_str().unwrap()),
+    );
+    std::fs::write(&path, text).unwrap();
+    alias_registry(&env, "dot", "dots");
+
+    // Both a read and a write refuse, rather than routing or minting an old-prefix file.
+    assert_eq!(env.fail(&stale, &["list"]), "config");
+    assert_eq!(env.fail(&stale, &["add", "New", "-p", "2"]), "config");
+}
+
 /// Writes a claim straight into the store.
 fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
     let path = env.claim_store(prefix);
