@@ -20,7 +20,7 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
     // The registry is only mutated in memory here: `save` runs after `Project::init`, so
     // an init that fails leaves the registry exactly as it was.
     let displaced = if force {
-        registry.repoint(&prefix, &root)
+        registry.repoint(&prefix, &root)?
     } else {
         registry.register(&prefix, &root)?;
         None
@@ -44,6 +44,7 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
         prefix: project.prefix,
         root: project.root.display().to_string(),
         warnings,
+        aliases: Vec::new(),
     }))
 }
 

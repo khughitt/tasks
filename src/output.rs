@@ -15,6 +15,8 @@ pub struct InitOut {
     pub prefix: String,
     pub root: String,
     pub warnings: Vec<String>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 #[derive(Serialize)]

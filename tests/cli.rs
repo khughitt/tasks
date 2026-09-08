@@ -3615,6 +3615,34 @@ fn init_force_repoints_a_prefix_and_unregister_frees_it() {
 }
 
 #[test]
+fn unregister_takes_the_aliases_with_it_and_init_respects_them() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+    alias_registry(&env, "old", "fam");
+
+    // A retired name is taken: init cannot claim it.
+    let fresh = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.fail(fresh.path(), &["init", "--prefix", "old"]),
+        "config"
+    );
+    assert_eq!(
+        env.fail(fresh.path(), &["init", "--prefix", "old", "--force"]),
+        "config"
+    );
+
+    // Unregistering the alias itself is refused, pointing at the live name.
+    assert_eq!(env.fail(&sci, &["unregister", "old"]), "config");
+
+    // Unregistering the project drops its aliases and says so.
+    let value = env.json(&sci, &["unregister", "fam"]);
+    assert_eq!(value["aliases"], serde_json::json!(["old"]));
+    // The registry is loadable afterwards: no dangling alias.
+    assert_eq!(env.json(&sci, &["list"])["tasks"], serde_json::json!([]));
+}
+
+#[test]
 fn root_prints_the_registered_root_of_an_id() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

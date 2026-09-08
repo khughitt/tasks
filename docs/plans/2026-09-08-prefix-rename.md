@@ -731,7 +731,7 @@ git commit -m "feat(check): nudge a depends naming a retired prefix"
 Leaving an alias behind would dangle the Task 1 load invariant and fail every subsequent
 command, so removal takes them with it (spec §5.4).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -756,12 +756,12 @@ fn unregister_takes_the_aliases_with_it_and_init_respects_them() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli -- unregister_takes_the_aliases`
 Expected: FAIL — `init --prefix old` succeeds.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/registry.rs`:
 
@@ -798,13 +798,13 @@ In `register` and `repoint`, refuse a prefix that `is_taken` as an alias. In
 `#[serde(default)] pub aliases: Vec<String>` to `InitOut` in `src/output.rs` and fill it
 from both callers (empty from `init`).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- unregister_takes_the_aliases` — Expected: PASS.
 Run: `just gate` — Expected: clean. Fix `registry.rs`'s existing
 `unregister_removes_once_and_then_reports_the_prefix_is_absent` for the new return type.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code

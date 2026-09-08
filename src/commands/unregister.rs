@@ -6,11 +6,12 @@ use crate::registry::Registry;
 /// longer want to enter, or one that no longer exists.
 pub fn run(prefix: String) -> Result<Output> {
     let mut registry = Registry::load()?;
-    let root = registry.unregister(&prefix)?;
+    let (root, aliases) = registry.unregister(&prefix)?;
     registry.save()?;
     Ok(Output::Init(InitOut {
         prefix,
         root: root.display().to_string(),
         warnings: Vec::new(),
+        aliases,
     }))
 }

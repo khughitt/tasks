@@ -82,6 +82,11 @@ impl Registry {
     /// Claims `prefix` for `root`. A prefix already pointing somewhere else is a conflict,
     /// never a silent takeover; the message names both ways out.
     pub fn register(&mut self, prefix: &str, root: &Path) -> Result<()> {
+        if let Some(target) = self.aliases.get(prefix) {
+            return Err(Error::Config(format!(
+                "prefix {prefix:?} is retired; it resolves to {target:?}"
+            )));
+        }
         if let Some(existing) = self.projects.get(prefix)
             && existing != root
         {
@@ -98,20 +103,41 @@ impl Registry {
 
     /// Points `prefix` at `root` whatever it pointed at before, returning the displaced
     /// root when that changed anything. The deliberate override behind `init --force`.
-    pub fn repoint(&mut self, prefix: &str, root: &Path) -> Option<PathBuf> {
-        match self.projects.insert(prefix.into(), root.into()) {
+    pub fn repoint(&mut self, prefix: &str, root: &Path) -> Result<Option<PathBuf>> {
+        if let Some(target) = self.aliases.get(prefix) {
+            return Err(Error::Config(format!(
+                "prefix {prefix:?} is retired; it resolves to {target:?}"
+            )));
+        }
+        Ok(match self.projects.insert(prefix.into(), root.into()) {
             Some(previous) if previous != root => Some(previous),
             _ => None,
-        }
+        })
     }
 
-    /// Drops `prefix`, returning the root it pointed at. Removing something that is not
-    /// there is an error rather than a no-op, so a typo does not look like success. Only
-    /// the registry is touched; the project's own files are left alone.
-    pub fn unregister(&mut self, prefix: &str) -> Result<PathBuf> {
-        self.projects
+    /// Removes a project and every alias that targeted it. Leaving an alias behind would
+    /// dangle the load invariant and fail every later command; and once the project is
+    /// gone its ids cannot resolve anyway, alias or not.
+    pub fn unregister(&mut self, prefix: &str) -> Result<(PathBuf, Vec<String>)> {
+        if let Some(target) = self.aliases.get(prefix) {
+            return Err(Error::Config(format!(
+                "{prefix:?} is a retired prefix of {target:?}; unregister {target:?} to remove the project"
+            )));
+        }
+        let root = self
+            .projects
             .remove(prefix)
-            .ok_or_else(|| Error::Config(format!("no project registered as {prefix:?}")))
+            .ok_or_else(|| Error::Config(format!("no project registered as {prefix:?}")))?;
+        let dropped: Vec<String> = self
+            .aliases
+            .iter()
+            .filter(|(_, target)| target.as_str() == prefix)
+            .map(|(alias, _)| alias.clone())
+            .collect();
+        for alias in &dropped {
+            self.aliases.remove(alias);
+        }
+        Ok((root, dropped))
     }
 
     pub fn project_root(&self, prefix: &str) -> Option<&Path> {
@@ -173,14 +199,14 @@ mod tests {
     #[test]
     fn repoint_replaces_and_reports_the_displaced_root() {
         let mut r = Registry::default();
-        assert_eq!(r.repoint("sci", Path::new("/tmp/a")), None);
+        assert_eq!(r.repoint("sci", Path::new("/tmp/a")).unwrap(), None);
         assert_eq!(
-            r.repoint("sci", Path::new("/tmp/b")),
+            r.repoint("sci", Path::new("/tmp/b")).unwrap(),
             Some(PathBuf::from("/tmp/a"))
         );
         assert_eq!(r.project_root("sci").unwrap(), Path::new("/tmp/b"));
         assert_eq!(
-            r.repoint("sci", Path::new("/tmp/b")),
+            r.repoint("sci", Path::new("/tmp/b")).unwrap(),
             None,
             "re-pointing at the same root displaces nothing"
         );
@@ -190,7 +216,10 @@ mod tests {
     fn unregister_removes_once_and_then_reports_the_prefix_is_absent() {
         let mut r = Registry::default();
         r.register("sci", Path::new("/tmp/a")).unwrap();
-        assert_eq!(r.unregister("sci").unwrap(), PathBuf::from("/tmp/a"));
+        assert_eq!(
+            r.unregister("sci").unwrap(),
+            (PathBuf::from("/tmp/a"), Vec::new())
+        );
         assert!(r.project_root("sci").is_none());
         assert_eq!(r.unregister("sci").unwrap_err().kind(), "config");
         r.register("sci", Path::new("/tmp/c")).unwrap();
