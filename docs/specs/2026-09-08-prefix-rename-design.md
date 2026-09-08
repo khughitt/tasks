@@ -281,9 +281,10 @@ Entry    = { hex, source: Absent | Present(digest),
                   dest:   Absent | Present(digest) }
 
 Snapshot = { registry:  Registry,
-             config:    Absent | Present(digest),
+             config:    Absent | Present { prefix: name, digest },
              inventory: Absent | Present(Inventory),
-             entries:   [Entry],
+             entries:   [Entry],        // empty when the inventory is absent
+             named:     { source: int, target: int },  // task files by prefix, scanned
              strays:    [path] }        // task files in no inventory entry
 
 Recovery = Fresh | ResumeFiles | ResumeRegistry | ResumeCleanup
@@ -293,24 +294,37 @@ Recovery = Fresh | ResumeFiles | ResumeRegistry | ResumeCleanup
 `Dirt` is gone. Git status is not an input: every judgement below is a digest comparison
 against the inventory, so recovery reads the same inside and outside a repository.
 
+**Two regimes, and the vocabulary says which is which.** With an inventory present, the
+baseline exists and every judgement is a digest comparison against it. With the inventory
+absent there is no baseline to compare to — `config_from` and `config_to` do not exist —
+so the only honest inputs are the config's **parsed prefix** and a **scan of task
+filenames**. `config` therefore carries both a name and a digest, and `named` counts task
+files by prefix. Baseline comparisons are reserved for recovery; the inventory-free rows
+use the name and the counts. An earlier draft defined `config_old` and `config_new` purely
+as digest comparisons and then used them on the two rows where the inventory is absent,
+which could not be evaluated at all.
+
 ### Refusals, evaluated before the table
 
 A too-broad row swallows a bad state that a trailing "anything else" can then never see, so
 every refusal is decided **first**. Any of these ends classification with `Refuse`, naming
 what it saw:
 
-| | |
-|---|---|
-| R1 | the inventory's `source`, `target`, or `root` disagrees with this invocation |
-| R2 | a source file is present whose digest is not its entry's `from` — edited mid-rename |
-| R3 | a destination is present whose digest is not its entry's `to` — a conflicting file |
-| R4 | an entry has `source: Absent` **and** `dest: Absent` — a **missing task**, visible only against the baseline |
-| R5 | `strays` is non-empty — a task file the rename never knew about, created after P2 |
-| R6 | the config digest is neither `config_from` nor `config_to` — an unrelated config edit |
-| R7 | `old_key` and `new_key` are both present and name different roots |
-| R8 | `new_key` is present and does not name this project's root |
+**R1–R6 apply only when the inventory is present**; they are baseline comparisons and have
+nothing to compare against otherwise. **R7–R8 always apply**: they read the registry alone.
 
-R2, R5, and R6 are what the previous draft's `rename_only` predicate was reaching for and
+| | Scope | |
+|---|---|---|
+| R1 | inventory | the inventory's `source`, `target`, or `root` disagrees with this invocation |
+| R2 | inventory | a source file is present whose digest is not its entry's `from` — edited mid-rename |
+| R3 | inventory | a destination is present whose digest is not its entry's `to` — a conflicting file |
+| R4 | inventory | an entry has `source: Absent` **and** `dest: Absent` — a **missing task**, visible only against the baseline |
+| R5 | inventory | `strays` is non-empty — a task file the rename never knew about, created after P2 |
+| R6 | inventory | the config digest is neither `config_from` nor `config_to` — an unrelated config edit |
+| R7 | always | `old_key` and `new_key` are both present and name different roots |
+| R8 | always | `new_key` is present and does not name this project's root |
+
+R2, R5, and R6 are what an earlier draft's `rename_only` predicate was reaching for and
 could not express: it compared against git's idea of dirt, which accepted *any* modified
 `.config.toml` and could not see a stray file at all outside a repository.
 
@@ -324,17 +338,20 @@ Files, from the entries: `untouched` (every source `Present(from)`, every dest `
 survived R2–R4). An empty project is `untouched` and `done` simultaneously; the rows below
 resolve it by config and registry, never by file state alone.
 
-Config: `config_old` when the digest is `config_from`, `config_new` when it is `config_to`.
+Config, in the two regimes: with an inventory, `config_old` means the digest is
+`config_from` and `config_new` means it is `config_to`; without one, `config_named(p)`
+means the parsed prefix is `p`.
+
 Registry: `registry_old` is `old_key = Root(root)`, `new_key: Absent`, `alias: Absent`;
 `registry_new` is `new_key = Root(root)`, `old_key: Absent`, `alias: Present(target)`.
 
 | Inventory | Files | Config | Registry | Recovery |
 |---|---|---|---|---|
-| absent | all dests absent | `config_old` | `registry_old` | `Fresh` |
+| absent | `named.target == 0` | `config_named(old)` | `registry_old` | `Fresh` |
 | present | any | `config_old` | `registry_old` | `ResumeFiles` — P3 onward |
 | present | `done` | `config_new` | `registry_old` | `ResumeRegistry` — P5 onward |
 | present | `done` | `config_new` | `registry_new` | `ResumeCleanup` — P6 |
-| absent | all sources absent | `config_new` | `registry_new` | `Complete` |
+| absent | `named.source == 0` | `config_named(new)` | `registry_new` | `Complete` |
 | — | — | — | — | `Refuse` |
 
 The second row is deliberately broad in its *file* dimension and exact in the other two.
@@ -423,12 +440,21 @@ and resumes. That covers every interruption for which the inventory survives.
 
 A genuine rollback is manual, and is documented rather than automated because it spans both
 stores. Every step is scoped by the inventory — nothing is removed that the inventory does
-not name:
+not name — and no step deletes a file before its replacement is back and verified.
 
-1. For each entry, delete the destination **only if** its digest equals `to`, then
-   `git checkout tasks/<old>-<hex>.md` for each entry whose source is absent. A blanket
-   `git clean -f tasks/` is wrong: it would delete unrelated task files added after the
-   interruption, which are untracked exactly as the rename's own destinations are.
+Restoring a source means `git checkout tasks/<old>-<hex>.md`. **Outside a repository there
+is nothing to restore from**, so once P3 has removed a source, rollback is unavailable and
+forward recovery is the only route; §9 records this.
+
+1. **Restore before deleting, per entry.** For each entry whose source is absent, restore
+   `tasks/<old>-<hex>.md` and verify its digest equals `from`; only once that succeeds,
+   delete `tasks/<new>-<hex>.md` if its digest equals `to`. If the source cannot be
+   restored and verified, **keep the destination and stop** — a digest identifies bytes but
+   cannot reconstruct them, so deleting the only surviving copy first would destroy the
+   task outright, which is what the previous ordering did whenever `git checkout` failed.
+   A blanket `git clean -f tasks/` is wrong for a second reason: it would delete unrelated
+   task files added after the interruption, which are untracked exactly as the rename's own
+   destinations are.
 2. If P4 landed, restore `prefix` in `tasks/.config.toml` — `git checkout` covers it, since
    the config is tracked.
 3. If P5 landed, repair the registry by hand, and note that restoring the `<old>` key is not
@@ -449,10 +475,29 @@ it adding a task, taking a claim, or unregistering the project — and then reco
 delete a live claim store, or R5 would refuse forever on a task file created in good faith.
 
 So a pending inventory freezes the project it names. Every **mutating** command — including
-`add`, which §6 already brings under the lock — stats
-`~/.local/state/tasks/rename/<prefix>.toml` for both the project's live prefix and any
-prefix that resolves to it, and refuses with a typed error naming the pending rename and
-the two ways out: finish it by re-running `rename`, or roll it back per §5.6.
+`add`, which §6 already brings under the lock — refuses with a typed error naming the
+pending rename and the two ways out: finish it by re-running `rename`, or roll it back per
+§5.6.
+
+**Discovery reads the inventories, not the registry.** The pending directory
+`~/.local/state/tasks/rename/` is scanned and each inventory matched on its recorded
+`source`, `target`, and `root`; a command is frozen if its project's root matches, or if
+its prefix equals either recorded name. Looking up `rename/<prefix>.toml` by the caller's
+current prefix does not work, and the window where it fails is an ordinary one: between P4
+and P5 the config already says `new` while the registry still holds `old` and no alias
+exists, so a caller resolving from the registry looks for `rename/<new>.toml` and never
+finds `rename/<old>.toml`. An `add` would sail straight through the freeze into a project
+mid-rename. The recorded names are stable across every phase; the resolvable ones are not.
+
+**The target name is reserved while a rename is pending.** Until P5 the target is not in
+the registry at all, so `init --prefix <target>` in an unrelated directory would otherwise
+succeed and take the name out from under the recovery. `init` and `rename` therefore check
+the pending inventories for the name they are about to claim, alongside the live prefixes
+and aliases of §2.
+
+Discovery runs **under the relevant locks** — the prefix lock a mutating command already
+holds, and the registry lock for registry mutations — so a scan cannot race a rename that
+is in the middle of writing or removing an inventory.
 
 Reads are unaffected. They report the project as it currently stands, which is the truth.
 
@@ -545,9 +590,12 @@ registry with no `[aliases]` table loads unchanged.
 
 **The recovery classifier is unit-tested by bounded enumeration.** Because `classify`
 (§5.3) is pure, its input is enumerable up to a bound: `registry` over its three fields,
-`config` × 3 (matching `config_from`, matching `config_to`, matching neither), `inventory`
-× 2, `strays` × 2, and an entry list over `source` × 3 and `dest` × 3 for file counts of
-zero, one, and two. That is a bounded cover, not the whole state space — an earlier draft
+`config` over its prefix name × 3 and its digest × 3 (matching `config_from`, matching
+`config_to`, matching neither), `inventory` × 2, `named` over zero and non-zero in each
+component, `strays` × 2, and an entry list over `source` × 3 and `dest` × 3 for file counts
+of zero, one, and two. The enumeration deliberately includes inventory-absent snapshots
+carrying entries and inventory-present ones carrying none, so that a predicate reaching for
+a baseline that is not there is caught rather than assumed away. That is a bounded cover, not the whole state space — an earlier draft
 overclaimed. What the bound buys is that no *shape* of
 disagreement goes unrepresented, since every predicate in §5.3 is decided per entry and two
 entries suffice to make any pair of per-entry verdicts disagree. Tests assert two
@@ -597,6 +645,15 @@ End to end (`tests/cli.rs`):
   `ResumeCleanup` rather than having its store deleted
 - `--explain` writes nothing, takes no lock, and reports the same verdict the mutating run
   would act on
+- `Fresh` and `Complete` classify with **no inventory on disk**, from the config's parsed
+  prefix and the filename scan alone
+- the freeze holds in the P4–P5 window, where the config says `new` and the registry still
+  says `old`: an `add` there is refused, having found the inventory by its recorded names
+  rather than by resolving the caller's prefix
+- `init --prefix <target>` in an unrelated directory is refused while a rename to that name
+  is pending
+- rollback with an unrestorable source keeps the destination and stops, rather than leaving
+  neither copy
 - a task deleted mid-rename is detected as missing against the inventory and refuses
 - `add` blocks on the mutation lock during a rename and cannot mint an old-prefix file
 - a worktree checked out from a branch predating the rename refuses with the stale-local
@@ -623,6 +680,10 @@ End to end (`tests/cli.rs`):
   design — or anywhere else in the tool — establishes durability across power failure.
   Changing that is a separate piece of work affecting every write.
 - **An orphaned `<old>.lock` remains** after a rename, by design (§5.1).
+- **Outside a git repository, a rename past P3 cannot be rolled back**, only completed.
+  Rollback restores sources from git, and nothing else holds the original bytes — the
+  inventory records digests, which identify bytes without reproducing them. Forward
+  recovery still works, since it needs only the destinations and the baseline.
 - **The inventory is machine state, not a repository artefact.** Losing the state directory
   between P3 and P6 — a different machine, a wiped `~/.local/state` — leaves a half-renamed
   repository with no baseline, which classifies as `Refuse` rather than resuming. That is
