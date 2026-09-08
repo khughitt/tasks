@@ -10,6 +10,7 @@ mod model;
 mod output;
 mod query;
 mod registry;
+mod rename;
 mod repo;
 mod resolve;
 mod scope;

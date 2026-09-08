@@ -22,19 +22,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
     let (fm, after) = rest
         .split_once("\n---\n")
         .ok_or_else(|| perr(file, "missing closing ---"))?;
-    // Timestamps are the one schema scalar containing `:`; quote them for the strict subset parser.
-    let fm = fm
-        .lines()
-        .map(|line| {
-            if line.starts_with("created: ") || line.starts_with("updated: ") {
-                let (k, v) = line.split_once(':').unwrap();
-                format!("{k}: \"{}\"", v.trim_start())
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let fm = quote_timestamps(fm);
     let pairs = frontmatter::parse(&format!("{fm}\n")).map_err(|e| match e {
         Error::Parse { detail, .. } => perr(file, detail),
         e => e,
@@ -118,6 +106,22 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
     };
     validate_task(&task).map_err(|e| perr(file, e.to_string()))?;
     Ok(task)
+}
+
+/// Timestamps are the one schema scalar containing `:`; quote them for the strict subset
+/// parser. Shared with the rename rewrite, which must round-trip a file it did not write.
+pub fn quote_timestamps(fm: &str) -> String {
+    fm.lines()
+        .map(|line| {
+            if line.starts_with("created: ") || line.starts_with("updated: ") {
+                let (k, v) = line.split_once(':').expect("prefix matched");
+                format!("{k}: \"{}\"", v.trim_start())
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn split_body_notes(after: &str, file: &str) -> Result<(String, Vec<Note>)> {

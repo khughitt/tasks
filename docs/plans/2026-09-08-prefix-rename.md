@@ -1026,7 +1026,7 @@ git commit -m "fix(registry): serialize read-modify-write and lock add"
 `serialize_task` emits them `Value::Raw` (`src/format.rs:295`). Reuse both halves or the
 rewrite either fails to parse or re-quotes timestamps and changes bytes.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `src/rename/rewrite.rs`:
 
@@ -1059,12 +1059,12 @@ depends: [dot-b11111, ops-c22222]\ntags: []\n---\n\n\nBody   with  odd    spacin
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --bin tasks rename::rewrite`
 Expected: FAIL — module does not exist.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/format.rs`, extract the existing inline pass and call it from `parse_task`:
 
@@ -1133,7 +1133,7 @@ pub fn rewrite_prefix(text: &str, old: &str, new: &str) -> Result<String> {
 
 Create `src/rename/mod.rs` with `pub mod rewrite;` and add `mod rename;` to `src/main.rs`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --bin tasks rename::rewrite` — Expected: PASS.
 Run: `just gate` — Expected: clean.
