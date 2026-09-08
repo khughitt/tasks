@@ -1138,7 +1138,7 @@ Create `src/rename/mod.rs` with `pub mod rewrite;` and add `mod rename;` to `src
 Run: `cargo test --bin tasks rename::rewrite` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
@@ -1175,7 +1175,7 @@ and `registry` carry information.
 The inventory lives at `~/.local/state/tasks/rename/<source>.toml`, beside claims: it is
 machine state, must not appear in `git status`, and must survive `git checkout .`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `src/rename/snapshot.rs`:
 
@@ -1237,12 +1237,12 @@ created: 2026-09-01T00:00:00Z\nupdated: 2026-09-01T00:00:00Z\ndepends: []\ntags:
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --bin tasks rename::snapshot`
 Expected: FAIL — modules do not exist.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Add to `Cargo.toml` under `[dependencies]`: `sha2 = "0.10"`.
 
@@ -1256,12 +1256,12 @@ inventory in the directory.
 `Snapshot`, and `observe`, which scans `tasks/*.md` once, classifies each file as a source,
 a destination, or a stray, and reads the config.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --bin tasks rename::` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code

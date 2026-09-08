@@ -2,7 +2,6 @@ use crate::error::{Error, Result};
 use crate::frontmatter::{self, Value};
 
 /// Rewrite `id` and local `depends`/`parent` references while preserving the body bytes.
-#[allow(dead_code)] // Consumed by the rename inventory in Task 9/11.
 pub fn rewrite_prefix(text: &str, old: &str, new: &str) -> Result<String> {
     let rest = text.strip_prefix("---\n").ok_or_else(|| Error::Parse {
         file: String::new(),
