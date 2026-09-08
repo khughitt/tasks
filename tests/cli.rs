@@ -6212,3 +6212,53 @@ fn a_closed_stdout_reader_does_not_hide_what_check_found() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert_eq!(out.status.code(), Some(1), "{stderr}");
 }
+
+#[test]
+fn closeout_omits_a_goal_its_dependencies_still_hold_and_says_why() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal", "-p", "2"]));
+    let child = id_of(env.json(&dir, &["add", "Child", "-p", "2", "--parent", &goal]));
+    let blocker = id_of(env.json(&dir, &["add", "Blocker", "-p", "2"]));
+    env.json(&dir, &["dep", &goal, "--on", &blocker]);
+    env.json(&dir, &["done", &child, "done"]);
+
+    // closeout means "done will accept this". While the dependency is open it will not:
+    // `done` answers open_dependencies, so an invitation here is one the tool refuses.
+    let v = env.json(&dir, &["prime"]);
+    let closeout: Vec<&str> = v["closeout"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert!(closeout.is_empty(), "{closeout:?}");
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&goal) && w.contains(&blocker)
+        }),
+        "the goal must not go silent: {v}"
+    );
+    assert_eq!(env.fail(&dir, &["done", &goal, "x"]), "open_dependencies");
+
+    // Once the dependency closes the goal is genuinely closeable, and the notice goes away.
+    env.json(&dir, &["done", &blocker, "done"]);
+    let v = env.json(&dir, &["prime"]);
+    let closeout: Vec<&str> = v["closeout"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(closeout, [goal.as_str()], "{v}");
+    assert!(
+        !v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains(&goal)),
+        "{v}"
+    );
+    env.json(&dir, &["done", &goal, "met"]);
+}

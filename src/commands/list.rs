@@ -214,17 +214,42 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         .collect();
     sort_list(&mut doing);
     let roadmap = crate::hierarchy::forest(&all, None, false, Some(&claims));
-    let mut closeout: Vec<Task> = all
-        .iter()
-        .filter(|task| {
-            // spec §4.3: todo, doing, or blocked; an idea is open but not a candidate
-            matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
-                && !crate::hierarchy::children(&all, &task.id).is_empty()
-                && crate::hierarchy::open_descendants(&all, &task.id).is_empty()
-        })
-        .cloned()
-        .collect();
+    // closeout is an invitation to run `done`, so it holds only what `done` will accept.
+    // Children are one gate and dependencies are the other; listing a goal its dependencies
+    // still hold would invite a close the tool then refuses with `open_dependencies`. Held
+    // goals are named in a warning instead, so none of them goes silent.
+    let mut closeout: Vec<Task> = Vec::new();
+    let mut held: Vec<String> = Vec::new();
+    for task in &all {
+        // spec §4.3: todo, doing, or blocked; an idea is open but not a candidate
+        if !matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
+            || crate::hierarchy::children(&all, &task.id).is_empty()
+            || !crate::hierarchy::open_descendants(&all, &task.id).is_empty()
+        {
+            continue;
+        }
+        let mut open = Vec::new();
+        for dependency in &task.depends {
+            // An unreachable dependency counts as open, exactly as `done` treats it: what
+            // we cannot resolve, we cannot call closed.
+            match resolve_dependency(&ctx, &all, dependency)? {
+                Some(dependency) if !dependency.status.is_open() => {}
+                _ => open.push(dependency.to_string()),
+            }
+        }
+        if open.is_empty() {
+            closeout.push(task.clone());
+        } else {
+            held.push(format!(
+                "{} has no open children but is held by open dependencies: {}; it joins \
+                 closeout when they close",
+                task.id,
+                open.join(", ")
+            ));
+        }
+    }
     sort_ready(&mut closeout);
+    ctx.warnings.extend(held);
     let wide = matches!(ctx.scope, Scope::All(_));
     for project in ctx.scope.projects() {
         if let Some(files) = project.uncommitted_task_files()?

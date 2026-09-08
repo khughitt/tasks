@@ -113,10 +113,14 @@ Parents surface through a separate list, because the protocol has an agent `star
 before brainstorming or decomposing it, which leaves the goal `doing`. A `todo`-only rule
 would therefore never show it again. `prime` gains:
 
-- `closeout`: every open task (`todo`, `doing`, or `blocked`) that has at least one child
-  and no open descendant. That is the explicit close-out: someone confirms the goal is met
-  and runs `done`, or adds the children that are still missing. Nothing closes
-  automatically.
+- `closeout`: every open task (`todo`, `doing`, or `blocked`) that has at least one child,
+  no open descendant, and no open dependency. That is the explicit close-out: someone
+  confirms the goal is met and runs `done`, or adds the children that are still missing.
+  Nothing closes automatically. The dependency gate keeps the list to what `done` will
+  actually accept: a goal its dependencies still hold is refused with `open_dependencies`,
+  so listing it would invite a close the tool then declines. Such a goal is named in a
+  `prime` warning instead of vanishing, and an unreachable dependency counts as open here
+  exactly as it does for `done`.
 - `roadmap`: the open forest, as nested nodes, identical to `tasks tree` with no
   arguments (§4.4). Roots are the roadmap; their subtrees show how each goal is
   decomposed and how far along it is. A project with no hierarchy gets a flat list of its
@@ -260,7 +264,8 @@ before writing; `done` refuses with an open descendant, including one under a
 force-closed child, and succeeds with `--force`; `drop` refuses with an open descendant;
 `edit --no-parent` detaches; `tree` nests, prunes, and `--all` includes closed;
 `prime.roadmap` lists an open parent while `ready` omits it; a `doing` parent whose
-children have all closed appears in `prime.closeout`; `check` reports each new error and
+children have all closed appears in `prime.closeout`, while one its dependencies still
+hold is absent and named in a warning until they close; `check` reports each new error and
 warning kind, including `unlinked_step` for a plan with an unreferenced `Task 3:` heading;
 editor path accepts and rejects `parent` like the flags.
 
