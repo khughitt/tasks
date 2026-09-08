@@ -379,6 +379,11 @@ tasks feedback <summary> --category friction|gap|idea|positive [-b|--body TEXT]
   warnings only.
 - Warnings are part of the success payload in JSON mode (`"warnings": [...]`, always
   present, possibly empty) so agents see them without parsing stderr.
+- A reader that closes the pipe (`tasks show <id> | head`) ends output quietly: no panic,
+  no diagnostic, exit 0 — the reader leaving is not a failure. It does not override an exit
+  code the command earned, so `check | head` still exits 1 on findings. Any other write
+  failure is reported and exits 1 as above. The same holds for stderr, except that a
+  diagnostic that cannot be delivered never changes the exit code.
 
 Shapes (all fields always present; optional fields are `null`):
 

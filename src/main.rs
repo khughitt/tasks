@@ -19,7 +19,24 @@ mod time;
 
 use clap::{CommandFactory, Parser};
 use output::Format;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
+
+/// Write to a stream and flush, reporting whether it landed.
+///
+/// The flush is explicit: a piped stdout is block-buffered, so for output smaller than the
+/// pipe buffer the write lands in the buffer and the failure surfaces only at the flush --
+/// which, left implicit at process exit, is performed and its error discarded.
+fn write_to(mut stream: impl Write, text: &str) -> std::io::Result<()> {
+    stream.write_all(text.as_bytes())?;
+    stream.flush()
+}
+
+/// stderr, with a reader that has gone away treated as an ordinary end of output. A
+/// diagnostic we cannot deliver must not become a panic, and must not change the exit code
+/// the command earned -- so unlike stdout, nothing here inspects the error.
+fn to_stderr(text: &str) {
+    let _ = write_to(std::io::stderr().lock(), text);
+}
 
 fn main() {
     // Must run before anything writes to stdout. Returns immediately unless
@@ -33,12 +50,12 @@ fn main() {
         (true, _) | (false, Some("pretty")) => Format::Pretty,
         (false, None) | (false, Some("json")) => Format::Json,
         (false, Some(other)) => {
-            eprintln!(
-                "{}",
+            to_stderr(&format!(
+                "{}\n",
                 output::render_error(&error::Error::Config(format!(
                     "TASKS_FORMAT must be json or pretty, got {other:?}"
                 )))
-            );
+            ));
             std::process::exit(1);
         }
     };
@@ -46,12 +63,12 @@ fn main() {
         Ok(value) => Some(value),
         Err(std::env::VarError::NotPresent) => None,
         Err(std::env::VarError::NotUnicode(value)) => {
-            eprintln!(
-                "{}",
+            to_stderr(&format!(
+                "{}\n",
                 output::render_error(&error::Error::Config(format!(
                     "TASKS_COLOR must be valid UTF-8, got {value:?}"
                 )))
-            );
+            ));
             std::process::exit(1);
         }
     };
@@ -60,7 +77,7 @@ fn main() {
         match style::ColorMode::resolve(cli.color.as_deref(), tasks_color.as_deref(), no_color) {
             Ok(mode) => mode,
             Err(error) => {
-                eprintln!("{}", output::render_error(&error));
+                to_stderr(&format!("{}\n", output::render_error(&error)));
                 std::process::exit(1);
             }
         };
@@ -69,12 +86,28 @@ fn main() {
     match commands::run(cli) {
         Ok(out) => {
             if format == Format::Pretty {
-                eprint!(
-                    "{}",
-                    output::pretty_warnings(&output::warnings_of(&out), &stderr_painter)
-                );
+                to_stderr(&output::pretty_warnings(
+                    &output::warnings_of(&out),
+                    &stderr_painter,
+                ));
             }
-            println!("{}", output::render(&out, format, &stdout_painter));
+            let rendered = output::render(&out, format, &stdout_painter);
+            match write_to(std::io::stdout().lock(), &format!("{rendered}\n")) {
+                Ok(()) => {}
+                // The reader closed the pipe -- `tasks show <id> | head`. That is an
+                // ordinary end of output, not a failure, and falling through rather than
+                // exiting here leaves the exit code the command earned intact below.
+                Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+                Err(error) => {
+                    to_stderr(&format!(
+                        "{}\n",
+                        output::render_error(&error::Error::Io(format!(
+                            "failed writing to stdout: {error}"
+                        )))
+                    ));
+                    std::process::exit(1);
+                }
+            }
             if let output::Output::Check(check) = &out
                 && !check.errors.is_empty()
             {
@@ -82,7 +115,7 @@ fn main() {
             }
         }
         Err(error) => {
-            eprintln!("{}", output::render_error(&error));
+            to_stderr(&format!("{}\n", output::render_error(&error)));
             std::process::exit(1);
         }
     }

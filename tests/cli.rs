@@ -6141,3 +6141,74 @@ fn prime_aligns_the_parallel_column_across_all_its_blocks() {
         "dates must start in the same column across prime's blocks:\n{text}"
     );
 }
+
+/// A pipe whose read end is closed before the child writes: the first write gets EPIPE
+/// whatever the output's size. Piping to `head` is the same situation with a race in it.
+fn closed_pipe() -> (std::io::PipeReader, std::process::Stdio) {
+    let (reader, writer) = std::io::pipe().unwrap();
+    (reader, std::process::Stdio::from(writer))
+}
+
+#[test]
+fn a_closed_stdout_reader_ends_the_command_quietly() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+
+    let (reader, stdout) = closed_pipe();
+    let child = env
+        .raw(&dir)
+        .args(["show", &id, "--pretty"])
+        .stdout(stdout)
+        .spawn()
+        .unwrap();
+    drop(reader);
+    let out = child.wait_with_output().unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert_eq!(out.status.code(), Some(0), "{stderr}");
+}
+
+#[test]
+fn a_closed_stderr_reader_does_not_panic_either() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+
+    // The error path writes to stderr and exits 1. With nothing reading it, the exit code
+    // must still be the one the command earned -- not 101 from a panic.
+    let (reader, stderr) = closed_pipe();
+    let mut child = env
+        .raw(&dir)
+        .args(["show", "sci-abcdef"])
+        .stderr(stderr)
+        .spawn()
+        .unwrap();
+    drop(reader);
+    let status = child.wait().unwrap();
+
+    assert_eq!(status.code(), Some(1));
+}
+
+#[test]
+fn a_closed_stdout_reader_does_not_hide_what_check_found() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    std::fs::write(dir.join("tasks/sci-abcdef.md"), "garbage").unwrap();
+
+    // Falling through rather than exiting on the broken pipe is what keeps this 1: the
+    // findings are real whether or not anyone read the report.
+    let (reader, stdout) = closed_pipe();
+    let child = env
+        .raw(&dir)
+        .args(["check"])
+        .stdout(stdout)
+        .spawn()
+        .unwrap();
+    drop(reader);
+    let out = child.wait_with_output().unwrap();
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+}
