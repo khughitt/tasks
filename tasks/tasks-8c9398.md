@@ -6,10 +6,11 @@ priority: 2
 size: l
 owner: design/prefix-rename
 created: 2026-09-06T09:37:15Z
-updated: 2026-09-08T13:17:38Z
+updated: 2026-09-08T20:53:27Z
 depends: []
 tags: [feedback, gap, "from:tasks", cli, registry]
 spec: docs/specs/2026-09-08-prefix-rename-design.md
+plan: docs/plans/2026-09-08-prefix-rename.md
 ---
 
 Renaming a project alias means hand-editing three layers the binary owns: the registry key in ~/.config/tasks/projects.toml, `prefix` in the project's tasks/.config.toml, and every task id (filename + `id:` frontmatter). Inbound cross-project references in OTHER registered projects (depends lists, parent, note prose, spec/plan docs) go stale, and foreign-id resolution in `check` then fails there. Done by hand on 2026-09-06 for aut -> autonomy (empty project, trivial) and dot -> dots (2 task files, 4 inbound refs across ops and prism, 3 doc mentions).
