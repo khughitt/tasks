@@ -2,31 +2,34 @@ use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::output::{TaskSummary, TreeNode};
 use crate::query::ready_order;
+use crate::registry::Registry;
 use crate::repo::Project;
 use std::collections::HashMap;
 
 /// Rejects a `parent` that is foreign, missing, or would make `task` its own ancestor.
 /// Reads ancestors from disk, so it is the write-path check; `check` uses `parent_cycle`.
-pub fn validate_parent(project: &Project, task: &Task) -> Result<()> {
-    let Some(parent) = &task.parent else {
+pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
+    let Some(stored_parent) = &task.parent else {
         return Ok(());
     };
+    let parent = registry.canonical_id(stored_parent);
+    let task_id = registry.canonical_id(&task.id);
     if parent.prefix != project.prefix {
         return Err(Error::Validation(format!(
             "parent {parent} must be in this project ({})",
             project.prefix
         )));
     }
-    if parent == &task.id {
+    if parent == task_id {
         return Err(Error::Cycle(format!("{parent} -> {parent}")));
     }
-    if !project.task_path(parent).is_file() {
+    if !project.task_path(&parent).is_file() {
         return Err(Error::UnresolvableId(format!(
             "parent {parent} does not exist"
         )));
     }
-    let mut path = vec![task.id.clone()];
-    let mut current = Some(parent.clone());
+    let mut path = vec![task_id];
+    let mut current = Some(parent);
     while let Some(id) = current {
         if path.contains(&id) {
             path.push(id);
@@ -38,7 +41,10 @@ pub fn validate_parent(project: &Project, task: &Task) -> Result<()> {
             Err(error) => return Err(error),
         };
         path.push(id);
-        current = ancestor.parent;
+        current = ancestor
+            .parent
+            .as_ref()
+            .map(|parent| registry.canonical_id(parent));
     }
     Ok(())
 }
@@ -48,40 +54,53 @@ pub fn validate_parent(project: &Project, task: &Task) -> Result<()> {
 /// whichever member the walk enters first (`b -> a -> b` from `b`), so callers that
 /// deduplicate must key on the set of members, as `check` does, not on the order. Missing
 /// parents end the walk without a cycle.
-pub fn parent_cycle(tasks: &[Task], start: &TaskId) -> Option<Vec<TaskId>> {
-    let parents: HashMap<&TaskId, &TaskId> = tasks
+pub fn parent_cycle(tasks: &[Task], start: &TaskId, registry: &Registry) -> Option<Vec<TaskId>> {
+    let parents: HashMap<TaskId, TaskId> = tasks
         .iter()
-        .filter_map(|task| task.parent.as_ref().map(|parent| (&task.id, parent)))
+        .filter_map(|task| {
+            task.parent.as_ref().map(|parent| {
+                (
+                    registry.canonical_id(&task.id),
+                    registry.canonical_id(parent),
+                )
+            })
+        })
         .collect();
+    let start = registry.canonical_id(start);
     let mut path = vec![start.clone()];
-    let mut current = parents.get(start).copied();
+    let mut current = parents.get(&start).cloned();
     while let Some(id) = current {
-        if let Some(position) = path.iter().position(|item| item == id) {
+        if let Some(position) = path.iter().position(|item| item == &id) {
             let mut cycle = path[position..].to_vec();
-            cycle.push(id.clone());
+            cycle.push(id);
             return Some(cycle);
         }
         path.push(id.clone());
-        current = parents.get(id).copied();
+        current = parents.get(&id).cloned();
     }
     None
 }
 
 /// Direct children of `id`, in the order they appear in `tasks`.
-pub fn children<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
+pub fn children<'a>(tasks: &'a [Task], id: &TaskId, registry: &Registry) -> Vec<&'a Task> {
+    let id = registry.canonical_id(id);
     tasks
         .iter()
-        .filter(|task| task.parent.as_ref() == Some(id))
+        .filter(|task| {
+            task.parent
+                .as_ref()
+                .is_some_and(|parent| registry.canonical_id(parent) == id)
+        })
         .collect()
 }
 
 /// Every task below `id`, depth first. A visited set makes a corrupt loop terminate.
-pub fn descendants<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
+pub fn descendants<'a>(tasks: &'a [Task], id: &TaskId, registry: &Registry) -> Vec<&'a Task> {
     let mut out = Vec::new();
     let mut visited = std::collections::HashSet::new();
     let mut stack: Vec<&TaskId> = vec![id];
     while let Some(current) = stack.pop() {
-        for child in children(tasks, current) {
+        for child in children(tasks, current, registry) {
             if visited.insert(&child.id) {
                 out.push(child);
                 stack.push(&child.id);
@@ -91,8 +110,8 @@ pub fn descendants<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
     out
 }
 
-pub fn open_descendants<'a>(tasks: &'a [Task], id: &TaskId) -> Vec<&'a Task> {
-    descendants(tasks, id)
+pub fn open_descendants<'a>(tasks: &'a [Task], id: &TaskId, registry: &Registry) -> Vec<&'a Task> {
+    descendants(tasks, id, registry)
         .into_iter()
         .filter(|task| task.status.is_open())
         .collect()
@@ -108,15 +127,20 @@ pub fn forest(
     root: Option<&TaskId>,
     include_closed: bool,
     claims: Option<&crate::claims::ClaimSnapshot>,
+    registry: &Registry,
 ) -> Vec<TreeNode> {
     let mut tops: Vec<&Task> = match root {
-        Some(id) => all.iter().filter(|task| &task.id == id).collect(),
+        Some(id) => {
+            let id = registry.canonical_id(id);
+            all.iter().filter(|task| task.id == id).collect()
+        }
         None => all
             .iter()
             .filter(|task| {
-                task.parent
-                    .as_ref()
-                    .is_none_or(|parent| !all.iter().any(|candidate| &candidate.id == parent))
+                task.parent.as_ref().is_none_or(|parent| {
+                    let parent = registry.canonical_id(parent);
+                    !all.iter().any(|candidate| candidate.id == parent)
+                })
             })
             .collect(),
     };
@@ -128,6 +152,7 @@ pub fn forest(
                 task,
                 include_closed,
                 claims,
+                registry,
                 &mut std::collections::HashSet::new(),
             )
         })
@@ -139,23 +164,25 @@ fn node(
     task: &Task,
     include_closed: bool,
     claims: Option<&crate::claims::ClaimSnapshot>,
+    registry: &Registry,
     visited: &mut std::collections::HashSet<TaskId>,
 ) -> Option<TreeNode> {
     if !visited.insert(task.id.clone()) {
         return None;
     }
-    let keep =
-        include_closed || task.status.is_open() || !open_descendants(all, &task.id).is_empty();
+    let keep = include_closed
+        || task.status.is_open()
+        || !open_descendants(all, &task.id, registry).is_empty();
     if !keep {
         return None;
     }
-    let mut kids = children(all, &task.id);
+    let mut kids = children(all, &task.id, registry);
     kids.sort_by(|a, b| ready_order(a, b));
     Some(TreeNode {
-        summary: TaskSummary::of(task, all, claims),
+        summary: TaskSummary::of(task, all, claims, registry),
         children: kids
             .into_iter()
-            .filter_map(|child| node(all, child, include_closed, claims, visited))
+            .filter_map(|child| node(all, child, include_closed, claims, registry, visited))
             .collect(),
     })
 }
@@ -197,19 +224,20 @@ mod tests {
 
     #[test]
     fn parent_cycle_finds_loops_of_any_length_and_ignores_chains() {
+        let registry = Registry::default();
         let a = task("xx-000001", Some("xx-000002"), Status::Todo);
         let b = task("xx-000002", Some("xx-000003"), Status::Todo);
         let c = task("xx-000003", Some("xx-000001"), Status::Todo);
-        let cycle = parent_cycle(&[a.clone(), b.clone(), c], &a.id).unwrap();
+        let cycle = parent_cycle(&[a.clone(), b.clone(), c], &a.id, &registry).unwrap();
         assert_eq!(cycle.len(), 4);
         assert_eq!(cycle[0], cycle[3]);
         let root = task("xx-000003", None, Status::Todo);
-        assert!(parent_cycle(&[a.clone(), b, root], &a.id).is_none());
+        assert!(parent_cycle(&[a.clone(), b, root], &a.id, &registry).is_none());
         let dangling = task("xx-000009", Some("xx-000008"), Status::Todo);
-        assert!(parent_cycle(std::slice::from_ref(&dangling), &dangling.id).is_none());
+        assert!(parent_cycle(std::slice::from_ref(&dangling), &dangling.id, &registry).is_none());
         let own = task("xx-000007", Some("xx-000007"), Status::Todo);
         assert_eq!(
-            parent_cycle(std::slice::from_ref(&own), &own.id)
+            parent_cycle(std::slice::from_ref(&own), &own.id, &registry)
                 .unwrap()
                 .len(),
             2
@@ -221,10 +249,13 @@ mod tests {
         let b2 = task("xx-000002", Some("xx-000001"), Status::Todo);
         let all = [tail.clone(), a2.clone(), b2.clone()];
         let ids = |path: &[TaskId]| path.iter().map(ToString::to_string).collect::<Vec<_>>();
-        let from_tail = parent_cycle(&all, &tail.id).unwrap();
+        let from_tail = parent_cycle(&all, &tail.id, &registry).unwrap();
         assert_eq!(ids(&from_tail), ["xx-000001", "xx-000002", "xx-000001"]);
-        assert_eq!(ids(&parent_cycle(&all, &a2.id).unwrap()), ids(&from_tail));
-        let from_b = parent_cycle(&all, &b2.id).unwrap();
+        assert_eq!(
+            ids(&parent_cycle(&all, &a2.id, &registry).unwrap()),
+            ids(&from_tail)
+        );
+        let from_b = parent_cycle(&all, &b2.id, &registry).unwrap();
         assert_eq!(ids(&from_b), ["xx-000002", "xx-000001", "xx-000002"]);
         let members = |path: &[TaskId]| {
             let mut m: Vec<String> = ids(&path[..path.len() - 1]);
@@ -240,13 +271,14 @@ mod tests {
 
     #[test]
     fn open_descendants_see_through_a_closed_middle_node() {
+        let registry = Registry::default();
         let a = task("xx-000001", None, Status::Todo);
         let b = task("xx-000002", Some("xx-000001"), Status::Done);
         let c = task("xx-000003", Some("xx-000002"), Status::Todo);
         let all = [a.clone(), b, c];
-        assert_eq!(children(&all, &a.id).len(), 1);
-        assert_eq!(descendants(&all, &a.id).len(), 2);
-        let open: Vec<String> = open_descendants(&all, &a.id)
+        assert_eq!(children(&all, &a.id, &registry).len(), 1);
+        assert_eq!(descendants(&all, &a.id, &registry).len(), 2);
+        let open: Vec<String> = open_descendants(&all, &a.id, &registry)
             .iter()
             .map(|t| t.id.to_string())
             .collect();
@@ -255,12 +287,13 @@ mod tests {
 
     #[test]
     fn forest_prunes_closed_leaves_but_keeps_closed_ancestors_of_open_work() {
+        let registry = Registry::default();
         let root = task("xx-000001", None, Status::Todo);
         let closed_leaf = task("xx-000002", Some("xx-000001"), Status::Done);
         let closed_mid = task("xx-000003", Some("xx-000001"), Status::Done);
         let open_deep = task("xx-000004", Some("xx-000003"), Status::Todo);
         let all = [root, closed_leaf, closed_mid, open_deep];
-        let nodes = forest(&all, None, false, None);
+        let nodes = forest(&all, None, false, None, &registry);
         assert_eq!(nodes.len(), 1);
         let kids: Vec<&str> = nodes[0]
             .children
@@ -269,9 +302,14 @@ mod tests {
             .collect();
         assert_eq!(kids, ["xx-000003"]);
         assert_eq!(nodes[0].children[0].children[0].summary.id, "xx-000004");
-        assert_eq!(forest(&all, None, true, None)[0].children.len(), 2);
         assert_eq!(
-            forest(&all, Some(&all[2].id), true, None)[0].summary.id,
+            forest(&all, None, true, None, &registry)[0].children.len(),
+            2
+        );
+        assert_eq!(
+            forest(&all, Some(&all[2].id), true, None, &registry)[0]
+                .summary
+                .id,
             "xx-000003"
         );
     }

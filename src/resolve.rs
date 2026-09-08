@@ -32,6 +32,7 @@ impl<'a> Resolver<'a> {
     /// `Ok(None)` when the id is unreachable (unregistered prefix, missing root, or
     /// missing file); `Err` when a file exists but cannot be parsed.
     pub fn resolve_task(&self, id: &TaskId) -> Result<Option<Task>> {
+        let id = &self.registry.canonical_id(id);
         if id.prefix == self.project.prefix {
             read_present(self.project, id)
         } else {
@@ -123,6 +124,7 @@ pub fn read_present(project: &Project, id: &TaskId) -> Result<Option<Task>> {
 /// unreachable-dependency warnings. Once those cases are excluded, the strict shared
 /// opener makes malformed config or a registry/config prefix mismatch a config error.
 pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
+    let id = &registry.canonical_id(id);
     let Some(root) = registry.project_root(&id.prefix) else {
         return Ok(None);
     };

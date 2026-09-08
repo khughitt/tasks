@@ -3614,6 +3614,114 @@ fn a_retired_prefix_resolves_to_its_live_project() {
 }
 
 #[test]
+fn a_retired_id_is_one_task_for_routing_dedup_and_removal() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let a = id_of(env.json(&sci, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&sci, &["add", "B", "-p", "2"]));
+    alias_registry(&env, "old", "sci");
+    let retired_a = format!("old-{}", a.split_once('-').unwrap().1);
+    let retired_b = format!("old-{}", b.split_once('-').unwrap().1);
+
+    assert_eq!(env.json(&sci, &["show", &retired_a])["task"]["id"], a);
+    assert_eq!(
+        env.json(&sci, &["list", "--parent", &retired_a])["tasks"],
+        serde_json::json!([])
+    );
+
+    env.json(
+        &sci,
+        &["note", &retired_a, "written through the retired name"],
+    );
+    let shown = env.json(&sci, &["show", &a]);
+    assert_eq!(
+        shown["task"]["notes"][0]["text"],
+        "written through the retired name"
+    );
+
+    env.json(&sci, &["dep", &a, "--on", &retired_b]);
+    assert_eq!(env.json(&sci, &["show", &a])["task"]["depends"][0], b);
+
+    env.json(&sci, &["dep", &a, "--on", &b]);
+    assert_eq!(
+        env.json(&sci, &["show", &a])["task"]["depends"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    assert_eq!(env.fail(&sci, &["dep", &a, "--on", &retired_a]), "cycle");
+
+    env.json(&sci, &["dep", &a, "--rm", &retired_b]);
+    assert!(
+        env.json(&sci, &["show", &a])["task"]["depends"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn stored_retired_references_resolve_detect_cycles_and_keep_their_spelling() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "2"]));
+    let child = id_of(env.json(&sci, &["add", "Child", "-p", "2", "--parent", &goal]));
+    let a = id_of(env.json(&sci, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&sci, &["add", "B", "-p", "2"]));
+    env.json(&sci, &["dep", &a, "--on", &b]);
+    alias_registry(&env, "old", "sci");
+
+    let retired_goal = goal.replacen("sci-", "old-", 1);
+    let retired_child = child.replacen("sci-", "old-", 1);
+    let retired_b = b.replacen("sci-", "old-", 1);
+    let child_path = sci.join("tasks").join(format!("{child}.md"));
+    let a_path = sci.join("tasks").join(format!("{a}.md"));
+    std::fs::write(
+        &child_path,
+        std::fs::read_to_string(&child_path).unwrap().replace(
+            &format!("parent: {goal}"),
+            &format!("parent: {retired_goal}"),
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &a_path,
+        std::fs::read_to_string(&a_path).unwrap().replace(
+            &format!("depends: [{b}]"),
+            &format!("depends: [{retired_b}]"),
+        ),
+    )
+    .unwrap();
+
+    let shown = env.json(&sci, &["show", &child]);
+    assert_eq!(shown["parent"]["id"], goal);
+    assert_eq!(env.json(&sci, &["show", &goal])["children"][0]["id"], child);
+    assert_eq!(
+        env.json(&sci, &["list", "--parent", &goal])["tasks"][0]["id"],
+        child
+    );
+    assert_eq!(
+        env.json(&sci, &["tree", &goal])["nodes"][0]["children"][0]["id"],
+        child
+    );
+
+    env.json(&sci, &["note", &child, "unrelated"]);
+    assert!(
+        std::fs::read_to_string(&child_path)
+            .unwrap()
+            .contains(&format!("parent: {retired_goal}"))
+    );
+
+    assert_eq!(
+        env.fail(&sci, &["edit", &goal, "--parent", &retired_child]),
+        "cycle"
+    );
+    assert_eq!(env.fail(&sci, &["dep", &b, "--on", &a]), "cycle");
+}
+
+#[test]
 fn projects_lists_the_registry_with_reachability_and_counts() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

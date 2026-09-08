@@ -58,7 +58,7 @@ pub fn run(
     // none, so an unrelated malformed file there cannot block an explicit request.
     let existing: Option<(TaskId, bool)> = match (&recur, new) {
         (Some(id), _) => {
-            let id = TaskId::parse(id)?;
+            let id = super::parse_id(&ctx.registry, id)?;
             let not_feedback = || {
                 Error::Validation(format!(
                     "{id} is not an open feedback task in {TARGET_PREFIX:?}"
@@ -104,7 +104,10 @@ pub fn run(
             )?,
             "recurred",
         ),
-        None => (create(&target, summary, body, &category, &from)?, "created"),
+        None => (
+            create(&target, &ctx.registry, summary, body, &category, &from)?,
+            "created",
+        ),
     };
     let path = target.task_path(&task.id);
     ctx.warnings.push(format!(
@@ -122,6 +125,7 @@ pub fn run(
 
 fn create(
     target: &Project,
+    registry: &Registry,
     summary: String,
     body: String,
     category: &str,
@@ -130,7 +134,7 @@ fn create(
     let mut task = super::add::blank(target, summary, Status::Idea)?;
     task.tags = vec!["feedback".into(), category.into(), from.into()];
     task.body = body;
-    super::create(target, &mut task)?;
+    super::create(target, registry, &mut task)?;
     Ok(task)
 }
 
@@ -175,7 +179,7 @@ fn recur_into(
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the public upstream file. The reporting project is already in the note text.
     let prefix = ctx.project.prefix.clone();
-    let task = guarded_update(target, id, eligible, |task| {
+    let task = guarded_update(target, &ctx.registry, id, eligible, |task| {
         append_note(
             task,
             NOTE_AUTHOR,
@@ -209,6 +213,7 @@ fn recur_into(
 /// project's doc roots, and, inside `write_task`, the parent.
 pub fn guarded_update(
     target: &Project,
+    registry: &Registry,
     id: &TaskId,
     eligible: impl Fn(&Task) -> Result<()>,
     mut mutate: impl FnMut(&mut Task) -> Result<()>,
@@ -223,7 +228,7 @@ pub fn guarded_update(
         if target.read_raw(id)? != raw {
             continue;
         }
-        target.write_task(&task)?;
+        target.write_task(registry, &task)?;
         return Ok(task);
     }
     Err(Error::ConcurrentModification(
@@ -240,16 +245,25 @@ mod tests {
     fn guarded_update_retries_after_a_concurrent_write_and_gives_up_eventually() {
         let dir = tempfile::tempdir().unwrap();
         let project = Project::init(dir.path(), "tst").unwrap();
-        let mut seed = create(&project, "seed".into(), String::new(), "gap", "from:tst").unwrap();
+        let registry = Registry::default();
+        let mut seed = create(
+            &project,
+            &registry,
+            "seed".into(),
+            String::new(),
+            "gap",
+            "from:tst",
+        )
+        .unwrap();
         let id = seed.id.clone();
 
         let always = |_: &Task| Ok(());
         let mut calls = 0;
-        let task = guarded_update(&project, &id, always, |task| {
+        let task = guarded_update(&project, &registry, &id, always, |task| {
             calls += 1;
             if calls == 1 {
                 seed.title = "changed underneath".into();
-                project.write_task(&seed).unwrap();
+                project.write_task(&registry, &seed).unwrap();
             }
             task.tags.push(format!("round-{calls}"));
             Ok(())
@@ -265,10 +279,11 @@ mod tests {
 
         // eligibility is judged on the fresh read, not on the snapshot the caller had
         seed.status = crate::model::Status::Done;
-        project.write_task(&seed).unwrap();
+        project.write_task(&registry, &seed).unwrap();
         let before = project.read_raw(&id).unwrap();
         let error = guarded_update(
             &project,
+            &registry,
             &id,
             |task| {
                 if task.status.is_open() {
@@ -288,10 +303,10 @@ mod tests {
         seed.status = crate::model::Status::Idea;
 
         let mut rounds = 0;
-        let error = guarded_update(&project, &id, always, |_| {
+        let error = guarded_update(&project, &registry, &id, always, |_| {
             rounds += 1;
             seed.priority = (rounds % 5) as u8;
-            project.write_task(&seed).unwrap();
+            project.write_task(&registry, &seed).unwrap();
             Ok(())
         })
         .unwrap_err();

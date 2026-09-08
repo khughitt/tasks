@@ -1,6 +1,6 @@
 use super::Ctx;
 use crate::error::Result;
-use crate::model::{Task, TaskId};
+use crate::model::Task;
 use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
@@ -8,7 +8,7 @@ use crate::resolve::Resolver;
 use crate::scope::Origin;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
-    let id = TaskId::parse(&id)?;
+    let id = super::parse_id(&ctx.registry, &id)?;
     let foreign;
     let project: &Project = if id.prefix == ctx.project.prefix {
         &ctx.project
@@ -50,7 +50,8 @@ pub fn describe(
     for dependency in &task.depends {
         // The scan the caller already holds answers first, so `next` describes the same
         // snapshot it chose from; only ids outside it touch the filesystem.
-        let resolved = match all.iter().find(|candidate| &candidate.id == dependency) {
+        let dependency_id = registry.canonical_id(dependency);
+        let resolved = match all.iter().find(|candidate| candidate.id == dependency_id) {
             Some(found) => Some(found.clone()),
             None => resolver.resolve_task(dependency)?,
         };
@@ -82,7 +83,10 @@ pub fn describe(
         status: task.status,
     };
     let parent = match &task.parent {
-        Some(id) => match all.iter().find(|candidate| &candidate.id == id) {
+        Some(id) => match all
+            .iter()
+            .find(|candidate| candidate.id == registry.canonical_id(id))
+        {
             Some(found) => Some(related(found)),
             None => {
                 warnings.push(format!("parent {id} not found"));
@@ -91,7 +95,7 @@ pub fn describe(
         },
         None => None,
     };
-    let mut kids = crate::hierarchy::children(all, &task.id);
+    let mut kids = crate::hierarchy::children(all, &task.id, registry);
     kids.sort_by(|a, b| crate::query::ready_order(a, b));
     let children = kids.into_iter().map(related).collect();
     Ok(ShowFields {

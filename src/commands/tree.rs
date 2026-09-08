@@ -1,6 +1,5 @@
 use super::ReadCtx;
 use crate::error::{Error, Result};
-use crate::model::TaskId;
 use crate::output::{Output, TreeOut};
 
 /// One forest per project in scope, concatenated in scope order. The forest builder
@@ -9,7 +8,10 @@ use crate::output::{Output, TreeOut};
 /// resolved by `open_id_read_ctx`, since `--all-projects` and an id are a clap conflict --
 /// so that project's scan is checked for it.
 pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
-    let root = id.as_deref().map(TaskId::parse).transpose()?;
+    let root = id
+        .as_deref()
+        .map(|id| super::parse_id(&ctx.registry, id))
+        .transpose()?;
     let mut nodes = Vec::new();
     for (_, tasks) in ctx.scope.scan_each()? {
         if let Some(root) = &root
@@ -17,7 +19,13 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
         {
             return Err(Error::TaskNotFound(root.to_string()));
         }
-        nodes.extend(crate::hierarchy::forest(&tasks, root.as_ref(), all, None));
+        nodes.extend(crate::hierarchy::forest(
+            &tasks,
+            root.as_ref(),
+            all,
+            None,
+            &ctx.registry,
+        ));
     }
     Ok(Output::Tree(TreeOut {
         nodes,

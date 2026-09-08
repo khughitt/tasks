@@ -66,8 +66,9 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     for task in &tasks {
         let file = format!("tasks/{}.md", task.id);
         for dependency in &task.depends {
-            if dependency.prefix == ctx.project.prefix {
-                if !ctx.project.task_path(dependency).try_exists()? {
+            let dependency_id = ctx.registry.canonical_id(dependency);
+            if dependency_id.prefix == ctx.project.prefix {
+                if !ctx.project.task_path(&dependency_id).try_exists()? {
                     errors.push(finding(
                         Some(task),
                         file.clone(),
@@ -94,14 +95,15 @@ pub fn run(ctx: Ctx) -> Result<Output> {
             }
         }
         if let Some(parent) = &task.parent {
-            if parent.prefix != ctx.project.prefix {
+            let parent_id = ctx.registry.canonical_id(parent);
+            if parent_id.prefix != ctx.project.prefix {
                 errors.push(finding(
                     Some(task),
                     file.clone(),
                     "foreign_parent",
                     format!("parent {parent} is not in this project"),
                 ));
-            } else if !ctx.project.task_path(parent).try_exists()? {
+            } else if !ctx.project.task_path(&parent_id).try_exists()? {
                 errors.push(finding(
                     Some(task),
                     file.clone(),
@@ -112,7 +114,9 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
         if let Some(parent) = &task.parent
             && task.status.is_open()
-            && let Some(parent_task) = tasks.iter().find(|candidate| &candidate.id == parent)
+            && let Some(parent_task) = tasks
+                .iter()
+                .find(|candidate| candidate.id == ctx.registry.canonical_id(parent))
             && !parent_task.status.is_open()
         {
             warnings.push(finding(
@@ -153,13 +157,24 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     let mut seen = BTreeSet::new();
     let unreachable = RefCell::new(BTreeSet::new());
     let edges = |id: &TaskId| -> Result<Option<Vec<TaskId>>> {
-        if let Some(task) = tasks.iter().find(|task| &task.id == id) {
-            return Ok(Some(task.depends.clone()));
+        let id = ctx.registry.canonical_id(id);
+        if let Some(task) = tasks.iter().find(|task| task.id == id) {
+            return Ok(Some(
+                task.depends
+                    .iter()
+                    .map(|dependency| ctx.registry.canonical_id(dependency))
+                    .collect(),
+            ));
         }
-        match foreign(id) {
-            Ok(Some(task)) => Ok(Some(task.depends)),
+        match foreign(&id) {
+            Ok(Some(task)) => Ok(Some(
+                task.depends
+                    .iter()
+                    .map(|dependency| ctx.registry.canonical_id(dependency))
+                    .collect(),
+            )),
             Ok(None) | Err(_) => {
-                unreachable.borrow_mut().insert(id.clone());
+                unreachable.borrow_mut().insert(id);
                 Ok(Some(vec![]))
             }
         }
@@ -183,7 +198,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
 
     let mut seen_parent_cycles = BTreeSet::new();
     for task in &tasks {
-        if let Some(cycle) = crate::hierarchy::parent_cycle(&tasks, &task.id) {
+        if let Some(cycle) = crate::hierarchy::parent_cycle(&tasks, &task.id, &ctx.registry) {
             record_cycle(&cycle, "parent_cycle", &mut seen_parent_cycles, &mut errors);
         }
     }

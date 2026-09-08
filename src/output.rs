@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::model::{Size, Status, Task};
+use crate::registry::Registry;
 use crate::style::{Painter, Style};
 use serde::Serialize;
 
@@ -166,6 +167,7 @@ impl TaskSummary {
         task: &Task,
         all: &[Task],
         claims: Option<&crate::claims::ClaimSnapshot>,
+        registry: &Registry,
     ) -> TaskSummary {
         TaskSummary {
             id: task.id.to_string(),
@@ -181,8 +183,9 @@ impl TaskSummary {
             source: task.source.clone(),
             depends: task.depends.iter().map(ToString::to_string).collect(),
             parent: task.parent.as_ref().map(ToString::to_string),
-            child_count: crate::hierarchy::children(all, &task.id).len(),
-            open_descendant_count: crate::hierarchy::open_descendants(all, &task.id).len(),
+            child_count: crate::hierarchy::children(all, &task.id, registry).len(),
+            open_descendant_count: crate::hierarchy::open_descendants(all, &task.id, registry)
+                .len(),
             claim: claims
                 .and_then(|snapshot| snapshot.get(&task.id))
                 .map(|(claim, live)| ClaimInfo::of(claim, live)),

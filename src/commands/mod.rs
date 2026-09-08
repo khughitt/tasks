@@ -172,8 +172,8 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
 /// still required, so a cwd outside every project fails exactly as before. The lock and
 /// the claim store key off `ctx.project`, so both follow the id to its project.
 pub fn open_id_write_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
-    let id = TaskId::parse(id)?;
     let mut ctx = open_ctx(dir)?;
+    let id = parse_id(&ctx.registry, id)?;
     if id.prefix != ctx.project.prefix {
         ctx.project = crate::scope::open_registered(&ctx.registry, &id.prefix, Origin::Id(&id))?;
     }
@@ -201,7 +201,7 @@ pub fn open_id_read_ctx(
     let Some(id) = id else {
         return Ok(ctx);
     };
-    let id = TaskId::parse(id)?;
+    let id = parse_id(&ctx.registry, id)?;
     if let Scope::Local(project) = &ctx.scope
         && id.prefix != project.prefix
     {
@@ -218,6 +218,11 @@ pub struct ReadCtx {
     pub scope: Scope,
     pub registry: Registry,
     pub warnings: Vec<String>,
+}
+
+/// Parses a user-supplied id under the registry's current prefix names.
+pub fn parse_id(registry: &Registry, id: &str) -> Result<TaskId> {
+    Ok(registry.canonical_id(&TaskId::parse(id)?))
 }
 
 impl ReadCtx {
@@ -305,7 +310,7 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
     if !fields.depends.is_empty() {
         let mut dependencies = Vec::new();
         for dependency in &fields.depends {
-            let id = TaskId::parse(dependency)?;
+            let id = parse_id(&ctx.registry, dependency)?;
             if id == task.id {
                 return Err(Error::Cycle(format!("{id} -> {id}")));
             }
@@ -320,7 +325,7 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
         dep::ensure_acyclic(ctx, task)?;
     }
     if let Some(parent) = &fields.parent {
-        task.parent = Some(TaskId::parse(parent)?);
+        task.parent = Some(parse_id(&ctx.registry, parent)?);
     }
     if let Some(source) = &fields.source {
         validate_line("source", source)?;
@@ -350,15 +355,15 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
 
 /// `save` for a task that does not exist yet: validates, then creates exclusively. Takes
 /// the project rather than `Ctx` because the feedback command creates in another project.
-pub fn create(project: &Project, task: &mut Task) -> Result<()> {
+pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result<()> {
     task.updated = crate::time::now();
     validate_task(task)?;
     project.validate_docs(task)?;
-    project.create_task(task)
+    project.create_task(registry, task)
 }
 
 pub fn load(ctx: &Ctx, id: &str) -> Result<Task> {
-    ctx.project.read_task(&TaskId::parse(id)?)
+    ctx.project.read_task(&parse_id(&ctx.registry, id)?)
 }
 
 pub fn id_out(ctx: Ctx, task: &Task) -> Output {
@@ -413,7 +418,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     let closing = matches!(to, Status::Done | Status::Dropped) && task.status != to;
     if closing && !(force && to == Status::Done) {
         let all = ctx.project.scan()?;
-        let open: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id)
+        let open: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry)
             .iter()
             .map(|task| task.id.to_string())
             .collect();
@@ -483,7 +488,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     let loaded = std::mem::replace(&mut task.updated, crate::time::now());
     validate_task(task)?;
     ctx.project.validate_docs(task)?;
-    crate::hierarchy::validate_parent(&ctx.project, task)?;
+    crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
     warn_on_newer_sibling_copies(ctx, &task.id, &loaded);
 
     match ctx.pending_claim.take() {
@@ -497,7 +502,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             store.insert(&id, claim);
             store.save()?;
 
-            let Err(error) = ctx.project.write_task(task) else {
+            let Err(error) = ctx.project.write_task(&ctx.registry, task) else {
                 return Ok(());
             };
             let store = ctx.claims_mut()?;
@@ -519,7 +524,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             Err(error.with_suffix(&suffix))
         }
         Some((id, ClaimIntent::Release)) => {
-            ctx.project.write_task(task)?;
+            ctx.project.write_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.remove(&id);
@@ -537,7 +542,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
         None => {
             // Resolve the store before writing so a corrupt store cannot hide a landed edit.
             ctx.claims_mut()?;
-            ctx.project.write_task(task)?;
+            ctx.project.write_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             if let Err(error) = store.save() {

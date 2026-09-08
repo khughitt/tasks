@@ -125,7 +125,6 @@ impl Registry {
 
     /// The same rule applied to an id. Only the prefix component moves; the hex is
     /// preserved by a rename, which is what makes this a rule rather than an index.
-    #[allow(dead_code)]
     pub fn canonical_id(&self, id: &TaskId) -> TaskId {
         let prefix = self.canonical_prefix(&id.prefix);
         if prefix == id.prefix {

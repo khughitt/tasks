@@ -9,10 +9,22 @@ use crate::resolve::Resolver;
 pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
     let edges = |id: &TaskId| -> Result<Option<Vec<TaskId>>> {
-        if *id == candidate.id {
-            return Ok(Some(candidate.depends.clone()));
+        let id = ctx.registry.canonical_id(id);
+        if id == candidate.id {
+            return Ok(Some(
+                candidate
+                    .depends
+                    .iter()
+                    .map(|dependency| ctx.registry.canonical_id(dependency))
+                    .collect(),
+            ));
         }
-        Ok(resolver.resolve_task(id)?.map(|task| task.depends))
+        Ok(resolver.resolve_task(&id)?.map(|task| {
+            task.depends
+                .iter()
+                .map(|dependency| ctx.registry.canonical_id(dependency))
+                .collect()
+        }))
     };
     if let Some(cycle) = find_cycle(&candidate.id, &edges)? {
         return Err(Error::Cycle(
@@ -31,23 +43,28 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
     if !on.is_empty() {
         let resolver = Resolver::new(&ctx.project, &ctx.registry);
         for value in &on {
-            let dependency = TaskId::parse(value)?;
+            let dependency = super::parse_id(&ctx.registry, value)?;
             if dependency == task.id {
                 return Err(Error::Cycle(format!("{dependency} -> {dependency}")));
             }
             if resolver.resolve_task(&dependency)?.is_none() {
                 return Err(Error::UnresolvableId(dependency.to_string()));
             }
-            if !task.depends.contains(&dependency) {
+            if !task
+                .depends
+                .iter()
+                .any(|item| ctx.registry.canonical_id(item) == dependency)
+            {
                 task.depends.push(dependency);
             }
         }
         ensure_acyclic(&ctx, &task)?;
     } else {
         for value in &rm {
-            let dependency = TaskId::parse(value)?;
+            let dependency = super::parse_id(&ctx.registry, value)?;
             let before = task.depends.len();
-            task.depends.retain(|item| item != &dependency);
+            task.depends
+                .retain(|item| ctx.registry.canonical_id(item) != dependency);
             if task.depends.len() == before {
                 return Err(Error::Validation(format!(
                     "{} does not depend on {dependency}",

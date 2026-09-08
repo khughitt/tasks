@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::format::{parse_task, serialize_task, validate_doc_path};
 use crate::model::{Task, TaskId, is_valid_prefix};
+use crate::registry::Registry;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -315,8 +316,8 @@ impl Project {
         (tasks, errors)
     }
 
-    pub fn write_task(&self, task: &Task) -> Result<()> {
-        crate::hierarchy::validate_parent(self, task)?;
+    pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
+        crate::hierarchy::validate_parent(self, registry, task)?;
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
     }
 
@@ -493,12 +494,17 @@ impl Project {
     /// Assigns a fresh id and links the file into place with an exclusive operation, so a
     /// concurrent creator that drew the same id can never be overwritten: on a collision
     /// the id is regenerated. The temp file lives under tasks/ like every other write.
-    pub fn create_task(&self, task: &mut Task) -> Result<()> {
-        self.create_task_with(task, || fastrand::u32(..0x100_0000))
+    pub fn create_task(&self, registry: &Registry, task: &mut Task) -> Result<()> {
+        self.create_task_with(registry, task, || fastrand::u32(..0x100_0000))
     }
 
-    fn create_task_with(&self, task: &mut Task, mut candidate: impl FnMut() -> u32) -> Result<()> {
-        crate::hierarchy::validate_parent(self, task)?;
+    fn create_task_with(
+        &self,
+        registry: &Registry,
+        task: &mut Task,
+        mut candidate: impl FnMut() -> u32,
+    ) -> Result<()> {
+        crate::hierarchy::validate_parent(self, registry, task)?;
         for _ in 0..16 {
             task.id = TaskId {
                 prefix: self.prefix.clone(),
@@ -617,8 +623,9 @@ mod tests {
     #[test]
     fn write_scan_read_roundtrip() {
         let (_dir, p) = temp_project();
+        let registry = Registry::default();
         let t = sample(&p);
-        p.write_task(&t).unwrap();
+        p.write_task(&registry, &t).unwrap();
         assert_eq!(p.read_task(&t.id).unwrap(), t);
         let (from_raw, raw) = p.read_task_with_raw(&t.id).unwrap();
         assert_eq!(from_raw, t);
@@ -636,50 +643,56 @@ mod tests {
     #[test]
     fn write_task_refuses_a_bad_parent_on_any_write() {
         let (_dir, p) = temp_project();
+        let registry = Registry::default();
         let mut t = sample(&p);
         t.parent = Some(TaskId {
             prefix: "tst".into(),
             hex: "ffffff".into(),
         });
-        assert!(matches!(p.write_task(&t), Err(Error::UnresolvableId(_))));
+        assert!(matches!(
+            p.write_task(&registry, &t),
+            Err(Error::UnresolvableId(_))
+        ));
         t.parent = Some(t.id.clone());
-        assert!(matches!(p.write_task(&t), Err(Error::Cycle(_))));
+        assert!(matches!(p.write_task(&registry, &t), Err(Error::Cycle(_))));
         t.parent = None;
-        p.write_task(&t).unwrap();
+        p.write_task(&registry, &t).unwrap();
     }
 
     #[test]
     fn write_task_survives_a_missing_ancestor_further_up_the_chain() {
         let (_dir, p) = temp_project();
+        let registry = Registry::default();
         let grandparent = sample(&p);
-        p.write_task(&grandparent).unwrap();
+        p.write_task(&registry, &grandparent).unwrap();
         let mut parent = sample(&p);
         parent.parent = Some(grandparent.id.clone());
-        p.write_task(&parent).unwrap();
+        p.write_task(&registry, &parent).unwrap();
         let mut child = sample(&p);
         child.parent = Some(parent.id.clone());
-        p.write_task(&child).unwrap();
+        p.write_task(&registry, &child).unwrap();
 
         std::fs::remove_file(p.task_path(&grandparent.id)).unwrap();
 
         child.title = "unrelated change".into();
-        p.write_task(&child).unwrap();
+        p.write_task(&registry, &child).unwrap();
     }
 
     #[test]
     fn create_task_takes_the_next_free_id_and_leaves_no_temp() {
         let (_dir, p) = temp_project();
+        let registry = Registry::default();
         let mut first = sample(&p);
         first.id = TaskId {
             prefix: "tst".into(),
             hex: "000001".into(),
         };
         first.title = "first".into();
-        p.write_task(&first).unwrap();
+        p.write_task(&registry, &first).unwrap();
         let mut second = sample(&p);
         second.title = "second".into();
         let mut candidates = [1, 2].into_iter();
-        p.create_task_with(&mut second, || candidates.next().unwrap())
+        p.create_task_with(&registry, &mut second, || candidates.next().unwrap())
             .unwrap();
         assert_eq!(second.id.hex, "000002");
         assert_eq!(p.read_task(&first.id).unwrap().title, "first");
@@ -704,12 +717,13 @@ mod tests {
     #[test]
     fn rejects_task_with_foreign_prefix_in_this_project() {
         let (_dir, p) = temp_project();
+        let registry = Registry::default();
         let mut t = sample(&p);
         t.id = TaskId {
             prefix: "oth".into(),
             hex: "000001".into(),
         };
-        p.write_task(&t).unwrap();
+        p.write_task(&registry, &t).unwrap();
         assert!(p.read_task(&t.id).is_err());
         assert!(p.scan().is_err());
     }

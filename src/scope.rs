@@ -143,6 +143,7 @@ impl Scope {
     /// A project in scope answers for its own prefix; anything else goes through the
     /// registry, leniently, as dependency resolution always has.
     pub fn resolve_task(&self, registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
+        let id = &registry.canonical_id(id);
         match self
             .projects()
             .iter()

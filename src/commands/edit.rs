@@ -92,7 +92,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
 }
 
 fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
-    let id = TaskId::parse(&id)?;
+    let id = super::parse_id(&ctx.registry, &id)?;
     let (original, original_raw) = ctx.project.read_task_with_raw(&id)?;
     let editor = std::env::var("EDITOR")
         .ok()

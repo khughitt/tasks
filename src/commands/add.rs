@@ -93,7 +93,7 @@ pub fn run(mut ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Re
     };
     let mut task = blank(&ctx.project, title, status)?;
     apply_fields(&ctx, &mut task, &fields)?;
-    create(&ctx.project, &mut task)?;
+    create(&ctx.project, &ctx.registry, &mut task)?;
     Ok(Output::Add(AddOut {
         id: task.id.to_string(),
         action: "created".into(),

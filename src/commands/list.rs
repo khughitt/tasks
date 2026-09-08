@@ -7,9 +7,10 @@ use crate::scope::Scope;
 use std::collections::HashMap;
 
 fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
-    match all.iter().find(|task| &task.id == id) {
+    let id = ctx.registry.canonical_id(id);
+    match all.iter().find(|task| task.id == id) {
         Some(task) => Ok(Some(task.clone())),
-        None => ctx.resolve_task(id),
+        None => ctx.resolve_task(&id),
     }
 }
 
@@ -36,9 +37,12 @@ pub fn list(
     let all = tasks.clone();
     let prefixes = ctx.scope.prefixes();
     let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
-    let parent = parent.as_deref().map(TaskId::parse).transpose()?;
+    let parent = parent
+        .as_deref()
+        .map(|id| super::parse_id(&ctx.registry, id))
+        .transpose()?;
     if let Some(parent) = &parent
-        && !all.iter().any(|task| &task.id == parent)
+        && !all.iter().any(|task| task.id == *parent)
     {
         return Err(Error::TaskNotFound(parent.to_string()));
     }
@@ -55,9 +59,11 @@ pub fn list(
         let source_ok = source
             .as_ref()
             .is_none_or(|value| task.source.as_ref() == Some(value));
-        let parent_ok = parent
-            .as_ref()
-            .is_none_or(|p| task.parent.as_ref() == Some(p));
+        let parent_ok = parent.as_ref().is_none_or(|p| {
+            task.parent
+                .as_ref()
+                .is_some_and(|parent| ctx.registry.canonical_id(parent) == *p)
+        });
         status_ok && tags_ok && owner_ok && source_ok && parent_ok
     });
     for task in &tasks {
@@ -77,7 +83,7 @@ pub fn list(
     Ok(Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
             .collect(),
         warnings: ctx.warnings,
         date: sort.date_column(),
@@ -116,7 +122,7 @@ pub fn ready_tasks(
                 ));
             }
         }
-        let has_children = !crate::hierarchy::children(all, &task.id).is_empty();
+        let has_children = !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty();
         if is_ready(task, has_children, &lookup) {
             ready.push(task.clone());
         }
@@ -159,7 +165,7 @@ pub fn ready(
     Ok(Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
             .collect(),
         warnings: ctx.warnings,
         date: DateColumn::Updated,
@@ -213,7 +219,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         .cloned()
         .collect();
     sort_list(&mut doing);
-    let roadmap = crate::hierarchy::forest(&all, None, false, Some(&claims));
+    let roadmap = crate::hierarchy::forest(&all, None, false, Some(&claims), &ctx.registry);
     // closeout is an invitation to run `done`, so it holds only what `done` will accept.
     // Children are one gate and dependencies are the other; listing a goal its dependencies
     // still hold would invite a close the tool then refuses with `open_dependencies`. Held
@@ -223,8 +229,8 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     for task in &all {
         // spec §4.3: todo, doing, or blocked; an idea is open but not a candidate
         if !matches!(task.status, Status::Todo | Status::Doing | Status::Blocked)
-            || crate::hierarchy::children(&all, &task.id).is_empty()
-            || !crate::hierarchy::open_descendants(&all, &task.id).is_empty()
+            || crate::hierarchy::children(&all, &task.id, &ctx.registry).is_empty()
+            || !crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry).is_empty()
         {
             continue;
         }
@@ -291,16 +297,16 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         closed,
         ready: ready
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
             .collect(),
         doing: doing
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
             .collect(),
         roadmap,
         closeout: closeout
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims)))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
             .collect(),
         warnings: ctx.warnings,
     }))
