@@ -82,7 +82,7 @@ is safe, because every existing reference keeps resolving. Tasks 8–12 add the 
 
 Purely additive: no existing signature changes, so every caller still compiles.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `src/registry.rs`, in the existing `mod tests`:
 
@@ -134,12 +134,12 @@ fn a_registry_without_an_aliases_table_still_loads() {
 
 Add `use crate::model::TaskId;` to the test module if it is not already in scope.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --bin tasks registry::`
 Expected: FAIL — `no method named canonical_prefix`, `no field aliases`.
 
-- [ ] **Step 3: Add the field, the invariants, and the primitives**
+- [x] **Step 3: Add the field, the invariants, and the primitives**
 
 ```rust
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -202,12 +202,12 @@ In `impl Registry`:
 
 Add `use crate::model::TaskId;` to the module imports.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --bin tasks registry::` — Expected: PASS.
 Run: `just check` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
@@ -234,7 +234,7 @@ through a retired id additionally needs `canonical_id` at the input, which is Ta
 `tasks/old-a00088.md`, which does not exist. The test below therefore exercises `root` and
 `--project`, and Task 3's test covers `show`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `tests/cli.rs`. `alias_registry` writes the alias directly because `tasks rename` does
 not exist until Task 11; every later task reuses this helper.
@@ -270,12 +270,12 @@ fn a_retired_prefix_resolves_to_its_live_project() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli -- a_retired_prefix_resolves`
 Expected: FAIL — `unresolvable_id`, no project registered as "old".
 
-- [ ] **Step 3: Follow the alias in `open_registered`**
+- [x] **Step 3: Follow the alias in `open_registered`**
 
 In `src/scope.rs`, replace the body's opening lookup:
 
@@ -310,12 +310,12 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- a_retired_prefix_resolves` — Expected: PASS.
 Run: `just gate` — Expected: clean; no existing test regresses.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
@@ -343,7 +343,7 @@ git commit -m "feat(scope): resolve a retired prefix to its live project"
 file from the model, so that would silently rewrite stored references during an unrelated
 edit and erase the Task 5 nudge (spec §4).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -386,12 +386,12 @@ fn a_retired_id_is_one_task_for_routing_dedup_and_removal() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli -- a_retired_id_is_one_task`
 Expected: FAIL — `task_not_found` on the first `note`.
 
-- [ ] **Step 3: Canonicalize at the three points**
+- [x] **Step 3: Canonicalize at the three points**
 
 In `src/commands/mod.rs`:
 
@@ -527,12 +527,12 @@ In `ensure_acyclic`, canonicalize the ids the edge function yields:
 
 Update `show::run` and `root` to use `parse_id` as well.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- a_retired_id_is_one_task` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
@@ -561,7 +561,7 @@ which after a rename is consistent, and `Project::locate` never consults the reg
 (spec §4). Reads refuse too — reporting a project under a name the registry retired is the
 same lie, more quietly told.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -587,12 +587,12 @@ fn a_checkout_still_using_a_retired_prefix_refuses() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli -- a_checkout_still_using_a_retired`
 Expected: FAIL — both commands succeed.
 
-- [ ] **Step 3: Check the local prefix against the registry**
+- [x] **Step 3: Check the local prefix against the registry**
 
 In `src/commands/mod.rs`:
 
@@ -615,12 +615,12 @@ pub fn reject_stale_local(registry: &Registry, project: &Project) -> Result<()> 
 
 Call it in `open_ctx` after loading the registry, and in `open_read_ctx`'s local arm.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- a_checkout_still_using_a_retired` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code
@@ -644,7 +644,7 @@ git commit -m "feat(scope): refuse a checkout whose prefix the registry retired"
 Raised in the *referring* project on a `depends` entry naming a retired prefix. Prose is
 never examined, so the note mentions the spec measured stay silent and keep resolving.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -676,12 +676,12 @@ fn check_nudges_a_depends_naming_a_retired_prefix() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli -- check_nudges_a_depends`
 Expected: FAIL — no `retired_prefix` warning.
 
-- [ ] **Step 3: Raise the warning**
+- [x] **Step 3: Raise the warning**
 
 In `src/commands/check.rs`, in the dependency loop, before the reachability match:
 
@@ -700,12 +700,12 @@ In `src/commands/check.rs`, in the dependency loop, before the reachability matc
                 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- check_nudges_a_depends` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code

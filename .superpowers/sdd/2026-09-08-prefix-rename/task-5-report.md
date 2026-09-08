@@ -25,3 +25,9 @@ Verification:
 
 Self-review: warning uses the dependency loop's existing canonicalization and
 does not alter stored spelling or reachability behavior. No concerns.
+
+Follow-up documentation correction: marked all verified steps for Tasks 1–5
+complete in `docs/plans/2026-09-08-prefix-rename.md`; Tasks 6–12 remain open.
+Validation: `tasks check` passed with no errors or warnings; `just check` passed
+(format, clippy, and task consistency). No reinstall was needed because the
+follow-up changes documentation only.
