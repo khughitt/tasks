@@ -255,6 +255,22 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Set a task down: record the next step, who it waits on, and this session in the
+    /// shared store. Status is untouched; `start` resumes it.
+    Park {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        /// The one concrete next step, on one line.
+        next_step: String,
+        /// Who the task waits on: user or agent.
+        #[arg(
+            long,
+            default_value = "agent",
+            value_name = "WHO",
+            add = ArgValueCandidates::new(crate::complete::waiting_on)
+        )]
+        waiting_on: String,
+    },
     /// Close a task as done.
     Done {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]

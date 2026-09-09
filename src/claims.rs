@@ -5,11 +5,14 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-/// Who holds a claim, and the pid that proves it is still alive.
+/// Who holds a claim, and the pid that proves it is still alive. `session` is raw, for
+/// matching against the store; `tagged` is the same session with the scheme of the level
+/// that resolved it, for records that outlive the claim (a park entry, spec §6).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
     pub session: String,
     pub pid: Option<u32>,
+    pub tagged: String,
 }
 
 /// The caller's Unix session id, from `/proc/self/stat` field 6 (field 4 of the remainder
@@ -39,12 +42,14 @@ pub fn identity_from(
     let pid_of = |key: &str| var(key).and_then(|value| value.parse().ok());
     if let Some(session) = var("TASKS_SESSION") {
         return Ok(Identity {
+            tagged: session.clone(),
             session,
             pid: pid_of("TASKS_SESSION_PID"),
         });
     }
     if let Some(session) = var("CLAUDE_CODE_SESSION_ID") {
         return Ok(Identity {
+            tagged: format!("claude:{session}"),
             session,
             pid: pid_of("CLAUDE_PID"),
         });
@@ -52,6 +57,7 @@ pub fn identity_from(
     match session_pid {
         Some(pid) => Ok(Identity {
             session: format!("sid:{pid}"),
+            tagged: format!("sid:{pid}"),
             pid: Some(pid),
         }),
         None => Err(Error::Config(
@@ -95,6 +101,17 @@ pub enum WaitingOn {
 }
 
 impl WaitingOn {
+    pub const ALL: [WaitingOn; 2] = [WaitingOn::User, WaitingOn::Agent];
+
+    pub fn parse(s: &str) -> Result<WaitingOn> {
+        WaitingOn::ALL
+            .into_iter()
+            .find(|who| who.as_str() == s)
+            .ok_or_else(|| {
+                Error::Validation(format!("--waiting-on must be user or agent, got {s:?}"))
+            })
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             WaitingOn::User => "user",
@@ -230,6 +247,13 @@ impl ClaimStore {
         let key = id.to_string();
         self.parks.remove(&key);
         self.claims.insert(key, claim);
+    }
+
+    /// A park displaces a claim on the same id.
+    pub fn insert_park(&mut self, id: &TaskId, park: Park) {
+        let key = id.to_string();
+        self.claims.remove(&key);
+        self.parks.insert(key, park);
     }
 
     pub fn remove(&mut self, id: &TaskId) -> Option<Claim> {
@@ -878,6 +902,52 @@ mod tests {
         std::fs::write(&path, text).unwrap();
         let store = ClaimStore::load_from(&path).unwrap();
         (dir, store)
+    }
+
+    #[test]
+    fn identity_tags_the_session_by_the_level_that_resolved_it() {
+        let explicit = identity_from(env_of(&[("TASKS_SESSION", "mine:7")]), Some(11)).unwrap();
+        assert_eq!(explicit.tagged, "mine:7", "verbatim; the caller tags it");
+        let claude =
+            identity_from(env_of(&[("CLAUDE_CODE_SESSION_ID", "abc-123")]), Some(11)).unwrap();
+        assert_eq!(
+            claude.session, "abc-123",
+            "the raw session still matches claims"
+        );
+        assert_eq!(claude.tagged, "claude:abc-123");
+        let unix = identity_from(env_of(&[]), Some(11)).unwrap();
+        assert_eq!(unix.tagged, "sid:11");
+    }
+
+    #[test]
+    fn waiting_on_parses_its_two_values_only() {
+        assert_eq!(WaitingOn::parse("user").unwrap(), WaitingOn::User);
+        assert_eq!(WaitingOn::parse("agent").unwrap(), WaitingOn::Agent);
+        assert!(matches!(
+            WaitingOn::parse("nobody"),
+            Err(Error::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn inserting_a_park_displaces_a_claim_on_the_same_id() {
+        let (_dir, mut store) = store_from(A_CLAIM);
+        let id = TaskId::parse("sci-000001").unwrap();
+        store.insert_park(
+            &id,
+            Park {
+                owner: "o".into(),
+                session: "a".into(),
+                host: "h".into(),
+                worktree: "/w".into(),
+                at: "2026-09-09T23:00:00Z".into(),
+                next_step: "x".into(),
+                waiting_on: WaitingOn::User,
+                title: "T".into(),
+            },
+        );
+        assert!(store.get(&id).is_none(), "one entry per task");
+        assert_eq!(store.parks().count(), 1);
     }
 
     #[test]

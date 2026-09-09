@@ -318,6 +318,153 @@ fn park_appears_in_show_and_list_json_and_pretty_show() {
 }
 
 #[test]
+fn park_records_the_entry_and_a_note_and_re_parking_replaces() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "write §3 of the spec"])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["task"]["status"], "todo", "status is untouched");
+    assert_eq!(v["park"]["next_step"], "write §3 of the spec");
+    assert_eq!(v["park"]["waiting_on"], "agent", "the default");
+    assert_eq!(
+        v["park"]["session"], "agent-a",
+        "TASKS_SESSION is written verbatim"
+    );
+    assert_eq!(v["park"]["owner"], "tester");
+    assert_eq!(v["park"]["worktree"], sci.to_str().unwrap());
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        raw.contains("parked (waiting on agent): write §3 of the spec"),
+        "{raw}"
+    );
+    assert!(!raw.contains("next_step"), "no frontmatter field: {raw}");
+
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "decide the store shape",
+            "--waiting-on",
+            "user",
+        ])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["park"]["next_step"], "decide the store shape");
+    assert_eq!(v["park"]["waiting_on"], "user");
+    assert_eq!(
+        v["task"]["notes"].as_array().unwrap().len(),
+        2,
+        "the notes accumulate"
+    );
+}
+
+#[test]
+fn park_replaces_the_callers_claim_and_follows_the_claim_rules_for_others() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "next"])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert!(v["claim"].is_null(), "the caller's own claim is replaced");
+    assert_eq!(v["park"]["session"], "agent-a");
+    assert_eq!(v["task"]["status"], "doing");
+
+    // A foreign live claim refuses; there is no --force.
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["park", &id, "steal"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "claimed");
+    assert!(err_detail(&out).contains("agent-a"));
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["park", "--force", &id, "steal"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "no --force flag exists");
+
+    // A foreign stale claim is replaced with the takeover warning.
+    let other = id_of(env.json(&sci, &["add", "U", "-p", "2"]));
+    write_claim(&env, "sci", &other, "ghost", false);
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["park", &other, "carry on"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("took over")),
+        "{v}"
+    );
+    assert_eq!(
+        env.json(&sci, &["show", &other])["park"]["session"],
+        "agent-b"
+    );
+
+    // Any session may re-park.
+    as_agent(&env, &sci, "agent-c")
+        .args(["park", &other, "again"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &other])["park"]["session"],
+        "agent-c"
+    );
+}
+
+#[test]
+fn park_refuses_a_closed_task_and_validates_its_arguments() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let idea = id_of(env.json(&sci, &["add", "I", "--status", "idea"]));
+
+    assert_eq!(env.fail(&sci, &["park", &id, ""]), "validation");
+    assert_eq!(env.fail(&sci, &["park", &id, "two\nlines"]), "validation");
+    assert_eq!(
+        env.fail(&sci, &["park", &id, "x", "--waiting-on", "nobody"]),
+        "validation"
+    );
+    assert!(
+        env.json(&sci, &["show", &id])["park"].is_null(),
+        "nothing landed"
+    );
+
+    env.json(&sci, &["done", &id, "landed"]);
+    let out = env.cmd(&sci).args(["park", &id, "x"]).output().unwrap();
+    assert_eq!(err_kind(&out), "invalid_transition");
+    assert!(err_detail(&out).contains("parked"), "{}", err_detail(&out));
+
+    // An idea needs no start: parking it writes the entry that makes it visible.
+    env.json(&sci, &["park", &idea, "write the problem statement"]);
+    let v = env.json(&sci, &["show", &idea]);
+    assert_eq!(v["task"]["status"], "idea");
+    assert_eq!(v["park"]["next_step"], "write the problem statement");
+}
+
+#[test]
 fn claim_appears_in_show_and_list_json() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

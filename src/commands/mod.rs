@@ -6,6 +6,7 @@ pub mod feedback;
 pub mod graph;
 pub mod init;
 pub mod list;
+pub mod park;
 pub mod projects;
 pub mod rename;
 pub mod root;
@@ -29,10 +30,11 @@ use crate::scope::{Origin, Scope};
 use std::path::{Path, PathBuf};
 
 /// What `save` must do to the claim store once every validation has passed. Recorded by the
-/// guard in `transition`; **nothing is persisted until `save` acts on it.**
+/// guard in `transition` (or by `park`); **nothing is persisted until `save` acts on it.**
 pub enum ClaimIntent {
     Acquire(crate::claims::Claim),
     Release,
+    Park(crate::claims::Park),
 }
 
 pub struct Ctx {
@@ -637,6 +639,21 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             }
             Ok(())
         }
+        Some((id, ClaimIntent::Park(park))) => {
+            // Record first, then store: a note with no entry is a trail that says what was
+            // intended, while an entry with no note would be state the record never saw.
+            ctx.project.write_task(&ctx.registry, task)?;
+            let store = ctx.claims_mut()?;
+            store.prune_dead();
+            store.insert_park(&id, park);
+            if let Err(error) = store.save() {
+                ctx.warnings.push(format!(
+                    "the note landed, but parking on {id} was not updated ({error}); a previous \\
+                     park entry, if any, is intact"
+                ));
+            }
+            Ok(())
+        }
         None => {
             // Resolve the store before writing so a corrupt store cannot hide a landed edit.
             ctx.claims_mut()?;
@@ -759,6 +776,11 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Prime { scope, closed } => list::prime(open_read_ctx(dir, &scope)?, closed),
         Command::Note { id, text } => status::note(open_id_write_ctx(dir, &id)?, id, text),
         Command::Start { id, force } => status::start(open_id_write_ctx(dir, &id)?, id, force),
+        Command::Park {
+            id,
+            next_step,
+            waiting_on,
+        } => park::run(open_id_write_ctx(dir, &id)?, id, next_step, waiting_on),
         Command::Done { id, message, force } => status::close(
             open_id_write_ctx(dir, &id)?,
             id,
