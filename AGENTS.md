@@ -38,6 +38,7 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 - `tests/cli.rs` — end-to-end tests against the built binary in temp repos.
 - `justfile`, `tools/tt`, `.githooks/` — the test front door and its timing wrapper (see Gates).
 - `skills/tasks/SKILL.md` — the agent skill shipped to other projects; keep it in step with CLI changes.
+  `skills/curate/SKILL.md` — the curation pass (`tasks sample`, then bounded edits); same rule.
 - `docs/specs/`, `docs/plans/` — design and plan docs; tasks link to them with `--spec` / `--plan --step`.
 
 ## Rules

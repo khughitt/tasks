@@ -93,6 +93,8 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
   `XDG_CONFIG_HOME=$(mktemp -d) tasks init --prefix <p>` so the registration dies with
   it. If you forget, `tasks unregister <prefix>` removes the entry; project files are
   untouched.
+- Curating the corpus (random open tasks, one bounded maintenance pass each): the
+  `curate` skill, shipped beside this one. Never part of the session protocol.
 
 ## Prefix renames and recovery
 
