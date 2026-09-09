@@ -159,7 +159,7 @@ an index asserting something untrue.
 | P3 | File pass, per file: write `new-<hex>.md`, then remove `old-<hex>.md`. |
 | P4 | `tasks/.config.toml` prefix (atomic). |
 | P5 | Registry key and alias records (atomic, under the registry lock). |
-| P6 | Remove `claims/<old>.toml`, then the inventory. |
+| P6 | Write `claims/<new>.toml` from the inventory's recorded park entries when it holds any, verify it, remove `claims/<old>.toml`, then the inventory. |
 
 P6 removes the claim store's `.toml` only. **`<old>.lock` is never unlinked**, in this phase or any
 other: it is an flock inode another process may hold or be waiting on, and removing it
@@ -229,6 +229,7 @@ obstacle:
 - The project's `tasks/` is dirty, and the dirt is not a resumable rename (§5.3). Outside
   a git repository there is no dirty check and no undo; the rename proceeds with a warning.
 - Any **live claim** exists on the project.
+- A fresh rename refuses a target store that holds park entries; recovery does not repeat this check.
 - The repository has **more than one git worktree**. Other checkouts keep the retired
   prefix in their config and filenames, which would recreate the routing hazard of §4
   after an otherwise successful rename.
@@ -462,7 +463,10 @@ forward recovery is the only route; §9 records this.
    targeted `<old>` before the rename now targets `<new>` and must be pointed back. After a
    second rename that is more than one entry, which is why the inventory records `source`
    explicitly.
-4. Remove `~/.local/state/tasks/rename/<old>.toml` **last**. Until it is gone the project
+4. If the store step landed, restore `claims/<old>.toml` from the inventory's `parks_store`
+   with ids re-prefixed back, verify it, then remove `claims/<new>.toml`; the entries carry
+   no other state.
+5. Remove `~/.local/state/tasks/rename/<old>.toml` **last**. Until it is gone the project
    stays frozen (§5.7), so removing it first would unfreeze a half-rolled-back project.
 
 ### 5.7 A pending rename freezes the project

@@ -1,11 +1,11 @@
 ---
 id: tasks-08b9d5
 title: "Park: record the next step and who it waits on when a task is set down"
-status: todo
+status: done
 priority: 2
 size: l
 created: 2026-09-09T12:31:46Z
-updated: 2026-09-09T15:22:57Z
+updated: 2026-09-09T22:10:22Z
 depends: []
 tags: [cli, observability, provenance]
 spec: docs/specs/2026-09-09-park-design.md
@@ -30,3 +30,4 @@ Consumers: the quick-launch picker (tasks-202e1f) and the familiar session-end h
 - 2026-09-09T14:30:30Z (park): Second review 2026-09-09 folded in: store-only entries resolve by scanning the originating checkout and are never next candidates; rename migrates park entries; editor-save rule scoped to park preservation; unresolved row contract.
 - 2026-09-09T14:37:50Z (park): Third review 2026-09-09: rename preflight rejects unrelated target parks; inventory records the expected target store (store_to) and recovery verifies it. Spec approved for planning.
 - 2026-09-09T15:22:57Z (park): Plan docs/plans/2026-09-09-park.md revised after review 2026-09-09: six tasks grouped so each helper lands with its consumer; rename target check is fresh-only; store maps skip when empty.
+- 2026-09-09T22:10:22Z (park): park lands: store-authoritative parking, resume on start, prime/ready/next/list surfaces, rename migration

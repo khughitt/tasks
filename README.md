@@ -52,6 +52,8 @@ command for human-readable output.
 its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
 `TASKS_SESSION` per agent when agents share a terminal or harness process; use
 `tasks start --force <id>` for an explicit, recorded takeover.
+`park` sets a task down with its next step in the same store; `start` resumes it, and
+`prime` lists parked work first.
 
 ## Install
 
@@ -81,7 +83,8 @@ from a clone):
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
     tasks sample -n 3                # random open tasks for a curation pass (see skills/curate)
     tasks tree                       # the goal hierarchy
-    tasks next                       # the first ready task, in full
+    tasks next                       # parked work waiting on you, else the first ready task
+    tasks park <id> "next step"      # set it down; tasks list --parked to see what is parked
     tasks next --all-projects        # the same across every registered project
     tasks prime --project fam        # read another registered project; also list, ready,
                                      #   next, tree, tags, sample. Needs no local project.

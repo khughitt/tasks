@@ -1,6 +1,6 @@
 # Park: setting a task down with its next step
 
-Status: designed (2026-09-09, revised after review the same day); not yet implemented
+Status: implemented (2026-09-09)
 Task: tasks-08b9d5; consumers tasks-202e1f (quick launch), fam-5b276b (session-end hook)
 
 ## 1. Problem
@@ -164,7 +164,9 @@ deletion would discard every parked task. The store is now authoritative for par
 rename **migrates** it. Rejecting the rename while parks exist was considered and declined:
 it would force every parked task through `start` and re-park to rename a prefix.
 
-**Preflight**, before any mutation and alongside the live-claim check: the target prefix's
+**Preflight**, before any mutation and alongside the live-claim check, on a fresh rename
+only; recovery validates the destination against the inventory (below) and never against
+emptiness, since the store it finds may be the one it wrote: the target prefix's
 store must hold no park entries. `unregister` frees a prefix but leaves its store behind,
 so parking under `new`, unregistering `new`, then renaming `old → new` is reachable, and
 the migration must not overwrite `new`'s parks. A target store with park entries fails
@@ -180,7 +182,9 @@ move.
 **Order** in the `claims` step: write the target store from the expectation, verify the
 written bytes digest to `store_to`, then remove the source store. Recovery accepts an
 existing destination only when its digest matches `store_to`; a destination that does not
-match is a validation error, in the shape the config rewrite uses when it disagrees with
+match is a validation error unless the destination holds no park entries, in which case it
+is litter (stale claims at most, since live ones fail authorization) and is replaced;
+otherwise the error is in the shape the config rewrite uses when it disagrees with
 the inventory, and the source is left in place. With the source already gone, the
 destination is verified against `store_to` before the step is considered complete.
 
@@ -210,8 +214,9 @@ The **effective parking state** of a task is the store entry, everywhere: `prime
 - **`list --parked`** keeps only tasks with a park entry, resolved the same way `prime`'s
   section is. It combines with the other `list` filters and both read scopes. Rows gain
   `phase`.
-- **Pretty `show`** prints a `park` block after the claim line. Pretty `list` rows do not
-  gain a column.
+- **Pretty `show`** prints a `# parked` footer after the related-task footers: the
+  waiting party, the park date, and the next step, then the session and worktree.
+  (`show` prints no claim line, so the block is a footer like the others.)
 
 ### 5.2 Candidates for `next`
 

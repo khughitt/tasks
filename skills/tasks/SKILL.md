@@ -13,28 +13,37 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 1. `tasks prime` — roadmap (the open goal tree), closeout (goals whose work is all
    done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
+   The one exception: an idea `next` hands you because it is parked waiting on the agent,
+   which means resume its scoping, never implement it.
    `tasks list` is the wider view: open tasks by priority, or `--sort updated` /
    `--sort created` for the most recently touched or added first (`--reverse` flips it).
    Never pick a task with children; those are goals. `ready` already omits them.
-   With nothing in hand, `tasks next` prints the first ready task in full; `tasks next
-   --all-projects` does the same across every registered project, and `tasks next
+   With nothing in hand, `tasks next` prints the most recently parked task waiting on the
+   agent, else the first ready task, in full; `tasks next --all-projects` does the same
+   across every registered project, and `tasks next
    --project <prefix>` reads one of them.
 3. `tasks start <id>` before changing code. It records you as owner.
    `start` also records a claim outside git, visible from every worktree of the project,
    with the session identity and a liveness handle. A task claimed by another live session
    fails with `claimed`; `tasks start --force <id>` takes it over and records that in the
-   task's notes. `ready` and `next` omit live claims and explain each omission in warnings.
+   task's notes. `ready` and `next` omit live claims and explain each omission in warnings,
+   and `ready` omits tasks parked waiting on the user.
    Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, when a long-lived process id is available)
    when several agents share one terminal or harness process; otherwise agents that resolve
    to the same session id are indistinguishable to the claim store.
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
-5. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are
+5. `tasks park <id> "<next step>" [--waiting-on user]` before ending a turn that waits on
+   the user, or whenever you set work down. It records the next step and this session in
+   the shared store, releases your claim, and leaves status alone; `start` resumes it.
+   `prime` lists parked work first with where it was left; `ready` omits work waiting on
+   the user; `list --parked` is the picker's feed.
+6. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are
    still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
-6. `tasks check` before committing. A failing check means a task and its plan/spec drifted apart; fix both.
-7. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
+7. `tasks check` before committing. A failing check means a task and its plan/spec drifted apart; fix both.
+8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
 Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source`

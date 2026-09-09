@@ -161,6 +161,8 @@ is open and has no override. It applies to `done` and to `edit --status done` al
 
 - `idea`: unscoped; never appears in `ready`.
 - `blocked`: explicit judgment, distinct from "has open dependencies".
+- Parking is not a status. `tasks park` records where a task was set down in the shared
+  claim store; see `2026-09-09-park-design.md`.
 
 `ready` = status `todo`, no children, and every entry in `depends` is closed.
 
@@ -270,7 +272,7 @@ tasks ready [--size S] [--parallel] [-n N] [--project P | --all-projects]
     priority, then size (xs first, unsized last), then created, then id.
     --all-projects: the same order over every reachable registered project; no project
     grouping or weighting (the final id tiebreak orders by prefix only among tasks equal
-    on everything else).
+    on everything else). Omits tasks parked waiting on the user, with a warning.
 
 tasks sample [-n N] [--older-than DAYS] [--seed U64] [--project P | --all-projects]
     N tasks (default 3) drawn uniformly without replacement from the curable pool: status
@@ -299,6 +301,12 @@ tasks start [--force] <id>
     records a per-prefix, out-of-git claim with session identity and liveness. A live claim
     held by another session refuses with claimed; --force records a takeover note.
 
+tasks park <id> <next-step> [--waiting-on user|agent]
+    Set a task down: record the one-line next step, who it waits on (default agent), and
+    this session in the shared claim store, and append a note. Status is untouched; any
+    open task may be parked. start replaces the entry (resume); done and drop remove it. A
+    live claim held by another session refuses with claimed. See 2026-09-09-park-design.md.
+
 tasks done <id> [message] [--force]
     status=done; message appended as a note. Refuses under the open-work rule.
 
@@ -325,7 +333,8 @@ tasks check
     prefix) are warnings.
 
 tasks next [--project P | --all-projects]
-    The first task of ready in the show shape, or null when nothing is ready (exit 0).
+    The most recently parked task waiting on the agent that is open, unblocked,
+    dependency-free, and childless, else the first ready task, in the show shape.
 
 tasks prime [--project P | --all-projects] [--closed]
     Agent session context: prefix, counts by status, the ready list, doing tasks
@@ -442,6 +451,16 @@ prime       += roadmap: [TreeNode],           the open forest, pruned as tree (ย
                closeout: [TaskSummary]        see ยง4.3, ready order
 check       += kinds dangling_parent, foreign_parent, parent_cycle (errors);
                open_child_of_closed_parent, unlinked_step (warnings)
+
+TaskSummary += park: ParkInfo|null
+show        += park: ParkInfo|null
+ParkInfo     = { at, next_step, waiting_on: "user"|"agent", session, owner, host, worktree }
+ParkedRow    = TaskSummary with every scalar nullable, + phase: "brainstorming"|"planning"|"implementing"|null
+               status is null only for an entry whose checkout is unavailable
+prime       += parked: [ParkedRow]            most recently parked first
+list        -> --parked returns { tasks: [ParkedRow], warnings }
+park        -> { id, warnings }
+rename      += parks: int                     park entries carried to the target store
 
 prime       += projects: [string]; prefix is string|null (null under --all-projects)
 next        -> { next: ShowFields|null, warnings }   ShowFields = show without warnings

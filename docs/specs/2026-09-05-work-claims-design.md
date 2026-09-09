@@ -50,6 +50,10 @@ claimed task:
 State, not configuration: it is per-machine, disposable, and losing it costs only the
 overlay, never a task.
 
+The store holds a second entry kind, `[parks."<id>"]`, with one entry per task of either
+kind; see `2026-09-09-park-design.md` §4. Park entries have no liveness and are not
+pruned. An empty kind is omitted from the file.
+
 If the hostname cannot be read, `host` is recorded as `"unknown"`. This degrades display
 metadata only; liveness uses the pid, process start time, boot id, and TTL described below.
 
