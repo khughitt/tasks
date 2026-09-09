@@ -435,6 +435,202 @@ fn park_replaces_the_callers_claim_and_follows_the_claim_rules_for_others() {
 }
 
 #[test]
+fn start_resumes_a_parked_task_and_closing_removes_the_entry() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "next"])
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "doing");
+
+    as_agent(&env, &sci, "agent-b")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert!(v["park"].is_null(), "resumed");
+    assert_eq!(v["claim"]["session"], "agent-b");
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(!raw.contains("took over"), "a park is free to take: {raw}");
+
+    as_agent(&env, &sci, "agent-b")
+        .args(["park", &id, "next"])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-b")
+        .args(["done", &id, "landed"])
+        .assert()
+        .success();
+    assert!(
+        env.json(&sci, &["show", &id])["park"].is_null(),
+        "done removes it"
+    );
+
+    let dropped = id_of(env.json(&sci, &["add", "D", "-p", "2"]));
+    as_agent(&env, &sci, "agent-b")
+        .args(["park", &dropped, "x"])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-b")
+        .args(["drop", &dropped, "no"])
+        .assert()
+        .success();
+    assert!(
+        env.json(&sci, &["show", &dropped])["park"].is_null(),
+        "drop removes it"
+    );
+}
+
+#[test]
+fn block_unblock_note_and_dep_leave_a_park_entry_alone() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let other = id_of(env.json(&sci, &["add", "O", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "next"])
+        .assert()
+        .success();
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["block", &id, "waiting"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &id])["park"]["next_step"],
+        "next",
+        "blocked, still parked"
+    );
+    as_agent(&env, &sci, "agent-a")
+        .args(["unblock", &id])
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &id])["park"]["next_step"], "next");
+    as_agent(&env, &sci, "agent-a")
+        .args(["note", &id, "a thought"])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["dep", &id, "--on", &other])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["edit", &id, "--tag", "x"])
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &id])["park"]["next_step"], "next");
+
+    write_claim(&env, "sci", &other, "agent-z", true);
+    as_agent(&env, &sci, "agent-a")
+        .args(["note", &other, "fine"])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &other]);
+    assert_eq!(v["claim"]["session"], "agent-z");
+    assert_eq!(
+        v["claim"]["seen"], "2026-01-01T00:00:00Z",
+        "a foreign claim is never refreshed"
+    );
+}
+
+#[test]
+fn status_changing_edits_clear_a_park_and_unchanged_saves_keep_it() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    let closed = id_of(env.json(&sci, &["add", "C", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &closed, "x"])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["edit", &closed, "--status", "done"])
+        .assert()
+        .success();
+    assert!(env.json(&sci, &["show", &closed])["park"].is_null());
+
+    let taken = id_of(env.json(&sci, &["add", "D", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &taken, "x"])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["edit", &taken, "--status", "doing"])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &taken]);
+    assert!(v["park"].is_null(), "a change into doing is a resume");
+    assert_eq!(v["claim"]["session"], "agent-a");
+
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "resume here"])
+        .assert()
+        .success();
+    let store = env.claim_store("sci");
+    let before = std::fs::read_to_string(&store).unwrap();
+    let editor = editor_script(&sci, "sed -i '/^## Notes/i edited body' \"$1\"");
+    as_agent(&env, &sci, "agent-a")
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(
+        v["park"]["next_step"], "resume here",
+        "an unchanged-status save keeps the park"
+    );
+    assert!(v["claim"].is_null(), "and acquires nothing");
+    assert!(v["task"]["body"].as_str().unwrap().contains("edited body"));
+    assert_eq!(
+        std::fs::read_to_string(&store).unwrap(),
+        before,
+        "the store was not written"
+    );
+    as_agent(&env, &sci, "agent-a")
+        .args(["edit", &id, "--status", "doing"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &id])["park"]["next_step"],
+        "resume here",
+        "edit --status <same> is not a transition"
+    );
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert!(
+        env.json(&sci, &["show", &id])["park"].is_null(),
+        "explicit start clears"
+    );
+
+    let held = id_of(env.json(&sci, &["add", "H", "-p", "2"]));
+    write_claim(&env, "sci", &held, "agent-z", true);
+    let out = as_agent(&env, &sci, "agent-a")
+        .env("EDITOR", &editor)
+        .args(["edit", &held])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    let out = as_agent(&env, &sci, "agent-a")
+        .args(["edit", &held, "--status", "todo"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+}
+
+#[test]
 fn park_refuses_a_closed_task_and_validates_its_arguments() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

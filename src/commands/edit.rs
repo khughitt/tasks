@@ -85,7 +85,12 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     apply_fields(&ctx, &mut task, &args.fields)?;
     if let Some(status) = args.status {
-        transition(&mut ctx, &mut task, Status::parse(&status)?, args.force)?;
+        let to = Status::parse(&status)?;
+        if to == task.status {
+            ctx.refuse_foreign_live_claim(&task.id)?;
+        } else {
+            transition(&mut ctx, &mut task, to, args.force)?;
+        }
     }
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
@@ -165,7 +170,11 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     super::dep::ensure_acyclic(&ctx, &edited).map_err(keep)?;
     let status = edited.status;
     edited.status = original.status;
-    transition(&mut ctx, &mut edited, status, false).map_err(keep)?;
+    if status == original.status {
+        ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;
+    } else {
+        transition(&mut ctx, &mut edited, status, false).map_err(keep)?;
+    }
 
     match ctx.project.read_raw(&original.id) {
         Ok(current) if current == original_raw => {}

@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 /// guard in `transition` (or by `park`); **nothing is persisted until `save` acts on it.**
 pub enum ClaimIntent {
     Acquire(crate::claims::Claim),
-    Release,
+    Release { clear_park: bool },
     Park(crate::claims::Park),
 }
 
@@ -80,6 +80,21 @@ impl Ctx {
             "session {} (owner {}, host {}{pid}, worktree {}, since {}, age {age}s, {state})",
             claim.session, claim.owner, claim.host, claim.worktree, claim.started
         )
+    }
+
+    pub fn refuse_foreign_live_claim(&mut self, id: &TaskId) -> Result<()> {
+        let me = crate::claims::identity()?;
+        let store = self.claims_mut()?;
+        if let Some(existing) = store.get(id) {
+            let live = crate::claims::liveness(existing);
+            if live == Liveness::Live && existing.session != me.session {
+                return Err(Error::Claimed(
+                    id.to_string(),
+                    Ctx::describe_claim(existing, &live),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Guard only. Decides whether this session may make the change and records what `save`
@@ -149,7 +164,12 @@ impl Ctx {
                 }),
             )
         } else {
-            (id.clone(), ClaimIntent::Release)
+            (
+                id.clone(),
+                ClaimIntent::Release {
+                    clear_park: matches!(to, Status::Done | Status::Dropped),
+                },
+            )
         });
 
         if let Some(warning) = warning {
@@ -598,6 +618,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             // takeover both write over an existing claim, and a blanket removal on failure
             // would unclaim work someone still holds.
             let previous = store.get(&id).cloned();
+            let previous_park = store.park(&id).cloned();
             store.prune_dead();
             store.insert(&id, claim);
             store.save()?;
@@ -606,9 +627,10 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                 return Ok(());
             };
             let store = ctx.claims_mut()?;
-            match previous {
-                Some(previous) => store.insert(&id, previous),
-                None => {
+            match (previous, previous_park) {
+                (Some(previous), _) => store.insert(&id, previous),
+                (None, Some(park)) => store.insert_park(&id, park),
+                (None, None) => {
                     store.remove(&id);
                 }
             }
@@ -623,11 +645,14 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             };
             Err(error.with_suffix(&suffix))
         }
-        Some((id, ClaimIntent::Release)) => {
+        Some((id, ClaimIntent::Release { clear_park })) => {
             ctx.project.write_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.remove(&id);
+            if clear_park {
+                store.remove_park(&id);
+            }
             if let Err(error) = store.save() {
                 // The task is closed now, so `start --force` cannot recover this:
                 // `can_transition` rejects `done -> doing`. Re-running the same closing

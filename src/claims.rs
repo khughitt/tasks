@@ -256,8 +256,16 @@ impl ClaimStore {
         self.parks.insert(key, park);
     }
 
+    pub fn park(&self, id: &TaskId) -> Option<&Park> {
+        self.parks.get(&id.to_string())
+    }
+
     pub fn remove(&mut self, id: &TaskId) -> Option<Claim> {
         self.claims.remove(&id.to_string())
+    }
+
+    pub fn remove_park(&mut self, id: &TaskId) -> Option<Park> {
+        self.parks.remove(&id.to_string())
     }
 
     pub fn prune_with(&mut self, keep: impl Fn(&Claim) -> bool) {
@@ -948,6 +956,19 @@ mod tests {
         );
         assert!(store.get(&id).is_none(), "one entry per task");
         assert_eq!(store.parks().count(), 1);
+    }
+
+    #[test]
+    fn park_and_remove_park_read_and_clear_one_entry() {
+        let (_dir, mut store) = store_from(A_PARK);
+        let id = TaskId::parse("sci-000002").unwrap();
+        assert_eq!(
+            store.park(&id).map(|p| p.next_step.as_str()),
+            Some("write §3")
+        );
+        assert!(store.remove_park(&id).is_some());
+        assert!(store.park(&id).is_none());
+        assert!(store.remove_park(&id).is_none());
     }
 
     #[test]
