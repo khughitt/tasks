@@ -133,19 +133,46 @@ unscoped by definition.
 listings; it is `null` when the record could not be resolved (§5.3). It is not on `show`
 or on any unparked row.
 
-### 4.3 Status-preserving saves
+### 4.3 Editor saves and park preservation
 
 Today the editor path calls `transition` on every save, and the claim guard then acquires a
 claim whenever the status is `doing`, changed or not. Under this design that would replace
-a park entry on an unrelated field edit. The rule becomes: **a save that leaves status
-unchanged does not write the store.** Only `start` (always) and an actual change of status
-(into `doing`, `done`, or `dropped`) touch the entry. Re-acquiring a claim on an unchanged
-`doing` save was incidental behaviour, not a contract, and stops.
+a park entry on an unrelated field edit. The rule, scoped to that one path: **an editor
+save that leaves status unchanged neither acquires nor releases a store entry.** Only
+`start` (always), `park`, and an actual change of status touch the entry. On a change, a
+**claim** behaves exactly as it does today (acquired on `doing`, released on every other
+target, including `blocked` and `todo`); a **park entry** follows §4.1 (replaced on
+`doing`, removed on `done` and `dropped`, left in place on `blocked`, `todo`, and `idea`).
+Re-acquiring a claim on an unchanged `doing` save was incidental behaviour, not a
+contract, and stops.
 
-Preserving the store is not bypassing the guards. A status-preserving save still enforces
-the foreign-live-claim check (`claimed` when another live session holds the task) and the
-concurrent-edit checks (`updated` comparison, newer-sibling-copy warning) exactly as today.
-The only thing it stops doing is writing the store.
+Nothing else about the store changes:
+
+- `note` keeps its heartbeat on the caller's own claim, and stays permitted on a task
+  another session holds; it is never refused.
+- `block`, `unblock`, `done`, and `drop` keep releasing a claim as they do now.
+- Preserving the entry is not bypassing the guards. A status-preserving editor save still
+  fails with `claimed` when another live session holds the task, as it does today, and
+  still runs the concurrent-edit checks (`updated` comparison, raw-content comparison,
+  newer-sibling-copy warning).
+
+### 4.4 Prefix rename
+
+`tasks rename` today authorizes against live claims, then deletes the source prefix's
+store file outright. Park entries have no liveness, so that check would pass and the
+deletion would discard every parked task. The store is now authoritative for parking, so
+rename **migrates** it: after the registry step and before removing the source store, load
+the source store (it holds only parks and stale claims, since live claims fail
+authorization), drop the stale claims as today, rewrite each park entry's id to the target
+prefix, and write the target store; then remove the source. `worktree` paths in entries are
+unchanged by a rename.
+
+The migration is a checkpointed step in the rename inventory (`claims`), so recovery
+resumes it: with the source store present, rewrite again (idempotent); with the source
+gone, the target already holds the entries. `rename --explain` reports the count of park
+entries that will move. Rejecting the rename while parks exist was considered and
+declined: it would force every parked task through `start` and re-park to rename a
+prefix.
 
 ## 5. Surfacing
 
@@ -176,7 +203,8 @@ The **effective parking state** of a task is the store entry, everywhere: `prime
 
 A parked task is a candidate when an agent may act on it alone:
 
-- its record was resolved (§5.3) and its status is open;
+- its record is in the current scan (store-only entries are never candidates, §5.3) and
+  its status is open;
 - `waiting_on` is `agent`;
 - status is not `blocked`;
 - every dependency resolves and is closed (an unreachable dependency holds the task,
@@ -189,17 +217,27 @@ unscoped idea; the next step says what scoping remains.
 
 ### 5.3 Store-only entries
 
-A park entry whose id is not in the scan (a task created and parked in a worktree whose
-branch has not merged) is resolved by reading `tasks/<id>.md` from the entry's recorded
-`worktree`. When that file is unavailable (worktree removed, file missing or unparseable),
-the row is rendered from the payload alone: id, title snapshot, at, next step, waiting on,
-session, worktree, with `status` and `phase` null, and a warning:
-`<id> is parked in <worktree>, which is unavailable; the row shows the park entry only`.
+A park entry whose id is not in the scan belongs to a task that exists only in another
+checkout: created and parked in a worktree whose branch has not merged. Reading its file
+alone is not enough. Its children, its local dependencies, and its spec and plan live in
+that checkout too, and a parent parked there would look childless from here.
 
-Unresolved rows are display-only. They stay in `prime` and `list --parked` so nothing goes
-silent, but they are never `next` candidates: eligibility cannot be established without
-the record. Reads never delete an entry; `start`, `done`, or `drop` on the task from any
-worktree does.
+**Resolution** opens the entry's recorded `worktree` as a project (it must be a checkout
+of the same prefix; anything else counts as unavailable) and scans it. The row is built
+from that scan exactly as a local row would be: status, phase, dependencies, child counts.
+A task that exists in both checkouts is not store-only; it is scanned locally, and its
+row reflects the local copy even where the parked copy has moved on.
+
+**Store-only entries are never `next` candidates**, resolved or not. `start` reads
+`tasks/<id>.md` from the current checkout, so a task that is not here cannot be resumed
+from here. The warning says where it can be:
+`<id> is parked in <worktree>; resume it from that checkout`.
+
+**Unresolved store-only entries** (worktree removed, not a checkout of this prefix, file
+missing or unparseable) are rendered from the payload alone (§5.4) with the warning
+`<id> is parked in <worktree>, which is unavailable; the row shows the park entry only`.
+They stay in `prime` and `list --parked` so nothing goes silent. Reads never delete an
+entry; `start`, `done`, or `drop` on the task from a checkout that holds it does.
 
 ### 5.4 JSON shapes
 
@@ -210,10 +248,28 @@ Additive only; no existing key changes.
 
       park: { at, next_step, waiting_on, session, owner, host, worktree }
 
-- `prime` gains `parked: [row]`, where `row` is the summary row plus `phase`. A store-only
-  row has `status: null` and `phase: null` and carries the title snapshot as `title`.
+- `prime` gains `parked: [row]`, where `row` is the summary row plus `phase`. Resolved
+  rows, local or store-only, are complete summary rows with their real status and phase.
 - `list --parked` rows gain `phase`.
 - `park` returns the id shape every mutating command returns.
+
+**Unresolved store-only rows** keep the summary row keys so consumers see one shape:
+
+| Key | Value |
+|---|---|
+| `id`, `title` | from the entry (`title` is the snapshot) |
+| `park` | the entry |
+| `phase`, `status`, `priority`, `size`, `owner`, `created`, `updated`, `parent`, `source`, `child_count`, `open_descendant_count`, `claim` | `null` |
+| `parallel` | `false` |
+| `depends`, `tags`, `children` | `[]` |
+
+`status: null` is the marker; nothing else in the contract produces it.
+
+**Ordering and filters.** `prime.parked` and `list --parked` order by `park.at`, most
+recent first, resolved or not; `--parked` conflicts with `--sort` and `--reverse`.
+Unresolved rows match none of `--status`, `--tag`, `--source`, or `--parent`: with any of
+those given they are dropped from the output, and the unavailable warning still names
+them.
 
 ## 6. The session value
 
@@ -246,7 +302,8 @@ title plus the next-step line, not the session.
 - **Field checklist.** No task field is added, so the field checklist (tasks-4e1cae) does
   not apply. The JSON shapes block of the tasks design (`docs/specs/2026-08-29-tasks-design.md`
   §3) gains the `park` object and `prime.parked` addendum; the work-claims design gains a
-  pointer to this document for the second entry kind.
+  pointer to this document for the second entry kind; the prefix-rename design's cleanup
+  step and manual rollback procedure gain the store migration (§4.4).
 - **Protocol.** The tasks skill and this repository's agent guide gain two rules: park
   before ending a turn that waits on the user, with the next step as the message; and
   `next` may hand you parked work, including an idea, which means resume its scoping. Both
@@ -283,8 +340,19 @@ title plus the next-step line, not the session.
   - **park in worktree A, `start` then `done` in worktree B, inspect A**: A shows nothing
     parked and no resurrection;
   - **park a task that exists only in a new worktree, inspect main**: `prime` in main lists
-    it with the worktree named; remove the worktree and it is listed from the payload with
-    the unavailable warning and is not returned by `next`;
+    it with the worktree named and is not returned by `next` (resume-from-that-checkout
+    warning); remove the worktree and it is listed from the payload with `status: null`,
+    the unavailable warning, and is still not returned by `next`;
+  - **store-only parent and child**: create a parent and a child only in worktree A, park
+    the parent, inspect main: the row shows `child_count` 1 from A's scan and the task is
+    not a `next` candidate;
+  - `list --parked` with `--tag` drops an unresolved row and still warns about it;
+    `--parked` with `--sort` fails as a flag conflict;
+  - `note` on a parked task leaves the entry untouched; `note` on a task another live
+    session claims is still accepted and still heartbeats only the caller's own claim;
+  - **rename with parks**: park two tasks, `tasks rename`, and the target prefix's store
+    holds both with rewritten ids while the source store is gone; `rename --explain`
+    reports the count; interrupt after the store step and resume;
   - **park a doing task, then explicit `start` versus an unchanged-status editor save**:
     the first clears, the second preserves;
   - `list --parked` filters and combines with `--project`.

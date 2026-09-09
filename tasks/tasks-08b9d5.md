@@ -5,7 +5,7 @@ status: todo
 priority: 2
 size: l
 created: 2026-09-09T12:31:46Z
-updated: 2026-09-09T14:12:07Z
+updated: 2026-09-09T14:30:30Z
 depends: []
 tags: [cli, observability, provenance]
 spec: docs/specs/2026-09-09-park-design.md
@@ -26,3 +26,4 @@ Consumers: the quick-launch picker (tasks-202e1f) and the familiar session-end h
 - 2026-09-09T12:39:44Z (main): Familiar-side hook piece: fam-5b276b.
 - 2026-09-09T13:20:02Z (park): Brainstormed 2026-09-09; design in docs/specs/2026-09-09-park-design.md. Next: writing-plans, then children per plan step.
 - 2026-09-09T14:12:07Z (park): Spec revised after review 2026-09-09: store-authoritative parking, no frontmatter fields; start is resume; next eligibility and store-only rows defined.
+- 2026-09-09T14:30:30Z (park): Second review 2026-09-09 folded in: store-only entries resolve by scanning the originating checkout and are never next candidates; rename migrates park entries; editor-save rule scoped to park preservation; unresolved row contract.
