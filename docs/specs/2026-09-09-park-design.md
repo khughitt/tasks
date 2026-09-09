@@ -66,7 +66,7 @@ is parked there, and losing the store file costs the overlay, never a task.
   store write move together in the order the claims design fixed (validate everything,
   then write the record, then the store). If the store write fails after the note has
   landed, the result is a warning in the shape `note` uses for a failed heartbeat, saying
-  the note landed but the task is not parked.
+  the note landed but parking was not updated (a previous park entry, if any, is intact).
 
 ### 3.1 Store effects
 
@@ -161,18 +161,32 @@ Nothing else about the store changes:
 `tasks rename` today authorizes against live claims, then deletes the source prefix's
 store file outright. Park entries have no liveness, so that check would pass and the
 deletion would discard every parked task. The store is now authoritative for parking, so
-rename **migrates** it: after the registry step and before removing the source store, load
-the source store (it holds only parks and stale claims, since live claims fail
-authorization), drop the stale claims as today, rewrite each park entry's id to the target
-prefix, and write the target store; then remove the source. `worktree` paths in entries are
-unchanged by a rename.
+rename **migrates** it. Rejecting the rename while parks exist was considered and declined:
+it would force every parked task through `start` and re-park to rename a prefix.
 
-The migration is a checkpointed step in the rename inventory (`claims`), so recovery
-resumes it: with the source store present, rewrite again (idempotent); with the source
-gone, the target already holds the entries. `rename --explain` reports the count of park
-entries that will move. Rejecting the rename while parks exist was considered and
-declined: it would force every parked task through `start` and re-park to rename a
-prefix.
+**Preflight**, before any mutation and alongside the live-claim check: the target prefix's
+store must hold no park entries. `unregister` frees a prefix but leaves its store behind,
+so parking under `new`, unregistering `new`, then renaming `old → new` is reachable, and
+the migration must not overwrite `new`'s parks. A target store with park entries fails
+authorization, naming them: `target store holds N parked tasks (ids…); remove or resume
+them before renaming`. Stale claims in either store are dropped as today.
+
+**Expectation.** The inventory records the migration: the bytes of the target store the
+rename will write (source parks with ids rewritten to the target prefix, no claims) and
+their digest, `store_to`, beside `config_from` and `config_to`. `worktree` paths in entries
+are unchanged by a rename. `rename --explain` reports the count of park entries that will
+move.
+
+**Order** in the `claims` step: write the target store from the expectation, verify the
+written bytes digest to `store_to`, then remove the source store. Recovery accepts an
+existing destination only when its digest matches `store_to`; a destination that does not
+match is a validation error, in the shape the config rewrite uses when it disagrees with
+the inventory, and the source is left in place. With the source already gone, the
+destination is verified against `store_to` before the step is considered complete.
+
+The manual rollback procedure in the prefix-rename design gains the store: restore the
+source store from the inventory's recorded source parks before deleting the destination,
+and remove the destination last.
 
 ## 5. Surfacing
 
@@ -261,7 +275,7 @@ Additive only; no existing key changes.
 | `park` | the entry |
 | `phase`, `status`, `priority`, `size`, `owner`, `created`, `updated`, `parent`, `source`, `child_count`, `open_descendant_count`, `claim` | `null` |
 | `parallel` | `false` |
-| `depends`, `tags`, `children` | `[]` |
+| `depends`, `tags` | `[]` |
 
 `status: null` is the marker; nothing else in the contract produces it.
 
@@ -352,7 +366,13 @@ title plus the next-step line, not the session.
     session claims is still accepted and still heartbeats only the caller's own claim;
   - **rename with parks**: park two tasks, `tasks rename`, and the target prefix's store
     holds both with rewritten ids while the source store is gone; `rename --explain`
-    reports the count; interrupt after the store step and resume;
+    reports the count;
+  - **rename onto a pre-existing target store**: park under `new`, `unregister new`, park
+    under `old`, `rename old new` fails in preflight naming `new`'s parks, and neither
+    store has changed;
+  - **rename interrupted between destination write and source removal**: resume completes
+    with the destination verified and the source removed; a destination altered in the
+    interval fails recovery with the source left in place;
   - **park a doing task, then explicit `start` versus an unchanged-status editor save**:
     the first clears, the second preserves;
   - `list --parked` filters and combines with `--project`.
