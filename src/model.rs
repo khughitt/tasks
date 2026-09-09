@@ -57,6 +57,64 @@ mod tests {
         assert_eq!(Size::parse("m").unwrap(), Size::M);
         assert!(Size::parse("huge").is_err());
     }
+
+    fn task_with(
+        status: Status,
+        spec: Option<&str>,
+        plan: Option<&str>,
+        step: Option<&str>,
+    ) -> Task {
+        Task {
+            id: TaskId::parse("sci-000001").unwrap(),
+            title: "T".into(),
+            status,
+            priority: 2,
+            size: None,
+            parallel: false,
+            owner: None,
+            created: "2026-09-09T00:00:00Z".into(),
+            updated: "2026-09-09T00:00:00Z".into(),
+            depends: vec![],
+            parent: None,
+            tags: vec![],
+            source: None,
+            spec: spec.map(Into::into),
+            plan: plan.map(Into::into),
+            step: step.map(Into::into),
+            body: String::new(),
+            notes: vec![],
+        }
+    }
+
+    #[test]
+    fn phase_is_derived_first_match_wins() {
+        assert_eq!(
+            Phase::of(&task_with(Status::Idea, Some("s"), Some("p"), None)),
+            Phase::Brainstorming
+        );
+        assert_eq!(
+            Phase::of(&task_with(Status::Todo, None, Some("p"), None)),
+            Phase::Implementing
+        );
+        assert_eq!(
+            Phase::of(&task_with(Status::Doing, Some("s"), None, Some("Task 1"))),
+            Phase::Implementing
+        );
+        assert_eq!(
+            Phase::of(&task_with(Status::Todo, Some("s"), None, None)),
+            Phase::Planning
+        );
+        assert_eq!(
+            Phase::of(&task_with(Status::Todo, None, None, None)),
+            Phase::Implementing,
+            "scoped work needs no spec"
+        );
+        assert_eq!(
+            Phase::of(&task_with(Status::Blocked, Some("s"), None, None)),
+            Phase::Planning
+        );
+        assert_eq!(Phase::Planning.as_str(), "planning");
+    }
 }
 use crate::error::{Error, Result};
 use serde::Serialize;
@@ -198,6 +256,38 @@ impl Size {
             Size::M => "m",
             Size::L => "l",
             Size::Xl => "xl",
+        }
+    }
+}
+
+/// Where a parked task was left. Derived from its design links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Phase {
+    Brainstorming,
+    Planning,
+    Implementing,
+}
+
+impl Phase {
+    pub fn of(task: &Task) -> Phase {
+        if task.status == Status::Idea {
+            return Phase::Brainstorming;
+        }
+        if task.plan.is_some() || task.step.is_some() {
+            return Phase::Implementing;
+        }
+        if task.spec.is_some() {
+            return Phase::Planning;
+        }
+        Phase::Implementing
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Phase::Brainstorming => "brainstorming",
+            Phase::Planning => "planning",
+            Phase::Implementing => "implementing",
         }
     }
 }

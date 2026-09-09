@@ -4485,6 +4485,258 @@ fn as_agent(env: &TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::
 }
 
 #[test]
+fn prime_lists_parked_before_ready_and_ready_omits_user_parked_work() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    write_doc(&sci, "docs/specs/x-design.md", "# x\n");
+    let a = id_of(env.json(&sci, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(
+        &sci,
+        &["add", "B", "-p", "1", "--spec", "docs/specs/x-design.md"],
+    ));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &b, "decide the shape", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["parked"].as_array().unwrap().len(), 1);
+    assert_eq!(prime["parked"][0]["id"], b);
+    assert_eq!(prime["parked"][0]["phase"], "planning");
+    assert_eq!(prime["parked"][0]["status"], "todo");
+    assert_eq!(prime["parked"][0]["park"]["waiting_on"], "user");
+    let ready: Vec<&str> = prime["ready"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ready, vec![a.as_str()], "B waits on the user");
+    let warnings = prime["warnings"].to_string();
+    assert!(
+        warnings.contains(&format!(
+            "{b} omitted: parked waiting on the user: decide the shape"
+        )),
+        "{warnings}"
+    );
+    assert_eq!(env.json(&sci, &["next"])["next"]["task"]["id"], a);
+    let text = env.pretty(&sci, &["prime"]);
+    assert!(
+        text.find("parked:").unwrap() < text.find("ready:").unwrap(),
+        "{text}"
+    );
+    assert!(
+        text.contains("planning") && text.contains("decide the shape"),
+        "{text}"
+    );
+}
+
+#[test]
+fn next_prefers_the_most_recently_parked_candidate_and_applies_the_eligibility_rules() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let urgent = id_of(env.json(&sci, &["add", "Urgent", "-p", "0", "--size", "xs"]));
+    let work = id_of(env.json(&sci, &["add", "Work", "-p", "3"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &work, "continue"])
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["next"])["next"]["task"]["id"], work);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let idea = id_of(env.json(&sci, &["add", "Idea", "--status", "idea"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &idea, "write the problem statement"])
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["next"])["next"]["task"]["id"], idea);
+    env.json(&sci, &["drop", &work, "x"]);
+    env.json(&sci, &["drop", &idea, "x"]);
+    let blocked = id_of(env.json(&sci, &["add", "Blocked", "-p", "1"]));
+    env.json(&sci, &["block", &blocked, "why"]);
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &blocked, "x"])
+        .assert()
+        .success();
+    let open_dep = id_of(env.json(&sci, &["add", "OpenDep", "-p", "1"]));
+    let held = id_of(env.json(&sci, &["add", "Held", "-p", "1", "--depends", &open_dep]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &held, "x"])
+        .assert()
+        .success();
+    let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "1"]));
+    env.json(&sci, &["add", "Child", "-p", "1", "--parent", &goal]);
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &goal, "x"])
+        .assert()
+        .success();
+    let foreign = id_of(env.json(&fam, &["add", "F", "-p", "2"]));
+    let unreachable = id_of(env.json(
+        &sci,
+        &["add", "Unreachable", "-p", "1", "--depends", &foreign],
+    ));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &unreachable, "x"])
+        .assert()
+        .success();
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(next["next"]["task"]["id"], urgent, "{next}");
+    assert!(
+        next["warnings"].to_string().contains("unreachable"),
+        "{next}"
+    );
+    assert_eq!(
+        env.json(&sci, &["prime"])["parked"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+}
+
+#[test]
+fn park_in_one_worktree_start_and_done_in_another_leaves_nothing_parked() {
+    let mut env = TestEnv::new();
+    let (a, b) = two_roots(&mut env);
+    let id = id_of(env.json(&a, &["add", "T", "-p", "2"]));
+    std::fs::copy(
+        a.join(format!("tasks/{id}.md")),
+        b.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+    as_agent(&env, &a, "agent-a")
+        .args(["park", &id, "next"])
+        .assert()
+        .success();
+    assert_eq!(env.json(&b, &["prime"])["parked"][0]["id"], id);
+    as_agent(&env, &b, "agent-b")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &b, "agent-b")
+        .args(["done", &id, "landed"])
+        .assert()
+        .success();
+    let prime = env.json(&a, &["prime"]);
+    assert!(prime["parked"].as_array().unwrap().is_empty(), "{prime}");
+    assert!(env.json(&a, &["show", &id])["park"].is_null());
+}
+
+#[test]
+fn a_task_parked_only_in_another_checkout_is_listed_from_there_and_never_next() {
+    let mut env = TestEnv::new();
+    let (main, wt) = two_roots(&mut env);
+    let parent = id_of(env.json(&wt, &["add", "Parent", "-p", "2"]));
+    env.json(&wt, &["add", "Child", "-p", "2", "--parent", &parent]);
+    as_agent(&env, &wt, "agent-a")
+        .args(["park", &parent, "plan the pieces"])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let goal = id_of(env.json(&wt, &["add", "Goal", "-p", "2"]));
+    let kid = id_of(env.json(&wt, &["add", "Kid", "-p", "2", "--parent", &goal]));
+    as_agent(&env, &wt, "agent-a")
+        .args(["park", &kid, "finish the kid"])
+        .assert()
+        .success();
+    let prime = env.json(&main, &["prime"]);
+    let rows = prime["parked"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let row = rows.iter().find(|r| r["id"] == parent).unwrap();
+    assert_eq!(row["status"], "todo");
+    assert_eq!(row["phase"], "implementing");
+    assert_eq!(row["child_count"], 1, "{row}");
+    assert!(
+        prime["warnings"]
+            .to_string()
+            .contains("resume it from that checkout"),
+        "{prime}"
+    );
+    assert!(env.json(&main, &["next"])["next"].is_null());
+    let by_parent = env.json(&main, &["list", "--parked", "--parent", &goal]);
+    assert_eq!(by_parent["tasks"][0]["id"], kid);
+    std::fs::remove_dir_all(wt.join("tasks")).unwrap();
+    let prime = env.json(&main, &["prime"]);
+    let row = prime["parked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == parent)
+        .unwrap()
+        .clone();
+    assert_eq!(row["title"], "Parent");
+    assert!(row["status"].is_null() && row["phase"].is_null() && row["priority"].is_null());
+    assert_eq!(row["depends"], serde_json::json!([]));
+    assert_eq!(row["parallel"], false);
+    assert_eq!(row["park"]["next_step"], "plan the pieces");
+    assert!(
+        prime["warnings"]
+            .to_string()
+            .contains("which is unavailable"),
+        "{prime}"
+    );
+    assert!(env.json(&main, &["next"])["next"].is_null());
+    assert_eq!(
+        env.json(&main, &["list", "--parked"])["tasks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let filtered = env.json(&main, &["list", "--parked", "--tag", "x"]);
+    assert!(filtered["tasks"].as_array().unwrap().is_empty());
+    assert!(filtered["warnings"].to_string().contains("unavailable"));
+    assert_eq!(
+        env.fail(&main, &["list", "--parked", "--parent", &goal]),
+        "task_not_found"
+    );
+}
+
+#[test]
+fn list_parked_orders_by_park_time_and_conflicts_with_sort() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let first = id_of(env.json(&sci, &["add", "First", "-p", "1"]));
+    let second = id_of(env.json(&sci, &["add", "Second", "-p", "3"]));
+    env.json(&sci, &["add", "Neither", "-p", "0"]);
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &first, "a"])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &second, "b", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let listed = env.json(&sci, &["list", "--parked"]);
+    let ids: Vec<&str> = listed["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![second.as_str(), first.as_str()]);
+    assert_eq!(listed["tasks"][0]["phase"], "implementing");
+    assert_eq!(
+        env.json(&sci, &["list", "--parked", "--status", "todo"])["tasks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    for flag in ["--sort", "--reverse"] {
+        let mut args = vec!["list", "--parked", flag];
+        if flag == "--sort" {
+            args.push("updated");
+        }
+        assert_eq!(
+            env.cmd(&sci).args(&args).output().unwrap().status.code(),
+            Some(2)
+        );
+    }
+}
+
+#[test]
 fn ready_omits_a_task_claimed_from_another_root_and_says_why() {
     let mut env = TestEnv::new();
     let (a, b) = two_roots(&mut env);

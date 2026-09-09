@@ -7,6 +7,7 @@ pub mod graph;
 pub mod init;
 pub mod list;
 pub mod park;
+pub mod parked;
 pub mod projects;
 pub mod rename;
 pub mod root;
@@ -779,6 +780,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             parent,
             sort,
             reverse,
+            parked,
             scope,
         } => list::list(
             open_read_ctx(dir, &scope)?,
@@ -789,6 +791,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             parent,
             sort,
             reverse,
+            parked,
         ),
         Command::Ready {
             size,

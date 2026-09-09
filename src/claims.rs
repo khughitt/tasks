@@ -378,6 +378,10 @@ impl ClaimSnapshot {
         self.parks.get(&id.to_string())
     }
 
+    pub fn parks(&self) -> impl Iterator<Item = (&String, &Park)> {
+        self.parks.iter()
+    }
+
     pub fn get(&self, id: &TaskId) -> Option<&(Claim, Liveness)> {
         self.by_id.get(&id.to_string())
     }

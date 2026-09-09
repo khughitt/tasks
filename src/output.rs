@@ -238,6 +238,81 @@ impl TaskSummary {
     }
 }
 
+#[derive(Serialize, Clone)]
+pub struct ParkedRow {
+    pub id: String,
+    pub title: String,
+    pub status: Option<Status>,
+    pub priority: Option<u8>,
+    pub size: Option<Size>,
+    pub parallel: bool,
+    pub owner: Option<String>,
+    pub created: Option<String>,
+    pub updated: Option<String>,
+    pub tags: Vec<String>,
+    pub source: Option<String>,
+    pub depends: Vec<String>,
+    pub parent: Option<String>,
+    pub child_count: Option<usize>,
+    pub open_descendant_count: Option<usize>,
+    pub claim: Option<ClaimInfo>,
+    pub park: Option<ParkInfo>,
+    pub phase: Option<crate::model::Phase>,
+}
+
+impl ParkedRow {
+    pub fn resolved(summary: TaskSummary, phase: crate::model::Phase) -> ParkedRow {
+        ParkedRow {
+            id: summary.id,
+            title: summary.title,
+            status: Some(summary.status),
+            priority: Some(summary.priority),
+            size: summary.size,
+            parallel: summary.parallel,
+            owner: summary.owner,
+            created: Some(summary.created),
+            updated: Some(summary.updated),
+            tags: summary.tags,
+            source: summary.source,
+            depends: summary.depends,
+            parent: summary.parent,
+            child_count: Some(summary.child_count),
+            open_descendant_count: Some(summary.open_descendant_count),
+            claim: summary.claim,
+            park: summary.park,
+            phase: Some(phase),
+        }
+    }
+    pub fn unresolved(id: &str, park: &crate::claims::Park) -> ParkedRow {
+        ParkedRow {
+            id: id.into(),
+            title: park.title.clone(),
+            status: None,
+            priority: None,
+            size: None,
+            parallel: false,
+            owner: None,
+            created: None,
+            updated: None,
+            tags: Vec::new(),
+            source: None,
+            depends: Vec::new(),
+            parent: None,
+            child_count: None,
+            open_descendant_count: None,
+            claim: None,
+            park: Some(ParkInfo::of(park)),
+            phase: None,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ParkedOut {
+    pub tasks: Vec<ParkedRow>,
+    pub warnings: Vec<String>,
+}
+
 /// Which timestamp a pretty row shows. JSON always carries both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DateColumn {
@@ -425,6 +500,7 @@ pub struct PrimeOut {
     #[serde(skip)]
     pub closed: bool,
     pub ready: Vec<TaskSummary>,
+    pub parked: Vec<ParkedRow>,
     pub doing: Vec<TaskSummary>,
     pub roadmap: Vec<TreeNode>,
     pub closeout: Vec<TaskSummary>,
@@ -473,6 +549,7 @@ pub enum Output {
     Show(Box<ShowOut>),
     Next(Box<NextOut>),
     List(ListOut),
+    Parked(ParkedOut),
     Prime(PrimeOut),
     Graph(GraphOut),
     Check(CheckOut),
@@ -542,6 +619,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             None => "nothing ready".into(),
         },
         Output::List(o) => table(&o.tasks, o.date, painter, any_parallel(&o.tasks)),
+        Output::Parked(o) => parked_table(&o.tasks, painter),
         Output::Prime(o) => {
             // One decision for the whole output: prime's blocks align today only because
             // every width is fixed, and a per-section decision would break that.
@@ -606,6 +684,11 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             rendered.push_str(&format!(
                 "{listed_under_ready} childless root(s) are listed under ready\n"
             ));
+            rendered.push_str(&format!(
+                "\n{}\n",
+                painter.paint(Style::Emphasis, "parked:")
+            ));
+            rendered.push_str(&parked_table(&o.parked, painter));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "ready:")));
             rendered.push_str(&table(
                 &o.ready,
@@ -843,6 +926,36 @@ pub fn table(
     rendered
 }
 
+pub fn parked_table(rows: &[ParkedRow], painter: &Painter) -> String {
+    let mut rendered = String::new();
+    for row in rows {
+        let Some(park) = &row.park else {
+            continue;
+        };
+        let id = painter.paint(Style::Chrome, &row.id);
+        let status = match row.status {
+            Some(status) => {
+                painter.paint(Style::Status(status), &format!("{:<7}", status.as_str()))
+            }
+            None => painter.paint(Style::Chrome, &format!("{:<7}", "?")),
+        };
+        let phase = format!(
+            "{:<13}",
+            row.phase.map(crate::model::Phase::as_str).unwrap_or("-")
+        );
+        rendered.push_str(&format!(
+            "{id}  {status} {phase} waits on {:<5} {}  {}\n",
+            park.waiting_on.as_str(),
+            crate::time::day(&park.at),
+            row.title
+        ));
+        rendered
+            .push_str(&painter.paint(Style::Chrome, &format!("        next: {}", park.next_step)));
+        rendered.push('\n');
+    }
+    rendered
+}
+
 pub fn render_error(e: &Error) -> String {
     serde_json::json!({ "error": { "kind": e.kind(), "detail": e.to_string() } }).to_string()
 }
@@ -864,6 +977,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Show(o) => o.warnings.clone(),
         Output::Next(o) => o.warnings.clone(),
         Output::List(o) => o.warnings.clone(),
+        Output::Parked(o) => o.warnings.clone(),
         Output::Prime(o) => o.warnings.clone(),
         Output::Graph(o) => o.warnings.clone(),
         Output::Check(o) => o

@@ -1,12 +1,15 @@
 use super::ReadCtx;
+use crate::claims::WaitingOn;
 use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
-use crate::output::{Counts, DateColumn, ListOut, NextOut, Output, PrimeOut, TaskSummary};
+use crate::output::{
+    Counts, DateColumn, ListOut, NextOut, Output, ParkedOut, ParkedRow, PrimeOut, TaskSummary,
+};
 use crate::query::{SortKey, is_ready, sort_by_key, sort_list, sort_ready};
 use crate::scope::Scope;
 use std::collections::HashMap;
 
-fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
+pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
     let id = ctx.registry.canonical_id(id);
     match all.iter().find(|task| task.id == id) {
         Some(task) => Ok(Some(task.clone())),
@@ -24,6 +27,7 @@ pub fn list(
     parent: Option<String>,
     sort: Option<String>,
     reverse: bool,
+    parked: bool,
 ) -> Result<Output> {
     let sort = match sort {
         Some(key) => SortKey::parse(&key)?,
@@ -33,6 +37,9 @@ pub fn list(
         .iter()
         .map(|status| Status::parse(status))
         .collect::<Result<Vec<_>>>()?;
+    if parked {
+        return list_parked(ctx, statuses, tags, owner, source, parent);
+    }
     let (all, claims) = ctx.scan_with_claims()?;
     let mut tasks = all.clone();
     let parent = parent
@@ -86,6 +93,67 @@ pub fn list(
         warnings: ctx.warnings,
         date: sort.date_column(),
     }))
+}
+
+fn list_parked(
+    mut ctx: ReadCtx,
+    statuses: Vec<Status>,
+    tags: Vec<String>,
+    owner: Option<String>,
+    source: Option<String>,
+    parent: Option<String>,
+) -> Result<Output> {
+    let (all, claims) = ctx.scan_with_claims()?;
+    let parent = parent
+        .as_deref()
+        .map(|id| super::parse_id(&ctx.registry, id))
+        .transpose()?;
+    let rows = super::parked::rows(&mut ctx, &all, &claims)?;
+    let warnings = std::mem::take(&mut ctx.warnings);
+    let row_parent = |row: &ParkedRow| {
+        row.parent
+            .as_deref()
+            .and_then(|parent| TaskId::parse(parent).ok())
+            .map(|id| ctx.registry.canonical_id(&id))
+    };
+    if let Some(parent) = &parent
+        && !all.iter().any(|task| task.id == *parent)
+        && !rows
+            .iter()
+            .any(|row| row_parent(row).as_ref() == Some(parent))
+    {
+        return Err(Error::TaskNotFound(parent.to_string()));
+    }
+    let filtered = !statuses.is_empty()
+        || !tags.is_empty()
+        || owner.is_some()
+        || source.is_some()
+        || parent.is_some();
+    let tasks = rows
+        .into_iter()
+        .filter(|row| {
+            let Some(status) = row.status else {
+                return !filtered;
+            };
+            let status_ok = if statuses.is_empty() {
+                status.is_open()
+            } else {
+                statuses.contains(&status)
+            };
+            let tags_ok = tags.iter().all(|tag| row.tags.contains(tag));
+            let owner_ok = owner
+                .as_ref()
+                .is_none_or(|value| row.owner.as_ref() == Some(value));
+            let source_ok = source
+                .as_ref()
+                .is_none_or(|value| row.source.as_ref() == Some(value));
+            let parent_ok = parent
+                .as_ref()
+                .is_none_or(|p| row_parent(row).as_ref() == Some(p));
+            status_ok && tags_ok && owner_ok && source_ok && parent_ok
+        })
+        .collect();
+    Ok(Output::Parked(ParkedOut { tasks, warnings }))
 }
 
 /// Why a live claim keeps a task out of a read command's rows. `ready` appends the
@@ -146,6 +214,16 @@ pub fn ready_tasks(
         }
         None => true,
     });
+    ready.retain(|task| match claims.park(&task.id) {
+        Some(park) if park.waiting_on == WaitingOn::User => {
+            warnings.push(format!(
+                "{} omitted: parked waiting on the user: {}",
+                task.id, park.next_step
+            ));
+            false
+        }
+        _ => true,
+    });
     ctx.warnings.extend(warnings);
     Ok(ready)
 }
@@ -182,8 +260,13 @@ pub fn ready(
 /// lookup. Nothing ready is a normal state: null, warnings, exit 0.
 pub fn next(mut ctx: ReadCtx) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
+    let candidates = super::parked::candidates(&mut ctx, &all, &claims)?;
     let ready = ready_tasks(&mut ctx, &all, &claims)?;
-    let next = match ready.into_iter().next() {
+    let next = match candidates
+        .into_iter()
+        .next()
+        .or_else(|| ready.into_iter().next())
+    {
         None => None,
         Some(task) => {
             let project = ctx
@@ -214,6 +297,7 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
 pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let counts = Counts::of(&all);
+    let parked = super::parked::rows(&mut ctx, &all, &claims)?;
     let ready = ready_tasks(&mut ctx, &all, &claims)?;
     let mut doing: Vec<Task> = all
         .iter()
@@ -301,6 +385,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
             .collect(),
+        parked,
         doing: doing
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))

@@ -193,6 +193,9 @@ pub enum Command {
         /// Reverse the chosen order.
         #[arg(long)]
         reverse: bool,
+        /// Only parked tasks, most recently parked first.
+        #[arg(long, conflicts_with_all = ["sort", "reverse"])]
+        parked: bool,
         #[command(flatten)]
         scope: ScopeArgs,
     },
