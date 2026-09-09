@@ -541,6 +541,8 @@ fn block_unblock_note_and_dep_leave_a_park_entry_alone() {
 
 #[test]
 fn status_changing_edits_clear_a_park_and_unchanged_saves_keep_it() {
+    use std::os::unix::fs::MetadataExt;
+
     let mut env = TestEnv::new();
     let sci = env.init("sci");
 
@@ -577,8 +579,11 @@ fn status_changing_edits_clear_a_park_and_unchanged_saves_keep_it() {
         .args(["park", &id, "resume here"])
         .assert()
         .success();
+    let stale = id_of(env.json(&sci, &["add", "S", "-p", "2"]));
+    write_claim(&env, "sci", &stale, "dead-agent", false);
     let store = env.claim_store("sci");
     let before = std::fs::read_to_string(&store).unwrap();
+    let before_ino = std::fs::metadata(&store).unwrap().ino();
     let editor = editor_script(&sci, "sed -i '/^## Notes/i edited body' \"$1\"");
     as_agent(&env, &sci, "agent-a")
         .env("EDITOR", &editor)
@@ -597,6 +602,7 @@ fn status_changing_edits_clear_a_park_and_unchanged_saves_keep_it() {
         before,
         "the store was not written"
     );
+    assert_eq!(std::fs::metadata(&store).unwrap().ino(), before_ino);
     as_agent(&env, &sci, "agent-a")
         .args(["edit", &id, "--status", "doing"])
         .assert()
@@ -606,6 +612,8 @@ fn status_changing_edits_clear_a_park_and_unchanged_saves_keep_it() {
         "resume here",
         "edit --status <same> is not a transition"
     );
+    assert_eq!(std::fs::read_to_string(&store).unwrap(), before);
+    assert_eq!(std::fs::metadata(&store).unwrap().ino(), before_ino);
     as_agent(&env, &sci, "agent-a")
         .args(["start", &id])
         .assert()

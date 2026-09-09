@@ -35,6 +35,7 @@ pub enum ClaimIntent {
     Acquire(crate::claims::Claim),
     Release { clear_park: bool },
     Park(crate::claims::Park),
+    PreserveStore,
 }
 
 pub struct Ctx {
@@ -95,6 +96,10 @@ impl Ctx {
             }
         }
         Ok(())
+    }
+
+    pub fn preserve_claim_store(&mut self, id: &TaskId) {
+        self.pending_claim = Some((id.clone(), ClaimIntent::PreserveStore));
     }
 
     /// Guard only. Decides whether this session may make the change and records what `save`
@@ -679,6 +684,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             }
             Ok(())
         }
+        Some((_, ClaimIntent::PreserveStore)) => ctx.project.write_task(&ctx.registry, task),
         None => {
             // Resolve the store before writing so a corrupt store cannot hide a landed edit.
             ctx.claims_mut()?;

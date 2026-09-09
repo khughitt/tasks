@@ -88,6 +88,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         let to = Status::parse(&status)?;
         if to == task.status {
             ctx.refuse_foreign_live_claim(&task.id)?;
+            ctx.preserve_claim_store(&task.id);
         } else {
             transition(&mut ctx, &mut task, to, args.force)?;
         }
@@ -172,6 +173,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     edited.status = original.status;
     if status == original.status {
         ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;
+        ctx.preserve_claim_store(&original.id);
     } else {
         transition(&mut ctx, &mut edited, status, false).map_err(keep)?;
     }
