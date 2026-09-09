@@ -6,10 +6,11 @@ priority: 2
 size: m
 owner: design/curation
 created: 2026-09-09T03:01:18Z
-updated: 2026-09-09T08:42:19Z
+updated: 2026-09-09T08:55:38Z
 depends: []
 tags: [curation, cli, skill]
 spec: docs/specs/2026-09-08-task-curation-design.md
+plan: docs/plans/2026-09-08-task-curation.md
 ---
 
 A curate skill, skills/curate/SKILL.md, that samples open tasks and refines each in a bounded pass: clearer prose, implicit assumptions made explicit, open questions collected, links fixed, stale and duplicate tasks proposed for drop. Backed by a tasks sample command that draws uniformly from open, unclaimed, not recently updated tasks. Zero new tasks per pass; drops, priority changes, and new tasks are proposals. Task kinds (templates) are a follow-up derived from passes.

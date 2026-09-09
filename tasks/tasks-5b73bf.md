@@ -4,9 +4,8 @@ title: Derive task kinds from curation passes and write the kinds section of the
 status: idea
 priority: 2
 created: 2026-09-09T03:01:18Z
-updated: 2026-09-09T03:01:25Z
+updated: 2026-09-09T08:53:26Z
 depends: []
-parent: tasks-c3c0d1
 tags: [curation, skill]
 ---
 
