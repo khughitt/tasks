@@ -174,7 +174,7 @@ fn sample_bounds_older_than_at_the_cli() {
         assert_eq!(out.status.code(), Some(2), "--older-than {bad} must be a parse error");
     }
     let v = env.json(&dir, &["sample", "--older-than", "36500"]);
-    assert_eq!(sampled_ids(&v).len(), 1, "{v}");
+    assert!(sampled_ids(&v).is_empty(), "{v}");
 }
 
 /// Pins the seeded draw so a change of generator or generator width is caught. The
