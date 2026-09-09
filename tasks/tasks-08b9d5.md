@@ -5,10 +5,11 @@ status: todo
 priority: 2
 size: l
 created: 2026-09-09T12:31:46Z
-updated: 2026-09-09T14:37:50Z
+updated: 2026-09-09T15:22:57Z
 depends: []
 tags: [cli, observability, provenance]
 spec: docs/specs/2026-09-09-park-design.md
+plan: docs/plans/2026-09-09-park.md
 ---
 
 Today 'doing' is the only active state, so a task set down overnight says nothing about whether it waits on the user or the agent, or what the next concrete action is. The resumption state exists, but buried in the last of several long notes, invisible in every list view.
@@ -28,3 +29,4 @@ Consumers: the quick-launch picker (tasks-202e1f) and the familiar session-end h
 - 2026-09-09T14:12:07Z (park): Spec revised after review 2026-09-09: store-authoritative parking, no frontmatter fields; start is resume; next eligibility and store-only rows defined.
 - 2026-09-09T14:30:30Z (park): Second review 2026-09-09 folded in: store-only entries resolve by scanning the originating checkout and are never next candidates; rename migrates park entries; editor-save rule scoped to park preservation; unresolved row contract.
 - 2026-09-09T14:37:50Z (park): Third review 2026-09-09: rename preflight rejects unrelated target parks; inventory records the expected target store (store_to) and recovery verifies it. Spec approved for planning.
+- 2026-09-09T15:22:57Z (park): Plan docs/plans/2026-09-09-park.md revised after review 2026-09-09: six tasks grouped so each helper lands with its consumer; rename target check is fresh-only; store maps skip when empty.
