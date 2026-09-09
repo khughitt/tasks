@@ -8143,6 +8143,14 @@ fn sample_draws_only_from_the_curable_pool() {
     let done = old_task(&env, &dir, "Done", &[]);
     env.json(&dir, &["done", &done]);
     stamp(&dir, &done, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    let dropped = old_task(&env, &dir, "Dropped", &[]);
+    env.json(&dir, &["drop", &dropped, "not needed"]);
+    stamp(
+        &dir,
+        &dropped,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
     let recent = id_of(env.json(&dir, &["add", "Recent", "-p", "2"]));
     let live = old_task(&env, &dir, "Live claim", &[]);
     write_claim(&env, "sci", &live, "other-session", true);
@@ -8155,7 +8163,7 @@ fn sample_draws_only_from_the_curable_pool() {
     let mut expected = vec![idea.clone(), todo.clone(), blocked.clone(), stale.clone()];
     expected.sort();
     assert_eq!(ids, expected, "{v}");
-    for absent in [&doing, &done, &recent, &live] {
+    for absent in [&doing, &done, &dropped, &recent, &live] {
         assert!(!ids.contains(absent), "{absent} must not be drawn: {v}");
     }
     let warnings = v["warnings"].as_array().unwrap();

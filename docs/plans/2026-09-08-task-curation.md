@@ -60,7 +60,7 @@ the same checkout.
   Option<u64>) -> Result<Output>`; the CLI surface `tasks sample [-n N] [--older-than DAYS]
   [--seed U64] [--project P | --all-projects]`. Task 2's skill calls this surface.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/cli.rs`. The helpers `id_of`, `stamp`, `write_claim`, and `TestEnv` already
 exist in that file and in `tests/common/mod.rs`.
@@ -292,14 +292,14 @@ fn sample_scopes_like_the_other_read_commands() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --test cli sample_ 2>&1 | tail -20`
 Expected: every `sample_` test fails (seven of them); most fail on clap's "unrecognized
 subcommand 'sample'" (exit 2) surfacing as a JSON parse panic in `env.json`, and the
 bounds test fails on its final `env.json` call.
 
-- [ ] **Step 3: Add the CLI variant**
+- [x] **Step 3: Add the CLI variant**
 
 In `src/cli.rs`, after the `Next { .. }` variant:
 
@@ -327,7 +327,7 @@ In `src/cli.rs`, after the `Next { .. }` variant:
     },
 ```
 
-- [ ] **Step 4: Write the command**
+- [x] **Step 4: Write the command**
 
 Create `src/commands/sample.rs`:
 
@@ -416,7 +416,7 @@ pub fn sample(
 If `task.id` does not implement `Ord`, sort by its string form instead:
 `pool.sort_by_key(|task| task.id.to_string())`.
 
-- [ ] **Step 5: Register and dispatch**
+- [x] **Step 5: Register and dispatch**
 
 In `src/commands/mod.rs`, add `pub mod sample;` to the module list (alphabetical, after
 `root`), and in the dispatch `match` after the `Command::Next` arm:
@@ -430,7 +430,7 @@ In `src/commands/mod.rs`, add `pub mod sample;` to the module list (alphabetical
         } => sample::sample(open_read_ctx(dir, &scope)?, count, older_than, seed),
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test --test cli sample_ 2>&1 | tail -20`
 Expected: 7 passed. Then `just check` to confirm fmt and clippy are clean. If clippy
@@ -438,7 +438,7 @@ flags the `as i64` cast despite the comment, `i64::try_from(older_than).expect("
 to 36500 by the CLI")` is the right replacement: the range is enforced before this code
 runs, so an error path here would be dead.
 
-- [ ] **Step 7: Document the command**
+- [x] **Step 7: Document the command**
 
 In `docs/specs/2026-08-29-tasks-design.md` section 5, after the `tasks ready` entry:
 
@@ -459,7 +459,7 @@ In `README.md`, in the `## Use` block after the `tasks ready --parallel -n 3` li
     tasks sample -n 3                # random open tasks for a curation pass (see skills/curate)
 ```
 
-- [ ] **Step 8: Reinstall, close the task, commit**
+- [x] **Step 8: Reinstall, close the task, commit**
 
 ```bash
 cargo install --path .
@@ -485,7 +485,7 @@ git commit -m "feat(sample): draw random curable tasks for a curation pass"
   (`null` or an object with `live: bool`).
 - Produces: the skill file; nothing in code depends on it.
 
-- [ ] **Step 1: Write the skill**
+- [x] **Step 1: Write the skill**
 
 Create `skills/curate/SKILL.md` with exactly this content:
 
@@ -614,7 +614,7 @@ Task kinds (templates) are derived from passes, not written up front. After a ha
 passes, cluster what was seen; that work is tasks-5b73bf in the tasks project.
 ````
 
-- [ ] **Step 2: Point the other docs at it**
+- [x] **Step 2: Point the other docs at it**
 
 In `skills/tasks/SKILL.md`, at the end of the "Recording work" bullet list:
 
@@ -641,7 +641,7 @@ lines, add the matching pair for curate:
 and one sentence after the install block: "`skills/curate/SKILL.md` is the maintenance
 pass: `/curate` samples open tasks and refines them within fixed bounds."
 
-- [ ] **Step 3: Dry-run the skill against this repository**
+- [x] **Step 3: Dry-run the skill against this repository**
 
 Without writing anything, walk sections 1 through 3 step 4 for one task, to prove every
 command the skill names exists and yields the fields the skill reads:
@@ -659,7 +659,7 @@ Expected: a status in `idea|todo|blocked`, an RFC 3339 stamp, and `None` or a cl
 object; the tree and tags print. If any command errors, the skill text is wrong; fix the
 text, not the CLI.
 
-- [ ] **Step 4: Check and commit**
+- [x] **Step 4: Check and commit**
 
 ```bash
 just check
@@ -676,7 +676,7 @@ git commit -m "feat(skills): add the curate skill for bounded task maintenance p
 - Modify: `docs/specs/2026-09-08-task-curation-design.md` (the `Status:` line)
 - Modify: `tasks/` via the CLI only
 
-- [ ] **Step 1: Correct the spec status**
+- [x] **Step 1: Correct the spec status**
 
 Change the status line at the top of `docs/specs/2026-09-08-task-curation-design.md` to:
 
@@ -690,13 +690,13 @@ Then grep for the same claim elsewhere and fix any drift:
 grep -rn 'task-curation' README.md AGENTS.md docs/ skills/
 ```
 
-- [ ] **Step 2: Run the full gate**
+- [x] **Step 2: Run the full gate**
 
 Run: `just gate`
 Expected: fmt, clippy, `tasks check`, and `cargo test` all pass. Paste the last lines of
 the output in the commit body if anything was non-obvious.
 
-- [ ] **Step 3: Run one real pass**
+- [x] **Step 3: Run one real pass**
 
 Now that the binary and the skill are installed, run `/curate 3 --project tasks` in a
 fresh session (or follow the skill by hand here). This is the skill's acceptance test.
@@ -709,7 +709,7 @@ tasks note tasks-c3c0d1 "first pass: <n> tasks, verdicts <list>, <k> proposals"
 If the pass exposed a defect in the skill text, fix it in this task and mention it in the
 same note.
 
-- [ ] **Step 4: Close the goal and commit**
+- [x] **Step 4: Close the goal and commit**
 
 ```bash
 tasks done tasks-3c2dfb "spec status, gate, first pass"

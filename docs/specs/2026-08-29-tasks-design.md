@@ -251,7 +251,7 @@ tasks list [--status S]... [--tag T]... [--owner O] [--source REF]
     registry; both need no local project (§6).
     Pretty rows carry a date column (the `YYYY-MM-DD` day, UTC): the timestamp sorted
     on, or updated (last activity) when the order is not a date. Every command that
-    prints summary rows (ready, prime, tree) shows the updated day.
+    prints summary rows (ready, prime, tree, sample) shows the updated day.
 
 tasks tree [<id>] [--all] [--project P | --all-projects]
     The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
@@ -529,8 +529,8 @@ and the claim store key off the resolved project, so a cross-project write locks
 in the target, not the caller. A local project is still required — only `add --project` and
 the two read-scope flags run without one.
 
-The same six read commands (list, ready, prime, tree, next, tags) take `--project <p>`
-and `--all-projects`, which conflict. Both locate no local project.
+The same seven read commands (list, ready, prime, tree, next, tags, sample) take
+`--project <p>` and `--all-projects`, which conflict. Both locate no local project.
 
 `--project <p>` reads that one registered project through the rule `add --project` uses:
 the *registered root*, so a worktree sharing the prefix does not displace it, and the

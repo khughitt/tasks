@@ -84,7 +84,7 @@ from a clone):
     tasks next                       # the first ready task, in full
     tasks next --all-projects        # the same across every registered project
     tasks prime --project fam        # read another registered project; also list, ready,
-                                     #   next, tree, tags. Needs no local project.
+                                     #   next, tree, tags, sample. Needs no local project.
     tasks projects                   # the registry: reachable? counts?
     tasks add "Piece" --project fam  # create in another registered project
     tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
