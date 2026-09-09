@@ -7946,9 +7946,12 @@ fn rename_migrates_park_entries_to_the_target_store() {
         .collect();
     assert_eq!(ids.len(), 2);
     assert!(ids.iter().all(|id| id.starts_with("dots-")), "{ids:?}");
+    let completed = env.json(&dir, &["rename", "dot", "dots"]);
+    assert_eq!(completed["recovery"], "complete");
+    assert_eq!(completed["parks"], 2);
     assert_eq!(
-        env.json(&dir, &["rename", "dot", "dots"])["recovery"],
-        "complete"
+        env.json(&dir, &["rename", "dot", "dots", "--explain"])["parks"],
+        2
     );
 }
 
@@ -8051,6 +8054,29 @@ fn rename_interrupted_after_the_store_write_resumes_and_a_tampered_destination_r
             );
         }
     }
+
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    as_agent(&env, &dir, "agent-a")
+        .args(["park", &id, "a"])
+        .assert()
+        .success();
+    let stopped = env
+        .raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "claims")
+        .args(["rename", "dot", "dots"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+    assert!(!env.claim_store("dot").exists(), "source removed");
+    assert_eq!(
+        env.json(&dir, &["rename", "dot", "dots", "--explain"])["parks"],
+        1
+    );
+    let resumed = env.json(&dir, &["rename", "dot", "dots"]);
+    assert_eq!(resumed["recovery"], "resume_cleanup");
+    assert_eq!(resumed["parks"], 1);
 }
 
 #[test]
