@@ -1,6 +1,6 @@
 # Task curation: a curate skill and `tasks sample`
 
-Status: designed (2026-09-08)
+Status: implemented (2026-09-09)
 Task: tasks-c3c0d1; follow-up tasks-5b73bf (task kinds)
 
 ## Problem
