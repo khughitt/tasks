@@ -95,9 +95,11 @@ log) runs in that same root.
    - `decompose`: a goal is missing children it needs. Proposal: the children, each one
      line.
 4. **Revalidate**, immediately before the first write. `tasks show <id>` again: if the
-   status is no longer open, a `claim` is present, or `updated` differs from the stamp
-   taken in step 1, the task is reported as skipped (with the reason: became active,
-   claimed, or changed) and nothing is written. `edit` and `note` do not consult the claim
+   status is not one of `idea`, `todo`, or `blocked`, a `claim` is present with
+   `live: true`, or `updated` differs from the stamp taken in step 1, the task is
+   reported as skipped (with the reason: became active, claimed, or changed) and nothing
+   is written. `doing` counts as active here, and a stale claim does not count as
+   claimed, matching the pool rules `sample` applies. `edit` and `note` do not consult the claim
    store, so this is a check, not a lock; a session that starts the task between the
    recheck and the write gets a prose edit and a `curate:` note on a task it holds. That
    window is seconds wide, the edit changes no status or link semantics, and the note says
