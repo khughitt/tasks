@@ -1,12 +1,14 @@
 ---
 id: tasks-08b9d5
 title: "Park: record the next step and who it waits on when a task is set down"
-status: idea
+status: todo
 priority: 2
+size: l
 created: 2026-09-09T12:31:46Z
-updated: 2026-09-09T12:39:44Z
+updated: 2026-09-09T13:20:02Z
 depends: []
 tags: [cli, observability, provenance]
+spec: docs/specs/2026-09-09-park-design.md
 ---
 
 Today 'doing' is the only active state, so a task set down overnight says nothing about whether it waits on the user or the agent, or what the next concrete action is. The current doing task shows the shape of the problem: its resumption state exists, but buried in the last of several long notes, invisible in every list view.
@@ -26,3 +28,4 @@ Consumers: the quick-launch picker (tasks-202e1f) and the familiar-side session-
 - 2026-09-09T12:31:46Z (main): Follow-up quick-launch picker filed as tasks-202e1f; session capture as tasks-abfd3d.
 - 2026-09-09T12:39:44Z (main): Reshaped from phase states to a park command; tasks-abfd3d (session capture) folded in. Hook piece filed in familiar.
 - 2026-09-09T12:39:44Z (main): Familiar-side hook piece: fam-5b276b.
+- 2026-09-09T13:20:02Z (park): Brainstormed 2026-09-09; design in docs/specs/2026-09-09-park-design.md. Next: writing-plans, then children per plan step.
