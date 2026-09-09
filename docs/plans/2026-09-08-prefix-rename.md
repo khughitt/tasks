@@ -2054,3 +2054,12 @@ checks. The original filter ruling was too broad: Cargo accepts one positional f
 but multiple filters after `--` are accepted by the Rust test harness, and were used for
 focused checks. A bounded, isolated manual rollback check verified that a failed source
 restore leaves the destination and inventory intact; no rollback command was added.
+
+- Ruling: Canonicalize existing roots at rename routing/observation and pending-freeze boundaries; retain the original spelling only for an explicit NotFound observation and propagate all other filesystem errors — Project already uses canonical identity, while absent-root snapshots must remain diagnosable by explain/refusal logic — if wrong, missing-root diagnostics could hide an identity mismatch or valid recovery could refuse.
+
+The final review fix canonicalizes registry and inventory roots only where rename compares
+project identity. Symlink and `..` registry spellings now recover before and after registry
+replacement, older aliases find and freeze their pending inventory by canonical root, and
+the registry keeps its original spelling. Missing and foreign roots still produce R8
+diagnostics, and explain remains read-only. The full gate passed with 123 unit tests and
+194 CLI tests.

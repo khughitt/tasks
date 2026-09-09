@@ -7323,6 +7323,170 @@ fn rename_disk_state(
     state
 }
 
+#[cfg(unix)]
+fn set_registry_root(env: &TestEnv, prefix: &str, root: &std::path::Path) {
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    registry["projects"].as_table_mut().unwrap().insert(
+        prefix.into(),
+        toml::Value::String(root.display().to_string()),
+    );
+    std::fs::write(path, toml::to_string(&registry).unwrap()).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn rename_recovers_through_noncanonical_registry_roots_before_and_after_registry_write() {
+    for spelling in ["symlink", "dotdot"] {
+        for (stop, verdict) in [("files", "resume_files"), ("registry", "resume_cleanup")] {
+            let env = TestEnv::new();
+            let outer = tempfile::tempdir().unwrap();
+            let real = outer.path().join("real");
+            std::fs::create_dir(&real).unwrap();
+            env.json(&real, &["init", "--prefix", "dot"]);
+            let id = id_of(env.json(&real, &["add", "One", "-p", "2"]));
+            let root = if spelling == "symlink" {
+                let link = outer.path().join("link");
+                std::os::unix::fs::symlink(&real, &link).unwrap();
+                link
+            } else {
+                real.join("..").join("real")
+            };
+            set_registry_root(&env, "dot", &root);
+            let label = format!("{spelling} stop={stop}");
+
+            assert_eq!(
+                env.json(&real, &["rename", "dot", "dots", "--explain"])["recovery"],
+                "fresh",
+                "{label}"
+            );
+            rename_stop(&env, &real, "dot", "dots", stop);
+            let moved = id.replacen("dot-", "dots-", 1);
+            assert!(!real.join(format!("tasks/{id}.md")).exists(), "{label}");
+            assert!(real.join(format!("tasks/{moved}.md")).is_file(), "{label}");
+            let before = rename_disk_state(&env, &real);
+            assert_eq!(
+                env.json(&real, &["rename", "dot", "dots", "--explain"])["recovery"],
+                verdict,
+                "{label}"
+            );
+            assert_eq!(rename_disk_state(&env, &real), before, "{label}");
+            assert_eq!(
+                env.json(&real, &["rename", "dot", "dots"])["recovery"],
+                verdict,
+                "{label}"
+            );
+            assert_eq!(env.json(&real, &["show", &id])["task"]["id"], moved);
+            assert_eq!(env.json(&real, &["show", &moved])["task"]["id"], moved);
+            assert!(
+                !env.home
+                    .path()
+                    .join(".local/state/tasks/rename/dot.toml")
+                    .exists(),
+                "{label}"
+            );
+            let registry: toml::Value = toml::from_str(
+                &std::fs::read_to_string(env.home.path().join(".config/tasks/projects.toml"))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(registry["projects"]["dots"].as_str(), root.to_str());
+            assert_eq!(registry["aliases"]["dot"].as_str(), Some("dots"));
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn rename_older_alias_replays_and_freezes_by_canonical_root() {
+    let env = TestEnv::new();
+    let outer = tempfile::tempdir().unwrap();
+    let real = outer.path().join("real");
+    let link = outer.path().join("link");
+    std::fs::create_dir(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    env.json(&real, &["init", "--prefix", "dot"]);
+    let id = id_of(env.json(&real, &["add", "One", "-p", "2"]));
+    env.json(&real, &["rename", "dot", "dots"]);
+    set_registry_root(&env, "dots", &link);
+    rename_stop(&env, &real, "dot", "config", "registry");
+    let moved = id.replacen("dot-", "config-", 1);
+    assert!(
+        !real
+            .join("tasks")
+            .join(id.replacen("dot-", "dots-", 1))
+            .with_extension("md")
+            .exists()
+    );
+    assert!(
+        real.join("tasks")
+            .join(&moved)
+            .with_extension("md")
+            .is_file()
+    );
+
+    assert_eq!(
+        env.json(&real, &["rename", "dot", "config", "--explain"])["recovery"],
+        "resume_cleanup"
+    );
+    let frozen = env.raw(&real).args(["unregister", "dot"]).output().unwrap();
+    assert_eq!(frozen.status.code(), Some(1), "{frozen:?}");
+    assert!(
+        String::from_utf8_lossy(&frozen.stderr).contains("unfinished"),
+        "{frozen:?}"
+    );
+    assert_eq!(
+        env.json(&real, &["rename", "dot", "config"])["recovery"],
+        "resume_cleanup"
+    );
+    assert_eq!(env.json(&real, &["show", &id])["task"]["id"], moved);
+    assert_eq!(
+        env.json(&real, &["show", &id.replacen("dot-", "dots-", 1)])["task"]["id"],
+        moved
+    );
+    assert!(
+        !env.home
+            .path()
+            .join(".local/state/tasks/rename/dots.toml")
+            .exists()
+    );
+    let registry: toml::Value = toml::from_str(
+        &std::fs::read_to_string(env.home.path().join(".config/tasks/projects.toml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(registry["projects"]["config"].as_str(), link.to_str());
+    assert_eq!(registry["aliases"]["dot"].as_str(), Some("config"));
+    assert_eq!(registry["aliases"]["dots"].as_str(), Some("config"));
+}
+
+#[test]
+fn rename_explains_a_missing_foreign_registry_root_as_r8() {
+    let mut env = TestEnv::new();
+    let (dir, _) = rename_fixture(&mut env, 1, false);
+    rename_stop(&env, &dir, "dot", "dots", "config");
+    let missing = dir.with_file_name("missing-rename-root");
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let projects = registry["projects"].as_table_mut().unwrap();
+    projects.remove("dot");
+    projects.insert(
+        "dots".into(),
+        toml::Value::String(missing.display().to_string()),
+    );
+    std::fs::write(path, toml::to_string(&registry).unwrap()).unwrap();
+
+    let before = rename_disk_state(&env, &dir);
+    let explain = env.json(&dir, &["rename", "dot", "dots", "--explain"]);
+    assert_eq!(explain["recovery"], "refuse");
+    let warning = explain["warnings"][0].as_str().unwrap();
+    assert!(warning.starts_with("R8:"), "{warning}");
+    assert!(warning.contains(missing.to_str().unwrap()), "{warning}");
+    assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "config");
+    assert_eq!(rename_disk_state(&env, &dir), before);
+}
+
 #[test]
 fn rename_every_mutation_boundary_resumes_inside_and_outside_git_including_empty_projects() {
     for in_git in [true, false] {

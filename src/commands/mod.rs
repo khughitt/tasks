@@ -248,8 +248,10 @@ pub fn reject_pending_rename(project: &Project) -> Result<()> {
 }
 
 pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()> {
+    let root = root.map(crate::rename::root_identity).transpose()?;
     for inventory in crate::rename::inventory::Inventory::pending()? {
-        if Some(inventory.root.as_path()) == root
+        let inventory_root = crate::rename::root_identity(&inventory.root)?;
+        if root.as_deref() == Some(inventory_root.as_path())
             || inventory.source == prefix
             || inventory.target == prefix
         {

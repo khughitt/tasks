@@ -13,6 +13,16 @@ use classify::{Recovery, classify};
 use inventory::{Inventory, digest, rewrite_config_prefix};
 use snapshot::{Invocation, observe};
 
+/// Existing roots compare by filesystem identity. An absent root keeps its spelling so
+/// explain can classify and report the broken registry state; every other error surfaces.
+pub(crate) fn root_identity(root: &std::path::Path) -> Result<std::path::PathBuf> {
+    match root.canonicalize() {
+        Ok(root) => Ok(root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(root.to_path_buf()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// The command holds both prefix locks and the registry lock for mutating calls.
 /// Observation is repeated here after lock acquisition; explain needs none of the locks.
 pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> Result<RenameOut> {
@@ -81,7 +91,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                 invocation.target, pending.source, pending.target
             )));
         }
-        if pending.root == invocation.root || pending.target == invocation.source {
+        if root_identity(&pending.root)? == invocation.root || pending.target == invocation.source {
             return Err(Error::Validation(format!(
                 "an unfinished rename {} -> {} already names this project; finish it first",
                 pending.source, pending.target

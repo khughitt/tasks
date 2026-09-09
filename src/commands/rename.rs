@@ -8,8 +8,15 @@ use crate::rename::snapshot::Invocation;
 
 /// Keep the old spelling for recovery; an older alias may also start a new rename.
 fn invocation(registry: &Registry, old: &str, new: &str) -> Result<Invocation> {
-    let pending = Inventory::pending()?;
+    let mut pending = Inventory::pending()?;
+    for inventory in &mut pending {
+        inventory.root = crate::rename::root_identity(&inventory.root)?;
+    }
     let live = registry.canonical_prefix(old);
+    let live_root = registry
+        .project_root(live)
+        .map(crate::rename::root_identity)
+        .transpose()?;
     let replay = registry
         .aliases
         .get(old)
@@ -22,7 +29,7 @@ fn invocation(registry: &Registry, old: &str, new: &str) -> Result<Invocation> {
             pending.iter().find(|inventory| {
                 replay
                     && inventory.target == new
-                    && registry.project_root(live) == Some(inventory.root.as_path())
+                    && live_root.as_deref() == Some(inventory.root.as_path())
             })
         });
     let source = baseline
@@ -32,11 +39,13 @@ fn invocation(registry: &Registry, old: &str, new: &str) -> Result<Invocation> {
         return Err(Error::Config(format!("invalid source prefix {source:?}")));
     }
     let inventory = Inventory::load(source)?;
-    let root = registry
-        .project_root(registry.canonical_prefix(source))
-        .or_else(|| inventory.as_ref().map(|inventory| inventory.root.as_path()))
-        .ok_or_else(|| Error::Config(format!("no project registered as {old:?}")))?
-        .to_path_buf();
+    let root = if let Some(root) = registry.project_root(registry.canonical_prefix(source)) {
+        crate::rename::root_identity(root)?
+    } else if let Some(inventory) = &inventory {
+        crate::rename::root_identity(&inventory.root)?
+    } else {
+        return Err(Error::Config(format!("no project registered as {old:?}")));
+    };
     Ok(Invocation {
         source: source.into(),
         target: new.into(),

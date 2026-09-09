@@ -68,6 +68,12 @@ pub fn observe(
     inventory: Option<Inventory>,
 ) -> Result<Snapshot> {
     validate_invocation(invocation)?;
+    let inventory = inventory
+        .map(|mut inventory| {
+            inventory.root = super::root_identity(&inventory.root)?;
+            Ok::<_, Error>(inventory)
+        })
+        .transpose()?;
     if let Some(inventory) = &inventory {
         inventory.validate(Path::new("inventory"))?;
     }
@@ -137,8 +143,16 @@ pub fn observe(
     Ok(Snapshot {
         invocation: invocation.clone(),
         registry: RegistryState {
-            old_key: registry.projects.get(&invocation.source).cloned(),
-            new_key: registry.projects.get(&invocation.target).cloned(),
+            old_key: registry
+                .projects
+                .get(&invocation.source)
+                .map(|root| super::root_identity(root))
+                .transpose()?,
+            new_key: registry
+                .projects
+                .get(&invocation.target)
+                .map(|root| super::root_identity(root))
+                .transpose()?,
             alias: registry.aliases.get(&invocation.source).cloned(),
         },
         config: observe_config(invocation)?,
