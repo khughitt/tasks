@@ -458,7 +458,10 @@ fn park_refuses_a_closed_task_and_validates_its_arguments() {
     assert!(err_detail(&out).contains("parked"), "{}", err_detail(&out));
 
     // An idea needs no start: parking it writes the entry that makes it visible.
-    env.json(&sci, &["park", &idea, "write the problem statement"]);
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &idea, "write the problem statement"])
+        .assert()
+        .success();
     let v = env.json(&sci, &["show", &idea]);
     assert_eq!(v["task"]["status"], "idea");
     assert_eq!(v["park"]["next_step"], "write the problem statement");
