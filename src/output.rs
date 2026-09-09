@@ -112,6 +112,7 @@ pub struct ShowFields {
     pub parent: Option<Related>,
     pub children: Vec<Related>,
     pub claim: Option<ClaimInfo>,
+    pub park: Option<ParkInfo>,
 }
 
 #[derive(Serialize)]
@@ -145,6 +146,7 @@ pub struct TaskSummary {
     pub child_count: usize,
     pub open_descendant_count: usize,
     pub claim: Option<ClaimInfo>,
+    pub park: Option<ParkInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,6 +172,33 @@ impl ClaimInfo {
             started: claim.started.clone(),
             seen: claim.seen.clone(),
             live: live == &crate::claims::Liveness::Live,
+        }
+    }
+}
+
+/// The park entry as JSON: everything but the title snapshot, which is the row's own
+/// `title` (spec §5.4).
+#[derive(Debug, Clone, Serialize)]
+pub struct ParkInfo {
+    pub at: String,
+    pub next_step: String,
+    pub waiting_on: crate::claims::WaitingOn,
+    pub session: String,
+    pub owner: String,
+    pub host: String,
+    pub worktree: String,
+}
+
+impl ParkInfo {
+    pub fn of(park: &crate::claims::Park) -> ParkInfo {
+        ParkInfo {
+            at: park.at.clone(),
+            next_step: park.next_step.clone(),
+            waiting_on: park.waiting_on,
+            session: park.session.clone(),
+            owner: park.owner.clone(),
+            host: park.host.clone(),
+            worktree: park.worktree.clone(),
         }
     }
 }
@@ -202,6 +231,9 @@ impl TaskSummary {
             claim: claims
                 .and_then(|snapshot| snapshot.get(&task.id))
                 .map(|(claim, live)| ClaimInfo::of(claim, live)),
+            park: claims
+                .and_then(|snapshot| snapshot.park(&task.id))
+                .map(ParkInfo::of),
         }
     }
 }
@@ -704,6 +736,20 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
             rendered.push_str(&related_row(&child.id, Some(child.status), &child.title));
         }
     }
+    if let Some(park) = &o.park {
+        rendered.push_str("\n# parked\n");
+        rendered.push_str(&format!(
+            "- waiting on {} since {}: {}\n",
+            park.waiting_on.as_str(),
+            crate::time::day(&park.at),
+            park.next_step
+        ));
+        rendered.push_str(&painter.paint(
+            Style::Chrome,
+            &format!("  session {} in {}", park.session, park.worktree),
+        ));
+        rendered.push('\n');
+    }
     rendered
 }
 
@@ -853,6 +899,7 @@ mod tests {
             child_count: 0,
             open_descendant_count: 0,
             claim: None,
+            park: None,
             parallel,
         }
     }

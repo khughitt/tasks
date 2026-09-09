@@ -271,6 +271,52 @@ fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool)
     std::fs::write(&path, text).unwrap();
 }
 
+/// Writes a park entry straight into the store.
+fn write_park(
+    env: &TestEnv,
+    prefix: &str,
+    id: &str,
+    session: &str,
+    waiting_on: &str,
+    worktree: &str,
+) {
+    let path = env.claim_store(prefix);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&format!(
+        "[parks.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\nhost = \"h\"\n\
+         worktree = \"{worktree}\"\nat = \"2026-01-02T00:00:00Z\"\nnext_step = \"finish §3\"\n\
+         waiting_on = \"{waiting_on}\"\ntitle = \"T\"\n"
+    ));
+    std::fs::write(&path, text).unwrap();
+}
+
+#[test]
+fn park_appears_in_show_and_list_json_and_pretty_show() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    assert!(env.json(&sci, &["show", &id])["park"].is_null());
+    assert!(env.json(&sci, &["list"])["tasks"][0]["park"].is_null());
+
+    write_park(&env, "sci", &id, "claude:abc", "user", "/elsewhere");
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["park"]["next_step"], "finish §3");
+    assert_eq!(v["park"]["waiting_on"], "user");
+    assert_eq!(v["park"]["session"], "claude:abc");
+    assert_eq!(v["park"]["worktree"], "/elsewhere");
+    assert_eq!(v["park"]["at"], "2026-01-02T00:00:00Z");
+    assert!(v["claim"].is_null(), "a park is not a claim");
+    assert_eq!(
+        env.json(&sci, &["list"])["tasks"][0]["park"]["waiting_on"],
+        "user"
+    );
+    let text = env.pretty(&sci, &["show", &id]);
+    assert!(text.contains("# parked"), "{text}");
+    assert!(text.contains("waiting on user"), "{text}");
+    assert!(text.contains("finish §3"), "{text}");
+}
+
 #[test]
 fn claim_appears_in_show_and_list_json() {
     let mut env = TestEnv::new();

@@ -87,16 +87,52 @@ pub struct Claim {
     pub seen: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaitingOn {
+    User,
+    Agent,
+}
+
+impl WaitingOn {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WaitingOn::User => "user",
+            WaitingOn::Agent => "agent",
+        }
+    }
+}
+
+/// A task set down with its next step: the store's other entry kind. No liveness, no
+/// heartbeat, never pruned by a read; `start` replaces it, `done` and `drop` remove it.
+/// See docs/specs/2026-09-09-park-design.md §4.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Park {
+    pub owner: String,
+    /// Scheme-tagged (`Identity::tagged`); opaque to tasks.
+    pub session: String,
+    pub host: String,
+    pub worktree: String,
+    pub at: String,
+    pub next_step: String,
+    pub waiting_on: WaitingOn,
+    /// Snapshot at park time, for rows whose task file is unreachable (spec §5.3).
+    pub title: String,
+}
+
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct StoreFile {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     claims: BTreeMap<String, Claim>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    parks: BTreeMap<String, Park>,
 }
 
 #[derive(Debug)]
 pub struct ClaimStore {
     path: PathBuf,
     claims: BTreeMap<String, Claim>,
+    parks: BTreeMap<String, Park>,
 }
 
 impl ClaimStore {
@@ -128,15 +164,13 @@ impl ClaimStore {
     }
 
     pub fn load_from(path: &Path) -> Result<ClaimStore> {
-        let claims = match std::fs::read_to_string(path) {
-            Ok(text) => {
-                toml::from_str::<StoreFile>(&text)
-                    .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?
-                    .claims
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+        let file = match std::fs::read_to_string(path) {
+            Ok(text) => toml::from_str::<StoreFile>(&text)
+                .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => StoreFile::default(),
             Err(error) => return Err(error.into()),
         };
+        let StoreFile { claims, parks } = file;
         for (id, claim) in &claims {
             for (field, value) in [("started", &claim.started), ("seen", &claim.seen)] {
                 crate::time::parse(value).map_err(|error| {
@@ -147,9 +181,27 @@ impl ClaimStore {
                 })?;
             }
         }
+        for (id, park) in &parks {
+            crate::time::parse(&park.at).map_err(|error| {
+                Error::Config(format!(
+                    "{}: park {id} has an unreadable at: {error}",
+                    path.display()
+                ))
+            })?;
+            crate::format::validate_line("next_step", &park.next_step).map_err(|error| {
+                Error::Config(format!("{}: park {id}: {error}", path.display()))
+            })?;
+            if claims.contains_key(id) {
+                return Err(Error::Config(format!(
+                    "{}: {id} has both a claim and a park; one entry per task",
+                    path.display()
+                )));
+            }
+        }
         Ok(ClaimStore {
             path: path.to_path_buf(),
             claims,
+            parks,
         })
     }
 
@@ -159,6 +211,7 @@ impl ClaimStore {
         }
         let file = StoreFile {
             claims: self.claims.clone(),
+            parks: self.parks.clone(),
         };
         atomic_write(
             &self.path,
@@ -172,8 +225,11 @@ impl ClaimStore {
         self.claims.get(&id.to_string())
     }
 
+    /// A claim displaces a park on the same id: one entry per task (spec §4).
     pub fn insert(&mut self, id: &TaskId, claim: Claim) {
-        self.claims.insert(id.to_string(), claim);
+        let key = id.to_string();
+        self.parks.remove(&key);
+        self.claims.insert(key, claim);
     }
 
     pub fn remove(&mut self, id: &TaskId) -> Option<Claim> {
@@ -186,6 +242,10 @@ impl ClaimStore {
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Claim)> {
         self.claims.iter()
+    }
+
+    pub fn parks(&self) -> impl Iterator<Item = (&String, &Park)> {
+        self.parks.iter()
     }
 
     pub fn prune_dead(&mut self) {
@@ -250,21 +310,40 @@ pub enum Liveness {
     Stale(String),
 }
 
-/// Every claim in scope, with its liveness verdict, read once per command.
+/// Every claim in scope, with its liveness verdict, and every park entry, read once per
+/// command.
 #[derive(Debug, Default)]
 pub struct ClaimSnapshot {
     by_id: BTreeMap<String, (Claim, Liveness)>,
+    parks: BTreeMap<String, Park>,
 }
 
 impl ClaimSnapshot {
     pub fn load<'a>(prefixes: impl Iterator<Item = &'a str>) -> Result<ClaimSnapshot> {
+        let paths = prefixes
+            .map(ClaimStore::path_for)
+            .collect::<Result<Vec<_>>>()?;
+        Self::load_from_paths(paths.into_iter())
+    }
+
+    /// The path form, so a test can point at a file without setting the environment.
+    pub fn load_from_paths(paths: impl Iterator<Item = PathBuf>) -> Result<ClaimSnapshot> {
         let mut by_id = BTreeMap::new();
-        for prefix in prefixes {
-            for (id, claim) in ClaimStore::load(prefix)?.iter() {
+        let mut parks = BTreeMap::new();
+        for path in paths {
+            let store = ClaimStore::load_from(&path)?;
+            for (id, claim) in store.iter() {
                 by_id.insert(id.clone(), (claim.clone(), liveness(claim)));
             }
+            for (id, park) in store.parks() {
+                parks.insert(id.clone(), park.clone());
+            }
         }
-        Ok(ClaimSnapshot { by_id })
+        Ok(ClaimSnapshot { by_id, parks })
+    }
+
+    pub fn park(&self, id: &TaskId) -> Option<&Park> {
+        self.parks.get(&id.to_string())
     }
 
     pub fn get(&self, id: &TaskId) -> Option<&(Claim, Liveness)> {
@@ -785,5 +864,116 @@ mod tests {
             "fields are counted from after the LAST ')'"
         );
         assert_eq!(parse_proc_stat("garbage"), ProcStat::Unreadable);
+    }
+
+    const A_CLAIM: &str = "[claims.\"sci-000001\"]\nowner = \"o\"\nsession = \"a\"\nhost = \"h\"\n\
+        worktree = \"/w\"\nstarted = \"2026-09-09T20:00:00Z\"\nseen = \"2026-09-09T20:00:00Z\"\n";
+    const A_PARK: &str = "[parks.\"sci-000002\"]\nowner = \"o\"\nsession = \"claude:x\"\nhost = \"h\"\n\
+        worktree = \"/w\"\nat = \"2026-09-09T21:00:00Z\"\nnext_step = \"write §3\"\n\
+        waiting_on = \"agent\"\ntitle = \"T\"\n";
+
+    fn store_from(text: &str) -> (tempfile::TempDir, ClaimStore) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sci.toml");
+        std::fs::write(&path, text).unwrap();
+        let store = ClaimStore::load_from(&path).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn a_store_loads_and_saves_claims_and_parks_side_by_side() {
+        let (dir, store) = store_from(&format!("{A_CLAIM}{A_PARK}"));
+        let claimed = TaskId::parse("sci-000001").unwrap();
+        let parked = TaskId::parse("sci-000002").unwrap();
+        assert_eq!(store.get(&claimed).map(|c| c.session.as_str()), Some("a"));
+        let park = store
+            .parks()
+            .find(|(id, _)| *id == "sci-000002")
+            .map(|(_, park)| park)
+            .unwrap();
+        assert_eq!(park.next_step, "write §3");
+        assert_eq!(park.waiting_on, WaitingOn::Agent);
+        assert_eq!(park.title, "T");
+        assert!(store.get(&parked).is_none(), "a park is not a claim");
+
+        store.save().unwrap();
+        let text = std::fs::read_to_string(dir.path().join("sci.toml")).unwrap();
+        assert!(text.contains("[parks.sci-000002]"), "{text}");
+        assert!(text.contains("[claims.sci-000001]"), "{text}");
+        let reloaded = ClaimStore::load_from(&dir.path().join("sci.toml")).unwrap();
+        assert_eq!(reloaded.parks().count(), 1);
+        assert_eq!(reloaded.iter().count(), 1);
+    }
+
+    #[test]
+    fn an_empty_kind_is_absent_from_the_file() {
+        let (dir, store) = store_from(A_PARK);
+        store.save().unwrap();
+        let text = std::fs::read_to_string(dir.path().join("sci.toml")).unwrap();
+        assert!(
+            !text.contains("claims"),
+            "an empty claims map must not write [claims]: {text}"
+        );
+    }
+
+    #[test]
+    fn inserting_a_claim_displaces_a_park_on_the_same_id() {
+        let (_dir, mut store) = store_from(A_PARK);
+        let id = TaskId::parse("sci-000002").unwrap();
+        store.insert(
+            &id,
+            Claim {
+                owner: "o".into(),
+                session: "b".into(),
+                pid: None,
+                pid_start: None,
+                boot_id: None,
+                host: "h".into(),
+                worktree: "/w".into(),
+                started: "2026-09-09T22:00:00Z".into(),
+                seen: "2026-09-09T22:00:00Z".into(),
+            },
+        );
+        assert_eq!(store.parks().count(), 0, "one entry per task");
+        assert_eq!(store.get(&id).map(|c| c.session.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn loading_rejects_an_id_in_both_maps_and_a_bad_park() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sci.toml");
+        std::fs::write(
+            &path,
+            format!("{A_CLAIM}{}", A_PARK.replace("sci-000002", "sci-000001")),
+        )
+        .unwrap();
+        let error = ClaimStore::load_from(&path).unwrap_err().to_string();
+        assert!(error.contains("both a claim and a park"), "{error}");
+
+        std::fs::write(&path, A_PARK.replace("2026-09-09T21:00:00Z", "yesterday")).unwrap();
+        let error = ClaimStore::load_from(&path).unwrap_err().to_string();
+        assert!(error.contains("unreadable at"), "{error}");
+
+        std::fs::write(&path, A_PARK.replace("write §3", "")).unwrap();
+        let error = ClaimStore::load_from(&path).unwrap_err().to_string();
+        assert!(error.contains("next_step"), "{error}");
+    }
+
+    #[test]
+    fn the_snapshot_carries_parks() {
+        let (dir, _store) = store_from(&format!("{A_CLAIM}{A_PARK}"));
+        let snapshot =
+            ClaimSnapshot::load_from_paths(std::iter::once(dir.path().join("sci.toml"))).unwrap();
+        let parked = TaskId::parse("sci-000002").unwrap();
+        assert_eq!(
+            snapshot.park(&parked).map(|p| p.session.as_str()),
+            Some("claude:x")
+        );
+        assert!(
+            snapshot
+                .park(&TaskId::parse("sci-000001").unwrap())
+                .is_none()
+        );
+        assert!(snapshot.live(&parked).is_none());
     }
 }

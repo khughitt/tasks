@@ -108,6 +108,9 @@ pub fn describe(
         claim: claims
             .and_then(|snapshot| snapshot.get(&task.id))
             .map(|(claim, live)| crate::output::ClaimInfo::of(claim, live)),
+        park: claims
+            .and_then(|snapshot| snapshot.park(&task.id))
+            .map(crate::output::ParkInfo::of),
         task,
     })
 }
