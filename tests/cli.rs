@@ -6763,3 +6763,450 @@ fn id_writer_revalidates_doc_roots_even_when_identity_is_unchanged() {
         "changed/new-spec.md"
     );
 }
+
+#[test]
+fn rename_rewrites_the_project_and_keeps_inbound_refs_resolving() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dot");
+    let ops = env.init("ops");
+    git(&dots, &["init", "-q", "-b", "main"]);
+    let mine = id_of(env.json(&dots, &["add", "Mine", "-p", "2"]));
+    let theirs = id_of(env.json(&ops, &["add", "Theirs", "-p", "2"]));
+    env.json(&ops, &["dep", &theirs, "--on", &mine]);
+    git(&dots, &["add", "-A"]);
+    git(&dots, &["commit", "-qm", "seed"]);
+
+    let v = env.json(&dots, &["rename", "dot", "dots"]);
+    assert_eq!(v["prefix"], "dots");
+    assert_eq!(v["previous"], "dot");
+    assert_eq!(v["tasks"], 1);
+    assert_eq!(v["recovery"], "fresh");
+    assert_eq!(v["aliases"], serde_json::json!(["dot"]));
+
+    let moved = format!("dots-{}", mine.split_once('-').unwrap().1);
+    assert!(dots.join(format!("tasks/{moved}.md")).is_file());
+    assert!(!dots.join(format!("tasks/{mine}.md")).exists());
+    assert_eq!(env.json(&dots, &["show", &moved])["task"]["id"], moved);
+
+    // The other project was not written to, and its stored ref still resolves.
+    assert_eq!(
+        env.json(&ops, &["show", &theirs])["task"]["depends"][0],
+        mine
+    );
+    assert_eq!(env.json(&ops, &["show", &mine])["task"]["id"], moved);
+
+    // A completed re-run reports Complete rather than tripping a fresh-operation refusal.
+    let v = env.json(&dots, &["rename", "dot", "dots"]);
+    assert_eq!(v["recovery"], "complete");
+
+    // --explain writes nothing and reports the same verdict.
+    let before =
+        std::fs::read_to_string(env.home.path().join(".config/tasks/projects.toml")).unwrap();
+    assert_eq!(
+        env.json(&dots, &["rename", "dot", "dots", "--explain"])["recovery"],
+        "complete"
+    );
+    assert_eq!(
+        std::fs::read_to_string(env.home.path().join(".config/tasks/projects.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn an_add_waiting_through_a_rename_never_writes_the_old_prefix() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let seed = id_of(env.json(&dir, &["add", "Seed", "-p", "2"]));
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    let moved_seed = format!("dots-{}", seed.split_once('-').unwrap().1);
+
+    // This tests revalidation, not the rename executor (covered separately above).
+    // Hold the lock and establish a completed-rename fixture while the add waits.
+    let lock_path = env.claim_store("dot").with_file_name("dot.lock");
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    held.lock().unwrap();
+
+    let mut adder = env
+        .raw(&dir)
+        .args(["add", "Late", "-p", "2"])
+        .spawn()
+        .unwrap();
+    // Seeing its lock descriptor proves the child constructed its old-prefix context
+    // and reached lock acquisition. A sleep alone could leave it not yet started.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        assert!(
+            adder.try_wait().unwrap().is_none(),
+            "the add exited before acquiring its lock"
+        );
+        let opened = std::fs::read_dir(format!("/proc/{}/fd", adder.id()))
+            .unwrap()
+            .any(|entry| {
+                // Other descriptors can close while /proc is being inspected.
+                std::fs::read_link(entry.unwrap().path()).is_ok_and(|path| path == lock_path)
+            });
+        if opened {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the add never opened its lock"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    // Only this one seed task exists. Install its renamed file, config and registry
+    // directly while the lock is held; invoking rename here would wait on our lock too.
+    let source = dir.join(format!("tasks/{seed}.md"));
+    let text = std::fs::read_to_string(&source).unwrap();
+    std::fs::write(
+        dir.join(format!("tasks/{moved_seed}.md")),
+        text.replacen(&format!("id: {seed}\n"), &format!("id: {moved_seed}\n"), 1),
+    )
+    .unwrap();
+    std::fs::remove_file(source).unwrap();
+    let config_path = dir.join("tasks/.config.toml");
+    let mut config: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    config["prefix"] = toml::Value::String("dots".into());
+    std::fs::write(config_path, toml::to_string(&config).unwrap()).unwrap();
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    let projects = registry["projects"].as_table_mut().unwrap();
+    let root = projects.remove("dot").unwrap();
+    projects.insert("dots".into(), root);
+    std::fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    alias_registry(&env, "dot", "dots");
+    assert!(dir.join(format!("tasks/{moved_seed}.md")).is_file());
+
+    drop(held);
+    let out = adder.wait_with_output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let added: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let late = added["id"].as_str().unwrap();
+    assert!(
+        late.starts_with("dots-"),
+        "the queued add must use the refreshed prefix: {added}"
+    );
+    assert_eq!(env.json(&dir, &["show", late])["task"]["title"], "Late");
+
+    // No later rename can mask a stale write: only the queued add ran after the fixture.
+    let stale: Vec<_> = std::fs::read_dir(dir.join("tasks"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("dot-"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "an old-prefix file survived the rename: {stale:?}"
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &moved_seed])["task"]["id"],
+        moved_seed
+    );
+    assert_eq!(
+        env.json(&dir, &["list"])["tasks"].as_array().unwrap().len(),
+        2
+    );
+}
+
+#[test]
+fn an_add_waiting_through_a_pending_rename_is_refused() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    env.json(&dir, &["add", "Seed", "-p", "2"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+
+    // An interrupted rename leaves the freeze in place; a waiter that wakes into it is
+    // refused rather than writing under either name.
+    env.raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "config")
+        .args(["rename", "dot", "dots"])
+        .status()
+        .unwrap();
+    let out = env
+        .raw(&dir)
+        .args(["add", "Late", "-p", "2"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+}
+
+#[test]
+fn a_pending_rename_freezes_the_project_including_the_p4_window() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    env.json(&dir, &["add", "T", "-p", "2"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+
+    // Stop after the config write: files and config renamed, registry untouched. This is
+    // the window where a lookup by resolved prefix would miss rename/dot.toml entirely.
+    env.raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "config")
+        .args(["rename", "dot", "dots"])
+        .status()
+        .unwrap();
+
+    assert_eq!(env.fail(&dir, &["add", "New", "-p", "2"]), "validation");
+    assert_eq!(env.fail(&dir, &["unregister", "dot"]), "validation");
+    let config_before = std::fs::read(dir.join("tasks/.config.toml")).unwrap();
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let registry_before = std::fs::read(&registry_path).unwrap();
+    let baseline_path = env.home.path().join(".local/state/tasks/rename/dot.toml");
+    let baseline_before = std::fs::read(&baseline_path).unwrap();
+    let files_before: std::collections::BTreeMap<_, _> = std::fs::read_dir(dir.join("tasks"))
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            (path.clone(), std::fs::read(path).unwrap())
+        })
+        .collect();
+    assert_eq!(
+        env.fail(&dir, &["add", "Explicit", "--project", "dot", "-p", "2"]),
+        "config"
+    );
+    assert_eq!(
+        std::fs::read(dir.join("tasks/.config.toml")).unwrap(),
+        config_before
+    );
+    assert_eq!(std::fs::read(registry_path).unwrap(), registry_before);
+    assert_eq!(std::fs::read(baseline_path).unwrap(), baseline_before);
+    let files_after: std::collections::BTreeMap<_, _> = std::fs::read_dir(dir.join("tasks"))
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            (path.clone(), std::fs::read(path).unwrap())
+        })
+        .collect();
+    assert_eq!(files_after, files_before);
+
+    assert!(
+        env.json(&dir, &["list"])["tasks"].is_array(),
+        "reads still work"
+    );
+
+    // The target is reserved even though it is in no registry yet.
+    let fresh = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.fail(fresh.path(), &["init", "--prefix", "dots"]),
+        "config"
+    );
+
+    // And the rename completes on a re-run.
+    assert_eq!(
+        env.json(&dir, &["rename", "dot", "dots"])["recovery"],
+        "resume_registry"
+    );
+    assert!(
+        env.json(&dir, &["add", "New", "-p", "2"])["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("dots-")
+    );
+}
+
+#[test]
+fn rename_refuses_a_dirty_tree_a_live_claim_and_a_second_worktree() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "validation"); // uncommitted
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+
+    as_agent(&env, &dir, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "claimed");
+}
+
+#[test]
+fn rename_collapses_aliases_and_accepts_an_older_alias_as_source() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    env.json(&dir, &["rename", "dot", "dots"]);
+    let v = env.json(&dir, &["rename", "dot", "config"]);
+    assert_eq!(v["previous"], "dots");
+    assert_eq!(v["aliases"], serde_json::json!(["dot", "dots"]));
+    let registry: toml::Value =
+        toml::from_str(&env.read(&env.home.path().join(".config"), "tasks/projects.toml")).unwrap();
+    assert_eq!(registry["aliases"]["dot"].as_str(), Some("config"));
+    assert_eq!(registry["aliases"]["dots"].as_str(), Some("config"));
+    assert!(
+        env.json(&dir, &["show", &id])["task"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("config-")
+    );
+}
+
+#[test]
+fn rename_preflight_refusals_leave_no_inventory_or_changed_files() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    env.init("taken");
+    alias_registry(&env, "retired", "taken");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    let path = dir.join(format!("tasks/{id}.md"));
+    let original = std::fs::read_to_string(&path).unwrap();
+    for target in ["../bad", "dot", "taken", "retired"] {
+        let out = env
+            .raw(&dir)
+            .args(["rename", "dot", target])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        assert!(!env.home.path().join(".local/state/tasks/rename").exists());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+    for invalid in [
+        original.replace("priority: 2", "priority: 9"),
+        original.replace(&format!("id: {id}"), "id: dot-ffffff"),
+    ] {
+        std::fs::write(&path, invalid).unwrap();
+        assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "parse");
+        assert!(!env.home.path().join(".local/state/tasks/rename").exists());
+    }
+}
+
+#[test]
+fn rename_explain_never_creates_locks_or_inventory_and_skips_authorization() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let registry = std::fs::read(&registry_path).unwrap();
+    let config = std::fs::read(dir.join("tasks/.config.toml")).unwrap();
+    // init creates only the registry lock; remove it so explain must prove no lock creation.
+    std::fs::remove_file(registry_path.with_file_name("projects.lock")).unwrap();
+    let value = env.json(&dir, &["rename", "dot", "dots", "--explain"]);
+    assert_eq!(value["recovery"], "fresh");
+    assert!(!registry_path.with_file_name("projects.lock").exists());
+    assert!(!env.home.path().join(".local/state/tasks").exists());
+    assert_eq!(std::fs::read(&registry_path).unwrap(), registry);
+    assert_eq!(
+        std::fs::read(dir.join("tasks/.config.toml")).unwrap(),
+        config
+    );
+
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    as_agent(&env, &dir, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&dir, &["rename", "dot", "dots", "--explain"])["recovery"],
+        "fresh"
+    );
+}
+
+#[test]
+fn rename_refuses_a_second_worktree_even_with_no_task_copies() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    let other = tempfile::tempdir().unwrap();
+    git(
+        &dir,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            other.path().to_str().unwrap(),
+        ],
+    );
+    let out = env
+        .raw(&dir)
+        .args(["rename", "dot", "dots"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("worktree"));
+    assert!(!env.home.path().join(".local/state/tasks/rename").exists());
+}
+
+#[test]
+fn rename_pending_target_is_reserved_against_another_rename() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let other = env.init("other");
+    env.raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "dot", "dots"])
+        .output()
+        .unwrap();
+    assert_eq!(env.fail(&other, &["rename", "other", "dots"]), "config");
+    assert!(
+        !env.home
+            .path()
+            .join(".local/state/tasks/rename/other.toml")
+            .exists()
+    );
+}
+
+#[test]
+fn rename_explain_reports_refusal_without_touching_the_baseline() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    env.raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "dot", "dots"])
+        .output()
+        .unwrap();
+    let inventory_path = env.home.path().join(".local/state/tasks/rename/dot.toml");
+    let before = std::fs::read(&inventory_path).unwrap();
+    std::fs::remove_file(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let out = env.json(&dir, &["rename", "dot", "dots", "--explain"]);
+    assert_eq!(out["recovery"], "refuse");
+    assert!(out["warnings"][0].as_str().unwrap().contains("R4"));
+    assert_eq!(std::fs::read(inventory_path).unwrap(), before);
+    assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "validation");
+}
+
+#[test]
+fn rename_an_older_alias_resumes_cleanup_using_the_real_source_inventory() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    env.json(&dir, &["rename", "dot", "dots"]);
+    let stopped = env
+        .raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "registry")
+        .args(["rename", "dot", "config"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+    let baseline = env.home.path().join(".local/state/tasks/rename/dots.toml");
+    assert!(baseline.is_file());
+    let out = env.json(&dir, &["rename", "dot", "config"]);
+    assert_eq!(out["recovery"], "resume_cleanup");
+    assert_eq!(out["previous"], "dots");
+    assert!(!baseline.exists());
+    assert!(
+        env.json(&dir, &["add", "After", "-p", "2"])["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("config-")
+    );
+}

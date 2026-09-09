@@ -20,6 +20,17 @@ pub struct InitOut {
 }
 
 #[derive(Serialize)]
+pub struct RenameOut {
+    pub prefix: String,
+    pub previous: String,
+    pub root: String,
+    pub tasks: usize,
+    pub aliases: Vec<String>,
+    pub recovery: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct IdOut {
     pub id: String,
     pub warnings: Vec<String>,
@@ -422,6 +433,7 @@ pub struct CheckOut {
 #[serde(untagged)]
 pub enum Output {
     Init(InitOut),
+    Rename(RenameOut),
     Id(IdOut),
     Add(AddOut),
     Root(RootOut),
@@ -447,6 +459,7 @@ pub fn render(out: &Output, format: Format, painter: &Painter) -> String {
 fn pretty(out: &Output, painter: &Painter) -> String {
     match out {
         Output::Init(o) => o.prefix.clone(),
+        Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Add(o) => o.id.clone(),
         Output::Root(o) => o.root.clone(),
@@ -797,6 +810,7 @@ pub fn pretty_warnings(warnings: &[String], painter: &Painter) -> String {
 pub fn warnings_of(out: &Output) -> Vec<String> {
     match out {
         Output::Init(o) => o.warnings.clone(),
+        Output::Rename(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),

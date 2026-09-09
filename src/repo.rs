@@ -361,6 +361,27 @@ impl Project {
         }
     }
 
+    pub fn worktree_count(&self) -> Result<Option<usize>> {
+        if self.git_toplevel()?.is_none() {
+            return Ok(None);
+        }
+        let output = self.git(&["worktree", "list", "--porcelain", "-z"])?;
+        if !output.status.success() {
+            return Err(Error::Io(format!(
+                "git worktree list in {} failed: {}",
+                self.root.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(Some(
+            output
+                .stdout
+                .split(|byte| *byte == 0)
+                .filter(|field| field.starts_with(b"worktree "))
+                .count(),
+        ))
+    }
+
     /// This record as it stands in every *other* worktree of the repository. `None` in the
     /// two cases `git_toplevel` documents.
     ///

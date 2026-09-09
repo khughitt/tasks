@@ -7,6 +7,8 @@ use crate::registry::Registry;
 pub fn run(prefix: String) -> Result<Output> {
     let _lock = Registry::lock()?;
     let mut registry = Registry::load()?;
+    let root = registry.project_root(registry.canonical_prefix(&prefix));
+    super::reject_pending_rename_at(root, &prefix)?;
     let (root, aliases) = registry.unregister(&prefix)?;
     registry.save()?;
     Ok(Output::Init(InitOut {

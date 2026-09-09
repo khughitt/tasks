@@ -7,6 +7,7 @@ pub mod graph;
 pub mod init;
 pub mod list;
 pub mod projects;
+pub mod rename;
 pub mod root;
 pub mod show;
 pub mod status;
@@ -218,6 +219,7 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
     for _ in 0..4 {
         ctx.lock = Some(MutationLock::acquire(&ctx.project.prefix)?);
         let registry = Registry::load()?;
+        reject_pending_rename(&ctx.project)?;
         let project = match routing {
             Routing::Local => Project::open(&ctx.project.root)?,
             Routing::Registered(prefix) => {
@@ -238,6 +240,26 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
     Err(Error::Io(
         "the project's identity kept changing while acquiring its lock; retry".into(),
     ))
+}
+
+/// Recorded names and root remain stable through the config/registry transition.
+pub fn reject_pending_rename(project: &Project) -> Result<()> {
+    reject_pending_rename_at(Some(&project.root), &project.prefix)
+}
+
+pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()> {
+    for inventory in crate::rename::inventory::Inventory::pending()? {
+        if Some(inventory.root.as_path()) == root
+            || inventory.source == prefix
+            || inventory.target == prefix
+        {
+            return Err(Error::Validation(format!(
+                "a rename of {:?} to {:?} is unfinished; finish it with `tasks rename {} {}` or roll it back (see the design doc)",
+                inventory.source, inventory.target, inventory.source, inventory.target
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// A read command that takes an id: the id's prefix routes to its registered project, the
@@ -649,6 +671,7 @@ pub fn run(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
         Command::Init { prefix, force } => init::run(dir, prefix, force),
+        Command::Rename { old, new, explain } => rename::run(old, new, explain),
         Command::Unregister { prefix } => unregister::run(prefix),
         Command::Projects {
             sort,

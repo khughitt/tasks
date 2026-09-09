@@ -114,7 +114,6 @@ impl Scope {
         }
     }
 
-    #[allow(dead_code)] // Used by later registry-wide commands.
     pub fn prefixes(&self) -> Vec<String> {
         self.projects()
             .iter()
@@ -132,7 +131,6 @@ impl Scope {
     }
 
     /// One scan per project, for commands that group by project (`tree`).
-    #[allow(dead_code)] // Used by the later registry-wide tree command.
     pub fn scan_each(&self) -> Result<Vec<(&Project, Vec<Task>)>> {
         self.projects()
             .iter()

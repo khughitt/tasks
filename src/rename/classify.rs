@@ -12,7 +12,6 @@ pub enum Recovery {
 }
 
 /// Derive recovery from one observation; a verdict does not authorize writes.
-#[allow(dead_code)] // The rename command consumes this entry point in Task 11.
 pub fn classify(snap: &Snapshot) -> Recovery {
     if let Some(reason) = refusal(snap) {
         return Recovery::Refuse(reason);

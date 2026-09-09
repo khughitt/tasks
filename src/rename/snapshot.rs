@@ -62,7 +62,6 @@ struct ConfigPrefix {
     prefix: String,
 }
 
-#[allow(dead_code)] // The rename command observes before classification in Task 11.
 pub fn observe(
     registry: &Registry,
     invocation: &Invocation,

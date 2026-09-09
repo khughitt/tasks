@@ -145,6 +145,27 @@ impl Registry {
         Ok((root, dropped))
     }
 
+    /// Move the live key and flatten every retired name directly to the new key.
+    pub fn rename(&mut self, source: &str, target: &str) -> Result<()> {
+        if !crate::model::is_valid_prefix(target) || self.is_taken(target) {
+            return Err(Error::Config(format!(
+                "target prefix {target:?} is invalid or taken"
+            )));
+        }
+        let root = self
+            .projects
+            .remove(source)
+            .ok_or_else(|| Error::Config(format!("no project registered as {source:?}")))?;
+        self.projects.insert(target.into(), root);
+        for live in self.aliases.values_mut() {
+            if live == source {
+                *live = target.into();
+            }
+        }
+        self.aliases.insert(source.into(), target.into());
+        Ok(())
+    }
+
     pub fn project_root(&self, prefix: &str) -> Option<&Path> {
         self.projects.get(prefix).map(PathBuf::as_path)
     }
@@ -169,7 +190,6 @@ impl Registry {
 
     /// Whether a prefix may be claimed: a live prefix and a retired one are both taken,
     /// because an id must never mean two projects.
-    #[allow(dead_code)]
     pub fn is_taken(&self, prefix: &str) -> bool {
         self.projects.contains_key(prefix) || self.aliases.contains_key(prefix)
     }

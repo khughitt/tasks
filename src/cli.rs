@@ -115,6 +115,15 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Rename a registered project's prefix and retain its retired names as aliases.
+    Rename {
+        #[arg(add = ArgValueCandidates::new(crate::complete::prefixes))]
+        old: String,
+        new: String,
+        /// Explain recovery without locks or writes.
+        #[arg(long)]
+        explain: bool,
+    },
     /// Remove a prefix from the registry. Project files are left untouched.
     Unregister {
         #[arg(add = ArgValueCandidates::new(crate::complete::prefixes))]

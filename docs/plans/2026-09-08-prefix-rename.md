@@ -1489,7 +1489,7 @@ Classification precedes every fresh-operation check: after P5, `<old>` canonical
 re-run this design promises. Claim and worktree checks gate **every** mutating path, not
 just `Fresh`. `--explain` writes nothing, takes no locks, runs no authorization checks.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -1676,12 +1676,12 @@ fn rename_refuses_a_dirty_tree_a_live_claim_and_a_second_worktree() {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --test cli -- rename_rewrites_the_project`
 Expected: FAIL — unrecognized subcommand `rename`.
 
-- [ ] **Step 3: Implement the phases and wire the command**
+- [x] **Step 3: Implement the phases and wire the command**
 
 `src/rename/mod.rs` reads `TASKS_RENAME_STOP_AFTER` and returns early after the named
 boundary — `inventory`, `file:<n>` (after the nth destination write, before its source is
@@ -1741,12 +1741,12 @@ nothing else reserves it.
 `rename` itself must **not** be frozen by its own inventory; it passes its own invocation
 through and skips the check.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --test cli -- rename_` — Expected: PASS.
 Run: `just gate` — Expected: clean.
 
-- [ ] **Step 5: Reinstall, close the task, and commit**
+- [x] **Step 5: Reinstall, close the task, and commit**
 
 ```bash
 cargo install --path .   # AGENTS.md: the `tasks` the next task uses must be this code

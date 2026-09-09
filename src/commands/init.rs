@@ -18,6 +18,15 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
     };
     let _lock = Registry::lock()?;
     let mut registry = Registry::load()?;
+    for inventory in crate::rename::inventory::Inventory::pending()? {
+        if inventory.target == prefix {
+            return Err(Error::Config(format!(
+                "prefix {prefix:?} is reserved by unfinished rename {} -> {}",
+                inventory.source, inventory.target
+            )));
+        }
+    }
+    super::reject_pending_rename_at(Some(&root), &prefix)?;
     // The registry is only mutated in memory here: `save` runs after `Project::init`, so
     // an init that fails leaves the registry exactly as it was.
     let displaced = if force {
