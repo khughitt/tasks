@@ -17,6 +17,12 @@ pub fn classify(snap: &Snapshot) -> Recovery {
         return Recovery::Refuse(reason);
     }
     let invocation = &snap.invocation;
+    if invocation.source == invocation.target {
+        return Recovery::Refuse(format!(
+            "source and target prefixes are both {:?}",
+            invocation.source
+        ));
+    }
     let registry = &snap.registry;
     let registry_old = registry.old_key.as_ref() == Some(&invocation.root)
         && registry.new_key.is_none()
@@ -28,7 +34,13 @@ pub fn classify(snap: &Snapshot) -> Recovery {
     match &snap.inventory {
         None => {
             let prefix = snap.config.as_ref().map(|config| &config.prefix);
-            if snap.named.target == 0 && prefix == Some(&invocation.source) && registry_old {
+            if prefix == Some(&invocation.source) && registry_old {
+                if snap.named.target != 0 {
+                    return Recovery::Refuse(format!(
+                        "{} destination task files with prefix {:?} already exist",
+                        snap.named.target, invocation.target
+                    ));
+                }
                 Recovery::Fresh
             } else if snap.named.source == 0 && prefix == Some(&invocation.target) && registry_new {
                 Recovery::Complete
@@ -111,8 +123,17 @@ fn refusal(snap: &Snapshot) -> Option<String> {
                 && digest != &baseline[&entry.hex].to
             {
                 return Some(format!(
-                    "R3: destination {}-{} conflicts with the inventory",
-                    inventory.target, entry.hex
+                    "R3: destination {} conflicts with the inventory for source {}",
+                    inventory
+                        .root
+                        .join("tasks")
+                        .join(format!("{}-{}.md", inventory.target, entry.hex))
+                        .display(),
+                    inventory
+                        .root
+                        .join("tasks")
+                        .join(format!("{}-{}.md", inventory.source, entry.hex))
+                        .display()
                 ));
             }
         }

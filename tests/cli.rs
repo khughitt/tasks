@@ -7215,7 +7215,7 @@ fn rename_an_older_alias_resumes_cleanup_using_the_real_source_inventory() {
 fn rename_reports_only_destination_files_written_by_this_invocation() {
     for (boundary, written, resumed, verdict) in [
         ("inventory", 0, 2, "resume_files"),
-        ("file:1", 1, 1, "resume_files"),
+        ("file:0", 1, 1, "resume_files"),
         ("files", 2, 0, "resume_files"),
         ("config", 2, 0, "resume_registry"),
         ("registry", 2, 0, "resume_cleanup"),
@@ -7270,4 +7270,673 @@ fn rename_taken_live_and_alias_targets_are_config_errors() {
                 .exists()
         );
     }
+}
+
+fn rename_fixture(
+    env: &mut TestEnv,
+    count: usize,
+    in_git: bool,
+) -> (std::path::PathBuf, Vec<String>) {
+    let dir = env.init("dot");
+    let ids = (0..count)
+        .map(|n| id_of(env.json(&dir, &["add", &format!("T{n}"), "-p", "2"])))
+        .collect();
+    if in_git {
+        git(&dir, &["init", "-q", "-b", "main"]);
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "seed"]);
+    }
+    (dir, ids)
+}
+
+fn rename_stop(env: &TestEnv, dir: &std::path::Path, old: &str, new: &str, stop: &str) {
+    let output = env
+        .raw(dir)
+        .env("TASKS_RENAME_STOP_AFTER", stop)
+        .args(["rename", old, new])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{stop}: {output:?}");
+}
+
+// Include directories as well as bytes: diagnosis must not create even an empty state dir.
+fn rename_disk_state(
+    env: &TestEnv,
+    dir: &std::path::Path,
+) -> std::collections::BTreeMap<std::path::PathBuf, Option<Vec<u8>>> {
+    fn collect(
+        path: &std::path::Path,
+        state: &mut std::collections::BTreeMap<std::path::PathBuf, Option<Vec<u8>>>,
+    ) {
+        if path.is_dir() {
+            state.insert(path.to_path_buf(), None);
+            for entry in std::fs::read_dir(path).unwrap() {
+                collect(&entry.unwrap().path(), state);
+            }
+        } else if path.exists() {
+            state.insert(path.to_path_buf(), Some(std::fs::read(path).unwrap()));
+        }
+    }
+    let mut state = std::collections::BTreeMap::new();
+    collect(&dir.join("tasks"), &mut state);
+    collect(env.home.path(), &mut state);
+    state
+}
+
+#[test]
+fn rename_every_mutation_boundary_resumes_inside_and_outside_git_including_empty_projects() {
+    for in_git in [true, false] {
+        for count in [0, 3] {
+            for (stop, want) in [
+                ("inventory", "resume_files"),
+                ("file:0", "resume_files"),
+                ("file:1", "resume_files"),
+                ("file:2", "resume_files"),
+                ("files", "resume_files"),
+                ("config", "resume_registry"),
+                ("registry", "resume_cleanup"),
+                ("claims", "resume_cleanup"),
+            ] {
+                if count == 0 && stop.starts_with("file:") {
+                    continue;
+                }
+                let mut env = TestEnv::new();
+                let (dir, ids) = rename_fixture(&mut env, count, in_git);
+                let inventory = env.home.path().join(".local/state/tasks/rename/dot.toml");
+                let claims = env.claim_store("dot");
+                std::fs::create_dir_all(claims.parent().unwrap()).unwrap();
+                std::fs::write(&claims, "[claims]\n").unwrap();
+                let label = format!("git={in_git} count={count} stop={stop}");
+                assert_eq!(
+                    env.json(&dir, &["rename", "dot", "dots", "--explain"])["recovery"],
+                    "fresh",
+                    "{label}"
+                );
+                assert!(!inventory.exists());
+                rename_stop(&env, &dir, "dot", "dots", stop);
+                assert!(
+                    inventory.is_file(),
+                    "hook must leave a pending inventory: {label}"
+                );
+                let named = |prefix: &str| {
+                    std::fs::read_dir(dir.join("tasks"))
+                        .unwrap()
+                        .map(|entry| entry.unwrap())
+                        .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+                        .count()
+                };
+                let (sources, destinations) = match stop {
+                    "inventory" => (count, 0),
+                    "file:0" => (3, 1),
+                    "file:1" => (2, 2),
+                    "file:2" => (1, 3),
+                    _ => (0, count),
+                };
+                assert_eq!(
+                    (named("dot-"), named("dots-")),
+                    (sources, destinations),
+                    "{label}"
+                );
+                let config: toml::Value =
+                    toml::from_str(&env.read(&dir, "tasks/.config.toml")).unwrap();
+                assert_eq!(
+                    config["prefix"].as_str().unwrap(),
+                    if matches!(stop, "config" | "registry" | "claims") {
+                        "dots"
+                    } else {
+                        "dot"
+                    },
+                    "{label}"
+                );
+                let registry: toml::Value = toml::from_str(
+                    &env.read(&env.home.path().join(".config"), "tasks/projects.toml"),
+                )
+                .unwrap();
+                if matches!(stop, "registry" | "claims") {
+                    assert_eq!(
+                        registry["projects"]["dots"].as_str(),
+                        dir.to_str(),
+                        "{label}"
+                    );
+                    assert_eq!(registry["aliases"]["dot"].as_str(), Some("dots"), "{label}");
+                } else {
+                    assert_eq!(
+                        registry["projects"]["dot"].as_str(),
+                        dir.to_str(),
+                        "{label}"
+                    );
+                    assert!(registry["projects"].get("dots").is_none(), "{label}");
+                }
+                assert_eq!(claims.exists(), stop != "claims", "{label}");
+                let before = rename_disk_state(&env, &dir);
+                assert_eq!(
+                    env.json(&dir, &["rename", "dot", "dots", "--explain"])["recovery"],
+                    want,
+                    "{label}"
+                );
+                assert_eq!(
+                    rename_disk_state(&env, &dir),
+                    before,
+                    "explain changed disk: {label}"
+                );
+                let resumed = env.json(&dir, &["rename", "dot", "dots"]);
+                assert_eq!(resumed["recovery"], want, "{label}");
+                if !in_git {
+                    assert!(
+                        resumed["warnings"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|w| w.as_str().unwrap().contains("outside git")),
+                        "{label}"
+                    );
+                }
+                assert_eq!((named("dot-"), named("dots-")), (0, count), "{label}");
+                for id in ids {
+                    let moved = id.replacen("dot-", "dots-", 1);
+                    assert_eq!(
+                        env.json(&dir, &["show", &id])["task"]["id"],
+                        moved,
+                        "{label}"
+                    );
+                    assert_eq!(
+                        env.json(&dir, &["show", &moved])["task"]["id"],
+                        moved,
+                        "{label}"
+                    );
+                }
+                assert!(!inventory.exists(), "{label}");
+                assert!(!claims.exists(), "{label}");
+                assert!(
+                    claims.with_extension("lock").is_file(),
+                    "old lock must survive: {label}"
+                );
+                assert_eq!(
+                    env.json(&dir, &["rename", "dot", "dots", "--explain"])["recovery"],
+                    "complete",
+                    "{label}"
+                );
+                assert!(
+                    env.json(&dir, &["check"])["errors"]
+                        .as_array()
+                        .unwrap()
+                        .is_empty(),
+                    "{label}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn rename_each_recovery_refusal_fires_independently_and_preserves_disk() {
+    for rule in 1..=8 {
+        let mut env = TestEnv::new();
+        let (dir, ids) = rename_fixture(&mut env, 1, true);
+        let foreign = env.init("foreign");
+        rename_stop(&env, &dir, "dot", "dots", "file:0");
+        let source = dir.join(format!("tasks/{}.md", ids[0]));
+        let dest = dir.join(format!("tasks/{}.md", ids[0].replacen("dot-", "dots-", 1)));
+        let registry_path = env.home.path().join(".config/tasks/projects.toml");
+        let mut target = "dots";
+        match rule {
+            1 => target = "other",
+            2 => std::fs::write(
+                &source,
+                std::fs::read_to_string(&source)
+                    .unwrap()
+                    .replace("title: T0", "title: Edited"),
+            )
+            .unwrap(),
+            3 => std::fs::write(
+                &dest,
+                std::fs::read_to_string(&dest)
+                    .unwrap()
+                    .replace("title: T0", "title: Conflict"),
+            )
+            .unwrap(),
+            4 => {
+                std::fs::remove_file(&source).unwrap();
+                std::fs::remove_file(&dest).unwrap();
+            }
+            5 => std::fs::write(dir.join("tasks/dot-ffffff.md"), "unrecorded task").unwrap(),
+            6 => {
+                let config = dir.join("tasks/.config.toml");
+                std::fs::write(
+                    &config,
+                    format!(
+                        "{}\n# unrelated edit\n",
+                        std::fs::read_to_string(&config).unwrap()
+                    ),
+                )
+                .unwrap();
+            }
+            7 | 8 => {
+                let mut registry: toml::Value =
+                    toml::from_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+                let projects = registry["projects"].as_table_mut().unwrap();
+                projects.remove("foreign");
+                projects.insert(
+                    "dots".into(),
+                    toml::Value::String(foreign.display().to_string()),
+                );
+                if rule == 8 {
+                    projects.remove("dot");
+                }
+                std::fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        // R1's alternate target lock exists before taking the byte-for-byte snapshot.
+        let held = hold_project_lock(&env, target);
+        drop(held);
+        let before = rename_disk_state(&env, &dir);
+        let explain = env.json(&dir, &["rename", "dot", target, "--explain"]);
+        assert_eq!(explain["recovery"], "refuse", "R{rule}: {explain}");
+        let reason = explain["warnings"][0].as_str().unwrap();
+        assert!(reason.starts_with(&format!("R{rule}:")), "{reason}");
+        if rule == 3 {
+            assert!(
+                reason.contains(source.to_str().unwrap()),
+                "both paths required: {reason}"
+            );
+            assert!(
+                reason.contains(dest.to_str().unwrap()),
+                "both paths required: {reason}"
+            );
+        }
+        assert_eq!(
+            rename_disk_state(&env, &dir),
+            before,
+            "R{rule}: explain changed disk"
+        );
+        let out = env
+            .raw(&dir)
+            .args(["rename", "dot", target])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "R{rule}: {out:?}");
+        assert_eq!(
+            err_kind(&out),
+            if rule >= 7 { "config" } else { "validation" }
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(&format!("R{rule}:")),
+            "{out:?}"
+        );
+        assert_eq!(
+            rename_disk_state(&env, &dir),
+            before,
+            "R{rule}: refusal changed disk"
+        );
+    }
+}
+
+#[test]
+fn rename_same_name_refusal_names_the_obstacle() {
+    let mut env = TestEnv::new();
+    let (dir, _) = rename_fixture(&mut env, 1, true);
+    let out = env
+        .raw(&dir)
+        .args(["rename", "dot", "dot"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let detail = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        detail.contains("source and target prefixes are both"),
+        "{detail}"
+    );
+    assert!(!env.home.path().join(".local/state/tasks/rename").exists());
+}
+
+#[test]
+fn rename_resumes_require_claim_and_worktree_authorization_at_every_stage() {
+    for (stop, verdict) in [
+        ("inventory", "resume_files"),
+        ("files", "resume_files"),
+        ("config", "resume_registry"),
+        ("registry", "resume_cleanup"),
+        ("claims", "resume_cleanup"),
+    ] {
+        for obstacle in ["old claim", "new claim", "worktree"] {
+            let mut env = TestEnv::new();
+            let (dir, ids) = rename_fixture(&mut env, 1, true);
+            rename_stop(&env, &dir, "dot", "dots", stop);
+            let other = tempfile::tempdir().unwrap();
+            let claim_prefix = if obstacle == "old claim" {
+                "dot"
+            } else {
+                "dots"
+            };
+            if obstacle == "worktree" {
+                git(
+                    &dir,
+                    &[
+                        "worktree",
+                        "add",
+                        "-q",
+                        "--detach",
+                        other.path().to_str().unwrap(),
+                    ],
+                );
+            } else {
+                let id = ids[0].replacen("dot-", &format!("{claim_prefix}-"), 1);
+                write_claim(&env, claim_prefix, &id, "agent-a", true);
+            }
+            let before = rename_disk_state(&env, &dir);
+            // Authorization is separate from classification, including after P5/P6.
+            assert_eq!(
+                env.json(&dir, &["rename", "dot", "dots", "--explain"])["recovery"],
+                verdict,
+                "{stop}: {obstacle}"
+            );
+            assert_eq!(rename_disk_state(&env, &dir), before);
+            assert_eq!(
+                env.fail(&dir, &["rename", "dot", "dots"]),
+                if obstacle == "worktree" {
+                    "validation"
+                } else {
+                    "claimed"
+                },
+                "{stop}: {obstacle}"
+            );
+            assert_eq!(rename_disk_state(&env, &dir), before, "{stop}: {obstacle}");
+            if obstacle == "worktree" {
+                git(
+                    &dir,
+                    &["worktree", "remove", other.path().to_str().unwrap()],
+                );
+            } else {
+                assert!(
+                    env.claim_store(claim_prefix).is_file(),
+                    "live store must survive refused cleanup"
+                );
+                std::fs::remove_file(env.claim_store(claim_prefix)).unwrap();
+            }
+            assert_eq!(
+                env.json(&dir, &["rename", "dot", "dots"])["recovery"],
+                verdict
+            );
+            assert!(
+                !env.home
+                    .path()
+                    .join(".local/state/tasks/rename/dot.toml")
+                    .exists()
+            );
+        }
+    }
+}
+
+#[test]
+fn rename_pending_explain_does_not_acquire_any_existing_lock() {
+    let mut env = TestEnv::new();
+    let (dir, ids) = rename_fixture(&mut env, 1, true);
+    rename_stop(&env, &dir, "dot", "dots", "registry");
+    write_claim(
+        &env,
+        "dots",
+        &ids[0].replacen("dot-", "dots-", 1),
+        "agent-a",
+        true,
+    );
+    let old_lock = hold_project_lock(&env, "dot");
+    let new_lock = hold_project_lock(&env, "dots");
+    let registry_lock = File::options()
+        .write(true)
+        .open(env.home.path().join(".config/tasks/projects.lock"))
+        .unwrap();
+    registry_lock.lock().unwrap();
+    let before = rename_disk_state(&env, &dir);
+    let child = env
+        .raw(&dir)
+        .args(["rename", "dot", "dots", "--explain"])
+        .spawn()
+        .unwrap();
+    let out = reap(child, Duration::from_secs(3));
+    drop((old_lock, new_lock, registry_lock));
+    let out = out.expect("explain waited on a lock");
+    assert!(out.status.success(), "{out:?}");
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["recovery"], "resume_cleanup");
+    assert_eq!(rename_disk_state(&env, &dir), before);
+}
+
+#[test]
+fn rename_freeze_covers_all_writers_feedback_and_registry_names() {
+    for stop in ["inventory", "config", "registry", "claims"] {
+        let (env, dir, reporter) = feedback_env();
+        let id = id_of(env.json(
+            &reporter,
+            &["feedback", "Original", "--category", "gap", "--new"],
+        ));
+        let editor_ran = dir.join("editor-ran");
+        let editor = editor_script(&dir, &format!("touch '{}'; exit 99", editor_ran.display()));
+        rename_stop(&env, &dir, "tasks", "tracker", stop);
+        let current = if stop == "inventory" {
+            id.clone()
+        } else {
+            id.replacen("tasks-", "tracker-", 1)
+        };
+        let before = rename_disk_state(&env, &dir);
+        let commands: &[&[&str]] = &[
+            &["add", "Late", "-p", "2"],
+            &["add", "Late", "--source", "same-source"],
+            &["start", &current],
+            &["done", &current],
+            &["drop", &current, "Reason"],
+            &["block", &current, "Reason"],
+            &["note", &current, "Late note"],
+            &["edit", &current, "--title", "Late title"],
+            &["edit", &current],
+            &["dep", &current, "--on", &current],
+        ];
+        for args in commands {
+            let out = env
+                .raw(&dir)
+                .env("EDITOR", &editor)
+                .args(*args)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(1), "{stop}: {args:?}: {out:?}");
+            assert_eq!(err_kind(&out), "validation", "{stop}: {args:?}: {out:?}");
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains("unfinished"),
+                "{stop}: {args:?}: {out:?}"
+            );
+            assert_eq!(rename_disk_state(&env, &dir), before, "{stop}: {args:?}");
+        }
+        assert!(
+            !editor_ran.exists(),
+            "a frozen edit must not launch the editor"
+        );
+        for args in [
+            vec!["feedback", "Late", "--category", "gap", "--new"],
+            vec!["feedback", "Late", "--category", "gap", "--recur", &current],
+        ] {
+            let out = env.raw(&reporter).args(&args).output().unwrap();
+            assert_eq!(out.status.code(), Some(1), "{stop}: {args:?}: {out:?}");
+            assert_eq!(
+                err_kind(&out),
+                if stop == "config" {
+                    "config"
+                } else {
+                    "validation"
+                }
+            );
+            if stop != "config" {
+                assert!(
+                    String::from_utf8_lossy(&out.stderr).contains("unfinished"),
+                    "{out:?}"
+                );
+            }
+            assert_eq!(rename_disk_state(&env, &dir), before, "{stop}: {args:?}");
+        }
+        let unrelated = tempfile::tempdir().unwrap();
+        for prefix in ["tasks", "tracker"] {
+            for (root, args) in [
+                (dir.as_path(), vec!["unregister", prefix]),
+                (dir.as_path(), vec!["init", "--prefix", prefix, "--force"]),
+                (
+                    unrelated.path(),
+                    vec!["init", "--prefix", prefix, "--force"],
+                ),
+            ] {
+                let out = env.raw(root).args(&args).output().unwrap();
+                assert_eq!(out.status.code(), Some(1), "{stop}: {args:?}: {out:?}");
+                assert!(
+                    String::from_utf8_lossy(&out.stderr).contains("unfinished"),
+                    "{stop}: {args:?}: {out:?}"
+                );
+                assert!(!unrelated.path().join("tasks").exists());
+                assert_eq!(rename_disk_state(&env, &dir), before, "{stop}: {args:?}");
+            }
+        }
+        assert_eq!(env.json(&dir, &["show", &current])["task"]["id"], current);
+        assert_eq!(
+            env.json(&dir, &["list"])["tasks"].as_array().unwrap().len(),
+            1
+        );
+    }
+}
+
+#[test]
+fn rename_freeze_is_rechecked_when_an_editor_returns() {
+    let mut env = TestEnv::new();
+    let (dir, ids) = rename_fixture(&mut env, 1, false);
+    let original = env.read(&dir, &format!("tasks/{}.md", ids[0]));
+    let editor = editor_script(
+        &dir,
+        &format!(
+            "sed -i 's/^title: T0$/title: Edited/' \"$1\"\nTASKS_RENAME_STOP_AFTER=inventory '{}' rename dot dots > /dev/null",
+            assert_cmd::cargo::cargo_bin("tasks").display()
+        ),
+    );
+    let out = env
+        .raw(&dir)
+        .env("EDITOR", editor)
+        .args(["edit", &ids[0]])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(err_kind(&out), "validation");
+    let detail = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        detail.contains("unfinished") && detail.contains(".edit.md"),
+        "{detail}"
+    );
+    assert_eq!(env.read(&dir, &format!("tasks/{}.md", ids[0])), original);
+    assert!(std::fs::read_dir(dir.join("tasks")).unwrap().any(|entry| {
+        let path = entry.unwrap().path();
+        path.to_string_lossy().ends_with(".edit.md")
+            && std::fs::read_to_string(path)
+                .unwrap()
+                .contains("title: Edited")
+    }));
+    assert_eq!(
+        env.json(&dir, &["rename", "dot", "dots"])["recovery"],
+        "resume_files"
+    );
+}
+
+#[test]
+fn rename_rewrites_own_refs_and_preserves_hand_written_body_notes_and_foreign_bytes() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let foreign = env.init("ops");
+    let foreign_id = id_of(env.json(&foreign, &["add", "Foreign"]));
+    let parent = "---\nid: dot-a00001\ntitle: Parent\nstatus: todo\npriority: 2\ncreated: 2026-09-01T00:00:00Z\nupdated: 2026-09-05T09:00:00Z\ndepends: []\ntags: []\n---\n\nParent body.\n";
+    let child = format!(
+        "---\nid: dot-a00002\ntitle: Child\nstatus: todo\npriority: 2\ncreated: 2026-09-01T00:00:00Z\nupdated: 2026-09-05T09:00:00Z\nparent: dot-a00001\ndepends: [dot-a00001, {foreign_id}]\ntags: [dot-a00001]\nsource: dot-a00001\n---\n\n\nBody   with  odd    spacing mentions dot-a00001.\n\n\n## Notes\n\n- 2026-09-01T00:00:00Z (keith):   dot-a00001 stays in prose\n\n"
+    );
+    std::fs::write(dir.join("tasks/dot-a00001.md"), parent).unwrap();
+    std::fs::write(dir.join("tasks/dot-a00002.md"), &child).unwrap();
+    let inbound = id_of(env.json(&foreign, &["add", "Inbound", "--depends", "dot-a00002"]));
+    let foreign_before = env.read(&foreign, &format!("tasks/{inbound}.md"));
+    git(&dir, &["init", "-q", "-b", "main"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    env.json(&dir, &["rename", "dot", "dots"]);
+    assert_eq!(
+        env.read(&dir, "tasks/dots-a00001.md"),
+        parent
+            .replacen("id: dot-a00001", "id: dots-a00001", 1)
+            .replace("priority: 2", "priority: \"2\"")
+    );
+    let expected = child
+        .replacen("id: dot-a00002", "id: dots-a00002", 1)
+        .replacen("parent: dot-a00001", "parent: dots-a00001", 1)
+        .replacen("depends: [dot-a00001", "depends: [dots-a00001", 1)
+        .replace("priority: 2", "priority: \"2\"");
+    assert_eq!(env.read(&dir, "tasks/dots-a00002.md"), expected);
+    assert_eq!(
+        env.read(&foreign, &format!("tasks/{inbound}.md")),
+        foreign_before
+    );
+    let shown = env.json(&dir, &["show", "dot-a00002"]);
+    assert_eq!(shown["task"]["parent"], "dots-a00001");
+    assert_eq!(
+        shown["task"]["depends"],
+        serde_json::json!(["dots-a00001", foreign_id])
+    );
+    assert!(
+        env.json(&dir, &["check"])["errors"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let check = env.json(&foreign, &["check"]);
+    assert!(
+        check["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "retired_prefix")
+    );
+    env.json(&foreign, &["edit", &inbound, "--title", "Unrelated edit"]);
+    assert_eq!(
+        env.json(&foreign, &["show", &inbound])["task"]["depends"][0],
+        "dot-a00002"
+    );
+}
+
+#[test]
+fn rename_fresh_destination_collision_names_the_obstacle_and_keeps_both_files() {
+    let mut env = TestEnv::new();
+    let (dir, ids) = rename_fixture(&mut env, 1, false);
+    let dest = dir.join(format!("tasks/{}.md", ids[0].replacen("dot-", "dots-", 1)));
+    std::fs::write(&dest, "unrelated destination").unwrap();
+    let original = env.read(&dir, &format!("tasks/{}.md", ids[0]));
+    let out = env
+        .raw(&dir)
+        .args(["rename", "dot", "dots"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "validation");
+    let detail = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        detail.contains("destination") && detail.contains("dots"),
+        "{detail}"
+    );
+    assert_eq!(env.read(&dir, &format!("tasks/{}.md", ids[0])), original);
+    assert_eq!(
+        std::fs::read_to_string(dest).unwrap(),
+        "unrelated destination"
+    );
+    assert!(!env.home.path().join(".local/state/tasks/rename").exists());
+}
+
+#[test]
+fn rename_explains_a_missing_config_and_refuses_recovery_without_writes() {
+    let mut env = TestEnv::new();
+    let (dir, _) = rename_fixture(&mut env, 1, false);
+    rename_stop(&env, &dir, "dot", "dots", "inventory");
+    std::fs::remove_file(dir.join("tasks/.config.toml")).unwrap();
+    let before = rename_disk_state(&env, &dir);
+    let explain = env.json(&dir, &["rename", "dot", "dots", "--explain"]);
+    assert_eq!(explain["recovery"], "refuse");
+    assert!(explain["warnings"][0].as_str().unwrap().starts_with("R6:"));
+    assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "validation");
+    assert_eq!(rename_disk_state(&env, &dir), before);
 }

@@ -1770,7 +1770,7 @@ git commit -m "feat(rename): rename a project's prefix in six recoverable phases
 The freeze itself shipped with the command in Task 11. This task is the verification matrix
 the spec's §8 promises and the user-facing documentation.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Stopping only after whole phases misses the boundaries where a crash actually hurts: a
 destination written with its source still present, partial progress across several files,
@@ -1950,22 +1950,22 @@ fn each_refusal_fires_end_to_end() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --test cli -- every_mutation_boundary an_empty_project a_live_claim_blocks_the_resume each_refusal_fires`
 Expected: FAIL — `file:<n>` and `claims` stops are unrecognized; refusals not wired end to end.
 
-- [ ] **Step 3: Extend the stop hook and close the gaps the tests find**
+- [x] **Step 3: Extend the stop hook and close the gaps the tests find**
 
 Add the `file:<n>` and `claims` boundaries to `TASKS_RENAME_STOP_AFTER`. Fix whatever the
 matrix exposes — most likely the ordering inside P3 (write destination, *then* remove
 source, never the reverse) and P6 removing the claim store before the inventory.
 
-- [ ] **Step 4: Run the whole gate**
+- [x] **Step 4: Run the whole gate**
 
 Run: `just gate` — Expected: clean, 12 tasks' worth of tests passing.
 
-- [ ] **Step 5: Update the docs, reinstall, close the task, and commit**
+- [x] **Step 5: Update the docs, reinstall, close the task, and commit**
 
 In `skills/tasks/SKILL.md`, under the registry paragraph: renaming a prefix is
 `tasks rename <old> <new>`; the retired prefix keeps resolving **for as long as the project
@@ -2006,3 +2006,51 @@ consumed by Task 11. `Inventory::pending` (Task 9) is consumed by Task 12.
 **Known gap, deliberate.** §5.6's rollback is a documented manual procedure, not code, so no
 task implements it; Task 12 links it from the skill doc. If a reviewer wants it automated
 that is a new task against a new spec section.
+
+
+## Implementation notes
+
+The execution decisions below are preserved in chronological order, with their original
+cost-if-wrong assessment. Final outcomes follow the rulings.
+
+- Ruling: Canonicalize candidate dependency edges as well as resolved edges in Task 3 — the prose/spec require canonical cycle comparison but its candidate snippet returns raw refs — if wrong, extra canonical comparisons only.
+
+- Ruling: Use explicit invocation/inventory arguments consistently in Tasks 9–10 and implement the enumeration oracle independently — the classifier sketch omits arguments its test uses, and copying its predicates would weaken the oracle — if wrong, localized API/test rework.
+
+- Ruling: Task 12 verifies hooks already shipped by Task 11; do not remove working hooks to manufacture RED, and run Cargo filters separately — the plan contradicts its earlier hook placement and Cargo accepts one filter — if wrong, adjust validation evidence.
+
+- Ruling: Keep future rename APIs narrowly dead-code-allowed until Task 11 wires them, then remove allowances — intermediate commits must pass clippy while preserving the required sequence — if wrong, temporary annotations add review noise.
+
+- Ruling: Task 3 must also cover canonical parent lookups/comparisons in hierarchy and check paths where required — spec section 4 explicitly requires parent lookups, but the plan file list omits hierarchy — if wrong, extra API plumbing may need simplification.
+
+- Ruling: Extend Task 7 shared lock/revalidation to feedback creation/recurrence and editor reacquisition — code audit found feedback create unlocked and edit/feedback using independent acquisitions, while spec §6 requires every writer to participate — if wrong, localized locking changes may need rework. Task 11 freeze must cover those shared paths too.
+
+- Ruling: Inventory::path returns Result<PathBuf>, rather than the brief’s bare PathBuf — XDG/HOME resolution and prefix validation can fail and must retain typed errors — if wrong, downstream callers need a small signature adjustment.
+
+- Ruling: Refuse inventory-present snapshots whose observed hex entries do not correspond one-to-one to the baseline — missing/extra/duplicate observations cannot support a digest judgment; truly empty inventories remain valid and inventory-absent entries are ignored — if wrong, only impossible-observer-shape classifier behavior/test expectations need rework.
+
+- Ruling: Explain reports recovery="refuse" with the classifier reason in existing warnings, while mutating refusal remains a typed Error — read-only diagnosis must report its verdict and RenameOut has no reason field — if wrong, explain JSON/exit behavior needs adjustment.
+
+- Ruling: Preserve existing config-mismatch refusal for explicit registered writes opened between config and registry phases — spec §5.2 explicitly endorses that guard for ordinary commands, and it fails before any mutation — if wrong, pending-rename diagnostics on those routes need unification; local/shared-boundary writers still get the freeze message.
+
+- Ruling: Executor takes Registry and Invocation and opens Project after classification, replacing the sketch’s project-first signature — explain must classify an absent config — if wrong, only executor API/callers need rework.
+
+The final tree canonicalizes candidate dependency edges and parent lookups; the executor
+uses `Registry` and `Invocation`, and `observe` receives the inventory explicitly.
+The independent classifier oracle covers 1,572,480 bounded snapshots and rejects invalid
+baseline/observation shapes. Inventory paths retain typed errors through `Result<PathBuf>`.
+Feedback and editor reacquisition share locking, revalidation, and the pending freeze.
+Explicit registered writers in the config/registry window retain their existing config
+mismatch refusal. Explain returns `refuse` plus a warning while mutating refusals are typed
+errors. All temporary production dead-code allowances were removed when Task 11 wired the
+command.
+
+Task 12 verified the shipped hooks and fixed the zero-based `file:<n>` hook regression
+introduced by Task 11's write-count correction: `file:0` again stops after the first
+successful destination write, before removing its source. Counts still report only
+successful destination writes during that invocation. Already-working coverage passed
+without manufacturing failures; the hook and diagnostic fixes have actual RED/GREEN
+checks. The original filter ruling was too broad: Cargo accepts one positional filter,
+but multiple filters after `--` are accepted by the Rust test harness, and were used for
+focused checks. A bounded, isolated manual rollback check verified that a failed source
+restore leaves the destination and inventory intact; no rollback command was added.

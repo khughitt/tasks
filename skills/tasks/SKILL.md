@@ -94,6 +94,28 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
   it. If you forget, `tasks unregister <prefix>` removes the entry; project files are
   untouched.
 
+## Prefix renames and recovery
+
+`tasks rename <old> <new>` renames a registered prefix and the project's own ids and local
+references. The retired prefix keeps resolving **for as long as the project stays
+registered**, so references in other projects and in prose need no edit. `unregister`
+drops the project's aliases with it. Retired names are reserved, and completion offers
+only live names; `check` can warn about stored retired references without rewriting them.
+
+Start with clean `tasks/`, no live claims, and at most one git worktree. A pending rename
+freezes every writer to that project, including `start`, feedback, `init --force`, and
+`unregister`; reads remain available. `tasks rename <old> <new> --explain` reports the
+observed recovery verdict without writes, locks, or authorization checks. Re-run the same
+command without `--explain` to resume; live claims and extra worktrees still block recovery.
+
+Recovery covers process interruption, not power loss. Outside git, once a source was
+removed, only forward recovery is available. `git checkout .` alone is not an undo: new
+filenames and the registry survive it. Follow the
+[manual rollback procedure](../../docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery)
+when rollback is needed: restore and verify each source before deleting its destination,
+keep the destination and stop if restoration fails, restore config and registry (including
+all moved aliases), and remove the inventory last.
+
 ## With superpowers
 
 - **brainstorming** runs against an existing task and attaches with

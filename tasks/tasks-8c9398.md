@@ -1,12 +1,12 @@
 ---
 id: tasks-8c9398
 title: No way to rename a project prefix
-status: doing
+status: done
 priority: 2
 size: l
 owner: design/prefix-rename
 created: 2026-09-06T09:37:15Z
-updated: 2026-09-08T20:53:27Z
+updated: 2026-09-09T00:22:58Z
 depends: []
 tags: [feedback, gap, "from:tasks", cli, registry]
 spec: docs/specs/2026-09-08-prefix-rename-design.md
@@ -26,3 +26,7 @@ Design sketch - keep the id scheme, make rename first-class:
 2. Rewrite structured refs, report prose. depends and parent are structured and safe to rewrite mechanically; note bodies and docs/ markdown are not - regexing arbitrary prose corrupts history. In the dot -> dots migration that split was 2 auto-fixed against 5 reported. It also surfaces a decision the tool must not make silently: ops-645643's note read "moved to dot-a00088 after registering dotfiles", true when written, and rewriting it trades historical fidelity for resolvability.
 
 3. Retired prefixes as read-only aliases. Let the registry keep `aliases = ["dot"]` on the dots entry so stale inbound refs still resolve. That decouples renaming the alias from rewriting the world, making the migration lazy rather than atomic across N repos, with `check` warning while any stale ref remains so the alias stays a transition rather than a permanent second name.
+
+## Notes
+
+- 2026-09-09T00:22:58Z (design/prefix-rename): Implemented tasks rename with registration-scoped retired aliases, six-phase process-interruption recovery, immutable foreign/prose references, shared writer freeze, and explicit diagnosis. All twelve implementation tasks are complete; final gate passed 123 unit and 191 CLI tests.

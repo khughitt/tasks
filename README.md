@@ -69,7 +69,9 @@ from a clone):
     cd <repo>
     tasks init --prefix sci          # creates tasks/ and the doc roots; registers the project
     tasks init --prefix sci --force  # re-point the prefix here after moving the repo
-    tasks unregister sci             # drop a stale prefix; project files are untouched
+    tasks unregister sci             # drop a stale prefix and its aliases; files are untouched
+    tasks rename dot dots            # rename a registered prefix; old ids still resolve
+    tasks rename dot dots --explain  # diagnose an interruption without locks or writes
     tasks add "Bank the ledger" -p 1 --size m --tag ledger
     tasks add "Emit rows" --parent sci-4f2a9c
     tasks add "Reply to Dana" --source "mail:<42@example.org>"  # where it came from; never interpreted
@@ -95,6 +97,20 @@ from a clone):
     tasks check                      # validate files, links, plan steps, dependencies
 
 Run `tasks --help` for the full command list.
+
+The registry maps live prefixes to project roots and retired prefixes to their current
+live name. `tasks rename <old> <new>` updates the project's filenames, ids, local
+`depends`/`parent` references, config, and registry. References in other projects and in
+prose need no edits: retired names keep resolving **for as long as the project stays
+registered**. `unregister` removes that project's aliases too; retired names cannot be
+reused while registered.
+
+Rename requires clean `tasks/`, no live claims, and at most one git worktree. An interrupted
+rename freezes writes to that project; reads remain available. Re-run the same command to
+resume, or use `--explain` to observe its recovery verdict without writing, locking, or
+checking authorization. Outside git, rename warns that forward recovery is the only
+option after source removal. `git checkout .` alone does not undo a rename; see
+[manual recovery](docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery).
 
 ## Completions
 
@@ -179,4 +195,4 @@ so a person here reviews each uncommitted file before it becomes public.
 
     tasks/.config.toml               prefix = "sci"; optional spec_dirs / plan_dirs
     tasks/sci-4f2a9c.md              one task
-    ~/.config/tasks/projects.toml    per-machine registry: prefix -> repo path
+    ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live

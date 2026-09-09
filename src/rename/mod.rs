@@ -91,12 +91,6 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     let project = Project::open(&invocation.root)?;
     authorize(&project, invocation, &mut out.warnings)?;
     let inventory = if recovery == Recovery::Fresh {
-        if invocation.source == invocation.target {
-            return Err(Error::Validation(format!(
-                "source and target prefixes are both {:?}",
-                invocation.source
-            )));
-        }
         if registry.is_taken(&invocation.target) {
             return Err(Error::Config(format!(
                 "prefix {:?} is already taken",
@@ -165,7 +159,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     atomic_write(&dest, rewritten.as_bytes())?;
                     out.tasks += 1;
-                    if stop_after(&format!("file:{}", out.tasks)) {
+                    if stop_after(&format!("file:{}", out.tasks - 1)) {
                         return Ok(out);
                     }
                 }

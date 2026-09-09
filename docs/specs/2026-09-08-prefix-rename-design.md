@@ -1,6 +1,6 @@
 # Renaming a project prefix
 
-Status: designed (2026-09-08)
+Status: implemented (2026-09-08)
 Tasks: tasks-8c9398
 
 ## 1. Problem
@@ -12,8 +12,7 @@ every *other* registered project.
 
 Done by hand on 2026-09-06 for `aut` → `autonomy` (empty, trivial) and `dot` → `dots`
 (2 task files, 4 inbound refs across ops and prism, 3 doc mentions). The manual procedure
-works but is unguided, and it leaves debris: `dot.lock` and `dot.toml` still sit in the
-claim store today.
+worked but was unguided, and left `dot.lock` and `dot.toml` in the claim store.
 
 Measured across the 16 registered projects and 787 tasks:
 
@@ -45,8 +44,8 @@ already provides.
 ## 2. Model
 
 A **prefix** is a project's live name. An **alias** is a retired prefix: a name the
-project used to have. Aliases are permanent and never become a second live name — new
-tasks always receive the live prefix.
+project used to have. Aliases last for as long as the project stays registered and never
+become a second live name — new tasks always receive the live prefix.
 
 **Resolution rule.** An id `<a>-<hex>` where `a` is an alias of project P resolves to
 `<P.prefix>-<hex>` in P. Only the prefix component is rewritten; the hex is preserved by
@@ -521,12 +520,11 @@ read-modify-write; atomic replacement prevents a torn file but not a lost update
 file beside `projects.toml` is taken by `init`, `unregister`, and `rename` for the whole
 read-modify-write. This closes a race that predates this design.
 
-**Every writer participates.** `add` currently takes no mutation lock at all — `open_ctx`
-and the `--project` arm both construct a `Ctx` with `lock: None`, relying on
-`create_task`'s exclusive create, which guards against a colliding id and against nothing
-else. After P3 an unlocked `add` would happily create a fresh `old-<hex>.md` in a directory
-the rename has already emptied, and no later phase would notice. `add` therefore acquires
-the mutation lock for the project it is about to write, on both arms.
+**Every writer participates.** `add` acquires the mutation lock for the project it is
+about to write, on both the local and `--project` arms. Exclusive file creation alone
+would prevent an id collision but allow a fresh `old-<hex>.md` after P3 had emptied the
+source files. Feedback creation/recurrence and editor reacquisition use the same shared
+lock and routing revalidation, including the pending-rename freeze.
 
 **Revalidation after acquiring a lock.** A writer that was already waiting on a prefix
 lock resolved its routing *before* the rename landed. Write commands therefore re-resolve
@@ -554,9 +552,9 @@ A `Recovery` value computed before the locks is a diagnosis, not a warrant.
 ```
 tasks rename <old> <new> [--explain]
     Renames a project's prefix. Rewrites the project's own task ids, its config, and the
-    registry key; records <old> as a permanent alias so existing references elsewhere keep
-    resolving. Refuses on a dirty tasks/, a live claim, more than one worktree, or a name
-    already taken. Re-run to resume an interrupted rename; --explain classifies and reports
+    registry key; records <old> as an alias for as long as the project stays registered,
+    so existing references elsewhere keep resolving. Refuses on a dirty tasks/, a live
+    claim, more than one worktree, or a name already taken. Re-run to resume an interrupted rename; --explain classifies and reports
     the verdict without writing, taking locks, or checking authorization.
 
 rename -> { prefix, previous, root, tasks: int, aliases: [string], recovery, warnings }
@@ -564,7 +562,9 @@ rename -> { prefix, previous, root, tasks: int, aliases: [string], recovery, war
            task files rewritten by this run, aliases every alias now targeting this
            project, and recovery the §5.3 verdict this run acted on ("fresh",
            "resume_files", "resume_registry", "resume_cleanup", "complete") so a resume
-           is observable rather than inferred from counts.
+           is observable rather than inferred from counts. Explain reports "refuse" with
+           the classifier reason in warnings when recovery is blocked; it always reports
+           zero task writes. Mutating refusals remain typed errors.
 
 unregister += aliases: [string]   the aliases dropped with the project
 
