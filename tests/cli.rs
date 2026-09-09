@@ -8104,3 +8104,254 @@ fn rename_explains_a_missing_config_and_refuses_recovery_without_writes() {
     assert_eq!(env.fail(&dir, &["rename", "dot", "dots"]), "validation");
     assert_eq!(rename_disk_state(&env, &dir), before);
 }
+
+/// A task backdated far enough to be in the default sample pool.
+fn old_task(env: &TestEnv, dir: &std::path::Path, title: &str, status_args: &[&str]) -> String {
+    let mut args = vec!["add", title, "-p", "2"];
+    args.extend_from_slice(status_args);
+    let id = id_of(env.json(dir, &args));
+    stamp(dir, &id, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    id
+}
+
+fn sampled_ids(v: &serde_json::Value) -> Vec<String> {
+    v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn sample_draws_only_from_the_curable_pool() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = old_task(&env, &dir, "Idea", &["--status", "idea"]);
+    let todo = old_task(&env, &dir, "Todo", &[]);
+    let blocked = id_of(env.json(&dir, &["add", "Blocked", "-p", "2"]));
+    env.json(&dir, &["block", &blocked, "waiting"]);
+    stamp(
+        &dir,
+        &blocked,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+    let doing = old_task(&env, &dir, "Doing", &[]);
+    env.json(&dir, &["start", &doing]);
+    stamp(&dir, &doing, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    let done = old_task(&env, &dir, "Done", &[]);
+    env.json(&dir, &["done", &done]);
+    stamp(&dir, &done, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    let recent = id_of(env.json(&dir, &["add", "Recent", "-p", "2"]));
+    let live = old_task(&env, &dir, "Live claim", &[]);
+    write_claim(&env, "sci", &live, "other-session", true);
+    let stale = old_task(&env, &dir, "Stale claim", &[]);
+    write_claim(&env, "sci", &stale, "gone-session", false);
+
+    let v = env.json(&dir, &["sample", "-n", "10", "--seed", "1"]);
+    let mut ids = sampled_ids(&v);
+    ids.sort();
+    let mut expected = vec![idea.clone(), todo.clone(), blocked.clone(), stale.clone()];
+    expected.sort();
+    assert_eq!(ids, expected, "{v}");
+    for absent in [&doing, &done, &recent, &live] {
+        assert!(!ids.contains(absent), "{absent} must not be drawn: {v}");
+    }
+    let warnings = v["warnings"].as_array().unwrap();
+    assert!(
+        warnings.iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&live) && w.contains("omitted") && w.contains("other-session")
+        }),
+        "{v}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("pool holds 4")),
+        "{v}"
+    );
+    // rows are list rows: the same keys, with the claim reported on the stale one
+    let row = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == stale)
+        .unwrap();
+    assert_eq!(row["claim"]["live"], false, "{row}");
+    assert!(row.get("child_count").is_some(), "{row}");
+}
+
+#[test]
+fn sample_older_than_zero_admits_fresh_tasks_and_goals_stay_in() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal", "-p", "2"]));
+    let child = id_of(env.json(&dir, &["add", "Child", "-p", "2", "--parent", &goal]));
+    // clock skew: a record stamped in the future is "within" every positive window
+    let future = id_of(env.json(&dir, &["add", "Future", "-p", "2"]));
+    stamp(
+        &dir,
+        &future,
+        "2026-01-01T00:00:00Z",
+        "2030-01-01T00:00:00Z",
+    );
+
+    let v = env.json(&dir, &["sample", "-n", "10"]);
+    assert_eq!(sampled_ids(&v), Vec::<String>::new(), "{v}");
+
+    let v = env.json(&dir, &["sample", "-n", "10", "--older-than", "0"]);
+    let mut ids = sampled_ids(&v);
+    ids.sort();
+    let mut expected = vec![goal, child, future];
+    expected.sort();
+    assert_eq!(ids, expected, "{v}");
+}
+
+#[test]
+fn sample_bounds_older_than_at_the_cli() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    old_task(&env, &dir, "T", &[]);
+    for bad in ["36501", "10000000", "18446744073709551615", "-1"] {
+        let out = env
+            .cmd(&dir)
+            .args(["sample", "--older-than", bad])
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "--older-than {bad} must be a parse error"
+        );
+    }
+    let v = env.json(&dir, &["sample", "--older-than", "36500"]);
+    assert!(sampled_ids(&v).is_empty(), "{v}");
+}
+
+/// Pins the seeded draw so a change of generator or generator width is caught. The
+/// expected indices were computed with fastrand 2.5.0 by the same algorithm
+/// (`Rng::with_seed(seed)`, then `rng.u64(i..n)` for each slot) over a pool of twenty
+/// ids sorted lexically; on a 32-bit target `Rng::usize` would give different values.
+#[test]
+fn sample_seeded_draw_is_a_known_answer() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for n in 0..20u32 {
+        let id = format!("sci-{n:06x}");
+        std::fs::write(
+            dir.join(format!("tasks/{id}.md")),
+            format!(
+                "---\nid: {id}\ntitle: T{n}\nstatus: todo\npriority: 2\n\
+                 created: 2026-01-01T00:00:00Z\nupdated: 2026-01-01T00:00:00Z\n\
+                 depends: []\ntags: []\n---\n"
+            ),
+        )
+        .unwrap();
+    }
+    let v = env.json(&dir, &["sample", "--seed", "7"]);
+    assert_eq!(
+        sampled_ids(&v),
+        vec!["sci-00000f", "sci-000005", "sci-00000e"],
+        "{v}"
+    );
+    let v = env.json(&dir, &["sample", "--seed", "8"]);
+    assert_eq!(
+        sampled_ids(&v),
+        vec!["sci-000005", "sci-000002", "sci-000000"],
+        "{v}"
+    );
+    let v = env.json(&dir, &["sample", "-n", "5", "--seed", "7"]);
+    assert_eq!(
+        sampled_ids(&v),
+        vec![
+            "sci-00000f",
+            "sci-000005",
+            "sci-00000e",
+            "sci-00000b",
+            "sci-000001"
+        ],
+        "{v}"
+    );
+}
+
+#[test]
+fn sample_is_reproducible_by_seed_and_defaults_to_three() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for n in 0..20 {
+        old_task(&env, &dir, &format!("T{n}"), &[]);
+    }
+    let a = sampled_ids(&env.json(&dir, &["sample", "--seed", "7"]));
+    let b = sampled_ids(&env.json(&dir, &["sample", "--seed", "7"]));
+    assert_eq!(a, b);
+    assert_eq!(a.len(), 3);
+    let c = sampled_ids(&env.json(&dir, &["sample", "--seed", "8"]));
+    assert_ne!(
+        a, c,
+        "two seeds over twenty tasks should not draw the same three in order"
+    );
+    let five = sampled_ids(&env.json(&dir, &["sample", "-n", "5", "--seed", "7"]));
+    assert_eq!(five.len(), 5);
+    let mut unique = five.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 5, "without replacement");
+}
+
+#[test]
+fn sample_of_an_empty_pool_is_empty_with_a_warning() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let v = env.json(&dir, &["sample"]);
+    assert_eq!(v["tasks"], serde_json::json!([]));
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("pool holds 0")),
+        "{v}"
+    );
+    let out = env.cmd(&dir).args(["--pretty", "sample"]).output().unwrap();
+    assert!(out.status.success());
+}
+
+#[test]
+fn sample_scopes_like_the_other_read_commands() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let nowhere = tempfile::tempdir().unwrap();
+    let s = old_task(&env, &sci, "S", &[]);
+    let f = old_task(&env, &fam, "F", &[]);
+
+    let v = env.json(&sci, &["sample", "-n", "10", "--project", "fam"]);
+    assert_eq!(sampled_ids(&v), vec![f.clone()], "{v}");
+
+    let v = env.json(
+        nowhere.path(),
+        &["sample", "-n", "10", "--all-projects", "--seed", "1"],
+    );
+    let mut ids = sampled_ids(&v);
+    ids.sort();
+    let mut expected = vec![s.clone(), f.clone()];
+    expected.sort();
+    assert_eq!(ids, expected, "{v}");
+
+    let out = env
+        .cmd(&sci)
+        .args(["sample", "--project", "fam", "--all-projects"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "clap conflict");
+
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "sample", "-n", "10", "--project", "fam"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains(&f) && text.contains("F"), "{text}");
+}

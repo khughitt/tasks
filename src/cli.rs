@@ -213,6 +213,27 @@ pub enum Command {
         #[command(flatten)]
         scope: ScopeArgs,
     },
+    /// Random open tasks for a curation pass: idea, todo, or blocked; not live-claimed;
+    /// not updated within --older-than days. Rows are list rows.
+    Sample {
+        /// How many to draw (without replacement).
+        #[arg(short = 'n', long, default_value_t = 3)]
+        count: usize,
+        /// Exclude tasks updated within this many days (0 to 36500); 0 skips the age
+        /// check entirely.
+        #[arg(
+            long,
+            default_value_t = 7,
+            value_name = "DAYS",
+            value_parser = clap::value_parser!(u64).range(0..=36500)
+        )]
+        older_than: u64,
+        /// Fix the draw so a pass can be reproduced.
+        #[arg(long)]
+        seed: Option<u64>,
+        #[command(flatten)]
+        scope: ScopeArgs,
+    },
     /// Edit fields, or open the task in $EDITOR when no field flags are given.
     Edit {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]

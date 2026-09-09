@@ -79,6 +79,7 @@ from a clone):
     tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)
     tasks ready                      # what can be worked on now (JSON)
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
+    tasks sample -n 3                # random open tasks for a curation pass (see skills/curate)
     tasks tree                       # the goal hierarchy
     tasks next                       # the first ready task, in full
     tasks next --all-projects        # the same across every registered project

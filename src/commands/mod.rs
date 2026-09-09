@@ -9,6 +9,7 @@ pub mod list;
 pub mod projects;
 pub mod rename;
 pub mod root;
+pub mod sample;
 pub mod show;
 pub mod status;
 pub mod tags;
@@ -739,6 +740,12 @@ pub fn run(cli: Cli) -> Result<Output> {
             scope,
         } => list::ready(open_read_ctx(dir, &scope)?, size, parallel, limit),
         Command::Next { scope } => list::next(open_read_ctx(dir, &scope)?),
+        Command::Sample {
+            count,
+            older_than,
+            seed,
+            scope,
+        } => sample::sample(open_read_ctx(dir, &scope)?, count, older_than, seed),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
         Command::Prime { scope, closed } => list::prime(open_read_ctx(dir, &scope)?, closed),
         Command::Note { id, text } => status::note(open_id_write_ctx(dir, &id)?, id, text),

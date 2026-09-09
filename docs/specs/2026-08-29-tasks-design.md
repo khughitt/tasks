@@ -272,6 +272,15 @@ tasks ready [--size S] [--parallel] [-n N] [--project P | --all-projects]
     grouping or weighting (the final id tiebreak orders by prefix only among tasks equal
     on everything else).
 
+tasks sample [-n N] [--older-than DAYS] [--seed U64] [--project P | --all-projects]
+    N tasks (default 3) drawn uniformly without replacement from the curable pool: status
+    idea, todo, or blocked; no live claim; updated more than DAYS days ago (default 7,
+    at most 36500; 0 skips the age check, so even a future-dated record is admitted).
+    Rows are list rows. Fewer than N in the pool returns the
+    pool with a warning; an empty pool is an empty list, exit 0. --seed fixes the draw.
+    Live-claim omissions are warned like ready's. The read side of the curate skill
+    (docs/specs/2026-09-08-task-curation-design.md).
+
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
            [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
            [--source REF | --no-source]
