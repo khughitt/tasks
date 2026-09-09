@@ -4,7 +4,7 @@ title: Derive task kinds from curation passes and write the kinds section of the
 status: idea
 priority: 2
 created: 2026-09-09T03:01:18Z
-updated: 2026-09-09T10:33:04Z
+updated: 2026-09-09T11:36:50Z
 depends: []
 tags: [curation, skill]
 ---
@@ -14,3 +14,4 @@ After a handful of curate passes, cluster what was seen into a small set of task
 ## Notes
 
 - 2026-09-09T10:33:04Z (design/curation): the curate skill's write path (revalidate, edit, curate: note) has not yet run against a real task: the first pass drew an empty pool. The first non-empty draw doubles as that acceptance test.
+- 2026-09-09T11:36:50Z (main): first real pass ran 2026-09-09 on three tasks records (two refined, one decision); kinds seen so far: a scoped defect, a decision-needed idea, an unscoped idea with open questions
