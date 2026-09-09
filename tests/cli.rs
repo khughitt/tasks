@@ -7210,3 +7210,64 @@ fn rename_an_older_alias_resumes_cleanup_using_the_real_source_inventory() {
             .starts_with("config-")
     );
 }
+
+#[test]
+fn rename_reports_only_destination_files_written_by_this_invocation() {
+    for (boundary, written, resumed, verdict) in [
+        ("inventory", 0, 2, "resume_files"),
+        ("file:1", 1, 1, "resume_files"),
+        ("files", 2, 0, "resume_files"),
+        ("config", 2, 0, "resume_registry"),
+        ("registry", 2, 0, "resume_cleanup"),
+        ("claims", 2, 0, "resume_cleanup"),
+    ] {
+        let mut env = TestEnv::new();
+        let dir = env.init("dot");
+        env.json(&dir, &["add", "One", "-p", "2"]);
+        env.json(&dir, &["add", "Two", "-p", "2"]);
+        let explain = env.json(&dir, &["rename", "dot", "dots", "--explain"]);
+        assert_eq!(explain["tasks"], 0, "fresh explain at {boundary}");
+        let output = env
+            .raw(&dir)
+            .env("TASKS_RENAME_STOP_AFTER", boundary)
+            .args(["rename", "dot", "dots"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{boundary}: {output:?}");
+        let stopped: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(stopped["tasks"], written, "stop {boundary}");
+        let explain = env.json(&dir, &["rename", "dot", "dots", "--explain"]);
+        assert_eq!(explain["tasks"], 0, "pending explain at {boundary}");
+        let recovered = env.json(&dir, &["rename", "dot", "dots"]);
+        assert_eq!(recovered["recovery"], verdict, "resume {boundary}");
+        assert_eq!(recovered["tasks"], resumed, "resume {boundary}");
+        let completed = env.json(&dir, &["rename", "dot", "dots"]);
+        assert_eq!(completed["recovery"], "complete");
+        assert_eq!(completed["tasks"], 0, "complete after {boundary}");
+        assert_eq!(
+            env.json(&dir, &["rename", "dot", "dots", "--explain"])["tasks"],
+            0
+        );
+    }
+}
+
+#[test]
+fn rename_taken_live_and_alias_targets_are_config_errors() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    env.init("taken");
+    alias_registry(&env, "retired", "taken");
+    for target in ["taken", "retired"] {
+        assert_eq!(
+            env.fail(&dir, &["rename", "dot", target]),
+            "config",
+            "target {target}"
+        );
+        assert!(
+            !env.home
+                .path()
+                .join(".local/state/tasks/rename/dot.toml")
+                .exists()
+        );
+    }
+}

@@ -27,23 +27,32 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         Recovery::Complete => "complete",
         Recovery::Refuse(reason) => {
             if !explain {
-                return Err(Error::Validation(reason.clone()));
+                let state = &snapshot.registry;
+                let registry_old = state.old_key.as_ref() == Some(&invocation.root)
+                    && state.new_key.is_none()
+                    && state.alias.is_none();
+                let registry_new = state.old_key.is_none()
+                    && state.new_key.as_ref() == Some(&invocation.root)
+                    && state.alias.as_ref() == Some(&invocation.target);
+                return Err(
+                    if registry.aliases.contains_key(&invocation.target)
+                        || !(registry_old || registry_new)
+                    {
+                        Error::Config(reason.clone())
+                    } else {
+                        Error::Validation(reason.clone())
+                    },
+                );
             }
             warnings.push(reason.clone());
             "refuse"
         }
     };
-    let count = snapshot
-        .inventory
-        .as_ref()
-        .map_or(snapshot.named.source + snapshot.named.target, |inventory| {
-            inventory.entries.len()
-        });
     let mut out = RenameOut {
         prefix: invocation.target.clone(),
         previous: invocation.source.clone(),
         root: invocation.root.display().to_string(),
-        tasks: count,
+        tasks: 0,
         aliases: Vec::new(),
         recovery: verdict.into(),
         warnings,
@@ -116,7 +125,6 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     };
 
     if matches!(recovery, Recovery::Fresh | Recovery::ResumeFiles) {
-        let mut writes = 0;
         for entry in &inventory.entries {
             let source = project
                 .tasks_dir()
@@ -156,8 +164,8 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     atomic_write(&dest, rewritten.as_bytes())?;
-                    writes += 1;
-                    if stop_after(&format!("file:{writes}")) {
+                    out.tasks += 1;
+                    if stop_after(&format!("file:{}", out.tasks)) {
                         return Ok(out);
                     }
                 }
