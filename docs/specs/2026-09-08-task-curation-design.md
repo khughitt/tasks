@@ -69,10 +69,18 @@ never part of the session protocol.
 **Invocation.** `/curate [n] [--project <prefix> | --all-projects]`, defaulting to three
 tasks in the current project. The skill runs `tasks sample` with those arguments.
 
+**One root per task.** `sample --project` and `--all-projects` read registered roots, but
+`show`, `edit`, and `note` prefer the current checkout when the id's prefix matches it, so
+from a worktree the pass could sample one copy of a task and rewrite another. The skill
+therefore resolves a root before touching a sampled task and runs every later command for
+it, reads and writes alike, as `tasks -C <root> ...`: the current directory when `sample`
+ran unscoped, otherwise the output of `tasks root <id>`. Evidence gathering (grep, git
+log) runs in that same root.
+
 **Per task.**
 
 1. **Read.** `tasks show <id>`, then the spec, plan, and parent it links to, and
-   `tasks tree <id>` when it has children.
+   `tasks tree <id>` when it has children. Keep the `updated` stamp from this read.
 2. **Evidence.** Grep the code and docs the task names. Check whether the described thing
    already exists in the tree; if it does, find the commit. Search open titles and tags
    for a probable duplicate. For a goal, check that its children cover it.
@@ -86,7 +94,16 @@ tasks in the current project. The skill runs `tasks sample` with those arguments
      Questions are written into the record; the summary asks.
    - `decompose`: a goal is missing children it needs. Proposal: the children, each one
      line.
-4. **Edits allowed without asking**, all through the CLI:
+4. **Revalidate**, immediately before the first write. `tasks show <id>` again: if the
+   status is no longer open, a `claim` is present, or `updated` differs from the stamp
+   taken in step 1, the task is reported as skipped (with the reason: became active,
+   claimed, or changed) and nothing is written. `edit` and `note` do not consult the claim
+   store, so this is a check, not a lock; a session that starts the task between the
+   recheck and the write gets a prose edit and a `curate:` note on a task it holds. That
+   window is seconds wide, the edit changes no status or link semantics, and the note says
+   what happened, so the pass accepts it rather than adding a compare-and-swap flag to
+   the CLI. Revisit if a pass ever collides in practice.
+5. **Edits allowed without asking**, all through the CLI:
    - `--title`, `--body`: rewritten for clarity and brevity. Facts are preserved. Implicit
      assumptions are stated. Questions the agent cannot answer are collected under one
      `## Open questions` heading at the end of the body; an existing heading is reused, not
@@ -95,19 +112,31 @@ tasks in the current project. The skill runs `tasks sample` with those arguments
      and the link is missing or wrong.
    - `--size`: set or corrected.
    - `--tag`: added when a tag the project already uses clearly applies; never invented.
-5. **Not touched.** Status, priority, `--parallel`, `--source`, anything in `doing`, and
+6. **Not touched.** Status, priority, `--parallel`, `--source`, anything in `doing`, and
    `tasks/*.md` by hand. No `add`, no `drop`.
-6. **Note.** One `tasks note <id> "curate: <verdict>; <what changed>; <proposals>"`. This is
-   the audit trail, and it moves the task out of the next sample's pool.
+7. **Note.** One `tasks note <id> "curate: <verdict>; <what changed>[; proposal: <text>]"`.
+   The `proposal:` segment is present only when the pass wants a decision from the human
+   (`stale`, `duplicate`, `decision`, `decompose`). The note is the audit trail, and it
+   moves the task out of the next sample's pool for the age window.
 
-**Skip rule.** A task whose most recent note starts with `curate:` is not re-curated. It is
-reported as skipped and the pass moves on; the human decides its pending proposals or a
-later note clears the mark. `--older-than` already makes this rare.
+**Repeat reviews.** The age window governs them. A `keep` or `refined` task re-enters the
+pool after `--older-than` days like any other and is reviewed again; that is the
+maintenance, not a waste of a draw. The only persistent skip is a pending proposal: a task
+whose most recent note is a `curate:` note carrying a `proposal:` segment is not
+re-curated, and is reported as `pending` with the proposal text so the human sees it again.
+Any later note clears it. The human records the decision with `tasks note <id> "<decision>"`
+whether they acted on the proposal or declined it, and that note is the record either way.
 
-**Summary to the human.** One line per task: id, verdict, one phrase of what changed. Then
-the proposals, grouped: drops (with the commit or the duplicate id), priority changes,
-children to add (under which goal). Nothing else. A pass with no proposals says so in one
-line.
+**Summary to the human.** One line per task: id, verdict, one phrase of what changed;
+skipped and pending tasks appear in the same list with their reason. Then the decisions
+that are the human's, grouped:
+
+- **drops**: id, and the commit or the duplicate id;
+- **priority changes**: id, from, to, why;
+- **children to add**: the goal, then one line per child;
+- **questions**: id, then the open questions a `decision` verdict wrote into the record.
+
+Nothing else. A pass with nothing in those groups says so in one line.
 
 **Bounds.** Zero new tasks per pass. Prefer shorter: a rewrite that grows the body without
 adding a fact is wrong. One pass touches only the sampled tasks; a duplicate found in
