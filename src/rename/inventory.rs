@@ -22,6 +22,10 @@ pub struct Inventory {
     pub config_from: String,
     pub config_to: String,
     pub entries: Vec<InventoryEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parks_store: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_to: Option<String>,
 }
 
 pub fn digest(bytes: &[u8]) -> String {
@@ -97,6 +101,14 @@ impl Inventory {
             });
         }
         entries.sort_by(|left, right| left.hex.cmp(&right.hex));
+        let store = crate::claims::ClaimStore::load(&project.prefix)?;
+        let (parks_store, store_to) = if store.parks().next().is_none() {
+            (None, None)
+        } else {
+            let text = store.parks_renamed_text(&project.prefix, target)?;
+            let digest = digest(text.as_bytes());
+            (Some(text), Some(digest))
+        };
 
         Ok(Inventory {
             source: project.prefix.clone(),
@@ -105,6 +117,8 @@ impl Inventory {
             config_from: digest(&config_bytes),
             config_to: digest(config_to.as_bytes()),
             entries,
+            parks_store,
+            store_to,
         })
     }
 
@@ -244,6 +258,24 @@ impl Inventory {
             }
             validate_digest(path, "entry from", &entry.from)?;
             validate_digest(path, "entry to", &entry.to)?;
+        }
+        match (&self.parks_store, &self.store_to) {
+            (None, None) => {}
+            (Some(text), Some(expected)) => {
+                validate_digest(path, "store_to", expected)?;
+                if digest(text.as_bytes()) != *expected {
+                    return Err(Error::Config(format!(
+                        "{}: parks_store does not digest to store_to",
+                        path.display()
+                    )));
+                }
+            }
+            _ => {
+                return Err(Error::Config(format!(
+                    "{}: parks_store and store_to must be present together",
+                    path.display()
+                )));
+            }
         }
         Ok(())
     }

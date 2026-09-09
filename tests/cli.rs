@@ -7904,6 +7904,156 @@ fn rename_reports_only_destination_files_written_by_this_invocation() {
 }
 
 #[test]
+fn rename_migrates_park_entries_to_the_target_store() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let one = id_of(env.json(&dir, &["add", "One", "-p", "2"]));
+    let two = id_of(env.json(&dir, &["add", "Two", "-p", "2"]));
+    as_agent(&env, &dir, "agent-a")
+        .args(["park", &one, "a"])
+        .assert()
+        .success();
+    as_agent(&env, &dir, "agent-a")
+        .args(["park", &two, "b", "--waiting-on", "user"])
+        .assert()
+        .success();
+    write_claim(&env, "dot", "dot-ffffff", "ghost", false);
+
+    assert_eq!(
+        env.json(&dir, &["rename", "dot", "dots", "--explain"])["parks"],
+        2
+    );
+    let out = env.json(&dir, &["rename", "dot", "dots"]);
+    assert_eq!(out["parks"], 2);
+    assert!(
+        !env.claim_store("dot").exists(),
+        "the source store is removed"
+    );
+    let target = std::fs::read_to_string(env.claim_store("dots")).unwrap();
+    assert!(
+        target.contains(&format!("[parks.dots-{}]", &one[4..])),
+        "{target}"
+    );
+    assert!(!target.contains("dot-"), "{target}");
+    assert!(!target.contains("claims"), "{target}");
+
+    let prime = env.json(&dir, &["prime"]);
+    let ids: Vec<&str> = prime["parked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.iter().all(|id| id.starts_with("dots-")), "{ids:?}");
+    assert_eq!(
+        env.json(&dir, &["rename", "dot", "dots"])["recovery"],
+        "complete"
+    );
+}
+
+#[test]
+fn rename_refuses_a_target_store_that_holds_parks_before_any_mutation() {
+    let mut env = TestEnv::new();
+    let new = env.init("new");
+    let theirs = id_of(env.json(&new, &["add", "Theirs", "-p", "2"]));
+    as_agent(&env, &new, "agent-a")
+        .args(["park", &theirs, "keep"])
+        .assert()
+        .success();
+    env.json(&new, &["unregister", "new"]);
+    let old = env.init("old");
+    let mine = id_of(env.json(&old, &["add", "Mine", "-p", "2"]));
+    as_agent(&env, &old, "agent-a")
+        .args(["park", &mine, "move"])
+        .assert()
+        .success();
+    let before_new = std::fs::read_to_string(env.claim_store("new")).unwrap();
+    let before_old = std::fs::read_to_string(env.claim_store("old")).unwrap();
+
+    let out = env
+        .cmd(&old)
+        .args(["rename", "old", "new"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "validation");
+    assert!(
+        err_detail(&out).contains("target store holds 1 parked task"),
+        "{}",
+        err_detail(&out)
+    );
+    assert!(err_detail(&out).contains(&theirs), "{}", err_detail(&out));
+    assert_eq!(
+        std::fs::read_to_string(env.claim_store("new")).unwrap(),
+        before_new
+    );
+    assert_eq!(
+        std::fs::read_to_string(env.claim_store("old")).unwrap(),
+        before_old
+    );
+    assert!(
+        !env.home
+            .path()
+            .join(".local/state/tasks/rename/old.toml")
+            .exists(),
+        "no inventory"
+    );
+    assert!(
+        old.join(format!("tasks/{mine}.md")).is_file(),
+        "no file moved"
+    );
+}
+
+#[test]
+fn rename_interrupted_after_the_store_write_resumes_and_a_tampered_destination_refuses() {
+    for tamper in [false, true] {
+        let mut env = TestEnv::new();
+        let dir = env.init("dot");
+        let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+        as_agent(&env, &dir, "agent-a")
+            .args(["park", &id, "a"])
+            .assert()
+            .success();
+        let stopped = env
+            .raw(&dir)
+            .env("TASKS_RENAME_STOP_AFTER", "store")
+            .args(["rename", "dot", "dots"])
+            .output()
+            .unwrap();
+        assert!(stopped.status.success(), "{stopped:?}");
+        assert!(env.claim_store("dots").is_file(), "destination written");
+        assert!(env.claim_store("dot").is_file(), "source still present");
+        if tamper {
+            write_park(&env, "dots", "dots-ffffff", "someone", "agent", "/x");
+            let out = env
+                .cmd(&dir)
+                .args(["rename", "dot", "dots"])
+                .output()
+                .unwrap();
+            assert_eq!(err_kind(&out), "validation");
+            assert!(
+                err_detail(&out).contains("disagrees with inventory"),
+                "{}",
+                err_detail(&out)
+            );
+            assert!(
+                env.claim_store("dot").is_file(),
+                "the source is left in place"
+            );
+        } else {
+            let resumed = env.json(&dir, &["rename", "dot", "dots"]);
+            assert_eq!(resumed["recovery"], "resume_cleanup");
+            assert_eq!(resumed["parks"], 1);
+            assert!(!env.claim_store("dot").exists());
+            assert_eq!(
+                env.json(&dir, &["prime"])["parked"][0]["id"],
+                format!("dots-{}", &id[4..])
+            );
+        }
+    }
+}
+
+#[test]
 fn rename_taken_live_and_alias_targets_are_config_errors() {
     let mut env = TestEnv::new();
     let dir = env.init("dot");

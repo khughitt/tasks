@@ -280,6 +280,26 @@ impl ClaimStore {
         self.parks.iter()
     }
 
+    /// The store `rename` writes for the target prefix: this store's park entries with
+    /// their ids re-prefixed, and no claims. Pure; nothing on disk changes.
+    pub fn parks_renamed_text(&self, source: &str, target: &str) -> Result<String> {
+        let mut parks = BTreeMap::new();
+        for (key, park) in &self.parks {
+            let id = TaskId::parse(key)?;
+            if id.prefix != source {
+                return Err(Error::Config(format!(
+                    "park entry {key} does not belong to prefix {source:?}"
+                )));
+            }
+            parks.insert(format!("{target}-{}", id.hex), park.clone());
+        }
+        Ok(toml::to_string(&StoreFile {
+            claims: BTreeMap::new(),
+            parks,
+        })
+        .expect("claim store serializes"))
+    }
+
     pub fn prune_dead(&mut self) {
         self.prune_with(|claim| liveness(claim) == Liveness::Live);
     }
@@ -1009,6 +1029,23 @@ mod tests {
             !text.contains("claims"),
             "an empty claims map must not write [claims]: {text}"
         );
+    }
+
+    #[test]
+    fn parks_renamed_text_re_prefixes_ids_and_drops_claims() {
+        let (_dir, store) = store_from(&format!(
+            "{}{}",
+            A_CLAIM.replace("sci-", "old-"),
+            A_PARK.replace("sci-", "old-")
+        ));
+        let text = store.parks_renamed_text("old", "new").unwrap();
+        assert!(text.contains("[parks.new-000002]"), "{text}");
+        assert!(!text.contains("claims"), "{text}");
+        assert!(!text.contains("old-"), "{text}");
+        assert!(matches!(
+            store.parks_renamed_text("sci", "new"),
+            Err(Error::Config(_))
+        ));
     }
 
     #[test]

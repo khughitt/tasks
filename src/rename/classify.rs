@@ -229,6 +229,8 @@ mod tests {
                     to: format!("after {index}"),
                 })
                 .collect(),
+            parks_store: None,
+            store_to: None,
         }
     }
 

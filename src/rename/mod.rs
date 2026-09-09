@@ -58,11 +58,24 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             "refuse"
         }
     };
+    let source_parks = ClaimStore::load(&invocation.source)?.parks().count();
+    let parks = if source_parks == 0
+        && (snapshot
+            .inventory
+            .as_ref()
+            .is_some_and(|inventory| inventory.parks_store.is_some())
+            || recovery == Recovery::Complete)
+    {
+        ClaimStore::load(&invocation.target)?.parks().count()
+    } else {
+        source_parks
+    };
     let mut out = RenameOut {
         prefix: invocation.target.clone(),
         previous: invocation.source.clone(),
         root: invocation.root.display().to_string(),
         tasks: 0,
+        parks,
         aliases: Vec::new(),
         recovery: verdict.into(),
         warnings,
@@ -105,6 +118,18 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             return Err(Error::Config(format!(
                 "prefix {:?} is already taken",
                 invocation.target
+            )));
+        }
+        let target_parks: Vec<String> = ClaimStore::load(&invocation.target)?
+            .parks()
+            .map(|(id, _)| id.clone())
+            .collect();
+        if !target_parks.is_empty() {
+            return Err(Error::Validation(format!(
+                "target store holds {} parked task{} ({}); remove or resume them before renaming",
+                target_parks.len(),
+                if target_parks.len() == 1 { "" } else { "s" },
+                target_parks.join(", ")
             )));
         }
         crate::commands::reject_pending_rename(&project)?;
@@ -202,6 +227,30 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         registry.rename(&invocation.source, &invocation.target)?;
         registry.save()?;
         if stop_after("registry") {
+            return Ok(out);
+        }
+    }
+    if let (Some(text), Some(expected)) = (&inventory.parks_store, &inventory.store_to) {
+        let dest = ClaimStore::path_for(&invocation.target)?;
+        match std::fs::read(&dest) {
+            Ok(bytes) if digest(&bytes) == *expected => {}
+            Ok(_) => {
+                if ClaimStore::load_from(&dest)?.parks().next().is_some() {
+                    return Err(Error::Validation(format!(
+                        "{} disagrees with inventory",
+                        dest.display()
+                    )));
+                }
+                atomic_write(&dest, text.as_bytes())?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                atomic_write(&dest, text.as_bytes())?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        verify_bytes(&dest, expected)?;
+        out.parks = ClaimStore::load_from(&dest)?.parks().count();
+        if stop_after("store") {
             return Ok(out);
         }
     }
