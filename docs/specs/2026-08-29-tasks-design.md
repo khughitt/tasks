@@ -334,7 +334,8 @@ tasks check
 
 tasks next [--project P | --all-projects]
     The most recently parked task waiting on the agent that is open, unblocked,
-    dependency-free, and childless, else the first ready task, in the show shape.
+    with all dependencies resolved and closed, and childless, else the first ready task,
+    in the show shape.
 
 tasks prime [--project P | --all-projects] [--closed]
     Agent session context: prefix, counts by status, the ready list, doing tasks
@@ -455,7 +456,10 @@ check       += kinds dangling_parent, foreign_parent, parent_cycle (errors);
 TaskSummary += park: ParkInfo|null
 show        += park: ParkInfo|null
 ParkInfo     = { at, next_step, waiting_on: "user"|"agent", session, owner, host, worktree }
-ParkedRow    = TaskSummary with every scalar nullable, + phase: "brainstorming"|"planning"|"implementing"|null
+ParkedRow    = TaskSummary where status, priority, size, owner, created, updated, source,
+               parent, child_count, and open_descendant_count are nullable; id, title, and
+               parallel remain concrete; tags and depends are arrays (empty when unavailable),
+               + phase: "brainstorming"|"planning"|"implementing"|null
                status is null only for an entry whose checkout is unavailable
 prime       += parked: [ParkedRow]            most recently parked first
 list        -> --parked returns { tasks: [ParkedRow], warnings }

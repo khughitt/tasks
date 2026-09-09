@@ -189,8 +189,8 @@ the inventory, and the source is left in place. With the source already gone, th
 destination is verified against `store_to` before the step is considered complete.
 
 The manual rollback procedure in the prefix-rename design gains the store: restore the
-source store from the inventory's recorded source parks before deleting the destination,
-and remove the destination last.
+source store from the inventory's recorded source parks and verify it before deleting the
+destination; remove the inventory last.
 
 ## 5. Surfacing
 
