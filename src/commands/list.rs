@@ -260,6 +260,7 @@ pub fn ready(
 /// lookup. Nothing ready is a normal state: null, warnings, exit 0.
 pub fn next(mut ctx: ReadCtx) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
+    let _ = super::parked::rows(&mut ctx, &all, &claims)?;
     let candidates = super::parked::candidates(&mut ctx, &all, &claims)?;
     let ready = ready_tasks(&mut ctx, &all, &claims)?;
     let next = match candidates

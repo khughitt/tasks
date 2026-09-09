@@ -660,12 +660,17 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                 store.remove_park(&id);
             }
             if let Err(error) = store.save() {
-                // The task is closed now, so `start --force` cannot recover this:
-                // `can_transition` rejects `done -> doing`. Re-running the same closing
-                // command can, because a same-status transition still releases.
+                let recovery = match task.status {
+                    Status::Done => format!("run `tasks done {id}`"),
+                    Status::Dropped => format!("run `tasks drop {id}`"),
+                    Status::Blocked => format!("run `tasks block {id}`"),
+                    Status::Todo | Status::Idea | Status::Doing => {
+                        "the store is unchanged and a same-status edit will not retry cleanup"
+                            .into()
+                    }
+                };
                 ctx.warnings.push(format!(
-                    "{id} was closed but its claim was not released ({error}); \
-                     re-run the same command to retry the release"
+                    "{id}'s status was saved but store cleanup failed ({error}); {recovery}"
                 ));
             }
             Ok(())

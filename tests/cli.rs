@@ -4652,7 +4652,14 @@ fn a_task_parked_only_in_another_checkout_is_listed_from_there_and_never_next() 
             .contains("resume it from that checkout"),
         "{prime}"
     );
-    assert!(env.json(&main, &["next"])["next"].is_null());
+    let next = env.json(&main, &["next"]);
+    assert!(next["next"].is_null());
+    assert!(
+        next["warnings"]
+            .to_string()
+            .contains("resume it from that checkout"),
+        "{next}"
+    );
     let by_parent = env.json(&main, &["list", "--parked", "--parent", &goal]);
     assert_eq!(by_parent["tasks"][0]["id"], kid);
     std::fs::remove_dir_all(wt.join("tasks")).unwrap();
@@ -4675,7 +4682,14 @@ fn a_task_parked_only_in_another_checkout_is_listed_from_there_and_never_next() 
             .contains("which is unavailable"),
         "{prime}"
     );
-    assert!(env.json(&main, &["next"])["next"].is_null());
+    let next = env.json(&main, &["next"]);
+    assert!(next["next"].is_null());
+    assert!(
+        next["warnings"]
+            .to_string()
+            .contains("which is unavailable"),
+        "{next}"
+    );
     assert_eq!(
         env.json(&main, &["list", "--parked"])["tasks"]
             .as_array()
@@ -5099,14 +5113,14 @@ fn one_checkouts_closed_copy_does_not_prune_a_live_claim() {
 }
 
 #[test]
-fn re_running_a_close_retries_a_failed_release() {
+fn done_retries_a_failed_release_after_a_status_edit() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
     let store = env.claim_store("sci");
 
     as_agent(&env, &sci, "agent-a")
-        .args(["start", &id])
+        .args(["park", &id, "continue here"])
         .assert()
         .success();
     use std::os::unix::fs::PermissionsExt;
@@ -5115,7 +5129,7 @@ fn re_running_a_close_retries_a_failed_release() {
     let original = std::fs::metadata(state_dir).unwrap().permissions();
     std::fs::set_permissions(state_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let out = as_agent(&env, &sci, "agent-a")
-        .args(["done", &id, "landed"])
+        .args(["edit", &id, "--status", "done"])
         .output();
     std::fs::set_permissions(state_dir, original).unwrap();
     let out = out.unwrap();
@@ -5128,14 +5142,13 @@ fn re_running_a_close_retries_a_failed_release() {
     assert!(
         result["warnings"].as_array().unwrap().iter().any(|w| {
             let w = w.as_str().unwrap();
-            w.contains("re-run the same command to retry the release")
+            w.contains(&format!("run `tasks done {id}"))
         }),
         "{result}"
     );
     let shown = env.json(&sci, &["show", &id]);
     assert_eq!(shown["task"]["status"], "done");
-    assert_eq!(shown["claim"]["session"], "agent-a");
-    assert_eq!(shown["claim"]["live"], true);
+    assert_eq!(shown["park"]["next_step"], "continue here");
 
     // `start --force` cannot recover this: can_transition rejects done -> doing.
     let out = as_agent(&env, &sci, "agent-a")
@@ -5144,12 +5157,14 @@ fn re_running_a_close_retries_a_failed_release() {
         .unwrap();
     assert_eq!(err_kind(&out), "invalid_transition");
 
-    // Re-running the closing command can, because a same-status transition still releases.
+    // The advertised status command retries the release even though the task is already done.
     as_agent(&env, &sci, "agent-a")
         .args(["done", &id, "landed"])
         .assert()
         .success();
-    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
+    let shown = env.json(&sci, &["show", &id]);
+    assert!(shown["claim"].is_null(), "{shown}");
+    assert!(shown["park"].is_null(), "{shown}");
 }
 
 #[test]
@@ -5742,6 +5757,34 @@ fn a_failed_takeover_restores_the_previous_owners_claim() {
         "agent-a",
         "a failed takeover must not unclaim the previous holder"
     );
+}
+
+#[test]
+fn a_failed_start_restores_the_displaced_park() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "continue here", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let before = std::fs::read(env.claim_store("sci")).unwrap();
+
+    let tasks_dir = sci.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["start", &id])
+        .output();
+    std::fs::set_permissions(&tasks_dir, original).unwrap();
+    assert_eq!(out.unwrap().status.code(), Some(1));
+
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), before);
+    let shown = env.json(&sci, &["show", &id]);
+    assert!(shown["claim"].is_null(), "{shown}");
+    assert_eq!(shown["park"]["next_step"], "continue here", "{shown}");
+    assert_eq!(shown["park"]["waiting_on"], "user", "{shown}");
 }
 
 #[test]
