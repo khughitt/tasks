@@ -2,13 +2,25 @@
 //!
 //! The pool is the definition of "worth a maintenance look": open but not in hand
 //! (`idea`, `todo`, `blocked`), not live-claimed, and not touched within the age window.
-//! Age and status exclusions are silent; a live-claim omission is reported like `ready`
-//! reports it, so a reader can tell a small pool from a busy one.
+//! Age and status exclusions are silent. A live-claim omission is reported with the
+//! message `ready` uses (minus its takeover hint), and a task whose latest note is a
+//! `curate:` note still carrying a `proposal:` for the human is reported as pending, so
+//! a reader can tell a small pool from a busy one and an unanswered proposal never
+//! re-enters the pool by age alone.
 
 use super::ReadCtx;
 use crate::error::Result;
 use crate::model::{Status, Task};
 use crate::output::{DateColumn, ListOut, Output, TaskSummary};
+
+/// The proposal text of a task whose most recent note is a curate note awaiting the
+/// human's decision. Any later note clears it, which is how the human answers.
+fn pending_proposal(task: &Task) -> Option<&str> {
+    let text = task.notes.last()?.text.as_str();
+    let rest = text.strip_prefix("curate:")?;
+    rest.split_once("proposal:")
+        .map(|(_, proposal)| proposal.trim())
+}
 
 pub fn sample(
     mut ctx: ReadCtx,
@@ -16,9 +28,7 @@ pub fn sample(
     older_than: u64,
     seed: Option<u64>,
 ) -> Result<Output> {
-    let all = ctx.scope.scan()?;
-    let prefixes = ctx.scope.prefixes();
-    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
+    let (all, claims) = ctx.scan_with_claims()?;
     // Bounded to <= 36500 at the CLI, so the cast is exact and the subtraction stays far
     // inside OffsetDateTime's range. Zero means no age check at all: a future-dated
     // record from clock skew is still admitted.
@@ -36,10 +46,13 @@ pub fn sample(
             continue;
         }
         if let Some(claim) = claims.live(&task.id) {
-            ctx.warnings.push(format!(
-                "{} omitted: claimed by session {} in {}",
-                task.id, claim.session, claim.worktree
-            ));
+            ctx.warnings
+                .push(super::list::claim_omission(&task.id, claim));
+            continue;
+        }
+        if let Some(proposal) = pending_proposal(task) {
+            ctx.warnings
+                .push(format!("{} pending: {proposal}", task.id));
             continue;
         }
         pool.push(task);
@@ -48,8 +61,13 @@ pub fn sample(
     pool.sort_by(|a, b| a.id.cmp(&b.id));
     let pool_size = pool.len();
     if pool_size < count {
+        let window = if older_than == 0 {
+            "any age".to_string()
+        } else {
+            format!("not updated in {older_than} days")
+        };
         ctx.warnings.push(format!(
-            "asked for {count}; the pool holds {pool_size} (open, unclaimed, not updated in {older_than} days)"
+            "asked for {count}; the pool holds {pool_size} (open, unclaimed, not pending, {window})"
         ));
     }
 

@@ -35,7 +35,10 @@ tasks-5b73bf so they are derived from passes rather than guessed.
     tasks sample [-n N] [--project <prefix> | --all-projects] [--older-than <days>] [--seed <u64>]
 
 - **Pool.** Tasks whose status is `idea`, `todo`, or `blocked`; not `doing`, `done`, or
-  `dropped`. A task with a live claim is excluded. A task whose `updated` is within
+  `dropped`. A task with a live claim is excluded. A task whose most recent note starts
+  with `curate:` and carries a `proposal:` segment is excluded: its proposal is awaiting
+  the human, and re-drawing it would only re-report it. Any later note clears that, so
+  the human answers by writing one. A task whose `updated` is within
   `--older-than` days of now is excluded; the default is 7. `--older-than 0` skips the
   age check entirely, so a future-dated record (clock skew) is admitted too. The value is
   bounded at the CLI to 0 through 36500 days (a century); anything else is a clap parse
@@ -53,9 +56,11 @@ tasks-5b73bf so they are derived from passes rather than guessed.
 - **Output.** `{"tasks": [...], "warnings": [...]}`, each entry a `TaskSummary` in the
   same shape as a `list` row, so any consumer that reads `list` reads `sample`. Order is
   the draw order. `--pretty` prints the same one-line rows `list --pretty` prints.
-  Exclusions for live claims are reported in warnings the way `ready` reports them; the
-  age and status exclusions are silent, since they are the definition of the pool, and
-  the pool size in the shortfall warning is enough to see the effect.
+  A live-claim exclusion is reported with the message `ready` uses, minus `ready`'s
+  takeover hint (a curator never starts a task); a pending-proposal exclusion is
+  reported as `<id> pending: <proposal text>`. The age and status exclusions are silent,
+  since they are the definition of the pool, and the pool size in the shortfall warning
+  is enough to see the effect.
 - **Completion.** `sample` joins the subcommand list; its flags complete from clap; no new
   candidate list.
 - **Random source.** `fastrand`, already a dependency: `fastrand::Rng::with_seed` when
@@ -77,8 +82,10 @@ tasks in the current project. The skill runs `tasks sample` with those arguments
 `show`, `edit`, and `note` prefer the current checkout when the id's prefix matches it, so
 from a worktree the pass could sample one copy of a task and rewrite another. The skill
 therefore resolves a root before touching a sampled task and runs every later command for
-it, reads and writes alike, as `tasks -C <root> ...`: the current directory when `sample`
-ran unscoped, otherwise the path `tasks --pretty root <id>` prints (the JSON form carries
+it, reads and writes alike, as `tasks -C <root> ...`: when `sample` ran unscoped, the
+nearest ancestor of the current directory that contains `tasks/.config.toml` (the project
+an unscoped `tasks` command locates, which from a subdirectory is not the current
+directory); otherwise the path `tasks --pretty root <id>` prints (the JSON form carries
 it in the `root` field). Evidence gathering (grep, git
 log) runs in that same root.
 
@@ -128,11 +135,13 @@ log) runs in that same root.
 
 **Repeat reviews.** The age window governs them. A `keep` or `refined` task re-enters the
 pool after `--older-than` days like any other and is reviewed again; that is the
-maintenance, not a waste of a draw. The only persistent skip is a pending proposal: a task
-whose most recent note is a `curate:` note carrying a `proposal:` segment is not
-re-curated, and is reported as `pending` with the proposal text so the human sees it again.
-Any later note clears it. The human records the decision with `tasks note <id> "<decision>"`
-whether they acted on the proposal or declined it, and that note is the record either way.
+maintenance, not a waste of a draw. The only persistent skip is a pending proposal, and
+`sample` enforces it: a task whose most recent note is a `curate:` note carrying a
+`proposal:` segment is never drawn, and comes back as a `pending` warning with the
+proposal text so the human sees it again. The skill relays those warnings in its summary
+and needs no check of its own. Any later note clears it. The human records the decision
+with `tasks note <id> "<decision>"` whether they acted on the proposal or declined it, and
+that note is the record either way.
 
 **Summary to the human.** One line per task: id, verdict, one phrase of what changed;
 skipped and pending tasks appear in the same list with their reason. Then the decisions
@@ -165,8 +174,11 @@ link to tasks-5b73bf.
 End-to-end in `tests/cli.rs` against the built binary:
 
 - Pool: `doing`, `done`, and `dropped` are never drawn; a task with a live claim is never
-  drawn and produces the omission warning; a task updated within the window is never
-  drawn; `--older-than 0` admits every open task.
+  drawn and produces the omission warning; a task whose latest note is a `curate:` note
+  with a `proposal:` is never drawn and produces the pending warning, while a `curate:`
+  note without one or a later note of any kind leaves the task in; a task updated within
+  the window is never drawn; `--older-than 0` admits every open task, future-dated ones
+  included.
 - `-n` larger than the pool returns the pool and a shortfall warning; an empty pool
   returns an empty list, exit 0.
 - The same `--seed` draws the same set in the same order; two seeds differ on a large pool.

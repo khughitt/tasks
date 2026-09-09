@@ -16,9 +16,11 @@ Default: three tasks from the current project.
 
     tasks sample -n <n> [--project <prefix> | --all-projects]
 
-The pool is already the right one: `idea`, `todo`, or `blocked`; no live claim; not updated
-in the last 7 days. Read the warnings: a shortfall names the pool size, and each live-claim
-omission names the holder.
+The pool is already the right one: `idea`, `todo`, or `blocked`; no live claim; no
+proposal still awaiting the human; not updated in the last 7 days. Read the warnings: a
+shortfall names the pool size, each live-claim omission names the holder, and each
+`<id> pending: <proposal>` line is a decision the human still owes (relay it in the
+summary; do not open the task).
 
 ## 2. One root per task
 
@@ -27,7 +29,10 @@ omission names the holder.
 could sample one copy of a task and rewrite another. So, before touching a sampled task,
 fix its root and run **every** later command for it as `tasks -C <root> ...`:
 
-- `sample` ran unscoped: the root is the current directory.
+- `sample` ran unscoped: the root is the nearest ancestor of the current directory that
+  contains `tasks/.config.toml`. That is the project an unscoped `tasks` command locates;
+  from a subdirectory it is not the current directory, and running grep there would miss
+  the specs and history the verdict depends on.
 - `sample` ran with `--project` or `--all-projects`: the root is the path that
   `tasks --pretty root <id>` prints. The default JSON form is an object; its `root`
   field is the same path. Never pass the JSON to `-C`.
@@ -82,11 +87,12 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
 
 ## Pending proposals
 
-A task whose most recent note is a `curate:` note carrying a `proposal:` segment is not
-re-curated. Report it as `pending` with the proposal text and move on. Any later note
-clears it: the human records the decision with `tasks note <id> "<decision>"` whether
-they acted on the proposal or declined it. A `keep` or `refined` task simply re-enters
-the pool after the age window; reviewing it again is the maintenance.
+`sample` never draws a task whose most recent note is a `curate:` note carrying a
+`proposal:` segment; it reports the task as `pending` with the proposal text instead.
+Relay those lines in the summary and move on. Any later note clears it: the human records
+the decision with `tasks note <id> "<decision>"` whether they acted on the proposal or
+declined it. A `keep` or `refined` task simply re-enters the pool after the age window;
+reviewing it again is the maintenance.
 
 ## Bounds
 
@@ -97,8 +103,8 @@ the pool after the age window; reviewing it again is the maintenance.
 
 ## Summary to the human
 
-One line per sampled task: id, verdict (or `skipped: <reason>` / `pending: <proposal>`),
-one phrase of what changed. Then the decisions that are the human's, grouped, omitting
+One line per sampled task: id, verdict (or `skipped: <reason>`), one phrase of what
+changed; then one `pending: <proposal>` line per pending warning `sample` printed. Then the decisions that are the human's, grouped, omitting
 empty groups:
 
 - **drops**: id, and the commit or the duplicate id;

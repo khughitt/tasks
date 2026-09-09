@@ -34,7 +34,7 @@ visiting each checkout in turn.
   existing spelling, on every command that gains the scope.
 - **One scope, opened once.** Read commands take a `Scope` that is either the local project
   or the set of reachable registered projects. Reachability is decided in one function, so
-  `list`, `ready`, `prime`, `tree`, `next`, `tags`, and `projects` cannot drift in how they
+  `list`, `ready`, `prime`, `tree`, `next`, `tags`, `sample`, and `projects` cannot drift in how they
   treat a missing root. `--all-projects` is only defined on the read commands. Write
   commands keep a mandatory local project, with exactly one exception: `add --project`
   names its target explicitly and locates no local project (§4.3). Dispatch must therefore

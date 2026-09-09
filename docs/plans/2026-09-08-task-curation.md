@@ -25,8 +25,9 @@ the same checkout.
 - **`just check` before every commit; `just gate` before the final one.** `check` is
   `cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check`; the
   pre-commit hook runs it for you and refuses on failure.
-- **Conventional commits, no AI-attribution trailers.** The pre-commit hook rejects a
-  `Claude-Session:` line; do not add one.
+- **Conventional commits, no AI-attribution trailers.** Do not add a `Claude-Session:`
+  line. The git hooks do not inspect messages; in this user's harness a pre-tool hook
+  refuses the commit command when it carries one, and elsewhere nothing will.
 - **There is no library target.** End-to-end tests live in `tests/cli.rs` and run against
   the built binary: `cargo test --test cli <filter>`.
 - **Every task ends by reinstalling and closing its task in the same commit as the code**

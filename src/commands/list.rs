@@ -33,10 +33,8 @@ pub fn list(
         .iter()
         .map(|status| Status::parse(status))
         .collect::<Result<Vec<_>>>()?;
-    let mut tasks = ctx.scope.scan()?;
-    let all = tasks.clone();
-    let prefixes = ctx.scope.prefixes();
-    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
+    let (all, claims) = ctx.scan_with_claims()?;
+    let mut tasks = all.clone();
     let parent = parent
         .as_deref()
         .map(|id| super::parse_id(&ctx.registry, id))
@@ -90,6 +88,15 @@ pub fn list(
     }))
 }
 
+/// Why a live claim keeps a task out of a read command's rows. `ready` appends the
+/// takeover hint; `sample` does not, since a curator never starts a task.
+pub fn claim_omission(id: &TaskId, claim: &crate::claims::Claim) -> String {
+    format!(
+        "{id} omitted: claimed by session {} in {}",
+        claim.session, claim.worktree
+    )
+}
+
 /// Ready tasks in ready order; pushes a warning per unreachable dependency.
 pub fn ready_tasks(
     ctx: &mut ReadCtx,
@@ -131,8 +138,9 @@ pub fn ready_tasks(
     ready.retain(|task| match claims.live(&task.id) {
         Some(claim) => {
             warnings.push(format!(
-                "{} omitted: claimed by session {} in {} — `tasks start --force {}` to take it over",
-                task.id, claim.session, claim.worktree, task.id
+                "{} — `tasks start --force {}` to take it over",
+                claim_omission(&task.id, claim),
+                task.id
             ));
             false
         }
@@ -149,9 +157,7 @@ pub fn ready(
     limit: Option<usize>,
 ) -> Result<Output> {
     let size = size.map(|size| Size::parse(&size)).transpose()?;
-    let all = ctx.scope.scan()?;
-    let prefixes = ctx.scope.prefixes();
-    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
+    let (all, claims) = ctx.scan_with_claims()?;
     let mut tasks = ready_tasks(&mut ctx, &all, &claims)?;
     if let Some(size) = size {
         tasks.retain(|task| task.size == Some(size));
@@ -175,9 +181,7 @@ pub fn ready(
 /// The head of `ready` in the show shape, so a caller can start on it without a second
 /// lookup. Nothing ready is a normal state: null, warnings, exit 0.
 pub fn next(mut ctx: ReadCtx) -> Result<Output> {
-    let all = ctx.scope.scan()?;
-    let prefixes = ctx.scope.prefixes();
-    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
+    let (all, claims) = ctx.scan_with_claims()?;
     let ready = ready_tasks(&mut ctx, &all, &claims)?;
     let next = match ready.into_iter().next() {
         None => None,
@@ -208,9 +212,7 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
 }
 
 pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
-    let all = ctx.scope.scan()?;
-    let prefixes = ctx.scope.prefixes();
-    let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
+    let (all, claims) = ctx.scan_with_claims()?;
     let counts = Counts::of(&all);
     let ready = ready_tasks(&mut ctx, &all, &claims)?;
     let mut doing: Vec<Task> = all

@@ -8154,16 +8154,57 @@ fn sample_draws_only_from_the_curable_pool() {
     let recent = id_of(env.json(&dir, &["add", "Recent", "-p", "2"]));
     let live = old_task(&env, &dir, "Live claim", &[]);
     write_claim(&env, "sci", &live, "other-session", true);
+    // a curate note whose proposal the human has not answered keeps the task out; a
+    // curate note without one, or any later note, does not
+    let pending = old_task(&env, &dir, "Pending", &[]);
+    env.json(
+        &dir,
+        &[
+            "note",
+            &pending,
+            "curate: stale; body tightened; proposal: drop, landed in abc1234",
+        ],
+    );
+    stamp(
+        &dir,
+        &pending,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+    let kept = old_task(&env, &dir, "Kept", &[]);
+    env.json(&dir, &["note", &kept, "curate: keep; nothing to change"]);
+    stamp(&dir, &kept, "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+    let answered = old_task(&env, &dir, "Answered", &[]);
+    env.json(
+        &dir,
+        &["note", &answered, "curate: duplicate; proposal: merge"],
+    );
+    env.json(&dir, &["note", &answered, "declined: they differ in scope"]);
+    stamp(
+        &dir,
+        &answered,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+    // last: `note` prunes dead claims from the store, so a stale claim written earlier
+    // would be swept before the draw
     let stale = old_task(&env, &dir, "Stale claim", &[]);
     write_claim(&env, "sci", &stale, "gone-session", false);
 
     let v = env.json(&dir, &["sample", "-n", "10", "--seed", "1"]);
     let mut ids = sampled_ids(&v);
     ids.sort();
-    let mut expected = vec![idea.clone(), todo.clone(), blocked.clone(), stale.clone()];
+    let mut expected = vec![
+        idea.clone(),
+        todo.clone(),
+        blocked.clone(),
+        stale.clone(),
+        kept.clone(),
+        answered.clone(),
+    ];
     expected.sort();
     assert_eq!(ids, expected, "{v}");
-    for absent in [&doing, &done, &dropped, &recent, &live] {
+    for absent in [&doing, &done, &dropped, &recent, &live, &pending] {
         assert!(!ids.contains(absent), "{absent} must not be drawn: {v}");
     }
     let warnings = v["warnings"].as_array().unwrap();
@@ -8177,7 +8218,13 @@ fn sample_draws_only_from_the_curable_pool() {
     assert!(
         warnings
             .iter()
-            .any(|w| w.as_str().unwrap().contains("pool holds 4")),
+            .any(|w| w.as_str().unwrap() == format!("{pending} pending: drop, landed in abc1234")),
+        "{v}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("pool holds 6")),
         "{v}"
     );
     // rows are list rows: the same keys, with the claim reported on the stale one
@@ -8203,13 +8250,29 @@ fn sample_older_than_zero_admits_fresh_tasks_and_goals_stay_in() {
         &dir,
         &future,
         "2026-01-01T00:00:00Z",
-        "2030-01-01T00:00:00Z",
+        "2999-01-01T00:00:00Z",
     );
 
     let v = env.json(&dir, &["sample", "-n", "10"]);
     assert_eq!(sampled_ids(&v), Vec::<String>::new(), "{v}");
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("not updated in 7 days")),
+        "{v}"
+    );
 
     let v = env.json(&dir, &["sample", "-n", "10", "--older-than", "0"]);
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("any age")),
+        "{v}"
+    );
     let mut ids = sampled_ids(&v);
     ids.sort();
     let mut expected = vec![goal, child, future];

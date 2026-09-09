@@ -54,7 +54,7 @@ registered project without leaving the current one. A prefix matching the curren
 always means this checkout.
 
 The read commands say where to look instead of inferring it from an id: `list`, `ready`,
-`next`, `prime`, `tree`, and `tags` each take `--project <prefix>` for one registered
+`next`, `prime`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one registered
 project or `--all-projects` for every reachable one. Either works from anywhere, including
 outside every project. `--project` reads that project's *registered* root, so from a
 worktree it is how you ask for the main checkout. `tree <id>` is the exception that needs

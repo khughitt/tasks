@@ -310,6 +310,15 @@ pub fn parse_id(registry: &Registry, id: &str) -> Result<TaskId> {
 }
 
 impl ReadCtx {
+    /// Every task in scope plus the claim snapshot for the scope's prefixes: the prologue
+    /// of each read command that reports claims.
+    pub fn scan_with_claims(&self) -> Result<(Vec<Task>, crate::claims::ClaimSnapshot)> {
+        let all = self.scope.scan()?;
+        let prefixes = self.scope.prefixes();
+        let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
+        Ok((all, claims))
+    }
+
     pub fn resolve_task(&self, id: &TaskId) -> Result<Option<Task>> {
         self.scope.resolve_task(&self.registry, id)
     }
