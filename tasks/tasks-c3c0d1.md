@@ -6,7 +6,7 @@ priority: 2
 size: m
 owner: design/curation
 created: 2026-09-09T03:01:18Z
-updated: 2026-09-09T10:12:06Z
+updated: 2026-09-09T11:06:14Z
 depends: []
 tags: [curation, cli, skill]
 spec: docs/specs/2026-09-08-task-curation-design.md
@@ -21,3 +21,4 @@ A curate skill, skills/curate/SKILL.md, that samples open tasks and refines each
 - 2026-09-09T09:23:28Z (design/curation): plan review: --older-than bounded 0..=36500 at the CLI and 0 skips the age check; draw uses Rng::u64 with a known-answer test; root resolved via tasks --pretty root
 - 2026-09-09T10:11:56Z (design/curation): first pass: 0 tasks, verdicts none, 0 proposals (pool empty: every open record updated within the 7-day window); no skill defects exposed
 - 2026-09-09T10:12:06Z (design/curation): tasks sample and the curate skill landed; kinds follow in tasks-5b73bf
+- 2026-09-09T11:06:14Z (design/curation): real pass (unscoped, --older-than 0, seed 42): 3 tasks, verdicts refined/refined/decision, 1 proposal (tasks-120a02); notes survived body rewrites; the pending exclusion held on the re-draw
