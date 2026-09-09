@@ -6,7 +6,7 @@ priority: 2
 size: m
 owner: design/curation
 created: 2026-09-09T03:01:18Z
-updated: 2026-09-09T08:55:38Z
+updated: 2026-09-09T09:23:28Z
 depends: []
 tags: [curation, cli, skill]
 spec: docs/specs/2026-09-08-task-curation-design.md
@@ -18,3 +18,4 @@ A curate skill, skills/curate/SKILL.md, that samples open tasks and refines each
 ## Notes
 
 - 2026-09-09T08:42:19Z (design/curation): spec review: pass runs every command as tasks -C <root>; only pending proposals persist a skip, the age window governs repeat reviews; revalidate status, claim, and updated before the first write (check, not lock); summary gains a questions group
+- 2026-09-09T09:23:28Z (design/curation): plan review: --older-than bounded 0..=36500 at the CLI and 0 skips the age check; draw uses Rng::u64 with a known-answer test; root resolved via tasks --pretty root

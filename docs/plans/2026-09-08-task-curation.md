@@ -145,6 +145,9 @@ fn sample_older_than_zero_admits_fresh_tasks_and_goals_stay_in() {
     let dir = env.init("sci");
     let goal = id_of(env.json(&dir, &["add", "Goal", "-p", "2"]));
     let child = id_of(env.json(&dir, &["add", "Child", "-p", "2", "--parent", &goal]));
+    // clock skew: a record stamped in the future is "within" every positive window
+    let future = id_of(env.json(&dir, &["add", "Future", "-p", "2"]));
+    stamp(&dir, &future, "2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z");
 
     let v = env.json(&dir, &["sample", "-n", "10"]);
     assert_eq!(sampled_ids(&v), Vec::<String>::new(), "{v}");
@@ -152,9 +155,66 @@ fn sample_older_than_zero_admits_fresh_tasks_and_goals_stay_in() {
     let v = env.json(&dir, &["sample", "-n", "10", "--older-than", "0"]);
     let mut ids = sampled_ids(&v);
     ids.sort();
-    let mut expected = vec![goal, child];
+    let mut expected = vec![goal, child, future];
     expected.sort();
     assert_eq!(ids, expected, "{v}");
+}
+
+#[test]
+fn sample_bounds_older_than_at_the_cli() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    old_task(&env, &dir, "T", &[]);
+    for bad in ["36501", "10000000", "18446744073709551615", "-1"] {
+        let out = env
+            .cmd(&dir)
+            .args(["sample", "--older-than", bad])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "--older-than {bad} must be a parse error");
+    }
+    let v = env.json(&dir, &["sample", "--older-than", "36500"]);
+    assert_eq!(sampled_ids(&v).len(), 1, "{v}");
+}
+
+/// Pins the seeded draw so a change of generator or generator width is caught. The
+/// expected indices were computed with fastrand 2.5.0 by the same algorithm
+/// (`Rng::with_seed(seed)`, then `rng.u64(i..n)` for each slot) over a pool of twenty
+/// ids sorted lexically; on a 32-bit target `Rng::usize` would give different values.
+#[test]
+fn sample_seeded_draw_is_a_known_answer() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for n in 0..20u32 {
+        let id = format!("sci-{n:06x}");
+        std::fs::write(
+            dir.join(format!("tasks/{id}.md")),
+            format!(
+                "---\nid: {id}\ntitle: T{n}\nstatus: todo\npriority: 2\n\
+                 created: 2026-01-01T00:00:00Z\nupdated: 2026-01-01T00:00:00Z\n\
+                 depends: []\ntags: []\n---\n"
+            ),
+        )
+        .unwrap();
+    }
+    let v = env.json(&dir, &["sample", "--seed", "7"]);
+    assert_eq!(
+        sampled_ids(&v),
+        vec!["sci-00000f", "sci-000005", "sci-00000e"],
+        "{v}"
+    );
+    let v = env.json(&dir, &["sample", "--seed", "8"]);
+    assert_eq!(
+        sampled_ids(&v),
+        vec!["sci-000005", "sci-000002", "sci-000000"],
+        "{v}"
+    );
+    let v = env.json(&dir, &["sample", "-n", "5", "--seed", "7"]);
+    assert_eq!(
+        sampled_ids(&v),
+        vec!["sci-00000f", "sci-000005", "sci-00000e", "sci-00000b", "sci-000001"],
+        "{v}"
+    );
 }
 
 #[test]
@@ -235,8 +295,9 @@ fn sample_scopes_like_the_other_read_commands() {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --test cli sample_ 2>&1 | tail -20`
-Expected: every `sample_` test fails; the failure is clap's "unrecognized subcommand
-'sample'" (exit 2) surfacing as a JSON parse panic in `env.json`.
+Expected: every `sample_` test fails (seven of them); most fail on clap's "unrecognized
+subcommand 'sample'" (exit 2) surfacing as a JSON parse panic in `env.json`, and the
+bounds test fails on its final `env.json` call.
 
 - [ ] **Step 3: Add the CLI variant**
 
@@ -249,8 +310,14 @@ In `src/cli.rs`, after the `Next { .. }` variant:
         /// How many to draw (without replacement).
         #[arg(short = 'n', long, default_value_t = 3)]
         count: usize,
-        /// Exclude tasks updated within this many days; 0 admits every open task.
-        #[arg(long, default_value_t = 7, value_name = "DAYS")]
+        /// Exclude tasks updated within this many days (0 to 36500); 0 skips the age
+        /// check entirely.
+        #[arg(
+            long,
+            default_value_t = 7,
+            value_name = "DAYS",
+            value_parser = clap::value_parser!(u64).range(0..=36500)
+        )]
         older_than: u64,
         /// Fix the draw so a pass can be reproduced.
         #[arg(long)]
@@ -286,14 +353,21 @@ pub fn sample(
     let all = ctx.scope.scan()?;
     let prefixes = ctx.scope.prefixes();
     let claims = crate::claims::ClaimSnapshot::load(prefixes.iter().map(String::as_str))?;
-    let cutoff = time::OffsetDateTime::now_utc() - time::Duration::days(older_than as i64);
+    // Bounded to <= 36500 at the CLI, so the cast is exact and the subtraction stays far
+    // inside OffsetDateTime's range. Zero means no age check at all: a future-dated
+    // record from clock skew is still admitted.
+    let cutoff = (older_than > 0).then(|| {
+        time::OffsetDateTime::now_utc() - time::Duration::days(older_than as i64)
+    });
 
     let mut pool: Vec<&Task> = Vec::new();
     for task in &all {
         if !matches!(task.status, Status::Idea | Status::Todo | Status::Blocked) {
             continue;
         }
-        if crate::time::parse(&task.updated)? > cutoff {
+        if let Some(cutoff) = cutoff
+            && crate::time::parse(&task.updated)? > cutoff
+        {
             continue;
         }
         if let Some(claim) = claims.live(&task.id) {
@@ -319,9 +393,11 @@ pub fn sample(
         None => fastrand::Rng::new(),
     };
     // Partial Fisher–Yates: the first `take` slots are a uniform draw without replacement.
+    // `u64`, not `usize`: fastrand's usize generator differs between 32- and 64-bit
+    // targets, and a seed must reproduce the same draw everywhere.
     let take = count.min(pool_size);
     for i in 0..take {
-        let j = rng.usize(i..pool_size);
+        let j = rng.u64(i as u64..pool_size as u64) as usize;
         pool.swap(i, j);
     }
     let drawn = &pool[..take];
@@ -357,10 +433,10 @@ In `src/commands/mod.rs`, add `pub mod sample;` to the module list (alphabetical
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cargo test --test cli sample_ 2>&1 | tail -20`
-Expected: 5 passed. Then `just check` to confirm fmt and clippy are clean; fix anything it
-reports (clippy will want `as i64` justified or replaced with `i64::try_from` if it flags
-the cast; use `i64::try_from(older_than).map_err(|_| Error::Validation(...))?` in that
-case, importing `crate::error::Error`).
+Expected: 7 passed. Then `just check` to confirm fmt and clippy are clean. If clippy
+flags the `as i64` cast despite the comment, `i64::try_from(older_than).expect("bounded
+to 36500 by the CLI")` is the right replacement: the range is enforced before this code
+runs, so an error path here would be dead.
 
 - [ ] **Step 7: Document the command**
 
@@ -369,8 +445,9 @@ In `docs/specs/2026-08-29-tasks-design.md` section 5, after the `tasks ready` en
 ```
 tasks sample [-n N] [--older-than DAYS] [--seed U64] [--project P | --all-projects]
     N tasks (default 3) drawn uniformly without replacement from the curable pool: status
-    idea, todo, or blocked; no live claim; updated more than DAYS days ago (default 7; 0
-    admits every open task). Rows are list rows. Fewer than N in the pool returns the
+    idea, todo, or blocked; no live claim; updated more than DAYS days ago (default 7,
+    at most 36500; 0 skips the age check, so even a future-dated record is admitted).
+    Rows are list rows. Fewer than N in the pool returns the
     pool with a warning; an empty pool is an empty list, exit 0. --seed fixes the draw.
     Live-claim omissions are warned like ready's. The read side of the curate skill
     (docs/specs/2026-09-08-task-curation-design.md).
@@ -443,7 +520,9 @@ could sample one copy of a task and rewrite another. So, before touching a sampl
 fix its root and run **every** later command for it as `tasks -C <root> ...`:
 
 - `sample` ran unscoped: the root is the current directory.
-- `sample` ran with `--project` or `--all-projects`: the root is `tasks root <id>`.
+- `sample` ran with `--project` or `--all-projects`: the root is the path that
+  `tasks --pretty root <id>` prints. The default JSON form is an object; its `root`
+  field is the same path. Never pass the JSON to `-C`.
 
 Grep, `git log`, and every other piece of evidence gathering run in that same root.
 
@@ -570,7 +649,7 @@ command the skill names exists and yields the fields the skill reads:
 ```bash
 tasks sample -n 1 --seed 1 --project tasks
 id=<the id it printed>
-root=$(tasks root "$id")
+root=$(tasks --pretty root "$id")
 tasks -C "$root" show "$id" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["task"]["status"], d["task"]["updated"], d["claim"])'
 tasks -C "$root" tree "$id" --pretty
 tasks -C "$root" tags --pretty

@@ -36,8 +36,10 @@ tasks-5b73bf so they are derived from passes rather than guessed.
 
 - **Pool.** Tasks whose status is `idea`, `todo`, or `blocked`; not `doing`, `done`, or
   `dropped`. A task with a live claim is excluded. A task whose `updated` is within
-  `--older-than` days of now is excluded; the default is 7 and `--older-than 0` admits
-  everything open. Goals (tasks with children) stay in the pool; whether a goal is
+  `--older-than` days of now is excluded; the default is 7. `--older-than 0` skips the
+  age check entirely, so a future-dated record (clock skew) is admitted too. The value is
+  bounded at the CLI to 0 through 36500 days (a century); anything else is a clap parse
+  error, so the date arithmetic can never overflow. Goals (tasks with children) stay in the pool; whether a goal is
   decomposed well is a curation question. Ideas stay in; they are most of the corpus and
   the least examined.
 - **Selection.** Uniform, without replacement. `-n` defaults to 3. `--seed` fixes the
@@ -58,8 +60,10 @@ tasks-5b73bf so they are derived from passes rather than guessed.
   candidate list.
 - **Random source.** `fastrand`, already a dependency: `fastrand::Rng::with_seed` when
   `--seed` is given, `fastrand::Rng::new()` otherwise. Selection is a partial
-  Fisher–Yates over the pool's index vector, so a seed gives the same result on every
-  platform.
+  Fisher–Yates over the pool sorted by id, drawing each index as a fixed-width `u64`
+  (`Rng::u64`, never `Rng::usize`, whose generator differs between 32- and 64-bit
+  targets), so a seed gives the same result on every platform. A known-answer test pins
+  the draw.
 
 ## The curate skill
 
@@ -74,7 +78,8 @@ tasks in the current project. The skill runs `tasks sample` with those arguments
 from a worktree the pass could sample one copy of a task and rewrite another. The skill
 therefore resolves a root before touching a sampled task and runs every later command for
 it, reads and writes alike, as `tasks -C <root> ...`: the current directory when `sample`
-ran unscoped, otherwise the output of `tasks root <id>`. Evidence gathering (grep, git
+ran unscoped, otherwise the path `tasks --pretty root <id>` prints (the JSON form carries
+it in the `root` field). Evidence gathering (grep, git
 log) runs in that same root.
 
 **Per task.**
