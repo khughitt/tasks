@@ -5,23 +5,19 @@ status: todo
 priority: 2
 size: l
 created: 2026-09-09T12:31:46Z
-updated: 2026-09-09T13:20:02Z
+updated: 2026-09-09T14:12:07Z
 depends: []
 tags: [cli, observability, provenance]
 spec: docs/specs/2026-09-09-park-design.md
 ---
 
-Today 'doing' is the only active state, so a task set down overnight says nothing about whether it waits on the user or the agent, or what the next concrete action is. The current doing task shows the shape of the problem: its resumption state exists, but buried in the last of several long notes, invisible in every list view.
+Today 'doing' is the only active state, so a task set down overnight says nothing about whether it waits on the user or the agent, or what the next concrete action is. The resumption state exists, but buried in the last of several long notes, invisible in every list view.
 
-Proposal: 'tasks park <id> "<next step>" [--waiting-on user|agent]'. One command at the moment work already stops, no new Status variant, so the JSON contract, ready, closeout, and existing consumers stay untouched. 'blocked' is the wrong home: it hides a task from ready, while a parked task should sit at the top of the morning list. 'next' and 'prime' list parked tasks first with the next-step line.
+Decision (docs/specs/2026-09-09-park-design.md): 'tasks park <id> "<next step>" [--waiting-on user|agent]' converts the caller's hold into a park entry in the shared claim store: at, next step, waiting on, tagged session, owner, host, worktree, title snapshot. The record gains only a note. Status is untouched; any open task can be parked. start replaces the entry with a live claim (resume, including doing to doing); done and drop remove it; status-preserving saves leave the store alone but keep every guard. Phase is derived from spec and plan links, never stored. prime gains a parked section, ready omits user-parked work with a warning, next prefers agent-parked candidates (open, not blocked, dependencies closed, no children; an idea means resume scoping), list --parked feeds pickers. Store-only entries resolve through their recorded worktree and are display-only when unresolved.
 
-Phase is derived, not stored. No spec means brainstorming; a spec without a plan means planning; a plan with open step children means implementing. The parked listing shows the derived phase beside the line, giving the observability without a field to keep honest.
+Rejected: new Status variants (phase is derivable; contract churn) and frontmatter park fields (released claims lose cross-worktree visibility; a record field cannot represent cancellation and resurrects cleared parks).
 
-Session capture rides on park. The claim store already resolves owner, session id, host, worktree, and started, but deliberately discards them when the claim clears. Park copies harness and session id into the park record, the one moment the session is worth remembering, so 'start' and 'done' write nothing new. Store the session as an opaque string with a harness tag, never interpreted, like --source: resume is harness-specific and perishable, so the launcher decides what to do with it. The human handle is the task title plus the next-step line; a session name is nice but unreliable.
-
-Open questions: does park live in the record (a field, a structured note) or beside the claim; does re-parking replace or append; does start or done clear the park; what prime shows when a parked task is also live-claimed.
-
-Consumers: the quick-launch picker (tasks-202e1f) and the familiar-side session-end hook that parks a still-claimed task automatically.
+Consumers: the quick-launch picker (tasks-202e1f) and the familiar session-end hook (fam-5b276b).
 
 ## Notes
 
@@ -29,3 +25,4 @@ Consumers: the quick-launch picker (tasks-202e1f) and the familiar-side session-
 - 2026-09-09T12:39:44Z (main): Reshaped from phase states to a park command; tasks-abfd3d (session capture) folded in. Hook piece filed in familiar.
 - 2026-09-09T12:39:44Z (main): Familiar-side hook piece: fam-5b276b.
 - 2026-09-09T13:20:02Z (park): Brainstormed 2026-09-09; design in docs/specs/2026-09-09-park-design.md. Next: writing-plans, then children per plan step.
+- 2026-09-09T14:12:07Z (park): Spec revised after review 2026-09-09: store-authoritative parking, no frontmatter fields; start is resume; next eligibility and store-only rows defined.

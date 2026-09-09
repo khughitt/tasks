@@ -1,6 +1,6 @@
 # Park: setting a task down with its next step
 
-Status: designed (2026-09-09); not yet implemented
+Status: designed (2026-09-09, revised after review the same day); not yet implemented
 Task: tasks-08b9d5; consumers tasks-202e1f (quick launch), fam-5b276b (session-end hook)
 
 ## 1. Problem
@@ -16,75 +16,107 @@ it was left. And the session that did the work is forgotten the moment its claim
 so nothing can offer to resume it.
 
 Adding phase states (brainstorming, planning, implementing) to `Status` was considered and
-rejected. Every phase is already derivable from the record (§4), and a new status variant
+rejected. Every phase is already derivable from the record (§4.2), and a new status variant
 changes the JSON contract, `ready`, `closeout`, and every consumer. What is *not*
 derivable is the next step and who it waits on. That is what park records.
 
 ## 2. Decision
 
-One command, `tasks park`, that records four optional fields on the task: when it was
-parked, the one-line next step, whether it waits on the user or the agent, and the session
-that set it down. Status is untouched; park works on any open task. `start`, `done`, and
-`drop` clear the fields. `prime` gains a `parked` section, `next` prefers parked work that
-waits on the agent, and `list --parked` feeds pickers.
+One command, `tasks park`, that converts the caller's hold on a task into a **park entry**
+in the shared claim store: when it was parked, the one-line next step, whether it waits on
+the user or the agent, and the session that set it down. The record itself gains only a
+note. Status is untouched; park works on any open task. `start` replaces the park entry
+with a live claim; `done` and `drop` remove it. `prime` gains a `parked` section, `next`
+prefers parked work that waits on the agent, `ready` omits work that waits on the user, and
+`list --parked` feeds pickers.
 
 Phase is derived from the record's spec and plan links and shown on parked rows only.
+
+### 2.1 Why the store, not the record
+
+The first draft wrote four frontmatter fields and released the claim. Review found two
+faults, both structural. Releasing the claim removed the one mechanism that makes work in
+a worktree visible from the main checkout (the work-claims design exists because a
+branch-local `doing` was invisible elsewhere). And a record field cannot represent
+cancellation: park in worktree A, then `start` and `done` in worktree B, and A's unchanged
+frontmatter says parked again the moment it is scanned.
+
+The store has neither fault. It is shared by every worktree of a prefix, and one entry per
+task means "parked", "claimed", and "neither" are exclusive states that any worktree can
+change. The record keeps the durable trail as a note. The trade is the one the claims
+design already made: a fresh machine or a fresh clone shows nothing parked until something
+is parked there, and losing the store file costs the overlay, never a task.
 
 ## 3. The command
 
     tasks park <id> "<next step>" [--waiting-on user|agent]
 
 - `<id>` may be any open task: idea, todo, doing, or blocked. A done or dropped task fails
-  with the invalid-transition error, from and to spelled `done` and `parked` (or `dropped`
-  and `parked`).
-- `<next step>` is a non-empty single line, validated at every write path with the same
-  rule and error shape as `title` and `source`.
+  with the invalid-transition error, from and to spelled `done` (or `dropped`) and
+  `parked`.
+- `<next step>` is a non-empty single line, validated with the same rule and error shape
+  as `title` and `source`.
 - `--waiting-on` defaults to `agent`. Any other value is a validation error listing the
   two accepted values.
 - Park appends a note, `parked (waiting on <who>): <next step>`, so re-parking leaves a
-  trail. Re-parking replaces the four fields; the notes accumulate.
+  trail on the record. Re-parking replaces the entry; the notes accumulate.
 - Park routes by the id's prefix like every other id-taking command, so it works on a task
   in another registered project.
+- Park is a mutation: it runs under the store's mutation lock, and the file write and the
+  store write move together in the order the claims design fixed (validate everything,
+  then write the record, then the store). If the store write fails after the note has
+  landed, the result is a warning in the shape `note` uses for a failed heartbeat, saying
+  the note landed but the task is not parked.
 
-### 3.1 Claims
+### 3.1 Store effects
 
-Park is the moment a session lets go, so it releases the caller's own claim.
+| Store holds before park                  | Result                                          |
+|------------------------------------------|-------------------------------------------------|
+| nothing                                  | park entry written                              |
+| the caller's own claim (live or stale)   | replaced by a park entry                        |
+| another session's live claim             | `claimed`, naming that session; no `--force`    |
+| another session's stale claim            | replaced by a park entry, with the takeover warning `start` uses |
+| a park entry (any session)               | replaced; re-parking is allowed from any session |
 
-- A live claim held by another session fails with `claimed`, naming that session, through
-  the same guard status changes use. No `--force`: taking over someone's task to park it
-  is not a thing.
-- The caller's own claim is removed after the file write succeeds. If the store write then
-  fails, the park has landed and a warning says the claim was not released, in the shape
-  `note` uses for a failed heartbeat.
-- No claim at all is fine. An idea being brainstormed was never started.
+No `--force`: taking over a live session's task in order to set it down is not a thing.
+An idea being brainstormed without `start` has no entry; parking it writes one, which is
+what makes it visible from other worktrees.
 
-## 4. The record
+## 4. The store entry
 
-Four frontmatter fields, written after `source` and before `spec`, omitted when absent.
-They are all present or all absent; a partial set is a parse error naming the file, in the
-shape the second `## Notes` heading uses.
+The per-prefix store (`claims.rs`) holds at most one entry per task id: a claim, as today,
+or a park. Park entries carry:
 
 | Field        | Value                                                                  |
 |--------------|------------------------------------------------------------------------|
-| `parked`     | timestamp of the park, same format as `created` and `updated`          |
-| `next_step`  | the one line; quoted by the writer whenever the frontmatter subset needs it |
+| `at`         | timestamp of the park, same format as `created` and `updated`          |
+| `next_step`  | the one line                                                           |
 | `waiting_on` | `user` or `agent`                                                      |
 | `session`    | opaque, scheme-tagged session reference (§6); never interpreted        |
+| `owner`      | who parked it, from the same identity `start` records                  |
+| `host`, `worktree` | where the record that was parked lives, as claims record them   |
+| `title`      | snapshot of the task title at park time, for rows whose file is unreachable (§5.3) |
 
-### 4.1 What clears the fields
+Park entries have no liveness. They are neither live nor stale, do not heartbeat, and are
+never pruned by a read. `claim_guard` treats a park entry as free: `start` from any
+session replaces it without `--force` and without a takeover warning.
 
-| Command            | Effect on the park record                                        |
-|--------------------|------------------------------------------------------------------|
-| `start`            | cleared; appends nothing, the park note and the new claim suffice |
-| `done`, `drop`     | cleared; a closed record keeps no resumption state               |
-| `block`, `unblock` | untouched; waiting on the user is not blocked, and a blocked task may carry a next step |
-| `note`, `dep`      | untouched                                                        |
-| `edit`             | untouched by flags; the editor path validates the set (§7)      |
-| `park`             | replaced                                                         |
+### 4.1 What changes the entry
+
+| Command                                 | Effect on a park entry                         |
+|-----------------------------------------|------------------------------------------------|
+| `start`                                 | replaced by a live claim; this is resume, and it applies on `doing → doing` too |
+| `done`, `drop`                          | removed                                        |
+| `edit --status` / editor save that *changes* status to `doing`, `done`, or `dropped` | as `start`, `done`, `drop` |
+| any save that leaves status unchanged   | untouched (§4.3)                               |
+| `block`, `unblock`                      | untouched; waiting on the user is not blocked, and a blocked task may carry a next step |
+| `note`, `dep`, field edits              | untouched                                      |
+| `park`                                  | replaced                                       |
 
 ### 4.2 Derived phase
 
-Phase is never stored. It is computed for parked rows, first match wins:
+Phase is never stored. It is computed for parked rows from the resolved record, first match
+wins:
 
 | Rule                          | Phase           |
 |-------------------------------|-----------------|
@@ -98,42 +130,95 @@ needed a design; the absence of a spec does not mean brainstorming. Only an idea
 unscoped by definition.
 
 `phase` appears on parked rows in `prime` and `list --parked` and in their pretty
-listings. It is not on `show` or on any unparked row, so the derivation touches one output
-shape.
+listings; it is `null` when the record could not be resolved (§5.3). It is not on `show`
+or on any unparked row.
+
+### 4.3 Status-preserving saves
+
+Today the editor path calls `transition` on every save, and the claim guard then acquires a
+claim whenever the status is `doing`, changed or not. Under this design that would replace
+a park entry on an unrelated field edit. The rule becomes: **a save that leaves status
+unchanged does not write the store.** Only `start` (always) and an actual change of status
+(into `doing`, `done`, or `dropped`) touch the entry. Re-acquiring a claim on an unchanged
+`doing` save was incidental behaviour, not a contract, and stops.
+
+Preserving the store is not bypassing the guards. A status-preserving save still enforces
+the foreign-live-claim check (`claimed` when another live session holds the task) and the
+concurrent-edit checks (`updated` comparison, newer-sibling-copy warning) exactly as today.
+The only thing it stops doing is writing the store.
 
 ## 5. Surfacing
 
-- **`prime`** gains `parked`: the parked open tasks, most recently parked first. Rows are
-  the summary row shape plus `phase`, `parked`, `next_step`, `waiting_on`, and `session`.
-  Pretty output prints the section before `ready`, one row per task with phase, who it
-  waits on, and the next-step line.
-- **`next`** returns the most recently parked task whose `waiting_on` is `agent` and which
-  has no live claim by another session. Only when there is none does it fall back to the
-  first ready task. The output shape is unchanged; the show shape already carries the four
-  fields. A parked task skipped for a foreign live claim is named in a warning, as `ready`
-  names its omissions. `--project` and `--all-projects` apply as today.
-- **`list --parked`** keeps only parked tasks. It combines with the other `list` filters
-  and both read scopes. Rows carry the same five extra keys as `prime`'s section. `ready`
-  does not change: readiness is about what can be started, and a parked todo is already in
-  it on its own merits.
-- **Pretty `show`** prints the four frontmatter lines. Pretty `list` rows do not gain a
-  column.
+The **effective parking state** of a task is the store entry, everywhere: `prime`, `next`,
+`ready`, `list`, and `show` all read the same snapshot.
 
-### 5.1 JSON shapes
+### 5.1 Views
+
+- **`prime`** gains `parked`: every park entry in scope, most recently parked first. Rows
+  are the summary row shape plus `phase`. Pretty output prints the section before `ready`,
+  one row per task with phase, who it waits on, and the next-step line. Any open status may
+  appear; it is a view, not a recommendation.
+- **`ready`** omits tasks whose park entry waits on the user, with a warning per omission in
+  the shape live-claim omissions use: `<id> omitted: parked waiting on the user: <next
+  step>`. Ready means an agent may start it, and a task waiting on a decision is not that.
+  Tasks parked waiting on the agent stay in `ready` on their own merits.
+- **`next`** returns the most recently parked **candidate** (§5.2). Only when there is none
+  does it fall back to the first ready task, which by the rule above can no longer be a
+  user-parked task. The output shape is unchanged. `--project` and `--all-projects` apply
+  as today.
+- **`list --parked`** keeps only tasks with a park entry, resolved the same way `prime`'s
+  section is. It combines with the other `list` filters and both read scopes. Rows gain
+  `phase`.
+- **Pretty `show`** prints a `park` block after the claim line. Pretty `list` rows do not
+  gain a column.
+
+### 5.2 Candidates for `next`
+
+A parked task is a candidate when an agent may act on it alone:
+
+- its record was resolved (§5.3) and its status is open;
+- `waiting_on` is `agent`;
+- status is not `blocked`;
+- every dependency resolves and is closed (an unreachable dependency holds the task,
+  exactly as `ready` and `done` treat it);
+- it has no children.
+
+An idea is a candidate. A park on an idea is an instruction to **resume scoping**, which is
+the one thing `ready` cannot express for ideas. It never authorizes implementing an
+unscoped idea; the next step says what scoping remains.
+
+### 5.3 Store-only entries
+
+A park entry whose id is not in the scan (a task created and parked in a worktree whose
+branch has not merged) is resolved by reading `tasks/<id>.md` from the entry's recorded
+`worktree`. When that file is unavailable (worktree removed, file missing or unparseable),
+the row is rendered from the payload alone: id, title snapshot, at, next step, waiting on,
+session, worktree, with `status` and `phase` null, and a warning:
+`<id> is parked in <worktree>, which is unavailable; the row shows the park entry only`.
+
+Unresolved rows are display-only. They stay in `prime` and `list --parked` so nothing goes
+silent, but they are never `next` candidates: eligibility cannot be established without
+the record. Reads never delete an entry; `start`, `done`, or `drop` on the task from any
+worktree does.
+
+### 5.4 JSON shapes
 
 Additive only; no existing key changes.
 
 - Every task object (`show`, `next`, and the summary rows of `list`, `ready`, `prime`,
-  `tree`) gains `parked`, `next_step`, `waiting_on`, and `session`, each `null` when the
-  task is not parked.
-- `prime` gains `parked: [row]`, where `row` is the summary row plus `phase`.
+  `tree`) gains `park`, `null` when the task has no park entry, beside `claim`:
+
+      park: { at, next_step, waiting_on, session, owner, host, worktree }
+
+- `prime` gains `parked: [row]`, where `row` is the summary row plus `phase`. A store-only
+  row has `status: null` and `phase: null` and carries the title snapshot as `title`.
 - `list --parked` rows gain `phase`.
 - `park` returns the id shape every mutating command returns.
 
 ## 6. The session value
 
-The claim store keeps the raw session string for matching and is not changed. Park writes
-a tagged copy to the record, following the level that resolved the identity:
+The claim entry keeps the raw session string for matching and is not changed. The park
+entry stores a tagged copy, following the level that resolved the identity:
 
 | Resolved from            | Written as              |
 |--------------------------|-------------------------|
@@ -146,43 +231,63 @@ exactly as consumers of `source` do. Resume is harness-specific and perishable: 
 transcript may be gone, or on another machine. The human handle for a parked task is its
 title plus the next-step line, not the session.
 
-## 7. Validation and `check`
+## 7. Validation and errors
 
-- Write paths (`park`, the editor path) reject an empty or multi-line `next_step` and an
-  unknown `waiting_on`.
-- Reading a file with some but not all of the four fields is a parse error naming the
-  file; `check` reports it like any other unparseable record.
-- `parked` must parse as a timestamp in the record's format.
-- `check` does not verify the session value or the next step against anything. Neither
-  points at a thing tasks can see.
+- `park` rejects an empty or multi-line next step and an unknown `--waiting-on` value with
+  the existing validation error shape.
+- `park` on a closed task fails with the invalid-transition shape (§3).
+- A foreign live claim fails with `claimed` (§3.1).
+- A corrupt store file fails as it does today for every store reader.
+- `check` gains nothing: the record carries only a note, and the store is not the
+  record's concern.
 
 ## 8. Documentation and protocol
 
-- **Field checklist.** Every place a task field must land, per tasks-4e1cae: the field
-  table and JSON shapes block of the tasks design (`docs/specs/2026-08-29-tasks-design.md`
-  §3), its usage blocks in §5, `skills/tasks/SKILL.md`, the README, and the `Task`
-  struct-literal sites in `src/`. The implementation plan lists each.
-- **Protocol.** The tasks skill and this repository's agent guide gain one rule: park
-  before ending a turn that waits on the user, with the next step as the message. Both
+- **Field checklist.** No task field is added, so the field checklist (tasks-4e1cae) does
+  not apply. The JSON shapes block of the tasks design (`docs/specs/2026-08-29-tasks-design.md`
+  §3) gains the `park` object and `prime.parked` addendum; the work-claims design gains a
+  pointer to this document for the second entry kind.
+- **Protocol.** The tasks skill and this repository's agent guide gain two rules: park
+  before ending a turn that waits on the user, with the next step as the message; and
+  `next` may hand you parked work, including an idea, which means resume its scoping. Both
   currently describe `next` as the first ready task; the same commit changes that to
-  "parked work waiting on the agent, else the first ready task".
+  "the most recently parked task waiting on the agent, else the first ready task". The
+  skill's "never pick an idea" rule gains that one exception.
 - **Hook interface.** The familiar-side session-end hook (fam-5b276b) needs no new
   command. `tasks prime` JSON exposes live claims with their sessions, so a hook can find
   the task its session still holds, and `tasks park <id> "<placeholder>" --waiting-on
-  agent` writes the record. The placeholder text is the hook's business.
+  agent` writes the entry. The placeholder text is the hook's business.
 
 ## 9. Testing
 
-- **Unit.** Frontmatter round trip of the four fields including a quoted `next_step`; the
-  all-or-nothing rule; phase derivation over the four rules and their order; session
-  tagging over the three resolution levels.
-- **End to end** (`tests/cli.rs`, against the built binary): park then `show`; re-park
-  replaces the fields and leaves two notes; `start`, `done`, and `drop` each clear;
-  `block` leaves the record; park releases the caller's own claim and refuses a foreign
-  live one with `claimed`; park on a done task fails; `prime` lists parked before ready
-  with `phase`; `next` prefers an agent-parked task over a ready one, skips a user-parked
-  one, skips a foreign-claimed one with a warning, and falls back to ready; `list --parked`
-  filters and combines with `--project`; `check` rejects a partial field set.
+- **Unit.** Store round trip of a park entry beside claims; one-entry-per-id invariant;
+  phase derivation over the four rules and their order; session tagging over the three
+  resolution levels; `claim_guard` treats a park entry as free.
+- **End to end** (`tests/cli.rs`, against the built binary, with `XDG_STATE_HOME` and
+  `TASKS_SESSION` set per test so stores and sessions are isolated):
+  - park then `show` carries `park`; re-park replaces the entry and leaves two notes;
+  - `start` on a parked doing task (doing → doing) replaces the entry with a claim;
+  - `done` and `drop` remove it; `block` leaves it;
+  - park replaces the caller's own claim, refuses a foreign live one with `claimed`,
+    replaces a foreign stale one with a warning;
+  - park on a done task fails;
+  - `edit --status done` on a parked task removes the entry; an editor save that changes
+    only the body leaves the entry untouched **and** still fails with `claimed` when a
+    foreign live session holds the task;
+  - `prime` lists parked before ready with `phase`; `ready` omits a user-parked todo with a
+    warning; `next` with no agent-parked candidate and a user-parked ready todo returns the
+    next ready task, not the parked one (the fallback regression);
+  - `next` prefers an agent-parked task over a ready one; skips a blocked one, a
+    dependency-held one, a goal with children, and one with an unreachable dependency;
+    returns an agent-parked idea;
+  - **park in worktree A, `start` then `done` in worktree B, inspect A**: A shows nothing
+    parked and no resurrection;
+  - **park a task that exists only in a new worktree, inspect main**: `prime` in main lists
+    it with the worktree named; remove the worktree and it is listed from the payload with
+    the unavailable warning and is not returned by `next`;
+  - **park a doing task, then explicit `start` versus an unchanged-status editor save**:
+    the first clears, the second preserves;
+  - `list --parked` filters and combines with `--project`.
 
 ## 10. Out of scope
 
@@ -192,3 +297,4 @@ title plus the next-step line, not the session.
 - Any interpretation of `session`, including launching or resuming anything.
 - An explicit phase override. If derivation proves wrong in practice, that is a new
   decision, not a flag.
+- Parking visible across machines. The store is per machine, as claims are.
