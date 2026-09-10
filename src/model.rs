@@ -80,6 +80,7 @@ mod tests {
             parent: None,
             tags: vec![],
             source: None,
+            model: None,
             spec: spec.map(Into::into),
             plan: plan.map(Into::into),
             step: step.map(Into::into),
@@ -327,6 +328,10 @@ pub struct Task {
     /// message id. Stored and returned, never interpreted or resolved. See
     /// docs/specs/2026-09-06-task-source-design.md.
     pub source: Option<String>,
+    /// The model id the harness reported (`TASKS_MODEL`) for the session that ran the
+    /// latest completion transition; `None` when unknown or cleared. Stored and returned,
+    /// never interpreted. See docs/specs/2026-09-10-model-provenance-design.md.
+    pub model: Option<String>,
     pub spec: Option<String>,
     pub plan: Option<String>,
     pub step: Option<String>,

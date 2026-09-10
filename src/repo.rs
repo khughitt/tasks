@@ -609,6 +609,7 @@ mod tests {
             parent: None,
             tags: vec![],
             source: None,
+            model: None,
             spec: None,
             plan: None,
             step: None,

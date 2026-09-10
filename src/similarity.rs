@@ -104,6 +104,7 @@ mod tests {
             parent: None,
             tags: vec!["feedback".into()],
             source: None,
+            model: None,
             spec: None,
             plan: None,
             step: None,

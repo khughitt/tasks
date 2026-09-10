@@ -27,6 +27,7 @@ pub fn blank(project: &Project, title: String, status: Status) -> Result<Task> {
         parent: None,
         tags: vec![],
         source: None,
+        model: None,
         spec: None,
         plan: None,
         step: None,

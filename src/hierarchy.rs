@@ -250,6 +250,7 @@ mod tests {
             parent: parent.map(|p| TaskId::parse(p).unwrap()),
             tags: vec![],
             source: None,
+            model: None,
             spec: None,
             plan: None,
             step: None,
