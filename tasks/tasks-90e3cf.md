@@ -1,11 +1,11 @@
 ---
 id: tasks-90e3cf
-title: Interval type and the record fields
+title: "Interval type, record fields, and checked add"
 status: todo
 priority: 2
 size: s
 created: 2026-09-10T00:33:06Z
-updated: 2026-09-10T01:25:25Z
+updated: 2026-09-10T01:41:44Z
 depends: []
 parent: tasks-5caeae
 tags: []
