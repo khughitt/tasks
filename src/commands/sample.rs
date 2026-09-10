@@ -29,11 +29,11 @@ pub fn sample(
     seed: Option<u64>,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
+    let now = time::OffsetDateTime::now_utc();
     // Bounded to <= 36500 at the CLI, so the cast is exact and the subtraction stays far
     // inside OffsetDateTime's range. Zero means no age check at all: a future-dated
     // record from clock skew is still admitted.
-    let cutoff = (older_than > 0)
-        .then(|| time::OffsetDateTime::now_utc() - time::Duration::days(older_than as i64));
+    let cutoff = (older_than > 0).then(|| now - time::Duration::days(older_than as i64));
 
     let mut pool: Vec<&Task> = Vec::new();
     for task in &all {
@@ -88,7 +88,7 @@ pub fn sample(
     Ok(Output::List(ListOut {
         tasks: drawn
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         warnings: ctx.warnings,
         date: DateColumn::Updated,

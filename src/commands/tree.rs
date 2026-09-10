@@ -12,6 +12,7 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
         .as_deref()
         .map(|id| super::parse_id(&ctx.registry, id))
         .transpose()?;
+    let now = crate::time::parse(&crate::time::now())?;
     let mut nodes = Vec::new();
     for (_, tasks) in ctx.scope.scan_each()? {
         if let Some(root) = &root
@@ -25,6 +26,7 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
             all,
             None,
             &ctx.registry,
+            now,
         ));
     }
     Ok(Output::Tree(TreeOut {

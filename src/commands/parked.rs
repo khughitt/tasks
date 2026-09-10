@@ -8,8 +8,14 @@ use crate::output::{ParkedRow, TaskSummary};
 use crate::registry::Registry;
 use crate::repo::Project;
 use std::path::Path;
+use time::OffsetDateTime;
 
-pub fn rows(ctx: &mut ReadCtx, all: &[Task], claims: &ClaimSnapshot) -> Result<Vec<ParkedRow>> {
+pub fn rows(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &ClaimSnapshot,
+    now: OffsetDateTime,
+) -> Result<Vec<ParkedRow>> {
     let mut entries: Vec<(&String, &Park)> = claims.parks().collect();
     entries.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| a.0.cmp(b.0)));
     let mut rows = Vec::new();
@@ -26,12 +32,12 @@ pub fn rows(ctx: &mut ReadCtx, all: &[Task], claims: &ClaimSnapshot) -> Result<V
         };
         if let Some(task) = all.iter().find(|task| task.id == id) {
             rows.push(ParkedRow::resolved(
-                TaskSummary::of(task, all, Some(claims), &ctx.registry),
+                TaskSummary::of(task, all, Some(claims), &ctx.registry, now),
                 Phase::of(task),
             ));
             continue;
         }
-        match resolve_elsewhere(&id, park, claims, &ctx.registry) {
+        match resolve_elsewhere(&id, park, claims, &ctx.registry, now) {
             Ok(Some(row)) => {
                 ctx.warnings.push(format!(
                     "{id} is parked in {}; resume it from that checkout",
@@ -60,6 +66,7 @@ fn resolve_elsewhere(
     park: &Park,
     claims: &ClaimSnapshot,
     registry: &Registry,
+    now: OffsetDateTime,
 ) -> Result<Option<ParkedRow>> {
     let root = Path::new(&park.worktree);
     if !crate::scope::has_config(root)? {
@@ -74,7 +81,7 @@ fn resolve_elsewhere(
         return Ok(None);
     };
     Ok(Some(ParkedRow::resolved(
-        TaskSummary::of(task, &scan, Some(claims), registry),
+        TaskSummary::of(task, &scan, Some(claims), registry, now),
         Phase::of(task),
     )))
 }

@@ -3,6 +3,7 @@ use crate::model::{Size, Status, Task};
 use crate::registry::Registry;
 use crate::style::{Painter, Style};
 use serde::Serialize;
+use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -114,6 +115,7 @@ pub struct ShowFields {
     pub children: Vec<Related>,
     pub claim: Option<ClaimInfo>,
     pub park: Option<ParkInfo>,
+    pub periodic: Option<PeriodicInfo>,
 }
 
 #[derive(Serialize)]
@@ -148,6 +150,7 @@ pub struct TaskSummary {
     pub open_descendant_count: usize,
     pub claim: Option<ClaimInfo>,
     pub park: Option<ParkInfo>,
+    pub periodic: Option<PeriodicInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,6 +207,29 @@ impl ParkInfo {
     }
 }
 
+/// A record's cadence and where it sits in the cycle (spec §5.4). `due_now` is carried
+/// explicitly because `due: null` cannot distinguish "not applicable" from "due now with
+/// no anchor".
+#[derive(Debug, Clone, Serialize)]
+pub struct PeriodicInfo {
+    pub every: String,
+    pub last_done: Option<String>,
+    pub due: Option<String>,
+    pub due_now: bool,
+}
+
+impl PeriodicInfo {
+    pub fn of(task: &Task, now: OffsetDateTime) -> Option<PeriodicInfo> {
+        let every = task.every?;
+        Some(PeriodicInfo {
+            every: every.to_string(),
+            last_done: task.last_done.clone(),
+            due: crate::periodic::due(task).map(crate::time::format),
+            due_now: crate::periodic::is_due(task, now),
+        })
+    }
+}
+
 impl TaskSummary {
     /// `all` is the scan the row came from; counts are computed against it.
     pub fn of(
@@ -211,6 +237,7 @@ impl TaskSummary {
         all: &[Task],
         claims: Option<&crate::claims::ClaimSnapshot>,
         registry: &Registry,
+        now: OffsetDateTime,
     ) -> TaskSummary {
         TaskSummary {
             id: task.id.to_string(),
@@ -235,6 +262,7 @@ impl TaskSummary {
             park: claims
                 .and_then(|snapshot| snapshot.park(&task.id))
                 .map(ParkInfo::of),
+            periodic: PeriodicInfo::of(task, now),
         }
     }
 }
@@ -1015,6 +1043,7 @@ mod tests {
             open_descendant_count: 0,
             claim: None,
             park: None,
+            periodic: None,
             parallel,
         }
     }

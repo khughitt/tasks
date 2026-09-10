@@ -6,6 +6,7 @@ use crate::registry::Registry;
 use crate::repo::Project;
 use crate::resolve::Resolver;
 use crate::scope::Origin;
+use time::OffsetDateTime;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &id)?;
@@ -19,6 +20,7 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let task = project.read_task(&id)?;
     let all = project.scan()?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(project.prefix.as_str()))?;
+    let now = crate::time::parse(&crate::time::now())?;
     let fields = describe(
         project,
         &ctx.registry,
@@ -26,6 +28,7 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         &all,
         Some(&claims),
         &mut ctx.warnings,
+        now,
     )?;
     Ok(Output::Show(Box::new(ShowOut {
         fields,
@@ -44,6 +47,7 @@ pub fn describe(
     all: &[Task],
     claims: Option<&crate::claims::ClaimSnapshot>,
     warnings: &mut Vec<String>,
+    now: OffsetDateTime,
 ) -> Result<ShowFields> {
     let resolver = Resolver::new(project, registry);
     let mut depends_on = Vec::new();
@@ -111,6 +115,7 @@ pub fn describe(
         park: claims
             .and_then(|snapshot| snapshot.park(&task.id))
             .map(crate::output::ParkInfo::of),
+        periodic: crate::output::PeriodicInfo::of(&task, now),
         task,
     })
 }

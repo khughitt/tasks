@@ -42,6 +42,7 @@ pub fn list(
         return list_parked(ctx, statuses, tags, owner, source, parent);
     }
     let (all, claims) = ctx.scan_with_claims()?;
+    let now = crate::time::parse(&crate::time::now())?;
     let mut tasks = all.clone();
     let parent = parent
         .as_deref()
@@ -89,7 +90,7 @@ pub fn list(
     Ok(Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         warnings: ctx.warnings,
         date: sort.date_column(),
@@ -105,11 +106,12 @@ fn list_parked(
     parent: Option<String>,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
+    let now = crate::time::parse(&crate::time::now())?;
     let parent = parent
         .as_deref()
         .map(|id| super::parse_id(&ctx.registry, id))
         .transpose()?;
-    let rows = super::parked::rows(&mut ctx, &all, &claims)?;
+    let rows = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let warnings = std::mem::take(&mut ctx.warnings);
     let row_parent = |row: &ParkedRow| {
         row.parent
@@ -252,7 +254,7 @@ pub fn ready(
     Ok(Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         warnings: ctx.warnings,
         date: DateColumn::Updated,
@@ -264,7 +266,7 @@ pub fn ready(
 pub fn next(mut ctx: ReadCtx) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let _ = super::parked::rows(&mut ctx, &all, &claims)?;
+    let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let candidates = super::parked::candidates(&mut ctx, &all, &claims)?;
     let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
     let next = match candidates
@@ -288,6 +290,7 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
                 &all,
                 Some(&claims),
                 &mut warnings,
+                now,
             )?;
             ctx.warnings.extend(warnings);
             Some(fields)
@@ -303,7 +306,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let counts = Counts::of(&all);
-    let parked = super::parked::rows(&mut ctx, &all, &claims)?;
+    let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
     let mut doing: Vec<Task> = all
         .iter()
@@ -311,7 +314,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         .cloned()
         .collect();
     sort_list(&mut doing);
-    let roadmap = crate::hierarchy::forest(&all, None, false, Some(&claims), &ctx.registry);
+    let roadmap = crate::hierarchy::forest(&all, None, false, Some(&claims), &ctx.registry, now);
     // closeout is an invitation to run `done`, so it holds only what `done` will accept.
     // Children are one gate and dependencies are the other; listing a goal its dependencies
     // still hold would invite a close the tool then refuses with `open_dependencies`. Held
@@ -389,17 +392,17 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         closed,
         ready: ready
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         parked,
         doing: doing
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         roadmap,
         closeout: closeout
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry))
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         warnings: ctx.warnings,
     }))

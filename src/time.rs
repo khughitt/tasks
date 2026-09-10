@@ -3,11 +3,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 pub fn now() -> String {
-    OffsetDateTime::now_utc()
-        .replace_nanosecond(0)
-        .expect("zero ns is valid")
-        .format(&Rfc3339)
-        .expect("rfc3339")
+    format(OffsetDateTime::now_utc())
 }
 
 /// The calendar day of a validated RFC 3339 UTC timestamp, `YYYY-MM-DD`.
@@ -28,6 +24,14 @@ pub fn parse(s: &str) -> Result<OffsetDateTime> {
     }
     OffsetDateTime::parse(s, &Rfc3339)
         .map_err(|e| Error::Validation(format!("bad timestamp {s:?}: {e}")))
+}
+
+/// The inverse of `parse`: the format `now` writes, for a timestamp we computed.
+pub fn format(t: OffsetDateTime) -> String {
+    t.replace_nanosecond(0)
+        .expect("zero ns is valid")
+        .format(&Rfc3339)
+        .expect("rfc3339")
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ use crate::query::ready_order;
 use crate::registry::Registry;
 use crate::repo::Project;
 use std::collections::HashMap;
+use time::OffsetDateTime;
 
 /// Rejects a `parent` that is foreign, missing, or would make `task` its own ancestor.
 /// Reads ancestors from disk, so it is the write-path check; `check` uses `parent_cycle`.
@@ -128,6 +129,7 @@ pub fn forest(
     include_closed: bool,
     claims: Option<&crate::claims::ClaimSnapshot>,
     registry: &Registry,
+    now: OffsetDateTime,
 ) -> Vec<TreeNode> {
     let mut tops: Vec<&Task> = match root {
         Some(id) => {
@@ -154,6 +156,7 @@ pub fn forest(
                 claims,
                 registry,
                 &mut std::collections::HashSet::new(),
+                now,
             )
         })
         .collect()
@@ -166,6 +169,7 @@ fn node(
     claims: Option<&crate::claims::ClaimSnapshot>,
     registry: &Registry,
     visited: &mut std::collections::HashSet<TaskId>,
+    now: OffsetDateTime,
 ) -> Option<TreeNode> {
     if !visited.insert(task.id.clone()) {
         return None;
@@ -179,10 +183,10 @@ fn node(
     let mut kids = children(all, &task.id, registry);
     kids.sort_by(|a, b| ready_order(a, b));
     Some(TreeNode {
-        summary: TaskSummary::of(task, all, claims, registry),
+        summary: TaskSummary::of(task, all, claims, registry, now),
         children: kids
             .into_iter()
-            .filter_map(|child| node(all, child, include_closed, claims, registry, visited))
+            .filter_map(|child| node(all, child, include_closed, claims, registry, visited, now))
             .collect(),
     })
 }
@@ -295,7 +299,8 @@ mod tests {
         let closed_mid = task("xx-000003", Some("xx-000001"), Status::Done);
         let open_deep = task("xx-000004", Some("xx-000003"), Status::Todo);
         let all = [root, closed_leaf, closed_mid, open_deep];
-        let nodes = forest(&all, None, false, None, &registry);
+        let now = crate::time::parse("2026-01-01T00:00:00Z").unwrap();
+        let nodes = forest(&all, None, false, None, &registry, now);
         assert_eq!(nodes.len(), 1);
         let kids: Vec<&str> = nodes[0]
             .children
@@ -305,11 +310,13 @@ mod tests {
         assert_eq!(kids, ["xx-000003"]);
         assert_eq!(nodes[0].children[0].children[0].summary.id, "xx-000004");
         assert_eq!(
-            forest(&all, None, true, None, &registry)[0].children.len(),
+            forest(&all, None, true, None, &registry, now)[0]
+                .children
+                .len(),
             2
         );
         assert_eq!(
-            forest(&all, Some(&all[2].id), true, None, &registry)[0]
+            forest(&all, Some(&all[2].id), true, None, &registry, now)[0]
                 .summary
                 .id,
             "xx-000003"

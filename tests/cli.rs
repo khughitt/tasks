@@ -9748,3 +9748,66 @@ fn a_due_recurrence_keeps_priority_order_and_respects_another_checkouts_claim() 
         "{ready}"
     );
 }
+
+#[test]
+fn the_periodic_object_is_the_json_contract() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    // no cadence: null everywhere
+    let plain = id_of(env.json(&sci, &["add", "One off"]));
+    assert_eq!(
+        env.json(&sci, &["show", &plain]).get("periodic"),
+        Some(&serde_json::Value::Null)
+    );
+    assert_eq!(
+        env.json(&sci, &["list"])["tasks"][0].get("periodic"),
+        Some(&serde_json::Value::Null)
+    );
+    // close it so it cannot compete for the head of `ready` below
+    env.json(&sci, &["done", &plain]);
+
+    // open with a cadence: present, but no pending recurrence (spec §4.1)
+    let open = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    let v = env.json(&sci, &["show", &open]);
+    assert_eq!(v["periodic"]["every"], "30d");
+    assert!(v["periodic"]["last_done"].is_null());
+    assert!(v["periodic"]["due"].is_null());
+    assert_eq!(v["periodic"]["due_now"], false);
+
+    // closed and anchored: a computable date, not yet due
+    env.json(&sci, &["start", &open]);
+    env.json(&sci, &["done", &open]);
+    let v = env.json(&sci, &["show", &open]);
+    assert!(v["periodic"]["last_done"].is_string());
+    assert!(v["periodic"]["due"].as_str().unwrap().ends_with('Z'));
+    assert_eq!(v["periodic"]["due_now"], false);
+
+    // closed and unanchored: due now, with no computable date -- the case `due: null`
+    // alone cannot express (spec §5.4)
+    let due = id_of(env.json(&sci, &["add", "Overdue"]));
+    env.json(&sci, &["done", &due]);
+    env.json(&sci, &["edit", &due, "--every", "30d"]);
+    let v = env.json(&sci, &["show", &due]);
+    assert!(v["periodic"]["due"].is_null());
+    assert_eq!(v["periodic"]["due_now"], true);
+
+    // the same object rides on list rows and on next; `due` is the only ready task
+    let rows = env.json(&sci, &["ready"]);
+    assert_eq!(rows["tasks"].as_array().unwrap().len(), 1, "{rows}");
+    assert_eq!(rows["tasks"][0]["id"], due);
+    assert_eq!(rows["tasks"][0]["periodic"]["due_now"], true);
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["periodic"]["due_now"],
+        true
+    );
+    // Reopening retains history but suspends dueness; dropping ends it.
+    env.json(&sci, &["start", &open]);
+    let reopened = env.json(&sci, &["show", &open]);
+    assert!(reopened["periodic"]["last_done"].is_string());
+    assert!(reopened["periodic"]["due"].is_null());
+    assert_eq!(reopened["periodic"]["due_now"], false);
+    env.json(&sci, &["drop", &open]);
+    let dropped = env.json(&sci, &["show", &open]);
+    assert_eq!(dropped["periodic"], reopened["periodic"]);
+}
