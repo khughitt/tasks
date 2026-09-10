@@ -318,6 +318,7 @@ impl Project {
 
     pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
         crate::hierarchy::validate_parent(self, registry, task)?;
+        crate::hierarchy::validate_periodic(self, registry, task)?;
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
     }
 

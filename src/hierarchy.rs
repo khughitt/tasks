@@ -29,6 +29,13 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
             "parent {parent} does not exist"
         )));
     }
+    // spec §4.7: a recurrence is never a goal, so nothing may hang beneath one.
+    if project.read_task(&parent)?.every.is_some() {
+        return Err(Error::Validation(format!(
+            "{parent} is a recurrence and cannot have children; clear its cadence with \
+             `tasks edit {parent} --no-every` first"
+        )));
+    }
     let mut path = vec![task_id];
     let mut current = Some(parent);
     while let Some(id) = current {
@@ -116,6 +123,29 @@ pub fn open_descendants<'a>(tasks: &'a [Task], id: &TaskId, registry: &Registry)
         .into_iter()
         .filter(|task| task.status.is_open())
         .collect()
+}
+
+/// spec §4.7: `is_ready` excludes any task with children, so a cadence on a goal could
+/// never fire. Refuse it at the write rather than leave a silent dead end. Scans only when
+/// a cadence is actually set, which is rare.
+pub fn validate_periodic(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
+    if task.every.is_none() {
+        return Ok(());
+    }
+    let all = project.scan()?;
+    let kids = children(&all, &task.id, registry);
+    if !kids.is_empty() {
+        return Err(Error::Validation(format!(
+            "{} has children ({}) and cannot be a recurrence; a task with children is a \
+             goal, and a goal is never ready",
+            task.id,
+            kids.iter()
+                .map(|kid| kid.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    Ok(())
 }
 
 /// The forest under `root` (or every root when `None`). Without `include_closed`, a node

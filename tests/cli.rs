@@ -9969,3 +9969,75 @@ fn prime_counts_what_is_scheduled_but_not_yet_due() {
     assert!(text.contains("(in ") && text.contains("d)"), "{text}");
     assert!(text.is_ascii(), "{text}");
 }
+
+#[test]
+fn a_goal_is_never_periodic_in_either_direction() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    let goal = id_of(env.json(&sci, &["add", "Goal"]));
+    let child = id_of(env.json(&sci, &["add", "Piece", "--parent", &goal]));
+
+    // A task that already has children cannot be given a cadence: `is_ready` excludes
+    // goals, so it could never fire (spec §4.7).
+    assert_eq!(
+        env.fail(&sci, &["edit", &goal, "--every", "30d"]),
+        "validation"
+    );
+    assert!(
+        !env.read(&sci, &format!("tasks/{goal}.md"))
+            .contains("every:")
+    );
+
+    // And a recurrence cannot acquire children, through add or through edit.
+    let sweep = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    assert_eq!(
+        env.fail(&sci, &["edit", &child, "--parent", &sweep]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&sci, &["add", "Under a sweep", "--parent", &sweep]),
+        "validation"
+    );
+
+    // The editor save goes through the same choke point.
+    let before = env.read(&sci, &format!("tasks/{child}.md"));
+    let reparent = editor_script(
+        &sci,
+        &format!("sed -i 's/^parent: .*/parent: {sweep}/' \"$1\""),
+    );
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &reparent)
+        .args(["edit", &child])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    assert!(error["error"]["detail"].as_str().unwrap().contains(&sweep));
+    assert_eq!(env.read(&sci, &format!("tasks/{child}.md")), before);
+
+    let cadence = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\nevery: 30d/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &cadence)
+        .args(["edit", &goal])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    assert!(error["error"]["detail"].as_str().unwrap().contains(&goal));
+    assert!(
+        !env.read(&sci, &format!("tasks/{goal}.md"))
+            .contains("every:")
+    );
+
+    // Dropping the cadence lets it be a goal again.
+    env.json(&sci, &["edit", &sweep, "--no-every"]);
+    env.json(&sci, &["add", "Under a former sweep", "--parent", &sweep]);
+}
