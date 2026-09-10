@@ -5,11 +5,12 @@ status: doing
 priority: 2
 owner: design/periodic
 created: 2026-09-07T10:25:11Z
-updated: 2026-09-09T23:51:19Z
+updated: 2026-09-10T00:32:45Z
 depends: []
 tags: [quick-add, cli]
 source: "mindful:thought:ec1726a8595c47f78ddaad57f65eb89e"
 spec: docs/specs/2026-09-09-periodic-design.md
+plan: docs/plans/2026-09-09-periodic.md
 ---
 
 Tasks that come back on a schedule instead of closing for good: doc and code curation sweeps, dependency review, stale-doc checks. The curate skill (docs/specs/2026-09-08-task-curation-design.md) runs by hand today; a periodic sweep is the obvious first consumer.
