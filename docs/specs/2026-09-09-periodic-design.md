@@ -232,10 +232,17 @@ forbids, so it is refused instead. Closing a record that is already `Done` and c
     tasks-5caeae is already done and recurs every 30d; `tasks start tasks-5caeae` before
     closing the next occurrence
 
-The refusal is narrow -- an already-done record *without* `every` keeps its idempotent
-no-op, and it applies equally to `done`, `edit --status done`, and the editor save, since
-all three pass through `transition`. It sits beside the `Done -> Doing` allowance of §4.3,
-which is what makes the reopen a single command. The cycle is `start`, work, `done`.
+The refusal is narrow in two ways. An already-done record *without* `every` keeps its
+idempotent no-op. And it fires only where a completion is actually attempted: `edit
+--status done` and an editor save that leave the status unchanged never reach `transition`
+at all (`src/commands/edit.rs` branches on `to == task.status` first), so they stay the
+no-ops they are today. That is the right line -- `done` is a command to complete an
+occurrence, while asserting a field value that already holds is the "merely editing" case
+this section preserves, and refusing it would break `edit --status done --priority 1` on a
+closed recurrence.
+
+The refusal sits beside the `Done -> Doing` allowance of §4.3, which is what makes the
+reopen a single command. The cycle is `start`, work, `done`.
 
 ### 4.5 Dependencies
 
@@ -399,9 +406,11 @@ End-to-end coverage in `tests/cli.rs`:
 - early reopening: `start` on a not-yet-due recurrence succeeds, and the following `done`
   re-anchors from that close;
 - **repeated `done` is refused, not silent** (§4.4): `done` on an already-done recurrence
-  errors naming the reopen, and the anchor, the notes, and `updated` are unchanged; the
-  same through `edit --status done`; an already-done record *without* `every` still
-  accepts `done` as the no-op it is today;
+  errors naming the reopen, and the anchor, the notes, and `updated` are unchanged; an
+  already-done record *without* `every` still accepts `done` as the no-op it is today;
+- the equal-status paths stay no-ops (§4.4): `edit --status done --priority 1` on a closed
+  recurrence succeeds and changes only the priority, and an editor save that leaves the
+  status `done` touches neither the anchor nor the notes;
 - each completion appends the occurrence note: three cycles leave three notes and one
   anchor, and a `done` message is appended after the automatic note;
 - an ordinary task never acquires `last_done`, through `done`, `edit --status done`, and
