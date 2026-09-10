@@ -2330,6 +2330,70 @@ fn non_unicode_tasks_model_fails_the_completion() {
 }
 
 #[test]
+fn edit_model_replaces_and_no_model_clears() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Fix", "-p", "2"]));
+    env.cmd(&sci)
+        .args(["done", &id, "landed"])
+        .env("TASKS_MODEL", "A")
+        .assert()
+        .success();
+    env.json(&sci, &["edit", &id, "--model", "B"]);
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["model"], "B");
+    env.json(&sci, &["edit", &id, "--no-model"]);
+    assert!(env.json(&sci, &["show", &id])["task"]["model"].is_null());
+    assert_eq!(env.fail(&sci, &["edit", &id, "--model", ""]), "validation");
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id, "--model", "x", "--no-model"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "conflicting flags must fail");
+}
+
+#[test]
+fn a_completing_edit_stamps_last_over_a_same_invocation_correction() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    for extra in [&["--model", "B"][..], &["--no-model"][..]] {
+        let id = id_of(env.json(&sci, &["add", "Both", "-p", "2"]));
+        env.cmd(&sci)
+            .args(["edit", &id, "--status", "done"])
+            .args(extra)
+            .env("TASKS_MODEL", "A")
+            .assert()
+            .success();
+        assert_eq!(
+            env.json(&sci, &["show", &id])["task"]["model"],
+            "A",
+            "the fresh completion's stamp wins over {extra:?}"
+        );
+        env.json(&sci, &["edit", &id, "--model", "B"]);
+        assert_eq!(
+            env.json(&sci, &["show", &id])["task"]["model"],
+            "B",
+            "the correction holds in a following, non-completing edit"
+        );
+    }
+
+    // The editor equivalent: flipping the status and the model line together still
+    // stamps the completion.
+    let id = id_of(env.json(&sci, &["add", "BothInEditor", "-p", "2"]));
+    let editor = editor_script(
+        &sci,
+        "sed -i -e 's/^status: todo$/status: done/' -e 's/^tags: \\[\\]$/tags: []\\nmodel: C/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &editor)
+        .env("TASKS_MODEL", "A")
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["model"], "A");
+}
+
+#[test]
 fn completing_a_recurrence_anchors_and_notes_every_completion_path() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

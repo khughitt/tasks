@@ -101,6 +101,12 @@ pub struct EditArgs {
     /// Clear the source.
     #[arg(long, conflicts_with = "source")]
     pub no_source: bool,
+    /// Replace the model stamp recorded at completion; see `--no-model`.
+    #[arg(long)]
+    pub model: Option<String>,
+    /// Clear the model stamp.
+    #[arg(long, conflicts_with = "model")]
+    pub no_model: bool,
     /// Remove a tag (repeatable); `--tag` adds one.
     #[arg(long = "rm-tag", value_name = "TAG", conflicts_with = "no_tags")]
     pub rm_tags: Vec<String>,

@@ -54,6 +54,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_parent
         || fields.source.is_some()
         || args.no_source
+        || args.model.is_some()
+        || args.no_model
         || args.no_tags
         || !args.rm_tags.is_empty();
     if !has_flags {
@@ -81,6 +83,12 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     if args.no_source {
         task.source = None;
+    }
+    if args.no_model {
+        task.model = None;
+    }
+    if let Some(model) = &args.model {
+        task.model = Some(model.clone());
     }
     // Clear, then remove, then let `apply_fields` append: `--no-tags --tag x` is the
     // wholesale replace `--tag` used to perform by itself.
