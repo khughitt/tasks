@@ -10041,3 +10041,107 @@ fn a_goal_is_never_periodic_in_either_direction() {
     env.json(&sci, &["edit", &sweep, "--no-every"]);
     env.json(&sci, &["add", "Under a former sweep", "--parent", &sweep]);
 }
+
+#[test]
+fn check_reports_what_parsing_cannot_see_about_cadences() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    // A periodic child reopened under a goal that has since closed is intentional, and
+    // must not be warned about (spec §6).
+    let goal = id_of(env.json(&sci, &["add", "Goal"]));
+    let sweep = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d", "--parent", &goal]));
+    env.json(&sci, &["start", &sweep]);
+    env.json(&sci, &["done", &sweep]);
+    env.json(&sci, &["done", &goal]);
+    env.json(&sci, &["start", &sweep]);
+    let v = env.json(&sci, &["check"]);
+    let kinds: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["kind"].as_str().unwrap())
+        .collect();
+    assert!(!kinds.contains(&"open_child_of_closed_parent"), "{v}");
+
+    // An ordinary open child of a closed parent is still warned about.
+    let plain = id_of(env.json(&sci, &["add", "Plain", "--parent", &goal]));
+    let v = env.json(&sci, &["check"]);
+    let warned: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["kind"] == "open_child_of_closed_parent")
+        .map(|w| w["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(warned, vec![plain.as_str()], "{v}");
+
+    // A combination only a merge or a hand edit can produce: a cadence on a task that has
+    // children. Both writes go straight to disk, bypassing write_task.
+    let orphan = id_of(env.json(&sci, &["add", "Hand edited"]));
+    let kid = id_of(env.json(&sci, &["add", "Kid"]));
+    let path = sci.join(format!("tasks/{orphan}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("priority: 2\n", "priority: 2\nevery: 30d\n"),
+    )
+    .unwrap();
+    let kid_path = sci.join(format!("tasks/{kid}.md"));
+    let kid_text = std::fs::read_to_string(&kid_path).unwrap();
+    std::fs::write(
+        &kid_path,
+        kid_text.replace("depends: []\n", &format!("depends: []\nparent: {orphan}\n")),
+    )
+    .unwrap();
+
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "check exits 1 on errors");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<&str> = v["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert!(kinds.contains(&"periodic_goal"), "{v}");
+
+    // An anchor with no cadence does not load at all, so it arrives as a parse finding
+    // rather than one of its own (spec §6).
+    let bare = id_of(env.json(&sci, &["add", "Bare anchor"]));
+    let bare_path = sci.join(format!("tasks/{bare}.md"));
+    let bare_text = std::fs::read_to_string(&bare_path).unwrap();
+    std::fs::write(
+        &bare_path,
+        bare_text.replace("updated: ", "last_done: 2026-01-01T00:00:00Z\nupdated: "),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let parse_findings: Vec<&str> = v["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["kind"] == "parse")
+        .map(|e| e["file"].as_str().unwrap())
+        .collect();
+    assert!(
+        parse_findings.iter().any(|file| file.contains(&bare)),
+        "{v}"
+    );
+    // An unrepresentable anchor plus cadence also arrives through the parse channel.
+    let overflow = id_of(env.json(&sci, &["add", "Overflow", "--every", "1d"]));
+    seed_anchor(&sci, &overflow, "9999-12-31T00:00:00Z");
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "parse" && e["file"].as_str().unwrap().contains(&overflow)),
+        "{v}"
+    );
+}

@@ -125,6 +125,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
         if let Some(parent) = &task.parent
             && task.status.is_open()
+            && task.every.is_none()
             && let Some(parent_task) = tasks
                 .iter()
                 .find(|candidate| candidate.id == ctx.registry.canonical_id(parent))
@@ -140,6 +141,20 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     parent_task.status.as_str()
                 ),
             ));
+        }
+        if task.every.is_some() {
+            let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
+            if !kids.is_empty() {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "periodic_goal",
+                    format!(
+                        "has a cadence and children ({}); a goal is never ready, so the cadence can never fire",
+                        kids.iter().map(|kid| kid.id.to_string()).collect::<Vec<_>>().join(", ")
+                    ),
+                ));
+            }
         }
         for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
             let Some(path) = path else { continue };

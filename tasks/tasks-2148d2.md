@@ -1,14 +1,19 @@
 ---
 id: tasks-2148d2
 title: check findings and closed-parent exemption
-status: todo
+status: done
 priority: 2
 size: s
+owner: design/periodic
 created: 2026-09-10T00:33:06Z
-updated: 2026-09-10T01:25:25Z
+updated: 2026-09-10T02:48:21Z
 depends: []
 parent: tasks-5caeae
 tags: []
 plan: docs/plans/2026-09-09-periodic.md
 step: "Task 11: `check` findings and the closed-parent exemption"
 ---
+
+## Notes
+
+- 2026-09-10T02:48:21Z (design/periodic): Check periodic goals, exempt reopened periodic children, and report orphaned/overflowing anchors as parse findings.
