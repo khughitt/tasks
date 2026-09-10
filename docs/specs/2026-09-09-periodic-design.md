@@ -252,7 +252,9 @@ the claim, it tells the caller to run `tasks done <id>` again to finish the clea
 (`src/commands/mod.rs`, the `Release` arm). That retry arrives at a record that is already
 `done`. So the refusal fires only when the store holds no entry for the task; while an
 entry is still there, `done` performs the release it was asked for, warns that the
-occurrence was already recorded, and touches neither the anchor nor the notes.
+occurrence was already recorded, and touches neither the anchor nor the notes. "Neither
+the notes" includes a message passed to the retry: re-running the original
+`tasks done <id> "<what landed>"` must not append that line a second time.
 
 The refusal sits beside the `Done -> Doing` allowance of §4.3, which is what makes the
 reopen a single command. The cycle is `start`, work, `done`.
@@ -339,7 +341,11 @@ periodic: 3 scheduled, next due 2026-10-09 (in 6d)
 ```
 
 `scheduled` counts anchored `Done` records whose due date is in the future, and `next due`
-is the earliest of those. Due records are excluded from the count because they are work,
+is the earliest of those. The figure in parentheses is a difference of **calendar days**,
+`due.date() - now.date()`, not of elapsed 24-hour periods -- so it always agrees with the
+date printed beside it, and a cadence stamped moments ago reads `in 7d` rather than the
+`in 6d` that truncating a 7-day-minus-one-second remainder would give. A record due later
+today reads `in 0d`. Due records are excluded from the count because they are work,
 not schedule; they are eligible for `ready`, though a dependency, a claim, or a park
 waiting on the user may still keep any given one off that list.
 
@@ -427,9 +433,10 @@ End-to-end coverage in `tests/cli.rs`:
 - **repeated `done` is refused, not silent** (§4.4): `done` on an already-done recurrence
   errors naming the reopen, and the anchor, the notes, and `updated` are unchanged; an
   already-done record *without* `every` still accepts `done` as the no-op it is today;
-- the cleanup retry still works (§4.4): with the claim store left unwritable so that
-  `done` warns that cleanup failed, a second `done` releases the claim, warns that the
-  occurrence was already recorded, and leaves the anchor and the notes as they were;
+- the cleanup retry still works (§4.4): from the state an interrupted release leaves, a
+  second `done` -- including one carrying the same message as the first -- releases the
+  claim, warns that the occurrence was already recorded, and leaves the anchor and the
+  notes exactly as they were;
 - an editor save cannot set or move `last_done` (§3.2), can clear it together with
   `every`, and can change `every` on its own;
 - the equal-status paths stay no-ops (§4.4): `edit --status done --priority 1` on a closed
@@ -459,7 +466,8 @@ End-to-end coverage in `tests/cli.rs`:
 - frontmatter round-trip with both fields present, absent, and one without the other, and
   the nested JSON shape in `list`, `show`, and `next`.
 
-Unit tests keep the arithmetic: interval parsing and every rejection in §3.1, the cap,
+Unit tests keep the arithmetic: the calendar-day figure of §5.3 against fixed timestamps
+either side of a day boundary, interval parsing and every rejection in §3.1, the cap,
 checked addition against an anchor near the end of the representable range, and `is_due`
 at the boundary -- one second before, exactly at, and one second after
 `last_done + every`. `due` returns `None` for an anchored open record and an anchored
