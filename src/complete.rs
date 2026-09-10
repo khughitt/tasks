@@ -49,6 +49,12 @@ pub fn sorts() -> Vec<CompletionCandidate> {
     plain(["priority", "updated", "created"])
 }
 
+/// Common cadences. A convenience, not the accepted set: any interval matching the
+/// grammar in the periodic design §3.1 is valid.
+pub fn intervals() -> Vec<CompletionCandidate> {
+    plain(["7d", "14d", "30d", "90d"])
+}
+
 /// The keys `commands::projects::ProjectSort::parse` accepts. Separate from `sorts`:
 /// projects rank by size and activity, tasks by priority and their own dates.
 pub fn project_sorts() -> Vec<CompletionCandidate> {

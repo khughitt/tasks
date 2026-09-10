@@ -57,6 +57,9 @@ pub struct FieldArgs {
     /// flag; see `--no-parallel` to clear it.
     #[arg(long)]
     pub parallel: bool,
+    /// Make this a recurrence: `<n>d` or `<n>w`, measured from each completion.
+    #[arg(long, add = ArgValueCandidates::new(crate::complete::intervals))]
+    pub every: Option<String>,
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
@@ -92,6 +95,9 @@ pub struct EditArgs {
     /// Clear the parallel marker.
     #[arg(long, conflicts_with = "parallel")]
     pub no_parallel: bool,
+    /// Stop the recurrence, clearing both the cadence and its anchor.
+    #[arg(long, conflicts_with = "every")]
+    pub no_every: bool,
     /// Clear the source.
     #[arg(long, conflicts_with = "source")]
     pub no_source: bool,

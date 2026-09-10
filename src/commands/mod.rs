@@ -422,6 +422,9 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
     if let Some(size) = &fields.size {
         task.size = Some(Size::parse(size)?);
     }
+    if let Some(every) = &fields.every {
+        task.every = Some(crate::periodic::Interval::parse(every)?);
+    }
     // Setting only. `edit --no-parallel` clears it before this runs, mirroring --no-tags.
     if fields.parallel {
         task.parallel = true;

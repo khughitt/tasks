@@ -2171,6 +2171,146 @@ fn editor_script(dir: &std::path::Path, body: &str) -> String {
     p.display().to_string()
 }
 
+/// Writes `last_done: <stamp>` into a task record, inserting the line if it is absent and
+/// replacing it if it is not. Fixture-only: it reaches states the CLI produces later, or
+/// (in Task 3) does not produce at all.
+fn seed_anchor(dir: &std::path::Path, id: &str, stamp: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let seeded = if text.contains("\nlast_done: ") {
+        text.lines()
+            .map(|line| {
+                if line.starts_with("last_done: ") {
+                    format!("last_done: {stamp}")
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n"
+    } else {
+        text.replace("updated: ", &format!("last_done: {stamp}\nupdated: "))
+    };
+    std::fs::write(&path, seeded).unwrap();
+}
+
+#[test]
+fn every_sets_and_no_every_clears_the_cadence() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    let id = id_of(env.json(&sci, &["add", "Curation sweep", "--every", "30d"]));
+    let file = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(file.contains("every: 30d\n"), "{file}");
+    assert!(
+        !file.contains("last_done:"),
+        "no anchor before a completion: {file}"
+    );
+
+    env.json(&sci, &["edit", &id, "--every", "2w"]);
+    assert!(
+        env.read(&sci, &format!("tasks/{id}.md"))
+            .contains("every: 2w\n")
+    );
+
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--every", "30m"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--every", "0d"]),
+        "validation"
+    );
+    assert!(
+        env.read(&sci, &format!("tasks/{id}.md"))
+            .contains("every: 2w\n")
+    );
+
+    seed_anchor(&sci, &id, "2026-01-02T03:04:05Z");
+    let anchored = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        anchored.contains("last_done: 2026-01-02"),
+        "seeded: {anchored}"
+    );
+    env.json(&sci, &["edit", &id, "--no-every"]);
+    let cleared = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        !cleared.contains("every:") && !cleared.contains("last_done:"),
+        "{cleared}"
+    );
+
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id, "--every", "30d", "--no-every"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+
+    assert_eq!(
+        env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--every", ""]),
+        vec!["7d", "14d", "30d", "90d"]
+    );
+}
+
+#[test]
+fn an_editor_save_cannot_set_or_move_the_anchor() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    seed_anchor(&sci, &id, "2026-01-02T03:04:05Z");
+    let before = env.read(&sci, &format!("tasks/{id}.md"));
+
+    let move_it = editor_script(
+        &sci,
+        "sed -i 's/^last_done: .*/last_done: 2020-01-01T00:00:00Z/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &move_it)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), before);
+
+    let recadence = editor_script(&sci, "sed -i 's/^every: 30d$/every: 7d/' \"$1\"");
+    env.cmd(&sci)
+        .env("EDITOR", &recadence)
+        .args(["edit", &id])
+        .assert()
+        .success();
+    let after = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(after.contains("every: 7d\n"), "{after}");
+    assert!(
+        after.contains("last_done: 2026-01-02T03:04:05Z"),
+        "anchor preserved: {after}"
+    );
+
+    let clear = editor_script(&sci, "sed -i '/^every: /d; /^last_done: /d' \"$1\"");
+    env.cmd(&sci)
+        .env("EDITOR", &clear)
+        .args(["edit", &id])
+        .assert()
+        .success();
+    let cleared = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        !cleared.contains("every:") && !cleared.contains("last_done:"),
+        "{cleared}"
+    );
+
+    let orphan = editor_script(&sci, "sed -i '/^every: /d' \"$1\"");
+    let id2 = id_of(env.json(&sci, &["add", "Second sweep", "--every", "30d"]));
+    seed_anchor(&sci, &id2, "2026-01-02T03:04:05Z");
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &orphan)
+        .args(["edit", &id2])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+}
+
 #[test]
 fn edit_flags_update_fields_and_enforce_rules() {
     let mut env = TestEnv::new();

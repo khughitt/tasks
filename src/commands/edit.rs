@@ -20,6 +20,14 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
             "notes are append-only; use `tasks note`".into(),
         ));
     }
+    // The anchor is stamped by a completion and by nothing else. Clearing it is allowed,
+    // because clearing the cadence has to clear it; setting or moving it would move the
+    // schedule with no occurrence behind it.
+    if edited.last_done != original.last_done && edited.last_done.is_some() {
+        return Err(Error::Validation(
+            "last_done is stamped by completing the task; it cannot be edited".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -35,6 +43,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || fields.size.is_some()
         || fields.parallel
         || args.no_parallel
+        || fields.every.is_some()
+        || args.no_every
         || !fields.tags.is_empty()
         || !fields.depends.is_empty()
         || fields.spec.is_some()
@@ -64,6 +74,10 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     if args.no_parallel {
         task.parallel = false;
+    }
+    if args.no_every {
+        task.every = None;
+        task.last_done = None;
     }
     if args.no_source {
         task.source = None;
