@@ -9,6 +9,7 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 - `tasks note <id> "<one line>"` when scope or understanding changes.
 - `tasks park <id> "<next step>" [--waiting-on user]` when setting work down or waiting on the user; `start` resumes it.
 - `tasks done <id> "<what landed>"` in the same commit as the code. `tasks check` before every commit.
+- Recurring sweeps use `--every 30d`; `start` before closing each later occurrence.
 - Decompose goals with `--parent`; close a goal from `prime`'s closeout list.
 - Never edit `tasks/*.md` by hand; the binary is the only writer. Full protocol: `skills/tasks/SKILL.md`.
 - File tool friction with `tasks feedback`; in this repo, review uncommitted feedback files before committing them.

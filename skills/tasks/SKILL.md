@@ -42,11 +42,16 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
+   Recurring sweeps use `--every 30d` (positive whole days or weeks, up to 36500 days;
+   goals cannot recur). `done` closes normally, anchors the next cycle, and writes an
+   occurrence note. A due recurrence appears in `ready` still marked `done`; use `start`
+   before closing its next occurrence. Early runs are allowed. `list --periodic` shows
+   what is coming up; `edit --no-every` stops recurrence and clears its anchor.
 7. `tasks check` before committing. A failing check means a task and its plan/spec drifted apart; fix both.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all.

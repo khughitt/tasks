@@ -1,6 +1,6 @@
 # Periodic tasks: a recurrence that is derived, not scheduled
 
-Status: designed (2026-09-09)
+Status: implemented (2026-09-09)
 Task: tasks-5caeae; first consumer the curate skill
 (docs/specs/2026-09-08-task-curation-design.md)
 
@@ -462,8 +462,8 @@ End-to-end coverage in `tests/cli.rs`:
 - a due record is omitted from `ready` when another session holds a live claim on it, with
   the existing takeover warning -- reachable by starting it in a second worktree;
 - **parking follows §4.8**: `park` on a due record is refused with the closed-status
-  error, and `start` then `park --waiting-on user` succeeds and omits it from `ready` with
-  the existing parked warning;
+  error, and `start` then `park --waiting-on user` succeeds; the doing record remains
+  absent from `ready` and appears in `list --parked`;
 - `list --periodic` ordering across all three groups, its bypass of the default status
   filter, its intersection with `--tag`, and its conflicts with `--parked`, `--sort`, and
   `--reverse`;

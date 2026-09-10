@@ -76,6 +76,9 @@ from a clone):
     tasks rename dot dots --explain  # diagnose an interruption without locks or writes
     tasks add "Bank the ledger" -p 1 --size m --tag ledger
     tasks add "Emit rows" --parent sci-4f2a9c
+    tasks add "Curation sweep" --every 30d  # days or weeks since each completion
+    tasks list --periodic            # recurring tasks, soonest due first
+    tasks edit <sweep-id> --every 2w # change the cadence; --no-every clears it and its anchor
     tasks add "Reply to Dana" --source "mail:<42@example.org>"  # where it came from; never interpreted
     tasks add "Reply to Dana" --source "mail:<42@example.org>"  # again: reuses the id, writes nothing
     tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)
@@ -99,6 +102,11 @@ from a clone):
     tasks done sci-91be03 "rows emitted"
     tasks done sci-4f2a9c "landed in 1a2b3c"  # open-work rule: closes once its child is closed
     tasks check                      # validate files, links, plan steps, dependencies
+
+A recurring task closes normally: `done` records the completion and anchors its next
+cycle. When due, it appears in `ready` with status `done`; use `start` before completing
+the next occurrence. Early runs are allowed. `--every` accepts positive whole days or
+weeks (for example, `30d` or `2w`), up to 36500 days; goals cannot recur.
 
 Run `tasks --help` for the full command list.
 
