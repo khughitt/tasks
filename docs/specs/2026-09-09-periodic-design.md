@@ -36,8 +36,9 @@ A recurrence is one record, reopened, not a template that mints an occurrence pe
 The alternative gives each sweep its own notes, its own spec link, and its own closed
 record -- real value, at the cost of a second kind of thing in the tree, a growing pile of
 closed tasks, and a definition of "the same task" that every view would have to learn.
-Series history lives where the rest of a task's history lives: in its notes, which `done`
-already appends to each cycle.
+Series history lives where the rest of a task's history lives: in its notes -- one
+appended automatically at each completion (§4.4), so the record carries a dated line per
+cycle rather than only the anchor, which every cycle overwrites.
 
 ### 2.2 The record, not the store
 
@@ -82,14 +83,20 @@ hours; `1w` is `7d`. There are no other units: months and years have no fixed le
 an interval anchored to a completion has no calendar to resolve them against.
 
 Rejected with a validation error naming the value: zero, a negative or fractional `n`, a
-missing or unknown unit, and any `n` above 36500. The cap is stated rather than left to
-the arithmetic so that an absurd interval fails with a number a reader can act on instead
-of a platform-dependent overflow, and it makes `last_done + every` unconditionally
-representable.
+missing or unknown unit, and any `n` above 36500.
 
-A malformed `every` therefore fails in `parse_task`, which means a hand-edited record
-surfaces through the lenient scan as an unparsable file rather than through a `check`
-finding. `check` covers only what parsing cannot see (§6).
+The cap is a product limit -- an interval of a century is a typo, and failing with a
+stated number beats failing with a platform quirk. It is deliberately *not* a
+representability argument, which it cannot carry: an anchor near the end of the
+representable range overflows with `1d`. Representability is enforced where it actually
+lives, in the arithmetic. `due` adds with checked arithmetic (§4.1), and `validate_task`
+rejects a record whose `last_done + every` does not fit, so no record that parses can
+overflow later.
+
+A malformed `every`, or an anchor and interval that cannot be added, therefore fails in
+`parse_task`, which means a hand-edited record surfaces through the lenient scan as an
+unparsable file rather than through a `check` finding. `check` covers only what parsing
+cannot see (§6).
 
 ### 3.2 The anchor
 
@@ -102,21 +109,42 @@ the edges explicit rather than defensive:
   restart the clock.
 - **`--every` on an already-closed task does not stamp an anchor.** A closed record with a
   cadence and no anchor is due *now* (§4.1). "I want this to recur and I do not know when
-  it last happened" should surface the task; its first `done` anchors the cycle.
+  it last happened" should surface the task; its first completion -- `start`, then `done`
+  (§4.4) -- anchors the cycle.
 - **`--no-every` clears both fields.** Clearing a cadence removes the anchor with it, so
   `last_done` without `every` is an invariant violation rather than harmless residue
   (§6). The durable trail of past completions is the notes, which are untouched.
+
+### 3.3 The flags
+
+| Surface     | Shape                                                                  |
+|-------------|------------------------------------------------------------------------|
+| `FieldArgs` | `--every <interval>`, on `add` and `edit`                               |
+| `EditArgs`  | `--no-every`, `conflicts_with = "every"`; clears `every` and `last_done` |
+| `list`      | `--periodic`, `conflicts_with_all = ["sort", "reverse", "parked"]`      |
+
+`--every` offers `7d`, `14d`, `30d`, `90d` as completion candidates from `complete.rs`,
+which is best-effort by contract and never errors. The list is a convenience, not the
+accepted set: any interval matching §3.1 is valid.
 
 ## 4. Dueness
 
 ### 4.1 The predicate
 
 ```
-due(task)    = task.last_done + task.every            // None when either is absent
+// None for an open or dropped record and for an unanchored one. Validation (§3.1)
+// guarantees the addition cannot overflow on a record that parses.
+due(task) = if task.status == Done { task.last_done + task.every } else { None }
+
 is_due(task, now) = task.every.is_some()
                  && task.status == Done
-                 && (task.last_done.is_none() || now >= due(task))
+                 && due(task).map_or(task.last_done.is_none(), |d| now >= d)
 ```
+
+`due` carries the status gate itself so that eligibility, the `list --periodic` ordering,
+the JSON field, and the pretty due date are one value rather than four rules that could
+drift. §5.4's `null` for an open or dropped record is this `None`, not a separate
+convention.
 
 Three consequences, each stated because each is a thing a reader will otherwise assume the
 other way:
@@ -178,10 +206,36 @@ clock-free, and the division of labour is clean:
 ### 4.4 The completion transition
 
 `last_done` is stamped in `transition`, under the condition it already computes for the
-open-dependency check: `to == Done && task.status != Done`. That is exactly the right
-gate. Every path that completes a task anchors the cycle -- `done`, `edit --status done`,
-and an editor save that changes the status -- while re-saving a record that was already
-`done` leaves the anchor alone.
+open-dependency check, narrowed by the cadence:
+
+    to == Done && task.status != Done && task.every.is_some()
+
+The `every.is_some()` guard keeps `last_done` off every ordinary task -- an ordinary
+completion never acquires an anchor. The `status != Done` clause means re-saving a record
+that is already closed leaves the anchor alone. Every path that *completes* a task
+therefore anchors the cycle: `done`, `edit --status done`, and an editor save that changes
+the status.
+
+The same branch appends the occurrence note (§2.1), so the note and the anchor cannot
+drift apart:
+
+    - 2026-10-09T09:12:44Z (keith): completed; next due 2026-11-08
+
+A `done` message, when given, is appended after it as today.
+
+**Closing an occurrence requires reopening first.** `can_transition` treats `Done -> Done`
+as an idempotent no-op, so without a rule `tasks done` on a due recurrence would silently
+change nothing: no anchor, no note, still due. That is the silent fallback this codebase
+forbids, so it is refused instead. Closing a record that is already `Done` and carries
+`every` is a validation error naming the way forward:
+
+    tasks-5caeae is already done and recurs every 30d; `tasks start tasks-5caeae` before
+    closing the next occurrence
+
+The refusal is narrow -- an already-done record *without* `every` keeps its idempotent
+no-op, and it applies equally to `done`, `edit --status done`, and the editor save, since
+all three pass through `transition`. It sits beside the `Done -> Doing` allowance of §4.3,
+which is what makes the reopen a single command. The cycle is `start`, work, `done`.
 
 ### 4.5 Dependencies
 
@@ -206,6 +260,23 @@ time, on `add`, on `edit`, and on the editor save: `--every` is refused when the
 already has children, and setting or changing a `parent` is refused when the *prospective
 parent* carries `every`.
 `check` keeps a finding for the combination arriving by merge or hand edit (§6).
+
+### 4.8 Parking a recurrence
+
+`park` refuses any closed record, and a due recurrence is closed. It stays that way: no
+allowance is added, and `parked::candidates` keeps its `is_open` filter unchanged.
+
+Parking means "I set this down mid-work, and here is the next step". A closed recurrence
+is not work in progress; it is schedule. Someone who needs to record that a sweep waits on
+the user reopens it first -- `start` is legal on any recurrence and costs nothing (§4.3)
+-- and parks the `doing` record, where every existing park rule applies with no new case.
+The cost is one command; the alternative is a park entry whose task is closed, which the
+park design's own state machine has no meaning for.
+
+One consequence for testing (§8): a park entry sitting on a due record is not reachable
+through any ordinary sequence, because `done` removes the entry. The park filter in
+`ready_tasks` still covers due records, since it is generic, but this design creates no
+workflow that reaches it.
 
 ## 5. Surfacing
 
@@ -234,9 +305,9 @@ open-status filter, since most of a healthy series is closed at any moment. Orde
 
 with id breaking ties within each group. The view needs a third `DateColumn::Due`.
 
-Flag interactions: `--periodic` conflicts with `--parked` and with an explicit `--sort`,
-both of which impose an incompatible ordering. Ordinary filters intersect with it as
-usual: `--tag`, `--owner`, `--source`, `--parent`, `--project`, and an explicit `--status`
+Flag interactions (§3.3): `--periodic` conflicts with `--parked`, `--sort`, and
+`--reverse`, matching what `--parked` already declares -- each imposes an ordering
+incompatible with the three groups above. Ordinary filters intersect with it as usual: `--tag`, `--owner`, `--source`, `--parent`, `--project`, and an explicit `--status`
 all narrow the set.
 
 ### 5.3 `prime`
@@ -295,7 +366,13 @@ carrying `every`. A periodic child reopened under a goal that has since closed i
 intentional, and the goal stays closed; warning on it would be noise on exactly the
 records this feature exists to create.
 
-Write-time refusals (§4.7) are validation errors naming both ids.
+Three refusals live outside `check`, each a validation error at the moment of the write:
+
+- closing a record that is already `Done` and carries `every`, which names the reopen
+  (§4.4);
+- `--every` on a task with children, and reparenting under a task that carries `every`,
+  each naming both ids (§4.7);
+- `park` on a closed recurrence, which reuses the existing closed-status error (§4.8).
 
 ## 7. Documentation and protocol
 
@@ -317,24 +394,43 @@ unanchored rule of §3.2:
 End-to-end coverage in `tests/cli.rs`:
 
 - both flows above, including the `prime` line and its JSON aggregate;
+- the full cycle: `start` on a due record, `done`, and the record leaves `ready` anchored
+  at that close;
 - early reopening: `start` on a not-yet-due recurrence succeeds, and the following `done`
   re-anchors from that close;
+- **repeated `done` is refused, not silent** (§4.4): `done` on an already-done recurrence
+  errors naming the reopen, and the anchor, the notes, and `updated` are unchanged; the
+  same through `edit --status done`; an already-done record *without* `every` still
+  accepts `done` as the no-op it is today;
+- each completion appends the occurrence note: three cycles leave three notes and one
+  anchor, and a `done` message is appended after the automatic note;
+- an ordinary task never acquires `last_done`, through `done`, `edit --status done`, and
+  the editor save;
 - `--no-every` clears both fields, and a subsequent `check` is clean;
 - both hierarchy refusals: `--every` on a task with children, and parenting a task under
   one that carries `every`, each via `edit` and via the editor save;
 - `check` reports `anchor_without_cadence` and `periodic_goal` on hand-written records,
   and does not warn `open_child_of_closed_parent` for a periodic child;
+- a hand-written record whose `last_done + every` overflows fails the scan as unparsable
+  (§3.1);
 - a due record satisfies a dependent, and holds it once started;
-- a due record is omitted from `ready` when another session claims it, and when it is
-  parked waiting on the user, with the existing warnings;
+- a due record is omitted from `ready` when another session holds a live claim on it, with
+  the existing takeover warning -- reachable by starting it in a second worktree;
+- **parking follows §4.8**: `park` on a due record is refused with the closed-status
+  error, and `start` then `park --waiting-on user` succeeds and omits it from `ready` with
+  the existing parked warning;
 - `list --periodic` ordering across all three groups, its bypass of the default status
-  filter, its intersection with `--tag`, and its conflicts with `--parked` and `--sort`;
+  filter, its intersection with `--tag`, and its conflicts with `--parked`, `--sort`, and
+  `--reverse`;
+- `--no-every` and `--every` together fail as a flag conflict;
 - frontmatter round-trip with both fields present, absent, and one without the other, and
   the nested JSON shape in `list`, `show`, and `next`.
 
-Unit tests keep the arithmetic: interval parsing and every rejection in §3.1, the cap and
-representability, and `is_due` at the boundary -- one second before, exactly at, and one
-second after `last_done + every`.
+Unit tests keep the arithmetic: interval parsing and every rejection in §3.1, the cap,
+checked addition against an anchor near the end of the representable range, and `is_due`
+at the boundary -- one second before, exactly at, and one second after
+`last_done + every`. `due` returns `None` for an anchored open record and an anchored
+dropped one (§4.1), which is the case the JSON contract depends on.
 
 ## 9. Out of scope
 
@@ -344,3 +440,4 @@ second after `last_done + every`.
 - Lifecycle hooks (tasks-d40e8e), now independent of this design.
 - Any notification, reminder, or process that runs without the user invoking a command.
 - Recurrence on a goal (§4.7).
+- Parking a closed recurrence, and any park entry that outlives a completion (§4.8).
