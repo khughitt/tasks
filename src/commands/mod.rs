@@ -528,6 +528,24 @@ pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
     Ok(open)
 }
 
+/// The model the harness reports for this completion, from `TASKS_MODEL`. Unset or
+/// empty records nothing; a non-Unicode value is an explicit error, never a silent skip.
+fn completion_model() -> Result<Option<String>> {
+    match std::env::var_os("TASKS_MODEL") {
+        None => Ok(None),
+        Some(value) => {
+            let value = value
+                .into_string()
+                .map_err(|_| Error::Validation("TASKS_MODEL is not valid Unicode".into()))?;
+            if value.is_empty() {
+                return Ok(None);
+            }
+            crate::format::validate_line("TASKS_MODEL", &value)?;
+            Ok(Some(value))
+        }
+    }
+}
+
 pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Result<()> {
     // Cadence permits early reopening; the clock only governs read-time visibility.
     let reopening = task.status == Status::Done && to == Status::Doing && task.every.is_some();
@@ -590,6 +608,9 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         }
     }
     let completing = to == Status::Done && task.status != Status::Done;
+    if completing {
+        task.model = completion_model()?;
+    }
     task.status = to;
     if completing && let Some(every) = task.every {
         let at = crate::time::now();

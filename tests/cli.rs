@@ -2196,6 +2196,140 @@ fn seed_anchor(dir: &std::path::Path, id: &str, stamp: &str) {
 }
 
 #[test]
+fn done_stamps_model_from_tasks_model_and_absence_records_nothing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let stamped = id_of(env.json(&sci, &["add", "Stamped", "-p", "2"]));
+    env.cmd(&sci)
+        .args(["done", &stamped, "landed"])
+        .env("TASKS_MODEL", "claude-fable-5-1")
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &stamped])["task"]["model"],
+        "claude-fable-5-1"
+    );
+
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+    env.json(&sci, &["done", &plain, "landed"]);
+    assert!(env.json(&sci, &["show", &plain])["task"]["model"].is_null());
+}
+
+#[test]
+fn recompletion_without_the_variable_clears_the_stamp() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Rework", "-p", "2"]));
+    env.cmd(&sci)
+        .args(["done", &id, "first pass"])
+        .env("TASKS_MODEL", "A")
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["model"], "A");
+    env.json(&sci, &["edit", &id, "--status", "todo"]);
+    env.json(&sci, &["done", &id, "second pass"]);
+    assert!(
+        env.json(&sci, &["show", &id])["task"]["model"].is_null(),
+        "a fresh completion with no TASKS_MODEL records unknown, not the stale stamp"
+    );
+}
+
+#[test]
+fn recurring_restamps_and_recovery_preserves_the_stamp() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    env.cmd(&sci)
+        .args(["done", &id, "first"])
+        .env("TASKS_MODEL", "A")
+        .assert()
+        .success();
+    env.json(&sci, &["start", &id]);
+    env.cmd(&sci)
+        .args(["done", &id, "second"])
+        .env("TASKS_MODEL", "B")
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["model"], "B");
+
+    // A bare repeat with no claim or park errors before any write.
+    env.cmd(&sci)
+        .args(["done", &id, "third"])
+        .env("TASKS_MODEL", "C")
+        .assert()
+        .failure();
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["model"], "B");
+
+    // An interrupted completion whose claim cleanup failed: the record says done
+    // while this checkout still holds the claim. The retry takes the claim-release
+    // branch, which is not a completion and never restamps.
+    env.json(&sci, &["start", &id]);
+    let path = sci.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("status: doing", "status: done")).unwrap();
+    let out = env
+        .cmd(&sci)
+        .args(["done", &id, "cleanup"])
+        .env("TASKS_MODEL", "C")
+        .assert()
+        .success();
+    let value: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert!(
+        value["warnings"].to_string().contains("already completed"),
+        "{value}"
+    );
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["model"], "B");
+}
+
+#[test]
+fn edit_status_done_and_editor_flips_stamp_like_done() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let via_flag = id_of(env.json(&sci, &["add", "Flag", "-p", "2"]));
+    env.cmd(&sci)
+        .args(["edit", &via_flag, "--status", "done"])
+        .env("TASKS_MODEL", "E")
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &via_flag])["task"]["model"], "E");
+
+    let via_editor = id_of(env.json(&sci, &["add", "Editor", "-p", "2"]));
+    let editor = editor_script(&sci, "sed -i 's/^status: todo$/status: done/' \"$1\"");
+    env.cmd(&sci)
+        .args(["edit", &via_editor])
+        .env("EDITOR", &editor)
+        .env("TASKS_MODEL", "F")
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &via_editor])["task"]["model"], "F");
+}
+
+#[test]
+fn non_unicode_tasks_model_fails_the_completion() {
+    use std::os::unix::ffi::OsStrExt;
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Bytes", "-p", "2"]));
+    let out = env
+        .cmd(&sci)
+        .args(["done", &id, "x"])
+        .env("TASKS_MODEL", std::ffi::OsStr::from_bytes(b"\xff\xfe"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(err_kind(&out), "validation");
+    assert!(
+        err_detail(&out).contains("TASKS_MODEL is not valid Unicode"),
+        "{}",
+        err_detail(&out)
+    );
+    assert!(
+        env.json(&sci, &["show", &id])["task"]["model"].is_null(),
+        "a failed completion writes nothing"
+    );
+}
+
+#[test]
 fn completing_a_recurrence_anchors_and_notes_every_completion_path() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
