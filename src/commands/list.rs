@@ -5,7 +5,9 @@ use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{
     Counts, DateColumn, ListOut, NextOut, Output, ParkedOut, ParkedRow, PrimeOut, TaskSummary,
 };
-use crate::query::{SortKey, is_actionable, is_ready, sort_by_key, sort_list, sort_ready};
+use crate::query::{
+    SortKey, is_actionable, is_ready, sort_by_key, sort_list, sort_periodic, sort_ready,
+};
 use crate::scope::Scope;
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -29,6 +31,7 @@ pub fn list(
     sort: Option<String>,
     reverse: bool,
     parked: bool,
+    periodic: bool,
 ) -> Result<Output> {
     let sort = match sort {
         Some(key) => SortKey::parse(&key)?,
@@ -54,10 +57,14 @@ pub fn list(
         return Err(Error::TaskNotFound(parent.to_string()));
     }
     tasks.retain(|task| {
-        let status_ok = if statuses.is_empty() {
-            task.status.is_open()
-        } else {
+        let periodic_ok = !periodic || task.every.is_some();
+        let status_ok = if !statuses.is_empty() {
             statuses.contains(&task.status)
+        } else if periodic {
+            // Most of a healthy series is closed at any moment (spec §5.2).
+            true
+        } else {
+            task.status.is_open()
         };
         let tags_ok = tags.iter().all(|tag| task.tags.contains(tag));
         let owner_ok = owner
@@ -71,7 +78,7 @@ pub fn list(
                 .as_ref()
                 .is_some_and(|parent| ctx.registry.canonical_id(parent) == *p)
         });
-        status_ok && tags_ok && owner_ok && source_ok && parent_ok
+        periodic_ok && status_ok && tags_ok && owner_ok && source_ok && parent_ok
     });
     for task in &tasks {
         for dependency in &task.depends {
@@ -83,9 +90,13 @@ pub fn list(
             }
         }
     }
-    sort_by_key(&mut tasks, sort);
-    if reverse {
-        tasks.reverse();
+    if periodic {
+        sort_periodic(&mut tasks, now);
+    } else {
+        sort_by_key(&mut tasks, sort);
+        if reverse {
+            tasks.reverse();
+        }
     }
     Ok(Output::List(ListOut {
         tasks: tasks
@@ -93,7 +104,11 @@ pub fn list(
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         warnings: ctx.warnings,
-        date: sort.date_column(),
+        date: if periodic {
+            DateColumn::Due
+        } else {
+            sort.date_column()
+        },
     }))
 }
 

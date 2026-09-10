@@ -342,11 +342,12 @@ pub struct ParkedOut {
     pub warnings: Vec<String>,
 }
 
-/// Which timestamp a pretty row shows. JSON always carries both.
+/// Which date a pretty row shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DateColumn {
     Updated,
     Created,
+    Due,
 }
 
 #[derive(Serialize)]
@@ -919,10 +920,18 @@ pub fn table(
 ) -> String {
     let mut rendered = String::new();
     for row in rows {
-        let date = crate::time::day(match date {
-            DateColumn::Updated => &row.updated,
-            DateColumn::Created => &row.created,
-        });
+        let date = match date {
+            DateColumn::Updated => crate::time::day(&row.updated).to_string(),
+            DateColumn::Created => crate::time::day(&row.created).to_string(),
+            DateColumn::Due => match &row.periodic {
+                Some(periodic) => match (&periodic.due, periodic.due_now) {
+                    (Some(due), _) => crate::time::day(due).to_string(),
+                    (None, true) => "now".into(),
+                    (None, false) => "-".into(),
+                },
+                None => "-".into(),
+            },
+        };
         let id = painter.paint(Style::Chrome, &row.id);
         let priority = format!("P{}", row.priority);
         let priority = if row.priority <= 1 {

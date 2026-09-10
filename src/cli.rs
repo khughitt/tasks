@@ -202,10 +202,14 @@ pub enum Command {
         /// Only parked tasks, most recently parked first.
         #[arg(long, conflicts_with_all = ["sort", "reverse"])]
         parked: bool,
+        /// Only tasks with a cadence, soonest due first, at any status.
+        #[arg(long, conflicts_with_all = ["sort", "reverse", "parked"])]
+        periodic: bool,
+
         #[command(flatten)]
         scope: ScopeArgs,
     },
-    /// Actionable tasks: todo with all dependencies closed.
+    /// Actionable tasks: todo or due recurrences with all dependencies closed.
     Ready {
         #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
         size: Option<String>,

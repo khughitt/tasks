@@ -212,6 +212,23 @@ pub fn sort_ready(tasks: &mut [Task]) {
     tasks.sort_by(ready_order);
 }
 
+/// The order `list --periodic` prints in (periodic design §5.2): unanchored due-now first,
+/// then anchored records by due date ascending, then everything with no pending
+/// recurrence. Id breaks ties inside each group.
+pub fn sort_periodic(tasks: &mut [Task], now: OffsetDateTime) {
+    fn key(task: &Task, now: OffsetDateTime) -> (u8, Option<OffsetDateTime>) {
+        match (
+            crate::periodic::due(task),
+            crate::periodic::is_due(task, now),
+        ) {
+            (None, true) => (0, None),
+            (Some(due), _) => (1, Some(due)),
+            (None, false) => (2, None),
+        }
+    }
+    tasks.sort_by(|a, b| key(a, now).cmp(&key(b, now)).then_with(|| a.id.cmp(&b.id)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,6 +428,31 @@ mod tests {
         assert!(
             !is_ready(&held, false, &|_| Some(false), now),
             "an open dependency holds a due record too"
+        );
+    }
+
+    #[test]
+    fn periodic_sort_groups_dates_and_breaks_ties_by_id() {
+        let now = crate::time::parse("2026-09-09T00:00:00Z").unwrap();
+        let mut rows = vec![];
+        for (id, status, anchor) in [
+            ("xx-000005", Status::Done, None),
+            ("xx-000003", Status::Done, Some("2020-01-01T00:00:00Z")),
+            ("xx-000002", Status::Done, Some("2020-01-01T00:00:00Z")),
+            ("xx-000004", Status::Done, Some("2026-09-09T00:00:00Z")),
+            ("xx-000001", Status::Todo, Some("2020-01-01T00:00:00Z")),
+            ("xx-000000", Status::Dropped, Some("2020-01-01T00:00:00Z")),
+        ] {
+            let mut task = t(id, status, 2, None, &[]);
+            task.every = Some(crate::periodic::Interval::parse("7d").unwrap());
+            task.last_done = anchor.map(str::to_string);
+            rows.push(task);
+        }
+        sort_periodic(&mut rows, now);
+        let ids: Vec<_> = rows.iter().map(|task| task.id.hex.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["000005", "000002", "000003", "000004", "000000", "000001"]
         );
     }
 }

@@ -9842,3 +9842,92 @@ fn a_due_row_shows_its_cadence_and_due_date() {
         "not due yet"
     );
 }
+
+#[test]
+fn list_periodic_shows_the_series_in_due_order() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    let open = id_of(env.json(&sci, &["add", "Open sweep", "--every", "90d"]));
+    let soon = id_of(env.json(&sci, &["add", "Soon", "--every", "7d"]));
+    env.json(&sci, &["start", &soon]);
+    env.json(&sci, &["done", &soon]);
+    let later = id_of(env.json(&sci, &["add", "Later", "--every", "90d"]));
+    env.json(&sci, &["start", &later]);
+    env.json(&sci, &["done", &later]);
+    let overdue = id_of(env.json(&sci, &["add", "Overdue"]));
+    env.json(&sci, &["done", &overdue]);
+    env.json(&sci, &["edit", &overdue, "--every", "30d"]);
+    let plain = id_of(env.json(&sci, &["add", "Not periodic"]));
+
+    let rows = env.json(&sci, &["list", "--periodic"]);
+    let ids: Vec<&str> = rows["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    // unanchored due-now first, then anchored by due ascending, then everything else
+    assert_eq!(
+        ids,
+        vec![
+            overdue.as_str(),
+            soon.as_str(),
+            later.as_str(),
+            open.as_str()
+        ]
+    );
+    assert!(!ids.contains(&plain.as_str()), "{ids:?}");
+
+    // It bypasses the default open-status filter: most of a healthy series is closed.
+    assert_eq!(rows["tasks"][1]["status"], "done");
+
+    let text = env.pretty(&sci, &["list", "--periodic"]);
+    assert!(
+        text.contains("now"),
+        "the unanchored due cell reads now: {text}"
+    );
+    assert!(
+        text.contains(" -  "),
+        "an open row's due cell is a dash: {text}"
+    );
+
+    // Ordinary filters intersect, and validation survives: a bad parent still errors.
+    env.json(&sci, &["edit", &overdue, "--tag", "sweep"]);
+    let tagged = env.json(&sci, &["list", "--periodic", "--tag", "sweep"]);
+    assert_eq!(tagged["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        env.fail(&sci, &["list", "--periodic", "--parent", "sci-ffffff"]),
+        "task_not_found"
+    );
+    // An explicit --status still narrows.
+    let closed = env.json(&sci, &["list", "--periodic", "--status", "done"]);
+    assert_eq!(closed["tasks"].as_array().unwrap().len(), 3);
+
+    // The ordering flags conflict, as they do for --parked.
+    for flag in [
+        ["--sort", "created"].as_slice(),
+        ["--reverse"].as_slice(),
+        ["--parked"].as_slice(),
+    ] {
+        let mut args = vec!["list", "--periodic"];
+        args.extend_from_slice(flag);
+        let out = env.cmd(&sci).args(&args).output().unwrap();
+        assert!(
+            !out.status.success(),
+            "{flag:?} must conflict with --periodic"
+        );
+    }
+    // Periodic filtering keeps the ordinary dependency diagnostics.
+    let path = sci.join(format!("tasks/{open}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(path, text.replace("depends: []", "depends: [sci-ffffff]")).unwrap();
+    let rows = env.json(&sci, &["list", "--periodic"]);
+    assert!(
+        rows["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&open) && w.contains("sci-ffffff") && w.contains("unreachable")
+        }),
+        "{rows}"
+    );
+}

@@ -840,6 +840,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             sort,
             reverse,
             parked,
+            periodic,
             scope,
         } => list::list(
             open_read_ctx(dir, &scope)?,
@@ -851,6 +852,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             sort,
             reverse,
             parked,
+            periodic,
         ),
         Command::Ready {
             size,
