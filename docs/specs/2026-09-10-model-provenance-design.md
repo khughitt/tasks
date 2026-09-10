@@ -1,6 +1,6 @@
 # Model provenance: record the model behind a task's completion
 
-Status: approved in chat 2026-09-10; not yet implemented
+Status: implemented (2026-09-10)
 Task: tasks-222dab
 
 ## Problem

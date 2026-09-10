@@ -1,11 +1,11 @@
 ---
 id: tasks-222dab
 title: "Provenance: record the model and key parameters behind a task's implementation"
-status: doing
+status: done
 priority: 2
 owner: main
 created: 2026-09-06T21:51:32Z
-updated: 2026-09-10T12:11:06Z
+updated: 2026-09-10T12:57:14Z
 depends: []
 tags: [provenance, observability]
 source: "mindful:thought:455894a15b734fdf93dec0d9d84e20ab"
@@ -22,3 +22,4 @@ Capture which model was responsible for a task's implementation (e.g. claude-fab
 - 2026-09-10T10:42:08Z (main): parked (waiting on user): spec docs/specs/2026-09-10-model-provenance-design.md awaiting user review; then writing-plans, then implement
 - 2026-09-10T11:13:39Z (main): spec review round 1: recovery test now plants a lingering claim/park and retries under C; completion-stamps-last precedence over same-invocation --model/--no-model; query example uses list --status done; tests/common builders will scrub TASKS_MODEL
 - 2026-09-10T11:13:47Z (main): parked (waiting on user): spec revised after review round 1; awaiting user re-review, then writing-plans
+- 2026-09-10T12:57:14Z (main): model provenance landed: stamped at completion, correctable, in the JSON contract

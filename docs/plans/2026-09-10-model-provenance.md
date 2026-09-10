@@ -1,6 +1,6 @@
 # Model Provenance Implementation Plan
 
-**Status:** approved (2026-09-10)
+**Status:** implemented (2026-09-10)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -42,7 +42,7 @@
 - Produces: `Task::model: Option<String>`; `model` accepted in frontmatter between `source` and `spec` and round-tripped byte-for-byte; `validate_task` rejects empty/multi-line values with `model must not be empty` / `model must be a single line`.
 - Consumed by: every later task. Task 2 writes it; Tasks 3 and 4 surface it.
 
-- [ ] **Step 1: Write the failing unit tests**
+- [x] **Step 1: Write the failing unit tests**
 
 In `src/format.rs`'s tests module, after `rejects_empty_or_multiline_source` (`:667`):
 
@@ -102,12 +102,12 @@ In `src/format.rs`'s tests module, after `rejects_empty_or_multiline_source` (`:
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --bin tasks model`
 Expected: FAIL to compile (`no field model` on `Task`).
 
-- [ ] **Step 3: Add the field and thread it through the record layer**
+- [x] **Step 3: Add the field and thread it through the record layer**
 
 In `src/model.rs`, after the `source` field (`:329`):
 
@@ -141,12 +141,12 @@ In `src/format.rs`:
     }
 ```
 
-- [ ] **Step 4: Run the tests and the gate**
+- [x] **Step 4: Run the tests and the gate**
 
 Run: `cargo test --bin tasks model && just check`
 Expected: the four new tests PASS; fmt/clippy/`tasks check` clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 tasks done tasks-332ea5 "model field on Task, parsed/validated/serialized between source and spec"
@@ -167,7 +167,7 @@ git commit -m "feat(provenance): add the model field to the task record"
 - Consumes: `Task::model` (Task 1); `format::validate_line` (already `pub`).
 - Produces: on any fresh transition into `done`, `task.model` is set from `TASKS_MODEL` (`Some`/`None`, replacing whatever was there); a non-Unicode value fails the command with `TASKS_MODEL is not valid Unicode`. No other transition touches the field.
 
-- [ ] **Step 1: Scrub the variable in both test command builders**
+- [x] **Step 1: Scrub the variable in both test command builders**
 
 In `tests/common/mod.rs`, add to `cmd` (after the `TASKS_SESSION_PID` removal) and to the identical block in `raw`:
 
@@ -177,7 +177,7 @@ In `tests/common/mod.rs`, add to `cmd` (after the `TASKS_SESSION_PID` removal) a
 
 This lands first so every existing completion test is hermetic against the caller's environment before the stamp exists.
 
-- [ ] **Step 2: Write the failing end-to-end tests**
+- [x] **Step 2: Write the failing end-to-end tests**
 
 In `tests/cli.rs`, after `completing_a_recurrence_anchors_and_notes_every_completion_path` (`:2199`):
 
@@ -324,12 +324,12 @@ fn non_unicode_tasks_model_fails_the_completion() {
 }
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `cargo test --test cli model`
 Expected: the new tests FAIL (or compile-fail on the missing field until Task 1 lands): the stamp assertions get `null`.
 
-- [ ] **Step 4: Implement the stamp**
+- [x] **Step 4: Implement the stamp**
 
 In `src/commands/mod.rs`, beside `transition` (`:531`):
 
@@ -363,12 +363,12 @@ In `transition`, between `let completing = ...` (`:592`) and `task.status = to;`
 
 The recovered claim-release branch (`:540-568`) falls through with `completing == false`, so retries never restamp; reopens transition out of `done`, so they never stamp either. Erroring before `task.status = to;` keeps a bad variable from half-applying a completion.
 
-- [ ] **Step 5: Run the tests and the gate**
+- [x] **Step 5: Run the tests and the gate**
 
 Run: `cargo test --test cli model && cargo test --test cli && just check`
 Expected: new tests PASS; the whole e2e suite still PASS (proves the scrub kept it hermetic); gate clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 tasks done tasks-e84da5 "fresh completions stamp model from TASKS_MODEL; retries and reopens never touch it"
@@ -389,7 +389,7 @@ git commit -m "feat(provenance): stamp the completing model from TASKS_MODEL"
 - Consumes: `Task::model` (Task 1); the stamp (Task 2) — the completing-edit precedence test depends on `transition` stamping after `apply_fields` returns.
 - Produces: `EditArgs { model: Option<String>, no_model: bool }`; corrections apply in `run` before the status block, so a same-invocation completion overwrites them (spec "Correction" rule).
 
-- [ ] **Step 1: Write the failing end-to-end tests**
+- [x] **Step 1: Write the failing end-to-end tests**
 
 In `tests/cli.rs`, after the Task 2 tests:
 
@@ -446,12 +446,12 @@ fn a_completing_edit_stamps_last_over_a_same_invocation_correction() {
 
 (The second test's loop reuses a completed-then-corrected task name; each iteration adds a fresh task, so no state leaks between `--model` and `--no-model`.)
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --test cli model`
 Expected: FAIL — `unexpected argument '--model'`.
 
-- [ ] **Step 3: Add the flags and wire them**
+- [x] **Step 3: Add the flags and wire them**
 
 In `src/cli.rs`, in `EditArgs` after `no_source` (`:101-103`):
 
@@ -485,12 +485,12 @@ In `src/commands/edit.rs`:
 
 This ordering is the precedence rule: corrections are applied to the in-memory record first, and the status block's `transition` (`:101-108`) stamps over them when the same invocation completes the task.
 
-- [ ] **Step 4: Run the tests and the gate**
+- [x] **Step 4: Run the tests and the gate**
 
 Run: `cargo test --test cli model && just check`
 Expected: PASS; gate clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 tasks done tasks-d132e6 "edit --model/--no-model correct the stamp; a completing edit stamps last"
@@ -510,7 +510,7 @@ git commit -m "feat(provenance): correct the model stamp through edit"
 - Consumes: `Task::model` (Task 1).
 - Produces: `TaskSummary.model` and `ParkedRow.model` (`Option<String>`, serialized null when absent). The full-task JSON in `show`/`next` needs nothing: `Task` derives `Serialize`, so the key appeared with Task 1; this task's tests pin that down.
 
-- [ ] **Step 1: Write the failing end-to-end tests**
+- [x] **Step 1: Write the failing end-to-end tests**
 
 In `tests/cli.rs`, after the Task 3 tests:
 
@@ -580,12 +580,12 @@ fn show_pretty_prints_the_model_line() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --test cli model`
 Expected: the row assertions FAIL (`model` key missing → null against `"A"`); the pretty test passes already (the line comes free from `serialize_task` via `paint_frontmatter`, output.rs:811) and is here to pin the behavior.
 
-- [ ] **Step 3: Add the field to the summary rows**
+- [x] **Step 3: Add the field to the summary rows**
 
 In `src/output.rs`:
 - `TaskSummary` (`:146`): `pub model: Option<String>,` after `pub source: Option<String>,`.
@@ -597,12 +597,12 @@ In `src/output.rs`:
 
 Then `cargo check` and fix any remaining struct-literal site the compiler names.
 
-- [ ] **Step 4: Run the tests and the gate**
+- [x] **Step 4: Run the tests and the gate**
 
 Run: `cargo test --test cli model && cargo test && just check`
 Expected: PASS everywhere; gate clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 tasks done tasks-ec0953 "model rides TaskSummary and ParkedRow; pretty show prints the line"
@@ -619,7 +619,7 @@ git commit -m "feat(provenance): carry model in summary JSON and pretty output"
 - Modify: `README.md:53` (where `TASKS_SESSION` is documented)
 - Modify: `docs/specs/2026-09-10-model-provenance-design.md:3` (status header)
 
-- [ ] **Step 1: Document the variable and the stamp**
+- [x] **Step 1: Document the variable and the stamp**
 
 In `skills/tasks/SKILL.md`, in session protocol step 6 (the `tasks done` paragraph), add after the first sentence's clause about dependencies:
 
@@ -644,7 +644,7 @@ In `docs/specs/2026-09-10-model-provenance-design.md`, replace the status header
 Status: implemented (2026-09-10)
 ```
 
-- [ ] **Step 2: Rebuild, reinstall, and run the full gate**
+- [x] **Step 2: Rebuild, reinstall, and run the full gate**
 
 ```bash
 cargo install --path .
@@ -653,7 +653,7 @@ just gate
 
 Expected: `just test` and `just check` both clean, and the installed `tasks` binary is the code just landed (the session's own `done` below uses it).
 
-- [ ] **Step 3: Close the children and the goal, then commit**
+- [x] **Step 3: Close the children and the goal, then commit**
 
 ```bash
 tasks done tasks-6bd197 "TASKS_MODEL documented in the skill and README; spec marked implemented"

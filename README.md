@@ -52,6 +52,9 @@ command for human-readable output.
 its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
 `TASKS_SESSION` per agent when agents share a terminal or harness process; use
 `tasks start --force <id>` for an explicit, recorded takeover.
+`TASKS_MODEL` per harness process records which model completed each task: a fresh
+`done` stamps the record's `model` field from it (and clears the stamp when it is
+unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.
 `park` sets a task down with its next step in the same store; `start` resumes it, and
 `prime` lists parked work first.
 

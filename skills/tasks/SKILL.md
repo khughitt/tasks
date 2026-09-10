@@ -42,6 +42,10 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
+   When the harness exports `TASKS_MODEL` (the model id it is running), every fresh
+   completion stamps the record's `model` field with it — latest-completion attribution,
+   cleared by a recompletion without the variable; `tasks edit --model/--no-model`
+   corrects it.
    Recurring sweeps use `--every 30d` (positive whole days or weeks, up to 36500 days;
    goals cannot recur). `done` closes normally, anchors the next cycle, and writes an
    occurrence note. A due recurrence appears in `ready` still marked `done`; use `start`
