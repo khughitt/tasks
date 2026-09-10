@@ -114,6 +114,11 @@ the edges explicit rather than defensive:
 - **`--no-every` clears both fields.** Clearing a cadence removes the anchor with it, so
   `last_done` without `every` is an invariant violation rather than harmless residue
   (§6). The durable trail of past completions is the notes, which are untouched.
+- **The anchor is not editable.** An editor save may change or clear `every` -- changing a
+  cadence is ordinary work -- but one that sets or moves a non-empty `last_done` is
+  refused by `check_invariants`, beside `id`, `created`, and the notes. The anchor is
+  stamped by a completion and by nothing else (§4.4); *clearing* it stays allowed, because
+  clearing the cadence has to clear it.
 
 ### 3.3 The flags
 
@@ -241,6 +246,14 @@ occurrence, while asserting a field value that already holds is the "merely edit
 this section preserves, and refusing it would break `edit --status done --priority 1` on a
 closed recurrence.
 
+The refusal has one exception, and it follows from wording the rule around *change*
+rather than around the command. When `save` writes the record but then fails to release
+the claim, it tells the caller to run `tasks done <id>` again to finish the cleanup
+(`src/commands/mod.rs`, the `Release` arm). That retry arrives at a record that is already
+`done`. So the refusal fires only when the store holds no entry for the task; while an
+entry is still there, `done` performs the release it was asked for, warns that the
+occurrence was already recorded, and touches neither the anchor nor the notes.
+
 The refusal sits beside the `Done -> Doing` allowance of §4.3, which is what makes the
 reopen a single command. The cycle is `start`, work, `done`.
 
@@ -360,13 +373,19 @@ recompute it:
 
 ## 6. Validation and errors
 
-Interval and timestamp shape are enforced at parse (§3.1), so `check` covers only what
-parsing cannot see:
+Interval shape, timestamp shape, and the `last_done` requires `every` invariant are all
+enforced in `validate_task`, which `parse_task` calls -- so a record violating any of them
+does not load at all. `check` reads through `scan_lenient`, which still parses each file,
+so such a record reaches `check` as a `parse` finding naming the file, not as a finding of
+its own. This is the treatment `step requires plan` already gets, and it is why there is
+no `anchor_without_cadence` finding: a record that could carry one cannot be read.
 
-| Finding                 | Level   | Condition                                    |
-|-------------------------|---------|----------------------------------------------|
-| `anchor_without_cadence`| error   | `last_done` set with no `every`               |
-| `periodic_goal`         | error   | `every` on a task that has children           |
+That leaves `check` one condition of its own, the one parsing cannot see because it spans
+two files:
+
+| Finding         | Level | Condition                                     |
+|-----------------|-------|-----------------------------------------------|
+| `periodic_goal` | error | `every` on a task that has children            |
 
 `open_child_of_closed_parent` (`src/commands/check.rs`) is **exempted** for a task
 carrying `every`. A periodic child reopened under a goal that has since closed is
@@ -408,6 +427,11 @@ End-to-end coverage in `tests/cli.rs`:
 - **repeated `done` is refused, not silent** (§4.4): `done` on an already-done recurrence
   errors naming the reopen, and the anchor, the notes, and `updated` are unchanged; an
   already-done record *without* `every` still accepts `done` as the no-op it is today;
+- the cleanup retry still works (§4.4): with the claim store left unwritable so that
+  `done` warns that cleanup failed, a second `done` releases the claim, warns that the
+  occurrence was already recorded, and leaves the anchor and the notes as they were;
+- an editor save cannot set or move `last_done` (§3.2), can clear it together with
+  `every`, and can change `every` on its own;
 - the equal-status paths stay no-ops (§4.4): `edit --status done --priority 1` on a closed
   recurrence succeeds and changes only the priority, and an editor save that leaves the
   status `done` touches neither the anchor nor the notes;
@@ -418,10 +442,10 @@ End-to-end coverage in `tests/cli.rs`:
 - `--no-every` clears both fields, and a subsequent `check` is clean;
 - both hierarchy refusals: `--every` on a task with children, and parenting a task under
   one that carries `every`, each via `edit` and via the editor save;
-- `check` reports `anchor_without_cadence` and `periodic_goal` on hand-written records,
-  and does not warn `open_child_of_closed_parent` for a periodic child;
-- a hand-written record whose `last_done + every` overflows fails the scan as unparsable
-  (§3.1);
+- `check` reports `periodic_goal` on a hand-written pair of records, and does not warn
+  `open_child_of_closed_parent` for a periodic child;
+- a hand-written record with `last_done` and no `every`, and one whose `last_done + every`
+  overflows, each fail the scan and reach `check` as a `parse` finding (§6);
 - a due record satisfies a dependent, and holds it once started;
 - a due record is omitted from `ready` when another session holds a live claim on it, with
   the existing takeover warning -- reachable by starting it in a second worktree;
