@@ -3,7 +3,8 @@ use crate::claims::WaitingOn;
 use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{
-    Counts, DateColumn, ListOut, NextOut, Output, ParkedOut, ParkedRow, PrimeOut, TaskSummary,
+    Counts, DateColumn, ListOut, NextOut, Output, ParkedOut, ParkedRow, PeriodicSummary, PrimeOut,
+    TaskSummary,
 };
 use crate::query::{
     SortKey, is_actionable, is_ready, sort_by_key, sort_list, sort_periodic, sort_ready,
@@ -320,6 +321,17 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
 pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let upcoming: Vec<OffsetDateTime> = all
+        .iter()
+        .filter_map(crate::periodic::due)
+        .filter(|due| *due > now)
+        .collect();
+    let next = upcoming.iter().min().copied();
+    let periodic = PeriodicSummary {
+        scheduled: upcoming.len(),
+        next_due: next.map(crate::time::format),
+        in_days: next.map(|due| crate::periodic::days_until(due, now)),
+    };
     let counts = Counts::of(&all);
     let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
@@ -404,6 +416,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         },
         projects: ctx.scope.prefixes(),
         counts,
+        periodic,
         closed,
         ready: ready
             .iter()

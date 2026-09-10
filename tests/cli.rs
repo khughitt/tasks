@@ -9931,3 +9931,41 @@ fn list_periodic_shows_the_series_in_due_order() {
         "{rows}"
     );
 }
+
+#[test]
+fn prime_counts_what_is_scheduled_but_not_yet_due() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    let empty = env.json(&sci, &["prime"]);
+    assert_eq!(empty["periodic"]["scheduled"], 0);
+    assert!(empty["periodic"]["next_due"].is_null());
+    assert!(!env.pretty(&sci, &["prime"]).contains("periodic:"));
+
+    let soon = id_of(env.json(&sci, &["add", "Soon", "--every", "7d"]));
+    env.json(&sci, &["start", &soon]);
+    env.json(&sci, &["done", &soon]);
+    let later = id_of(env.json(&sci, &["add", "Later", "--every", "90d"]));
+    env.json(&sci, &["start", &later]);
+    env.json(&sci, &["done", &later]);
+    // A due record is work, not schedule: it is in ready, and out of the count.
+    let due = id_of(env.json(&sci, &["add", "Overdue"]));
+    env.json(&sci, &["done", &due]);
+    env.json(&sci, &["edit", &due, "--every", "30d"]);
+
+    let v = env.json(&sci, &["prime"]);
+    assert_eq!(v["periodic"]["scheduled"], 2);
+    let next = v["periodic"]["next_due"].as_str().unwrap().to_string();
+    let soon_due = env.json(&sci, &["show", &soon])["periodic"]["due"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(next, soon_due, "the earliest of the scheduled");
+    assert!(v["periodic"].get("in_days").is_none(), "pretty-only: {v}");
+
+    let text = env.pretty(&sci, &["prime"]);
+    assert!(text.contains("periodic: 2 scheduled, next due "), "{text}");
+    // The figure itself is pinned by the unit test above; here only its presence and form.
+    assert!(text.contains("(in ") && text.contains("d)"), "{text}");
+    assert!(text.is_ascii(), "{text}");
+}

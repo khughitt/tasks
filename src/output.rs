@@ -519,6 +519,19 @@ fn grid_text(grid: &[Vec<Cell>], painter: &Painter) -> String {
     rendered
 }
 
+/// What `prime` says about the cadences that are not yet due (spec §5.3). Due records are
+/// work, not schedule, and are counted nowhere here.
+#[derive(Serialize, Default)]
+pub struct PeriodicSummary {
+    pub scheduled: usize,
+    pub next_due: Option<String>,
+    /// Pretty-only, like `PrimeOut::closed`: calendar days from the command's captured
+    /// `now` to `next_due` (spec §5.3), so the line can say "in 7d" without reaching for a
+    /// second clock.
+    #[serde(skip)]
+    pub in_days: Option<i64>,
+}
+
 #[derive(Serialize)]
 pub struct PrimeOut {
     /// The local project; null under --all-projects.
@@ -526,6 +539,7 @@ pub struct PrimeOut {
     /// Every prefix in scope; one entry locally.
     pub projects: Vec<String>,
     pub counts: Counts,
+    pub periodic: PeriodicSummary,
     /// Pretty-only, like `ProjectsOut`: JSON always carries every count.
     #[serde(skip)]
     pub closed: bool,
@@ -675,6 +689,23 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 })
                 .collect();
             let mut rendered = format!("{header}\n{}\n", counts.join("  "));
+            if o.periodic.scheduled > 0 {
+                let next = o
+                    .periodic
+                    .next_due
+                    .as_deref()
+                    .expect("scheduled recurrences have a next due date");
+                let days = o
+                    .periodic
+                    .in_days
+                    .expect("a next due date has a relative day count");
+                rendered.push_str(&format!(
+                    "periodic: {} scheduled, next due {} (in {days}d)\n",
+                    o.periodic.scheduled,
+                    crate::time::day(next)
+                ));
+            }
+
             rendered.push_str(&format!(
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "closeout:")

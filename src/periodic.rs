@@ -132,6 +132,25 @@ mod tests {
         ));
         assert!(!is_due(&periodic(Status::Done, None, None), now));
     }
+    #[test]
+    fn days_until_counts_calendar_days() {
+        // One second after a 7d cadence is stamped, the answer is still 7: truncating the
+        // elapsed remainder would say 6, and disagree with the date printed beside it.
+        assert_eq!(
+            days_until(at("2026-10-09T11:00:00Z"), at("2026-10-02T11:00:01Z")),
+            7
+        );
+        // A second either side of a day boundary moves it by exactly one.
+        assert_eq!(
+            days_until(at("2026-10-09T00:00:00Z"), at("2026-10-08T23:59:59Z")),
+            1
+        );
+        assert_eq!(
+            days_until(at("2026-10-09T23:59:59Z"), at("2026-10-09T00:00:00Z")),
+            0,
+            "due later today reads in 0d"
+        );
+    }
 }
 use crate::error::{Error, Result};
 use std::fmt;
@@ -253,4 +272,12 @@ pub fn is_due(task: &Task, now: OffsetDateTime) -> bool {
     task.every.is_some()
         && task.status == Status::Done
         && due(task).map_or(task.last_done.is_none(), |date| now >= date)
+}
+
+/// Whole calendar days from `now` to `due`: the figure the `prime` line prints beside the
+/// due date (spec §5.3). Calendar days, not elapsed 24-hour periods, so the number always
+/// agrees with the date next to it -- a cadence stamped a second ago reads `in 7d`, where
+/// truncating the remaining duration would say 6. A record due later today reads 0.
+pub fn days_until(due: OffsetDateTime, now: OffsetDateTime) -> i64 {
+    (due.date() - now.date()).whole_days()
 }
