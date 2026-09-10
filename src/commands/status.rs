@@ -122,7 +122,9 @@ pub fn close(
 ) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
     transition(&mut ctx, &mut task, to, force)?;
-    if let Some(message) = message {
+    if let Some(message) = message
+        && !ctx.recovered
+    {
         let owner = owner_name(&ctx.project)?;
         append_note(&mut task, &owner, &message)?;
     }

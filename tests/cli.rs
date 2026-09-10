@@ -2196,6 +2196,191 @@ fn seed_anchor(dir: &std::path::Path, id: &str, stamp: &str) {
 }
 
 #[test]
+fn completing_a_recurrence_anchors_and_notes_every_completion_path() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    for (title, path) in [("Command", "done"), ("Flag", "flag"), ("Editor", "editor")] {
+        let id = id_of(env.json(&sci, &["add", title, "--every", "30d"]));
+        env.json(&sci, &["start", &id]);
+        match path {
+            "done" => {
+                env.json(&sci, &["done", &id, "landed"]);
+            }
+            "flag" => {
+                env.json(&sci, &["edit", &id, "--status", "done"]);
+            }
+            _ => {
+                let editor = editor_script(&sci, "sed -i 's/^status: doing$/status: done/' \"$1\"");
+                env.cmd(&sci)
+                    .env("EDITOR", editor)
+                    .args(["edit", &id])
+                    .assert()
+                    .success();
+            }
+        }
+        let file = env.read(&sci, &format!("tasks/{id}.md"));
+        assert!(file.contains("last_done: 2"), "{path}: {file}");
+        assert_eq!(
+            file.matches("completed; next due ").count(),
+            1,
+            "{path}: {file}"
+        );
+        if path == "done" {
+            assert!(file.find("completed; next due ").unwrap() < file.find("landed").unwrap());
+        }
+    }
+}
+
+#[test]
+fn ordinary_completion_paths_and_same_status_editor_do_not_create_an_anchor() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    for (title, path) in [("Command", "done"), ("Flag", "flag"), ("Editor", "editor")] {
+        let id = id_of(env.json(&sci, &["add", title]));
+        if path == "done" {
+            env.json(&sci, &["done", &id]);
+        } else if path == "flag" {
+            env.json(&sci, &["edit", &id, "--status", "done"]);
+        } else {
+            let editor = editor_script(&sci, "sed -i 's/^status: todo$/status: done/' \"$1\"");
+            env.cmd(&sci)
+                .env("EDITOR", editor)
+                .args(["edit", &id])
+                .assert()
+                .success();
+        }
+        let file = env.read(&sci, &format!("tasks/{id}.md"));
+        assert!(
+            !file.contains("last_done:") && !file.contains("completed; next due"),
+            "{file}"
+        );
+    }
+
+    let id = id_of(env.json(&sci, &["add", "Periodic", "--every", "30d"]));
+    seed_anchor(&sci, &id, "2026-01-02T03:04:05Z");
+    let before = env.read(&sci, &format!("tasks/{id}.md"));
+    let editor = editor_script(&sci, "sed -i 's/^title: Periodic$/title: Renamed/' \"$1\"");
+    env.cmd(&sci)
+        .env("EDITOR", editor)
+        .args(["edit", &id])
+        .assert()
+        .success();
+    let after = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(after.contains("last_done: 2026-01-02T03:04:05Z"));
+    assert_eq!(
+        after.matches("completed; next due ").count(),
+        before.matches("completed; next due ").count()
+    );
+}
+
+#[test]
+fn recurrence_records_each_cycle_and_refuses_an_unclaimed_reclose() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    for cycle in 0..3 {
+        env.json(&sci, &["start", &id]);
+        env.json(&sci, &["done", &id]);
+        if cycle < 2 {
+            env.json(&sci, &["edit", &id, "--status", "todo"]);
+        }
+    }
+    let file = env.read(&sci, &format!("tasks/{id}.md"));
+    assert_eq!(file.matches("completed; next due ").count(), 3, "{file}");
+    let before = file;
+    assert_eq!(env.fail(&sci, &["done", &id]), "validation");
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), before);
+    env.json(&sci, &["edit", &id, "--status", "done", "-p", "1"]);
+    let after = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(after.contains("priority: 1"), "{after}");
+    assert_eq!(after.matches("completed; next due ").count(), 3, "{after}");
+}
+
+#[test]
+fn cleanup_retry_releases_only_entries_owned_by_this_checkout() {
+    let mut env = TestEnv::new();
+    for (pending, prefix) in [("claim", "sci"), ("park", "fam")] {
+        let a = env.init(prefix);
+        let b = env.init_forced(prefix);
+        let id = id_of(env.json(&a, &["add", pending, "--every", "30d"]));
+        as_agent(&env, &a, "same")
+            .args(["start", &id])
+            .assert()
+            .success();
+        as_agent(&env, &a, "same")
+            .args(["done", &id])
+            .assert()
+            .success();
+        std::fs::copy(
+            a.join(format!("tasks/{id}.md")),
+            b.join(format!("tasks/{id}.md")),
+        )
+        .unwrap();
+        env.json(&a, &["edit", &id, "--status", "todo"]);
+        as_agent(&env, &a, "same")
+            .args(["start", &id])
+            .assert()
+            .success();
+        if pending == "park" {
+            as_agent(&env, &a, "same")
+                .args(["park", &id, "continue"])
+                .assert()
+                .success();
+        }
+        let record_before = std::fs::read(b.join(format!("tasks/{id}.md"))).unwrap();
+        let store_before = std::fs::read(env.claim_store(prefix)).unwrap();
+        let out = as_agent(&env, &b, "same")
+            .args(["done", &id])
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "validation");
+        assert!(String::from_utf8_lossy(&out.stderr).contains(a.to_str().unwrap()));
+        assert_eq!(
+            std::fs::read(b.join(format!("tasks/{id}.md"))).unwrap(),
+            record_before
+        );
+        assert_eq!(
+            std::fs::read(env.claim_store(prefix)).unwrap(),
+            store_before
+        );
+    }
+}
+
+#[test]
+fn cleanup_retry_releases_this_checkouts_claim_without_a_second_occurrence() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    env.json(&sci, &["start", &id]);
+    let path = sci.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("status: doing", "status: done")
+            .replace("updated: ", "last_done: 2026-01-01T00:00:00Z\nupdated: "),
+    )
+    .unwrap();
+
+    let value = env.json(&sci, &["done", &id, "landed"]);
+    assert!(
+        value["warnings"].to_string().contains("already completed"),
+        "{value}"
+    );
+    assert!(
+        !std::fs::read_to_string(env.claim_store("sci"))
+            .unwrap()
+            .contains(&id)
+    );
+    let file = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(file.contains("last_done: 2026-01-01T00:00:00Z"), "{file}");
+    assert!(
+        !file.contains("completed; next due") && !file.contains("landed"),
+        "{file}"
+    );
+}
+
+#[test]
 fn every_sets_and_no_every_clears_the_cadence() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

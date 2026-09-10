@@ -48,6 +48,8 @@ pub struct Ctx {
     routing: Routing,
     claims: Option<ClaimStore>,
     pending_claim: Option<(TaskId, ClaimIntent)>,
+    /// This close only finishes a previous completion's pending claim-store cleanup.
+    pub recovered: bool,
 }
 
 impl Ctx {
@@ -198,6 +200,7 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
         routing: Routing::Local,
         claims: None,
         pending_claim: None,
+        recovered: false,
     })
 }
 
@@ -532,6 +535,35 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             to.as_str().into(),
         ));
     }
+    if to == Status::Done
+        && task.status == Status::Done
+        && let Some(every) = task.every
+    {
+        let id = task.id.clone();
+        let worktree = ctx.project.root.display().to_string();
+        let store = ctx.claims_mut()?;
+        for entry_worktree in store
+            .get(&id)
+            .map(|claim| &claim.worktree)
+            .into_iter()
+            .chain(store.park(&id).map(|park| &park.worktree))
+        {
+            if entry_worktree != &worktree {
+                return Err(Error::Validation(format!(
+                    "{id} is already done here but has work in {entry_worktree}; finish that occurrence in its owning checkout"
+                )));
+            }
+        }
+        if store.get(&id).is_none() && store.park(&id).is_none() {
+            return Err(Error::Validation(format!(
+                "{id} is already done and recurs every {every}; `tasks start {id}` before closing the next occurrence"
+            )));
+        }
+        ctx.warnings.push(format!(
+            "{id} was already completed; releasing its claim without recording another occurrence"
+        ));
+        ctx.recovered = true;
+    }
     // Guard before the dependency and descendant checks, so a session that no longer holds
     // the task is told *that* rather than something incidental.
     ctx.claim_guard(&task.id, to, force)?;
@@ -555,7 +587,23 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             return Err(Error::OpenDescendants(task.id.to_string(), open.join(", ")));
         }
     }
+    let completing = to == Status::Done && task.status != Status::Done;
     task.status = to;
+    if completing && let Some(every) = task.every {
+        let at = crate::time::now();
+        let next = crate::periodic::add(crate::time::parse(&at)?, every).ok_or_else(|| {
+            Error::Validation(format!(
+                "completing now plus every {every} is not a representable timestamp"
+            ))
+        })?;
+        task.last_done = Some(at);
+        let owner = owner_name(&ctx.project)?;
+        append_note(
+            task,
+            &owner,
+            &format!("completed; next due {}", next.date()),
+        )?;
+    }
     Ok(())
 }
 
@@ -772,6 +820,7 @@ pub fn run(cli: Cli) -> Result<Output> {
                         routing: routing.clone(),
                         claims: None,
                         pending_claim: None,
+                        recovered: false,
                     }
                 }
                 None => open_ctx(dir)?,
