@@ -5,7 +5,7 @@ status: doing
 priority: 2
 owner: design/periodic
 created: 2026-09-07T10:25:11Z
-updated: 2026-09-10T00:32:45Z
+updated: 2026-09-10T02:13:13Z
 depends: []
 tags: [quick-add, cli]
 source: "mindful:thought:ec1726a8595c47f78ddaad57f65eb89e"
@@ -27,3 +27,4 @@ Tasks that come back on a schedule instead of closing for good: doc and code cur
 - 2026-09-07T10:39:15Z (main): Shares a design fork with tasks-d40e8e: recurrence could be the first consumer of lifecycle hooks (on done, mint the next occurrence) rather than a field on the model. Whichever is scoped first constrains the other.
 - 2026-09-09T11:05:43Z (design/curation): curate: refined; open questions moved under their heading, the hooks alternative folded into the question it answers, curate skill named as the likely first consumer
 - 2026-09-09T23:51:19Z (design/periodic): design settled: two frontmatter fields (every, last_done), dueness derived at read time; independent of tasks-d40e8e
+- 2026-09-10T02:13:13Z (design/periodic): Implementation includes checkout-scoped cleanup recovery and an editor reparent test that reaches hierarchy validation.

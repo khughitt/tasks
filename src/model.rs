@@ -71,9 +71,11 @@ mod tests {
             priority: 2,
             size: None,
             parallel: false,
+            every: None,
             owner: None,
             created: "2026-09-09T00:00:00Z".into(),
             updated: "2026-09-09T00:00:00Z".into(),
+            last_done: None,
             depends: vec![],
             parent: None,
             tags: vec![],
@@ -309,9 +311,15 @@ pub struct Task {
     /// Marked safe to run beside any other task marked parallel. Hand-set; nothing
     /// infers or validates it. See docs/specs/2026-09-06-parallel-candidates-design.md.
     pub parallel: bool,
+    /// The recurrence interval. A closed task carrying one falls due again; an open one is
+    /// an ordinary task. See docs/specs/2026-09-09-periodic-design.md.
+    pub every: Option<crate::periodic::Interval>,
     pub owner: Option<String>,
     pub created: String,
     pub updated: String,
+    /// The completion that anchors the current cycle. Stamped only alongside `every`, and
+    /// only by a transition that actually completes the task (spec §4.4).
+    pub last_done: Option<String>,
     pub depends: Vec<TaskId>,
     pub parent: Option<TaskId>,
     pub tags: Vec<String>,

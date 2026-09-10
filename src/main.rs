@@ -8,6 +8,7 @@ mod frontmatter;
 mod hierarchy;
 mod model;
 mod output;
+mod periodic;
 mod query;
 mod registry;
 mod rename;

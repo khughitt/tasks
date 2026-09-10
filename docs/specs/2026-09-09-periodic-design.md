@@ -83,7 +83,7 @@ hours; `1w` is `7d`. There are no other units: months and years have no fixed le
 an interval anchored to a completion has no calendar to resolve them against.
 
 Rejected with a validation error naming the value: zero, a negative or fractional `n`, a
-missing or unknown unit, and any `n` above 36500.
+missing or unknown unit, leading zeroes, and any interval exceeding 36500 days.
 
 The cap is a product limit -- an interval of a century is a typo, and failing with a
 stated number beats failing with a platform quirk. It is deliberately *not* a
@@ -250,9 +250,12 @@ The refusal has one exception, and it follows from wording the rule around *chan
 rather than around the command. When `save` writes the record but then fails to release
 the claim, it tells the caller to run `tasks done <id>` again to finish the cleanup
 (`src/commands/mod.rs`, the `Release` arm). That retry arrives at a record that is already
-`done`. So the refusal fires only when the store holds no entry for the task; while an
-entry is still there, `done` performs the release it was asked for, warns that the
-occurrence was already recorded, and touches neither the anchor nor the notes. "Neither
+`done`. The retry is allowed only when the store holds an entry for the task and every entry
+(claim or park) belongs to the current checkout. An entry from another checkout may
+represent a new occurrence while this checkout still holds the old completion; refuse
+that ambiguous close with a pointer to the owning checkout, preserving both the record
+and the store. For a local cleanup, `done` performs the release it was asked for, warns
+that the occurrence was already recorded, and touches neither the anchor nor the notes. "Neither
 the notes" includes a message passed to the retry: re-running the original
 `tasks done <id> "<what landed>"` must not append that line a second time.
 
@@ -437,6 +440,8 @@ End-to-end coverage in `tests/cli.rs`:
   second `done` -- including one carrying the same message as the first -- releases the
   claim, warns that the occurrence was already recorded, and leaves the anchor and the
   notes exactly as they were;
+- a retry from a different checkout refuses without releasing its claim or park, even
+  when the same session owns it;
 - an editor save cannot set or move `last_done` (§3.2), can clear it together with
   `every`, and can change `every` on its own;
 - the equal-status paths stay no-ops (§4.4): `edit --status done --priority 1` on a closed

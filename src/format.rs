@@ -3,9 +3,25 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Note, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 16] = [
-    "id", "title", "status", "priority", "size", "parallel", "owner", "created", "updated",
-    "depends", "parent", "tags", "source", "spec", "plan", "step",
+const KEYS: [&str; 18] = [
+    "id",
+    "title",
+    "status",
+    "priority",
+    "size",
+    "parallel",
+    "every",
+    "owner",
+    "created",
+    "updated",
+    "last_done",
+    "depends",
+    "parent",
+    "tags",
+    "source",
+    "spec",
+    "plan",
+    "step",
 ];
 
 fn perr(file: &str, detail: impl Into<String>) -> Error {
@@ -88,9 +104,14 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
         parallel: boolean("parallel")?,
+        every: scalar("every")?
+            .map(|value| crate::periodic::Interval::parse(&value))
+            .transpose()
+            .map_err(|e| perr(file, e.to_string()))?,
         owner: scalar("owner")?,
         created,
         updated,
+        last_done: scalar("last_done")?,
         depends,
         parent: scalar("parent")?
             .map(|p| TaskId::parse(&p))
@@ -113,7 +134,10 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
 pub fn quote_timestamps(fm: &str) -> String {
     fm.lines()
         .map(|line| {
-            if line.starts_with("created: ") || line.starts_with("updated: ") {
+            if line.starts_with("created: ")
+                || line.starts_with("updated: ")
+                || line.starts_with("last_done: ")
+            {
                 let (k, v) = line.split_once(':').expect("prefix matched");
                 format!("{k}: \"{}\"", v.trim_start())
             } else {
@@ -243,6 +267,22 @@ pub fn validate_task(t: &Task) -> Result<()> {
     }
     crate::time::parse(&t.created)?;
     crate::time::parse(&t.updated)?;
+    match (t.every, &t.last_done) {
+        (None, Some(_)) => {
+            return Err(Error::Validation(
+                "last_done requires every; clearing a cadence clears its anchor".into(),
+            ));
+        }
+        (Some(every), Some(anchor)) => {
+            let parsed = crate::time::parse(anchor)?;
+            if crate::periodic::add(parsed, every).is_none() {
+                return Err(Error::Validation(format!(
+                    "last_done {anchor} plus every {every} is not a representable timestamp"
+                )));
+            }
+        }
+        _ => {}
+    }
     if t.step.is_some() && t.plan.is_none() {
         return Err(Error::Validation("step requires plan".into()));
     }
@@ -292,17 +332,23 @@ pub fn serialize_task(t: &Task) -> String {
     if t.parallel {
         pairs.push(("parallel".into(), Value::Raw("true".into())));
     }
+    if let Some(every) = t.every {
+        pairs.push(("every".into(), s(&every.to_string())));
+    }
     if let Some(o) = &t.owner {
         pairs.push(("owner".into(), s(o)));
     }
     pairs.extend([
         (String::from("created"), Value::Raw(t.created.clone())),
         (String::from("updated"), Value::Raw(t.updated.clone())),
-        (
-            String::from("depends"),
-            Value::List(t.depends.iter().map(ToString::to_string).collect()),
-        ),
     ]);
+    if let Some(last_done) = &t.last_done {
+        pairs.push((String::from("last_done"), Value::Raw(last_done.clone())));
+    }
+    pairs.push((
+        String::from("depends"),
+        Value::List(t.depends.iter().map(ToString::to_string).collect()),
+    ));
     if let Some(parent) = &t.parent {
         pairs.push(("parent".into(), s(&parent.to_string())));
     }
@@ -362,6 +408,47 @@ mod tests {
         assert_eq!(t.body, "");
         assert!(t.notes.is_empty());
         assert_eq!(serialize_task(&t), MINIMAL);
+    }
+
+    #[test]
+    fn cadence_round_trips_in_its_field_positions() {
+        let mut task = parse_task(FULL, "f").unwrap();
+        task.every = Some(crate::periodic::Interval::parse("2w").unwrap());
+        task.last_done = Some("2026-09-01T08:00:00Z".into());
+        let text = serialize_task(&task);
+        assert!(
+            text.contains("size: m\nevery: 2w\n"),
+            "every follows the shape fields: {text}"
+        );
+        assert!(
+            text.contains("updated: 2026-08-29T14:02:11Z\nlast_done: 2026-09-01T08:00:00Z\n"),
+            "last_done follows updated: {text}"
+        );
+        let back = parse_task(&text, "f").unwrap();
+        assert_eq!(back.every, task.every);
+        assert_eq!(back.last_done, task.last_done);
+    }
+
+    #[test]
+    fn cadence_is_omitted_when_absent() {
+        let task = parse_task(FULL, "f").unwrap();
+        assert_eq!(task.every, None);
+        assert_eq!(task.last_done, None);
+        let text = serialize_task(&task);
+        assert!(
+            !text.contains("every:") && !text.contains("last_done:"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_bad_cadence_and_a_bare_anchor() {
+        let with = |line: &str| FULL.replace("size: m\n", &format!("size: m\n{line}\n"));
+        assert!(parse_task(&with("every: 30m"), "f").is_err());
+        assert!(parse_task(&with("every: 0d"), "f").is_err());
+        assert!(parse_task(&with("last_done: 2026-09-01T08:00:00Z"), "f").is_err());
+        assert!(parse_task(&with("every: 30d\nlast_done: nonsense"), "f").is_err());
+        assert!(parse_task(&with("every: 1d\nlast_done: 9999-12-31T00:00:00Z"), "f").is_err());
     }
     #[test]
     fn parent_roundtrips_after_depends() {
