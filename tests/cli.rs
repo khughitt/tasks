@@ -9668,3 +9668,83 @@ fn a_recurrence_reopens_straight_to_doing_and_parks_only_once_open() {
     env.json(&sci, &["done", &plain]);
     assert_eq!(env.fail(&sci, &["start", &plain]), "invalid_transition");
 }
+
+#[test]
+fn a_due_recurrence_is_ready_and_an_anchored_one_is_not() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    // not due: anchored at this moment by its own completion
+    let anchored = id_of(env.json(&sci, &["add", "Fresh sweep", "-p", "1", "--every", "30d"]));
+    env.json(&sci, &["start", &anchored]);
+    env.json(&sci, &["done", &anchored]);
+
+    // due: closed with no anchor, then given a cadence (spec §3.2)
+    let due = id_of(env.json(&sci, &["add", "Overdue sweep", "-p", "0"]));
+    env.json(&sci, &["done", &due]);
+    env.json(&sci, &["edit", &due, "--every", "30d"]);
+
+    let ready = env.json(&sci, &["ready"]);
+    let ids: Vec<&str> = ready["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![due.as_str()], "{ready}");
+    assert_eq!(ready["tasks"][0]["status"], "done", "the record is closed");
+    assert_eq!(env.json(&sci, &["next"])["next"]["task"]["id"], due);
+
+    // A due record satisfies a dependent, because it is closed (spec §4.5).
+    let dependent = id_of(env.json(&sci, &["add", "Follows", "-p", "2", "--depends", &due]));
+    let ids: Vec<String> = env.json(&sci, &["ready"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(ids.contains(&dependent), "{ids:?}");
+
+    // Once started it is open, and holds the dependent (spec §4.5).
+    env.json(&sci, &["start", &due]);
+    let ids: Vec<String> = env.json(&sci, &["ready"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(!ids.contains(&dependent), "{ids:?}");
+}
+
+#[test]
+fn a_due_recurrence_keeps_priority_order_and_respects_another_checkouts_claim() {
+    let mut env = TestEnv::new();
+    let a = env.init("sci");
+    let b = env.init_forced("sci");
+    let due = id_of(env.json(&a, &["add", "Due", "-p", "2"]));
+    env.json(&a, &["done", &due]);
+    env.json(&a, &["edit", &due, "--every", "30d"]);
+    let urgent = id_of(env.json(&a, &["add", "Urgent", "-p", "1"]));
+    let ready = env.json(&a, &["ready"]);
+    assert_eq!(ready["tasks"][0]["id"], urgent);
+    assert_eq!(ready["tasks"][1]["id"], due);
+    std::fs::copy(
+        a.join(format!("tasks/{due}.md")),
+        b.join(format!("tasks/{due}.md")),
+    )
+    .unwrap();
+    as_agent(&env, &b, "other")
+        .args(["start", &due])
+        .assert()
+        .success();
+    let ready = env.json(&a, &["ready"]);
+    assert_eq!(ready["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(ready["tasks"][0]["id"], urgent);
+    assert!(
+        ready["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(&due) && w.contains("claimed") && w.contains("--force")
+        }),
+        "{ready}"
+    );
+}

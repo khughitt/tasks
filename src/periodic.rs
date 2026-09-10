@@ -1,3 +1,4 @@
+use crate::model::{Status, Task};
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,6 +60,77 @@ mod tests {
     fn serializes_as_its_string_form() {
         let json = serde_json::to_string(&Interval::parse("2w").unwrap()).unwrap();
         assert_eq!(json, "\"2w\"");
+    }
+    use crate::model::{Status, Task, TaskId};
+
+    fn periodic(status: Status, every: Option<&str>, last_done: Option<&str>) -> Task {
+        Task {
+            id: TaskId::parse("sci-000001").unwrap(),
+            title: "Sweep".into(),
+            status,
+            priority: 2,
+            size: None,
+            parallel: false,
+            every: every.map(|e| Interval::parse(e).unwrap()),
+            owner: None,
+            created: "2026-01-01T00:00:00Z".into(),
+            updated: "2026-01-01T00:00:00Z".into(),
+            last_done: last_done.map(Into::into),
+            depends: vec![],
+            parent: None,
+            tags: vec![],
+            source: None,
+            spec: None,
+            plan: None,
+            step: None,
+            body: String::new(),
+            notes: vec![],
+        }
+    }
+
+    #[test]
+    fn due_carries_the_status_gate() {
+        let anchored = |status| periodic(status, Some("30d"), Some("2026-09-09T11:00:00Z"));
+        assert_eq!(
+            due(&anchored(Status::Done)),
+            Some(at("2026-10-09T11:00:00Z"))
+        );
+        // An anchored record that is open or dropped has no pending recurrence (spec §4.1);
+        // this is the None the JSON contract renders as null.
+        assert_eq!(due(&anchored(Status::Todo)), None);
+        assert_eq!(due(&anchored(Status::Doing)), None);
+        assert_eq!(due(&anchored(Status::Dropped)), None);
+        // Unanchored: no computable date even though the record is due.
+        assert_eq!(due(&periodic(Status::Done, Some("30d"), None)), None);
+        assert_eq!(due(&periodic(Status::Done, None, None)), None);
+    }
+
+    #[test]
+    fn is_due_at_the_boundary() {
+        let task = periodic(Status::Done, Some("30d"), Some("2026-09-09T11:00:00Z"));
+        assert!(!is_due(&task, at("2026-10-09T10:59:59Z")));
+        assert!(is_due(&task, at("2026-10-09T11:00:00Z")));
+        assert!(is_due(&task, at("2026-10-09T11:00:01Z")));
+    }
+
+    #[test]
+    fn unanchored_closed_recurrence_is_due_now() {
+        assert!(is_due(
+            &periodic(Status::Done, Some("30d"), None),
+            at("2020-01-01T00:00:00Z")
+        ));
+    }
+
+    #[test]
+    fn open_and_dropped_and_plain_records_are_never_due() {
+        let now = at("2030-01-01T00:00:00Z");
+        assert!(!is_due(&periodic(Status::Todo, Some("30d"), None), now));
+        assert!(!is_due(&periodic(Status::Doing, Some("30d"), None), now));
+        assert!(!is_due(
+            &periodic(Status::Dropped, Some("30d"), Some("2026-09-09T11:00:00Z")),
+            now
+        ));
+        assert!(!is_due(&periodic(Status::Done, None, None), now));
     }
 }
 use crate::error::{Error, Result};
@@ -161,4 +233,24 @@ impl serde::Serialize for Interval {
 
 pub fn add(anchor: OffsetDateTime, every: Interval) -> Option<OffsetDateTime> {
     anchor.checked_add(Duration::days(every.days()))
+}
+
+/// The date this recurrence next falls due, or `None` for an open or dropped record, for
+/// one with no cadence, and for one that has never been completed (spec §4.1). The status
+/// gate lives here so eligibility, ordering, JSON, and pretty output share one value.
+pub fn due(task: &Task) -> Option<OffsetDateTime> {
+    if task.status != Status::Done {
+        return None;
+    }
+    let every = task.every?;
+    let anchor = task.last_done.as_deref()?;
+    let anchor = crate::time::parse(anchor).expect("validate_task parsed last_done");
+    Some(add(anchor, every).expect("validate_task checked this sum"))
+}
+
+/// Whether a closed recurrence has come back around (spec §4.1).
+pub fn is_due(task: &Task, now: OffsetDateTime) -> bool {
+    task.every.is_some()
+        && task.status == Status::Done
+        && due(task).map_or(task.last_done.is_none(), |date| now >= date)
 }

@@ -5,9 +5,10 @@ use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{
     Counts, DateColumn, ListOut, NextOut, Output, ParkedOut, ParkedRow, PrimeOut, TaskSummary,
 };
-use crate::query::{SortKey, is_ready, sort_by_key, sort_list, sort_ready};
+use crate::query::{SortKey, is_actionable, is_ready, sort_by_key, sort_list, sort_ready};
 use crate::scope::Scope;
 use std::collections::HashMap;
+use time::OffsetDateTime;
 
 pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
     let id = ctx.registry.canonical_id(id);
@@ -170,10 +171,11 @@ pub fn ready_tasks(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
+    now: OffsetDateTime,
 ) -> Result<Vec<Task>> {
     let mut warnings = Vec::new();
     let mut closed: HashMap<TaskId, Option<bool>> = HashMap::new();
-    for task in all.iter().filter(|task| task.status == Status::Todo) {
+    for task in all.iter().filter(|task| is_actionable(task, now)) {
         for dependency in &task.depends {
             if closed.contains_key(dependency) {
                 continue;
@@ -186,7 +188,7 @@ pub fn ready_tasks(
     let lookup = |id: &TaskId| -> Option<bool> { closed.get(id).copied().flatten() };
     let mut ready = Vec::new();
     for task in all {
-        if task.status != Status::Todo {
+        if !is_actionable(task, now) {
             continue;
         }
         for dependency in &task.depends {
@@ -198,7 +200,7 @@ pub fn ready_tasks(
             }
         }
         let has_children = !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty();
-        if is_ready(task, has_children, &lookup) {
+        if is_ready(task, has_children, &lookup, now) {
             ready.push(task.clone());
         }
     }
@@ -236,7 +238,8 @@ pub fn ready(
 ) -> Result<Output> {
     let size = size.map(|size| Size::parse(&size)).transpose()?;
     let (all, claims) = ctx.scan_with_claims()?;
-    let mut tasks = ready_tasks(&mut ctx, &all, &claims)?;
+    let now = crate::time::parse(&crate::time::now())?;
+    let mut tasks = ready_tasks(&mut ctx, &all, &claims, now)?;
     if let Some(size) = size {
         tasks.retain(|task| task.size == Some(size));
     }
@@ -260,9 +263,10 @@ pub fn ready(
 /// lookup. Nothing ready is a normal state: null, warnings, exit 0.
 pub fn next(mut ctx: ReadCtx) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
+    let now = crate::time::parse(&crate::time::now())?;
     let _ = super::parked::rows(&mut ctx, &all, &claims)?;
     let candidates = super::parked::candidates(&mut ctx, &all, &claims)?;
-    let ready = ready_tasks(&mut ctx, &all, &claims)?;
+    let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
     let next = match candidates
         .into_iter()
         .next()
@@ -297,9 +301,10 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
 
 pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
+    let now = crate::time::parse(&crate::time::now())?;
     let counts = Counts::of(&all);
     let parked = super::parked::rows(&mut ctx, &all, &claims)?;
-    let ready = ready_tasks(&mut ctx, &all, &claims)?;
+    let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
     let mut doing: Vec<Task> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())

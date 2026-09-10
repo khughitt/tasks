@@ -3,6 +3,7 @@ use crate::model::{Size, Status, Task, TaskId};
 use crate::output::DateColumn;
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use time::OffsetDateTime;
 
 /// Depth-first search for a cycle reachable from `start`.
 pub fn find_cycle(
@@ -127,10 +128,22 @@ pub fn render_graph(tasks: &[Task], format: GraphFormat) -> String {
     rendered
 }
 
+/// Eligible to be worked on now: an open `todo`, or a recurrence that has come back
+/// around (spec §4.2). Every caller of `ready` uses this one definition; three
+/// independent `status == Todo` checks used to have to agree.
+pub fn is_actionable(task: &Task, now: OffsetDateTime) -> bool {
+    task.status == Status::Todo || crate::periodic::is_due(task, now)
+}
+
 /// `lookup` returns Some(closed?) for a reachable dependency, None if unreachable.
 /// A task with children is a goal, not work, and is never ready.
-pub fn is_ready(task: &Task, has_children: bool, lookup: &dyn Fn(&TaskId) -> Option<bool>) -> bool {
-    task.status == Status::Todo
+pub fn is_ready(
+    task: &Task,
+    has_children: bool,
+    lookup: &dyn Fn(&TaskId) -> Option<bool>,
+    now: OffsetDateTime,
+) -> bool {
+    is_actionable(task, now)
         && !has_children
         && task.depends.iter().all(|d| lookup(d) == Some(true))
 }
@@ -238,17 +251,21 @@ mod tests {
             None,
             &["xx-000002", "yy-000003"],
         );
+        let now = crate::time::parse("2026-01-01T00:00:00Z").unwrap();
         let closed_all = |_: &TaskId| Some(true);
         let open_one = |id: &TaskId| Some(id.hex != "000002");
         let unreachable = |id: &TaskId| if id.prefix == "yy" { None } else { Some(true) };
-        assert!(is_ready(&a, false, &closed_all));
-        assert!(!is_ready(&a, false, &open_one));
-        assert!(!is_ready(&a, false, &unreachable));
+        assert!(is_ready(&a, false, &closed_all, now));
+        assert!(!is_ready(&a, false, &open_one, now));
+        assert!(!is_ready(&a, false, &unreachable, now));
         let idea = t("xx-000009", Status::Idea, 0, None, &[]);
-        assert!(!is_ready(&idea, false, &closed_all));
+        assert!(!is_ready(&idea, false, &closed_all, now));
         let doing = t("xx-000008", Status::Doing, 0, None, &[]);
-        assert!(!is_ready(&doing, false, &closed_all));
-        assert!(!is_ready(&a, true, &closed_all), "parents are never ready");
+        assert!(!is_ready(&doing, false, &closed_all, now));
+        assert!(
+            !is_ready(&a, true, &closed_all, now),
+            "parents are never ready"
+        );
     }
 
     #[test]
@@ -369,6 +386,31 @@ mod tests {
         assert!(
             dot.contains("[label=\"xx-000001 P2 - todo: say \\\"hi\\\" #1 \\\\ ] done\"]"),
             "{dot}"
+        );
+    }
+    #[test]
+    fn a_due_recurrence_is_actionable_and_an_undue_one_is_not() {
+        let now = crate::time::parse("2026-10-09T11:00:00Z").unwrap();
+        let mut due = t("sci-000009", Status::Done, 2, None, &[]);
+        due.every = Some(crate::periodic::Interval::parse("30d").unwrap());
+        due.last_done = Some("2026-09-09T11:00:00Z".into());
+        assert!(is_actionable(&due, now));
+        assert!(is_ready(&due, false, &|_| Some(true), now));
+
+        let mut undue = due.clone();
+        undue.last_done = Some("2026-10-08T11:00:00Z".into());
+        assert!(!is_actionable(&undue, now));
+
+        // Every other gate still applies to a due record.
+        assert!(
+            !is_ready(&due, true, &|_| Some(true), now),
+            "goals never ready"
+        );
+        let mut held = due.clone();
+        held.depends = vec![TaskId::parse("sci-000010").unwrap()];
+        assert!(
+            !is_ready(&held, false, &|_| Some(false), now),
+            "an open dependency holds a due record too"
         );
     }
 }
