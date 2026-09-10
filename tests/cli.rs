@@ -2394,6 +2394,73 @@ fn a_completing_edit_stamps_last_over_a_same_invocation_correction() {
 }
 
 #[test]
+fn summary_rows_and_parked_rows_carry_model() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let done_id = id_of(env.json(&sci, &["add", "Done", "-p", "2"]));
+    env.cmd(&sci)
+        .args(["done", &done_id, "landed"])
+        .env("TASKS_MODEL", "A")
+        .assert()
+        .success();
+    let rows = env.json(&sci, &["list", "--status", "done"]);
+    let row = rows["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == done_id)
+        .unwrap()
+        .clone();
+    assert_eq!(row["model"], "A", "list rows carry the stamp");
+
+    let open_id = id_of(env.json(&sci, &["add", "Open", "-p", "2"]));
+    let open = env.json(&sci, &["list"]);
+    let row = open["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == open_id)
+        .unwrap()
+        .clone();
+    assert!(
+        row["model"].is_null(),
+        "the key is present and null when absent"
+    );
+
+    // A parked row for a previously completed task keeps its attribution.
+    env.json(&sci, &["edit", &done_id, "--status", "todo"]);
+    env.json(&sci, &["park", &done_id, "resume here"]);
+    let prime = env.json(&sci, &["prime"]);
+    let parked = prime["parked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == done_id)
+        .unwrap()
+        .clone();
+    assert_eq!(parked["model"], "A");
+}
+
+#[test]
+fn show_pretty_prints_the_model_line() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Pretty", "-p", "2"]));
+    env.cmd(&sci)
+        .args(["done", &id, "landed"])
+        .env("TASKS_MODEL", "claude-fable-5-1")
+        .assert()
+        .success();
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "show", &id])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout);
+    assert!(text.contains("model: claude-fable-5-1\n"), "{text}");
+}
+
+#[test]
 fn completing_a_recurrence_anchors_and_notes_every_completion_path() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
