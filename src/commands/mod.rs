@@ -529,7 +529,9 @@ pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
 }
 
 pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Result<()> {
-    if !Status::can_transition(task.status, to) {
+    // Cadence permits early reopening; the clock only governs read-time visibility.
+    let reopening = task.status == Status::Done && to == Status::Doing && task.every.is_some();
+    if !reopening && !Status::can_transition(task.status, to) {
         return Err(Error::InvalidTransition(
             task.status.as_str().into(),
             to.as_str().into(),

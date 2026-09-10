@@ -9622,3 +9622,49 @@ fn sample_scopes_like_the_other_read_commands() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains(&f) && text.contains("F"), "{text}");
 }
+
+#[test]
+fn a_recurrence_reopens_straight_to_doing_and_parks_only_once_open() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    env.json(&sci, &["start", &id]);
+    env.json(&sci, &["done", &id]);
+
+    // Seed a distinctly older anchor so that "the anchor moved" is provable. Timestamps
+    // have second precision, so comparing two same-second stamps would prove nothing.
+    seed_anchor(&sci, &id, "2020-03-04T05:06:07Z");
+
+    // An overdue recurrence reopens directly.
+    let v = env.json(&sci, &["start", &id]);
+    assert_eq!(v["id"], id);
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "doing");
+
+    // Running early re-anchors from that close, replacing the seeded value.
+    env.json(&sci, &["done", &id]);
+    let after = env.json(&sci, &["show", &id])["task"]["last_done"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_ne!(after, "2020-03-04T05:06:07Z", "the anchor was replaced");
+    assert!(after.starts_with("20"), "{after}");
+    assert!(
+        after.as_str() > "2020-03-04T05:06:07Z",
+        "the anchor moved forward: {after}"
+    );
+
+    // A closed recurrence cannot be parked; reopen first (spec §4.8).
+    assert_eq!(
+        env.fail(&sci, &["park", &id, "ask the user"]),
+        "invalid_transition"
+    );
+    // Freshly completed: not yet due, but early reopening is allowed too.
+    env.json(&sci, &["start", &id]);
+    env.json(&sci, &["park", &id, "ask the user", "--waiting-on", "user"]);
+    assert_eq!(env.json(&sci, &["list", "--parked"])["tasks"][0]["id"], id);
+
+    // An ordinary closed task still cannot reopen straight to doing.
+    let plain = id_of(env.json(&sci, &["add", "One off"]));
+    env.json(&sci, &["done", &plain]);
+    assert_eq!(env.fail(&sci, &["start", &plain]), "invalid_transition");
+}
