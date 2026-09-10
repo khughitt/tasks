@@ -814,6 +814,16 @@ fn paint_field(line: &str, task: &Task, painter: &Painter) -> String {
 
 fn show_text(o: &ShowFields, painter: &Painter) -> String {
     let mut rendered = paint_frontmatter(&crate::format::serialize_task(&o.task), &o.task, painter);
+    if let Some(periodic) = &o.periodic {
+        let due = match (&periodic.due, periodic.due_now) {
+            (Some(due), _) => Some(crate::time::day(due)),
+            (None, true) => Some("now"),
+            (None, false) => None,
+        };
+        if let Some(due) = due {
+            rendered.push_str(&format!("\n# periodic\ndue: {due}\n"));
+        }
+    }
     let related_row = |id: &str, status: Option<Status>, title: &str| {
         let status = match status {
             Some(status) => painter.paint(Style::Status(status), status.as_str()),
@@ -930,6 +940,23 @@ pub fn table(
         } else {
             painter.paint(Style::Chrome, &format!(" [{}]", row.tags.join(", ")))
         };
+        // A due row's status column reads `done`, which is true; the marker is what says why
+        // it is here (spec §5.1). Not-yet-due rows never reach `ready`, and carry their date
+        // in the due column of `list --periodic` instead.
+        let cadence = match &row.periodic {
+            Some(periodic) if periodic.due_now => {
+                let when = periodic
+                    .due
+                    .as_deref()
+                    .map(|due| crate::time::day(due).to_string())
+                    .unwrap_or_else(|| "now".into());
+                painter.paint(
+                    Style::Emphasis,
+                    &format!("  every {}, due {when}", periodic.every),
+                )
+            }
+            _ => String::new(),
+        };
         let owner = match &row.claim {
             Some(claim) if claim.live => format!(" @{} [{}]", claim.owner, claim.session),
             Some(claim) => format!(" @{} [{} stale]", claim.owner, claim.session),
@@ -948,7 +975,7 @@ pub fn table(
             (true, false) => "   ",
         };
         rendered.push_str(&format!(
-            "{id}  {priority} {size:<2} {status} {mark}{date}  {}{tags}{owner}\n",
+            "{id}  {priority} {size:<2} {status} {mark}{date}  {}{tags}{cadence}{owner}\n",
             row.title
         ));
     }

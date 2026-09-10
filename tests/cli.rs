@@ -9811,3 +9811,34 @@ fn the_periodic_object_is_the_json_contract() {
     let dropped = env.json(&sci, &["show", &open]);
     assert_eq!(dropped["periodic"], reopened["periodic"]);
 }
+
+#[test]
+fn a_due_row_shows_its_cadence_and_due_date() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let due = id_of(env.json(&sci, &["add", "Overdue sweep"]));
+    env.json(&sci, &["done", &due]);
+    env.json(&sci, &["edit", &due, "--every", "30d"]);
+
+    let text = env.pretty(&sci, &["ready"]);
+    assert!(text.contains("done"), "the status column is honest: {text}");
+    assert!(text.contains("every 30d, due now"), "{text}");
+    assert!(text.is_ascii(), "pretty output is ASCII only: {text}");
+
+    let shown = env.pretty(&sci, &["show", &due]);
+    assert!(shown.contains("every: 30d"), "{shown}");
+    assert!(shown.contains("due: now"), "{shown}");
+
+    // An anchored, not-yet-due recurrence is not in ready at all, and its show page
+    // carries a real date.
+    let anchored = id_of(env.json(&sci, &["add", "Fresh sweep", "--every", "2w"]));
+    env.json(&sci, &["start", &anchored]);
+    env.json(&sci, &["done", &anchored]);
+    let shown = env.pretty(&sci, &["show", &anchored]);
+    assert!(shown.contains("every: 2w"), "{shown}");
+    assert!(shown.contains("due: 2"), "{shown}");
+    assert!(
+        !env.pretty(&sci, &["ready"]).contains(&anchored),
+        "not due yet"
+    );
+}
