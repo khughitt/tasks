@@ -6,7 +6,7 @@ priority: 2
 size: m
 owner: waiting-on
 created: 2026-09-11T11:59:09Z
-updated: 2026-09-11T12:30:21Z
+updated: 2026-09-11T12:36:13Z
 depends: []
 tags: [obs]
 source: ops-2cb205
@@ -24,3 +24,7 @@ Scope:
 - Keep the initial vocabulary small; refuse values outside it; no questionnaire beyond the one flag.
 
 Out of scope: a full append-only transition history, session-to-task linkage, and any report over the stamps; those wait until these fields have been collected for a while. Design through brainstorming against this task before implementation.
+
+## Notes
+
+- 2026-09-11T12:36:13Z (waiting-on): Corrected plan review findings: next JSON nesting, runnable test filters, historical first-start fixture, and explicit task-file staging.

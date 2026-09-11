@@ -24,7 +24,7 @@
 - **Gates.** `just check` before every commit (fmt, clippy `-D warnings`, `tasks check`); `just test` is `cargo test`. Rebuild and reinstall after CLI changes so the tracker in use is the code under test: `cargo install --path .`.
 - **Struct-literal sites that break when a field is added** (each task names the ones it touches): `Task` (`src/commands/add.rs:25`, `src/repo.rs:607`, `src/hierarchy.rs:248`, `src/query.rs:249`, `src/similarity.rs:102`, test helper `task_with` at `src/model.rs:78`); `TaskSummary` (constructor at `src/output.rs:243`, test fixture `row` at `src/output.rs:1100`); `ParkedRow` (`resolved` at `src/output.rs:296`, `unresolved` at `src/output.rs:316`); `Park` (`src/commands/park.rs:48`, test at `src/claims.rs:970`); `ParkInfo::of` (`src/output.rs:198`).
 - **End-to-end tests isolate the environment.** `TestEnv::cmd`/`raw` set `HOME` to a temp dir and scrub `TASKS_*`. Session-identified commands use `as_agent(&env, &dir, "name")` (tests/cli.rs:5070); editor-driven edits use `editor_script(&dir, "<sh body>")` (tests/cli.rs:2166) with `.env("EDITOR", &editor)`.
-- **Commit hygiene.** Never `git add -A`: two untracked feedback reports (`tasks/tasks-74a525.md`, `tasks/tasks-b5add6.md`) are unrelated and stay out. Conventional commits; no AI-attribution trailers. This work lives in the `.worktrees/waiting-on` checkout on branch `waiting-on`; every path below is relative to that checkout.
+- **Commit hygiene.** Stage only the named files, never `git add -A` or the whole `tasks/` directory; unrelated feedback stays out. Conventional commits; no AI-attribution trailers. This work lives in the `.worktrees/waiting-on` checkout on branch `waiting-on`; every path below is relative to that checkout.
 - **Each plan task has a step child under `tasks-82b559`**; the ids are listed at the end of this header. `tasks start <step>` before its first step and `tasks done <step> "<what landed>"` in the same commit as its code; the commit blocks below include the `done`.
 
 **Step children:** Task 1 `tasks-bfe479`, Task 2 `tasks-1a8e3b`, Task 3 `tasks-a7387b`, Task 4 `tasks-8da6fa`.
@@ -185,7 +185,7 @@ Expected: all format tests pass, including the four new ones; the suite is green
 just check
 git add src/model.rs src/format.rs src/output.rs src/commands/add.rs src/repo.rs src/hierarchy.rs src/query.rs src/similarity.rs
 tasks done tasks-bfe479 "started and completed parse, validate, and serialize between updated and last_done"
-git add tasks/
+git add tasks/tasks-bfe479.md
 git commit -m "feat(record): started and completed stamps on the task record"
 ```
 
@@ -221,6 +221,17 @@ fn start_stamps_started_once_and_later_starts_leave_it() {
         .success();
     let first = env.json(&sci, &["show", &id])["task"]["started"].clone();
     assert!(first.is_string(), "{first}");
+
+    // Fixture-only: use a historical stamp so an accidental restamp cannot hide
+    // behind the clock's second precision during the rapid commands below.
+    let path = sci.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let seeded = text.replace(
+        &format!("started: {}", first.as_str().unwrap()),
+        "started: 2000-01-01T00:00:00Z",
+    );
+    std::fs::write(&path, seeded).unwrap();
+    let first = "2000-01-01T00:00:00Z";
 
     as_agent(&env, &sci, "agent-a")
         .args(["park", &id, "resume later"])
@@ -286,7 +297,7 @@ fn done_stamps_completed_and_reopening_clears_it() {
 }
 
 #[test]
-fn editor_reopen_keeps_the_completed_line_and_transition_clears_it() {
+fn editor_reopen_keeps_the_completed_stamp_and_transition_clears_it() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
@@ -397,7 +408,7 @@ fn editor_refuses_to_set_move_or_clear_a_stamp() {
 }
 
 #[test]
-fn check_reports_completed_on_an_open_record() {
+fn check_reports_completed_stamp_on_an_open_record() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
@@ -419,7 +430,7 @@ fn check_reports_completed_on_an_open_record() {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --test cli stamp 2>&1 | grep -E 'test .* (ok|FAILED)'`
-Expected: `start_stamps_started_once_and_later_starts_leave_it`, `done_stamps_completed_and_reopening_clears_it`, `editor_reopen_keeps_the_completed_line_and_transition_clears_it`, `recurring_completion_stamps_both_and_recovery_stamps_neither`, `editor_refuses_to_set_move_or_clear_a_stamp`, and `check_reports_completed_on_an_open_record` all FAILED (the stamps stay null; the editor accepts the edits; `check` reports nothing).
+Expected: `start_stamps_started_once_and_later_starts_leave_it`, `done_stamps_completed_and_reopening_clears_it`, `editor_reopen_keeps_the_completed_stamp_and_transition_clears_it`, `recurring_completion_stamps_both_and_recovery_stamps_neither`, `editor_refuses_to_set_move_or_clear_a_stamp`, and `check_reports_completed_stamp_on_an_open_record` all FAILED (the stamps stay null; the editor accepts the edits; `check` reports nothing).
 
 - [ ] **Step 3: Stamp in `transition()`**
 
@@ -511,7 +522,7 @@ Expected: the six new tests pass; the whole suite is green. If `recurring_restam
 just check
 git add src/commands/mod.rs src/commands/edit.rs src/commands/check.rs tests/cli.rs
 tasks done tasks-1a8e3b "transition stamps started and completed; editor refuses to touch them; check reports a completed stamp on an open record"
-git add tasks/
+git add tasks/tasks-1a8e3b.md
 git commit -m "feat(transition): stamp started and completed, guard them from edits, report drift"
 ```
 
@@ -634,9 +645,9 @@ fn park_reason_rides_the_entry_the_note_and_every_park_view() {
         .assert()
         .success();
     let next = env.json(&sci, &["next"]);
-    assert_eq!(next["task"]["id"], id);
-    assert_eq!(next["park"]["reason"], "environment");
-    assert_eq!(next["park"]["waiting_on"], "agent");
+    assert_eq!(next["next"]["task"]["id"], id);
+    assert_eq!(next["next"]["park"]["reason"], "environment");
+    assert_eq!(next["next"]["park"]["waiting_on"], "agent");
 }
 
 #[test]
@@ -681,7 +692,7 @@ fn park_without_a_reason_records_none_and_re_parking_drops_a_previous_one() {
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `cargo test --bin tasks claims::tests::reason 2>&1 | tail -5` and `cargo test --test cli park_reason park_without 2>&1 | tail -5`
+Run: `cargo test --bin tasks claims::tests::reason 2>&1 | tail -5` and `cargo test --test cli park_ 2>&1 | tail -5`
 Expected: compile errors — `Reason` and `describe_stop` are undefined; `Park` has no field `reason`.
 
 - [ ] **Step 4: Add `Reason`, `describe_stop`, and `Park::reason`**
@@ -858,7 +869,7 @@ Expected: green, including the three claims units and the two park end-to-end te
 just check
 git add src/claims.rs src/cli.rs src/complete.rs src/commands/mod.rs src/commands/park.rs src/output.rs tests/cli.rs
 tasks done tasks-a7387b "park --reason with the six-word vocabulary on the store entry, the note, and park.reason in every view"
-git add tasks/
+git add tasks/tasks-a7387b.md
 git commit -m "feat(park): --reason records why the work stopped"
 ```
 
@@ -930,7 +941,7 @@ Expected: `{"errors":[],"warnings":[]}`.
 git add skills/tasks/SKILL.md README.md docs/specs/2026-09-11-park-reason-and-stamps-design.md docs/plans/2026-09-11-park-reason-and-stamps.md
 tasks done tasks-8da6fa "skill step 5, README, and both status lines updated"
 tasks done tasks-82b559 "started/completed stamps and park --reason landed with tests and docs"
-git add tasks/
+git add tasks/tasks-8da6fa.md tasks/tasks-82b559.md
 git commit -m "docs(park): document --reason and the lifecycle stamps; close tasks-82b559"
 ```
 
