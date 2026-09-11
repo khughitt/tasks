@@ -106,9 +106,11 @@ Rules, in the shape the model-provenance design fixed:
 - **Note.** The park note becomes `parked (waiting on <who>, <reason>): <next step>`
   when a reason is given and stays `parked (waiting on <who>): <next step>` when not.
   The note is the durable trail (park design §2.1); no park frontmatter is added.
-- **Rows.** `ParkedRow` gains `reason` (`null` when absent), so `prime`, `list --parked`,
-  and `next` carry it. The pretty parked listings print it after the who, in the same
-  parenthetical the note uses.
+- **Rows.** `ParkInfo` (src/output.rs), the one park block every view embeds as `park`
+  — `ShowFields` for `show` and `next`, `TaskSummary` for `list`, `ready`, `prime`, and
+  `tree`, and `ParkedRow` — gains `reason`, `null` when absent, so `park.reason` is the
+  JSON path everywhere and no row type carries a second copy. The pretty parked
+  listings print it after the who, in the same parenthetical the note uses.
 - **Completion.** `complete::reason` offers the six values;
   `ArgValueCandidates` on the flag, as for `--waiting-on`.
 - **Rename.** Park entries migrate through `tasks rename` byte-for-byte as today; the
@@ -124,19 +126,22 @@ table, and its record-format section lists `started` and `completed` beside `las
 ## 6. Testing
 
 Units in `format.rs` mirroring `last_done`: round-trip of both stamps, the write order,
-`quote_timestamps` covering them, the parse-time refusal of `completed` on an open task,
-and of an unparsable value; a `check` finding for `completed` on an open record. Integration cases that carry the contract:
+`quote_timestamps` covering them, refusal of an unparsable value, and — the inverse of
+the `last_done` rule — that `completed` on an open record *parses*. `check` reports that
+record as a finding. Integration cases that carry the contract:
 
 - `start` stamps `started`; a second `start` after `park`, a `--force` takeover from
   another session, and `edit --status doing` all leave the original value.
 - `done` stamps `completed`; `edit --status todo` (reopen) clears it and leaves
-  `started`; a fresh `done` restamps with a later value.
+  `started`; a fresh `done` restamps with a later value. The same reopen made in the
+  editor — the saved text flips `status: done` to `todo` and keeps the `completed:`
+  line — parses, transitions, and ends with the stamp cleared.
 - A recurring task: `done` stamps `completed` and `last_done` to the same instant;
   `start` on the due occurrence clears `completed` and keeps `last_done`; the retry
   path with a lingering claim (the provenance test's arrangement) stamps neither.
 - An editor save that sets, moves, or clears either stamp is refused with the named error.
-- `park --reason review` writes the entry, the row (`prime`, `list --parked`, `next`
-  JSON), and the note in the parenthetical form; `park` without the flag writes `null`
+- `park --reason review` writes the entry, `park.reason` in `show`, `next`, `prime`, and
+  `list --parked` JSON, and the note in the parenthetical form; `park` without the flag writes `null`
   and the old note form; `--reason nope` fails listing the six; re-park without the flag
   drops a previous reason.
 - A store file written before this change (no `reason` key) loads.
