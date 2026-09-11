@@ -75,6 +75,8 @@ mod tests {
             owner: None,
             created: "2026-01-01T00:00:00Z".into(),
             updated: "2026-01-01T00:00:00Z".into(),
+            started: None,
+            completed: None,
             last_done: last_done.map(Into::into),
             depends: vec![],
             parent: None,

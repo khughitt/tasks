@@ -22,6 +22,8 @@ pub fn blank(project: &Project, title: String, status: Status) -> Result<Task> {
         owner: None,
         created: now.clone(),
         updated: now,
+        started: None,
+        completed: None,
         last_done: None,
         depends: vec![],
         parent: None,

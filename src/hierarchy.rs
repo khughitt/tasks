@@ -245,6 +245,8 @@ mod tests {
             owner: None,
             created: "2026-09-03T00:00:00Z".into(),
             updated: "2026-09-03T00:00:00Z".into(),
+            started: None,
+            completed: None,
             last_done: None,
             depends: vec![],
             parent: parent.map(|p| TaskId::parse(p).unwrap()),

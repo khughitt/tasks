@@ -75,6 +75,8 @@ mod tests {
             owner: None,
             created: "2026-09-09T00:00:00Z".into(),
             updated: "2026-09-09T00:00:00Z".into(),
+            started: None,
+            completed: None,
             last_done: None,
             depends: vec![],
             parent: None,
@@ -318,6 +320,8 @@ pub struct Task {
     pub owner: Option<String>,
     pub created: String,
     pub updated: String,
+    pub started: Option<String>,
+    pub completed: Option<String>,
     /// The completion that anchors the current cycle. Stamped only alongside `every`, and
     /// only by a transition that actually completes the task (spec §4.4).
     pub last_done: Option<String>,

@@ -604,6 +604,8 @@ mod tests {
             owner: None,
             created: crate::time::now(),
             updated: crate::time::now(),
+            started: None,
+            completed: None,
             last_done: None,
             depends: vec![],
             parent: None,

@@ -3,7 +3,7 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Note, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 19] = [
+const KEYS: [&str; 21] = [
     "id",
     "title",
     "status",
@@ -14,6 +14,8 @@ const KEYS: [&str; 19] = [
     "owner",
     "created",
     "updated",
+    "started",
+    "completed",
     "last_done",
     "depends",
     "parent",
@@ -112,6 +114,8 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         owner: scalar("owner")?,
         created,
         updated,
+        started: scalar("started")?,
+        completed: scalar("completed")?,
         last_done: scalar("last_done")?,
         depends,
         parent: scalar("parent")?
@@ -138,6 +142,8 @@ pub fn quote_timestamps(fm: &str) -> String {
         .map(|line| {
             if line.starts_with("created: ")
                 || line.starts_with("updated: ")
+                || line.starts_with("started: ")
+                || line.starts_with("completed: ")
                 || line.starts_with("last_done: ")
             {
                 let (k, v) = line.split_once(':').expect("prefix matched");
@@ -269,6 +275,12 @@ pub fn validate_task(t: &Task) -> Result<()> {
     }
     crate::time::parse(&t.created)?;
     crate::time::parse(&t.updated)?;
+    if let Some(started) = &t.started {
+        crate::time::parse(started)?;
+    }
+    if let Some(completed) = &t.completed {
+        crate::time::parse(completed)?;
+    }
     match (t.every, &t.last_done) {
         (None, Some(_)) => {
             return Err(Error::Validation(
@@ -347,6 +359,12 @@ pub fn serialize_task(t: &Task) -> String {
         (String::from("created"), Value::Raw(t.created.clone())),
         (String::from("updated"), Value::Raw(t.updated.clone())),
     ]);
+    if let Some(started) = &t.started {
+        pairs.push((String::from("started"), Value::Raw(started.clone())));
+    }
+    if let Some(completed) = &t.completed {
+        pairs.push((String::from("completed"), Value::Raw(completed.clone())));
+    }
     if let Some(last_done) = &t.last_done {
         pairs.push((String::from("last_done"), Value::Raw(last_done.clone())));
     }
@@ -630,6 +648,53 @@ mod tests {
             hex: "000001".into(),
         });
         assert!(validate_task(&task).is_err());
+    }
+
+    #[test]
+    fn stamps_round_trip_between_updated_and_last_done() {
+        let mut task = parse_task(FULL, "f").unwrap();
+        task.every = Some(crate::periodic::Interval::parse("2w").unwrap());
+        task.last_done = Some("2026-09-01T08:00:00Z".into());
+        task.started = Some("2026-08-30T09:00:00Z".into());
+        task.completed = Some("2026-09-01T08:00:00Z".into());
+        let text = serialize_task(&task);
+        assert!(
+            text.contains(
+                "updated: 2026-08-29T14:02:11Z\nstarted: 2026-08-30T09:00:00Z\n\
+                 completed: 2026-09-01T08:00:00Z\nlast_done: 2026-09-01T08:00:00Z\n"
+            ),
+            "stamps follow updated and precede last_done: {text}"
+        );
+        let back = parse_task(&text, "f").unwrap();
+        assert_eq!(back.started, task.started);
+        assert_eq!(back.completed, task.completed);
+    }
+
+    #[test]
+    fn stamps_are_omitted_when_absent() {
+        let task = parse_task(FULL, "f").unwrap();
+        assert_eq!(task.started, None);
+        assert_eq!(task.completed, None);
+        let text = serialize_task(&task);
+        assert!(
+            !text.contains("started:") && !text.contains("completed:"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_unparsable_stamp() {
+        let with = |line: &str| FULL.replace("size: m\n", &format!("size: m\n{line}\n"));
+        assert!(parse_task(&with("started: yesterday"), "f").is_err());
+        assert!(parse_task(&with("completed: 2026-13-45T00:00:00Z"), "f").is_err());
+    }
+
+    #[test]
+    fn completed_on_an_open_record_parses() {
+        let text = FULL.replace("size: m\n", "size: m\ncompleted: 2026-09-01T08:00:00Z\n");
+        let task = parse_task(&text, "f").unwrap();
+        assert_eq!(task.status, Status::Todo);
+        assert_eq!(task.completed.as_deref(), Some("2026-09-01T08:00:00Z"));
     }
 
     #[test]
