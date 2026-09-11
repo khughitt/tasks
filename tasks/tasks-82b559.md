@@ -1,14 +1,16 @@
 ---
 id: tasks-82b559
 title: Stamp started and completed on task records and give park --waiting-on a small vocabulary
-status: todo
+status: doing
 priority: 2
 size: m
+owner: waiting-on
 created: 2026-09-11T11:59:09Z
-updated: 2026-09-11T11:59:09Z
+updated: 2026-09-11T12:13:58Z
 depends: []
 tags: [obs]
 source: ops-2cb205
+spec: docs/specs/2026-09-11-park-reason-and-stamps-design.md
 ---
 
 The minimal telemetry change the friction diagnosis (ops docs/reports/2026-09-11-friction-diagnosis.md, §4 gaps 1 and 3, §5 item 4) asks for.
