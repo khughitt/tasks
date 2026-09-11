@@ -15,6 +15,16 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
     if edited.created != original.created {
         return Err(Error::Validation("created is immutable".into()));
     }
+    if edited.started != original.started {
+        return Err(Error::Validation(
+            "started is stamped by starting the task; it cannot be edited".into(),
+        ));
+    }
+    if edited.completed != original.completed {
+        return Err(Error::Validation(
+            "completed is stamped by completing the task; it cannot be edited".into(),
+        ));
+    }
     if edited.notes != original.notes {
         return Err(Error::Validation(
             "notes are append-only; use `tasks note`".into(),

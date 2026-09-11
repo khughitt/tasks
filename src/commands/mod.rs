@@ -610,6 +610,12 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     let completing = to == Status::Done && task.status != Status::Done;
     if completing {
         task.model = completion_model()?;
+        task.completed = Some(crate::time::now());
+    } else if task.status == Status::Done && to != Status::Done {
+        task.completed = None;
+    }
+    if to == Status::Doing && task.started.is_none() {
+        task.started = Some(crate::time::now());
     }
     task.status = to;
     if completing && let Some(every) = task.every {

@@ -65,6 +65,14 @@ pub fn run(ctx: Ctx) -> Result<Output> {
 
     for task in &tasks {
         let file = format!("tasks/{}.md", task.id);
+        if task.status.is_open() && task.completed.is_some() {
+            warnings.push(finding(
+                Some(task),
+                file.clone(),
+                "completed_stamp_on_open_task",
+                "open task has a completion stamp".into(),
+            ));
+        }
         for dependency in &task.depends {
             let dependency_id = ctx.registry.canonical_id(dependency);
             if &dependency_id != dependency {
