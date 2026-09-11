@@ -63,7 +63,10 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
-`--rm-tag <tag>` removes one and `--no-tags` clears them all.
+`--rm-tag <tag>` removes one and `--no-tags` clears them all. When the project keeps a
+tag dictionary (`[tags]` in `tasks/.config.toml`), `tasks tags` shows each tag's meaning:
+prefer a defined tag, and add an entry when a new tag is worth keeping — `check` warns
+on open tasks carrying an undefined one.
 `--source <ref>` records where a task came from (a URL, a message id, a note); tasks never interprets it.
 `tasks list --source <ref>` finds everything filed from one reference, matched exactly.
 A sourced `add` is idempotent: when the project already holds a task with that same source

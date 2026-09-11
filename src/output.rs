@@ -391,6 +391,9 @@ pub struct TreeOut {
 #[derive(Serialize)]
 pub struct TagRow {
     pub tag: String,
+    /// From the dictionary of the project in scope, or of the first registered project
+    /// that defines the tag under `--all-projects`; `null` when no dictionary has it.
+    pub meaning: Option<String>,
     pub count: usize,
     /// Count per project; one key in local scope.
     pub projects: std::collections::BTreeMap<String, usize>,
@@ -810,7 +813,15 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                     .map(|(prefix, count)| format!("{prefix} {count}"))
                     .collect();
                 let breakdown = painter.paint(Style::Chrome, &format!("  ({})", parts.join(", ")));
-                rendered.push_str(&format!("{:>4}  {}{breakdown}\n", row.count, row.tag));
+                let meaning = row
+                    .meaning
+                    .as_deref()
+                    .map(|meaning| format!("  {meaning}"))
+                    .unwrap_or_default();
+                rendered.push_str(&format!(
+                    "{:>4}  {}{meaning}{breakdown}\n",
+                    row.count, row.tag
+                ));
             }
             rendered
         }

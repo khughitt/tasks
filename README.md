@@ -219,6 +219,20 @@ so a person here reviews each uncommitted file before it becomes public.
    A configured list replaces the defaults. The roots are both the validation boundary
    and the search path for bare names, and they are project-level only so `tasks check`
    agrees on every machine.
+
+   The same file may carry the project's tag dictionary, one line per tag with a
+   specific meaning:
+
+       [tags]
+       testing = "Tests, gates, and CI."
+       perf = "Speed or memory."
+
+   `tasks tags` prints the meaning beside each tag, and `tasks check` warns
+   `undefined_tag` for an open task carrying a tag the table does not define; a project
+   without the table is not held to anything. A new metadata idea starts here as a tag
+   plus an entry, and is promoted to a proper field only once it has earned validation
+   and a JSON key — then the entry says so and `check` flushes the tag. Design:
+   `docs/specs/2026-09-11-tag-dictionary-design.md`.
 2. `tasks init --prefix <p>`.
 3. Install the skill and mention it in the project's CLAUDE.md / AGENTS.md.
 4. Require `tasks prime` at session start and `tasks check` before completion. Add
@@ -227,6 +241,6 @@ so a person here reviews each uncommitted file before it becomes public.
 
 ## Layout
 
-    tasks/.config.toml               prefix = "sci"; optional spec_dirs / plan_dirs
+    tasks/.config.toml               prefix = "sci"; optional spec_dirs / plan_dirs / [tags]
     tasks/sci-4f2a9c.md              one task
     ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live

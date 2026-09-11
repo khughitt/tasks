@@ -2,7 +2,19 @@ use super::ReadCtx;
 use crate::error::Result;
 use crate::model::Status;
 use crate::output::{Output, TagRow, TagsOut};
+use crate::scope::Scope;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// The local project's entry, or the first registered project's under `--all-projects`.
+fn meaning_of(scope: &Scope, tag: &str) -> Option<String> {
+    let projects: Vec<&crate::repo::Project> = match scope {
+        Scope::Local(project) => vec![project],
+        Scope::All(projects) => projects.iter().collect(),
+    };
+    projects
+        .into_iter()
+        .find_map(|project| project.tags.as_ref()?.get(tag).cloned())
+}
 
 /// Tag frequencies over open tasks, or over the given statuses: how many tasks carry
 /// each tag. Visibility only: this is how a shared vocabulary would be chosen, not
@@ -26,6 +38,7 @@ pub fn run(ctx: ReadCtx, statuses: Vec<String>) -> Result<Output> {
         for tag in distinct {
             let row = rows.entry(tag).or_insert_with(|| TagRow {
                 tag: tag.to_string(),
+                meaning: meaning_of(&ctx.scope, tag),
                 count: 0,
                 projects: BTreeMap::new(),
             });

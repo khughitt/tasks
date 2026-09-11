@@ -136,6 +136,87 @@ fn local_read_prefers_no_project_to_a_malformed_registry() {
     assert_eq!(env.fail(dir.path(), &["list"]), "no_project");
 }
 
+fn write_dictionary(dir: &std::path::Path, prefix: &str, entries: &[(&str, &str)]) {
+    let mut text = format!("prefix = \"{prefix}\"\n\n[tags]\n");
+    for (tag, meaning) in entries {
+        text.push_str(&format!("{tag} = \"{meaning}\"\n"));
+    }
+    std::fs::write(dir.join("tasks/.config.toml"), text).unwrap();
+}
+
+#[test]
+fn tags_carry_the_dictionary_meaning_and_check_holds_open_work_to_it() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "A", "--tag", "testing", "--tag", "perf"]);
+    env.json(&fam, &["add", "C", "--tag", "testing"]);
+
+    // No dictionary: meanings are null and check says nothing about tags.
+    assert!(env.json(&sci, &["tags"])["tags"][0]["meaning"].is_null());
+    assert!(
+        env.json(&sci, &["check"])["warnings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    write_dictionary(&sci, "sci", &[("testing", "Tests, gates, and CI.")]);
+    let local = env.json(&sci, &["tags"]);
+    let row = |name: &str| {
+        local["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["tag"] == name)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(row("testing")["meaning"], "Tests, gates, and CI.");
+    assert!(row("perf")["meaning"].is_null(), "perf has no entry");
+    let text = env.pretty(&sci, &["tags"]);
+    assert!(text.contains("testing  Tests, gates, and CI."), "{text}");
+
+    // The open task carrying the undefined tag is a finding; a closed one is not.
+    let warnings = env.json(&sci, &["check"])["warnings"].clone();
+    let warnings = warnings.as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0]["kind"], "undefined_tag");
+    assert!(warnings[0]["detail"].as_str().unwrap().contains("\"perf\""));
+    let id = warnings[0]["id"].as_str().unwrap().to_string();
+    env.json(&sci, &["done", &id, "landed"]);
+    assert!(
+        env.json(&sci, &["check"])["warnings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    // Across projects the first registered dictionary that defines the tag wins.
+    write_dictionary(&fam, "fam", &[("testing", "fam's reading.")]);
+    let nowhere = tempfile::tempdir().unwrap();
+    let wide = env.json(nowhere.path(), &["tags", "--all-projects"]);
+    let testing = wide["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["tag"] == "testing")
+        .unwrap();
+    assert_eq!(
+        testing["meaning"], "fam's reading.",
+        "fam registers before sci"
+    );
+
+    // A malformed entry is a config error, not a silent skip.
+    std::fs::write(
+        sci.join("tasks/.config.toml"),
+        "prefix = \"sci\"\n\n[tags]\nx = \"\"\n",
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["tags"]).output().unwrap();
+    assert_eq!(err_kind(&out), "config");
+}
+
 #[test]
 fn tags_counts_per_project_and_filters_by_status() {
     let mut env = TestEnv::new();
@@ -152,8 +233,8 @@ fn tags_counts_per_project_and_filters_by_status() {
     assert_eq!(
         local["tags"],
         serde_json::json!([
-            { "tag": "testing", "count": 2, "projects": { "sci": 2 } },
-            { "tag": "perf", "count": 1, "projects": { "sci": 1 } }
+            { "tag": "testing", "meaning": null, "count": 2, "projects": { "sci": 2 } },
+            { "tag": "perf", "meaning": null, "count": 1, "projects": { "sci": 1 } }
         ])
     );
 
@@ -177,7 +258,7 @@ fn tags_counts_per_project_and_filters_by_status() {
     );
     assert_eq!(
         closed["tags"],
-        serde_json::json!([{ "tag": "legacy", "count": 1, "projects": { "fam": 1 } }])
+        serde_json::json!([{ "tag": "legacy", "meaning": null, "count": 1, "projects": { "fam": 1 } }])
     );
 
     let out = env
@@ -1674,7 +1755,7 @@ fn project_scope_covers_every_read_command() {
     let v = env.json(&sci, &["tags", "--project", "fam"]);
     assert_eq!(
         v["tags"],
-        serde_json::json!([{ "tag": "fam-only", "count": 1, "projects": { "fam": 1 } }])
+        serde_json::json!([{ "tag": "fam-only", "meaning": null, "count": 1, "projects": { "fam": 1 } }])
     );
 }
 

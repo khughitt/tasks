@@ -65,6 +65,27 @@ pub fn run(ctx: Ctx) -> Result<Output> {
 
     for task in &tasks {
         let file = format!("tasks/{}.md", task.id);
+        // Only a project that keeps a dictionary is held to it, and only its open work:
+        // a closed task's tags are history, not vocabulary.
+        if let Some(dictionary) = &ctx.project.tags
+            && task.status.is_open()
+        {
+            for tag in task
+                .tags
+                .iter()
+                .filter(|tag| !dictionary.contains_key(*tag))
+            {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "undefined_tag",
+                    format!(
+                        "tag {tag:?} has no entry in {}'s [tags]",
+                        crate::repo::CONFIG_REL
+                    ),
+                ));
+            }
+        }
         if let Some(completed) = &task.completed
             && task.status != Status::Done
         {

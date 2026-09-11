@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use crate::format::{parse_task, serialize_task, validate_doc_path};
 use crate::model::{Task, TaskId, is_valid_prefix};
 use crate::registry::Registry;
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -72,6 +73,10 @@ pub struct Project {
     pub spec_dirs: Vec<String>,
     /// Roots a `plan` link may live under; also the search path for bare plan names.
     pub plan_dirs: Vec<String>,
+    /// The tag dictionary: tag -> one-line meaning, from the config's `[tags]` table.
+    /// `None` when the project keeps no dictionary; then `check` says nothing about
+    /// tags. See docs/specs/2026-09-11-tag-dictionary-design.md.
+    pub tags: Option<BTreeMap<String, String>>,
 }
 
 /// One other checkout's copy of a record, as `sibling_task_copies` found it.
@@ -90,6 +95,24 @@ struct Config {
     spec_dirs: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     plan_dirs: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tags: Option<BTreeMap<String, String>>,
+}
+
+/// A dictionary entry is a valid tag with a one-line, non-empty meaning; anything else
+/// is a config error naming the entry.
+fn tag_dictionary(
+    raw: Option<BTreeMap<String, String>>,
+) -> Result<Option<BTreeMap<String, String>>> {
+    let Some(entries) = raw else {
+        return Ok(None);
+    };
+    for (tag, meaning) in &entries {
+        crate::format::validate_line("tag", tag)
+            .and_then(|()| crate::format::validate_line("meaning", meaning))
+            .map_err(|error| Error::Config(format!("{CONFIG_REL}: [tags] {tag:?}: {error}")))?;
+    }
+    Ok(Some(entries))
 }
 
 /// Normalizes a configured doc root: one trailing slash is dropped; anything that is not a
@@ -144,6 +167,7 @@ impl Project {
                 prefix: prefix.into(),
                 spec_dirs: None,
                 plan_dirs: None,
+                tags: None,
             })
             .expect("config serializes");
             atomic_write(&config, text.as_bytes())?;
@@ -170,6 +194,7 @@ impl Project {
             prefix: config.prefix,
             spec_dirs: doc_roots("spec_dirs", config.spec_dirs, DEFAULT_SPEC_DIRS)?,
             plan_dirs: doc_roots("plan_dirs", config.plan_dirs, DEFAULT_PLAN_DIRS)?,
+            tags: tag_dictionary(config.tags)?,
         })
     }
 
@@ -618,6 +643,27 @@ mod tests {
             body: String::new(),
             notes: vec![],
         }
+    }
+
+    #[test]
+    fn tag_dictionary_is_optional_and_its_entries_are_validated() {
+        let (dir, p) = temp_project();
+        assert_eq!(p.tags, None, "init writes no dictionary");
+        let config = dir.path().join("tasks/.config.toml");
+        std::fs::write(
+            &config,
+            "prefix = \"tst\"\n\n[tags]\ntesting = \"Tests, gates, and CI.\"\nperf = \"Speed or memory.\"\n",
+        )
+        .unwrap();
+        let p = Project::open(dir.path()).unwrap();
+        let dictionary = p.tags.unwrap();
+        assert_eq!(dictionary.len(), 2);
+        assert_eq!(dictionary["testing"], "Tests, gates, and CI.");
+
+        std::fs::write(&config, "prefix = \"tst\"\n\n[tags]\ntesting = \"\"\n").unwrap();
+        let error = Project::open(dir.path()).unwrap_err().to_string();
+        assert!(error.contains("[tags] \"testing\""), "{error}");
+        assert!(error.contains("must not be empty"), "{error}");
     }
 
     #[test]
