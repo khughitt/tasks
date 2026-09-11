@@ -1,12 +1,13 @@
 ---
 id: tasks-82b559
 title: Stamp started and completed on task records and give park --waiting-on a small vocabulary
-status: doing
+status: done
 priority: 2
 size: m
 owner: waiting-on
 created: 2026-09-11T11:59:09Z
-updated: 2026-09-11T12:36:13Z
+updated: 2026-09-11T13:09:27Z
+completed: 2026-09-11T13:09:27Z
 depends: []
 tags: [obs]
 source: ops-2cb205
@@ -28,3 +29,4 @@ Out of scope: a full append-only transition history, session-to-task linkage, an
 ## Notes
 
 - 2026-09-11T12:36:13Z (waiting-on): Corrected plan review findings: next JSON nesting, runnable test filters, historical first-start fixture, and explicit task-file staging.
+- 2026-09-11T13:09:27Z (waiting-on): started/completed stamps and park --reason landed with tests and docs

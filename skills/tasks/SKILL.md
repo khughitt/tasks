@@ -32,9 +32,14 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    when several agents share one terminal or harness process; otherwise agents that resolve
    to the same session id are indistinguishable to the claim store.
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
-5. `tasks park <id> "<next step>" [--waiting-on user]` before ending a turn that waits on
-   the user, or whenever you set work down. It records the next step and this session in
-   the shared store, releases your claim, and leaves status alone; `start` resumes it.
+5. `tasks park <id> "<next step>" [--waiting-on user] [--reason <why>]` before ending a
+   turn that waits on the user, or whenever you set work down. It records the next step
+   and this session in the shared store, releases your claim, and leaves status alone;
+   `start` resumes it. Add `--reason` when one of these fits, and leave it off otherwise:
+   `review` (the user must inspect and judge an artifact), `decision` (only the user can
+   decide), `approval` (you hold a recommendation and want it confirmed), `environment`
+   (the checkout or machine cannot run the work), `dependency` (another task or project
+   must land first), `session` (the session is ending before the work is).
    `prime` lists parked work first with where it was left; `ready` omits work waiting on
    the user; `list --parked` is the picker's feed.
 6. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are

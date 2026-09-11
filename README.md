@@ -55,8 +55,22 @@ its liveness. `ready` and `next` omit live claims with an explanatory warning. S
 `TASKS_MODEL` per harness process records which model completed each task: a fresh
 `done` stamps the record's `model` field from it (and clears the stamp when it is
 unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.
-`park` sets a task down with its next step in the same store; `start` resumes it, and
-`prime` lists parked work first.
+`park` sets a task down with its next step in the same store, who it waits on, and
+optionally why:
+
+| reason        | The work stopped because…                                                        |
+|---------------|----------------------------------------------------------------------------------|
+| `review`      | an artifact the user must inspect and judge: art sheets, screenshots, a document read |
+| `decision`    | a decision only the user can make — scope, taste, priority                       |
+| `approval`    | the agent holds a recommendation and wants it confirmed                          |
+| `environment` | the checkout or machine cannot run the work — missing deps, a restart, a TTY     |
+| `dependency`  | another task or project must land first                                          |
+| `session`     | the session ended before the work did — context exhausted, time, crash           |
+
+`start` resumes it, and `prime` lists parked work first. Every record also carries two
+stamps written only by status changes: `started`, the first time work began, and
+`completed`, the latest completion (cleared by a reopen). Design:
+`docs/specs/2026-09-11-park-reason-and-stamps-design.md`.
 
 ## Install
 
@@ -90,7 +104,7 @@ from a clone):
     tasks sample -n 3                # random open tasks for a curation pass (see skills/curate)
     tasks tree                       # the goal hierarchy
     tasks next                       # parked work waiting on you, else the first ready task
-    tasks park <id> "next step"      # set it down; tasks list --parked to see what is parked
+    tasks park <id> "next step" --reason review   # set it down; tasks list --parked to see what is parked
     tasks next --all-projects        # the same across every registered project
     tasks prime --project fam        # read another registered project; also list, ready,
                                      #   next, tree, tags, sample. Needs no local project.

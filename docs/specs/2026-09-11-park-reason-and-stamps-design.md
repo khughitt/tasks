@@ -1,6 +1,6 @@
 # Park reasons and lifecycle stamps: the minimal telemetry a task record carries
 
-Status: approved design, not yet implemented
+Status: implemented (2026-09-11)
 Task: tasks-82b559 (source: ops-2cb205, the friction diagnosis in ops
 docs/reports/2026-09-11-friction-diagnosis.md)
 
@@ -121,7 +121,8 @@ Rules, in the shape the model-provenance design fixed:
 `skills/tasks/SKILL.md` step 5 gains the flag and the six words in one sentence, with the
 instruction to record a reason when one of them fits and to leave it off otherwise — a
 park is frequent and must stay cheap. The README's park section gains the vocabulary
-table, and its record-format section lists `started` and `completed` beside `last_done`.
+table and names `started` and `completed` in prose; it has no record-format section to
+extend.
 
 ## 6. Testing
 
