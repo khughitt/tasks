@@ -320,7 +320,12 @@ pub struct Task {
     pub owner: Option<String>,
     pub created: String,
     pub updated: String,
+    /// When work first began: stamped by the first transition into `doing` and never
+    /// moved. See docs/specs/2026-09-11-park-reason-and-stamps-design.md §3.
     pub started: Option<String>,
+    /// When the task was last completed: stamped by every completing transition and
+    /// cleared by any transition out of `done`. Unlike `last_done` it exists on every
+    /// record and does not survive a reopen. Same spec, §3.
     pub completed: Option<String>,
     /// The completion that anchors the current cycle. Stamped only alongside `every`, and
     /// only by a transition that actually completes the task (spec §4.4).
