@@ -2419,12 +2419,17 @@ fn done_stamps_completed_and_reopening_clears_it() {
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
     env.json(&sci, &["start", &id]);
+    let started = env.json(&sci, &["show", &id])["task"]["started"].clone();
+    assert!(started.is_string(), "{started}");
     env.json(&sci, &["done", &id, "first pass"]);
     let v = env.json(&sci, &["show", &id]);
     let first = v["task"]["completed"].clone();
     assert!(first.is_string(), "{v}");
+    assert_eq!(v["task"]["started"], started);
     env.json(&sci, &["edit", &id, "--status", "todo"]);
-    assert!(env.json(&sci, &["show", &id])["task"]["completed"].is_null());
+    let v = env.json(&sci, &["show", &id]);
+    assert!(v["task"]["completed"].is_null());
+    assert_eq!(v["task"]["started"], started);
     std::thread::sleep(std::time::Duration::from_millis(1100));
     env.json(&sci, &["start", &id]);
     env.json(&sci, &["done", &id, "second pass"]);
@@ -2452,6 +2457,24 @@ fn editor_reopen_keeps_the_completed_stamp_and_transition_clears_it() {
 fn editor_refuses_to_set_move_or_clear_a_stamp() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
+    let fresh = id_of(env.json(&sci, &["add", "Fresh", "-p", "2"]));
+    let editor = editor_script(
+        &sci,
+        r#"sed -i 's/^updated: \(.*\)$/updated: \1\nstarted: 2026-09-01T00:00:00Z/' "$1""#,
+    );
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &fresh])
+        .env("EDITOR", &editor)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(err_kind(&out), "validation");
+    assert!(
+        err_detail(&out).contains("started is stamped by starting the task; it cannot be edited")
+    );
+    assert!(env.json(&sci, &["show", &fresh])["task"]["started"].is_null());
+
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
     env.json(&sci, &["start", &id]);
     let started = env.json(&sci, &["show", &id])["task"]["started"].clone();
@@ -2480,6 +2503,32 @@ fn editor_refuses_to_set_move_or_clear_a_stamp() {
         assert_eq!(err_kind(&out), "validation");
         assert!(err_detail(&out).contains(expected));
         assert_eq!(env.json(&sci, &["show", &id])["task"]["started"], started);
+    }
+
+    env.json(&sci, &["done", &id, "landed"]);
+    let completed = env.json(&sci, &["show", &id])["task"]["completed"].clone();
+    assert!(completed.is_string());
+    for body in [
+        "sed -i 's/^completed: .*$/completed: 2020-01-01T00:00:00Z/' \"$1\"",
+        "sed -i '/^completed: /d' \"$1\"",
+    ] {
+        let editor = editor_script(&sci, body);
+        let out = env
+            .cmd(&sci)
+            .args(["edit", &id])
+            .env("EDITOR", &editor)
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        assert_eq!(err_kind(&out), "validation");
+        assert!(
+            err_detail(&out)
+                .contains("completed is stamped by completing the task; it cannot be edited")
+        );
+        assert_eq!(
+            env.json(&sci, &["show", &id])["task"]["completed"],
+            completed
+        );
     }
 }
 
