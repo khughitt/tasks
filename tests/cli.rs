@@ -672,6 +672,112 @@ fn park_refuses_a_closed_task_and_validates_its_arguments() {
 }
 
 #[test]
+fn park_reason_rides_the_entry_the_note_and_every_park_view() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "open the round-02 sheet",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "review",
+        ])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["park"]["reason"], "review");
+    assert_eq!(v["park"]["waiting_on"], "user");
+    assert_eq!(
+        env.json(&sci, &["list", "--parked"])["tasks"][0]["park"]["reason"],
+        "review"
+    );
+    assert_eq!(
+        env.json(&sci, &["prime"])["parked"][0]["park"]["reason"],
+        "review"
+    );
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        raw.contains("parked (waiting on user, review): open the round-02 sheet"),
+        "{raw}"
+    );
+    let text = env.pretty(&sci, &["show", &id]);
+    assert!(text.contains("waiting on user, review since"), "{text}");
+    let table = env.pretty(&sci, &["list", "--parked"]);
+    assert!(table.contains("waits on user, review"), "{table}");
+
+    // `next` hands back agent-parked work with the same block.
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "rerun after the restart",
+            "--reason",
+            "environment",
+        ])
+        .assert()
+        .success();
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(next["next"]["task"]["id"], id);
+    assert_eq!(next["next"]["park"]["reason"], "environment");
+    assert_eq!(next["next"]["park"]["waiting_on"], "agent");
+}
+
+#[test]
+fn park_without_a_reason_records_none_and_re_parking_drops_a_previous_one() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "write §3"])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert!(v["park"]["reason"].is_null(), "{v}");
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        raw.contains("parked (waiting on agent): write §3"),
+        "old note form: {raw}"
+    );
+
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "decide the shape",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "decision",
+        ])
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["show", &id])["park"]["reason"], "decision");
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "decide the shape", "--waiting-on", "user"])
+        .assert()
+        .success();
+    assert!(
+        env.json(&sci, &["show", &id])["park"]["reason"].is_null(),
+        "a re-park without the flag records none"
+    );
+
+    assert_eq!(
+        env.fail(&sci, &["park", &id, "x", "--reason", "boredom"]),
+        "validation"
+    );
+    assert!(
+        env.json(&sci, &["show", &id])["park"]["reason"].is_null(),
+        "nothing landed"
+    );
+}
+
+#[test]
 fn claim_appears_in_show_and_list_json() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

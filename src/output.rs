@@ -190,6 +190,7 @@ pub struct ParkInfo {
     pub at: String,
     pub next_step: String,
     pub waiting_on: crate::claims::WaitingOn,
+    pub reason: Option<crate::claims::Reason>,
     pub session: String,
     pub owner: String,
     pub host: String,
@@ -202,6 +203,7 @@ impl ParkInfo {
             at: park.at.clone(),
             next_step: park.next_step.clone(),
             waiting_on: park.waiting_on,
+            reason: park.reason,
             session: park.session.clone(),
             owner: park.owner.clone(),
             host: park.host.clone(),
@@ -909,7 +911,7 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
         rendered.push_str("\n# parked\n");
         rendered.push_str(&format!(
             "- waiting on {} since {}: {}\n",
-            park.waiting_on.as_str(),
+            crate::claims::describe_stop(park.waiting_on, park.reason),
             crate::time::day(&park.at),
             park.next_step
         ));
@@ -1055,8 +1057,8 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter) -> String {
             row.phase.map(crate::model::Phase::as_str).unwrap_or("-")
         );
         rendered.push_str(&format!(
-            "{id}  {status} {phase} waits on {:<5} {}  {}\n",
-            park.waiting_on.as_str(),
+            "{id}  {status} {phase} waits on {:<18} {}  {}\n",
+            crate::claims::describe_stop(park.waiting_on, park.reason),
             crate::time::day(&park.at),
             row.title
         ));

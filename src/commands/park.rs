@@ -1,11 +1,17 @@
 use super::{ClaimIntent, Ctx, append_note, id_out, load, owner_name, save};
-use crate::claims::{Liveness, Park, WaitingOn};
+use crate::claims::{Liveness, Park, Reason, WaitingOn, describe_stop};
 use crate::error::{Error, Result};
 use crate::output::Output;
 
 /// Set a task down (spec §3). Validate everything, refuse a foreign live claim, then let
 /// `save` write the note and the entry in that order.
-pub fn run(mut ctx: Ctx, id: String, next_step: String, waiting_on: String) -> Result<Output> {
+pub fn run(
+    mut ctx: Ctx,
+    id: String,
+    next_step: String,
+    waiting_on: String,
+    reason: Option<String>,
+) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
     if !task.status.is_open() {
         return Err(Error::InvalidTransition(
@@ -15,6 +21,7 @@ pub fn run(mut ctx: Ctx, id: String, next_step: String, waiting_on: String) -> R
     }
     crate::format::validate_line("next_step", &next_step)?;
     let waiting_on = WaitingOn::parse(&waiting_on)?;
+    let reason = reason.as_deref().map(Reason::parse).transpose()?;
     let owner = owner_name(&ctx.project)?;
     let me = crate::claims::identity()?;
 
@@ -43,7 +50,10 @@ pub fn run(mut ctx: Ctx, id: String, next_step: String, waiting_on: String) -> R
     append_note(
         &mut task,
         &owner,
-        &format!("parked (waiting on {}): {next_step}", waiting_on.as_str()),
+        &format!(
+            "parked (waiting on {}): {next_step}",
+            describe_stop(waiting_on, reason)
+        ),
     )?;
     let park = Park {
         owner,
@@ -53,6 +63,7 @@ pub fn run(mut ctx: Ctx, id: String, next_step: String, waiting_on: String) -> R
         at: crate::time::now(),
         next_step,
         waiting_on,
+        reason,
         title: task.title.clone(),
     };
     ctx.pending_claim = Some((task.id.clone(), ClaimIntent::Park(park)));

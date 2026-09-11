@@ -289,6 +289,14 @@ pub enum Command {
             add = ArgValueCandidates::new(crate::complete::waiting_on)
         )]
         waiting_on: String,
+        /// Why the work stopped: review, decision, approval, environment, dependency, or
+        /// session. Optional; absent means not recorded.
+        #[arg(
+            long,
+            value_name = "WHY",
+            add = ArgValueCandidates::new(crate::complete::reason)
+        )]
+        reason: Option<String>,
     },
     /// Close a task as done.
     Done {

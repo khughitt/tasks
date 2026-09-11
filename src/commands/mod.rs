@@ -904,7 +904,14 @@ pub fn run(cli: Cli) -> Result<Output> {
             id,
             next_step,
             waiting_on,
-        } => park::run(open_id_write_ctx(dir, &id)?, id, next_step, waiting_on),
+            reason,
+        } => park::run(
+            open_id_write_ctx(dir, &id)?,
+            id,
+            next_step,
+            waiting_on,
+            reason,
+        ),
         Command::Done { id, message, force } => status::close(
             open_id_write_ctx(dir, &id)?,
             id,

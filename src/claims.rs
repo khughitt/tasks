@@ -120,6 +120,64 @@ impl WaitingOn {
     }
 }
 
+/// Why the work stopped, from the six-word vocabulary of
+/// docs/specs/2026-09-11-park-reason-and-stamps-design.md §4. Orthogonal to `WaitingOn`:
+/// the readers act on who, this only describes the stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Reason {
+    Review,
+    Decision,
+    Approval,
+    Environment,
+    Dependency,
+    Session,
+}
+
+impl Reason {
+    pub const ALL: [Reason; 6] = [
+        Reason::Review,
+        Reason::Decision,
+        Reason::Approval,
+        Reason::Environment,
+        Reason::Dependency,
+        Reason::Session,
+    ];
+
+    pub fn parse(s: &str) -> Result<Reason> {
+        Reason::ALL
+            .into_iter()
+            .find(|reason| reason.as_str() == s)
+            .ok_or_else(|| {
+                let accepted: Vec<&str> =
+                    Reason::ALL.iter().map(|reason| reason.as_str()).collect();
+                Error::Validation(format!(
+                    "--reason must be one of {}, got {s:?}",
+                    accepted.join(", ")
+                ))
+            })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reason::Review => "review",
+            Reason::Decision => "decision",
+            Reason::Approval => "approval",
+            Reason::Environment => "environment",
+            Reason::Dependency => "dependency",
+            Reason::Session => "session",
+        }
+    }
+}
+
+/// The parenthetical the park note and the park views share: `user` or `user, review`.
+pub fn describe_stop(who: WaitingOn, reason: Option<Reason>) -> String {
+    match reason {
+        Some(reason) => format!("{}, {}", who.as_str(), reason.as_str()),
+        None => who.as_str().to_string(),
+    }
+}
+
 /// A task set down with its next step: the store's other entry kind. No liveness, no
 /// heartbeat, never pruned by a read; `start` replaces it, `done` and `drop` remove it.
 /// See docs/specs/2026-09-09-park-design.md §4.
@@ -133,6 +191,10 @@ pub struct Park {
     pub at: String,
     pub next_step: String,
     pub waiting_on: WaitingOn,
+    /// Why the work stopped, when the parking session said. Absent in store files written
+    /// before the vocabulary existed and whenever `park` ran without `--reason`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<Reason>,
     /// Snapshot at park time, for rows whose task file is unreachable (spec §5.3).
     pub title: String,
 }
@@ -962,6 +1024,78 @@ mod tests {
     }
 
     #[test]
+    fn reason_parses_its_six_values_only() {
+        for (text, reason) in [
+            ("review", Reason::Review),
+            ("decision", Reason::Decision),
+            ("approval", Reason::Approval),
+            ("environment", Reason::Environment),
+            ("dependency", Reason::Dependency),
+            ("session", Reason::Session),
+        ] {
+            assert_eq!(Reason::parse(text).unwrap(), reason);
+            assert_eq!(reason.as_str(), text);
+        }
+        match Reason::parse("boredom") {
+            Err(Error::Validation(detail)) => {
+                assert!(
+                    detail.contains("review, decision, approval, environment, dependency, session"),
+                    "{detail}"
+                );
+                assert!(detail.contains("\"boredom\""), "{detail}");
+            }
+            other => panic!("expected a validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn describe_stop_names_the_who_and_the_reason_when_given() {
+        assert_eq!(describe_stop(WaitingOn::User, None), "user");
+        assert_eq!(
+            describe_stop(WaitingOn::Agent, Some(Reason::Session)),
+            "agent, session"
+        );
+    }
+
+    #[test]
+    fn a_park_without_a_reason_loads_and_a_park_with_one_writes_the_key() {
+        let (dir, mut store) = store_from(A_PARK);
+        let two = TaskId::parse("sci-000002").unwrap();
+        assert_eq!(
+            store.park(&two).unwrap().reason,
+            None,
+            "pre-reason store files load"
+        );
+
+        let three = TaskId::parse("sci-000003").unwrap();
+        store.insert_park(
+            &three,
+            Park {
+                owner: "o".into(),
+                session: "a".into(),
+                host: "h".into(),
+                worktree: "/w".into(),
+                at: "2026-09-11T10:00:00Z".into(),
+                next_step: "open the sheet".into(),
+                waiting_on: WaitingOn::User,
+                reason: Some(Reason::Review),
+                title: "T".into(),
+            },
+        );
+        store.save().unwrap();
+        let path = dir.path().join("sci.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("reason = \"review\""), "{text}");
+        assert_eq!(
+            text.matches("reason =").count(),
+            1,
+            "the reason-less park writes no key: {text}"
+        );
+        let reloaded = ClaimStore::load_from(&path).unwrap();
+        assert_eq!(reloaded.park(&three).unwrap().reason, Some(Reason::Review));
+    }
+
+    #[test]
     fn inserting_a_park_displaces_a_claim_on_the_same_id() {
         let (_dir, mut store) = store_from(A_CLAIM);
         let id = TaskId::parse("sci-000001").unwrap();
@@ -975,6 +1109,7 @@ mod tests {
                 at: "2026-09-09T23:00:00Z".into(),
                 next_step: "x".into(),
                 waiting_on: WaitingOn::User,
+                reason: None,
                 title: "T".into(),
             },
         );
