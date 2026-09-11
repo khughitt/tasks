@@ -608,24 +608,26 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         }
     }
     let completing = to == Status::Done && task.status != Status::Done;
+    // One instant for everything this transition stamps, so a recurring completion's
+    // `completed` and `last_done` agree to the second (spec §3).
+    let now = crate::time::now();
+    if to == Status::Doing && task.started.is_none() {
+        task.started = Some(now.clone());
+    }
     if completing {
         task.model = completion_model()?;
-        task.completed = Some(crate::time::now());
+        task.completed = Some(now.clone());
     } else if task.status == Status::Done && to != Status::Done {
         task.completed = None;
     }
-    if to == Status::Doing && task.started.is_none() {
-        task.started = Some(crate::time::now());
-    }
     task.status = to;
     if completing && let Some(every) = task.every {
-        let at = crate::time::now();
-        let next = crate::periodic::add(crate::time::parse(&at)?, every).ok_or_else(|| {
+        let next = crate::periodic::add(crate::time::parse(&now)?, every).ok_or_else(|| {
             Error::Validation(format!(
                 "completing now plus every {every} is not a representable timestamp"
             ))
         })?;
-        task.last_done = Some(at);
+        task.last_done = Some(now);
         let owner = owner_name(&ctx.project)?;
         append_note(
             task,

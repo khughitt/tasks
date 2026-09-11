@@ -2310,7 +2310,10 @@ fn start_stamps_started_once_and_later_starts_leave_it() {
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
     assert!(env.json(&sci, &["show", &id])["task"]["started"].is_null());
-    env.cmd(&sci).args(["start", &id]).assert().success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
     let first = env.json(&sci, &["show", &id])["task"]["started"].clone();
     assert!(first.is_string(), "{first}");
     let path = sci.join(format!("tasks/{id}.md"));
@@ -2324,17 +2327,90 @@ fn start_stamps_started_once_and_later_starts_leave_it() {
     )
     .unwrap();
     let first = "2000-01-01T00:00:00Z";
-    env.cmd(&sci)
+    as_agent(&env, &sci, "agent-a")
         .args(["park", &id, "resume later"])
         .assert()
         .success();
-    env.cmd(&sci).args(["start", &id]).assert().success();
-    assert_eq!(env.json(&sci, &["show", &id])["task"]["started"], first);
-    env.cmd(&sci)
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["started"],
+        first,
+        "resume"
+    );
+    as_agent(&env, &sci, "agent-b")
         .args(["start", &id, "--force"])
         .assert()
         .success();
-    assert_eq!(env.json(&sci, &["show", &id])["task"]["started"], first);
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["started"],
+        first,
+        "takeover"
+    );
+    as_agent(&env, &sci, "agent-b")
+        .args(["edit", &id, "--status", "todo"])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-b")
+        .args(["edit", &id, "--status", "doing"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["started"],
+        first,
+        "edit --status doing"
+    );
+    assert_eq!(env.json(&sci, &["list"])["tasks"][0]["started"], first);
+    assert!(env.json(&sci, &["list"])["tasks"][0]["completed"].is_null());
+    as_agent(&env, &sci, "agent-b")
+        .args(["park", &id, "later", "--waiting-on", "user"])
+        .assert()
+        .success();
+    assert_eq!(env.json(&sci, &["prime"])["parked"][0]["started"], first);
+}
+
+#[test]
+fn recurring_completion_stamps_both_and_recovery_stamps_neither() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    env.json(&sci, &["done", &id, "first"]);
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(
+        v["task"]["completed"], v["periodic"]["last_done"],
+        "one instant for both stamps: {v}"
+    );
+    let first = v["task"]["completed"].clone();
+    env.json(&sci, &["start", &id]);
+    let v = env.json(&sci, &["show", &id]);
+    assert!(v["task"]["completed"].is_null(), "{v}");
+    assert_eq!(
+        v["periodic"]["last_done"], first,
+        "the anchor survives: {v}"
+    );
+    assert!(v["task"]["started"].is_string());
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    env.json(&sci, &["done", &id, "second"]);
+    let second = env.json(&sci, &["show", &id])["task"]["completed"].clone();
+    assert_ne!(second, first);
+    env.json(&sci, &["start", &id]);
+    let path = sci.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("status: doing", "status: done")).unwrap();
+    assert!(env.json(&sci, &["show", &id])["task"]["completed"].is_null());
+    let out = env
+        .cmd(&sci)
+        .args(["done", &id, "cleanup"])
+        .assert()
+        .success();
+    let value: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert!(
+        value["warnings"].to_string().contains("already completed"),
+        "{value}"
+    );
+    assert!(env.json(&sci, &["show", &id])["task"]["completed"].is_null());
 }
 
 #[test]
@@ -2379,10 +2455,19 @@ fn editor_refuses_to_set_move_or_clear_a_stamp() {
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
     env.json(&sci, &["start", &id]);
     let started = env.json(&sci, &["show", &id])["task"]["started"].clone();
-    for body in [
-        "sed -i 's/^updated: \\(.*\\)$/updated: \\1\\ncompleted: 2026-09-01T00:00:00Z/' \"$1\"",
-        "sed -i 's/^started: .*$/started: 2020-01-01T00:00:00Z/' \"$1\"",
-        "sed -i '/^started: /d' \"$1\"",
+    for (body, expected) in [
+        (
+            "sed -i 's/^updated: \\(.*\\)$/updated: \\1\\ncompleted: 2026-09-01T00:00:00Z/' \"$1\"",
+            "completed is stamped by completing the task; it cannot be edited",
+        ),
+        (
+            "sed -i 's/^started: .*$/started: 2020-01-01T00:00:00Z/' \"$1\"",
+            "started is stamped by starting the task; it cannot be edited",
+        ),
+        (
+            "sed -i '/^started: /d' \"$1\"",
+            "started is stamped by starting the task; it cannot be edited",
+        ),
     ] {
         let editor = editor_script(&sci, body);
         let out = env
@@ -2393,7 +2478,7 @@ fn editor_refuses_to_set_move_or_clear_a_stamp() {
             .unwrap();
         assert!(!out.status.success());
         assert_eq!(err_kind(&out), "validation");
-        assert!(err_detail(&out).contains("cannot be edited"));
+        assert!(err_detail(&out).contains(expected));
         assert_eq!(env.json(&sci, &["show", &id])["task"]["started"], started);
     }
 }
@@ -2413,8 +2498,20 @@ fn check_reports_completed_stamp_on_an_open_record() {
     assert_eq!(warnings.len(), 1, "{v}");
     assert_eq!(warnings[0]["kind"], "completed_stamp_on_open_task");
     assert_eq!(warnings[0]["id"], id);
-}
 
+    let dropped = id_of(env.json(&sci, &["add", "Dropped", "-p", "2"]));
+    env.json(&sci, &["done", &dropped, "landed"]);
+    let path = sci.join(format!("tasks/{dropped}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("status: done", "status: dropped")).unwrap();
+    let v = env.json(&sci, &["check"]);
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|warning| {
+            warning["kind"] == "completed_stamp_on_open_task" && warning["id"] == dropped
+        }),
+        "{v}"
+    );
+}
 #[test]
 fn non_unicode_tasks_model_fails_the_completion() {
     use std::os::unix::ffi::OsStrExt;

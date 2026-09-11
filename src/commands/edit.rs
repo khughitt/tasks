@@ -15,6 +15,8 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
     if edited.created != original.created {
         return Err(Error::Validation("created is immutable".into()));
     }
+    // Both stamps are written by `transition()` and by nothing else. Unlike `last_done`,
+    // no other field's edit needs to clear them, so clearing is refused as well.
     if edited.started != original.started {
         return Err(Error::Validation(
             "started is stamped by starting the task; it cannot be edited".into(),

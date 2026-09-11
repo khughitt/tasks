@@ -1,6 +1,6 @@
 use super::Ctx;
 use crate::error::{Error, Result};
-use crate::model::{Task, TaskId};
+use crate::model::{Status, Task, TaskId};
 use crate::output::{CheckOut, Finding, Output};
 use crate::query::find_cycle;
 use crate::resolve::{DocKind, Resolver, step_headings};
@@ -65,12 +65,17 @@ pub fn run(ctx: Ctx) -> Result<Output> {
 
     for task in &tasks {
         let file = format!("tasks/{}.md", task.id);
-        if task.status.is_open() && task.completed.is_some() {
+        if let Some(completed) = &task.completed
+            && task.status != Status::Done
+        {
             warnings.push(finding(
                 Some(task),
                 file.clone(),
                 "completed_stamp_on_open_task",
-                "open task has a completion stamp".into(),
+                format!(
+                    "completed {completed} but status is {}; only a hand edit outside tasks leaves this",
+                    task.status.as_str()
+                ),
             ));
         }
         for dependency in &task.depends {
