@@ -6,11 +6,12 @@ priority: 2
 size: m
 owner: waiting-on
 created: 2026-09-11T11:59:09Z
-updated: 2026-09-11T12:13:58Z
+updated: 2026-09-11T12:30:21Z
 depends: []
 tags: [obs]
 source: ops-2cb205
 spec: docs/specs/2026-09-11-park-reason-and-stamps-design.md
+plan: docs/plans/2026-09-11-park-reason-and-stamps.md
 ---
 
 The minimal telemetry change the friction diagnosis (ops docs/reports/2026-09-11-friction-diagnosis.md, §4 gaps 1 and 3, §5 item 4) asks for.
