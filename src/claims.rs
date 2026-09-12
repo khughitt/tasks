@@ -199,12 +199,27 @@ pub struct Park {
     pub title: String,
 }
 
+/// A session under a cutoff found the task needs more reasoning than it could supply and
+/// raised its rating. Shared outside git so every checkout's picker sees the new level
+/// before the record merges; survives `start` and later parks; removed only by an explicit
+/// `edit --complexity`/`--no-complexity` or by closing the task. See
+/// docs/specs/2026-09-12-task-complexity-design.md §5.1.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Escalation {
+    pub level: crate::model::Complexity,
+    pub at: String,
+    /// Scheme-tagged (`Identity::tagged`); opaque to tasks.
+    pub session: String,
+}
+
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct StoreFile {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     claims: BTreeMap<String, Claim>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     parks: BTreeMap<String, Park>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    escalations: BTreeMap<String, Escalation>,
 }
 
 #[derive(Debug)]
@@ -212,6 +227,7 @@ pub struct ClaimStore {
     path: PathBuf,
     claims: BTreeMap<String, Claim>,
     parks: BTreeMap<String, Park>,
+    escalations: BTreeMap<String, Escalation>,
 }
 
 impl ClaimStore {
@@ -249,7 +265,11 @@ impl ClaimStore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => StoreFile::default(),
             Err(error) => return Err(error.into()),
         };
-        let StoreFile { claims, parks } = file;
+        let StoreFile {
+            claims,
+            parks,
+            escalations,
+        } = file;
         for (id, claim) in &claims {
             for (field, value) in [("started", &claim.started), ("seen", &claim.seen)] {
                 crate::time::parse(value).map_err(|error| {
@@ -277,10 +297,19 @@ impl ClaimStore {
                 )));
             }
         }
+        for (id, escalation) in &escalations {
+            crate::time::parse(&escalation.at).map_err(|error| {
+                Error::Config(format!(
+                    "{}: escalation {id} has an unreadable at: {error}",
+                    path.display()
+                ))
+            })?;
+        }
         Ok(ClaimStore {
             path: path.to_path_buf(),
             claims,
             parks,
+            escalations,
         })
     }
 
@@ -291,6 +320,7 @@ impl ClaimStore {
         let file = StoreFile {
             claims: self.claims.clone(),
             parks: self.parks.clone(),
+            escalations: self.escalations.clone(),
         };
         atomic_write(
             &self.path,
@@ -330,6 +360,39 @@ impl ClaimStore {
         self.parks.remove(&id.to_string())
     }
 
+    #[allow(dead_code)]
+    // Used by Task 4: access one escalation from the store.
+    pub fn escalation(&self, id: &TaskId) -> Option<&Escalation> {
+        self.escalations.get(&id.to_string())
+    }
+
+    /// Replaces any earlier entry; the caller has already checked the level never falls.
+    #[allow(dead_code)]
+    // Used by Task 6: record an escalation in the store.
+    pub fn insert_escalation(&mut self, id: &TaskId, escalation: Escalation) {
+        self.escalations.insert(id.to_string(), escalation);
+    }
+
+    #[allow(dead_code)]
+    // Used by Task 6: remove an escalation from the store.
+    pub fn remove_escalation(&mut self, id: &TaskId) -> Option<Escalation> {
+        self.escalations.remove(&id.to_string())
+    }
+
+    #[allow(dead_code)]
+    // Used by Task 4: access escalations from the read-side snapshot.
+    pub fn escalations(&self) -> impl Iterator<Item = (&String, &Escalation)> {
+        self.escalations.iter()
+    }
+
+    /// Nothing `rename` would need to carry: no parks and no escalations. Claims are
+    /// never carried; a rename refuses while any are live.
+    #[allow(dead_code)]
+    // Used by Task 5: check if the store is empty before renaming.
+    pub fn carries_nothing(&self) -> bool {
+        self.parks.is_empty() && self.escalations.is_empty()
+    }
+
     pub fn prune_with(&mut self, keep: impl Fn(&Claim) -> bool) {
         self.claims.retain(|_, claim| keep(claim));
     }
@@ -358,6 +421,8 @@ impl ClaimStore {
         Ok(toml::to_string(&StoreFile {
             claims: BTreeMap::new(),
             parks,
+            // Not carried until rename learns escalations (plan Task 9); a rename in between drops them.
+            escalations: BTreeMap::new(),
         })
         .expect("claim store serializes"))
     }
@@ -430,6 +495,9 @@ pub enum Liveness {
 pub struct ClaimSnapshot {
     by_id: BTreeMap<String, (Claim, Liveness)>,
     parks: BTreeMap<String, Park>,
+    #[allow(dead_code)]
+    // Used by Tasks 4–6 and any consumer of escalations; carried by load_from_paths.
+    escalations: BTreeMap<String, Escalation>,
 }
 
 impl ClaimSnapshot {
@@ -444,6 +512,7 @@ impl ClaimSnapshot {
     pub fn load_from_paths(paths: impl Iterator<Item = PathBuf>) -> Result<ClaimSnapshot> {
         let mut by_id = BTreeMap::new();
         let mut parks = BTreeMap::new();
+        let mut escalations = BTreeMap::new();
         for path in paths {
             let store = ClaimStore::load_from(&path)?;
             for (id, claim) in store.iter() {
@@ -452,8 +521,15 @@ impl ClaimSnapshot {
             for (id, park) in store.parks() {
                 parks.insert(id.clone(), park.clone());
             }
+            for (id, escalation) in store.escalations() {
+                escalations.insert(id.clone(), escalation.clone());
+            }
         }
-        Ok(ClaimSnapshot { by_id, parks })
+        Ok(ClaimSnapshot {
+            by_id,
+            parks,
+            escalations,
+        })
     }
 
     pub fn park(&self, id: &TaskId) -> Option<&Park> {
@@ -462,6 +538,12 @@ impl ClaimSnapshot {
 
     pub fn parks(&self) -> impl Iterator<Item = (&String, &Park)> {
         self.parks.iter()
+    }
+
+    #[allow(dead_code)]
+    // Used by Tasks 4–6 to look up escalations in the read-side snapshot.
+    pub fn escalation(&self, id: &TaskId) -> Option<&Escalation> {
+        self.escalations.get(&id.to_string())
     }
 
     pub fn get(&self, id: &TaskId) -> Option<&(Claim, Liveness)> {
@@ -998,6 +1080,34 @@ mod tests {
         (dir, store)
     }
 
+    fn sample_claim() -> Claim {
+        Claim {
+            owner: "o".into(),
+            session: "a".into(),
+            pid: None,
+            pid_start: None,
+            boot_id: None,
+            host: "h".into(),
+            worktree: "/w".into(),
+            started: "2026-09-09T20:00:00Z".into(),
+            seen: "2026-09-09T20:00:00Z".into(),
+        }
+    }
+
+    fn sample_park() -> Park {
+        Park {
+            owner: "o".into(),
+            session: "claude:x".into(),
+            host: "h".into(),
+            worktree: "/w".into(),
+            at: "2026-09-09T21:00:00Z".into(),
+            next_step: "write §3".into(),
+            waiting_on: WaitingOn::Agent,
+            reason: None,
+            title: "T".into(),
+        }
+    }
+
     #[test]
     fn identity_tags_the_session_by_the_level_that_resolved_it() {
         let explicit = identity_from(env_of(&[("TASKS_SESSION", "mine:7")]), Some(11)).unwrap();
@@ -1128,6 +1238,52 @@ mod tests {
         assert!(store.remove_park(&id).is_some());
         assert!(store.park(&id).is_none());
         assert!(store.remove_park(&id).is_none());
+    }
+
+    #[test]
+    fn escalations_round_trip_and_are_independent_of_claims_and_parks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sci.toml");
+        let id = TaskId::parse("sci-4f2a9c").unwrap();
+        let mut store = ClaimStore::load_from(&path).unwrap();
+        assert!(store.carries_nothing());
+        store.insert_escalation(
+            &id,
+            Escalation {
+                level: crate::model::Complexity::High,
+                at: "2026-09-12T10:00:00Z".into(),
+                session: "s:agent-a".into(),
+            },
+        );
+        assert!(!store.carries_nothing());
+        store.save().unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[escalations.sci-4f2a9c]"), "{text}");
+        assert!(text.contains("level = \"high\""), "{text}");
+
+        let mut store = ClaimStore::load_from(&path).unwrap();
+        assert_eq!(
+            store.escalation(&id).map(|e| e.level),
+            Some(crate::model::Complexity::High)
+        );
+        // A claim on the same id leaves the escalation alone; so does a park.
+        store.insert(&id, sample_claim());
+        assert!(store.escalation(&id).is_some());
+        store.remove(&id);
+        store.insert_park(&id, sample_park());
+        assert!(store.escalation(&id).is_some());
+        assert!(store.remove_escalation(&id).is_some());
+        assert!(store.remove_escalation(&id).is_none());
+
+        let bad =
+            "[escalations.sci-4f2a9c]\nlevel = \"high\"\nat = \"yesterday\"\nsession = \"s\"\n";
+        std::fs::write(&path, bad).unwrap();
+        let error = ClaimStore::load_from(&path).unwrap_err().to_string();
+        assert!(
+            error.contains("escalation sci-4f2a9c has an unreadable at"),
+            "{error}"
+        );
     }
 
     #[test]
