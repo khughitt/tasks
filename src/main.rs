@@ -2,6 +2,9 @@ mod claims;
 mod cli;
 mod commands;
 mod complete;
+#[allow(dead_code)]
+// Wired by the pickers in plan Task 5.
+mod complexity;
 mod error;
 mod format;
 mod frontmatter;

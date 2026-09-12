@@ -493,8 +493,6 @@ pub enum Liveness {
 pub struct ClaimSnapshot {
     by_id: BTreeMap<String, (Claim, Liveness)>,
     parks: BTreeMap<String, Park>,
-    #[allow(dead_code)]
-    // Used by Tasks 4–6 and any consumer of escalations; carried by load_from_paths.
     escalations: BTreeMap<String, Escalation>,
 }
 
@@ -530,6 +528,20 @@ impl ClaimSnapshot {
         })
     }
 
+    /// The literal form, for tests that need a snapshot without files.
+    #[cfg(test)]
+    pub fn from_parts(
+        by_id: BTreeMap<String, (Claim, Liveness)>,
+        parks: BTreeMap<String, Park>,
+        escalations: BTreeMap<String, Escalation>,
+    ) -> ClaimSnapshot {
+        ClaimSnapshot {
+            by_id,
+            parks,
+            escalations,
+        }
+    }
+
     pub fn park(&self, id: &TaskId) -> Option<&Park> {
         self.parks.get(&id.to_string())
     }
@@ -538,8 +550,6 @@ impl ClaimSnapshot {
         self.parks.iter()
     }
 
-    #[allow(dead_code)]
-    // Used by Tasks 4–6 to look up escalations in the read-side snapshot.
     pub fn escalation(&self, id: &TaskId) -> Option<&Escalation> {
         self.escalations.get(&id.to_string())
     }
