@@ -58,6 +58,17 @@ mod tests {
         assert!(Size::parse("huge").is_err());
     }
 
+    #[test]
+    fn complexity_order_and_parse() {
+        assert!(Complexity::Low < Complexity::Mid);
+        assert!(Complexity::Mid < Complexity::High);
+        for level in Complexity::ALL {
+            assert_eq!(Complexity::parse(level.as_str()).unwrap(), level);
+        }
+        let error = Complexity::parse("medium").unwrap_err().to_string();
+        assert!(error.contains("low, mid, high"), "{error}");
+    }
+
     fn task_with(
         status: Status,
         spec: Option<&str>,
@@ -70,6 +81,7 @@ mod tests {
             status,
             priority: 2,
             size: None,
+            complexity: None,
             parallel: false,
             every: None,
             owner: None,
@@ -265,6 +277,42 @@ impl Size {
     }
 }
 
+/// The reasoning and judgment a task demands given its current spec, plan, and context.
+/// Three levels, ordered; absent means unassessed and is never defaulted. See
+/// docs/specs/2026-09-12-task-complexity-design.md §3.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Complexity {
+    Low,
+    Mid,
+    High,
+}
+
+impl Complexity {
+    pub const ALL: [Complexity; 3] = [Complexity::Low, Complexity::Mid, Complexity::High];
+
+    pub fn parse(s: &str) -> Result<Complexity> {
+        Complexity::ALL
+            .into_iter()
+            .find(|level| level.as_str() == s)
+            .ok_or_else(|| {
+                Error::Validation(format!(
+                    "unknown complexity {s:?}; expected one of low, mid, high"
+                ))
+            })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Complexity::Low => "low",
+            Complexity::Mid => "mid",
+            Complexity::High => "high",
+        }
+    }
+}
+
 /// Where a parked task was left. Derived from its design links.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -311,6 +359,10 @@ pub struct Task {
     pub status: Status,
     pub priority: u8,
     pub size: Option<Size>,
+    /// The judgment the task demands; absent is unassessed. Set by `add`/`edit
+    /// --complexity` and by `park --reason capability`. See
+    /// docs/specs/2026-09-12-task-complexity-design.md.
+    pub complexity: Option<Complexity>,
     /// Marked safe to run beside any other task marked parallel. Hand-set; nothing
     /// infers or validates it. See docs/specs/2026-09-06-parallel-candidates-design.md.
     pub parallel: bool,

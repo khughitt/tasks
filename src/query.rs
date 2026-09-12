@@ -241,6 +241,7 @@ mod tests {
             status,
             priority,
             size,
+            complexity: None,
             parallel: false,
             every: None,
             owner: None,
