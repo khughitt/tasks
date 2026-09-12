@@ -92,6 +92,9 @@ Rules, in the shape the model-provenance design fixed:
 | `dependency`  | another task or project must land first                                          |
 | `session`     | the session ended before the work did — context exhausted, time, crash           |
 
+A seventh word, `capability`, is defined in `2026-09-12-task-complexity-design.md` §5; it
+is the one reason with a companion field.
+
 - **Parsing.** A `Reason` enum in `claims.rs` beside `WaitingOn`, with `ALL`, `parse`,
   and `as_str`, `serde(rename_all = "lowercase")`. A value outside the six is a
   validation error listing them, in `WaitingOn::parse`'s shape. The flag is optional and

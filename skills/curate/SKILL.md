@@ -73,6 +73,9 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
    - `--spec`, `--plan <topic> --step "<heading>"`, `--parent`, `--depends`: fix when
      the linked thing exists and the link is missing or wrong.
    - `--size`: set or correct.
+   - `--complexity`: set or correct against the rubric in the tasks skill (low: approach
+     established, context identified, clear check; mid: bounded choices remain, scope
+     clear; high: discovery, interacting behaviour, or an open architectural call).
    - `--tag`: add a tag the project already uses (`tasks -C <root> tags`) when it
      clearly applies. Never invent one.
    Never: status, priority, `--parallel`, `--source`, `add`, `drop`, or `tasks/*.md`

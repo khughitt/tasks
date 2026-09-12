@@ -13,6 +13,12 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 1. `tasks prime` — roadmap (the open goal tree), closeout (goals whose work is all
    done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
+   A session under a cutoff (`TASKS_MAX_COMPLEXITY=<low|mid|high>` set by its harness, or
+   `--max-complexity <level>` on `ready`/`next`) picks only through `ready` and `next`, which
+   hide tasks rated above the level and unassessed tasks and say in warnings how many they
+   hid. Do not take work from `prime`'s parked or roadmap sections or from `list --parked`,
+   and close goals only when `prime`'s closeout offers them. The variable is the harness
+   form; the flag is for a person at a terminal.
    The one exception: an idea `next` hands you because it is parked waiting on the agent,
    which means resume its scoping, never implement it.
    `tasks list` is the wider view: open tasks by priority, or `--sort updated` /
@@ -39,7 +45,20 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    `review` (the user must inspect and judge an artifact), `decision` (only the user can
    decide), `approval` (you hold a recommendation and want it confirmed), `environment`
    (the checkout or machine cannot run the work), `dependency` (another task or project
-   must land first), `session` (the session is ending before the work is).
+   must land first), `session` (the session is ending before the work is), `capability`
+   (the work needs more reasoning than this session can supply).
+   Escalate on an observable trigger, not a feeling: the implementation needs a decision
+   the spec or plan leaves unresolved; investigation reveals interacting behaviour outside
+   the assessed scope; a bounded attempt makes no progress or has no way to establish
+   correctness. Record the evidence in a note, then
+   `tasks park <id> "<where it stopped and why>" --reason capability --complexity <level>`:
+   the level must be at least the task's effective rating (its record, or an existing
+   escalation, whichever is higher) and above your cutoff, and it is
+   written to the record and to the shared store so no checkout's picker offers it under
+   that cutoff again. When no level above the cutoff exists, `--waiting-on user` instead,
+   so a person can decompose or reassign it. An environment or credential failure is
+   `--reason environment` and never raises the rating. If the command reports that the
+   escalation was not recorded, rerun it as it was.
    `prime` lists parked work first with where it was left; `ready` omits work waiting on
    the user; `list --parked` is the picker's feed.
 6. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are
@@ -60,7 +79,7 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all. When the project keeps a
@@ -91,7 +110,16 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
 ## Recording work
 
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+  `complexity` is the reasoning and judgment the task demands given its current spec,
+  plan, and context — `low`: the approach is established, the relevant context is
+  identified, and correctness has a clear check; `mid`: bounded investigation or
+  implementation choices remain, scope and acceptance criteria are clear; `high`:
+  substantial discovery, subtle reasoning about interacting behaviour, or an unresolved
+  architectural judgment. Rate it when scoping, next to priority and size; rate ready
+  work first. A precisely specified concurrent algorithm can still be `high`; touching
+  many files does not make a task `high`. `edit --complexity` or `--no-complexity` is an
+  explicit reassessment and clears any escalation.
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
   for ordering between the pieces. A goal that is committed work is a `todo` with a
   body, however large; `idea` is for uncommitted thoughts. `done` refuses while any
@@ -150,7 +178,9 @@ all moved aliases), and remove the inventory last.
   `tasks edit <id> --spec <topic>`; deliverables become children with
   `--parent <id> --spec <topic>`.
 - **writing-plans** attaches with `tasks edit <id> --plan <topic>` and adds one child
-  per `### Task N:` heading with `--parent <id> --plan <topic> --step "Task N: <title>"`;
+  per `### Task N:` heading with `--parent <id> --plan <topic> --step "Task N: <title>"`
+  and `--complexity <level>` on every step child — a plan is evidence for a lower
+  rating, not a guarantee, and `check` warns on an open step without one.
   `tasks check` warns on any heading left without a task.
 - **executing-plans / subagent-driven-development**: `tasks start` a step before implementing, `tasks done` when its commit lands.
 - Plan headings are the drift contract: renaming or removing a heading under an open task fails `tasks check`. Update the task in the same change.

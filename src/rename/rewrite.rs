@@ -29,7 +29,10 @@ pub fn rewrite_prefix(text: &str, old: &str, new: &str) -> Result<String> {
                 ("depends", Value::List(items)) => {
                     Value::List(items.iter().map(|item| move_one(item)).collect())
                 }
-                ("created", Value::Scalar(v)) | ("updated", Value::Scalar(v)) => Value::Raw(v),
+                (
+                    "created" | "updated" | "started" | "completed" | "last_done",
+                    Value::Scalar(v),
+                ) => Value::Raw(v),
                 (_, other) => other,
             };
             (key, value)
@@ -73,5 +76,24 @@ depends: [dot-b11111, ops-c22222]\ntags: []\n---\n\n\nBody   with  odd    spacin
             HAND_WRITTEN.replace("depends: [dot-b11111, ops-c22222]", "depends: [ops-c22222]");
         let out = rewrite_prefix(&text, "dot", "dots").unwrap();
         assert!(out.contains("depends: [ops-c22222]"), "{out}");
+    }
+
+    /// A task that has been started and returned to `todo` keeps its `started` field
+    /// (spec: `started` is stamped once and never cleared). A rename must leave it
+    /// unquoted like `created`/`updated`, or a later read double-quotes it via
+    /// `quote_timestamps` and fails to parse.
+    #[test]
+    fn a_started_field_stays_unquoted_and_reparses() {
+        let text = HAND_WRITTEN.replace(
+            "updated: 2026-09-05T09:00:00Z\n",
+            "updated: 2026-09-05T09:00:00Z\nstarted: 2026-09-05T09:00:00Z\n",
+        );
+        let out = rewrite_prefix(&text, "dot", "dots").unwrap();
+        assert!(
+            out.contains("started: 2026-09-05T09:00:00Z\n"),
+            "timestamps stay unquoted: {out}"
+        );
+        // Reparsing the rewritten file must not choke on a double-quoted timestamp.
+        rewrite_prefix(&out, "dots", "dot").unwrap();
     }
 }

@@ -2,6 +2,7 @@ mod claims;
 mod cli;
 mod commands;
 mod complete;
+mod complexity;
 mod error;
 mod format;
 mod frontmatter;

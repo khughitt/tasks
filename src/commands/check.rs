@@ -176,6 +176,16 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ),
             ));
         }
+        // Spec §6: the plan step is the unit of delegation, and rating it is the
+        // planner's duty. Elsewhere a missing rating is not a finding, like size.
+        if task.status.is_open() && task.step.is_some() && task.complexity.is_none() {
+            warnings.push(finding(
+                Some(task),
+                file.clone(),
+                "unrated_step",
+                "plan step without a complexity rating".into(),
+            ));
+        }
         if task.every.is_some() {
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
             if !kids.is_empty() {

@@ -1,14 +1,15 @@
 use crate::error::{Error, Result};
 use crate::frontmatter::{self, Value};
-use crate::model::{Note, Size, Status, Task, TaskId};
+use crate::model::{Complexity, Note, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 21] = [
+const KEYS: [&str; 22] = [
     "id",
     "title",
     "status",
     "priority",
     "size",
+    "complexity",
     "parallel",
     "every",
     "owner",
@@ -104,6 +105,10 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         priority,
         size: scalar("size")?
             .map(|s| Size::parse(&s))
+            .transpose()
+            .map_err(|e| perr(file, e.to_string()))?,
+        complexity: scalar("complexity")?
+            .map(|s| Complexity::parse(&s))
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
         parallel: boolean("parallel")?,
@@ -344,6 +349,9 @@ pub fn serialize_task(t: &Task) -> String {
     if let Some(z) = t.size {
         pairs.push(("size".into(), s(z.as_str())));
     }
+    if let Some(level) = t.complexity {
+        pairs.push(("complexity".into(), s(level.as_str())));
+    }
     // Raw, not Scalar: needs_quotes quotes the literal `true`, which would write
     // `parallel: "true"` — readable back, but out of step with every other scalar.
     if t.parallel {
@@ -434,6 +442,18 @@ mod tests {
         assert_eq!(t.body, "");
         assert!(t.notes.is_empty());
         assert_eq!(serialize_task(&t), MINIMAL);
+    }
+
+    #[test]
+    fn complexity_round_trips_after_size_and_rejects_unknown_levels() {
+        let text = MINIMAL.replace("priority: 2\n", "priority: 2\nsize: m\ncomplexity: mid\n");
+        // Through the allowlist first: an unlisted key is rejected before any field parses.
+        let t = parse_task(&text, "x").unwrap();
+        assert_eq!(t.complexity, Some(Complexity::Mid));
+        assert_eq!(serialize_task(&t), text);
+        let bad = MINIMAL.replace("priority: 2\n", "priority: 2\ncomplexity: medium\n");
+        let error = parse_task(&bad, "x").unwrap_err().to_string();
+        assert!(error.contains("low, mid, high"), "{error}");
     }
 
     #[test]

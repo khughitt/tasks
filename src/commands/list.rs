@@ -253,11 +253,18 @@ pub fn ready(
     size: Option<String>,
     parallel: bool,
     limit: Option<usize>,
+    max_complexity: Option<String>,
 ) -> Result<Output> {
+    let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
     let size = size.map(|size| Size::parse(&size)).transpose()?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let mut tasks = ready_tasks(&mut ctx, &all, &claims, now)?;
+    if let Some(cutoff) = cutoff {
+        let hidden = crate::complexity::apply(&mut tasks, cutoff, &claims);
+        ctx.warnings
+            .extend(crate::complexity::warnings(cutoff, &hidden));
+    }
     if let Some(size) = size {
         tasks.retain(|task| task.size == Some(size));
     }
@@ -279,17 +286,27 @@ pub fn ready(
 
 /// The head of `ready` in the show shape, so a caller can start on it without a second
 /// lookup. Nothing ready is a normal state: null, warnings, exit 0.
-pub fn next(mut ctx: ReadCtx) -> Result<Output> {
+pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> {
+    let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let candidates = super::parked::candidates(&mut ctx, &all, &claims)?;
     let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
-    let next = match candidates
-        .into_iter()
-        .next()
-        .or_else(|| ready.into_iter().next())
-    {
+    // One pool in pick order — parked candidates first, then the ready list — with each
+    // task once, so a parked todo that is also ready is hidden and counted once.
+    let mut pool = candidates;
+    for task in ready {
+        if !pool.iter().any(|candidate| candidate.id == task.id) {
+            pool.push(task);
+        }
+    }
+    if let Some(cutoff) = cutoff {
+        let hidden = crate::complexity::apply(&mut pool, cutoff, &claims);
+        ctx.warnings
+            .extend(crate::complexity::warnings(cutoff, &hidden));
+    }
+    let next = match pool.into_iter().next() {
         None => None,
         Some(task) => {
             let project = ctx
@@ -319,6 +336,7 @@ pub fn next(mut ctx: ReadCtx) -> Result<Output> {
 }
 
 pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
+    let cutoff = crate::complexity::cutoff(None)?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let upcoming: Vec<OffsetDateTime> = all
@@ -334,7 +352,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     };
     let counts = Counts::of(&all);
     let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
+    let mut ready = ready_tasks(&mut ctx, &all, &claims, now)?;
     let mut doing: Vec<Task> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
@@ -377,6 +395,14 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         }
     }
     sort_ready(&mut closeout);
+    if let Some(cutoff) = cutoff {
+        let mut hidden = crate::complexity::apply(&mut ready, cutoff, &claims);
+        let from_closeout = crate::complexity::apply(&mut closeout, cutoff, &claims);
+        hidden.above += from_closeout.above;
+        hidden.unassessed += from_closeout.unassessed;
+        ctx.warnings
+            .extend(crate::complexity::warnings(cutoff, &hidden));
+    }
     ctx.warnings.extend(held);
     let wide = matches!(ctx.scope, Scope::All(_));
     for project in ctx.scope.projects() {

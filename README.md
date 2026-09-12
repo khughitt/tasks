@@ -55,6 +55,10 @@ its liveness. `ready` and `next` omit live claims with an explanatory warning. S
 `TASKS_MODEL` per harness process records which model completed each task: a fresh
 `done` stamps the record's `model` field from it (and clears the stamp when it is
 unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.
+`TASKS_MAX_COMPLEXITY` per harness process is the envelope a session picks within:
+`ready`, `next`, and `prime` hide tasks rated above it and unassessed tasks, and say how
+many. `--max-complexity` on `ready`/`next` overrides it for one call. Design:
+`docs/specs/2026-09-12-task-complexity-design.md`.
 `park` sets a task down with its next step in the same store, who it waits on, and
 optionally why:
 
@@ -66,6 +70,7 @@ optionally why:
 | `environment` | the checkout or machine cannot run the work — missing deps, a restart, a TTY     |
 | `dependency`  | another task or project must land first                                          |
 | `session`     | the session ended before the work did — context exhausted, time, crash           |
+| `capability`  | the work needs more reasoning than this session can supply; `--complexity` raises the rating |
 
 `start` resumes it, and `prime` lists parked work first. Every record also carries two
 stamps written only by status changes: `started`, the first time work began, and
@@ -91,7 +96,7 @@ from a clone):
     tasks unregister sci             # drop a stale prefix and its aliases; files are untouched
     tasks rename dot dots            # rename a registered prefix; old ids still resolve
     tasks rename dot dots --explain  # diagnose an interruption without locks or writes
-    tasks add "Bank the ledger" -p 1 --size m --tag ledger
+    tasks add "Bank the ledger" -p 1 --size m --complexity low --tag ledger
     tasks add "Emit rows" --parent sci-4f2a9c
     tasks add "Curation sweep" --every 30d  # days or weeks since each completion
     tasks list --periodic            # recurring tasks, soonest due first

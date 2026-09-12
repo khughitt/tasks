@@ -53,6 +53,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || fields.body.is_some()
         || fields.priority.is_some()
         || fields.size.is_some()
+        || fields.complexity.is_some()
+        || args.no_complexity
         || fields.parallel
         || args.no_parallel
         || fields.every.is_some()
@@ -96,6 +98,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     if args.no_source {
         task.source = None;
     }
+    if args.no_complexity {
+        task.complexity = None;
+    }
     if args.no_model {
         task.model = None;
     }
@@ -126,6 +131,12 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         } else {
             transition(&mut ctx, &mut task, to, args.force)?;
         }
+    }
+    if args.fields.complexity.is_some() || args.no_complexity {
+        // `task.complexity` already carries what was given: `--no-complexity` cleared it
+        // above, `--complexity <level>` set it in `apply_fields`, and nothing since has
+        // touched it.
+        ctx.reassess(&task.id, task.complexity)?;
     }
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))

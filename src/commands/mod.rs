@@ -22,7 +22,7 @@ use crate::claims::{ClaimStore, Liveness, MutationLock};
 use crate::cli::{Cli, Command, FieldArgs, ScopeArgs};
 use crate::error::{Error, Result};
 use crate::format::{validate_body, validate_line, validate_note_text, validate_task};
-use crate::model::{Note, Size, Status, Task, TaskId};
+use crate::model::{Complexity, Note, Size, Status, Task, TaskId};
 use crate::output::Output;
 use crate::registry::Registry;
 use crate::repo::{Project, SiblingCopy};
@@ -34,9 +34,17 @@ use std::path::{Path, PathBuf};
 /// guard in `transition` (or by `park`); **nothing is persisted until `save` acts on it.**
 pub enum ClaimIntent {
     Acquire(crate::claims::Claim),
-    Release { clear_park: bool },
-    Park(crate::claims::Park),
+    Release {
+        clear_park: bool,
+    },
+    Park {
+        park: crate::claims::Park,
+        escalation: Option<crate::claims::Escalation>,
+    },
     PreserveStore,
+    /// An explicit rating replaced an escalation; the store must be saved even on a
+    /// same-status edit, which otherwise preserves it.
+    ClearEscalation(crate::claims::Escalation),
 }
 
 pub struct Ctx {
@@ -50,6 +58,11 @@ pub struct Ctx {
     pending_claim: Option<(TaskId, ClaimIntent)>,
     /// This close only finishes a previous completion's pending claim-store cleanup.
     pub recovered: bool,
+    /// Set by `reassess` to what was given -- `Some(level)` for `--complexity <level>`,
+    /// `None` for `--no-complexity`; the outer `Option` is absent when no reassessment
+    /// was requested. Taken once by `save`, which performs the actual removal and, only
+    /// once it knows whether that reached disk, reports success or names the retry.
+    clear_escalation: Option<Option<Complexity>>,
 }
 
 impl Ctx {
@@ -103,6 +116,27 @@ impl Ctx {
 
     pub fn preserve_claim_store(&mut self, id: &TaskId) {
         self.pending_claim = Some((id.clone(), ClaimIntent::PreserveStore));
+    }
+
+    /// `edit --complexity` / `--no-complexity`: the explicit rating is the new truth, so the
+    /// shared escalation goes (spec §5.1). Records only, with no warning yet -- whether the
+    /// clear actually reached disk is `save`'s to know, and only `save` can report it, so it
+    /// pushes the warning itself once it has saved. `given` is what was passed (`None` for
+    /// `--no-complexity`), needed only if the store save fails and the retry has to be
+    /// named. Called after the status handling so a transition's own intent — which saves
+    /// the store anyway — is kept, and only a store-preserving intent is replaced.
+    pub fn reassess(&mut self, id: &TaskId, given: Option<Complexity>) -> Result<()> {
+        let Some(escalation) = self.claims_mut()?.escalation(id).cloned() else {
+            return Ok(());
+        };
+        self.clear_escalation = Some(given);
+        if matches!(
+            self.pending_claim,
+            None | Some((_, ClaimIntent::PreserveStore))
+        ) {
+            self.pending_claim = Some((id.clone(), ClaimIntent::ClearEscalation(escalation)));
+        }
+        Ok(())
     }
 
     /// Guard only. Decides whether this session may make the change and records what `save`
@@ -201,6 +235,7 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
         claims: None,
         pending_claim: None,
         recovered: false,
+        clear_escalation: None,
     })
 }
 
@@ -424,6 +459,9 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
     }
     if let Some(size) = &fields.size {
         task.size = Some(Size::parse(size)?);
+    }
+    if let Some(level) = &fields.complexity {
+        task.complexity = Some(Complexity::parse(level)?);
     }
     if let Some(every) = &fields.every {
         task.every = Some(crate::periodic::Interval::parse(every)?);
@@ -690,6 +728,15 @@ fn warn_on_newer_sibling_copies(ctx: &mut Ctx, id: &TaskId, loaded: &str) {
     }
 }
 
+/// The exact retry for a reassessment whose store save failed: what was actually given,
+/// not a placeholder, so running it verbatim redoes the same clear.
+fn escalation_retry_hint(id: &TaskId, given: Option<Complexity>) -> String {
+    match given {
+        Some(level) => format!("rerun `tasks edit {id} --complexity {}`", level.as_str()),
+        None => format!("rerun `tasks edit {id} --no-complexity`"),
+    }
+}
+
 pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     // Until this line the record still carries the stamp it was loaded with, which is the
     // only baseline the divergence check below has; the bump destroys it.
@@ -698,6 +745,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
     warn_on_newer_sibling_copies(ctx, &task.id, &loaded);
+    let clear_escalation = std::mem::take(&mut ctx.clear_escalation);
 
     match ctx.pending_claim.take() {
         Some((id, ClaimIntent::Acquire(claim))) => {
@@ -707,14 +755,35 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             // would unclaim work someone still holds.
             let previous = store.get(&id).cloned();
             let previous_park = store.park(&id).cloned();
+            let previous_escalation = if clear_escalation.is_some() {
+                store.remove_escalation(&id)
+            } else {
+                None
+            };
             store.prune_dead();
             store.insert(&id, claim);
+            // A failure here never removed the escalation from disk, so nothing about
+            // clearing it is reported; the command fails with the store error itself.
             store.save()?;
 
-            let Err(error) = ctx.project.write_task(&ctx.registry, task) else {
-                return Ok(());
+            let error = match ctx.project.write_task(&ctx.registry, task) {
+                Ok(()) => {
+                    if let Some(escalation) = &previous_escalation {
+                        ctx.warnings.push(format!(
+                            "cleared the escalation of {id} to {} recorded by session {} at {}",
+                            escalation.level.as_str(),
+                            escalation.session,
+                            escalation.at
+                        ));
+                    }
+                    return Ok(());
+                }
+                Err(error) => error,
             };
             let store = ctx.claims_mut()?;
+            if let Some(escalation) = previous_escalation {
+                store.insert_escalation(&id, escalation);
+            }
             match (previous, previous_park) {
                 (Some(previous), _) => store.insert(&id, previous),
                 (None, Some(park)) => store.insert_park(&id, park),
@@ -723,7 +792,8 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                 }
             }
             // Warnings on `Ctx` are dropped when a command returns `Err`, so recovery
-            // guidance has to travel on the error itself.
+            // guidance has to travel on the error itself. The escalation, if any, was just
+            // restored above -- unchanged, so nothing about it belongs here either.
             let suffix = match store.save() {
                 Ok(()) => String::new(),
                 Err(inner) => format!(
@@ -738,37 +808,101 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.remove(&id);
+            let removed_escalation = if clear_escalation.is_some() || clear_park {
+                store.remove_escalation(&id)
+            } else {
+                None
+            };
             if clear_park {
                 store.remove_park(&id);
             }
-            if let Err(error) = store.save() {
-                let recovery = match task.status {
-                    Status::Done => format!("run `tasks done {id}`"),
-                    Status::Dropped => format!("run `tasks drop {id}`"),
-                    Status::Blocked => format!("run `tasks block {id}`"),
-                    Status::Todo | Status::Idea | Status::Doing => {
-                        "the store is unchanged and a same-status edit will not retry cleanup"
-                            .into()
+            match store.save() {
+                Ok(()) => {
+                    if let (Some(_), Some(escalation)) = (&clear_escalation, &removed_escalation) {
+                        ctx.warnings.push(format!(
+                            "cleared the escalation of {id} to {} recorded by session {} at {}",
+                            escalation.level.as_str(),
+                            escalation.session,
+                            escalation.at
+                        ));
                     }
-                };
-                ctx.warnings.push(format!(
-                    "{id}'s status was saved but store cleanup failed ({error}); {recovery}"
-                ));
+                }
+                Err(error) => {
+                    let recovery = match task.status {
+                        Status::Done => format!("run `tasks done {id}`"),
+                        Status::Dropped => format!("run `tasks drop {id}`"),
+                        Status::Blocked => format!("run `tasks block {id}`"),
+                        Status::Todo | Status::Idea | Status::Doing => {
+                            "the store is unchanged and a same-status edit will not retry cleanup"
+                                .into()
+                        }
+                    };
+                    ctx.warnings.push(format!(
+                        "{id}'s status was saved but store cleanup failed ({error}); {recovery}"
+                    ));
+                    if let Some(given) = clear_escalation {
+                        let escalation = removed_escalation
+                            .expect("reassess found this escalation under the same lock");
+                        ctx.warnings.push(format!(
+                            "the escalation of {id} to {} was not cleared ({error}); {}",
+                            escalation.level.as_str(),
+                            escalation_retry_hint(&id, given)
+                        ));
+                    }
+                }
             }
             Ok(())
         }
-        Some((id, ClaimIntent::Park(park))) => {
+        Some((id, ClaimIntent::Park { park, escalation })) => {
             // Record first, then store: a note with no entry is a trail that says what was
             // intended, while an entry with no note would be state the record never saw.
             ctx.project.write_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.insert_park(&id, park);
+            if let Some(escalation) = &escalation {
+                store.insert_escalation(&id, escalation.clone());
+            }
             if let Err(error) = store.save() {
+                // For an escalation the store write is the cross-checkout guarantee
+                // (spec §5.2), so its failure is the command's failure; the raised
+                // rating stays, and equal-to-current lets the rerun pass.
+                if let Some(escalation) = escalation {
+                    return Err(Error::Validation(format!(
+                        "the note and rating landed, but the escalation of {id} to {} was not \
+                         recorded ({error}); rerun the same `tasks park` command",
+                        escalation.level.as_str()
+                    )));
+                }
                 ctx.warnings.push(format!(
-                    "the note landed, but parking on {id} was not updated ({error}); a previous \\
+                    "the note landed, but parking on {id} was not updated ({error}); a previous \
                      park entry, if any, is intact"
                 ));
+            }
+            Ok(())
+        }
+        Some((id, ClaimIntent::ClearEscalation(escalation))) => {
+            ctx.project.write_task(&ctx.registry, task)?;
+            let store = ctx.claims_mut()?;
+            store.prune_dead();
+            store.remove_escalation(&id);
+            match store.save() {
+                Ok(()) => ctx.warnings.push(format!(
+                    "cleared the escalation of {id} to {} recorded by session {} at {}",
+                    escalation.level.as_str(),
+                    escalation.session,
+                    escalation.at
+                )),
+                Err(error) => {
+                    let given = clear_escalation
+                        .expect("a ClearEscalation intent is only set alongside clear_escalation");
+                    ctx.warnings.push(format!(
+                        "{id}'s rating was saved but the escalation to {} could not be cleared \
+                         ({error}); {}",
+                        escalation.level.as_str(),
+                        escalation_retry_hint(&id, given)
+                    ));
+                }
             }
             Ok(())
         }
@@ -852,6 +986,7 @@ pub fn run(cli: Cli) -> Result<Output> {
                         claims: None,
                         pending_claim: None,
                         recovered: false,
+                        clear_escalation: None,
                     }
                 }
                 None => open_ctx(dir)?,
@@ -887,9 +1022,19 @@ pub fn run(cli: Cli) -> Result<Output> {
             size,
             parallel,
             limit,
+            max_complexity,
             scope,
-        } => list::ready(open_read_ctx(dir, &scope)?, size, parallel, limit),
-        Command::Next { scope } => list::next(open_read_ctx(dir, &scope)?),
+        } => list::ready(
+            open_read_ctx(dir, &scope)?,
+            size,
+            parallel,
+            limit,
+            max_complexity,
+        ),
+        Command::Next {
+            max_complexity,
+            scope,
+        } => list::next(open_read_ctx(dir, &scope)?, max_complexity),
         Command::Sample {
             count,
             older_than,
@@ -905,12 +1050,14 @@ pub fn run(cli: Cli) -> Result<Output> {
             next_step,
             waiting_on,
             reason,
+            complexity,
         } => park::run(
             open_id_write_ctx(dir, &id)?,
             id,
             next_step,
             waiting_on,
             reason,
+            complexity,
         ),
         Command::Done { id, message, force } => status::close(
             open_id_write_ctx(dir, &id)?,

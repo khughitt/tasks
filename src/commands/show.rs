@@ -115,6 +115,9 @@ pub fn describe(
         park: claims
             .and_then(|snapshot| snapshot.park(&task.id))
             .map(crate::output::ParkInfo::of),
+        escalation: claims
+            .and_then(|snapshot| snapshot.escalation(&task.id))
+            .cloned(),
         periodic: crate::output::PeriodicInfo::of(&task, now),
         task,
     })

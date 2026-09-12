@@ -53,6 +53,9 @@ pub struct FieldArgs {
     pub priority: Option<u8>,
     #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
     pub size: Option<String>,
+    /// The judgment the task demands: low, mid, or high. Absent is unassessed.
+    #[arg(long, add = ArgValueCandidates::new(crate::complete::complexities))]
+    pub complexity: Option<String>,
     /// Mark as safe to run beside other tasks marked parallel. On `edit` this sets the
     /// flag; see `--no-parallel` to clear it.
     #[arg(long)]
@@ -101,6 +104,9 @@ pub struct EditArgs {
     /// Clear the source.
     #[arg(long, conflicts_with = "source")]
     pub no_source: bool,
+    /// Clear the complexity rating (back to unassessed).
+    #[arg(long, conflicts_with = "complexity")]
+    pub no_complexity: bool,
     /// Replace the model stamp recorded at completion; see `--no-model`.
     #[arg(long)]
     pub model: Option<String>,
@@ -224,11 +230,19 @@ pub enum Command {
         parallel: bool,
         #[arg(short = 'n', long)]
         limit: Option<usize>,
+        /// Hide tasks rated above this level and unassessed tasks; overrides
+        /// TASKS_MAX_COMPLEXITY.
+        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        max_complexity: Option<String>,
         #[command(flatten)]
         scope: ScopeArgs,
     },
     /// The first ready task, in the show shape; null when nothing is ready.
     Next {
+        /// Hide tasks rated above this level and unassessed tasks; overrides
+        /// TASKS_MAX_COMPLEXITY.
+        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        max_complexity: Option<String>,
         #[command(flatten)]
         scope: ScopeArgs,
     },
@@ -289,14 +303,18 @@ pub enum Command {
             add = ArgValueCandidates::new(crate::complete::waiting_on)
         )]
         waiting_on: String,
-        /// Why the work stopped: review, decision, approval, environment, dependency, or
-        /// session. Optional; absent means not recorded.
+        /// Why the work stopped: review, decision, approval, environment, dependency,
+        /// session, or capability. Optional; absent means not recorded.
         #[arg(
             long,
             value_name = "WHY",
             add = ArgValueCandidates::new(crate::complete::reason)
         )]
         reason: Option<String>,
+        /// With --reason capability: the rating the work actually needs. Written to the
+        /// record and, when waiting on the agent, to the shared store as an escalation.
+        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        complexity: Option<String>,
     },
     /// Close a task as done.
     Done {
