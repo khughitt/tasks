@@ -11064,6 +11064,10 @@ fn complexity_is_set_cleared_listed_and_completed() {
         values.iter().any(|value| value.starts_with("high")),
         "{values:?}"
     );
+    let values = env.complete_values(&sci, "bash", 3, &["tasks", "ready", "--max-complexity", ""]);
+    assert_eq!(values, vec!["low", "mid", "high"]);
+    let values = env.complete_values(&sci, "bash", 3, &["tasks", "next", "--max-complexity", ""]);
+    assert_eq!(values, vec!["low", "mid", "high"]);
 }
 
 #[test]

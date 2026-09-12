@@ -5,7 +5,7 @@ status: todo
 priority: 2
 size: l
 created: 2026-09-12T10:18:55Z
-updated: 2026-09-12T11:21:45Z
+updated: 2026-09-12T14:40:48Z
 depends: []
 tags: [cli]
 spec: docs/specs/2026-09-12-task-complexity-design.md
@@ -40,3 +40,4 @@ Rejected: reusing size; a routine tag (boolean, not a scale); a five-level scale
 ## Notes
 
 - 2026-09-12T10:26:44Z (main): Body revised after a second-opinion review: unassessed semantics, cutoff on next's parked path, explicit per-step ratings, observable escalation triggers, model-stamp caveat.
+- 2026-09-12T14:40:48Z (complexity): final review fix wave: escalation-clear warning after save with retry hint; park cutoff-high precedence; skill/spec wording; --max-complexity completion test
