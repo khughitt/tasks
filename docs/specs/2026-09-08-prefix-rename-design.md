@@ -159,12 +159,15 @@ an index asserting something untrue.
 | P3 | File pass, per file: write `new-<hex>.md`, then remove `old-<hex>.md`. |
 | P4 | `tasks/.config.toml` prefix (atomic). |
 | P5 | Registry key and alias records (atomic, under the registry lock). |
-| P6 | Write `claims/<new>.toml` from the inventory's recorded park entries when it holds any, verify it, remove `claims/<old>.toml`, then the inventory. |
+| P6 | Write `claims/<new>.toml` from the inventory's recorded park and escalation entries when it holds any, verify it, remove `claims/<old>.toml`, then the inventory. |
 
 P6 removes the claim store's `.toml` only. **`<old>.lock` is never unlinked**, in this phase or any
 other: it is an flock inode another process may hold or be waiting on, and removing it
 would silently break mutual exclusion for that waiter. The orphaned lock file is inert and
 is accepted as litter.
+
+Escalations are defined in `2026-09-12-task-complexity-design.md` §5.1 and are carried
+exactly as parks are.
 
 The inventory is removed last, after the claim store, so from the moment P2 completes
 until P6 finishes its presence means "a rename is unfinished", and means nothing else.
@@ -229,7 +232,7 @@ obstacle:
 - The project's `tasks/` is dirty, and the dirt is not a resumable rename (§5.3). Outside
   a git repository there is no dirty check and no undo; the rename proceeds with a warning.
 - Any **live claim** exists on the project.
-- A fresh rename refuses a target store that holds park entries; recovery does not repeat this check.
+- A fresh rename refuses a target store that holds park and escalation entries; recovery does not repeat this check.
 - The repository has **more than one git worktree**. Other checkouts keep the retired
   prefix in their config and filenames, which would recreate the routing hazard of §4
   after an otherwise successful rename.
@@ -363,8 +366,9 @@ finished being followed by the config write", and all four resume identically be
 idempotent per file.
 
 `ResumeCleanup` exists because an interruption between P5 and P6 leaves a fully renamed
-project with a stale claim store and a stale inventory. Reporting that as `Complete` and
-exiting would strand both; an earlier draft did exactly that.
+project with a stale claim store — its park and escalation entries both — and a stale
+inventory. Reporting that as `Complete` and exiting would strand both; an earlier draft
+did exactly that.
 
 `registry` distinguishes `old_key` from `new_key` separately, rather than as one three-way
 value, because both can be present at once — and can name *different* roots, which R7
@@ -463,9 +467,9 @@ forward recovery is the only route; §9 records this.
    targeted `<old>` before the rename now targets `<new>` and must be pointed back. After a
    second rename that is more than one entry, which is why the inventory records `source`
    explicitly.
-4. If the store step landed, restore `claims/<old>.toml` from the inventory's `parks_store`
-   with ids re-prefixed back, verify it, then remove `claims/<new>.toml`; the entries carry
-   no other state.
+4. If the store step landed, restore `claims/<old>.toml` — its park and escalation
+   entries both — from the inventory's `parks_store` with ids re-prefixed back, verify
+   it, then remove `claims/<new>.toml`; the entries carry no other state.
 5. Remove `~/.local/state/tasks/rename/<old>.toml` **last**. Until it is gone the project
    stays frozen (§5.7), so removing it first would unfreeze a half-rolled-back project.
 

@@ -1,6 +1,6 @@
 # Task complexity: rating the judgment a task demands so a harness can pick within its envelope
 
-Status: approved (2026-09-12)
+Status: implemented (2026-09-12)
 Task: tasks-be447b
 
 ## 1. Problem
