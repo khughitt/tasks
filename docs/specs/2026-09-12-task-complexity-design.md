@@ -154,15 +154,19 @@ the record and, when the park waits on the agent, to the store as an escalation.
 depend on who the park waits on:
 
 - `--waiting-on agent` (the default; a stronger session should pick it up):
-  `--complexity` is required. The level must be at least the record's current rating,
-  and when `TASKS_MAX_COMPLEXITY` is set it must be above that cutoff. A level equal to
-  the current rating is allowed so that a rerun after a partial write (§5.2) succeeds,
-  and so that a record already at `high` can be escalated as `high` under a lower or
-  absent cutoff. The command refuses only when no level above the cutoff exists — the
-  cutoff itself is `high` — and then names the `--waiting-on user` route.
+  `--complexity` is required. The level must be at least the task's **effective rating**
+  (§4.1: the record's rating or the existing escalation, whichever is higher), and when
+  `TASKS_MAX_COMPLEXITY` is set it must be above that cutoff. Checking against the
+  effective rating, not the checkout's record, is what stops a session reading a stale
+  `low` from replacing another checkout's `high` escalation with `mid`; lowering is
+  reserved to explicit reassessment (§5.1). A level equal to the effective rating is
+  allowed so that a rerun after a partial write (§5.2) succeeds, and so that a task
+  already at `high` can be escalated as `high` under a lower or absent cutoff. The
+  command refuses only when no level above the cutoff exists — the cutoff itself is
+  `high` — and then names the `--waiting-on user` route.
 - `--waiting-on user` (the envelope cannot be escaped by rerouting; a person must
   decompose, rescope, or reassign): `--complexity` is optional, and when given must be
-  at least the current rating. No escalation is recorded: the task is waiting on a
+  at least the effective rating. No escalation is recorded: the task is waiting on a
   person, and `ready` and `next` already omit work waiting on the user.
 
 `park` learns the cutoff only from `TASKS_MAX_COMPLEXITY`. A session that picked with
@@ -177,7 +181,7 @@ needs at least `level`", and it exists because the record's rating lives in one 
 until merged while the sessions that must respect it read others.
 
 - Written by `park --reason capability --waiting-on agent` only, replacing any earlier
-  entry for the id.
+  entry for the id with one at the same or a higher level (§5).
 - Untouched by `start`, by any later `park` with another reason, by `note`, and by
   every `edit` that does not name `--complexity`. Resuming an escalated task and parking
   it again for `session` from a checkout whose record still says `low` leaves the
@@ -190,6 +194,14 @@ until merged while the sessions that must respect it read others.
 - Never pruned by readers, and never pruned because the record caught up: after the
   merge the entry is redundant and harmless, and its `at` and `session` remain the
   record of an attempt (§5, calibration).
+- Carried by `tasks rename` exactly as park entries are
+  (docs/specs/2026-09-08-prefix-rename-design.md §5.1 P6, §5.2, §5.3, §5.6): the set the
+  rename migrates is parks and escalations together, re-keyed to the new prefix. A
+  source store holding only escalations is migrated, not skipped; a target store holding
+  only escalations is a destination conflict that preflight refuses; the inventory
+  snapshot that recovery restores from holds both maps; and manual recovery restores
+  both. That spec's "park entries" becomes "park and escalation entries" wherever the
+  store is meant, in the same change.
 
 Pickers compute the effective rating from it (§4.1). `show` and list rows report it as
 `escalation`.
@@ -246,6 +258,8 @@ starts quiet: no open task in any registered project carries a step today.
 - `README.md`: the field in the `add` example and the env var beside `TASKS_MODEL`.
 - `docs/specs/2026-09-11-park-reason-and-stamps-design.md`: a one-line pointer from §4
   to this spec for the seventh word, so the vocabulary has one home.
+- `docs/specs/2026-09-08-prefix-rename-design.md`: the store steps and refusals name
+  escalations beside parks (§5.1 above), with a pointer here.
 - The harness-side mapping — which level each provider's sessions may take — is written
   in each harness's own instructions, outside this repository.
 
@@ -266,8 +280,17 @@ End-to-end in `tests/cli.rs` against the built binary:
   record still says `low`; `start` in B, then `park --reason session` in B; A, B, and a
   third checkout still hide it and `show` reports the escalation; `edit --complexity mid`
   in B clears it with the warning, after which B offers it; `done` clears it too.
+- Two checkouts, stale record: A escalates to `high`; B, whose record still says `low`,
+  runs `park --reason capability --complexity mid` under `TASKS_MAX_COMPLEXITY=low` and
+  is refused naming the effective `high`; `--complexity high` from B succeeds and the
+  escalation stays `high`.
 - `park --reason capability --waiting-on user` records no escalation; the task is
   omitted by `ready`/`next` as parked on the user.
+- `rename`: a source store holding only escalations is migrated and re-keyed, and the
+  escalated task is still hidden under a cutoff from the renamed project; a target store
+  holding only escalations is refused in preflight; a rename interrupted after the
+  inventory is written resumes with the escalations intact, and the manual-recovery
+  steps restore them.
 - `prime` under `TASKS_MAX_COMPLEXITY` filters the ready and closeout sections and
   nothing else.
 - Flag overrides the variable; invalid variable fails even when the flag is given.
