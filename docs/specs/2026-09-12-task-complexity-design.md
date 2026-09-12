@@ -1,6 +1,6 @@
 # Task complexity: rating the judgment a task demands so a harness can pick within its envelope
 
-Status: proposed (2026-09-12)
+Status: approved (2026-09-12)
 Task: tasks-be447b
 
 ## 1. Problem
@@ -171,7 +171,8 @@ depend on who the park waits on:
 
 `park` learns the cutoff only from `TASKS_MAX_COMPLEXITY`. A session that picked with
 the flag alone is a person at a terminal, and its escalation is checked against the
-record's rating only; the harness form is the variable (§4.2), and the skill says so.
+effective rating without an additional cutoff check; the harness form is the variable
+(§4.2), and the skill says so.
 
 ### 5.1 The escalation entry
 
