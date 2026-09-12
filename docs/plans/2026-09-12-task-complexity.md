@@ -17,6 +17,7 @@
 - Fail early with a typed error; no silent fallbacks (AGENTS.md).
 - `tasks/*.md` is written only by the binary; tests go through the CLI.
 - Gate before every commit: `just check` (`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `tasks check`); `just test` is `cargo test`. The pre-commit hook runs `check`.
+- The crate is a binary only: unit tests run as `cargo test --bin tasks <filter>`; there is no `--lib` target. Test-only constructors carry `#[cfg(test)]` so the warnings-as-errors gate never sees them unused.
 - Conventional commits; no AI-attribution trailers.
 - Warning strings are exactly the spec's: `max-complexity <level>: <n> above cutoff hidden` and `max-complexity <level>: <n> unassessed hidden` (§4.3).
 - After the last task, `cargo install --path .` so the tracker used by the session protocol is the code under test.
@@ -27,7 +28,7 @@
 
 **Files:**
 - Modify: `src/model.rs` (after `impl Size`, around line 262; `Task` struct around line 300)
-- Modify: `src/format.rs` (`parse_task` around line 100; `serialize_task` around line 344; tests around line 415)
+- Modify: `src/format.rs` (`KEYS` allowlist line 6; `parse_task` around line 100; `serialize_task` around line 344; tests around line 415)
 - Modify: `src/repo.rs:626` (a `Task` literal with `size: None`)
 - Test: unit tests in `src/model.rs` and `src/format.rs`
 
@@ -58,6 +59,7 @@ In `src/format.rs` tests module, after `minimal_roundtrip`:
     #[test]
     fn complexity_round_trips_after_size_and_rejects_unknown_levels() {
         let text = MINIMAL.replace("priority: 2\n", "priority: 2\nsize: m\ncomplexity: mid\n");
+        // Through the allowlist first: an unlisted key is rejected before any field parses.
         let t = parse_task(&text, "x").unwrap();
         assert_eq!(t.complexity, Some(Complexity::Mid));
         assert_eq!(serialize_task(&t), text);
@@ -69,7 +71,7 @@ In `src/format.rs` tests module, after `minimal_roundtrip`:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib complexity`
+Run: `cargo test --bin tasks complexity`
 Expected: compile error — `Complexity` is not defined and `Task` has no `complexity` field.
 
 - [ ] **Step 3: Add the enum and the field**
@@ -123,7 +125,9 @@ In the `Task` struct, directly after `pub size: Option<Size>,`:
     pub complexity: Option<Complexity>,
 ```
 
-In `src/format.rs` `parse_task`, directly after the `size:` initializer:
+In `src/format.rs`, the `KEYS` allowlist at line 6 rejects any frontmatter key it does not name before field parsing runs, so a saved rated task would fail to load without this: change `const KEYS: [&str; 21]` to `[&str; 22]` and add `"complexity",` directly after `"size",`.
+
+In `parse_task`, directly after the `size:` initializer:
 
 ```rust
         complexity: scalar("complexity")?
@@ -151,7 +155,7 @@ Add `complexity: None,` after `size` in each reported literal (expect `src/query
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cargo test --lib complexity`
+Run: `cargo test --bin tasks complexity`
 Expected: 2 passed.
 
 Run: `cargo test`
@@ -384,7 +388,7 @@ Look at the existing test `park_and_remove_park_read_and_clear_one_entry` (line 
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cargo test --lib escalations_round_trip`
+Run: `cargo test --bin tasks escalations_round_trip`
 Expected: compile error — `Escalation` and the accessors do not exist.
 
 - [ ] **Step 3: Add the struct, the map, and the accessors**
@@ -481,7 +485,7 @@ Grep for every other `ClaimSnapshot { by_id, parks }` literal (tests) and add `e
 
 - [ ] **Step 5: Run the tests**
 
-Run: `cargo test --lib claims`
+Run: `cargo test --bin tasks claims`
 Expected: all pass, including the new one.
 
 - [ ] **Step 6: Commit**
@@ -638,6 +642,7 @@ This needs a `ClaimSnapshot::from_parts(by_id, parks, escalations)` constructor.
 
 ```rust
     /// The literal form, for tests that need a snapshot without files.
+    #[cfg(test)]
     pub fn from_parts(
         by_id: BTreeMap<String, (Claim, Liveness)>,
         parks: BTreeMap<String, Park>,
@@ -651,7 +656,7 @@ Add `mod complexity;` to `src/main.rs` next to the other `mod` lines.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --lib complexity::tests`
+Run: `cargo test --bin tasks complexity::tests`
 Expected: compile error — `cutoff_with`, `effective`, `apply`, `warnings`, `Hidden` undefined.
 
 - [ ] **Step 3: Implement the module**
@@ -745,7 +750,7 @@ pub fn warnings(cutoff: Complexity, hidden: &Hidden) -> Vec<String> {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `cargo test --lib complexity::tests`
+Run: `cargo test --bin tasks complexity::tests`
 Expected: 3 passed. `cargo clippy --all-targets -- -D warnings` may flag the public functions as dead code until Task 5 wires them; if so, add `#[allow(dead_code)]` on the module line in `main.rs` and remove it in Task 5.
 
 - [ ] **Step 5: Commit**
@@ -764,13 +769,18 @@ git commit -m "feat(complexity): cutoff resolution and the effective-rating filt
 - Modify: `src/commands/mod.rs` (dispatch of `Ready` line ~887, `Next` line ~892)
 - Modify: `src/commands/list.rs` (`ready` line ~250, `next` line ~282, `prime` line ~321)
 - Modify: `src/commands/parked.rs` (`candidates` line ~89 — unchanged signature; the filter is applied by the caller)
+- Modify: `tests/common/mod.rs` (`TestEnv::cmd` line ~19 and `TestEnv::raw` line ~38)
 - Test: `tests/cli.rs`
 
 **Interfaces:**
 - Consumes: `crate::complexity::{cutoff, apply, warnings}` (Task 4).
 - Produces: `list::ready(ctx, size, parallel, limit, max_complexity: Option<String>)`, `list::next(ctx, max_complexity: Option<String>)`.
 
-- [ ] **Step 1: Write the failing end-to-end tests**
+- [ ] **Step 1: Isolate the suite from the harness's own cutoff**
+
+The picker now reads `TASKS_MAX_COMPLEXITY`, and the suite may run inside a harness that sets it; every unrated fixture would vanish from `ready`. In `tests/common/mod.rs`, add `.env_remove("TASKS_MAX_COMPLEXITY")` after `.env_remove("TASKS_MODEL")` in **both** `cmd` and `raw`. Cutoff tests then set the variable explicitly on the command.
+
+- [ ] **Step 2: Write the failing end-to-end tests**
 
 Append to `tests/cli.rs`:
 
@@ -809,6 +819,32 @@ fn ready_and_next_hide_above_cutoff_and_unassessed_with_counts() {
     assert_eq!(v["tasks"].as_array().unwrap().len(), 3);
     let warnings: Vec<&str> = v["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
     assert_eq!(warnings, vec!["max-complexity high: 1 unassessed hidden"]);
+
+    // The cutoff composes with --size and --parallel, and its counts are the cutoff's
+    // alone: the size and parallel filters run after it and are not counted (spec §4.1).
+    env.json(&sci, &["edit", &low, "--size", "s", "--parallel"]);
+    env.json(&sci, &["edit", &mid, "--size", "m"]);
+    let v = env.json(&sci, &["ready", "--max-complexity", "mid", "--size", "s"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tasks"][0]["id"], low);
+    let warnings: Vec<&str> = v["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    assert_eq!(warnings, vec!["max-complexity mid: 1 above cutoff hidden", "max-complexity mid: 1 unassessed hidden"]);
+    let v = env.json(&sci, &["ready", "--max-complexity", "mid", "--parallel"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tasks"][0]["id"], low);
+    let v = env.json(&sci, &["ready", "--max-complexity", "mid", "--parallel", "--size", "m"]);
+    assert!(v["tasks"].as_array().unwrap().is_empty());
+
+    // Across projects the counts are one total for the scope, not one line per project.
+    let fam = env.init("fam");
+    env.json(&fam, &["add", "Fam unassessed", "-p", "2"]);
+    env.json(&fam, &["add", "Fam high", "-p", "2", "--complexity", "high"]);
+    let v = env.json(&sci, &["ready", "--all-projects", "--max-complexity", "mid"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 2, "{v}");
+    let warnings: Vec<&str> = v["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
+    assert_eq!(warnings, vec!["max-complexity mid: 2 above cutoff hidden", "max-complexity mid: 2 unassessed hidden"]);
+    let v = env.json(&fam, &["next", "--all-projects", "--max-complexity", "mid"]);
+    assert_eq!(v["next"]["task"]["id"], low, "priority order across the scope");
 
     assert_eq!(env.fail(&sci, &["ready", "--max-complexity", "huge"]), "validation");
     let _ = (high, none);
@@ -891,12 +927,12 @@ fn prime_closeout_is_filtered_by_the_goals_own_rating() {
 
 Check the exact JSON keys of `prime` output (`PrimeOut` in `src/output.rs`, grep `pub struct PrimeOut`) — the ready section may be named `ready` and closeout `closeout`; adjust the test if they differ.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 3: Run the tests to verify they fail**
 
 Run: `cargo test --test cli cutoff`
 Expected: FAIL — `unexpected argument '--max-complexity'`.
 
-- [ ] **Step 3: Add the flags and thread them**
+- [ ] **Step 4: Add the flags and thread them**
 
 In `src/cli.rs`, in `Ready` after `size`:
 
@@ -920,7 +956,7 @@ In `src/commands/mod.rs` dispatch:
         }
 ```
 
-- [ ] **Step 4: Apply the cutoff in the three pickers**
+- [ ] **Step 5: Apply the cutoff in the three pickers**
 
 In `src/commands/list.rs` `ready`, add the parameter `max_complexity: Option<String>` and resolve the cutoff before the scan (so a bad flag or variable fails before any work):
 
@@ -944,19 +980,24 @@ In `next`, add `max_complexity: Option<String>` and:
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let mut candidates = super::parked::candidates(&mut ctx, &all, &claims)?;
-    let mut ready = ready_tasks(&mut ctx, &all, &claims, now)?;
+    let candidates = super::parked::candidates(&mut ctx, &all, &claims)?;
+    let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
+    // One pool in pick order — parked candidates first, then the ready list — with each
+    // task once, so a parked todo that is also ready is hidden and counted once.
+    let mut pool = candidates;
+    for task in ready {
+        if !pool.iter().any(|candidate| candidate.id == task.id) {
+            pool.push(task);
+        }
+    }
     if let Some(cutoff) = cutoff {
-        let mut hidden = crate::complexity::apply(&mut candidates, cutoff, &claims);
-        let from_ready = crate::complexity::apply(&mut ready, cutoff, &claims);
-        hidden.above += from_ready.above;
-        hidden.unassessed += from_ready.unassessed;
+        let hidden = crate::complexity::apply(&mut pool, cutoff, &claims);
         ctx.warnings.extend(crate::complexity::warnings(cutoff, &hidden));
     }
-    let next = match candidates.into_iter().next().or_else(|| ready.into_iter().next()) {
+    let next = match pool.into_iter().next() {
 ```
 
-A task can be both a parked candidate and ready (a parked todo with no live claim); it is then counted once per list it was removed from. That is acceptable: the count says how many rows were hidden, and the test above pins the numbers.
+The counts are distinct tasks: in `next_skips_parked_work_above_the_cutoff_and_falls_through` the parked `high` task is both a candidate and ready, and the final call reports `2 above cutoff hidden`, not 3.
 
 In `prime`, after `let ready = ready_tasks(...)?;` make it `let mut ready = ...;`, and after the closeout loop's `sort_ready(&mut closeout);`:
 
@@ -974,7 +1015,7 @@ Move the `cutoff(None)?` call to the top of `prime` (before the scan) so an inva
 
 Remove any `#[allow(dead_code)]` added in Task 4.
 
-- [ ] **Step 5: Run the tests and the suite**
+- [ ] **Step 6: Run the tests and the suite**
 
 Run: `cargo test --test cli cutoff && cargo test --test cli next_skips && cargo test --test cli prime_closeout`
 Expected: PASS.
@@ -982,7 +1023,7 @@ Expected: PASS.
 Run: `cargo test`
 Expected: all pass.
 
-- [ ] **Step 6: Gate and commit**
+- [ ] **Step 7: Gate and commit**
 
 Run: `just check`
 
@@ -1467,6 +1508,30 @@ fn an_escalation_governs_every_checkout_through_resume_and_reparking() {
         .assert()
         .success();
 
+    // The registered root is A: --all-projects reads A's stale record with the shared
+    // store, from any directory.
+    let v = env.json(&b, &["next", "--all-projects", "--max-complexity", "mid"]);
+    assert!(v["next"].is_null(), "{v}");
+    let v = env.json(&c, &["ready", "--all-projects", "--max-complexity", "mid"]);
+    assert!(v["tasks"].as_array().unwrap().is_empty());
+    assert!(v["warnings"].as_array().unwrap().iter().any(|w| w == "max-complexity mid: 1 above cutoff hidden"), "{v}");
+
+    // A combined status-and-rating edit whose task write fails must leave the escalation
+    // standing: the acquire path saves the store first and rolls back on failure.
+    use std::os::unix::fs::PermissionsExt;
+    let b_tasks = b.join("tasks");
+    let original = std::fs::metadata(&b_tasks).unwrap().permissions();
+    std::fs::set_permissions(&b_tasks, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let out = as_agent(&env, &b, "agent-b")
+        .args(["edit", &id, "--status", "doing", "--complexity", "mid"])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&b_tasks, original).unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stdout));
+    let v = env.json(&a, &["show", &id]);
+    assert_eq!(v["escalation"]["level"], "high", "rolled back with the claim: {v}");
+    assert!(v["claim"].is_null(), "the claim was rolled back too: {v}");
+
     // Explicit reassessment from B clears it, with a warning naming what was overridden.
     let v = env.json(&b, &["edit", &id, "--complexity", "mid"]);
     let warning = v["warnings"][0].as_str().unwrap();
@@ -1527,6 +1592,8 @@ Expected: FAIL on the first `assert!(!has_escalation(...))` or the "must survive
 
 - [ ] **Step 3: The intent and `reassess`**
 
+The removal must not happen before `save`: the Acquire branch writes the store *before* the task file and rolls the claim and park back when the task write fails, and an escalation removed up front would not come back. So `reassess` only records the intent, and every `save` branch performs the removal at the point where it can be undone or is already safe.
+
 In `src/commands/mod.rs` add a variant to `ClaimIntent`:
 
 ```rust
@@ -1535,15 +1602,16 @@ In `src/commands/mod.rs` add a variant to `ClaimIntent`:
     ClearEscalation(crate::claims::Escalation),
 ```
 
-Add to `impl Ctx`, after `preserve_claim_store`:
+Add a private field to `Ctx`: `clear_escalation: bool,` (initialised `false` in every `Ctx { ... }` literal — grep `recovered: false`), and to `impl Ctx`, after `preserve_claim_store`:
 
 ```rust
     /// `edit --complexity` / `--no-complexity`: the explicit rating is the new truth, so the
-    /// shared escalation goes, with a warning naming what was overridden (spec §5.1). Called
-    /// after the status handling so a transition's own intent — which saves the store
-    /// anyway — is kept, and only a store-preserving intent is replaced.
+    /// shared escalation goes, with a warning naming what was overridden (spec §5.1).
+    /// Records only; `save` removes the entry where a failed task write can still restore
+    /// it. Called after the status handling so a transition's own intent — which saves
+    /// the store anyway — is kept, and only a store-preserving intent is replaced.
     pub fn reassess(&mut self, id: &TaskId) -> Result<()> {
-        let Some(escalation) = self.claims_mut()?.remove_escalation(id) else {
+        let Some(escalation) = self.claims_mut()?.escalation(id).cloned() else {
             return Ok(());
         };
         self.warnings.push(format!(
@@ -1552,6 +1620,7 @@ Add to `impl Ctx`, after `preserve_claim_store`:
             escalation.session,
             escalation.at
         ));
+        self.clear_escalation = true;
         if matches!(
             self.pending_claim,
             None | Some((_, ClaimIntent::PreserveStore))
@@ -1562,13 +1631,22 @@ Add to `impl Ctx`, after `preserve_claim_store`:
     }
 ```
 
-In `save`, the Release branch: after `store.remove_park(&id);` inside `if clear_park { ... }` add `store.remove_escalation(&id);`. Add a new branch before `PreserveStore`:
+In `save`, take the flag once at the top: `let clear_escalation = std::mem::take(&mut ctx.clear_escalation);`, then:
+
+- **Acquire branch** (store before task): after `let previous_park = store.park(&id).cloned();` add
+  `let previous_escalation = if clear_escalation { store.remove_escalation(&id) } else { None };`
+  and in the rollback after the failed task write, before the `match (previous, previous_park)`, add
+  `if let Some(escalation) = previous_escalation { store.insert_escalation(&id, escalation); }`.
+- **Release branch** (task before store): after `store.remove(&id);` add
+  `if clear_escalation || clear_park { store.remove_escalation(&id); }` and drop the separate `if clear_park` escalation line (keep `remove_park` under `clear_park`).
+- **New branch** before `PreserveStore`:
 
 ```rust
         Some((id, ClaimIntent::ClearEscalation(escalation))) => {
             ctx.project.write_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
+            store.remove_escalation(&id);
             if let Err(error) = store.save() {
                 ctx.warnings.push(format!(
                     "{id}'s rating was saved but the escalation to {} could not be cleared \
@@ -1579,6 +1657,8 @@ In `save`, the Release branch: after `store.remove_park(&id);` inside `if clear_
             Ok(())
         }
 ```
+
+The Park branch never sees the flag (`park` does not call `reassess`), and `PreserveStore`/`None` are replaced by `ClearEscalation` whenever the flag is set.
 
 - [ ] **Step 4: Call it from `edit`**
 
@@ -1881,16 +1961,36 @@ Add a row to the reason table:
 
 Run: `cargo install --path .`
 
-Then rate every step task of this plan (they were created unrated because the flag did not exist) — `tasks list --pretty` shows them under `tasks-be447b`:
+Then rate every step task of this plan (they were created unrated because the flag did not exist). Each rating is a judgment about the difficulty that remains after this plan, per the spec's rubric — a plan is evidence, not a guarantee — so they are set one by one, not bulk-labelled. `tasks tree tasks-be447b --pretty` maps titles to ids.
+
+| step | level | why |
+|------|-------|-----|
+| Task 1 | `low` | code given in full; the round-trip test is the check |
+| Task 2 | `low` | flag plumbing after existing patterns; e2e test is the check |
+| Task 3 | `low` | a third map mirroring `parks`; unit test is the check |
+| Task 4 | `low` | pure functions with pinned strings and unit tests |
+| Task 5 | `mid` | three pickers, distinct counting across two candidate paths, `prime` key names to confirm against `PrimeOut` |
+| Task 6 | `mid` | level rules with two routes, the intent change through `save`, and a fault-injected recovery test |
+| Task 7 | `mid` | rollback ordering in the acquire path; correctness is only visible through the three-checkout and forced-failure tests |
+| Task 8 | `low` | one finding in an existing loop |
+| Task 9 | `mid` | interrupted-rename recovery and the destination refusal touch inventory state |
+| Task 10 | `low` | text, with the rubric supplied |
 
 ```bash
-for id in $(tasks tree tasks-be447b | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ".join(c["id"] for c in d.get("children", d.get("nodes", [])) if c.get("status") != "done"))'); do
-  tasks edit "$id" --complexity low
-done
+tasks edit <task-1-id> --complexity low
+tasks edit <task-2-id> --complexity low
+tasks edit <task-3-id> --complexity low
+tasks edit <task-4-id> --complexity low
+tasks edit <task-5-id> --complexity mid
+tasks edit <task-6-id> --complexity mid
+tasks edit <task-7-id> --complexity mid
+tasks edit <task-8-id> --complexity low
+tasks edit <task-9-id> --complexity mid
+tasks edit <task-10-id> --complexity low
 tasks check
 ```
 
-(Read `tasks tree tasks-be447b` output first and adapt the key names; these steps are `low` — each carries its code — except this Task 10, which is `low` as well.)
+Steps already `done` by then are closed and need no rating; rate the ones still open (normally only this task).
 
 Change the spec's status line to `Status: implemented (<today>)`.
 
@@ -1908,7 +2008,7 @@ git commit -m "docs: complexity rubric, cutoff, and escalation in the skills, RE
 
 ## Self-review
 
-**Spec coverage.** §3.1 rubric → Task 10 (skill text). §3.2 record, JSON rows, pretty column, not a sort key → Tasks 1, 2, 6 (escalation in rows). §3.3 add/edit/no-complexity, completion, curate, no implicit set → Tasks 2, 10; `park` sets the record only with an explicit `--complexity` (Task 6). §4.1 ready/next/prime incl. closeout, effective rating, list/show/tree/sample/start unchanged → Tasks 4, 5. §4.2 flag, variable, precedence, validate-always → Tasks 4, 5. §4.3 warning strings and counts → Task 4 (strings), Task 5 (wiring). §5 routes, level rules, `capability` reason, flag-only sessions checked against the effective rating without a cutoff check → Task 6 (`cutoff(None)` reads only the variable). §5.1 entry shape, survives start/park/note/unrelated edit, cleared by edit --complexity/--no-complexity with warning, cleared by done/dropped, never pruned by readers, carried by rename → Tasks 3, 7, 9. §5.2 write order, exit 1 with the rerun message for capability parks only, ordinary parks warn → Task 6. §6 `unrated_step` → Task 8. §7 docs → Task 10. §8 tests: each bullet has a test in Tasks 2, 5, 6, 7, 8, 9; the interrupted-rename case is folded into the existing stop-after test in Task 9.
+**Spec coverage.** §3.1 rubric → Task 10 (skill text). §3.2 record, JSON rows, pretty column, not a sort key → Tasks 1, 2, 6 (escalation in rows). §3.3 add/edit/no-complexity, completion, curate, no implicit set → Tasks 2, 10; `park` sets the record only with an explicit `--complexity` (Task 6). §4.1 ready/next/prime incl. closeout, effective rating, composition with `--size`/`--parallel`/`-n`, list/show/tree/sample/start unchanged → Tasks 4, 5. §4.2 flag, variable, precedence, validate-always → Tasks 4, 5. §4.3 warning strings, distinct counts, one total under `--all-projects` → Task 4 (strings), Task 5 (wiring, cross-project test), Task 7 (`--all-projects` through the lifecycle). §5 routes, level rules, `capability` reason, flag-only sessions checked against the effective rating without a cutoff check → Task 6 (`cutoff(None)` reads only the variable). §5.1 entry shape, survives start/park/note/unrelated edit, cleared by edit --complexity/--no-complexity with warning and preserved when that edit's task write fails, cleared by done/dropped, never pruned by readers, carried by rename → Tasks 3, 7, 9. §5.2 write order, exit 1 with the rerun message for capability parks only, ordinary parks warn → Task 6. §6 `unrated_step` → Task 8. §7 docs → Task 10. §8 tests: each bullet has a test in Tasks 2, 5, 6, 7, 8, 9; the interrupted-rename case is folded into the existing stop-after test in Task 9.
 
 **Placeholders.** None: every step names its file and shows its code or exact text.
 
