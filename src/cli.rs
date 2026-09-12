@@ -230,11 +230,19 @@ pub enum Command {
         parallel: bool,
         #[arg(short = 'n', long)]
         limit: Option<usize>,
+        /// Hide tasks rated above this level and unassessed tasks; overrides
+        /// TASKS_MAX_COMPLEXITY.
+        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        max_complexity: Option<String>,
         #[command(flatten)]
         scope: ScopeArgs,
     },
     /// The first ready task, in the show shape; null when nothing is ready.
     Next {
+        /// Hide tasks rated above this level and unassessed tasks; overrides
+        /// TASKS_MAX_COMPLEXITY.
+        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        max_complexity: Option<String>,
         #[command(flatten)]
         scope: ScopeArgs,
     },

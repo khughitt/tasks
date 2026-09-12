@@ -10903,3 +10903,288 @@ fn complexity_is_set_cleared_listed_and_completed() {
         "{values:?}"
     );
 }
+
+#[test]
+fn ready_and_next_hide_above_cutoff_and_unassessed_with_counts() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let low = id_of(env.json(&sci, &["add", "Low", "-p", "1", "--complexity", "low"]));
+    let mid = id_of(env.json(&sci, &["add", "Mid", "-p", "2", "--complexity", "mid"]));
+    let high = id_of(env.json(&sci, &["add", "High", "-p", "0", "--complexity", "high"]));
+    let none = id_of(env.json(&sci, &["add", "Unassessed", "-p", "0"]));
+
+    let v = env.json(&sci, &["ready"]);
+    assert_eq!(
+        v["tasks"].as_array().unwrap().len(),
+        4,
+        "no cutoff, nothing hidden"
+    );
+    assert!(v["warnings"].as_array().unwrap().is_empty());
+
+    let v = env.json(&sci, &["ready", "--max-complexity", "mid"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![low.as_str(), mid.as_str()],
+        "priority order kept: {v}"
+    );
+    let warnings: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        warnings,
+        vec![
+            "max-complexity mid: 1 above cutoff hidden",
+            "max-complexity mid: 1 unassessed hidden"
+        ]
+    );
+
+    let v = env.json(&sci, &["ready", "--max-complexity", "low", "-n", "1"]);
+    assert_eq!(v["tasks"][0]["id"], low);
+    let warnings: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        warnings,
+        vec![
+            "max-complexity low: 2 above cutoff hidden",
+            "max-complexity low: 1 unassessed hidden"
+        ]
+    );
+
+    let v = env.json(&sci, &["next", "--max-complexity", "mid"]);
+    assert_eq!(v["next"]["task"]["id"], low, "{v}");
+
+    let v = env.json(&sci, &["ready", "--max-complexity", "high"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 3);
+    let warnings: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    assert_eq!(warnings, vec!["max-complexity high: 1 unassessed hidden"]);
+
+    // The cutoff composes with --size and --parallel, and its counts are the cutoff's
+    // alone: the size and parallel filters run after it and are not counted (spec §4.1).
+    env.json(&sci, &["edit", &low, "--size", "s", "--parallel"]);
+    env.json(&sci, &["edit", &mid, "--size", "m"]);
+    let v = env.json(&sci, &["ready", "--max-complexity", "mid", "--size", "s"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tasks"][0]["id"], low);
+    let warnings: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        warnings,
+        vec![
+            "max-complexity mid: 1 above cutoff hidden",
+            "max-complexity mid: 1 unassessed hidden"
+        ]
+    );
+    let v = env.json(&sci, &["ready", "--max-complexity", "mid", "--parallel"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tasks"][0]["id"], low);
+    let v = env.json(
+        &sci,
+        &[
+            "ready",
+            "--max-complexity",
+            "mid",
+            "--parallel",
+            "--size",
+            "m",
+        ],
+    );
+    assert!(v["tasks"].as_array().unwrap().is_empty());
+
+    // Across projects the counts are one total for the scope, not one line per project.
+    let fam = env.init("fam");
+    env.json(&fam, &["add", "Fam unassessed", "-p", "2"]);
+    env.json(
+        &fam,
+        &["add", "Fam high", "-p", "2", "--complexity", "high"],
+    );
+    let v = env.json(
+        &sci,
+        &["ready", "--all-projects", "--max-complexity", "mid"],
+    );
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 2, "{v}");
+    let warnings: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        warnings,
+        vec![
+            "max-complexity mid: 2 above cutoff hidden",
+            "max-complexity mid: 2 unassessed hidden"
+        ]
+    );
+    let v = env.json(&fam, &["next", "--all-projects", "--max-complexity", "mid"]);
+    assert_eq!(
+        v["next"]["task"]["id"], low,
+        "priority order across the scope"
+    );
+
+    assert_eq!(
+        env.fail(&sci, &["ready", "--max-complexity", "huge"]),
+        "validation"
+    );
+    let _ = (high, none);
+}
+
+#[test]
+fn the_cutoff_variable_drives_ready_next_and_prime_and_the_flag_wins() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let low = id_of(env.json(&sci, &["add", "Low", "-p", "2", "--complexity", "low"]));
+    let high = id_of(env.json(&sci, &["add", "High", "-p", "0", "--complexity", "high"]));
+    let with_env = |args: &[&str], value: &str| -> serde_json::Value {
+        let out = env
+            .cmd(&sci)
+            .env("TASKS_MAX_COMPLEXITY", value)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let v = with_env(&["ready"], "low");
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(v["tasks"][0]["id"], low);
+    let v = with_env(&["next"], "low");
+    assert_eq!(v["next"]["task"]["id"], low);
+    let v = with_env(&["prime"], "low");
+    assert_eq!(v["ready"].as_array().unwrap().len(), 1, "{v}");
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w == "max-complexity low: 1 above cutoff hidden")
+    );
+    let v = with_env(&["ready"], "");
+    assert_eq!(
+        v["tasks"].as_array().unwrap().len(),
+        2,
+        "empty means no cutoff"
+    );
+
+    // The flag wins over the variable.
+    let v = with_env(&["ready", "--max-complexity", "high"], "low");
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 2);
+    // An invalid variable fails even when the flag is given.
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_MAX_COMPLEXITY", "huge")
+        .args(["ready", "--max-complexity", "high"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_MAX_COMPLEXITY", "huge")
+        .args(["prime"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let _ = high;
+}
+
+#[test]
+fn next_skips_parked_work_above_the_cutoff_and_falls_through() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let parked = id_of(env.json(
+        &sci,
+        &["add", "Parked high", "-p", "0", "--complexity", "high"],
+    ));
+    let low = id_of(env.json(&sci, &["add", "Low", "-p", "2", "--complexity", "low"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &parked, "continue"])
+        .assert()
+        .success();
+
+    let v = env.json(&sci, &["next"]);
+    assert_eq!(
+        v["next"]["task"]["id"], parked,
+        "parked work waiting on the agent comes first"
+    );
+    let v = env.json(&sci, &["next", "--max-complexity", "mid"]);
+    assert_eq!(v["next"]["task"]["id"], low, "{v}");
+    let v = env.json(&sci, &["next", "--max-complexity", "low"]);
+    assert_eq!(v["next"]["task"]["id"], low);
+    env.json(&sci, &["edit", &low, "--complexity", "high"]);
+    let v = env.json(&sci, &["next", "--max-complexity", "low"]);
+    assert!(v["next"].is_null(), "{v}");
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w == "max-complexity low: 2 above cutoff hidden"),
+        "{v}"
+    );
+}
+
+#[test]
+fn prime_closeout_is_filtered_by_the_goals_own_rating() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "2", "-b", "committed"]));
+    let child = id_of(env.json(&sci, &["add", "Child", "--parent", &goal]));
+    env.json(&sci, &["done", &child, "landed"]);
+    let v = env.json(&sci, &["prime"]);
+    assert_eq!(v["closeout"][0]["id"], goal);
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_MAX_COMPLEXITY", "mid")
+        .arg("prime")
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["closeout"].as_array().unwrap().is_empty(),
+        "unrated goal hidden: {v}"
+    );
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w == "max-complexity mid: 1 unassessed hidden"),
+        "{v}"
+    );
+    env.json(&sci, &["edit", &goal, "--complexity", "low"]);
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_MAX_COMPLEXITY", "mid")
+        .arg("prime")
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["closeout"][0]["id"], goal);
+}

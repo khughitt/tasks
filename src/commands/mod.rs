@@ -890,9 +890,19 @@ pub fn run(cli: Cli) -> Result<Output> {
             size,
             parallel,
             limit,
+            max_complexity,
             scope,
-        } => list::ready(open_read_ctx(dir, &scope)?, size, parallel, limit),
-        Command::Next { scope } => list::next(open_read_ctx(dir, &scope)?),
+        } => list::ready(
+            open_read_ctx(dir, &scope)?,
+            size,
+            parallel,
+            limit,
+            max_complexity,
+        ),
+        Command::Next {
+            max_complexity,
+            scope,
+        } => list::next(open_read_ctx(dir, &scope)?, max_complexity),
         Command::Sample {
             count,
             older_than,
