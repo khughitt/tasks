@@ -232,7 +232,7 @@ obstacle:
 - The project's `tasks/` is dirty, and the dirt is not a resumable rename (§5.3). Outside
   a git repository there is no dirty check and no undo; the rename proceeds with a warning.
 - Any **live claim** exists on the project.
-- A fresh rename refuses a target store that holds park and escalation entries; recovery does not repeat this check.
+- A fresh rename refuses a target store that holds park or escalation entries; recovery does not repeat this check.
 - The repository has **more than one git worktree**. Other checkouts keep the retired
   prefix in their config and filenames, which would recreate the routing hazard of §4
   after an otherwise successful rename.

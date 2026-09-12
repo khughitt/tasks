@@ -52,7 +52,8 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    the assessed scope; a bounded attempt makes no progress or has no way to establish
    correctness. Record the evidence in a note, then
    `tasks park <id> "<where it stopped and why>" --reason capability --complexity <level>`:
-   the level must be at least the task's current rating and above your cutoff, and it is
+   the level must be at least the task's effective rating (its record, or an existing
+   escalation, whichever is higher) and above your cutoff, and it is
    written to the record and to the shared store so no checkout's picker offers it under
    that cutoff again. When no level above the cutoff exists, `--waiting-on user` instead,
    so a person can decompose or reassign it. An environment or credential failure is
