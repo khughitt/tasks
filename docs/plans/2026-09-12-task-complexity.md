@@ -434,6 +434,8 @@ In `load_from`: destructure `let StoreFile { claims, parks, escalations } = file
 
 and include `escalations` in the returned `ClaimStore`. In `save`, add `escalations: self.escalations.clone(),` to the `StoreFile` literal.
 
+`parks_renamed_text` (line ~347) also builds a `StoreFile` and will not compile without the field. Until Task 9 teaches `rename` to carry escalations, give it `escalations: BTreeMap::new(),` with the comment `// Not carried until rename learns escalations (plan Task 9); a rename in between drops them.` — an explicit interim, not a fallback, and Task 9 replaces the whole function.
+
 Accessors, after `remove_park`:
 
 ```rust
@@ -1028,7 +1030,7 @@ Expected: all pass.
 Run: `just check`
 
 ```bash
-git add src/cli.rs src/commands/mod.rs src/commands/list.rs src/main.rs tests/cli.rs
+git add src/cli.rs src/commands/mod.rs src/commands/list.rs src/main.rs tests/cli.rs tests/common/mod.rs
 git commit -m "feat(picker): --max-complexity on ready and next, TASKS_MAX_COMPLEXITY on prime"
 ```
 
@@ -1439,7 +1441,9 @@ git commit -m "feat(park): --reason capability --complexity records an escalatio
 
 **Interfaces:**
 - Consumes: `ClaimStore::remove_escalation` (Task 3).
-- Produces: `ClaimIntent::ClearEscalation(Escalation)`; `Ctx::reassess(&mut self, id: &TaskId) -> Result<()>`.
+- Produces: `ClaimIntent::ClearEscalation(Escalation)`; `Ctx::reassess(&mut self, id: &TaskId) -> Result<()>`; private `Ctx.clear_escalation: bool`.
+
+Note on the lifecycle test: `park` never changes status, so a checkout that has `start`ed the task stays `doing` and a later `edit --status doing` is a same-status edit (the `ClearEscalation` branch, task file first). The acquire rollback is only reached from `todo`; the test sets and asserts that precondition.
 
 - [ ] **Step 1: Write the failing end-to-end tests**
 
@@ -1460,16 +1464,22 @@ fn second_checkout(env: &mut TestEnv, first: &std::path::Path, id: &str) -> std:
 #[test]
 fn an_escalation_governs_every_checkout_through_resume_and_reparking() {
     let mut env = TestEnv::new();
+    // A is the registered root and stays stale throughout; B and C are unregistered
+    // checkouts holding the record as it was before the escalation.
     let a = env.init("sci");
     let id = id_of(env.json(&a, &["add", "T", "-p", "2", "--complexity", "low"]));
     let b = second_checkout(&mut env, &a, &id);
     let c = second_checkout(&mut env, &a, &id);
 
-    as_agent(&env, &a, "agent-a")
+    // The escalation is made from B, so the registered root never sees the raised record.
+    as_agent(&env, &b, "agent-b")
         .env("TASKS_MAX_COMPLEXITY", "mid")
         .args(["park", &id, "interacting behaviour outside the assessed scope", "--reason", "capability", "--complexity", "high"])
         .assert()
         .success();
+    let v = env.json(&a, &["show", &id]);
+    assert_eq!(v["task"]["complexity"], "low", "A's record is stale");
+    assert_eq!(v["escalation"]["level"], "high", "the store is shared");
 
     for dir in [&a, &b, &c] {
         let v = env.json(dir, &["next", "--max-complexity", "mid"]);
@@ -1478,68 +1488,76 @@ fn an_escalation_governs_every_checkout_through_resume_and_reparking() {
         assert!(v["tasks"].as_array().unwrap().is_empty());
         assert!(v["warnings"].as_array().unwrap().iter().any(|w| w == "max-complexity mid: 1 above cutoff hidden"), "{v}");
     }
-    let v = env.json(&b, &["show", &id]);
-    assert_eq!(v["task"]["complexity"], "low", "B's record is stale");
-    assert_eq!(v["escalation"]["level"], "high", "the store is shared");
-    let v = env.json(&b, &["next"]);
+    let v = env.json(&a, &["next"]);
     assert_eq!(v["next"]["task"]["id"], id, "an unrestricted session still gets it");
 
-    // A stronger session resumes in B and parks again for the session.
-    as_agent(&env, &b, "agent-b").args(["start", &id]).assert().success();
-    as_agent(&env, &b, "agent-b").args(["park", &id, "half done", "--reason", "session"]).assert().success();
+    // --all-projects reads the registered root's stale record with the shared store.
+    let v = env.json(&c, &["next", "--all-projects", "--max-complexity", "mid"]);
+    assert!(v["next"].is_null(), "{v}");
+    let v = env.json(&b, &["ready", "--all-projects", "--max-complexity", "mid"]);
+    assert!(v["tasks"].as_array().unwrap().is_empty());
+    assert!(v["warnings"].as_array().unwrap().iter().any(|w| w == "max-complexity mid: 1 above cutoff hidden"), "{v}");
+
+    // A stronger session resumes in C and parks again for the session.
+    as_agent(&env, &c, "agent-c").args(["start", &id]).assert().success();
+    as_agent(&env, &c, "agent-c").args(["park", &id, "half done", "--reason", "session"]).assert().success();
     for dir in [&a, &b, &c] {
         let v = env.json(dir, &["next", "--max-complexity", "mid"]);
         assert!(v["next"].is_null(), "{}: escalation must survive start and re-park: {v}", dir.display());
     }
-    let v = env.json(&c, &["show", &id]);
+    let v = env.json(&a, &["show", &id]);
     assert_eq!(v["escalation"]["level"], "high");
+    assert_eq!(v["park"]["reason"], "session");
 
     // A stale checkout cannot lower it through another capability park.
-    let out = as_agent(&env, &c, "agent-c")
+    let out = as_agent(&env, &a, "agent-a")
         .env("TASKS_MAX_COMPLEXITY", "low")
         .args(["park", &id, "x", "--reason", "capability", "--complexity", "mid"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("effective rating high"));
-    as_agent(&env, &c, "agent-c")
+    as_agent(&env, &a, "agent-a")
         .env("TASKS_MAX_COMPLEXITY", "low")
         .args(["park", &id, "x", "--reason", "capability", "--complexity", "high"])
         .assert()
         .success();
-
-    // The registered root is A: --all-projects reads A's stale record with the shared
-    // store, from any directory.
-    let v = env.json(&b, &["next", "--all-projects", "--max-complexity", "mid"]);
-    assert!(v["next"].is_null(), "{v}");
-    let v = env.json(&c, &["ready", "--all-projects", "--max-complexity", "mid"]);
-    assert!(v["tasks"].as_array().unwrap().is_empty());
-    assert!(v["warnings"].as_array().unwrap().iter().any(|w| w == "max-complexity mid: 1 above cutoff hidden"), "{v}");
+    let v = env.json(&a, &["show", &id]);
+    assert_eq!(v["park"]["reason"], "capability", "A's park replaced C's");
 
     // A combined status-and-rating edit whose task write fails must leave the escalation
-    // standing: the acquire path saves the store first and rolls back on failure.
+    // and the previous park standing: the acquire path saves the store first and rolls
+    // back on failure. C must be `todo` so the edit is a transition into `doing`.
+    as_agent(&env, &c, "agent-c").args(["edit", &id, "--status", "todo"]).assert().success();
+    let v = env.json(&c, &["show", &id]);
+    assert_eq!(v["task"]["status"], "todo", "precondition: the edit below acquires");
+    assert!(v["claim"].is_null(), "precondition: no claim to displace");
+    assert_eq!(v["park"]["reason"], "capability", "precondition: a park to restore");
     use std::os::unix::fs::PermissionsExt;
-    let b_tasks = b.join("tasks");
-    let original = std::fs::metadata(&b_tasks).unwrap().permissions();
-    std::fs::set_permissions(&b_tasks, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let out = as_agent(&env, &b, "agent-b")
+    let c_tasks = c.join("tasks");
+    let original = std::fs::metadata(&c_tasks).unwrap().permissions();
+    std::fs::set_permissions(&c_tasks, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let out = as_agent(&env, &c, "agent-c")
         .args(["edit", &id, "--status", "doing", "--complexity", "mid"])
         .output()
         .unwrap();
-    std::fs::set_permissions(&b_tasks, original).unwrap();
+    std::fs::set_permissions(&c_tasks, original).unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stdout));
     let v = env.json(&a, &["show", &id]);
-    assert_eq!(v["escalation"]["level"], "high", "rolled back with the claim: {v}");
-    assert!(v["claim"].is_null(), "the claim was rolled back too: {v}");
+    assert_eq!(v["escalation"]["level"], "high", "rolled back with the park: {v}");
+    assert_eq!(v["park"]["reason"], "capability", "the previous park is back: {v}");
+    assert!(v["claim"].is_null(), "the acquired claim was rolled back: {v}");
+    let v = env.json(&c, &["show", &id]);
+    assert_eq!(v["task"]["complexity"], "low", "the record write never landed");
 
-    // Explicit reassessment from B clears it, with a warning naming what was overridden.
-    let v = env.json(&b, &["edit", &id, "--complexity", "mid"]);
+    // Explicit reassessment from C clears it, with a warning naming what was overridden.
+    let v = env.json(&c, &["edit", &id, "--complexity", "mid"]);
     let warning = v["warnings"][0].as_str().unwrap();
     assert!(warning.contains("cleared the escalation of") && warning.contains("to high"), "{warning}");
-    let v = env.json(&b, &["show", &id]);
+    let v = env.json(&c, &["show", &id]);
     assert!(v["escalation"].is_null(), "{v}");
-    let v = env.json(&b, &["next", "--max-complexity", "mid"]);
-    assert_eq!(v["next"]["task"]["id"], id, "B offers it at its own mid");
+    let v = env.json(&c, &["next", "--max-complexity", "mid"]);
+    assert_eq!(v["next"]["task"]["id"], id, "C offers it at its own mid");
     let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
     assert!(!store.contains("[escalations."), "{store}");
 }
