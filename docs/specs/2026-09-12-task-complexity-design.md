@@ -30,8 +30,8 @@ instructions.
   of delegation and its rating is the planner's duty.
 - A seventh park reason, `capability`, for a session that found the work needs more
   reasoning than it can supply. When it waits on the agent it sets the rating in the same
-  command, and the shared park entry carries that rating so every checkout's picker
-  honours it before the record merges.
+  command and records an *escalation* in the shared claim store, so every checkout's
+  picker honours the new level before the record merges and after the task is resumed.
 
 ## 3. The field
 
@@ -62,8 +62,8 @@ Three levels, not five: three is what raters reproduce across weeks.
 - `Task.complexity: Option<Complexity>`; `Complexity` mirrors `Size` (`ALL`, `parse`,
   `as_str`, `Ord` in the order low < mid < high).
 - JSON: `complexity` (string or null) is added to the list row (`TaskSummary`) and the
-  show shape, and `park.complexity` (string, present only when the entry carries one) to
-  the park info those rows already embed. Additive; no existing key changes.
+  show shape, and `escalation` (`{level, at, session}` or null, §5) beside it in both.
+  Additive; no existing key changes.
 - `--pretty` list rows gain a complexity column beside size, showing `-` when unassessed.
   Tree and graph labels are unchanged.
 - Not a sort key. `ready` keeps priority-then-size order within whatever the cutoff
@@ -97,10 +97,11 @@ The cutoff applies to every feed a session picks from:
   sections are status views, not pickers, and stay complete.
 
 The level a picker compares is the **effective rating**: the record's `complexity`, or
-the park entry's `complexity` (§5) when the entry carries one and is higher. Park entries
-live in the shared store outside git, so an escalation made in one worktree governs
-picking from every checkout of the project immediately, while the record's own rating
-arrives with the merge. An unassessed record with no entry level is unassessed.
+the escalation's level (§5) when one is recorded for the task and is higher. Escalations
+live in the shared claim store outside git, so an escalation made in one worktree governs
+picking from every checkout of the project from the moment the store write succeeds,
+across resumes and later parks, until a session explicitly reassesses the task or closes
+it. An unassessed record with no escalation is unassessed.
 
 `list`, `show`, `tree`, `sample`, and `start` are unchanged. `start` is not gated: once
 someone names a task by id they have made a decision, and the envelope steers picking,
@@ -148,32 +149,68 @@ It records the evidence in a note and parks with the new reason:
     tasks park <id> "<where it stopped and why>" --reason capability --complexity high
 
 `--reason capability` takes `--complexity <level>` on the same `park` and writes it to
-the record and to the park entry (`Park.complexity`, optional, absent on every other
-park). `--complexity` on `park` without `--reason capability` is rejected. The level
-rules depend on who the park waits on:
+the record and, when the park waits on the agent, to the store as an escalation.
+`--complexity` on `park` without `--reason capability` is rejected. The level rules
+depend on who the park waits on:
 
 - `--waiting-on agent` (the default; a stronger session should pick it up):
   `--complexity` is required. The level must be at least the record's current rating,
   and when `TASKS_MAX_COMPLEXITY` is set it must be above that cutoff. A level equal to
-  the current rating is allowed so that a rerun after a partial write (§5.1) succeeds.
-  When no level above the cutoff exists — the record is already `high`, or the cutoff is
-  `high` — the command refuses and names the `--waiting-on user` route.
+  the current rating is allowed so that a rerun after a partial write (§5.2) succeeds,
+  and so that a record already at `high` can be escalated as `high` under a lower or
+  absent cutoff. The command refuses only when no level above the cutoff exists — the
+  cutoff itself is `high` — and then names the `--waiting-on user` route.
 - `--waiting-on user` (the envelope cannot be escaped by rerouting; a person must
   decompose, rescope, or reassign): `--complexity` is optional, and when given must be
-  at least the current rating.
+  at least the current rating. No escalation is recorded: the task is waiting on a
+  person, and `ready` and `next` already omit work waiting on the user.
 
 `park` learns the cutoff only from `TASKS_MAX_COMPLEXITY`. A session that picked with
 the flag alone is a person at a terminal, and its escalation is checked against the
 record's rating only; the harness form is the variable (§4.2), and the skill says so.
 
-### 5.1 Write order and recovery
+### 5.1 The escalation entry
 
-`park` writes the record before it saves the shared store, and a store failure after the
-record write already tells the caller to rerun `tasks park`. With `--reason capability`
-the record then carries the raised rating and the rerun passes because equal-to-current
-is accepted; the rerun writes the entry with the same level. No rollback of the rating is
-attempted: a raised rating without an entry is a true statement about the task, and the
-picker rule of §4.1 is correct with either half present.
+The claim store gains a third map beside claims and parks: `escalations`, keyed by task
+id, each `{level, at, session}`. It is the shared, git-independent statement "this task
+needs at least `level`", and it exists because the record's rating lives in one checkout
+until merged while the sessions that must respect it read others.
+
+- Written by `park --reason capability --waiting-on agent` only, replacing any earlier
+  entry for the id.
+- Untouched by `start`, by any later `park` with another reason, by `note`, and by
+  every `edit` that does not name `--complexity`. Resuming an escalated task and parking
+  it again for `session` from a checkout whose record still says `low` leaves the
+  escalation standing, so a third checkout's picker still hides it.
+- Removed by `edit --complexity <level>` and `edit --no-complexity` on that id from any
+  checkout — an explicit reassessment is the new truth — with a warning naming the
+  cleared level, session, and time so a session reassessing from a stale record sees
+  what it overrode. Removed by the transitions to `done` and `dropped`, alongside the
+  park entry.
+- Never pruned by readers, and never pruned because the record caught up: after the
+  merge the entry is redundant and harmless, and its `at` and `session` remain the
+  record of an attempt (§5, calibration).
+
+Pickers compute the effective rating from it (§4.1). `show` and list rows report it as
+`escalation`.
+
+### 5.2 Write order and recovery
+
+`park` writes the record before it saves the shared store. For every other reason a
+store failure after the record write is a success with a warning, as today: the note is
+the trail, and a missing park entry costs a listing. For `--reason capability` waiting
+on the agent the store write *is* the guarantee, so the command instead fails: exit
+status 1 with a validation-class error,
+
+    the note and rating landed, but the escalation of <id> to <level> was not recorded
+    (<error>); rerun the same `tasks park` command
+
+The record then carries the raised rating, and the rerun passes because equal-to-current
+is accepted; it writes the escalation and the park entry. No rollback of the rating is
+attempted, since a raised rating is a true statement about the task. Until the rerun
+succeeds, the raised rating is visible only in the checkout that wrote it: the
+cross-checkout guarantee of §4.1 begins with the successful store write, not with the
+record write.
 
 `capability` joins the reason vocabulary of
 docs/specs/2026-09-11-park-reason-and-stamps-design.md §4 as a seventh word: the work
@@ -223,21 +260,27 @@ End-to-end in `tests/cli.rs` against the built binary:
   `--parallel`, `-n`.
 - `next` under a cutoff skips a parked-waiting-on-agent task rated above it and falls
   through to the ready list; with nothing eligible returns null with the warnings.
-- Two worktrees of one project: `park --reason capability --complexity high` in one,
-  then `next --max-complexity mid` and `ready --max-complexity mid` from the other (and
-  under `--all-projects`) hide the task while its record there still says `low`; after
-  the merge the result is the same.
+- Two worktrees of one project, through the lifecycle: escalate in A with
+  `park --reason capability --complexity high`; `next --max-complexity mid` and
+  `ready --max-complexity mid` from B (and under `--all-projects`) hide the task while B's
+  record still says `low`; `start` in B, then `park --reason session` in B; A, B, and a
+  third checkout still hide it and `show` reports the escalation; `edit --complexity mid`
+  in B clears it with the warning, after which B offers it; `done` clears it too.
+- `park --reason capability --waiting-on user` records no escalation; the task is
+  omitted by `ready`/`next` as parked on the user.
 - `prime` under `TASKS_MAX_COMPLEXITY` filters the ready and closeout sections and
   nothing else.
 - Flag overrides the variable; invalid variable fails even when the flag is given.
 - `park --reason capability` waiting on the agent: refuses without `--complexity`;
   refuses a level below the current rating; with `TASKS_MAX_COMPLEXITY=mid` refuses `mid`
-  and accepts `high`; at the ceiling refuses and names `--waiting-on user`; on success the
-  record and the entry both carry the level. Waiting on the user: succeeds without
+  and accepts `high`; a record already `high` accepts `high` under cutoff `mid` or none;
+  with `TASKS_MAX_COMPLEXITY=high` refuses and names `--waiting-on user`; on success the
+  record and the escalation both carry the level. Waiting on the user: succeeds without
   `--complexity`. `--complexity` without the reason is refused.
-- Partial write: with the store made unwritable after the record write, the first
-  `park --reason capability` fails with the rerun message and the record carries the
-  raised rating; the rerun with the same level succeeds and writes the entry.
+- Partial write: with the store made unwritable, the first `park --reason capability`
+  exits 1 with the rerun message and the record carries the raised rating; a plain
+  `park --reason session` under the same fault still exits 0 with its warning; the rerun
+  with the same level succeeds and writes the escalation and the park entry.
 - `check` warns on an open step without a rating and stays silent otherwise.
 - Completion offers the three levels for `--complexity` and `--max-complexity`.
 
@@ -254,9 +297,14 @@ End-to-end in `tests/cli.rs` against the built binary:
 - **Letting `park --reason capability` raise the rating implicitly.** One level up is
   not always right, and an implicit write to a rated field is the kind of fallback this
   tool refuses elsewhere.
-- **Recording the escalating session's cutoff in the park entry instead of the level.**
-  It would need a second comparison rule in every picker; carrying the level reuses the
-  one rule the record already needs, and reads the same after the merge.
+- **Carrying the level on the park entry.** `start` drops the entry and any later
+  `park` replaces it, so the guarantee would end on the first resume from another
+  checkout — the normal path. A separate escalation entry survives the lifecycle.
+- **Recording the escalating session's cutoff instead of the level.** It would need a
+  second comparison rule in every picker; carrying the level reuses the one rule the
+  record already needs, and reads the same after the merge.
+- **Having `start` copy the escalated level into the resuming checkout's record.** Covers
+  the resuming checkout only; a third checkout still reads its own stale record.
 - **Requiring a strictly higher level.** Makes the rerun after a partial store write
   impossible and leaves a `high` task with no escalation route at all.
 - **Self-assessment before starting.** Sessions are not reliably calibrated about
