@@ -3565,7 +3565,10 @@ fn check_passes_clean_repo_and_reports_drift() {
         .to_string();
     let v = env.json(&dir, &["check"]);
     assert_eq!(v["errors"], serde_json::json!([]));
-    assert_eq!(v["warnings"], serde_json::json!([]));
+    let warnings = v["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0]["kind"], "unrated_step");
+    assert_eq!(warnings[0]["id"], a);
 
     // drift: heading renamed; dangling dep; garbage file; foreign unreachable dep
     write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: uno\n");
@@ -3624,19 +3627,21 @@ fn check_warns_on_plan_headings_without_a_task() {
         "docs/plans/2026-09-03-unlinked.md",
         "### Task 1: nobody\n",
     );
-    env.json(&dir, &["add", "A", "--plan", "p", "--step", "Task 1: one"]);
+    let a = env.json(&dir, &["add", "A", "--plan", "p", "--step", "Task 1: one"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let check = env.json(&dir, &["check"]);
     assert_eq!(check["errors"], serde_json::json!([]));
     let warnings = check["warnings"].as_array().unwrap();
-    assert_eq!(warnings.len(), 1, "{check}");
-    assert_eq!(warnings[0]["kind"], "unlinked_step");
-    assert_eq!(warnings[0]["file"], "docs/plans/2026-09-03-p.md");
-    assert_eq!(warnings[0]["id"], serde_json::Value::Null);
+    assert_eq!(warnings.len(), 2, "{check}");
+    assert!(warnings.iter().any(|w| w["kind"] == "unlinked_step"
+        && w["file"] == "docs/plans/2026-09-03-p.md"
+        && w["detail"].as_str().unwrap().contains("Task 2: two")));
     assert!(
-        warnings[0]["detail"]
-            .as_str()
-            .unwrap()
-            .contains("Task 2: two")
+        warnings
+            .iter()
+            .any(|w| w["kind"] == "unrated_step" && w["id"] == a)
     );
 }
 
@@ -11698,4 +11703,58 @@ fn reassessment_clears_on_every_edit_shape_and_closing_clears_too() {
     escalate(&dropped);
     env.json(&sci, &["drop", &dropped, "no longer needed"]);
     assert!(!has_escalation(&dropped));
+}
+
+#[test]
+fn check_warns_on_an_open_plan_step_without_a_rating() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    write_doc(&sci, "docs/plans/x.md", "# x\n\n### Task 1: do it\n");
+    let step = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Step",
+            "-p",
+            "2",
+            "--plan",
+            "x",
+            "--step",
+            "Task 1: do it",
+        ],
+    ));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+    let v = env.json(&sci, &["check"]);
+    let warnings = v["warnings"].as_array().unwrap();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w["kind"] == "unrated_step" && w["id"] == step),
+        "{v}"
+    );
+    assert!(
+        !warnings.iter().any(|w| w["id"] == plain),
+        "missing complexity elsewhere is not a finding"
+    );
+    env.json(&sci, &["edit", &step, "--complexity", "low"]);
+    let v = env.json(&sci, &["check"]);
+    assert!(
+        !v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "unrated_step"),
+        "{v}"
+    );
+    env.json(&sci, &["edit", &step, "--no-complexity"]);
+    env.json(&sci, &["done", &step, "landed"]);
+    let v = env.json(&sci, &["check"]);
+    assert!(
+        !v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "unrated_step"),
+        "closed steps are silent: {v}"
+    );
 }
