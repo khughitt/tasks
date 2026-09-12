@@ -5,10 +5,11 @@ status: todo
 priority: 2
 size: l
 created: 2026-09-12T10:18:55Z
-updated: 2026-09-12T10:32:04Z
+updated: 2026-09-12T11:21:45Z
 depends: []
 tags: [cli]
 spec: docs/specs/2026-09-12-task-complexity-design.md
+plan: docs/plans/2026-09-12-task-complexity.md
 ---
 
 size measures volume, not the judgment a task demands; the two diverge in exactly the cases that matter for routing work to mid-tier models (large mechanical vs. small subtle).
