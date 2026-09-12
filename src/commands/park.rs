@@ -76,27 +76,31 @@ pub fn run(
             match waiting_on {
                 WaitingOn::User => None,
                 WaitingOn::Agent => {
+                    // Checked before requiring a level at all: under a high cutoff there is
+                    // no level left to escalate to, so demanding --complexity first would
+                    // send the caller looking for a level that cannot exist.
+                    let cutoff = crate::complexity::cutoff(None)?;
+                    if cutoff == Some(Complexity::High) {
+                        return Err(Error::Validation(format!(
+                            "{}=high leaves no level to escalate to; park --waiting-on user so a person can decompose or reassign it",
+                            crate::complexity::ENV
+                        )));
+                    }
                     let level = level.ok_or_else(|| {
                         Error::Validation(
                             "--reason capability waiting on the agent needs --complexity <level>"
                                 .into(),
                         )
                     })?;
-                    if let Some(cutoff) = crate::complexity::cutoff(None)? {
-                        if cutoff == Complexity::High {
-                            return Err(Error::Validation(format!(
-                                "{}=high leaves no level to escalate to; park --waiting-on user so a person can decompose or reassign it",
-                                crate::complexity::ENV
-                            )));
-                        }
-                        if level <= cutoff {
-                            return Err(Error::Validation(format!(
-                                "--complexity {} does not exceed {}={}",
-                                level.as_str(),
-                                crate::complexity::ENV,
-                                cutoff.as_str()
-                            )));
-                        }
+                    if let Some(cutoff) = cutoff
+                        && level <= cutoff
+                    {
+                        return Err(Error::Validation(format!(
+                            "--complexity {} does not exceed {}={}",
+                            level.as_str(),
+                            crate::complexity::ENV,
+                            cutoff.as_str()
+                        )));
                     }
                     Some(Escalation {
                         level,

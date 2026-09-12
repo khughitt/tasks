@@ -11424,6 +11424,24 @@ fn capability_park_validates_the_level_and_records_the_escalation() {
     let out = under("high", "high");
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--waiting-on user"));
+
+    // Under a high cutoff, omitting --complexity still reports that no level above the
+    // cutoff exists -- not the generic "needs --complexity <level>" -- and names the
+    // --waiting-on user route.
+    let out = as_agent(&env, &sci, "agent-a")
+        .env("TASKS_MAX_COMPLEXITY", "high")
+        .args([
+            "park",
+            &id,
+            "needs a decision the plan leaves open",
+            "--reason",
+            "capability",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--waiting-on user"));
+
     let out = under("mid", "high");
     assert!(
         out.status.success(),
