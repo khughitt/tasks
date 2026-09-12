@@ -379,8 +379,6 @@ impl ClaimStore {
         self.escalations.remove(&id.to_string())
     }
 
-    #[allow(dead_code)]
-    // Used by Task 4: access escalations from the read-side snapshot.
     pub fn escalations(&self) -> impl Iterator<Item = (&String, &Escalation)> {
         self.escalations.iter()
     }
