@@ -22,7 +22,7 @@ use crate::claims::{ClaimStore, Liveness, MutationLock};
 use crate::cli::{Cli, Command, FieldArgs, ScopeArgs};
 use crate::error::{Error, Result};
 use crate::format::{validate_body, validate_line, validate_note_text, validate_task};
-use crate::model::{Note, Size, Status, Task, TaskId};
+use crate::model::{Complexity, Note, Size, Status, Task, TaskId};
 use crate::output::Output;
 use crate::registry::Registry;
 use crate::repo::{Project, SiblingCopy};
@@ -424,6 +424,9 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
     }
     if let Some(size) = &fields.size {
         task.size = Some(Size::parse(size)?);
+    }
+    if let Some(level) = &fields.complexity {
+        task.complexity = Some(Complexity::parse(level)?);
     }
     if let Some(every) = &fields.every {
         task.every = Some(crate::periodic::Interval::parse(every)?);

@@ -14,7 +14,7 @@ use clap::CommandFactory;
 use clap_complete::CompletionCandidate;
 
 use crate::cli::Cli;
-use crate::model::{Size, Status, Task, TaskId};
+use crate::model::{Complexity, Size, Status, Task, TaskId};
 use crate::registry::Registry;
 use crate::repo::Project;
 use crate::scope::Origin;
@@ -37,6 +37,11 @@ pub fn add_statuses() -> Vec<CompletionCandidate> {
 
 pub fn sizes() -> Vec<CompletionCandidate> {
     plain(Size::ALL.iter().map(|size| size.as_str()))
+}
+
+/// The three `--complexity` / `--max-complexity` levels.
+pub fn complexities() -> Vec<CompletionCandidate> {
+    plain(Complexity::ALL.iter().map(|level| level.as_str()))
 }
 
 /// The two `park --waiting-on` accepts.

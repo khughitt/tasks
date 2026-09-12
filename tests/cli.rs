@@ -10854,3 +10854,52 @@ fn check_reports_what_parsing_cannot_see_about_cadences() {
         "{v}"
     );
 }
+
+#[test]
+fn complexity_is_set_cleared_listed_and_completed() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Rate me", "-p", "2", "--complexity", "mid"]));
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["task"]["complexity"], "mid");
+    let v = env.json(&sci, &["list"]);
+    assert_eq!(v["tasks"][0]["complexity"], "mid");
+    let text = std::fs::read_to_string(sci.join(format!("tasks/{id}.md"))).unwrap();
+    assert!(text.contains("\ncomplexity: mid\n"), "{text}");
+
+    let pretty = env.pretty(&sci, &["list"]);
+    assert!(pretty.contains(" mid "), "{pretty}");
+
+    env.json(&sci, &["edit", &id, "--complexity", "high"]);
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["complexity"], "high");
+    env.json(&sci, &["edit", &id, "--no-complexity"]);
+    assert!(env.json(&sci, &["show", &id])["task"]["complexity"].is_null());
+    let pretty = env.pretty(&sci, &["list"]);
+    assert!(
+        pretty.contains(" -    "),
+        "unassessed shows a dash: {pretty}"
+    );
+
+    assert_eq!(
+        env.fail(&sci, &["add", "Bad", "--complexity", "medium"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--complexity", "5"]),
+        "validation"
+    );
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id, "--complexity", "low", "--no-complexity"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "clap conflict is a usage error");
+
+    let values = env.complete_values(&sci, "bash", 4, &["tasks", "add", "T", "--complexity", ""]);
+    assert_eq!(values, vec!["low", "mid", "high"]);
+    let values = env.complete_values(&sci, "zsh", 4, &["tasks", "edit", &id, "--complexity", ""]);
+    assert!(
+        values.iter().any(|value| value.starts_with("high")),
+        "{values:?}"
+    );
+}

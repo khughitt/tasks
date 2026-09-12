@@ -60,7 +60,7 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all. When the project keeps a
@@ -91,7 +91,7 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
 ## Recording work
 
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
   for ordering between the pieces. A goal that is committed work is a `todo` with a
   body, however large; `idea` is for uncommitted thoughts. `done` refuses while any

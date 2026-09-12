@@ -53,6 +53,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || fields.body.is_some()
         || fields.priority.is_some()
         || fields.size.is_some()
+        || fields.complexity.is_some()
+        || args.no_complexity
         || fields.parallel
         || args.no_parallel
         || fields.every.is_some()
@@ -95,6 +97,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     if args.no_source {
         task.source = None;
+    }
+    if args.no_complexity {
+        task.complexity = None;
     }
     if args.no_model {
         task.model = None;

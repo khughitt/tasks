@@ -91,7 +91,7 @@ from a clone):
     tasks unregister sci             # drop a stale prefix and its aliases; files are untouched
     tasks rename dot dots            # rename a registered prefix; old ids still resolve
     tasks rename dot dots --explain  # diagnose an interruption without locks or writes
-    tasks add "Bank the ledger" -p 1 --size m --tag ledger
+    tasks add "Bank the ledger" -p 1 --size m --complexity low --tag ledger
     tasks add "Emit rows" --parent sci-4f2a9c
     tasks add "Curation sweep" --every 30d  # days or weeks since each completion
     tasks list --periodic            # recurring tasks, soonest due first

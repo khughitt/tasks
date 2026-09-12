@@ -53,6 +53,9 @@ pub struct FieldArgs {
     pub priority: Option<u8>,
     #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
     pub size: Option<String>,
+    /// The judgment the task demands: low, mid, or high. Absent is unassessed.
+    #[arg(long, add = ArgValueCandidates::new(crate::complete::complexities))]
+    pub complexity: Option<String>,
     /// Mark as safe to run beside other tasks marked parallel. On `edit` this sets the
     /// flag; see `--no-parallel` to clear it.
     #[arg(long)]
@@ -101,6 +104,9 @@ pub struct EditArgs {
     /// Clear the source.
     #[arg(long, conflicts_with = "source")]
     pub no_source: bool,
+    /// Clear the complexity rating (back to unassessed).
+    #[arg(long, conflicts_with = "complexity")]
+    pub no_complexity: bool,
     /// Replace the model stamp recorded at completion; see `--no-model`.
     #[arg(long)]
     pub model: Option<String>,

@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::model::{Size, Status, Task};
+use crate::model::{Complexity, Size, Status, Task};
 use crate::registry::Registry;
 use crate::style::{Painter, Style};
 use serde::Serialize;
@@ -138,6 +138,7 @@ pub struct TaskSummary {
     pub status: Status,
     pub priority: u8,
     pub size: Option<Size>,
+    pub complexity: Option<Complexity>,
     pub parallel: bool,
     pub owner: Option<String>,
     pub created: String,
@@ -250,6 +251,7 @@ impl TaskSummary {
             status: task.status,
             priority: task.priority,
             size: task.size,
+            complexity: task.complexity,
             parallel: task.parallel,
             owner: task.owner.clone(),
             created: task.created.clone(),
@@ -282,6 +284,7 @@ pub struct ParkedRow {
     pub status: Option<Status>,
     pub priority: Option<u8>,
     pub size: Option<Size>,
+    pub complexity: Option<Complexity>,
     pub parallel: bool,
     pub owner: Option<String>,
     pub created: Option<String>,
@@ -308,6 +311,7 @@ impl ParkedRow {
             status: Some(summary.status),
             priority: Some(summary.priority),
             size: summary.size,
+            complexity: summary.complexity,
             parallel: summary.parallel,
             owner: summary.owner,
             created: Some(summary.created),
@@ -333,6 +337,7 @@ impl ParkedRow {
             status: None,
             priority: None,
             size: None,
+            complexity: None,
             parallel: false,
             owner: None,
             created: None,
@@ -999,6 +1004,7 @@ pub fn table(
             priority
         };
         let size = row.size.map(Size::as_str).unwrap_or("-");
+        let complexity = row.complexity.map(Complexity::as_str).unwrap_or("-");
         let status = painter.paint(
             Style::Status(row.status),
             &format!("{:<7}", row.status.as_str()),
@@ -1043,7 +1049,7 @@ pub fn table(
             (true, false) => "   ",
         };
         rendered.push_str(&format!(
-            "{id}  {priority} {size:<2} {status} {mark}{date}  {}{tags}{cadence}{owner}\n",
+            "{id}  {priority} {size:<2} {complexity:<4} {status} {mark}{date}  {}{tags}{cadence}{owner}\n",
             row.title
         ));
     }
@@ -1127,6 +1133,7 @@ mod tests {
             status: Status::Todo,
             priority: 2,
             size: None,
+            complexity: None,
             owner: None,
             created: "2026-09-06T00:00:00Z".into(),
             updated: "2026-09-06T00:00:00Z".into(),
