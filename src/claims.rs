@@ -383,8 +383,6 @@ impl ClaimStore {
 
     /// Nothing `rename` would need to carry: no parks and no escalations. Claims are
     /// never carried; a rename refuses while any are live.
-    #[allow(dead_code)]
-    // Used by Task 5: check if the store is empty before renaming.
     pub fn carries_nothing(&self) -> bool {
         self.parks.is_empty() && self.escalations.is_empty()
     }
@@ -401,24 +399,30 @@ impl ClaimStore {
         self.parks.iter()
     }
 
-    /// The store `rename` writes for the target prefix: this store's park entries with
-    /// their ids re-prefixed, and no claims. Pure; nothing on disk changes.
-    pub fn parks_renamed_text(&self, source: &str, target: &str) -> Result<String> {
-        let mut parks = BTreeMap::new();
-        for (key, park) in &self.parks {
+    /// The store `rename` writes for the target prefix: this store's park and escalation
+    /// entries with their ids re-prefixed, and no claims. Pure; nothing on disk changes.
+    pub fn carried_renamed_text(&self, source: &str, target: &str) -> Result<String> {
+        let rekey = |key: &String, kind: &str| -> Result<String> {
             let id = TaskId::parse(key)?;
             if id.prefix != source {
                 return Err(Error::Config(format!(
-                    "park entry {key} does not belong to prefix {source:?}"
+                    "{kind} entry {key} does not belong to prefix {source:?}"
                 )));
             }
-            parks.insert(format!("{target}-{}", id.hex), park.clone());
+            Ok(format!("{target}-{}", id.hex))
+        };
+        let mut parks = BTreeMap::new();
+        for (key, park) in &self.parks {
+            parks.insert(rekey(key, "park")?, park.clone());
+        }
+        let mut escalations = BTreeMap::new();
+        for (key, escalation) in &self.escalations {
+            escalations.insert(rekey(key, "escalation")?, escalation.clone());
         }
         Ok(toml::to_string(&StoreFile {
             claims: BTreeMap::new(),
             parks,
-            // Not carried until rename learns escalations (plan Task 9); a rename in between drops them.
-            escalations: BTreeMap::new(),
+            escalations,
         })
         .expect("claim store serializes"))
     }
@@ -1332,18 +1336,18 @@ mod tests {
     }
 
     #[test]
-    fn parks_renamed_text_re_prefixes_ids_and_drops_claims() {
+    fn carried_renamed_text_re_prefixes_ids_and_drops_claims() {
         let (_dir, store) = store_from(&format!(
             "{}{}",
             A_CLAIM.replace("sci-", "old-"),
             A_PARK.replace("sci-", "old-")
         ));
-        let text = store.parks_renamed_text("old", "new").unwrap();
+        let text = store.carried_renamed_text("old", "new").unwrap();
         assert!(text.contains("[parks.new-000002]"), "{text}");
         assert!(!text.contains("claims"), "{text}");
         assert!(!text.contains("old-"), "{text}");
         assert!(matches!(
-            store.parks_renamed_text("sci", "new"),
+            store.carried_renamed_text("sci", "new"),
             Err(Error::Config(_))
         ));
     }

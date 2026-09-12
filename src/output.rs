@@ -27,6 +27,7 @@ pub struct RenameOut {
     pub root: String,
     pub tasks: usize,
     pub parks: usize,
+    pub escalations: usize,
     pub aliases: Vec<String>,
     pub recovery: String,
     pub warnings: Vec<String>,

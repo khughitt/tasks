@@ -58,17 +58,24 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             "refuse"
         }
     };
-    let source_parks = ClaimStore::load(&invocation.source)?.parks().count();
-    let parks = if source_parks == 0
+    let source_store = ClaimStore::load(&invocation.source)?;
+    let source_parks = source_store.parks().count();
+    let source_escalations = source_store.escalations().count();
+    let (parks, escalations) = if source_parks == 0
+        && source_escalations == 0
         && (snapshot
             .inventory
             .as_ref()
             .is_some_and(|inventory| inventory.parks_store.is_some())
             || recovery == Recovery::Complete)
     {
-        ClaimStore::load(&invocation.target)?.parks().count()
+        let target_store = ClaimStore::load(&invocation.target)?;
+        (
+            target_store.parks().count(),
+            target_store.escalations().count(),
+        )
     } else {
-        source_parks
+        (source_parks, source_escalations)
     };
     let mut out = RenameOut {
         prefix: invocation.target.clone(),
@@ -76,6 +83,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         root: invocation.root.display().to_string(),
         tasks: 0,
         parks,
+        escalations,
         aliases: Vec::new(),
         recovery: verdict.into(),
         warnings,
@@ -120,16 +128,20 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                 invocation.target
             )));
         }
-        let target_parks: Vec<String> = ClaimStore::load(&invocation.target)?
-            .parks()
+        let target_store = ClaimStore::load(&invocation.target)?;
+        let target_parks: Vec<String> = target_store.parks().map(|(id, _)| id.clone()).collect();
+        let target_escalations: Vec<String> = target_store
+            .escalations()
             .map(|(id, _)| id.clone())
             .collect();
-        if !target_parks.is_empty() {
+        if !target_parks.is_empty() || !target_escalations.is_empty() {
+            let mut ids = target_parks.clone();
+            ids.extend(target_escalations.clone());
             return Err(Error::Validation(format!(
-                "target store holds {} parked task{} ({}); remove or resume them before renaming",
+                "target store holds {} parked task(s) and {} escalation(s) ({}); remove or resume them before renaming",
                 target_parks.len(),
-                if target_parks.len() == 1 { "" } else { "s" },
-                target_parks.join(", ")
+                target_escalations.len(),
+                ids.join(", ")
             )));
         }
         crate::commands::reject_pending_rename(&project)?;
@@ -235,7 +247,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         match std::fs::read(&dest) {
             Ok(bytes) if digest(&bytes) == *expected => {}
             Ok(_) => {
-                if ClaimStore::load_from(&dest)?.parks().next().is_some() {
+                if !ClaimStore::load_from(&dest)?.carries_nothing() {
                     return Err(Error::Validation(format!(
                         "{} disagrees with inventory",
                         dest.display()
@@ -249,7 +261,9 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
             Err(error) => return Err(error.into()),
         }
         verify_bytes(&dest, expected)?;
-        out.parks = ClaimStore::load_from(&dest)?.parks().count();
+        let dest_store = ClaimStore::load_from(&dest)?;
+        out.parks = dest_store.parks().count();
+        out.escalations = dest_store.escalations().count();
         if stop_after("store") {
             return Ok(out);
         }

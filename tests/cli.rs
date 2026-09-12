@@ -9109,6 +9109,91 @@ fn rename_refuses_a_target_store_that_holds_parks_before_any_mutation() {
 }
 
 #[test]
+fn rename_carries_an_escalation_only_store_and_refuses_one_at_the_target() {
+    let mut env = TestEnv::new();
+    let dot = env.init("dot");
+    let id = id_of(env.json(&dot, &["add", "T", "-p", "2", "--complexity", "low"]));
+    as_agent(&env, &dot, "agent-a")
+        .args([
+            "park",
+            &id,
+            "stuck",
+            "--reason",
+            "capability",
+            "--complexity",
+            "high",
+        ])
+        .assert()
+        .success();
+    // Resume and finish the session so the store holds an escalation and nothing else.
+    as_agent(&env, &dot, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &dot, "agent-a")
+        .args(["edit", &id, "--status", "todo"])
+        .assert()
+        .success();
+    let store = std::fs::read_to_string(env.claim_store("dot")).unwrap();
+    assert!(
+        store.contains("[escalations.") && !store.contains("[parks."),
+        "{store}"
+    );
+
+    let v = env.json(&dot, &["rename", "dot", "dots"]);
+    assert_eq!(v["escalations"], 1, "{v}");
+    assert_eq!(v["parks"], 0);
+    assert!(!env.claim_store("dot").exists());
+    let store = std::fs::read_to_string(env.claim_store("dots")).unwrap();
+    assert!(store.contains("[escalations.dots-"), "{store}");
+    let new_id = id.replace("dot-", "dots-");
+    let v = env.json(&dot, &["show", &new_id]);
+    assert_eq!(v["escalation"]["level"], "high");
+    let v = env.json(&dot, &["ready", "--max-complexity", "mid"]);
+    assert!(
+        v["tasks"].as_array().unwrap().is_empty(),
+        "still hidden after the rename: {v}"
+    );
+
+    // A target store holding only an escalation is a destination conflict.
+    let other = env.init("fam");
+    let other_id = id_of(env.json(&other, &["add", "F", "-p", "2", "--complexity", "low"]));
+    as_agent(&env, &other, "agent-b")
+        .args([
+            "park",
+            &other_id,
+            "stuck",
+            "--reason",
+            "capability",
+            "--complexity",
+            "high",
+        ])
+        .assert()
+        .success();
+    as_agent(&env, &other, "agent-b")
+        .args(["start", &other_id])
+        .assert()
+        .success();
+    as_agent(&env, &other, "agent-b")
+        .args(["edit", &other_id, "--status", "todo"])
+        .assert()
+        .success();
+    // Leave `fam` registered but make its store the target of a rename from `dots`.
+    env.json(&other, &["unregister", "fam"]);
+    let out = env
+        .cmd(&dot)
+        .args(["rename", "dots", "fam"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("target store holds"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn rename_interrupted_after_the_store_write_resumes_and_a_tampered_destination_refuses() {
     for tamper in [false, true] {
         let mut env = TestEnv::new();
@@ -9116,6 +9201,28 @@ fn rename_interrupted_after_the_store_write_resumes_and_a_tampered_destination_r
         let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
         as_agent(&env, &dir, "agent-a")
             .args(["park", &id, "a"])
+            .assert()
+            .success();
+        let escalated = id_of(env.json(&dir, &["add", "E", "-p", "2", "--complexity", "low"]));
+        as_agent(&env, &dir, "agent-a")
+            .args([
+                "park",
+                &escalated,
+                "stuck",
+                "--reason",
+                "capability",
+                "--complexity",
+                "high",
+            ])
+            .assert()
+            .success();
+        // Resume and finish the session so this task's only surviving entry is the escalation.
+        as_agent(&env, &dir, "agent-a")
+            .args(["start", &escalated])
+            .assert()
+            .success();
+        as_agent(&env, &dir, "agent-a")
+            .args(["edit", &escalated, "--status", "todo"])
             .assert()
             .success();
         let stopped = env
@@ -9127,6 +9234,11 @@ fn rename_interrupted_after_the_store_write_resumes_and_a_tampered_destination_r
         assert!(stopped.status.success(), "{stopped:?}");
         assert!(env.claim_store("dots").is_file(), "destination written");
         assert!(env.claim_store("dot").is_file(), "source still present");
+        let dest = std::fs::read_to_string(env.claim_store("dots")).unwrap();
+        assert!(
+            dest.contains(&format!("[escalations.dots-{}]", &escalated[4..])),
+            "{dest}"
+        );
         if tamper {
             write_park(&env, "dots", "dots-ffffff", "someone", "agent", "/x");
             let out = env
@@ -9148,10 +9260,15 @@ fn rename_interrupted_after_the_store_write_resumes_and_a_tampered_destination_r
             let resumed = env.json(&dir, &["rename", "dot", "dots"]);
             assert_eq!(resumed["recovery"], "resume_cleanup");
             assert_eq!(resumed["parks"], 1);
+            assert_eq!(resumed["escalations"], 1);
             assert!(!env.claim_store("dot").exists());
             assert_eq!(
                 env.json(&dir, &["prime"])["parked"][0]["id"],
                 format!("dots-{}", &id[4..])
+            );
+            assert_eq!(
+                env.json(&dir, &["show", &format!("dots-{}", &escalated[4..])])["escalation"]["level"],
+                "high"
             );
         }
     }
@@ -9163,6 +9280,27 @@ fn rename_interrupted_after_the_store_write_resumes_and_a_tampered_destination_r
         .args(["park", &id, "a"])
         .assert()
         .success();
+    let escalated = id_of(env.json(&dir, &["add", "E", "-p", "2", "--complexity", "low"]));
+    as_agent(&env, &dir, "agent-a")
+        .args([
+            "park",
+            &escalated,
+            "stuck",
+            "--reason",
+            "capability",
+            "--complexity",
+            "high",
+        ])
+        .assert()
+        .success();
+    as_agent(&env, &dir, "agent-a")
+        .args(["start", &escalated])
+        .assert()
+        .success();
+    as_agent(&env, &dir, "agent-a")
+        .args(["edit", &escalated, "--status", "todo"])
+        .assert()
+        .success();
     let stopped = env
         .raw(&dir)
         .env("TASKS_RENAME_STOP_AFTER", "claims")
@@ -9171,13 +9309,13 @@ fn rename_interrupted_after_the_store_write_resumes_and_a_tampered_destination_r
         .unwrap();
     assert!(stopped.status.success(), "{stopped:?}");
     assert!(!env.claim_store("dot").exists(), "source removed");
-    assert_eq!(
-        env.json(&dir, &["rename", "dot", "dots", "--explain"])["parks"],
-        1
-    );
+    let explained = env.json(&dir, &["rename", "dot", "dots", "--explain"]);
+    assert_eq!(explained["parks"], 1);
+    assert_eq!(explained["escalations"], 1);
     let resumed = env.json(&dir, &["rename", "dot", "dots"]);
     assert_eq!(resumed["recovery"], "resume_cleanup");
     assert_eq!(resumed["parks"], 1);
+    assert_eq!(resumed["escalations"], 1);
 }
 
 #[test]

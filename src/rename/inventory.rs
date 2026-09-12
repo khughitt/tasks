@@ -102,10 +102,10 @@ impl Inventory {
         }
         entries.sort_by(|left, right| left.hex.cmp(&right.hex));
         let store = crate::claims::ClaimStore::load(&project.prefix)?;
-        let (parks_store, store_to) = if store.parks().next().is_none() {
+        let (parks_store, store_to) = if store.carries_nothing() {
             (None, None)
         } else {
-            let text = store.parks_renamed_text(&project.prefix, target)?;
+            let text = store.carried_renamed_text(&project.prefix, target)?;
             let digest = digest(text.as_bytes());
             (Some(text), Some(digest))
         };
