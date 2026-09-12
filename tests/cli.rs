@@ -3555,7 +3555,19 @@ fn check_passes_clean_repo_and_reports_drift() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: one\n");
-    let a = env.json(&dir, &["add", "A", "--plan", "p", "--step", "Task 1: one"])["id"]
+    let a = env.json(
+        &dir,
+        &[
+            "add",
+            "A",
+            "--plan",
+            "p",
+            "--step",
+            "Task 1: one",
+            "--complexity",
+            "low",
+        ],
+    )["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -3565,10 +3577,7 @@ fn check_passes_clean_repo_and_reports_drift() {
         .to_string();
     let v = env.json(&dir, &["check"]);
     assert_eq!(v["errors"], serde_json::json!([]));
-    let warnings = v["warnings"].as_array().unwrap();
-    assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0]["kind"], "unrated_step");
-    assert_eq!(warnings[0]["id"], a);
+    assert_eq!(v["warnings"], serde_json::json!([]));
 
     // drift: heading renamed; dangling dep; garbage file; foreign unreachable dep
     write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: uno\n");
@@ -3635,14 +3644,24 @@ fn check_warns_on_plan_headings_without_a_task() {
     assert_eq!(check["errors"], serde_json::json!([]));
     let warnings = check["warnings"].as_array().unwrap();
     assert_eq!(warnings.len(), 2, "{check}");
-    assert!(warnings.iter().any(|w| w["kind"] == "unlinked_step"
-        && w["file"] == "docs/plans/2026-09-03-p.md"
-        && w["detail"].as_str().unwrap().contains("Task 2: two")));
-    assert!(
-        warnings
-            .iter()
-            .any(|w| w["kind"] == "unrated_step" && w["id"] == a)
-    );
+
+    // Verify the unlinked_step finding matches the original test's exact assertions
+    let unlinked = warnings
+        .iter()
+        .find(|w| w["kind"] == "unlinked_step")
+        .expect("unlinked_step warning missing");
+    assert_eq!(unlinked["kind"], "unlinked_step");
+    assert_eq!(unlinked["file"], "docs/plans/2026-09-03-p.md");
+    assert_eq!(unlinked["id"], serde_json::Value::Null);
+    assert!(unlinked["detail"].as_str().unwrap().contains("Task 2: two"));
+
+    // Verify the unrated_step finding for the plan step task
+    let unrated = warnings
+        .iter()
+        .find(|w| w["kind"] == "unrated_step")
+        .expect("unrated_step warning missing");
+    assert_eq!(unrated["kind"], "unrated_step");
+    assert_eq!(unrated["id"], a);
 }
 
 #[test]
