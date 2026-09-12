@@ -11188,3 +11188,239 @@ fn prime_closeout_is_filtered_by_the_goals_own_rating() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["closeout"][0]["id"], goal);
 }
+
+#[test]
+fn capability_park_validates_the_level_and_records_the_escalation() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2", "--complexity", "low"]));
+
+    assert_eq!(
+        env.fail(&sci, &["park", &id, "stuck", "--complexity", "high"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&sci, &["park", &id, "stuck", "--reason", "capability"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "park",
+                &id,
+                "stuck",
+                "--reason",
+                "capability",
+                "--complexity",
+                "medium"
+            ]
+        ),
+        "validation"
+    );
+    // Never below the effective rating.
+    env.json(&sci, &["edit", &id, "--complexity", "mid"]);
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "park",
+                &id,
+                "stuck",
+                "--reason",
+                "capability",
+                "--complexity",
+                "low"
+            ]
+        ),
+        "validation"
+    );
+
+    // Under a cutoff the level must exceed it.
+    let under = |value: &str, level: &str| {
+        as_agent(&env, &sci, "agent-a")
+            .env("TASKS_MAX_COMPLEXITY", value)
+            .args([
+                "park",
+                &id,
+                "needs a decision the plan leaves open",
+                "--reason",
+                "capability",
+                "--complexity",
+                level,
+            ])
+            .output()
+            .unwrap()
+    };
+    let out = under("mid", "mid");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = under("high", "high");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--waiting-on user"));
+    let out = under("mid", "high");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["task"]["complexity"], "high");
+    assert_eq!(v["escalation"]["level"], "high");
+    assert_eq!(
+        v["escalation"]["session"], "agent-a",
+        "TASKS_SESSION is written verbatim, per park_reason_rides_the_entry_the_note_and_every_park_view"
+    );
+    assert_eq!(v["park"]["reason"], "capability");
+    let v = env.json(&sci, &["list"]);
+    assert_eq!(v["tasks"][0]["escalation"]["level"], "high");
+    let pretty = env.pretty(&sci, &["show", &id]);
+    assert!(pretty.contains("# escalation"), "{pretty}");
+    assert!(pretty.contains("agent, capability"), "{pretty}");
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert!(store.contains("[escalations."), "{store}");
+
+    // A record already high accepts high under a lower or absent cutoff (the retry shape).
+    let out = under("mid", "high");
+    assert!(out.status.success());
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "again",
+            "--reason",
+            "capability",
+            "--complexity",
+            "high",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn capability_park_waiting_on_the_user_records_no_escalation() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2", "--complexity", "high"]));
+    as_agent(&env, &sci, "agent-a")
+        .env("TASKS_MAX_COMPLEXITY", "high")
+        .args([
+            "park",
+            &id,
+            "decompose this",
+            "--reason",
+            "capability",
+            "--waiting-on",
+            "user",
+        ])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert!(v["escalation"].is_null(), "{v}");
+    assert_eq!(v["park"]["waiting_on"], "user");
+    let v = env.json(&sci, &["ready"]);
+    assert!(
+        v["tasks"].as_array().unwrap().is_empty(),
+        "parked on the user is omitted"
+    );
+    // --complexity is optional here but still never lowers.
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "park",
+                &id,
+                "x",
+                "--reason",
+                "capability",
+                "--waiting-on",
+                "user",
+                "--complexity",
+                "low"
+            ]
+        ),
+        "validation"
+    );
+}
+
+#[test]
+fn capability_park_fails_loudly_when_the_store_write_fails_and_the_rerun_succeeds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2", "--complexity", "low"]));
+    let plain = id_of(env.json(&sci, &["add", "P", "-p", "2"]));
+    let store = env.claim_store("sci");
+    // Create the store directory and the lock so only the atomic temp file fails.
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &plain, "warm up"])
+        .assert()
+        .success();
+    use std::os::unix::fs::PermissionsExt;
+    let state_dir = store.parent().unwrap();
+    let original = std::fs::metadata(state_dir).unwrap().permissions();
+    std::fs::set_permissions(state_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let capability = as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "stuck",
+            "--reason",
+            "capability",
+            "--complexity",
+            "high",
+        ])
+        .output()
+        .unwrap();
+    let ordinary = as_agent(&env, &sci, "agent-a")
+        .args(["park", &plain, "later", "--reason", "session"])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(state_dir, original).unwrap();
+
+    assert_eq!(
+        capability.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&capability.stdout)
+    );
+    let error: serde_json::Value = serde_json::from_slice(&capability.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    let message = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        message.contains("rerun the same `tasks park` command"),
+        "{message}"
+    );
+    assert!(
+        message.contains(&format!("escalation of {id} to high")),
+        "{message}"
+    );
+    assert!(
+        ordinary.status.success(),
+        "an ordinary park keeps the warning contract"
+    );
+
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["task"]["complexity"], "high", "the record write landed");
+    assert!(v["escalation"].is_null(), "the store write did not");
+
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "stuck",
+            "--reason",
+            "capability",
+            "--complexity",
+            "high",
+        ])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["escalation"]["level"], "high");
+    assert_eq!(v["park"]["reason"], "capability");
+}

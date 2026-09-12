@@ -49,7 +49,7 @@ pub fn waiting_on() -> Vec<CompletionCandidate> {
     plain(crate::claims::WaitingOn::ALL.iter().map(|who| who.as_str()))
 }
 
-/// The six `park --reason` accepts.
+/// The seven `park --reason` accepts.
 pub fn reason() -> Vec<CompletionCandidate> {
     plain(
         crate::claims::Reason::ALL

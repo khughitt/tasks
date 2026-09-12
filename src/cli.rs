@@ -303,14 +303,18 @@ pub enum Command {
             add = ArgValueCandidates::new(crate::complete::waiting_on)
         )]
         waiting_on: String,
-        /// Why the work stopped: review, decision, approval, environment, dependency, or
-        /// session. Optional; absent means not recorded.
+        /// Why the work stopped: review, decision, approval, environment, dependency,
+        /// session, or capability. Optional; absent means not recorded.
         #[arg(
             long,
             value_name = "WHY",
             add = ArgValueCandidates::new(crate::complete::reason)
         )]
         reason: Option<String>,
+        /// With --reason capability: the rating the work actually needs. Written to the
+        /// record and, when waiting on the agent, to the shared store as an escalation.
+        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        complexity: Option<String>,
     },
     /// Close a task as done.
     Done {

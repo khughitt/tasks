@@ -115,6 +115,7 @@ pub struct ShowFields {
     pub children: Vec<Related>,
     pub claim: Option<ClaimInfo>,
     pub park: Option<ParkInfo>,
+    pub escalation: Option<crate::claims::Escalation>,
     pub periodic: Option<PeriodicInfo>,
 }
 
@@ -154,6 +155,7 @@ pub struct TaskSummary {
     pub open_descendant_count: usize,
     pub claim: Option<ClaimInfo>,
     pub park: Option<ParkInfo>,
+    pub escalation: Option<crate::claims::Escalation>,
     pub periodic: Option<PeriodicInfo>,
 }
 
@@ -272,6 +274,9 @@ impl TaskSummary {
             park: claims
                 .and_then(|snapshot| snapshot.park(&task.id))
                 .map(ParkInfo::of),
+            escalation: claims
+                .and_then(|snapshot| snapshot.escalation(&task.id))
+                .cloned(),
             periodic: PeriodicInfo::of(task, now),
         }
     }
@@ -300,6 +305,7 @@ pub struct ParkedRow {
     pub open_descendant_count: Option<usize>,
     pub claim: Option<ClaimInfo>,
     pub park: Option<ParkInfo>,
+    pub escalation: Option<crate::claims::Escalation>,
     pub phase: Option<crate::model::Phase>,
 }
 
@@ -327,6 +333,7 @@ impl ParkedRow {
             open_descendant_count: Some(summary.open_descendant_count),
             claim: summary.claim,
             park: summary.park,
+            escalation: summary.escalation,
             phase: Some(phase),
         }
     }
@@ -353,6 +360,7 @@ impl ParkedRow {
             open_descendant_count: None,
             claim: None,
             park: Some(ParkInfo::of(park)),
+            escalation: None,
             phase: None,
         }
     }
@@ -937,6 +945,17 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
         ));
         rendered.push('\n');
     }
+    if let Some(escalation) = &o.escalation {
+        rendered.push_str("\n# escalation\n");
+        rendered.push_str(&format!(
+            "- needs at least {} since {}\n",
+            escalation.level.as_str(),
+            crate::time::day(&escalation.at)
+        ));
+        rendered
+            .push_str(&painter.paint(Style::Chrome, &format!("  session {}", escalation.session)));
+        rendered.push('\n');
+    }
     rendered
 }
 
@@ -1148,6 +1167,7 @@ mod tests {
             open_descendant_count: 0,
             claim: None,
             park: None,
+            escalation: None,
             periodic: None,
             parallel,
         }

@@ -1,6 +1,7 @@
 use super::{ClaimIntent, Ctx, append_note, id_out, load, owner_name, save};
-use crate::claims::{Liveness, Park, Reason, WaitingOn, describe_stop};
+use crate::claims::{Escalation, Liveness, Park, Reason, WaitingOn, describe_stop};
 use crate::error::{Error, Result};
+use crate::model::Complexity;
 use crate::output::Output;
 
 /// Set a task down (spec §3). Validate everything, refuse a foreign live claim, then let
@@ -11,6 +12,7 @@ pub fn run(
     next_step: String,
     waiting_on: String,
     reason: Option<String>,
+    complexity: Option<String>,
 ) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
     if !task.status.is_open() {
@@ -22,6 +24,7 @@ pub fn run(
     crate::format::validate_line("next_step", &next_step)?;
     let waiting_on = WaitingOn::parse(&waiting_on)?;
     let reason = reason.as_deref().map(Reason::parse).transpose()?;
+    let complexity = complexity.as_deref().map(Complexity::parse).transpose()?;
     let owner = owner_name(&ctx.project)?;
     let me = crate::claims::identity()?;
 
@@ -47,6 +50,73 @@ pub fn run(
         ctx.warnings.push(warning);
     }
 
+    // Spec §5: --complexity belongs to --reason capability alone; the level never falls
+    // below the effective rating; waiting on the agent it is required and must clear the
+    // variable's cutoff, and an escalation is recorded; waiting on the user nothing is.
+    let escalation = match (reason, complexity) {
+        (Some(Reason::Capability), level) => {
+            let escalated = ctx
+                .claims_mut()?
+                .escalation(&task.id)
+                .map(|escalation| escalation.level);
+            let current = match (task.complexity, escalated) {
+                (Some(record), Some(escalated)) => Some(record.max(escalated)),
+                (record, escalated) => record.or(escalated),
+            };
+            if let (Some(level), Some(current)) = (level, current)
+                && level < current
+            {
+                return Err(Error::Validation(format!(
+                    "--complexity {} is below the effective rating {} of {}",
+                    level.as_str(),
+                    current.as_str(),
+                    task.id
+                )));
+            }
+            match waiting_on {
+                WaitingOn::User => None,
+                WaitingOn::Agent => {
+                    let level = level.ok_or_else(|| {
+                        Error::Validation(
+                            "--reason capability waiting on the agent needs --complexity <level>"
+                                .into(),
+                        )
+                    })?;
+                    if let Some(cutoff) = crate::complexity::cutoff(None)? {
+                        if cutoff == Complexity::High {
+                            return Err(Error::Validation(format!(
+                                "{}=high leaves no level to escalate to; park --waiting-on user so a person can decompose or reassign it",
+                                crate::complexity::ENV
+                            )));
+                        }
+                        if level <= cutoff {
+                            return Err(Error::Validation(format!(
+                                "--complexity {} does not exceed {}={}",
+                                level.as_str(),
+                                crate::complexity::ENV,
+                                cutoff.as_str()
+                            )));
+                        }
+                    }
+                    Some(Escalation {
+                        level,
+                        at: crate::time::now(),
+                        session: me.tagged.clone(),
+                    })
+                }
+            }
+        }
+        (_, Some(_)) => {
+            return Err(Error::Validation(
+                "--complexity on park needs --reason capability".into(),
+            ));
+        }
+        (_, None) => None,
+    };
+    if let Some(level) = complexity {
+        task.complexity = Some(level);
+    }
+
     append_note(
         &mut task,
         &owner,
@@ -66,7 +136,7 @@ pub fn run(
         reason,
         title: task.title.clone(),
     };
-    ctx.pending_claim = Some((task.id.clone(), ClaimIntent::Park(park)));
+    ctx.pending_claim = Some((task.id.clone(), ClaimIntent::Park { park, escalation }));
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }

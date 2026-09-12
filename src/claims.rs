@@ -120,8 +120,9 @@ impl WaitingOn {
     }
 }
 
-/// Why the work stopped, from the six-word vocabulary of
-/// docs/specs/2026-09-11-park-reason-and-stamps-design.md §4. Orthogonal to `WaitingOn`:
+/// Why the work stopped, from the seven-word vocabulary of
+/// docs/specs/2026-09-11-park-reason-and-stamps-design.md §4 and
+/// docs/specs/2026-09-12-task-complexity-design.md §5. Orthogonal to `WaitingOn`:
 /// the readers act on who, this only describes the stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -132,16 +133,18 @@ pub enum Reason {
     Environment,
     Dependency,
     Session,
+    Capability,
 }
 
 impl Reason {
-    pub const ALL: [Reason; 6] = [
+    pub const ALL: [Reason; 7] = [
         Reason::Review,
         Reason::Decision,
         Reason::Approval,
         Reason::Environment,
         Reason::Dependency,
         Reason::Session,
+        Reason::Capability,
     ];
 
     pub fn parse(s: &str) -> Result<Reason> {
@@ -166,6 +169,7 @@ impl Reason {
             Reason::Environment => "environment",
             Reason::Dependency => "dependency",
             Reason::Session => "session",
+            Reason::Capability => "capability",
         }
     }
 }
@@ -360,15 +364,11 @@ impl ClaimStore {
         self.parks.remove(&id.to_string())
     }
 
-    #[allow(dead_code)]
-    // Used by Task 4: access one escalation from the store.
     pub fn escalation(&self, id: &TaskId) -> Option<&Escalation> {
         self.escalations.get(&id.to_string())
     }
 
     /// Replaces any earlier entry; the caller has already checked the level never falls.
-    #[allow(dead_code)]
-    // Used by Task 6: record an escalation in the store.
     pub fn insert_escalation(&mut self, id: &TaskId, escalation: Escalation) {
         self.escalations.insert(id.to_string(), escalation);
     }
@@ -1142,7 +1142,7 @@ mod tests {
     }
 
     #[test]
-    fn reason_parses_its_six_values_only() {
+    fn reason_parses_its_seven_values_only() {
         for (text, reason) in [
             ("review", Reason::Review),
             ("decision", Reason::Decision),
@@ -1150,6 +1150,7 @@ mod tests {
             ("environment", Reason::Environment),
             ("dependency", Reason::Dependency),
             ("session", Reason::Session),
+            ("capability", Reason::Capability),
         ] {
             assert_eq!(Reason::parse(text).unwrap(), reason);
             assert_eq!(reason.as_str(), text);
@@ -1157,7 +1158,9 @@ mod tests {
         match Reason::parse("boredom") {
             Err(Error::Validation(detail)) => {
                 assert!(
-                    detail.contains("review, decision, approval, environment, dependency, session"),
+                    detail.contains(
+                        "review, decision, approval, environment, dependency, session, capability"
+                    ),
                     "{detail}"
                 );
                 assert!(detail.contains("\"boredom\""), "{detail}");

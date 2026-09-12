@@ -34,8 +34,13 @@ use std::path::{Path, PathBuf};
 /// guard in `transition` (or by `park`); **nothing is persisted until `save` acts on it.**
 pub enum ClaimIntent {
     Acquire(crate::claims::Claim),
-    Release { clear_park: bool },
-    Park(crate::claims::Park),
+    Release {
+        clear_park: bool,
+    },
+    Park {
+        park: crate::claims::Park,
+        escalation: Option<crate::claims::Escalation>,
+    },
     PreserveStore,
 }
 
@@ -760,16 +765,29 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             }
             Ok(())
         }
-        Some((id, ClaimIntent::Park(park))) => {
+        Some((id, ClaimIntent::Park { park, escalation })) => {
             // Record first, then store: a note with no entry is a trail that says what was
             // intended, while an entry with no note would be state the record never saw.
             ctx.project.write_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.insert_park(&id, park);
+            if let Some(escalation) = &escalation {
+                store.insert_escalation(&id, escalation.clone());
+            }
             if let Err(error) = store.save() {
+                // For an escalation the store write is the cross-checkout guarantee
+                // (spec §5.2), so its failure is the command's failure; the raised
+                // rating stays, and equal-to-current lets the rerun pass.
+                if let Some(escalation) = escalation {
+                    return Err(Error::Validation(format!(
+                        "the note and rating landed, but the escalation of {id} to {} was not \
+                         recorded ({error}); rerun the same `tasks park` command",
+                        escalation.level.as_str()
+                    )));
+                }
                 ctx.warnings.push(format!(
-                    "the note landed, but parking on {id} was not updated ({error}); a previous \\
+                    "the note landed, but parking on {id} was not updated ({error}); a previous \
                      park entry, if any, is intact"
                 ));
             }
@@ -918,12 +936,14 @@ pub fn run(cli: Cli) -> Result<Output> {
             next_step,
             waiting_on,
             reason,
+            complexity,
         } => park::run(
             open_id_write_ctx(dir, &id)?,
             id,
             next_step,
             waiting_on,
             reason,
+            complexity,
         ),
         Command::Done { id, message, force } => status::close(
             open_id_write_ctx(dir, &id)?,
