@@ -42,6 +42,9 @@ pub enum ClaimIntent {
         escalation: Option<crate::claims::Escalation>,
     },
     PreserveStore,
+    /// An explicit rating replaced an escalation; the store must be saved even on a
+    /// same-status edit, which otherwise preserves it.
+    ClearEscalation(crate::claims::Escalation),
 }
 
 pub struct Ctx {
@@ -55,6 +58,8 @@ pub struct Ctx {
     pending_claim: Option<(TaskId, ClaimIntent)>,
     /// This close only finishes a previous completion's pending claim-store cleanup.
     pub recovered: bool,
+    /// Set by `reassess`; taken once by `save`, which performs the actual removal.
+    clear_escalation: bool,
 }
 
 impl Ctx {
@@ -108,6 +113,31 @@ impl Ctx {
 
     pub fn preserve_claim_store(&mut self, id: &TaskId) {
         self.pending_claim = Some((id.clone(), ClaimIntent::PreserveStore));
+    }
+
+    /// `edit --complexity` / `--no-complexity`: the explicit rating is the new truth, so the
+    /// shared escalation goes, with a warning naming what was overridden (spec §5.1).
+    /// Records only; `save` removes the entry where a failed task write can still restore
+    /// it. Called after the status handling so a transition's own intent — which saves
+    /// the store anyway — is kept, and only a store-preserving intent is replaced.
+    pub fn reassess(&mut self, id: &TaskId) -> Result<()> {
+        let Some(escalation) = self.claims_mut()?.escalation(id).cloned() else {
+            return Ok(());
+        };
+        self.warnings.push(format!(
+            "cleared the escalation of {id} to {} recorded by session {} at {}",
+            escalation.level.as_str(),
+            escalation.session,
+            escalation.at
+        ));
+        self.clear_escalation = true;
+        if matches!(
+            self.pending_claim,
+            None | Some((_, ClaimIntent::PreserveStore))
+        ) {
+            self.pending_claim = Some((id.clone(), ClaimIntent::ClearEscalation(escalation)));
+        }
+        Ok(())
     }
 
     /// Guard only. Decides whether this session may make the change and records what `save`
@@ -206,6 +236,7 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
         claims: None,
         pending_claim: None,
         recovered: false,
+        clear_escalation: false,
     })
 }
 
@@ -706,6 +737,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
     warn_on_newer_sibling_copies(ctx, &task.id, &loaded);
+    let clear_escalation = std::mem::take(&mut ctx.clear_escalation);
 
     match ctx.pending_claim.take() {
         Some((id, ClaimIntent::Acquire(claim))) => {
@@ -715,6 +747,11 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             // would unclaim work someone still holds.
             let previous = store.get(&id).cloned();
             let previous_park = store.park(&id).cloned();
+            let previous_escalation = if clear_escalation {
+                store.remove_escalation(&id)
+            } else {
+                None
+            };
             store.prune_dead();
             store.insert(&id, claim);
             store.save()?;
@@ -723,6 +760,9 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                 return Ok(());
             };
             let store = ctx.claims_mut()?;
+            if let Some(escalation) = previous_escalation {
+                store.insert_escalation(&id, escalation);
+            }
             match (previous, previous_park) {
                 (Some(previous), _) => store.insert(&id, previous),
                 (None, Some(park)) => store.insert_park(&id, park),
@@ -746,6 +786,9 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.remove(&id);
+            if clear_escalation || clear_park {
+                store.remove_escalation(&id);
+            }
             if clear_park {
                 store.remove_park(&id);
             }
@@ -789,6 +832,20 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                 ctx.warnings.push(format!(
                     "the note landed, but parking on {id} was not updated ({error}); a previous \
                      park entry, if any, is intact"
+                ));
+            }
+            Ok(())
+        }
+        Some((id, ClaimIntent::ClearEscalation(escalation))) => {
+            ctx.project.write_task(&ctx.registry, task)?;
+            let store = ctx.claims_mut()?;
+            store.prune_dead();
+            store.remove_escalation(&id);
+            if let Err(error) = store.save() {
+                ctx.warnings.push(format!(
+                    "{id}'s rating was saved but the escalation to {} could not be cleared \
+                     ({error}); rerun `tasks edit {id} --complexity <level>`",
+                    escalation.level.as_str()
                 ));
             }
             Ok(())
@@ -873,6 +930,7 @@ pub fn run(cli: Cli) -> Result<Output> {
                         claims: None,
                         pending_claim: None,
                         recovered: false,
+                        clear_escalation: false,
                     }
                 }
                 None => open_ctx(dir)?,

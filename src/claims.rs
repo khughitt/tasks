@@ -373,8 +373,6 @@ impl ClaimStore {
         self.escalations.insert(id.to_string(), escalation);
     }
 
-    #[allow(dead_code)]
-    // Used by Task 6: remove an escalation from the store.
     pub fn remove_escalation(&mut self, id: &TaskId) -> Option<Escalation> {
         self.escalations.remove(&id.to_string())
     }

@@ -132,6 +132,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
             transition(&mut ctx, &mut task, to, args.force)?;
         }
     }
+    if args.fields.complexity.is_some() || args.no_complexity {
+        ctx.reassess(&task.id)?;
+    }
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }
