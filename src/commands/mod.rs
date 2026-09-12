@@ -58,8 +58,11 @@ pub struct Ctx {
     pending_claim: Option<(TaskId, ClaimIntent)>,
     /// This close only finishes a previous completion's pending claim-store cleanup.
     pub recovered: bool,
-    /// Set by `reassess`; taken once by `save`, which performs the actual removal.
-    clear_escalation: bool,
+    /// Set by `reassess` to what was given -- `Some(level)` for `--complexity <level>`,
+    /// `None` for `--no-complexity`; the outer `Option` is absent when no reassessment
+    /// was requested. Taken once by `save`, which performs the actual removal and, only
+    /// once it knows whether that reached disk, reports success or names the retry.
+    clear_escalation: Option<Option<Complexity>>,
 }
 
 impl Ctx {
@@ -116,21 +119,17 @@ impl Ctx {
     }
 
     /// `edit --complexity` / `--no-complexity`: the explicit rating is the new truth, so the
-    /// shared escalation goes, with a warning naming what was overridden (spec §5.1).
-    /// Records only; `save` removes the entry where a failed task write can still restore
-    /// it. Called after the status handling so a transition's own intent — which saves
+    /// shared escalation goes (spec §5.1). Records only, with no warning yet -- whether the
+    /// clear actually reached disk is `save`'s to know, and only `save` can report it, so it
+    /// pushes the warning itself once it has saved. `given` is what was passed (`None` for
+    /// `--no-complexity`), needed only if the store save fails and the retry has to be
+    /// named. Called after the status handling so a transition's own intent — which saves
     /// the store anyway — is kept, and only a store-preserving intent is replaced.
-    pub fn reassess(&mut self, id: &TaskId) -> Result<()> {
+    pub fn reassess(&mut self, id: &TaskId, given: Option<Complexity>) -> Result<()> {
         let Some(escalation) = self.claims_mut()?.escalation(id).cloned() else {
             return Ok(());
         };
-        self.warnings.push(format!(
-            "cleared the escalation of {id} to {} recorded by session {} at {}",
-            escalation.level.as_str(),
-            escalation.session,
-            escalation.at
-        ));
-        self.clear_escalation = true;
+        self.clear_escalation = Some(given);
         if matches!(
             self.pending_claim,
             None | Some((_, ClaimIntent::PreserveStore))
@@ -236,7 +235,7 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
         claims: None,
         pending_claim: None,
         recovered: false,
-        clear_escalation: false,
+        clear_escalation: None,
     })
 }
 
@@ -729,6 +728,15 @@ fn warn_on_newer_sibling_copies(ctx: &mut Ctx, id: &TaskId, loaded: &str) {
     }
 }
 
+/// The exact retry for a reassessment whose store save failed: what was actually given,
+/// not a placeholder, so running it verbatim redoes the same clear.
+fn escalation_retry_hint(id: &TaskId, given: Option<Complexity>) -> String {
+    match given {
+        Some(level) => format!("rerun `tasks edit {id} --complexity {}`", level.as_str()),
+        None => format!("rerun `tasks edit {id} --no-complexity`"),
+    }
+}
+
 pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     // Until this line the record still carries the stamp it was loaded with, which is the
     // only baseline the divergence check below has; the bump destroys it.
@@ -747,17 +755,30 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             // would unclaim work someone still holds.
             let previous = store.get(&id).cloned();
             let previous_park = store.park(&id).cloned();
-            let previous_escalation = if clear_escalation {
+            let previous_escalation = if clear_escalation.is_some() {
                 store.remove_escalation(&id)
             } else {
                 None
             };
             store.prune_dead();
             store.insert(&id, claim);
+            // A failure here never removed the escalation from disk, so nothing about
+            // clearing it is reported; the command fails with the store error itself.
             store.save()?;
 
-            let Err(error) = ctx.project.write_task(&ctx.registry, task) else {
-                return Ok(());
+            let error = match ctx.project.write_task(&ctx.registry, task) {
+                Ok(()) => {
+                    if let Some(escalation) = &previous_escalation {
+                        ctx.warnings.push(format!(
+                            "cleared the escalation of {id} to {} recorded by session {} at {}",
+                            escalation.level.as_str(),
+                            escalation.session,
+                            escalation.at
+                        ));
+                    }
+                    return Ok(());
+                }
+                Err(error) => error,
             };
             let store = ctx.claims_mut()?;
             if let Some(escalation) = previous_escalation {
@@ -771,7 +792,8 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                 }
             }
             // Warnings on `Ctx` are dropped when a command returns `Err`, so recovery
-            // guidance has to travel on the error itself.
+            // guidance has to travel on the error itself. The escalation, if any, was just
+            // restored above -- unchanged, so nothing about it belongs here either.
             let suffix = match store.save() {
                 Ok(()) => String::new(),
                 Err(inner) => format!(
@@ -786,25 +808,48 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.remove(&id);
-            if clear_escalation || clear_park {
-                store.remove_escalation(&id);
-            }
+            let removed_escalation = if clear_escalation.is_some() || clear_park {
+                store.remove_escalation(&id)
+            } else {
+                None
+            };
             if clear_park {
                 store.remove_park(&id);
             }
-            if let Err(error) = store.save() {
-                let recovery = match task.status {
-                    Status::Done => format!("run `tasks done {id}`"),
-                    Status::Dropped => format!("run `tasks drop {id}`"),
-                    Status::Blocked => format!("run `tasks block {id}`"),
-                    Status::Todo | Status::Idea | Status::Doing => {
-                        "the store is unchanged and a same-status edit will not retry cleanup"
-                            .into()
+            match store.save() {
+                Ok(()) => {
+                    if let (Some(_), Some(escalation)) = (&clear_escalation, &removed_escalation) {
+                        ctx.warnings.push(format!(
+                            "cleared the escalation of {id} to {} recorded by session {} at {}",
+                            escalation.level.as_str(),
+                            escalation.session,
+                            escalation.at
+                        ));
                     }
-                };
-                ctx.warnings.push(format!(
-                    "{id}'s status was saved but store cleanup failed ({error}); {recovery}"
-                ));
+                }
+                Err(error) => {
+                    let recovery = match task.status {
+                        Status::Done => format!("run `tasks done {id}`"),
+                        Status::Dropped => format!("run `tasks drop {id}`"),
+                        Status::Blocked => format!("run `tasks block {id}`"),
+                        Status::Todo | Status::Idea | Status::Doing => {
+                            "the store is unchanged and a same-status edit will not retry cleanup"
+                                .into()
+                        }
+                    };
+                    ctx.warnings.push(format!(
+                        "{id}'s status was saved but store cleanup failed ({error}); {recovery}"
+                    ));
+                    if let Some(given) = clear_escalation {
+                        let escalation = removed_escalation
+                            .expect("reassess found this escalation under the same lock");
+                        ctx.warnings.push(format!(
+                            "the escalation of {id} to {} was not cleared ({error}); {}",
+                            escalation.level.as_str(),
+                            escalation_retry_hint(&id, given)
+                        ));
+                    }
+                }
             }
             Ok(())
         }
@@ -841,12 +886,23 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             let store = ctx.claims_mut()?;
             store.prune_dead();
             store.remove_escalation(&id);
-            if let Err(error) = store.save() {
-                ctx.warnings.push(format!(
-                    "{id}'s rating was saved but the escalation to {} could not be cleared \
-                     ({error}); rerun `tasks edit {id} --complexity <level>`",
-                    escalation.level.as_str()
-                ));
+            match store.save() {
+                Ok(()) => ctx.warnings.push(format!(
+                    "cleared the escalation of {id} to {} recorded by session {} at {}",
+                    escalation.level.as_str(),
+                    escalation.session,
+                    escalation.at
+                )),
+                Err(error) => {
+                    let given = clear_escalation
+                        .expect("a ClearEscalation intent is only set alongside clear_escalation");
+                    ctx.warnings.push(format!(
+                        "{id}'s rating was saved but the escalation to {} could not be cleared \
+                         ({error}); {}",
+                        escalation.level.as_str(),
+                        escalation_retry_hint(&id, given)
+                    ));
+                }
             }
             Ok(())
         }
@@ -930,7 +986,7 @@ pub fn run(cli: Cli) -> Result<Output> {
                         claims: None,
                         pending_claim: None,
                         recovered: false,
-                        clear_escalation: false,
+                        clear_escalation: None,
                     }
                 }
                 None => open_ctx(dir)?,

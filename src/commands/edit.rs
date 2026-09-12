@@ -133,7 +133,10 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         }
     }
     if args.fields.complexity.is_some() || args.no_complexity {
-        ctx.reassess(&task.id)?;
+        // `task.complexity` already carries what was given: `--no-complexity` cleared it
+        // above, `--complexity <level>` set it in `apply_fields`, and nothing since has
+        // touched it.
+        ctx.reassess(&task.id, task.complexity)?;
     }
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))

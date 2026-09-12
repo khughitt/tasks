@@ -11862,6 +11862,156 @@ fn reassessment_clears_on_every_edit_shape_and_closing_clears_too() {
     assert!(!has_escalation(&dropped));
 }
 
+/// A failed store save during a reassessment must not claim the clear happened, and the
+/// recovery it names must be the actual retry -- not the generic status-cleanup hint.
+/// Covers both branches of `save` that remove an escalation: `ClearEscalation` (a
+/// same-status edit) and `Release` (a status change away from `doing`).
+#[test]
+fn reassessment_names_the_retry_when_the_store_save_fails() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let escalate = |id: &str| {
+        as_agent(&env, &sci, "agent-a")
+            .args([
+                "park",
+                id,
+                "stuck",
+                "--reason",
+                "capability",
+                "--complexity",
+                "high",
+            ])
+            .assert()
+            .success();
+    };
+    let has_escalation = |id: &str| !env.json(&sci, &["show", id])["escalation"].is_null();
+    let warnings_of = |out: &std::process::Output| -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w.as_str().unwrap().to_string())
+            .collect()
+    };
+    use std::os::unix::fs::PermissionsExt;
+    let state_dir = env.claim_store("sci").parent().unwrap().to_path_buf();
+    let chmod = |mode: u32| {
+        std::fs::set_permissions(&state_dir, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+
+    // ClearEscalation: a same-status edit that only reassesses the rating.
+    let same_status = id_of(env.json(&sci, &["add", "Same", "-p", "2", "--complexity", "low"]));
+    escalate(&same_status);
+    let original = std::fs::metadata(&state_dir).unwrap().permissions();
+    chmod(0o500);
+    let out = as_agent(&env, &sci, "agent-a")
+        .args(["edit", &same_status, "--complexity", "mid"])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&state_dir, original.clone()).unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let warnings = warnings_of(&out);
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.contains("cleared the escalation")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings.iter().any(|w| w.contains(&format!(
+            "rerun `tasks edit {same_status} --complexity mid`"
+        ))),
+        "{warnings:?}"
+    );
+    assert!(
+        has_escalation(&same_status),
+        "the store write failed, so the escalation still stands"
+    );
+
+    let v = env.json(&sci, &["edit", &same_status, "--complexity", "mid"]);
+    let retry_warnings: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    assert!(
+        retry_warnings
+            .iter()
+            .any(|w| w.contains("cleared the escalation")),
+        "the retry clears it once the store can be written again: {retry_warnings:?}"
+    );
+    assert!(!has_escalation(&same_status));
+
+    // Release: a status change away from `doing`, combined with a rating.
+    let releasing = id_of(env.json(
+        &sci,
+        &["add", "Releasing", "-p", "2", "--complexity", "low"],
+    ));
+    escalate(&releasing);
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &releasing])
+        .assert()
+        .success();
+    chmod(0o500);
+    let out = as_agent(&env, &sci, "agent-a")
+        .args([
+            "edit",
+            &releasing,
+            "--status",
+            "todo",
+            "--complexity",
+            "mid",
+        ])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&state_dir, original).unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let warnings = warnings_of(&out);
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.contains("cleared the escalation")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains(&format!("rerun `tasks edit {releasing} --complexity mid`"))),
+        "{warnings:?}"
+    );
+    assert!(
+        has_escalation(&releasing),
+        "the store write failed, so the escalation still stands"
+    );
+
+    let v = env.json(&sci, &["edit", &releasing, "--complexity", "mid"]);
+    let retry_warnings: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    assert!(
+        retry_warnings
+            .iter()
+            .any(|w| w.contains("cleared the escalation")),
+        "the retry clears it once the store can be written again: {retry_warnings:?}"
+    );
+    assert!(!has_escalation(&releasing));
+}
+
 #[test]
 fn check_warns_on_an_open_plan_step_without_a_rating() {
     let mut env = TestEnv::new();
