@@ -18,6 +18,29 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 - Demoing or smoke-testing `tasks init`? Use `XDG_CONFIG_HOME=$(mktemp -d)` so the scratch
   project does not leave a permanent entry in the real registry.
 
+## Process and workspace
+
+This repo adopts the process policy in `skills/tasks/SKILL.md`. The task's `process`
+field, not a generic Superpowers trigger, decides whether brainstorming runs.
+`direct` executes the scoped task or its reviewed plan without invoking brainstorming
+or creating new design/plan documents. `planned` requires a written design spec
+reviewed by the user, then a written implementation plan reviewed by the user,
+before implementation. Reuse existing artifacts after verifying their contents and
+review state; their presence alone is not approval. Both paths retain applicable
+debugging, testing, verification, and code-review skills.
+
+Before implementation, state the chosen process and workspace. When process is
+unassessed, inspect the task and relevant code, record the choice with
+`tasks edit <id> --process direct|planned`, and note the reason. Ideas still need
+scoping. Discovery beyond a direct task's scope requires a note and reassessment
+to planned before continuing implementation.
+
+For either code path, reuse the task's isolated worktree or create one with
+`git worktree add` under .worktrees/; planned work does this before drafting its
+spec. Run just setup immediately after creation when the justfile defines it.
+Read-only investigation and task-record maintenance alone need no new worktree.
+An explicit user instruction to work in place wins.
+
 ## Gates
 
     just gate

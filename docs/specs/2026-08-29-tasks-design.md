@@ -3,7 +3,7 @@
 **Status:** implemented (2026-08-29; spec roots extended 2026-09-02; doc roots made
 configurable per project 2026-09-03; hierarchy 2026-09-03; feedback 2026-09-03;
 color 2026-09-03; source 2026-09-06; source dedup and filter 2026-09-07;
-shelved 2026-09-13); see
+shelved and explicit process 2026-09-13); see
 docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
@@ -113,6 +113,7 @@ Free-form markdown body.
 | `status`   | enum                | yes      | `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, `dropped`. |
 | `priority` | int 0–4             | yes      | 0 = most urgent. Default 2. |
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
+| `process`  | enum                | no       | `direct` or `planned`; absent means unassessed. Explicitly chosen, never inferred or inherited. See `2026-09-13-task-process-design.md`. |
 | `parallel` | bool                | no       | Safe to run beside other tasks marked `parallel`. Omitted when false. |
 | `owner`    | string              | no       | Advisory tracked-file owner; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
@@ -222,6 +223,7 @@ tasks unregister <prefix>
     ~/.config/tasks/projects.toml changes.
 
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel]
+          [--process direct|planned]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
           [--source REF] [--parent ID] [--project PREFIX]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
@@ -230,6 +232,7 @@ tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--par
     --step headings are validated before anything is written. --project creates the
     task in that registered project instead of the current one, validating every field
     against it; no local project is needed. An unregistered prefix is config.
+    --process selects a workflow explicitly; omission leaves it unassessed.
     With --source, the add is idempotent: if the target project already holds a task
     with exactly that source and that title, in any status, its id is returned with
     action "reused" and a warning, and nothing is written — the other flags on that
@@ -292,12 +295,16 @@ tasks sample [-n N] [--older-than DAYS] [--seed U64] [--project P | --all-projec
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
            [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
            [--source REF | --no-source]
+           [--process direct|planned | --no-process]
     With flags: update those fields. Without flags: open an editable copy in $EDITOR
     (§5.2). Either way the result is validated against §3 and the invariants in §5.3
     before it replaces the original. --tag adds (repeats are no-ops) rather than
     replacing the list, so triage cannot silently drop the tags a task arrived with;
     --rm-tag removes one and is a validation error when the task lacks it, --no-tags
     clears the list, and the two conflict. --no-tags with --tag is a wholesale replace.
+    --process replaces the workflow choice; --no-process clears it to unassessed,
+    and these two flags conflict. Invalid process values are rejected before writes,
+    including when supplied through the editor. Completion offers direct and planned.
 
 tasks note <id> <text>
     Append a timestamped bullet under ## Notes.
@@ -342,7 +349,8 @@ tasks check
     dependency cycles, parent problems (dangling, foreign, cycle), open child of closed
     parent, plan headings with no task, reserved delimiter in body, malformed notes
     section. Exit 1 on any error. Unresolvable foreign ids (unregistered or unreachable
-    prefix) are warnings.
+    prefix) are warnings. process_missing warns only for doing records without a
+    process choice, including goals and plan steps; unassessed todos are not findings.
 
 tasks next [--project P | --all-projects]
     The most recently parked task waiting on the agent that is open, unblocked,
@@ -473,6 +481,9 @@ ParkedRow    = TaskSummary where status, priority, size, owner, created, updated
                parallel remain concrete; tags and depends are arrays (empty when unavailable),
                + phase: "brainstorming"|"planning"|"implementing"|null
                status is null only for an entry whose checkout is unavailable
+Task        += process: "direct"|"planned"|null
+TaskSummary += process: "direct"|"planned"|null
+ParkedRow   += process: "direct"|"planned"|null     null when unresolved or unassessed
 prime       += parked: [ParkedRow]            most recently parked first
 list        -> --parked returns { tasks: [ParkedRow], warnings }
 park        -> { id, warnings }
@@ -492,6 +503,12 @@ projects    -> { projects: [{ prefix, root, reachable: bool, counts: Counts|null
 feedback    -> { id, action: "created"|"recurred", path, warnings }
                path is the absolute task file in the target project
 ```
+
+Pretty summary and parked rows include a process column, using `-` for unassessed;
+show and next print `Process: direct`, `Process: planned`, or `Process: unassessed`.
+Process does not change any picker order, eligibility, or claim behavior. It is
+distinct from the parked phase: a link-less todo can have `phase: implementing`
+and `process: planned`; the phase is a resume hint, not permission to skip reviews.
 
 `--pretty` renders the same data as tables (`list`, `ready`, `prime`), the file text plus a
 resolved-dependencies footer (`show`), and the bare id for write commands. Color, when
@@ -639,17 +656,22 @@ Skill content:
    or understanding changes; `tasks done <id> "…"` with a message in the same commit
    as the code; when a goal appears under `closeout`, confirm it is met and `done` it,
    or add the missing children. Never edit `tasks/*.md` by hand.
+   Before implementation, read process and state the chosen path and workspace;
+   if unassessed, inspect the task/code and record the choice and its reason.
 2. **Recipes**: recording an idea vs. a scoped task; decomposing a goal
    (`tasks add "<piece>" --parent <goal>` for each part; `dep` only for ordering
    between the pieces); blocking on another project's task; resolving an id collision
    (§4).
 3. **Superpowers integration** (applies when the superpowers plugin is present):
-   - **Brainstorming** attaches, rather than creates: it runs against an existing task,
+   - **Brainstorming**, when selected by planned process, attaches rather than creates:
+     it runs against an existing task,
      and after approval the spec is attached with `edit <id> --spec <topic>`.
      Deliverables the spec identifies become children of that task.
    - **writing-plans** writes the plan for a task and attaches it with
      `edit <id> --plan`; its `Task N:` headings become children with
-     `--parent <id> --plan --step`. `check`'s `unlinked_step` warning then names any
+     `--parent <id> --plan <topic> --step "Task N: <title>" --complexity <level> --process <value>`.
+     Assign both fields explicitly: a reviewed plan that settles the work supports
+     direct; parentage does not supply a default. `check`'s `unlinked_step` warning names any
      heading without a task.
    - executing-plans and subagent-driven-development call `tasks start`/`done` per
      step.
@@ -668,6 +690,30 @@ Skill content:
    rather than the tool, then commit. Ideas tagged `feedback` are the triage queue; scope,
    drop, or promote them like any other idea and record the outcome in a note so a
    reporter checking back sees it.
+
+Projects adopting the process policy make the recorded field, ahead of generic
+Superpowers triggers, decide whether brainstorming runs. Direct executes scoped
+work or a reviewed plan without brainstorming or new design/plan documents; planned
+requires user review of a written spec, then of a written implementation plan.
+Links alone never prove approval. Both paths keep appropriate debugging, testing,
+verification, and code review. If direct work outgrows its scope or exposes an
+unresolved design decision, note the evidence and reassess it to planned.
+
+Both code paths reuse an isolated task worktree or create one with `git worktree add`
+under `.worktrees/`, then run `just setup` when defined. Planned work creates it before
+the spec. Read-only investigation and task-record maintenance alone need no new
+worktree, and explicit user overrides win. This is instruction policy; the CLI does
+not launch skills, create worktrees, or require process on `start`. Scoping chooses
+process with size/complexity; curation can fill missing choices with evidence in its
+existing sample. No bulk backfill is required.
+
+This repo's AGENTS.md adopts the policy. Other projects must adopt it themselves
+before relying on the field to override their generic skill triggers. The global
+worktree rule is a separate ai-69ccac follow-up: widening its trigger fixes the
+ran-on-main incident without any CLI change. ai-e8dcc5 separately updates and
+distributes the shared writing-plans skill's child command to match this repo's
+`--complexity <level> --process <value>` integration. Neither follow-up is completed
+by the local feature; see `2026-09-13-task-process-design.md`.
 
 ## 9. Adoption in existing projects
 

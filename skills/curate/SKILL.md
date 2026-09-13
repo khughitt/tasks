@@ -76,6 +76,12 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
    - `--complexity`: set or correct against the rubric in the tasks skill (low: approach
      established, context identified, clear check; mid: bounded choices remain, scope
      clear; high: discovery, interacting behaviour, or an open architectural call).
+   - `--process`: fill a missing choice with evidence. Use direct when the task or
+     reviewed plan settles outcome, approach, and verification; planned when written
+     design and plan reviews are needed. Never infer it from size, complexity,
+     parentage, or document presence; a link is not evidence of approval. Include
+     the reason in the pass's audit note. This does not change status or expand
+     the sample, and an unassessed todo does not require a backfill sweep.
    - `--tag`: add a tag the project already uses (`tasks -C <root> tags`) when it
      clearly applies. Never invent one.
    Never: status, priority, `--parallel`, `--source`, `add`, `drop`, or `tasks/*.md`

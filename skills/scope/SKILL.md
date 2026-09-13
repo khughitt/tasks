@@ -64,7 +64,7 @@ overlaps; batch membership does not make the same unanswered question new work.
 
 | Verdict | Use when | Required result |
 |---|---|---|
-| `scoped` | Approach and context are established and correctness has a check | Rewrite the body to say why, done, and where to look; set `todo`, priority, size, and complexity by the existing rubric; decompose into children under that idea if needed |
+| `scoped` | Approach and context are established and correctness has a check | Rewrite the body to say why, done, and where to look; set `todo`, priority, size, complexity, and process by the tasks skill rubrics; decompose into children under that idea if needed |
 | `briefed` | Decisions remain that a brief can frame | Keep `idea`; cover it in the handoff and add research or design follow-ups only when needed |
 | `question` | Only the user can resolve it and a brief adds no value | Keep status; collect the questions under one `## Open questions` body heading |
 | `shelved` | Worth keeping, but not worth reviewing now | Run `tasks -C <root> shelve <id> "<wake condition>"` |
@@ -73,6 +73,12 @@ overlaps; batch membership does not make the same unanswered question new work.
 `scoped` is exceptional. Unknowns do not establish priority, make investigation
 automatically low complexity, or justify implementation tasks that disguise unresolved
 decisions. Preserve the full source material when shortening bodies.
+
+Choose `--process direct` when the task or reviewed plan settles the outcome,
+approach, and verification; choose `--process planned` when written design and plan
+reviews are needed. Set it explicitly alongside size and complexity, including on
+children. Do not derive it from those fields, parentage, or document presence.
+Missing process remains unassessed, and assigning it never makes an idea executable.
 
 Every successfully processed member receives exactly one audit note:
 
@@ -119,9 +125,9 @@ Expected result: Record the observed behavior and a recommendation on this task 
 Ideas it wakes: On completion, run tasks note on each named waiting idea with the finding, in the same commit as this result.
 ```
 
-Replace the example with real paths and waiting ids. Set priority, size, and complexity
-from the rubric; investigation can be mid or high. File a high-complexity `Design
-<topic> from the brief` task only when unresolved questions require design, and make it
+Replace the example with real paths and waiting ids. Set priority, size, complexity,
+and process from the tasks skill rubrics; investigation can be mid or high. File a
+high-complexity `Design <topic> from the brief` task only when unresolved questions require design, and make it
 depend on prerequisite research. One measurement question does not also need a design
 task.
 

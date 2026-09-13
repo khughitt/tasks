@@ -36,7 +36,9 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    top of the queue and `--project <prefix>` narrows it. It is the person's bedtime
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
-3. `tasks start <id>` before changing code. It records you as owner.
+3. Read the task's `process` and follow **Process and workspace** below before
+   implementation; state the chosen path and workspace. `tasks start <id>` before
+   changing code records you as owner.
    `start` also records a claim outside git, visible from every worktree of the project,
    with the session identity and a liveness handle. A task claimed by another live session
    fails with `claimed`; `tasks start --force <id>` takes it over and records that in the
@@ -95,7 +97,7 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all. When the project keeps a
@@ -125,6 +127,42 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
 `tasks tree <other-prefix>-<hex>` reads that subtree from wherever you are. Passing
 `--project` alongside an id names the scope explicitly and wins over the prefix.
 
+## Process and workspace
+
+When the project's agent instructions adopt this policy, the recorded `process`
+decides whether brainstorming runs, ahead of generic Superpowers triggers:
+
+- `direct`: the scoped task or reviewed plan settles the outcome, approach, and
+  verification. Execute without brainstorming or new design/plan documents.
+- `planned`: prepare a written design spec for user review, then an implementation
+  plan for user review, before implementation. Reuse existing artifacts after
+  verifying their contents and review state; links alone never prove approval.
+- Missing (JSON null): unassessed. Read the full task and relevant code, choose with
+  `tasks edit <id> --process direct|planned`, and note the reason before implementation.
+  Do not silently default or infer a choice from size, priority, complexity, parents,
+  or document links. Ideas still require scoping.
+
+If direct work exposes an unresolved design decision or grows beyond the scoped
+task, record the evidence and change it to planned before continuing implementation.
+Bounded choices covered by the task do not require that change. Both paths retain
+applicable debugging, testing, verification, and code-review skills.
+
+Both code paths use an isolated task worktree: reuse it on resume, or create one
+with `git worktree add` under `.worktrees/`, then run `just setup` if defined.
+Planned work creates it before drafting the spec. Read-only investigation and
+task-record maintenance alone need no new worktree. Explicit user instructions to
+work in place win. This field does not override higher-priority instructions;
+other projects must adopt the policy in their agent instructions before relying
+on direct to waive mandatory brainstorming. The CLI never launches skills or
+creates worktrees, and does not gate selection or `start` on process.
+
+`add --process` and `edit --process` accept `direct` or `planned`;
+`edit --no-process` clears the choice. `check` warns `process_missing` only on
+doing records, including goals and plan steps. An unassessed todo is not a finding;
+there is no bulk backfill requirement. Parked `phase` is a link-derived resume hint:
+`process: planned` with `phase: implementing` on a link-less todo still requires
+the document reviews.
+
 ## Recording work
 
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
@@ -135,7 +173,7 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
   `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
   `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
   returns it to `idea`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or
@@ -145,6 +183,9 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
   work first. A precisely specified concurrent algorithm can still be `high`; touching
   many files does not make a task `high`. `edit --complexity` or `--no-complexity` is an
   explicit reassessment and clears any escalation.
+  Choose process separately using **Process and workspace**: a small risky change
+  can need planning; a large mechanical change can be direct. Record it at scoping
+  alongside size and complexity, including on each child; it is never inherited.
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
   for ordering between the pieces. A goal that is committed work is a `todo` with a
   body, however large; `idea` is for uncommitted thoughts. `done` refuses while any
@@ -199,14 +240,19 @@ all moved aliases), and remove the inventory last.
 
 ## With superpowers
 
-- **brainstorming** runs against an existing task and attaches with
-  `tasks edit <id> --spec <topic>`; deliverables become children with
+- **brainstorming**, when selected by planned process, runs against an existing task
+  and attaches with `tasks edit <id> --spec <topic>`; deliverables become children with
   `--parent <id> --spec <topic>`. When a scope brief files a design task,
   brainstorming attaches there and finishes its draft design.
 - **writing-plans** attaches with `tasks edit <id> --plan <topic>` and adds one child
-  per `### Task N:` heading with `--parent <id> --plan <topic> --step "Task N: <title>"`
-  and `--complexity <level>` on every step child — a plan is evidence for a lower
-  rating, not a guarantee, and `check` warns on an open step without one.
+  per `### Task N:` heading:
+
+      tasks add "<title>" --parent <id> --plan <topic> --step "Task N: <title>" --complexity <level> --process <value>
+
+  Choose both fields explicitly on every step child. Use `--process direct` when
+  the reviewed plan settles the work; a child that still needs design is planned.
+  A plan is evidence for a lower complexity rating, not a guarantee; `check` warns
+  on an open step without a rating and a doing record without process.
   `tasks check` warns on any heading left without a task.
 - **executing-plans / subagent-driven-development**: `tasks start` a step before implementing, `tasks done` when its commit lands.
 - Plan headings are the drift contract: renaming or removing a heading under an open task fails `tasks check`. Update the task in the same change.

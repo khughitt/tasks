@@ -34,6 +34,15 @@ Each step is idempotent.
        session with `tasks prime`, `tasks start <id>` before changing code, `tasks done <id>`
        in the same commit as the code, and `tasks check` before every commit.
 
+       Adopt the process and workspace policy in the tasks skill: the task's process
+       field, not generic Superpowers triggers, decides whether brainstorming runs.
+       Direct executes scoped work without brainstorming or new design/plan documents;
+       planned requires user review of a written spec, then a written implementation
+       plan, before implementation. Assess missing process explicitly before coding.
+       Both code paths use an isolated task worktree, reusing one on resume or creating
+       one with git worktree add under .worktrees/; run just setup when defined.
+       Planned work creates it before drafting the spec. Explicit user overrides win.
+
 4. Work:
 
        tasks prime                      # counts, ready list, who is doing what
@@ -105,8 +114,10 @@ from a clone):
     tasks unregister sci             # drop a stale prefix and its aliases; files are untouched
     tasks rename dot dots            # rename a registered prefix; old ids still resolve
     tasks rename dot dots --explain  # diagnose an interruption without locks or writes
-    tasks add "Bank the ledger" -p 1 --size m --complexity low --tag ledger
+    tasks add "Bank the ledger" -p 1 --size m --complexity low --process direct --tag ledger
     tasks add "Emit rows" --parent sci-4f2a9c
+    tasks edit <id> --process planned # choose a workflow explicitly
+    tasks edit <id> --no-process     # clear it to unassessed
     tasks add "Curation sweep" --every 30d  # days or weeks since each completion
     tasks list --periodic            # recurring tasks, soonest due first
     tasks edit <sweep-id> --every 2w # change the cadence; --no-every clears it and its anchor
@@ -163,6 +174,42 @@ resume, or use `--explain` to observe its recovery verdict without writing, lock
 checking authorization. Outside git, rename warns that forward recovery is the only
 option after source removal. `git checkout .` alone does not undo a rename; see
 [manual recovery](docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery).
+
+## Choosing a process
+
+Set `--process direct|planned` on `add` or `edit`; `edit --no-process` clears it.
+Choose it alongside size and complexity when scoping work, including each plan child.
+It is never derived from those fields, parentage, or document links.
+
+| Process | Agent workflow |
+|---------|----------------|
+| `direct` | Execute the scoped task or reviewed plan without brainstorming or new design/plan documents. |
+| `planned` | Review a written design spec with the user, then review a written implementation plan, before implementing. |
+| Unassessed | Read the task and relevant code, explicitly record the choice and its reason before implementation. |
+
+Both code paths retain appropriate debugging, tests, and review, and use an isolated
+task worktree under the adopted policy. A direct task that uncovers an unresolved
+design decision or grows beyond its scope needs a note and reassessment to planned.
+Ideas still need scoping. Existing document links do not establish approval.
+
+JSON task, summary, and parked rows expose `process` as a string or null. Pretty
+summary and parked rows show a process column (`-` when unassessed); show and next
+print `Process: direct`, `Process: planned`, or `Process: unassessed`. The parked
+`phase` remains a link-derived resume hint: a todo without document links can show
+`phase: implementing` alongside `process: planned`, which still requires both reviews.
+
+`tasks check` warns `process_missing` only for doing records without a choice,
+including goals and plan steps. Unassessed todos need no backfill sweep. The CLI
+does not change readiness, ordering, or `start` eligibility based on process, and
+does not run skills or create worktrees.
+
+Projects must adopt the process policy in their agent instructions (see the install
+snippet above) before it can take precedence over generic brainstorming triggers.
+This repo has adopted it. The separate global worktree-rule widening is tracked as
+`ai-69ccac`; it fixes the ran-on-main incident without a CLI change. `ai-e8dcc5`
+tracks updating and distributing the shared plan-writing skill so its child command
+mirrors `--complexity <level> --process <value>`. These rollout tasks are separate
+from this repo's implementation. Design: `docs/specs/2026-09-13-task-process-design.md`.
 
 ## Completions
 

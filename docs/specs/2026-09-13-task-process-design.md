@@ -1,7 +1,7 @@
 # Explicit task process
 
-Status: approved (2026-09-13); Task 1 CLI contract implemented on this branch;
-Task 2 policy and documentation pending. Cross-project rollout remains separate.
+Status: locally implemented (2026-09-13); CLI contract and policy/docs complete on
+this branch. Cross-project rollout (ai-69ccac, ai-e8dcc5) remains separate and open.
 Task: tasks-61cc5c
 
 ## Problem and evidence
@@ -114,9 +114,9 @@ plan-writing skill's child-creation command must include `--process` alongside
 do not infer it from parentage. The shared skill update is tracked as ai-e8dcc5,
 after this CLI lands; update the canonical skill and distribute it through its
 normal install flow, not by editing a plugin cache. The rollout remains incomplete
-until that follow-up lands. The field does not exist in the installed CLI during
-this feature's own planning: record intended process in child bodies now and set
-the field explicitly when the supporting binary is available.
+until that follow-up lands. During this feature's planning the installed CLI lacked
+the field, so child bodies recorded the intended process. Task 1 installed the
+supporting binary and explicitly set the parent to planned and both children to direct.
 If direct work reveals an unresolved design decision or expands beyond its stated
 scope, note the evidence, change it to planned, and prepare the reviewable spec.
 Bounded implementation choices already covered by the task do not force escalation.
@@ -153,4 +153,10 @@ doing-only warning applied before planning. The implementation plan was then
 approved. Task 1 passed `just gate` (171 unit and 289 CLI tests), code review,
 and installation. The parent now records planned and both children direct;
 the installed `tasks check` reports no errors and only the unrelated unassessed
-doing task tasks-7ba741. Task 2 and the cross-project rollout are not complete.
+doing task tasks-7ba741. Task 2 updated this repo's adoption instructions, shipped
+skills, README, and base reference. All three skills passed structural validation;
+manual review covered the direct, planned, and unassessed scenarios and found no
+material inconsistencies. `just check` passed with the same expected warning.
+These checks establish the local deliverables, not a completed live-agent rollout.
+ai-69ccac and ai-e8dcc5 remain open. At merge, assess tasks-7ba741 from the main
+checkout as the user directed; this branch leaves that record unchanged.

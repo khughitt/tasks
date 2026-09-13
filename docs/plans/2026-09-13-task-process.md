@@ -3,7 +3,8 @@
 > **For agentic workers:** Use superpowers:executing-plans to implement this plan
 > task-by-task in the existing worktree. Steps use checkboxes for tracking.
 
-Status: approved (2026-09-13); Task 1 implemented on this branch, Task 2 not started.
+Status: locally implemented (2026-09-13); both tasks complete on this branch.
+External rollout remains tracked by ai-69ccac and ai-e8dcc5.
 
 **Goal:** Store and display an explicit direct/planned process choice without
 changing which tasks can be selected or started.
@@ -41,10 +42,10 @@ with `tasks note`, and close it in its implementation commit after checks pass.
 
 This plan has two sequential, independently reviewable deliverables: the CLI
 contract, then the agent policy and documentation. Execute inline; no parallel
-dispatch is needed. Both children have intended process **direct**, since this
-reviewed plan will supply their decisions. Their task bodies record that intent
-until Task 1 installs a binary that can write the field. Set their actual fields
-then, without assigning process to unrelated records. The parent is **planned**.
+dispatch is needed. Both children now record process **direct**, since this
+reviewed plan supplies their decisions. Task 1 installed the supporting binary
+and assigned those fields explicitly; the parent records **planned**. Unrelated
+records remain unassessed, including tasks-7ba741 until the merge checkout handles it.
 
 External follow-ups already filed:
 
@@ -290,7 +291,7 @@ records. Depends on Task 1. No shared skill or harness source edits in this task
 agent instructions that select the recorded path, preserve both written-document
 review gates, and explain the separate global rollout tasks.
 
-- [ ] **Update the tasks protocol and its planning integration.**
+- [x] **Update the tasks protocol and its planning integration.**
 
 Place this rule before implementation starts in the session protocol:
 
@@ -317,7 +318,7 @@ of the already-filed child. A planner chooses both fields explicitly; process is
 not inherited. Add equivalent choice criteria and `--process` to scoping and to
 curation's allowed field edits. Do not change the curation pass's scope or gates.
 
-- [ ] **Adopt the policy in this repo and document the CLI.**
+- [x] **Adopt the policy in this repo and document the CLI.**
 
 Add a repo instruction making the task's process the selector for creating new
 design/plan artifacts, with generic brainstorming triggers subordinate to that
@@ -331,7 +332,7 @@ other projects must adopt the instruction policy and that ai-69ccac fixes global
 worktree coverage without this CLI. Name ai-e8dcc5 for the shared planner update;
 do not mark either follow-up done from this checkout.
 
-- [ ] **Check policy consistency and finish the local implementation.**
+- [x] **Check policy consistency and finish the local implementation.**
 
 ```sh
 rg -n 'process|worktree|brainstorm|writing-plans|complexity' \
