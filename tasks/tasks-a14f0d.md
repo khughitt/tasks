@@ -4,8 +4,9 @@ title: Validate TASKS_FORMAT even when --pretty overrides it
 status: todo
 priority: 3
 size: xs
+complexity: low
 created: 2026-09-04T02:03:12Z
-updated: 2026-09-09T11:05:38Z
+updated: 2026-09-13T16:47:44Z
 depends: []
 tags: [cli]
 ---
@@ -17,3 +18,4 @@ Done: any invocation with `TASKS_FORMAT` set to something other than `json` or `
 ## Notes
 
 - 2026-09-09T11:05:38Z (design/curation): curate: refined; body now states the done condition and the behaviour change; facts unchanged
+- 2026-09-13T16:47:44Z (main): Complexity low: main.rs still selects the (true, _) format arm before rejecting invalid TASKS_FORMAT. Validation before override selection is established, and the task specifies the failing value, exit code, and regression check.

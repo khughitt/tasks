@@ -4,8 +4,9 @@ title: Id-directed commands work from outside every project by routing through t
 status: todo
 priority: 3
 size: s
+complexity: mid
 created: 2026-09-05T23:00:36Z
-updated: 2026-09-09T11:36:44Z
+updated: 2026-09-13T16:47:43Z
 depends: []
 tags: [cli]
 spec: docs/specs/2026-09-05-shell-completions-design.md
@@ -19,3 +20,4 @@ Done: `open_id_write_ctx` and the id-directed read path fall through to `open_re
 
 - 2026-09-09T11:05:50Z (design/curation): curate: decision; reproduced from outside every project on 2026-09-09, conflict stated under Open questions; proposal: pick the rule: a registry-wide completion scope for root alone with id-directed completion requiring a local project, or amend the completions spec to justify offering foreign ids everywhere
 - 2026-09-09T11:36:44Z (main): decision (2026-09-09): neither option; id-directed commands run from outside every project by routing through the registry when no local project exists, as root already does. Completion then offers exactly what the command accepts.
+- 2026-09-13T16:47:43Z (main): Complexity mid: the routing decision and acceptance checks are explicit, but open_id_write_ctx and open_id_read_ctx now share registry alias resolution and writes use lock_and_revalidate. Bounded investigation must preserve local-checkout precedence, explicit scopes, rename guards, and errors other than no_project.

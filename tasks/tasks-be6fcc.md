@@ -4,8 +4,9 @@ title: "One-shot defer date: hide an open task from ready until a date"
 status: todo
 priority: 2
 size: m
+complexity: mid
 created: 2026-09-11T01:15:26Z
-updated: 2026-09-11T01:15:26Z
+updated: 2026-09-13T16:47:42Z
 depends: []
 tags: [quick-add, cli, periodic]
 source: "mindful:thought:1e2513d2f5ea48609022559f3c687d01"
@@ -18,3 +19,7 @@ Shape, following the periodic design's derived-not-scheduled principle: a `defer
 Open: whether a deferred todo should also be excluded from dependency-readiness of its dependents (probably not: defer is about attention, not blocking), and whether a task can carry both `every` and `defer` (probably refuse; recurrence already defers).
 
 Motivating records: prism-49a068 and prism-8a8eac, both carrying 'revisit 2026-11-10' in prose; move them onto the field when it lands. Feedback report: tasks-f5ab4a.
+
+## Notes
+
+- 2026-09-13T16:47:42Z (main): Complexity mid: the outcome and read-time date approach are defined; bounded choices remain for date semantics, recurrence coexistence, dependency readiness, and consistent omission across ready, next, prime, and sample. Reassess after the design resolves those choices.
