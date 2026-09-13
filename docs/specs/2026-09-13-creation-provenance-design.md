@@ -21,11 +21,19 @@ this design:
   config — and no task record in any registered project carries `model:`. A creation
   field built on "the harness exports a variable" is inert until the harness side is
   done, so that wiring is in scope here, as pieces in the projects that own it.
-- **Claude Code can supply the value.** Its `SessionStart` hook input may carry `model`
-  (not guaranteed), and a hook can write `export …` lines to `$CLAUDE_ENV_FILE`, which
-  runs as a preamble before every Bash command. ops already owns a session-start hook.
-  Codex has no session hook; its config can set static environment variables. Crush and
-  other harnesses are unknown.
+- **Claude Code can supply the value, but not with one export.** Its `SessionStart`
+  hook input may carry `model` (not guaranteed) and only SessionStart, Setup, CwdChanged,
+  and FileChanged hooks can write `export …` lines to `$CLAUDE_ENV_FILE`, the script
+  Claude Code runs as a preamble before every Bash command. The model can change
+  mid-session (`/model`, automatic fallback, `opusplan`, resume), and the hook that
+  follows those changes, `PostModelSwitch`, receives `to_model` but cannot write the env
+  file. A value exported once at session start would misattribute everything after a
+  switch. Both hooks receive `scratchpad_dir`, so the export can point at a state file
+  the switch hook rewrites. ops already owns the session-start hook.
+- **Codex knows its harness, not its effective model.** Codex 0.154.0 has hooks
+  (`session_start` among them, already configured), but no documented model field or
+  environment persistence, and `codex --model` overrides the configured default, so a
+  static export of the configured model can be wrong. Crush and others are unknown.
 
 ## Decision
 
@@ -61,15 +69,19 @@ Alternatives rejected:
   `source` and `model` (`validate_line("agent", …)`); a multi-line stored value is a
   parse error when read.
 - **Supply.** At creation the value comes from, in order: `--agent <value>` on `add`;
-  otherwise `TASKS_AGENT` from the environment; otherwise nothing. Unset or empty
+  otherwise `TASKS_AGENT` from the environment; otherwise nothing. The explicit value
+  is resolved first and the environment is read only when no flag was given, so an
+  invalid variable cannot fail an `add` that names a valid agent. Unset or empty
   `TASKS_AGENT` records nothing. A non-Unicode value is a validation error naming the
   variable, never a silent skip — the `completion_model()` shape, factored so both
   variables share one reader.
-- **Write path.** The stamp lives in `add::blank()`, the one constructor every created
-  record passes through: `tasks add` (and therefore quick-add), and `tasks feedback`.
-  `feedback` gains no flag; it is harness-driven by design and its reports must stay
-  free of project detail, which a hand-typed value could carry. `blank()` reads the
-  environment; `add` applies the flag afterwards through `FieldArgs` so the flag wins.
+- **Write path.** One resolver, `creation_agent(explicit: Option<&str>)` in
+  `commands/mod.rs`, validates the flag when present and otherwise reads the variable.
+  `add::blank()` takes the resolved value, so the two creators share it: `tasks add`
+  (and therefore quick-add) passes its flag; `tasks feedback` passes `None` and is
+  harness-driven only. `feedback` gains no flag: its reports must stay free of project
+  detail, which a hand-typed value could carry. `apply_fields` also sets `agent` when
+  the flag is present, which on `add` rewrites the same value.
 - **Correction.** `agent` joins `FieldArgs`, so `edit --agent <value>` replaces the
   stamp; `edit --no-agent` clears it; the two conflict. Editor saves validate through
   the record parser. An `edit` never reads `TASKS_AGENT`: only creation stamps from the
@@ -92,19 +104,39 @@ Alternatives rejected:
 The CLI stores what it is given; each harness owns exporting it. These are pieces in
 the projects that own them, blocking this goal (`tasks dep tasks-dc599b --on <piece>`):
 
-- **Claude Code (ops).** `hooks/claude-sessionstart` reads its stdin JSON and, when
-  `$CLAUDE_ENV_FILE` is set, appends `export TASKS_AGENT=claude-code/<model>` and
-  `export TASKS_MODEL=<model>` when `model` is present, and
-  `export TASKS_AGENT=claude-code` alone when it is not. The hook keeps its contract:
-  advisory, never fails session start, exit 0. Values are shell-quoted.
-- **Codex (ai).** `codex/config.toml` sets `TASKS_AGENT = "codex/<model>"` through the
-  shell environment policy, kept in step by hand with the `model` key beside it; the
-  same block sets `TASKS_MODEL`. Codex has no documented per-session hook to derive it from.
+- **Claude Code (ops).** The model lives in a state file, `<scratchpad_dir>/tasks-model`,
+  and the exports resolve it at command time, so a switch takes effect on the next
+  `tasks` invocation without touching the env file again:
+  - `hooks/claude-sessionstart` reads its stdin JSON. When `$CLAUDE_ENV_FILE` and
+    `scratchpad_dir` are both present it writes `model` to the state file (or removes
+    the file when the field is absent) and appends two lines to the env file:
+    `export TASKS_MODEL="$(cat '<state>' 2>/dev/null)"` and
+    `export TASKS_AGENT="claude-code${TASKS_MODEL:+/$TASKS_MODEL}"`. The preamble runs
+    before each Bash command, so the substitution re-reads the file every time. When
+    `scratchpad_dir` is absent it appends `export TASKS_AGENT=claude-code` only.
+    When `$CLAUDE_ENV_FILE` is absent it writes nothing.
+  - A new `PostModelSwitch` hook, `hooks/claude-postmodelswitch`, writes `to_model` to
+    the same state file. A missing `scratchpad_dir` or `to_model` writes nothing.
+  - Both hooks keep the session-start contract: advisory, exit 0, never fail the
+    session. Paths are shell-quoted. Subagents inherit the session's file; a subagent
+    running under another model is attributed to the session's model (deferred).
+  - Acceptance is a live transition, not only the unit tests: start a session, `/model`
+    to a different model, `tasks add`, and confirm the record carries the new model;
+    then `tasks done` and confirm `model` matches. If the preamble proves not to be
+    re-evaluated per command, fall back to `export TASKS_AGENT=claude-code` alone and
+    record why in this spec.
+- **Codex (ai).** Harness-only, because the effective model is not knowable from
+  config: `codex/config.toml` sets `TASKS_AGENT = "codex"` through the shell
+  environment policy and exports no `TASKS_MODEL`. Promote to `codex/<model>` when a
+  Codex hook exposes the effective model; the session_start hook already configured is
+  where that would go.
 - **Other harnesses (skill instruction, this repo).** `skills/tasks/SKILL.md` adds one
   rule: when `TASKS_AGENT` is unset and the session knows its harness and model ids,
   pass `--agent <harness>/<model>` on `add`; when it knows only the harness, pass that;
-  when unsure, pass nothing. The README documents the variable beside `TASKS_MODEL`.
-  quick-add inherits this through `tasks add` and needs no change of its own.
+  when unsure, pass nothing. For `feedback`, which has no flag, supply the variable on
+  that invocation: `TASKS_AGENT=<harness>/<model> tasks feedback …`. The README documents
+  the variable beside `TASKS_MODEL`. quick-add inherits this through `tasks add` and
+  needs no change of its own.
 
 ## Deferred
 
@@ -115,6 +147,8 @@ the projects that own them, blocking this goal (`tasks dep tasks-dc599b --on <pi
   the hook cannot be made reliable.
 - Per-note or per-edit attribution; notes already carry the owner identity.
 - Retroactive stamping of existing records.
+- Subagent attribution under Claude Code: a subagent on another model shares the
+  session's state file. `agent_id`/`agent_type` are in the hook input if this matters.
 
 ## Testing
 
@@ -122,7 +156,8 @@ Mirroring the `model` cases in `tests/cli.rs` and the format units:
 
 - `TASKS_AGENT=A tasks add` stamps A; `--agent B` with the variable set stamps B; neither
   present leaves the field absent; an empty variable is absent; a non-Unicode variable
-  fails the `add` with an error naming it and writes nothing.
+  fails the `add` with an error naming it and writes nothing — and the same invalid
+  variable with `--agent B` succeeds and stamps B, as does a multi-line variable.
 - `TASKS_AGENT=A tasks feedback …` stamps A on the filed report.
 - `TASKS_AGENT=A tasks edit <id> --title x` on an unstamped task leaves it unstamped.
 - `edit --agent` replaces, `--no-agent` clears, both together conflict; an editor save
@@ -132,6 +167,10 @@ Mirroring the `model` cases in `tests/cli.rs` and the format units:
   parked rows; pretty `show` prints the line and tables are unchanged.
 - `tests/common/mod.rs` scrubs `TASKS_AGENT` in both command builders alongside
   `TASKS_MODEL`.
-- Ops hook: a unit test feeding stdin JSON with and without `model`, asserting the lines
-  written to a temporary `CLAUDE_ENV_FILE`, and that no file is touched when the
-  variable is unset.
+- Ops hooks: unit tests feed session-start JSON with and without `model` and with and
+  without `scratchpad_dir`, asserting the state file and the lines appended to a
+  temporary `CLAUDE_ENV_FILE`, and that nothing is written when the variable is unset;
+  then feed a PostModelSwitch payload and assert the state file changes. A shell-level
+  test sources the env file before and after the switch payload and asserts
+  `TASKS_AGENT` and `TASKS_MODEL` follow it. The live `/model` transition above is the
+  acceptance check for the piece.
