@@ -3,7 +3,7 @@
 > **For agentic workers:** Use superpowers:executing-plans to implement this plan
 > task-by-task in the existing worktree. Steps use checkboxes for tracking.
 
-Status: locally implemented (2026-09-13); both tasks complete on this branch.
+Status: implemented (landed on main 2026-09-13); both tasks complete.
 External rollout remains tracked by ai-69ccac and ai-e8dcc5.
 
 **Goal:** Store and display an explicit direct/planned process choice without

@@ -1,7 +1,7 @@
 # Explicit task process
 
-Status: locally implemented (2026-09-13); CLI contract and policy/docs complete on
-this branch. Cross-project rollout (ai-69ccac, ai-e8dcc5) remains separate and open.
+Status: implemented (landed on main 2026-09-13, commits 6917eac..38b060e). Cross-project
+rollout (ai-69ccac, ai-e8dcc5) remains separate and open.
 Task: tasks-61cc5c
 
 ## Problem and evidence
@@ -158,5 +158,5 @@ skills, README, and base reference. All three skills passed structural validatio
 manual review covered the direct, planned, and unassessed scenarios and found no
 material inconsistencies. `just check` passed with the same expected warning.
 These checks establish the local deliverables, not a completed live-agent rollout.
-ai-69ccac and ai-e8dcc5 remain open. At merge, assess tasks-7ba741 from the main
-checkout as the user directed; this branch leaves that record unchanged.
+ai-69ccac and ai-e8dcc5 remain open. At merge, tasks-7ba741 was assessed direct from
+the main checkout as the user directed, leaving `tasks check` clean.

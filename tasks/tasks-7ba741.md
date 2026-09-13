@@ -5,9 +5,10 @@ status: doing
 priority: 2
 size: m
 complexity: mid
+process: direct
 owner: main
 created: 2026-09-04T21:44:54Z
-updated: 2026-09-13T16:47:43Z
+updated: 2026-09-13T18:21:00Z
 depends: [ops-31f038]
 tags: [testing]
 ---

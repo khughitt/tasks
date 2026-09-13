@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/tasks-61cc5c-process
 created: 2026-09-13T10:31:15Z
-updated: 2026-09-13T18:12:18Z
+updated: 2026-09-13T18:21:19Z
 started: 2026-09-13T17:30:00Z
 completed: 2026-09-13T18:12:18Z
 depends: []
@@ -28,3 +28,4 @@ prism-28e29c executed straight from the tasks protocol on main: the agent matche
 - 2026-09-13T17:52:35Z (feat/tasks-61cc5c-process): parked (waiting on agent, session): Task 1 complete and installed; resume tasks-d37cf5 for policy/docs in the approved plan, then close the local goal; ai-69ccac and ai-e8dcc5 remain separate follow-ups
 - 2026-09-13T18:12:18Z (feat/tasks-61cc5c-process): Merge handoff: tasks-7ba741 remains unchanged here. After merging, run tasks edit tasks-7ba741 --process direct from the main checkout, as directed by the user; do not edit it in this worktree. ai-69ccac (global worktree rule) and ai-e8dcc5 (shared planner distribution) remain open.
 - 2026-09-13T18:12:18Z (feat/tasks-61cc5c-process): Local process feature complete: CLI contract and repo policy/docs implemented, installed, and verified; both plan children closed. External rollout remains ai-69ccac and ai-e8dcc5.
+- 2026-09-13T18:21:19Z (main): Landed on main by fast-forward (6917eac..38b060e); gate passed on the branch (171 unit, 289 CLI); tasks-7ba741 assessed direct from main; spec and plan status corrected. Follow-ups ai-69ccac, ai-e8dcc5 stay open.
