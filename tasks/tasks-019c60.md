@@ -1,14 +1,15 @@
 ---
 id: tasks-019c60
 title: "Scope pass: ideas become a next action, a brief, a question, or a shelf"
-status: doing
+status: done
 priority: 2
 size: l
 complexity: high
 owner: scope
 created: 2026-09-13T01:42:27Z
-updated: 2026-09-13T02:04:17Z
+updated: 2026-09-13T11:55:39Z
 started: 2026-09-13T01:42:27Z
+completed: 2026-09-13T11:55:39Z
 depends: []
 tags: [skill, curation]
 spec: docs/specs/2026-09-12-scope-pass-design.md
@@ -20,3 +21,4 @@ A bounded pass over a cluster of related ideas that leaves each one with a suppo
 
 - 2026-09-13T01:45:04Z (scope): brainstormed 2026-09-12: spec drafted at docs/specs/2026-09-12-scope-pass-design.md; understood vs committed split, briefs under docs/notes, shelved is open and hidden; awaiting spec review
 - 2026-09-13T02:04:17Z (scope): spec review 2026-09-12: six points resolved (worktree root, goal shelving guard, pool eligibility, preserve parents, sample scope: prefix, editor rule); skill piece now depends on the CLI piece
+- 2026-09-13T11:55:39Z (scope): both pieces landed: shelved status (tasks-470e8c) and the scope skill (tasks-0d50ff) with real Prism acceptance on prism scope-acceptance 6887eae
