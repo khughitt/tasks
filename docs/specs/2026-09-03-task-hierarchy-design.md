@@ -121,8 +121,9 @@ would therefore never show it again. `prime` gains:
   so listing it would invite a close the tool then declines. Such a goal is named in a
   `prime` warning instead of vanishing, and an unreachable dependency counts as open here
   exactly as it does for `done`.
-- `roadmap`: the open forest, as nested nodes, identical to `tasks tree` with no
-  arguments (§4.4). Roots are the roadmap; their subtrees show how each goal is
+- `roadmap`: the visible open forest, as nested nodes. Unlike `tasks tree`, it hides every
+  shelved row; shelved roots remain hidden even if they have reopened descendants (§4.4).
+  Roots are the roadmap; their subtrees show how each goal is
   decomposed and how far along it is. A project with no hierarchy gets a flat list of its
   open tasks here, which is the honest answer to "what is this project trying to do".
 
@@ -148,9 +149,10 @@ tasks list [... existing flags ...] [--parent ID]
 tasks tree [<id>] [--all]
     The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
     the read side of parent, as graph is of depends. Without --all the forest is pruned
-    to nodes that are open or have an open descendant, so a closed ancestor of open work
+    to nodes that are open and not shelved or have such a descendant, so a closed ancestor of open work
     stays visible as context, with its closed status, rather than hiding the work
-    beneath it. --all includes every task. Roots and siblings are in ready order
+    beneath it. A shelved child of a shown parent stays visible recursively, while a
+    shelved root is hidden unless --all. --all includes every task. Roots and siblings are in ready order
     (priority, size, created); a parent precedes its children.
 
 tasks show <id>

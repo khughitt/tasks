@@ -1,6 +1,6 @@
 # Scope pass: a `scope` skill and a `shelved` status
 
-Status: draft (2026-09-12)
+Status: `shelved` implemented (2026-09-13, see docs/plans/2026-09-12-shelved-status.md); `scope` skill pending (tasks-0d50ff)
 Task: tasks-019c60; pieces tasks-470e8c (`shelved`), tasks-0d50ff (`scope` skill)
 
 ## 1. Problem
@@ -283,8 +283,8 @@ One note per member: `scope: <verdict>; <what changed>[; brief: <path>][; propos
 the age window, so `curate` does not redo the pass. A `proposal:` segment appears only
 on `drop`, and it is the one write a `drop` verdict makes.
 
-`tasks sample`'s pending rule today recognises only a `curate:` note; it gains
-`scope:` as a second prefix with the same `proposal:` parse, so a scope proposal is
+`tasks sample`'s pending rule recognises `curate:` and `scope:` notes with the same
+`proposal:` parse, so a scope proposal is
 excluded from the pool and reported as `<id> pending: <proposal>` exactly as a curate
 proposal is. That is a CLI change owned by tasks-470e8c (the CLI piece of this goal)
 and tested in §6; the skill must not land before it, or its drop proposals would be

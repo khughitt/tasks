@@ -90,7 +90,7 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
 
 ## Pending proposals
 
-`sample` never draws a task whose most recent note is a `curate:` note carrying a
+`sample` never draws a task whose most recent note is a `curate:` or `scope:` note carrying a
 `proposal:` segment; it reports the task as `pending` with the proposal text instead.
 Relay those lines in the summary and move on. Any later note clears it: the human records
 the decision with `tasks note <id> "<decision>"` whether they acted on the proposal or

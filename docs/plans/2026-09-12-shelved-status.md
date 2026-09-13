@@ -32,7 +32,7 @@
 **Interfaces:**
 - Produces: `Status::Shelved` (`as_str() == "shelved"`, `is_open() == true`), `Counts::shelved: usize`, a `shelved` count column between `blocked` and the closed columns.
 
-- [ ] **Step 1: Write the failing unit tests**
+- [x] **Step 1: Write the failing unit tests**
 
 In `src/model.rs`, extend the two existing tests:
 
@@ -64,12 +64,12 @@ In `src/model.rs`, extend the two existing tests:
     }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --bin tasks model::tests`
 Expected: compile error, `no variant named Shelved`.
 
-- [ ] **Step 3: Add the variant**
+- [x] **Step 3: Add the variant**
 
 `src/model.rs`:
 
@@ -110,7 +110,7 @@ impl Status {
     // is_open and can_transition unchanged: Shelved is open by construction
 ```
 
-- [ ] **Step 4: Fix the exhaustive matches the compiler now reports**
+- [x] **Step 4: Fix the exhaustive matches the compiler now reports**
 
 `src/output.rs` — `Counts` and its two functions:
 
@@ -184,12 +184,12 @@ and add `(Style::Status(Status::Shelved), "2;34"),` to the table the test at `:1
                     };
 ```
 
-- [ ] **Step 5: Build, run the unit tests, then the whole suite**
+- [x] **Step 5: Build, run the unit tests, then the whole suite**
 
 Run: `cargo build && cargo test --bin tasks model::tests && just test`
 Expected: all pass. If a `tests/cli.rs` test pins the exact `counts` object of `prime` or `projects` (search `"blocked":` in `tests/cli.rs`), add `"shelved": 0` at the same position in that expectation — that is the contract change this task makes, nothing else.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/model.rs src/output.rs src/style.rs src/commands/mod.rs tests/cli.rs
@@ -211,14 +211,14 @@ git commit -m "feat(model): add the shelved status as an open status"
 - Consumes: `Status::Shelved` (Task 1); `close(ctx, id, to, message, force)` and `transition` in `status.rs`/`mod.rs`; `crate::hierarchy::open_descendants`.
 - Produces: `status::shelve(ctx, id, wake: String)`, `status::unshelve(ctx, id)`; `ClaimIntent::Release { clear_park: bool, announce_escalation: bool }`.
 
-- [ ] **Step 1: Write the failing end-to-end tests**
+- [x] **Step 1: Write the failing end-to-end tests**
 
 Append to `tests/cli.rs` (helpers `as_agent`, `id_of`, `write_claim` already exist).
-`env.fail` asserts exit 1 and returns only the error *kind*; when a test needs the message
+`env.fail` asserts exit 1 and returns only the error *kind*; when a test needs the detail
 too, use this helper, added once beside `as_agent`:
 
 ```rust
-/// The parsed `{"error": {"kind", "message"}}` of a command expected to exit 1.
+/// The parsed `{"error": {"kind", "detail"}}` of a command expected to exit 1.
 fn error_of(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> serde_json::Value {
     let out = env.cmd(dir).args(args).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
@@ -261,7 +261,7 @@ fn shelve_requires_a_wake_condition_and_unshelve_requires_shelved() {
 
     let err = error_of(&env, &sci, &["unshelve", &id]);
     assert_eq!(err["error"]["kind"], "invalid_transition");
-    assert!(err["error"]["message"].as_str().unwrap().contains("unshelve requires shelved"));
+    assert!(err["error"]["detail"].as_str().unwrap().contains("unshelve requires shelved"));
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn shelve_refuses_a_goal_with_unshelved_open_descendants() {
     let b = id_of(env.json(&sci, &["add", "B", "--parent", &goal]));
     let err = error_of(&env, &sci, &["shelve", &goal, "someday"]);
     assert_eq!(err["error"]["kind"], "open_descendants");
-    let message = err["error"]["message"].as_str().unwrap();
+    let message = err["error"]["detail"].as_str().unwrap();
     assert!(message.contains(&a) && message.contains(&b), "{message}");
     assert_eq!(env.json(&sci, &["show", &goal])["task"]["status"], "todo");
 
@@ -331,12 +331,12 @@ fn shelve_refuses_a_goal_with_unshelved_open_descendants() {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --test cli shelve`
 Expected: 4 failures; the CLI reports `unrecognized subcommand 'shelve'`.
 
-- [ ] **Step 3: Add the subcommands**
+- [x] **Step 3: Add the subcommands**
 
 `src/cli.rs`, after `Unblock`:
 
@@ -411,7 +411,7 @@ pub fn unshelve(mut ctx: Ctx, id: String) -> Result<Output> {
 
 If `crate::format::validate_line` has a different name or signature in this tree, use whatever `park.rs:23` calls to validate `next_step`; the point is a one-line, non-empty message.
 
-- [ ] **Step 4: Clear the park entry and announce the escalation**
+- [x] **Step 4: Clear the park entry and announce the escalation**
 
 `src/commands/mod.rs`, the intent enum:
 
@@ -460,12 +460,12 @@ The release branch (`:806-830`): destructure `ClaimIntent::Release { clear_park,
 
 Any other constructor of `ClaimIntent::Release` in the tree (grep `ClaimIntent::Release`) passes `announce_escalation: false`.
 
-- [ ] **Step 5: Run the new tests, then the suite**
+- [x] **Step 5: Run the new tests, then the suite**
 
 Run: `cargo test --test cli shelve && just test`
 Expected: all pass. The existing test `reassessment_clears_on_every_edit_shape_and_closing_clears_too` still passes: `done`/`drop` behaviour is unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/cli.rs src/commands/status.rs src/commands/mod.rs src/complete.rs tests/cli.rs
@@ -486,7 +486,7 @@ git commit -m "feat(cli): add shelve and unshelve"
 - Consumes: `Status::Shelved`, `tasks shelve` (Tasks 1–2), `editor_script` test helper.
 - Produces: nothing new; four refusals.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -499,7 +499,7 @@ fn start_and_park_refuse_a_shelved_task_and_name_unshelve() {
         let err = error_of(&env, &sci, &args);
         assert_eq!(err["error"]["kind"], "invalid_transition", "{args:?}");
         assert!(
-            err["error"]["message"].as_str().unwrap().contains("tasks unshelve"),
+            err["error"]["detail"].as_str().unwrap().contains("tasks unshelve"),
             "{args:?}: {err}"
         );
     }
@@ -515,7 +515,7 @@ fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record()
 
     let err = error_of(&env, &sci, &["edit", &id, "--status", "shelved"]);
     assert_eq!(err["error"]["kind"], "validation");
-    assert!(err["error"]["message"].as_str().unwrap().contains("tasks shelve"));
+    assert!(err["error"]["detail"].as_str().unwrap().contains("tasks shelve"));
     assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
 
     let into = editor_script(&sci, "sed -i 's/^status: todo$/status: shelved/' \"$1\"");
@@ -548,12 +548,12 @@ fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record()
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --test cli shelved`
 Expected: both fail (`start` succeeds where it should refuse; `edit --status shelved` succeeds).
 
-- [ ] **Step 3: Add the guards**
+- [x] **Step 3: Add the guards**
 
 `src/commands/status.rs`, at the top of `start`, after `load`:
 
@@ -622,12 +622,12 @@ Editor path (`:217-224`):
     }
 ```
 
-- [ ] **Step 4: Run the tests, then the suite**
+- [x] **Step 4: Run the tests, then the suite**
 
 Run: `cargo test --test cli shelved && just test`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/commands/status.rs src/commands/park.rs src/commands/edit.rs tests/cli.rs
@@ -649,7 +649,7 @@ git commit -m "feat(cli): refuse start, park, and edits into shelved"
 - Consumes: `Status::Shelved`, `tasks shelve`, the `write_park` test helper at `tests/cli.rs:356`.
 - Produces: `hierarchy::is_active(&Task) -> bool` (open and not shelved); `hierarchy::Shelved { Hidden, UnderShownParent }`, a new parameter of `forest` after `include_closed`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -802,14 +802,14 @@ fn a_dependency_on_a_shelved_task_holds_ready_and_check_names_it() {
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `cargo test --test cli shelved`
 Expected: four failures: `list` shows the shelved task; `tree` shows the shelved root; `next` hands out the parked shelved task; `check` has no `shelved_dep` warning.
 
-- [ ] **Step 3: Hide from `list`**
+- [x] **Step 3: Hide from `list`**
 
-`src/commands/list.rs`, both default filters. At `:60-70`:
+`src/commands/list.rs`, the ordinary list default filter at `:60-70`:
 
 ```rust
         let status_ok = if !statuses.is_empty() {
@@ -821,16 +821,6 @@ Expected: four failures: `list` shows the shelved task; `tree` shows the shelved
             // Shelved is open but out of sight; `--status shelved` is its view.
             task.status.is_open() && task.status != Status::Shelved
         };
-```
-
-At `:150-160` (`list_parked`), the same substitution:
-
-```rust
-            let status_ok = if statuses.is_empty() {
-                status.is_open() && status != Status::Shelved
-            } else {
-                statuses.contains(&status)
-            };
 ```
 
 `ready` and `sample` need no change: `is_actionable` is `todo` or due, and `sample`'s pool names its statuses. `next` has a second feed, `parked::candidates`, which accepts every open status but `blocked`; add the shelf to that exclusion in `src/commands/parked.rs:95-98`:
@@ -847,7 +837,7 @@ At `:150-160` (`list_parked`), the same substitution:
 
 `parked::rows` (the parked section of `prime` and `list --parked`) is left alone on purpose: it lists store entries, and a park entry surviving on a shelved record is an anomaly the row should show, not hide.
 
-- [ ] **Step 4: The hierarchy rule, one mode per view**
+- [x] **Step 4: The hierarchy rule, one mode per view**
 
 `tree` and `prime`'s roadmap share `forest` but have different contracts (spec §3.2): the
 roadmap hides every shelved row; `tree` shows a shelved node whenever its parent is shown,
@@ -874,10 +864,20 @@ pub enum Shelved {
     /// close is visible.
     UnderShownParent,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Visibility {
+    All,
+    Hidden,
+    UnderShownParent,
+}
 ```
 
 (import `Status` from `crate::model` if the module does not already.) `forest` gains the
-parameter after `include_closed` and passes it, with `via_parent: bool`, into `node`:
+parameter after `include_closed`. The implementation combines it with `include_closed`
+in a private `Visibility { All, Hidden, UnderShownParent }` before calling `node`; this
+keeps `node` within clippy's argument limit. It filters shelved roots before recursion,
+so a reopened descendant never makes a shelved root visible:
 
 ```rust
 pub fn forest(
@@ -890,9 +890,17 @@ pub fn forest(
     now: OffsetDateTime,
 ) -> Vec<TreeNode> {
     // tops unchanged ...
+    let visibility = if include_closed {
+        Visibility::All
+    } else if shelved == Shelved::UnderShownParent {
+        Visibility::UnderShownParent
+    } else {
+        Visibility::Hidden
+    };
     tops.into_iter()
+        .filter(|task| visibility == Visibility::All || task.status != Status::Shelved)
         .filter_map(|task| {
-            node(all, task, include_closed, shelved, false, claims, registry,
+            node(all, task, visibility, claims, registry,
                  &mut std::collections::HashSet::new(), now)
         })
         .collect()
@@ -901,9 +909,7 @@ pub fn forest(
 fn node(
     all: &[Task],
     task: &Task,
-    include_closed: bool,
-    shelved: Shelved,
-    via_parent: bool,
+    visibility: Visibility,
     claims: Option<&crate::claims::ClaimSnapshot>,
     registry: &Registry,
     visited: &mut std::collections::HashSet<TaskId>,
@@ -912,12 +918,15 @@ fn node(
     if !visited.insert(task.id.clone()) {
         return None;
     }
-    let keep = include_closed
-        || is_active(task)
-        // A closed or shelved ancestor of active work stays visible as context.
-        || open_descendants(all, &task.id, registry).iter().any(|d| is_active(d))
-        // Reached through a kept parent: the view decides.
-        || (task.status == Status::Shelved && via_parent && shelved == Shelved::UnderShownParent);
+    let keep = visibility == Visibility::All
+        || if task.status == Status::Shelved {
+            visibility == Visibility::UnderShownParent
+        } else {
+            is_active(task)
+                || open_descendants(all, &task.id, registry)
+                    .iter()
+                    .any(|descendant| is_active(descendant))
+        };
     if !keep {
         return None;
     }
@@ -928,7 +937,7 @@ fn node(
         children: kids
             .into_iter()
             .filter_map(|child| {
-                node(all, child, include_closed, shelved, true, claims, registry, visited, now)
+                node(all, child, visibility, claims, registry, visited, now)
             })
             .collect(),
     })
@@ -942,7 +951,7 @@ comment on `forest`: "Without `include_closed`, a node is kept when it is open a
 shelved, has such a descendant, or (with `Shelved::UnderShownParent`) is a shelved child of
 a kept parent."
 
-- [ ] **Step 5: The `check` warning**
+- [x] **Step 5: The `check` warning**
 
 `src/commands/check.rs`, inside the `for dependency in &task.depends` loop, after the retired-prefix check and before the `if dependency_id.prefix == ctx.project.prefix` branch. The local branch already knows whether the file exists; resolve the record once through the same `resolver` the foreign branch uses:
 
@@ -963,12 +972,12 @@ a kept parent."
 
 `foreign` is the closure at `check.rs:58` and resolves local ids too (it wraps `resolver.resolve_task`); if it is restricted to foreign prefixes in this tree, call `resolver.resolve_task(&dependency_id)` directly. Import `Status` if needed.
 
-- [ ] **Step 6: Run the tests, then the suite**
+- [x] **Step 6: Run the tests, then the suite**
 
 Run: `cargo test --test cli shelved && just test`
 Expected: all pass. If an existing `tree`/`prime` test pinned the old `forest` keep rule for closed ancestors, the new rule keeps them for *active* descendants only; a closed ancestor of only-shelved work is now hidden, which is the spec's rule — adjust that test's fixture, not the rule.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/commands/list.rs src/commands/parked.rs src/hierarchy.rs src/commands/tree.rs src/commands/check.rs tests/cli.rs
@@ -987,7 +996,7 @@ git commit -m "feat: hide shelved from the default views and name shelved depend
 - Consumes: `old_task`, `stamp`, `sampled_ids` test helpers at `tests/cli.rs:10175-10192`.
 - Produces: `pending_proposal` accepting `curate:` or `scope:`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -1024,12 +1033,12 @@ fn sample_treats_a_scope_proposal_like_a_curate_proposal() {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `cargo test --test cli sample_treats_a_scope_proposal`
 Expected: FAIL — `pending` is drawn and no pending warning is printed.
 
-- [ ] **Step 3: Accept both prefixes**
+- [x] **Step 3: Accept both prefixes**
 
 `src/commands/sample.rs`:
 
@@ -1048,12 +1057,12 @@ fn pending_proposal(task: &Task) -> Option<&str> {
 
 Update the module doc comment's "`curate:` note" to "`curate:` or `scope:` note".
 
-- [ ] **Step 4: Run the test, then the suite**
+- [x] **Step 4: Run the test, then the suite**
 
 Run: `cargo test --test cli sample && just test`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/commands/sample.rs tests/cli.rs
@@ -1072,7 +1081,7 @@ git commit -m "feat(sample): treat a scope: proposal as pending"
 - Modify: `skills/curate/SKILL.md` ("Pending proposals")
 - Modify: `AGENTS.md` (session protocol)
 
-- [ ] **Step 1: The tasks design spec**
+- [x] **Step 1: The tasks design spec**
 
 `docs/specs/2026-08-29-tasks-design.md`:
 
@@ -1097,7 +1106,7 @@ git commit -m "feat(sample): treat a scope: proposal as pending"
 - `:434`: `counts: { idea, todo, doing, blocked, shelved, done, dropped }`.
 - The status header at the top: append `shelved 2026-09-<day>` to the implemented list, with the day the piece lands.
 
-- [ ] **Step 2: The scope-pass spec header**
+- [x] **Step 2: The scope-pass spec header**
 
 `docs/specs/2026-09-12-scope-pass-design.md:3`:
 
@@ -1105,7 +1114,7 @@ git commit -m "feat(sample): treat a scope: proposal as pending"
 Status: `shelved` implemented (2026-09-<day>, see docs/plans/2026-09-12-shelved-status.md); `scope` skill pending (tasks-0d50ff)
 ```
 
-- [ ] **Step 3: README, skills, AGENTS.md**
+- [x] **Step 3: README, skills, AGENTS.md**
 
 `README.md`: wherever the statuses are listed, add `shelved` with one clause: "open but hidden; `tasks shelve <id> "<wake condition>"` / `tasks unshelve <id>`". Add the two commands to the command list beside `block`/`unblock`.
 
@@ -1124,12 +1133,12 @@ Status: `shelved` implemented (2026-09-<day>, see docs/plans/2026-09-12-shelved-
 
 `AGENTS.md`, session protocol, after the `park` line: "`tasks shelve <id> "<wake condition>"` for work to keep out of sight; `unshelve` brings it back."
 
-- [ ] **Step 4: Reinstall and gate**
+- [x] **Step 4: Reinstall and gate**
 
 Run: `cargo install --path . && just gate`
 Expected: `check` and `test` pass; the installed `tasks` now knows `shelve`.
 
-- [ ] **Step 5: Close the piece and commit**
+- [x] **Step 5: Close the piece and commit**
 
 ```bash
 tasks done tasks-470e8c "shelved status, shelve/unshelve, guards, hidden views, check warning, sample scope: prefix"

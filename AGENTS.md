@@ -8,6 +8,7 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 - Start with `tasks prime`; pick from `tasks ready` (or `tasks next`); `tasks start <id>` before changing code.
 - `tasks note <id> "<one line>"` when scope or understanding changes.
 - `tasks park <id> "<next step>" [--waiting-on user]` when setting work down or waiting on the user; `start` resumes it.
+- `tasks shelve <id> "<wake condition>"` for work to keep out of sight; `unshelve` brings it back.
 - `tasks done <id> "<what landed>"` in the same commit as the code. `tasks check` before every commit.
 - Recurring sweeps use `--every 30d`; `start` before closing each later occurrence.
 - Decompose goals with `--parent`; close a goal from `prime`'s closeout list.

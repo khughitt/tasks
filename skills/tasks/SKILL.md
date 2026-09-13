@@ -13,6 +13,8 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 1. `tasks prime` — roadmap (the open goal tree), closeout (goals whose work is all
    done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
+   A `shelved` task is out of active work: `list --status shelved` sees it, and
+   `tasks unshelve <id>` brings it back as an idea.
    A session under a cutoff (`TASKS_MAX_COMPLEXITY=<low|mid|high>` set by its harness, or
    `--max-complexity <level>` on `ready`/`next`) picks only through `ready` and `next`, which
    hide tasks rated above the level and unassessed tasks and say in warnings how many they
@@ -110,6 +112,10 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
 ## Recording work
 
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
+- Not now, but kept: `tasks shelve <id> "<what would bring it back>"`. Shelved work is open
+  (it still blocks dependents and holds its goal open) but hidden from `list`, `ready`, and
+  `prime`; `check` warns when open work depends on it. `edit --status shelved` refuses; only
+  `shelve` writes the shelf. `tasks unshelve <id>` returns it to `idea`.
 - A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
