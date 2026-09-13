@@ -30,8 +30,14 @@ mod tests {
         for s in Status::ALL {
             assert_eq!(Status::parse(s.as_str()).unwrap(), s);
         }
+        assert_eq!(Status::ALL.len(), 7);
+        assert_eq!(Status::parse("shelved").unwrap(), Status::Shelved);
         assert!(Status::Idea.is_open());
         assert!(Status::Blocked.is_open());
+        assert!(
+            Status::Shelved.is_open(),
+            "shelved keeps blocking dependents"
+        );
         assert!(!Status::Done.is_open());
         assert!(!Status::Dropped.is_open());
     }
@@ -45,6 +51,15 @@ mod tests {
         assert!(Status::can_transition(Blocked, Dropped));
         assert!(Status::can_transition(Done, Todo));
         assert!(Status::can_transition(Dropped, Todo));
+        assert!(Status::can_transition(Idea, Shelved));
+        assert!(Status::can_transition(Doing, Shelved));
+        assert!(Status::can_transition(Shelved, Idea));
+        assert!(Status::can_transition(Shelved, Todo));
+        assert!(
+            !Status::can_transition(Done, Shelved),
+            "closed reopens to todo only"
+        );
+        assert!(!Status::can_transition(Dropped, Shelved));
         assert!(!Status::can_transition(Done, Doing));
         assert!(!Status::can_transition(Done, Dropped));
         assert!(!Status::can_transition(Dropped, Done));
@@ -200,16 +215,18 @@ pub enum Status {
     Todo,
     Doing,
     Blocked,
+    Shelved,
     Done,
     Dropped,
 }
 
 impl Status {
-    pub const ALL: [Status; 6] = [
+    pub const ALL: [Status; 7] = [
         Status::Idea,
         Status::Todo,
         Status::Doing,
         Status::Blocked,
+        Status::Shelved,
         Status::Done,
         Status::Dropped,
     ];
@@ -227,6 +244,7 @@ impl Status {
             Status::Todo => "todo",
             Status::Doing => "doing",
             Status::Blocked => "blocked",
+            Status::Shelved => "shelved",
             Status::Done => "done",
             Status::Dropped => "dropped",
         }

@@ -5368,14 +5368,14 @@ fn projects_pretty_prints_one_header_and_aligned_columns() {
     let mut lines = text.lines();
     assert_eq!(
         lines.next().unwrap(),
-        "project  idea  todo  doing  blocked  total  activity"
+        "project  idea  todo  doing  blocked  shelved  total  activity"
     );
     // header-width columns, two-space gutters, counts right-aligned under their labels
     assert_eq!(
         lines.next().unwrap(),
         format!(
-            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>5}  {day}",
-            "sci", 1, 0, 0, 0, 2
+            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>7}  {:>5}  {day}",
+            "sci", 1, 0, 0, 0, 0, 2
         )
     );
 }
@@ -5393,8 +5393,8 @@ fn projects_pretty_marks_an_unreachable_row_without_breaking_the_grid() {
     assert_eq!(
         row,
         format!(
-            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>5}  unreachable",
-            "fam", "-", "-", "-", "-", "-"
+            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>7}  {:>5}  unreachable",
+            "fam", "-", "-", "-", "-", "-", "-"
         ),
         "{text}"
     );
@@ -5420,7 +5420,7 @@ fn projects_pretty_reveals_closed_columns_on_request() {
     let opened = env.pretty(nowhere.path(), &["projects", "--closed"]);
     assert_eq!(
         opened.lines().next().unwrap(),
-        "project  idea  todo  doing  blocked  done  dropped  total  activity"
+        "project  idea  todo  doing  blocked  shelved  done  dropped  total  activity"
     );
 }
 
@@ -5461,13 +5461,13 @@ fn prime_counts_line_uses_the_same_columns_as_projects() {
     let text = env.pretty(&sci, &["prime"]);
     assert_eq!(
         text.lines().nth(1).unwrap(),
-        "idea 0  todo 1  doing 0  blocked 0  total 2"
+        "idea 0  todo 1  doing 0  blocked 0  shelved 0  total 2"
     );
 
     let opened = env.pretty(&sci, &["prime", "--closed"]);
     assert_eq!(
         opened.lines().nth(1).unwrap(),
-        "idea 0  todo 1  doing 0  blocked 0  done 1  dropped 0  total 2"
+        "idea 0  todo 1  doing 0  blocked 0  shelved 0  done 1  dropped 0  total 2"
     );
 }
 
@@ -7552,7 +7552,9 @@ fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
             4,
             &["tasks", "edit", "sci-000001", "--status", ""]
         ),
-        ["idea", "todo", "doing", "blocked", "done", "dropped"]
+        [
+            "idea", "todo", "doing", "blocked", "shelved", "done", "dropped"
+        ]
     );
     assert_eq!(
         env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--status", ""]),

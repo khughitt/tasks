@@ -832,6 +832,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                         Status::Done => format!("run `tasks done {id}`"),
                         Status::Dropped => format!("run `tasks drop {id}`"),
                         Status::Blocked => format!("run `tasks block {id}`"),
+                        Status::Shelved => format!("run `tasks shelve {id} \"<wake condition>\"`"),
                         Status::Todo | Status::Idea | Status::Doing => {
                             "the store is unchanged and a same-status edit will not retry cleanup"
                                 .into()

@@ -425,6 +425,7 @@ pub struct Counts {
     pub todo: usize,
     pub doing: usize,
     pub blocked: usize,
+    pub shelved: usize,
     pub done: usize,
     pub dropped: usize,
 }
@@ -438,6 +439,7 @@ impl Counts {
                 Status::Todo => counts.todo += 1,
                 Status::Doing => counts.doing += 1,
                 Status::Blocked => counts.blocked += 1,
+                Status::Shelved => counts.shelved += 1,
                 Status::Done => counts.done += 1,
                 Status::Dropped => counts.dropped += 1,
             }
@@ -446,7 +448,7 @@ impl Counts {
     }
 
     pub fn total(&self) -> usize {
-        self.idea + self.todo + self.doing + self.blocked + self.done + self.dropped
+        self.idea + self.todo + self.doing + self.blocked + self.shelved + self.done + self.dropped
     }
 }
 
@@ -468,6 +470,7 @@ pub fn count_columns(counts: &Counts, closed: bool) -> Vec<CountColumn> {
         count_column("todo", counts.todo, Status::Todo),
         count_column("doing", counts.doing, Status::Doing),
         count_column("blocked", counts.blocked, Status::Blocked),
+        count_column("shelved", counts.shelved, Status::Shelved),
     ];
     if closed {
         columns.push(count_column("done", counts.done, Status::Done));
