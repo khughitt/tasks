@@ -709,7 +709,7 @@ existing sample. No bulk backfill is required.
 
 This repo's AGENTS.md adopts the policy. Other projects must adopt it themselves
 before relying on the field to override their generic skill triggers. The global
-worktree rule is a separate ai-69ccac follow-up: widening its trigger fixes the
+worktree rule was widened separately by ai-69ccac (landed 2026-09-13): that fixes the
 ran-on-main incident without any CLI change. ai-e8dcc5 separately updates and
 distributes the shared writing-plans skill's child command to match this repo's
 `--complexity <level> --process <value>` integration. Neither follow-up is completed
