@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** implemented and accepted on `scope` (2026-09-13); retained for integration review. Real Prism pass committed separately as `6887eae` on `scope-acceptance`; see [validation](../notes/2026-09-13-scope-skill-validation.md).
+**Status:** implemented, accepted, and merged to `main` at `5e24819` (2026-09-13). Real Prism acceptance is merged to Prism `main` at `6887eae`; see [validation](../notes/2026-09-13-scope-skill-validation.md).
 
 **Goal:** Ship a deliberate `/scope` pass that turns ideas into supported next actions, briefs, questions, shelves, or drop proposals, and demonstrate it on real Prism work.
 

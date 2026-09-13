@@ -135,11 +135,11 @@ was rewritten. No new research is warranted for behavior already established by 
 and tests. Every member received exactly one scope audit note; shelves also received
 the native shelf note. Original bodies, sources and prior notes were checked intact.
 
-Reviewable artifacts, relative to Prism's main checkout:
+Current artifacts after integration, relative to Prism's main checkout:
 
-- `.worktrees/scope-acceptance/docs/notes/2026-09-13-profile-editing-brief.md`
-- `.worktrees/scope-acceptance/tasks/prism-3415ef.md`
-- `.worktrees/scope-acceptance/tasks/prism-e37618.md`
+- `docs/notes/2026-09-13-profile-editing-brief.md`
+- `tasks/prism-3415ef.md`
+- `tasks/prism-e37618.md`
 
 The pass changed those three files and only the five selected task records. A hash
 comparison of all 161 main-checkout task/document files, plus clean main git status,
@@ -160,6 +160,16 @@ unanswered. It reused the same brief, goal, design and reset task and made zero 
 no new evidence justified editing artifacts or adding another audit note. Task/document
 hashes before and after were identical, including sources, parents and prior notes.
 No skill wording correction was demonstrated by this pass or rerun.
+
+## Integration
+
+On 2026-09-13, the tasks feature was merged to `main` at `5e24819`, including
+goal closeout `644e283`. Prism `main` was fast-forwarded to acceptance commit
+`6887eae`. The paths above now resolve in Prism's main checkout; the worktree paths
+in the trial narrative and exact summary below describe the original acceptance run.
+Both main checkouts passed `just gate` after integration: 167 unit and 275 CLI
+tests in tasks, and 327 Node tests plus the Lua suite in Prism, with zero task
+errors or warnings. Both merged branches and their worktrees were then removed.
 
 ## Exact user summary
 

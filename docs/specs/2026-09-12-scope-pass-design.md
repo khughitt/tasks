@@ -1,6 +1,6 @@
 # Scope pass: a `scope` skill and a `shelved` status
 
-Status: `shelved` implemented (2026-09-13, see docs/plans/2026-09-12-shelved-status.md); `scope` skill implemented and real-cluster acceptance complete (2026-09-13, tasks-0d50ff; see [validation](../notes/2026-09-13-scope-skill-validation.md)). Both pieces are retained on `scope`; integration is separate.
+Status: implemented, accepted, and merged to `main` (2026-09-13, `5e24819`). The real Prism acceptance is merged to Prism `main` at `6887eae`; see [validation](../notes/2026-09-13-scope-skill-validation.md).
 Task: tasks-019c60; pieces tasks-470e8c (`shelved`), tasks-0d50ff (`scope` skill)
 
 ## 1. Problem
