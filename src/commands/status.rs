@@ -5,6 +5,12 @@ use crate::output::Output;
 
 pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
+    if task.status == Status::Shelved {
+        return Err(Error::InvalidTransition(
+            "shelved".into(),
+            format!("doing (`tasks unshelve {id}` first)"),
+        ));
+    }
     let before = ctx.warnings.len();
     transition(&mut ctx, &mut task, Status::Doing, force)?;
     let owner = owner_name(&ctx.project)?;

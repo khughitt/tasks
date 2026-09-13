@@ -1,7 +1,7 @@
 use super::{ClaimIntent, Ctx, append_note, id_out, load, owner_name, save};
 use crate::claims::{Escalation, Liveness, Park, Reason, WaitingOn, describe_stop};
 use crate::error::{Error, Result};
-use crate::model::Complexity;
+use crate::model::{Complexity, Status};
 use crate::output::Output;
 
 /// Set a task down (spec §3). Validate everything, refuse a foreign live claim, then let
@@ -19,6 +19,12 @@ pub fn run(
         return Err(Error::InvalidTransition(
             task.status.as_str().into(),
             "parked".into(),
+        ));
+    }
+    if task.status == Status::Shelved {
+        return Err(Error::InvalidTransition(
+            "shelved".into(),
+            format!("parked (`tasks unshelve {id}` first)"),
         ));
     }
     crate::format::validate_line("next_step", &next_step)?;

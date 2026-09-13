@@ -12223,3 +12223,83 @@ fn shelve_refuses_a_goal_with_unshelved_open_descendants() {
         "shelved"
     );
 }
+
+#[test]
+fn start_and_park_refuse_a_shelved_task_and_name_unshelve() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.json(&sci, &["shelve", &id, "later"]);
+    for args in [
+        vec!["start", id.as_str()],
+        vec!["park", id.as_str(), "next"],
+    ] {
+        let err = error_of(&env, &sci, &args);
+        assert_eq!(err["error"]["kind"], "invalid_transition", "{args:?}");
+        assert!(
+            err["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("tasks unshelve"),
+            "{args:?}: {err}"
+        );
+    }
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "shelved");
+    assert!(env.json(&sci, &["show", &id])["park"].is_null());
+}
+
+#[test]
+fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    let err = error_of(&env, &sci, &["edit", &id, "--status", "shelved"]);
+    assert_eq!(err["error"]["kind"], "validation");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("tasks shelve")
+    );
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
+
+    let into = editor_script(&sci, "sed -i 's/^status: todo$/status: shelved/' \"$1\"");
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &into)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "validation");
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
+
+    env.json(&sci, &["shelve", &id, "later"]);
+    let retitle = editor_script(&sci, "sed -i 's/^title: T$/title: Renamed/' \"$1\"");
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &retitle)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["title"], "Renamed");
+    assert_eq!(
+        shown["task"]["status"], "shelved",
+        "an edit keeps the shelf"
+    );
+
+    env.json(&sci, &["edit", &id, "--status", "todo"]);
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["status"],
+        "todo",
+        "explicit reopen"
+    );
+}
