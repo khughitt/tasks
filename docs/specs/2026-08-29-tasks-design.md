@@ -310,7 +310,8 @@ tasks start [--force] <id>
 tasks park <id> <next-step> [--waiting-on user|agent]
     Set a task down: record the one-line next step, who it waits on (default agent), and
     this session in the shared claim store, and append a note. Status is untouched; any
-    open task may be parked. start replaces the entry (resume); done and drop remove it. A
+    open task except `shelved` may be parked. `start` replaces the entry (resume); `done`
+    and `drop` remove it. A
     live claim held by another session refuses with claimed. See 2026-09-09-park-design.md.
 
 tasks done <id> [message] [--force]

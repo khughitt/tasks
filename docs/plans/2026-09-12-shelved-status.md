@@ -1125,8 +1125,10 @@ Status: `shelved` implemented (2026-09-<day>, see docs/plans/2026-09-12-shelved-
   ```markdown
   - Not now, but kept: `tasks shelve <id> "<what would bring it back>"`. Shelved work is open
     (it still blocks dependents and holds its goal open) but hidden from `list`, `ready`, and
-    `prime`; `check` warns when open work depends on it. `edit --status shelved` refuses; only
-    `shelve` writes the shelf. `tasks unshelve <id>` returns it to `idea`.
+    `prime`'s roadmap and ready sections. A surviving shelved park overlay remains visible in
+    `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
+    `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
+    returns it to `idea`.
   ```
 
 `skills/curate/SKILL.md`, "Pending proposals": "`sample` never draws a task whose most recent note is a `curate:` or `scope:` note carrying a `proposal:` segment".
@@ -1153,7 +1155,7 @@ git commit -m "docs: record the shelved status and close tasks-470e8c"
 
 **Spec coverage (§3, §4.7, §6):**
 - §3.1 commands, required message, claim rules, goal guard, `unshelve` → idea, `edit --status shelved` and editor refusals, editor edits of a shelved record — Tasks 2, 3.
-- §3.2 hidden from `list`/`prime`/`sample`/`ready`/`next` (both feeds of `next`); counted in `prime`/`projects`; `show`, `tree` child rule (recursive) versus the roadmap's blanket hide, `tree --all`, `check` warning — Task 4 (Task 1 for counts).
+- §3.2 hidden from `list`, `sample`, `ready`, `next` (both feeds), and `prime`'s roadmap/ready sections; counted in `prime`/`projects`; anomalous surviving shelf parks visible in `prime` and `list --parked`; `show`, `tree` child rule (recursive) versus the roadmap's blanket hide, `tree --all`, `check` warning — Task 4 (Task 1 for counts).
 - §3.3 open by construction (dependencies, `done` refusal, descendants, forest); `start`/`park` refuse; park entry and escalation cleared, warning new — Tasks 1, 2, 3, 4.
 - §3.4 JSON: enum value, counts, id shape, check text — Tasks 1, 2, 4; completion candidates come from `Status::ALL` (Task 1).
 - §4.7 `sample` `scope:` prefix — Task 5.

@@ -114,8 +114,10 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
 - Not now, but kept: `tasks shelve <id> "<what would bring it back>"`. Shelved work is open
   (it still blocks dependents and holds its goal open) but hidden from `list`, `ready`, and
-  `prime`; `check` warns when open work depends on it. `edit --status shelved` refuses; only
-  `shelve` writes the shelf. `tasks unshelve <id>` returns it to `idea`.
+  `prime`'s roadmap and ready sections. A surviving shelved park overlay remains visible in
+  `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
+  `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
+  returns it to `idea`.
 - A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
