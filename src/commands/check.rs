@@ -198,6 +198,14 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 "plan step without a complexity rating".into(),
             ));
         }
+        if task.status == Status::Doing && task.process.is_none() {
+            warnings.push(finding(
+                Some(task),
+                file.clone(),
+                "process_missing",
+                "doing task without a process decision".into(),
+            ));
+        }
         if task.every.is_some() {
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
             if !kids.is_empty() {

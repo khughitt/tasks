@@ -56,6 +56,9 @@ pub struct FieldArgs {
     /// The judgment the task demands: low, mid, or high. Absent is unassessed.
     #[arg(long, add = ArgValueCandidates::new(crate::complete::complexities))]
     pub complexity: Option<String>,
+    /// The chosen workflow: direct or planned. Absent is unassessed.
+    #[arg(long, add = ArgValueCandidates::new(crate::complete::processes))]
+    pub process: Option<String>,
     /// Mark as safe to run beside other tasks marked parallel. On `edit` this sets the
     /// flag; see `--no-parallel` to clear it.
     #[arg(long)]
@@ -107,6 +110,9 @@ pub struct EditArgs {
     /// Clear the complexity rating (back to unassessed).
     #[arg(long, conflicts_with = "complexity")]
     pub no_complexity: bool,
+    /// Clear the process decision (back to unassessed).
+    #[arg(long, conflicts_with = "process")]
+    pub no_process: bool,
     /// Replace the model stamp recorded at completion; see `--no-model`.
     #[arg(long)]
     pub model: Option<String>,

@@ -97,6 +97,7 @@ mod tests {
             priority: 2,
             size: None,
             complexity: None,
+            process: None,
             parallel: false,
             every: None,
             owner: None,
@@ -331,6 +332,36 @@ impl Complexity {
     }
 }
 
+/// The explicitly selected workflow; absence means unassessed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Process {
+    Direct,
+    Planned,
+}
+
+impl Process {
+    pub const ALL: [Process; 2] = [Process::Direct, Process::Planned];
+
+    pub fn parse(s: &str) -> Result<Process> {
+        Self::ALL
+            .into_iter()
+            .find(|process| process.as_str() == s)
+            .ok_or_else(|| {
+                Error::Validation(format!(
+                    "unknown process {s:?}; expected one of direct, planned"
+                ))
+            })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Planned => "planned",
+        }
+    }
+}
+
 /// Where a parked task was left. Derived from its design links.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -381,6 +412,8 @@ pub struct Task {
     /// --complexity` and by `park --reason capability`. See
     /// docs/specs/2026-09-12-task-complexity-design.md.
     pub complexity: Option<Complexity>,
+    /// Chosen explicitly; never inferred from complexity, parentage, or document links.
+    pub process: Option<Process>,
     /// Marked safe to run beside any other task marked parallel. Hand-set; nothing
     /// infers or validates it. See docs/specs/2026-09-06-parallel-candidates-design.md.
     pub parallel: bool,

@@ -13185,3 +13185,209 @@ fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record()
         "explicit reopen"
     );
 }
+
+#[test]
+fn process_round_trips_and_rejects_invalid_edits() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "T", "--process", "direct"]));
+    let path = dir.join(format!("tasks/{id}.md"));
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["process"], "direct");
+    env.json(&dir, &["edit", &id, "--process", "planned"]);
+    env.json(&dir, &["note", &id, "retain choice"]);
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["process"], "planned");
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--process", "auto"]),
+        "validation"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let out = env
+        .cmd(&dir)
+        .args(["edit", &id, "--process", "direct", "--no-process"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    env.json(&dir, &["edit", &id, "--no-process"]);
+    env.json(&dir, &["note", &id, "retain absence"]);
+    let task = env.json(&dir, &["show", &id]);
+    assert!(task["task"].get("process").unwrap().is_null());
+    assert!(
+        !std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("\nprocess:")
+    );
+    assert_eq!(
+        env.fail(&dir, &["add", "Bad", "--process", "auto"]),
+        "validation"
+    );
+    assert_eq!(
+        env.json(&dir, &["list"])["tasks"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        env.complete_values(&dir, "bash", 4, &["tasks", "add", "T", "--process", ""]),
+        vec!["direct", "planned"]
+    );
+    assert!(
+        env.complete_values(&dir, "zsh", 4, &["tasks", "edit", &id, "--process", ""])
+            .iter()
+            .any(|value| value.starts_with("planned"))
+    );
+
+    let editor = editor_script(&dir, "sed -i '/^priority:/a process: direct' \"$1\"");
+    env.cmd(&dir)
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["process"], "direct");
+    let before = std::fs::read(&path).unwrap();
+    let editor = editor_script(&dir, "sed -i 's/process: direct/process: auto/' \"$1\"");
+    env.cmd(&dir)
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .assert()
+        .failure();
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn process_survives_ready_and_parked_next() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "T", "--process", "planned"]));
+    assert_eq!(env.json(&dir, &["ready"])["tasks"][0]["process"], "planned");
+    assert_eq!(env.json(&dir, &["prime"])["ready"][0]["process"], "planned");
+    assert_eq!(
+        env.json(&dir, &["next"])["next"]["task"]["process"],
+        "planned"
+    );
+    assert!(env.pretty(&dir, &["ready"]).contains("planned"));
+    assert!(env.pretty(&dir, &["next"]).contains("Process: planned"));
+    env.json(&dir, &["park", &id, "resume here"]);
+    let parked = env.json(&dir, &["list", "--parked"]);
+    assert_eq!(parked["tasks"][0]["process"], "planned");
+    assert_eq!(parked["tasks"][0]["phase"], "implementing");
+    assert_eq!(
+        env.json(&dir, &["next"])["next"]["task"]["process"],
+        "planned"
+    );
+    assert!(env.pretty(&dir, &["list", "--parked"]).contains("planned"));
+    env.json(&dir, &["edit", &id, "--no-process"]);
+    assert!(
+        env.pretty(&dir, &["show", &id])
+            .contains("Process: unassessed")
+    );
+    assert!(
+        env.json(&dir, &["list", "--parked"])["tasks"][0]
+            .get("process")
+            .unwrap()
+            .is_null()
+    );
+    assert_eq!(env.json(&dir, &["next"])["next"]["task"]["id"], id);
+
+    // A surviving park with no record has an explicit null, not an omitted field.
+    std::fs::remove_file(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let unresolved = env.json(&dir, &["list", "--parked"]);
+    assert!(unresolved["tasks"][0].get("process").unwrap().is_null());
+}
+
+#[test]
+fn process_missing_warns_only_while_doing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    let missing = |v: &serde_json::Value| {
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "process_missing")
+    };
+    assert!(!missing(&env.json(&dir, &["check"])));
+    env.json(&dir, &["start", &id]);
+    assert!(missing(&env.json(&dir, &["check"])));
+    env.json(&dir, &["edit", &id, "--process", "direct"]);
+    assert!(!missing(&env.json(&dir, &["check"])));
+    env.json(&dir, &["edit", &id, "--no-process"]);
+    assert!(missing(&env.json(&dir, &["check"])));
+    env.json(&dir, &["done", &id]);
+    assert!(!missing(&env.json(&dir, &["check"])));
+
+    let idea = id_of(env.json(&dir, &["add", "Idea", "--status", "idea"]));
+    let shelved = id_of(env.json(&dir, &["add", "Shelf"]));
+    env.json(&dir, &["shelve", &shelved, "not now"]);
+    let dropped = id_of(env.json(&dir, &["add", "Drop"]));
+    env.json(&dir, &["drop", &dropped, "unneeded"]);
+    assert!(!missing(&env.json(&dir, &["check"])));
+    assert_eq!(env.json(&dir, &["show", &idea])["task"]["status"], "idea");
+
+    let goal = id_of(env.json(&dir, &["add", "Goal", "--process", "planned"]));
+    write_doc(&dir, "docs/plans/x.md", "# x\n\n### Task 1: do it\n");
+    let step = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Step",
+            "--parent",
+            &goal,
+            "--plan",
+            "x",
+            "--step",
+            "Task 1: do it",
+            "--complexity",
+            "low",
+        ],
+    ));
+    assert!(
+        env.json(&dir, &["show", &step])["task"]
+            .get("process")
+            .unwrap()
+            .is_null()
+    );
+    assert!(!missing(&env.json(&dir, &["check"])));
+    env.json(&dir, &["edit", &goal, "--no-process"]);
+    for active in [&goal, &step] {
+        env.json(&dir, &["start", active]);
+    }
+    let findings = env.json(&dir, &["check"]);
+    let ids: Vec<_> = findings["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["kind"] == "process_missing")
+        .map(|w| w["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(&goal.as_str()) && ids.contains(&step.as_str()));
+}
+
+#[test]
+fn process_does_not_change_selection_or_starting() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let first = id_of(env.json(&dir, &["add", "First", "-p", "1"]));
+    let second = id_of(env.json(&dir, &["add", "Second", "-p", "2"]));
+    for process in ["planned", "direct"] {
+        env.json(&dir, &["edit", &second, "--process", process]);
+        let ready = env.json(&dir, &["ready"]);
+        let ids: Vec<_> = ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, [first.as_str(), second.as_str()]);
+        assert!(ready["tasks"][0].get("process").unwrap().is_null());
+        assert_eq!(env.json(&dir, &["next"])["next"]["task"]["id"], first);
+    }
+    env.json(&dir, &["start", &first]);
+    assert!(
+        env.json(&dir, &["show", &first])["task"]
+            .get("process")
+            .unwrap()
+            .is_null()
+    );
+}

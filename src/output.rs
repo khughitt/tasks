@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::model::{Complexity, Size, Status, Task};
+use crate::model::{Complexity, Process, Size, Status, Task};
 use crate::registry::Registry;
 use crate::style::{Painter, Style};
 use serde::Serialize;
@@ -141,6 +141,7 @@ pub struct TaskSummary {
     pub priority: u8,
     pub size: Option<Size>,
     pub complexity: Option<Complexity>,
+    pub process: Option<Process>,
     pub parallel: bool,
     pub owner: Option<String>,
     pub created: String,
@@ -259,6 +260,7 @@ impl TaskSummary {
             priority: task.priority,
             size: task.size,
             complexity: task.complexity,
+            process: task.process,
             parallel: task.parallel,
             owner: task.owner.clone(),
             created: task.created.clone(),
@@ -295,6 +297,7 @@ pub struct ParkedRow {
     pub priority: Option<u8>,
     pub size: Option<Size>,
     pub complexity: Option<Complexity>,
+    pub process: Option<Process>,
     pub parallel: bool,
     pub owner: Option<String>,
     pub created: Option<String>,
@@ -323,6 +326,7 @@ impl ParkedRow {
             priority: Some(summary.priority),
             size: summary.size,
             complexity: summary.complexity,
+            process: summary.process,
             parallel: summary.parallel,
             owner: summary.owner,
             created: Some(summary.created),
@@ -350,6 +354,7 @@ impl ParkedRow {
             priority: None,
             size: None,
             complexity: None,
+            process: None,
             parallel: false,
             owner: None,
             created: None,
@@ -903,6 +908,10 @@ fn paint_field(line: &str, task: &Task, painter: &Painter) -> String {
 
 fn show_text(o: &ShowFields, painter: &Painter) -> String {
     let mut rendered = paint_frontmatter(&crate::format::serialize_task(&o.task), &o.task, painter);
+    rendered.push_str(&format!(
+        "\nProcess: {}\n",
+        o.task.process.map(Process::as_str).unwrap_or("unassessed")
+    ));
     if let Some(periodic) = &o.periodic {
         let due = match (&periodic.due, periodic.due_now) {
             (Some(due), _) => Some(crate::time::day(due)),
@@ -1040,6 +1049,7 @@ pub fn table(
         };
         let size = row.size.map(Size::as_str).unwrap_or("-");
         let complexity = row.complexity.map(Complexity::as_str).unwrap_or("-");
+        let process = row.process.map(Process::as_str).unwrap_or("-");
         let status = painter.paint(
             Style::Status(row.status),
             &format!("{:<7}", row.status.as_str()),
@@ -1084,7 +1094,7 @@ pub fn table(
             (true, false) => "   ",
         };
         rendered.push_str(&format!(
-            "{id}  {priority} {size:<2} {complexity:<4} {status} {mark}{date}  {}{tags}{cadence}{owner}\n",
+            "{id}  {priority} {size:<2} {complexity:<4} {process:<7} {status} {mark}{date}  {}{tags}{cadence}{owner}\n",
             row.title
         ));
     }
@@ -1108,8 +1118,9 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter) -> String {
             "{:<13}",
             row.phase.map(crate::model::Phase::as_str).unwrap_or("-")
         );
+        let process = row.process.map(Process::as_str).unwrap_or("-");
         rendered.push_str(&format!(
-            "{id}  {status} {phase} waits on {:<18} {}  {}\n",
+            "{id}  {status} {process:<7} {phase} waits on {:<18} {}  {}\n",
             crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes),
             crate::time::day(&park.at),
             row.title
@@ -1204,6 +1215,7 @@ mod tests {
             priority: 2,
             size: None,
             complexity: None,
+            process: None,
             owner: None,
             created: "2026-09-06T00:00:00Z".into(),
             updated: "2026-09-06T00:00:00Z".into(),

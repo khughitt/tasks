@@ -1,6 +1,7 @@
 # Explicit task process
 
-Status: approved with review edits applied (2026-09-13); not implemented.
+Status: approved (2026-09-13); Task 1 CLI contract implemented on this branch;
+Task 2 policy and documentation pending. Cross-project rollout remains separate.
 Task: tasks-61cc5c
 
 ## Problem and evidence
@@ -148,5 +149,8 @@ Use the existing tests in `tests/cli.rs` and record/model tests, without new too
 
 Run `just gate` and reinstall with `cargo install --path .` after CLI changes.
 The design review approved this approach with the global-policy follow-up and
-doing-only warning applied before planning. The implementation plan has its own
-review gate; neither implementation nor the cross-project rollout is complete.
+doing-only warning applied before planning. The implementation plan was then
+approved. Task 1 passed `just gate` (171 unit and 289 CLI tests), code review,
+and installation. The parent now records planned and both children direct;
+the installed `tasks check` reports no errors and only the unrelated unassessed
+doing task tasks-7ba741. Task 2 and the cross-project rollout are not complete.

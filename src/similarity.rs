@@ -95,6 +95,7 @@ mod tests {
             priority: 2,
             size: None,
             complexity: None,
+            process: None,
             parallel: false,
             every: None,
             owner: None,

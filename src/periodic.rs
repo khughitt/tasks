@@ -71,6 +71,7 @@ mod tests {
             priority: 2,
             size: None,
             complexity: None,
+            process: None,
             parallel: false,
             every: every.map(|e| Interval::parse(e).unwrap()),
             owner: None,

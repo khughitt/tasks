@@ -1,15 +1,16 @@
 use crate::error::{Error, Result};
 use crate::frontmatter::{self, Value};
-use crate::model::{Complexity, Note, Size, Status, Task, TaskId};
+use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 22] = [
+const KEYS: [&str; 23] = [
     "id",
     "title",
     "status",
     "priority",
     "size",
     "complexity",
+    "process",
     "parallel",
     "every",
     "owner",
@@ -109,6 +110,10 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             .map_err(|e| perr(file, e.to_string()))?,
         complexity: scalar("complexity")?
             .map(|s| Complexity::parse(&s))
+            .transpose()
+            .map_err(|e| perr(file, e.to_string()))?,
+        process: scalar("process")?
+            .map(|s| Process::parse(&s))
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
         parallel: boolean("parallel")?,
@@ -352,6 +357,9 @@ pub fn serialize_task(t: &Task) -> String {
     if let Some(level) = t.complexity {
         pairs.push(("complexity".into(), s(level.as_str())));
     }
+    if let Some(process) = t.process {
+        pairs.push(("process".into(), s(process.as_str())));
+    }
     // Raw, not Scalar: needs_quotes quotes the literal `true`, which would write
     // `parallel: "true"` — readable back, but out of step with every other scalar.
     if t.parallel {
@@ -442,6 +450,25 @@ mod tests {
         assert_eq!(t.body, "");
         assert!(t.notes.is_empty());
         assert_eq!(serialize_task(&t), MINIMAL);
+    }
+
+    #[test]
+    fn process_round_trips_and_rejects_invalid_values() {
+        assert_eq!(serialize_task(&parse_task(MINIMAL, "x").unwrap()), MINIMAL);
+        for process in ["direct", "planned"] {
+            let text = MINIMAL.replace(
+                "priority: 2\n",
+                &format!("priority: 2\nprocess: {process}\n"),
+            );
+            assert_eq!(serialize_task(&parse_task(&text, "x").unwrap()), text);
+        }
+        for process in ["auto", "Direct", "\"\"", "[direct]"] {
+            let text = MINIMAL.replace(
+                "priority: 2\n",
+                &format!("priority: 2\nprocess: {process}\n"),
+            );
+            assert!(parse_task(&text, "x").is_err());
+        }
     }
 
     #[test]

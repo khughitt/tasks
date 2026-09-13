@@ -18,6 +18,7 @@ pub fn blank(project: &Project, title: String, status: Status) -> Result<Task> {
         priority: 2,
         size: None,
         complexity: None,
+        process: None,
         parallel: false,
         every: None,
         owner: None,

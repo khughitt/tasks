@@ -3,7 +3,7 @@
 > **For agentic workers:** Use superpowers:executing-plans to implement this plan
 > task-by-task in the existing worktree. Steps use checkboxes for tracking.
 
-Status: draft — awaiting implementation-plan review; no steps implemented.
+Status: approved (2026-09-13); Task 1 implemented on this branch, Task 2 not started.
 
 **Goal:** Store and display an explicit direct/planned process choice without
 changing which tasks can be selected or started.
@@ -81,7 +81,7 @@ projections. Produces `Process::{Direct, Planned}`, `Process::ALL`,
 and `process: Option<Process>` on `Task`, `TaskSummary`, and `ParkedRow`.
 Produces `complete::processes() -> Vec<CompletionCandidate>`.
 
-- [ ] **Write a failing end-to-end field test in `tests/cli.rs`.**
+- [x] **Write a failing end-to-end field test in `tests/cli.rs`.**
 
 ```rust
 #[test]
@@ -120,7 +120,7 @@ fn process_round_trips_and_rejects_invalid_edits() {
 Run `python3 tools/tt test-fast -- cargo test process_round_trips` and confirm the
 unknown `--process` flag causes failure before implementing it.
 
-- [ ] **Implement the model and record codec using the existing field pattern.**
+- [x] **Implement the model and record codec using the existing field pattern.**
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -163,7 +163,7 @@ The existing editor calls this parser: do not add another validator or introduce
 separate serialization path. Add a record-level test covering both values,
 absence, and an invalid process scalar in the existing format test module.
 
-- [ ] **Wire the shared CLI fields, mutation path, and completion.**
+- [x] **Wire the shared CLI fields, mutation path, and completion.**
 
 ```rust
 // FieldArgs
@@ -190,7 +190,7 @@ Include `fields.process.is_some()` and `args.no_process` in `has_flags`, and add
 help text explaining missing means unassessed. Do not copy complexity's
 `ctx.reassess` call: process has no shared-store overlay.
 
-- [ ] **Write output and warning regression tests, then implement the projections.**
+- [x] **Write output and warning regression tests, then implement the projections.**
 
 Start with these two test bodies; run them red before changing those paths:
 
@@ -266,7 +266,7 @@ if task.status == Status::Doing && task.process.is_none() {
 }
 ```
 
-- [ ] **Verify, install, record the intended process, and commit.**
+- [x] **Verify, install, record the intended process, and commit.**
 
 Run `cargo fmt`, then `python3 tools/tt test-fast -- cargo test process_` and
 `just gate`. Existing exact pretty-output assertions may need the new column;

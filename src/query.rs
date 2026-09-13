@@ -242,6 +242,7 @@ mod tests {
             priority,
             size,
             complexity: None,
+            process: None,
             parallel: false,
             every: None,
             owner: None,
