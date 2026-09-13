@@ -639,7 +639,7 @@ git commit -m "feat(park): quiet reason with a needs and minutes recipe"
 
 **Interfaces:**
 - Consumes: `claims::Reason::Quiet`, `claims::Needs`, `ParkInfo.needs`/`.minutes` from Task 1; `Scope::projects(&self) -> &[Project]` (`src/scope.rs:110`); `Project.root: PathBuf` (`src/repo.rs:70`); `open_read_ctx(dir, &ScopeArgs)` from `src/commands/mod.rs`; the test helpers `as_agent`, `id_of`, `error_of` already in `tests/cli.rs` (`two_roots` is *not* used: `init_forced` re-points the registry at the second root, and these tests need the worktree unregistered).
-- Produces: `parked::Prefer { Registered, Recorded }`; `parked::rows_preferring(ctx: &mut ReadCtx, all: &[Task], claims: &ClaimSnapshot, now: OffsetDateTime, prefer: Prefer) -> Result<Vec<ParkedRow>>`; `parked::rows(...)` unchanged in signature, equal to `rows_preferring(..., Prefer::Registered)`; `Command::Quiet { limit: Option<usize>, project: Option<String>, all_projects: bool }`; `quiet::run(ctx: ReadCtx, limit: Option<usize>) -> Result<Output>`; `Output::Quiet(QuietOut { tasks: Vec<ParkedRow>, warnings: Vec<String> })`; `output::quiet_briefs(rows: &[ParkedRow], painter: &Painter) -> String`.
+- Produces: `parked::Prefer { Registered, Recorded }`; `parked::rows_preferring(ctx: &mut ReadCtx, all: &[Task], claims: &ClaimSnapshot, now: OffsetDateTime, prefer: Prefer, reason: Option<Reason>) -> Result<Vec<ParkedRow>>`; `parked::rows(...)` unchanged in signature, equal to `rows_preferring(..., Prefer::Registered, None)`; `Command::Quiet { limit: Option<usize>, project: Option<String>, all_projects: bool }`; `quiet::run(ctx: ReadCtx, limit: Option<usize>) -> Result<Output>`; `Output::Quiet(QuietOut { tasks: Vec<ParkedRow>, warnings: Vec<String> })`; `output::quiet_briefs(rows: &[ParkedRow], painter: &Painter) -> String`.
 
 The resolver refactor and the command land in one commit because `Prefer::Recorded` has no constructor until `quiet::run` exists, and an unconstructed variant fails the gate. The refactor is still verified on its own: step 3 runs the whole suite after it, before the command exists.
 
@@ -888,7 +888,7 @@ pub fn rows(
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
 ) -> Result<Vec<ParkedRow>> {
-    rows_preferring(ctx, all, claims, now, Prefer::Registered)
+    rows_preferring(ctx, all, claims, now, Prefer::Registered, None)
 }
 
 pub fn rows_preferring(
@@ -897,8 +897,12 @@ pub fn rows_preferring(
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
     prefer: Prefer,
+    reason: Option<Reason>,
 ) -> Result<Vec<ParkedRow>> {
-    let mut entries: Vec<(&String, &Park)> = claims.parks().collect();
+    let mut entries: Vec<(&String, &Park)> = claims
+        .parks()
+        .filter(|(_, park)| reason.is_none_or(|reason| park.reason == Some(reason)))
+        .collect();
     entries.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| a.0.cmp(b.0)));
     let mut rows = Vec::new();
     for (key, park) in entries {
@@ -1099,7 +1103,14 @@ use crate::output::{Output, ParkedRow, QuietOut};
 pub fn run(mut ctx: ReadCtx, limit: Option<usize>) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let rows = rows_preferring(&mut ctx, &all, &claims, now, Prefer::Recorded)?;
+    let rows = rows_preferring(
+        &mut ctx,
+        &all,
+        &claims,
+        now,
+        Prefer::Recorded,
+        Some(Reason::Quiet),
+    )?;
     let mut tasks: Vec<ParkedRow> = rows
         .into_iter()
         .filter(|row| {
@@ -1132,7 +1143,7 @@ pub fn run(mut ctx: ReadCtx, limit: Option<usize>) -> Result<Output> {
 }
 ```
 
-Resolution warnings for non-quiet parks are pushed by `rows_preferring` too (a review park in a worktree also says "resume it from that checkout"); that matches `list --parked` and is acceptable.
+`quiet` passes `Some(Reason::Quiet)` so unrelated review, decision, and other parks are filtered before recorded-checkout resolution; their warnings never leak into the quiet output. `list --parked` and `prime` pass `None` and retain warnings for every parked entry.
 
 - [ ] **Step 6: Add the output type and the pretty briefs**
 
