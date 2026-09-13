@@ -107,7 +107,9 @@ the projects that own them, blocking this goal (`tasks dep tasks-dc599b --on <pi
 - **Claude Code (ops).** The model lives in a state file, `<scratchpad_dir>/tasks-model`,
   and the exports resolve it at command time, so a switch takes effect on the next
   `tasks` invocation without touching the env file again:
-  - `hooks/claude-sessionstart` reads its stdin JSON. When `$CLAUDE_ENV_FILE` and
+  - One ops hook script, `hooks/claude-provenance`, registered for both events and
+    dispatching on `hook_event_name`, keeps the existing notice hook single-purpose.
+    On `SessionStart` it reads its stdin JSON. When `$CLAUDE_ENV_FILE` and
     `scratchpad_dir` are both present it writes `model` to the state file (or removes
     the file when the field is absent) and appends two lines to the env file:
     `export TASKS_MODEL="$(cat '<state>' 2>/dev/null)"` and
@@ -117,8 +119,7 @@ the projects that own them, blocking this goal (`tasks dep tasks-dc599b --on <pi
     `export TASKS_MODEL=` — the empty export clears any model inherited from the
     launching shell, which the CLI reads as "no model". When `$CLAUDE_ENV_FILE` is
     absent it writes nothing.
-  - A new `PostModelSwitch` hook, `hooks/claude-postmodelswitch`, writes `to_model` to
-    the same state file. A payload with `scratchpad_dir` but no `to_model` removes the
+  - On `PostModelSwitch` the same script writes `to_model` to the same state file. A payload with `scratchpad_dir` but no `to_model` removes the
     file, so the next command records the harness alone rather than the previous
     model. A missing `scratchpad_dir` writes nothing.
   - Both hooks keep the session-start contract: advisory, exit 0, never fail the
