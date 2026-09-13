@@ -9,7 +9,14 @@ use crate::output::{Output, ParkedRow, QuietOut};
 pub fn run(mut ctx: ReadCtx, limit: Option<usize>) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let rows = rows_preferring(&mut ctx, &all, &claims, now, Prefer::Recorded)?;
+    let rows = rows_preferring(
+        &mut ctx,
+        &all,
+        &claims,
+        now,
+        Prefer::Recorded,
+        Some(Reason::Quiet),
+    )?;
     let mut tasks: Vec<ParkedRow> = rows
         .into_iter()
         .filter(|row| {

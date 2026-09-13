@@ -1,7 +1,7 @@
 //! Parked read views and `next` candidates.
 
 use super::ReadCtx;
-use crate::claims::{ClaimSnapshot, Park, WaitingOn};
+use crate::claims::{ClaimSnapshot, Park, Reason, WaitingOn};
 use crate::error::Result;
 use crate::model::{Phase, Status, Task, TaskId};
 use crate::output::{ParkedRow, TaskSummary};
@@ -22,7 +22,7 @@ pub fn rows(
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
 ) -> Result<Vec<ParkedRow>> {
-    rows_preferring(ctx, all, claims, now, Prefer::Registered)
+    rows_preferring(ctx, all, claims, now, Prefer::Registered, None)
 }
 
 pub fn rows_preferring(
@@ -31,8 +31,12 @@ pub fn rows_preferring(
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
     prefer: Prefer,
+    reason: Option<Reason>,
 ) -> Result<Vec<ParkedRow>> {
-    let mut entries: Vec<(&String, &Park)> = claims.parks().collect();
+    let mut entries: Vec<(&String, &Park)> = claims
+        .parks()
+        .filter(|(_, park)| reason.is_none_or(|reason| park.reason == Some(reason)))
+        .collect();
     entries.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| a.0.cmp(b.0)));
     let mut rows = Vec::new();
     for (key, park) in entries {

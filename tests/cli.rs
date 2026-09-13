@@ -6465,6 +6465,68 @@ fn quiet_includes_a_store_only_entry_last() {
 }
 
 #[test]
+fn quiet_ignores_unavailable_non_quiet_parks_but_parked_lists_warn() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let quiet = id_of(env.json(&sci, &["add", "Quiet", "-p", "1"]));
+    let review = id_of(env.json(&sci, &["add", "Review", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &quiet,
+            "run",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "5",
+        ])
+        .assert()
+        .success();
+    let (_keep, wt) = unregistered_checkout("sci");
+    std::fs::copy(
+        sci.join(format!("tasks/{review}.md")),
+        wt.join(format!("tasks/{review}.md")),
+    )
+    .unwrap();
+    as_agent(&env, &wt, "agent-a")
+        .args([
+            "park",
+            &review,
+            "review",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "review",
+        ])
+        .assert()
+        .success();
+    std::fs::remove_file(sci.join(format!("tasks/{review}.md"))).unwrap();
+    std::fs::remove_file(wt.join(format!("tasks/{review}.md"))).unwrap();
+
+    let quiet_out = env.json(&sci, &["quiet"]);
+    assert_eq!(
+        quiet_out["tasks"].as_array().unwrap().len(),
+        1,
+        "{quiet_out}"
+    );
+    assert_eq!(quiet_out["tasks"][0]["id"], quiet);
+    assert!(
+        !quiet_out["warnings"].to_string().contains(&review),
+        "{quiet_out}"
+    );
+
+    let parked = env.json(&sci, &["list", "--parked"]);
+    assert!(
+        parked["warnings"]
+            .to_string()
+            .contains("which is unavailable"),
+        "{parked}"
+    );
+}
+
+#[test]
 fn list_parked_orders_by_park_time_and_conflicts_with_sort() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
