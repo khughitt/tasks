@@ -50,6 +50,7 @@ review rounds).
 - Modify: `src/commands/mod.rs` (`creation_agent`, shared env reader, `apply_fields`)
 - Modify: `src/commands/add.rs` (`blank` signature, resolver call)
 - Modify: `src/commands/feedback.rs` (`blank` call)
+- Modify: `src/commands/list.rs:482` (test fixture `blank` call gains `None`)
 - Modify: `src/commands/edit.rs` (`has_flags`, `--no-agent`)
 - Modify: `src/output.rs` (`TaskSummary`, `ParkedRow`, both constructors, test fixture)
 - Modify: `src/complexity.rs`, `src/hierarchy.rs`, `src/periodic.rs`, `src/query.rs`,
@@ -225,6 +226,29 @@ fn edit_never_reads_tasks_agent_and_agent_flags_replace_and_clear() {
         .args(["edit", &id, "--agent", "x", "--no-agent"])
         .assert()
         .code(2);
+
+    // an editor save is validated through the record parser: an empty value is refused
+    // and the record is left as it was
+    env.json(&sci, &["edit", &id, "--agent", "codex/gpt-6"]);
+    let editor = editor_script(&sci, "sed -i 's|^agent: .*$|agent: \"\"|' \"$1\"");
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &editor)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{}", err_detail(&out));
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["agent"], "codex/gpt-6");
+
+    // a value with reserved characters is quoted on disk and round-trips byte for byte
+    env.json(&sci, &["edit", &id, "--agent", "crush/kimi-k3 [nightly]: b"]);
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["agent"],
+        "crush/kimi-k3 [nightly]: b"
+    );
+    assert!(
+        env.read(&sci, &format!("tasks/{id}.md")).contains("\nagent: \"crush/kimi-k3 [nightly]: b\"\n")
+    );
 }
 
 #[test]
@@ -449,6 +473,13 @@ In `src/commands/feedback.rs:141`:
     let mut task = super::add::blank(target, summary, Status::Idea, agent)?;
 ```
 
+The third caller is a unit-test fixture, `src/commands/list.rs:482`; it passes `None`:
+
+```rust
+        let dependency =
+            crate::commands::add::blank(&project, "Dependency".into(), Status::Todo, None).unwrap();
+```
+
 - [ ] **Step 7: Project the field into JSON**
 
 `src/output.rs`: add `pub agent: Option<String>,` after `model` in both `TaskSummary`
@@ -522,9 +553,11 @@ After the `TASKS_MODEL` paragraph (line 66–68):
 `TASKS_AGENT` per harness process records which harness and model filed each task
 (`<harness>/<model>`, or the harness alone): `add` and `feedback` stamp the record's
 `agent` field from it, `add --agent` overrides it, and `tasks edit --agent`/`--no-agent`
-corrects a stamp. Claude Code is wired through the ops session-start and model-switch
-hooks; Codex exports the harness alone; other harnesses pass `--agent` when they know
-their ids. Design: `docs/specs/2026-09-13-creation-provenance-design.md`.
+corrects a stamp. The harness owns exporting it: the design wires Claude Code through
+an ops session-start and model-switch hook and exports the harness alone for Codex
+(both tracked as separate pieces in those projects until they land); other harnesses
+pass `--agent` when they know their ids. Design:
+`docs/specs/2026-09-13-creation-provenance-design.md`.
 ```
 
 Add `--agent codex/gpt-6` to one `tasks add` example in the examples block.
@@ -570,8 +603,9 @@ the installed binary from Task 1, after this plan's tasks merge.
 `hook_event_name`), create `tests/test_provenance.py`, modify `justfile` `check_cmd`
 (add the new hook to the `py_compile` list), modify `README.md` hooks section.
 
-Behaviour (spec, Harness wiring): read stdin JSON; on `SessionStart`, when
-`CLAUDE_ENV_FILE` is set: with `scratchpad_dir` present, write `model` to
+Behaviour (spec, Harness wiring): read stdin JSON; on `SessionStart`, which is the
+only event that receives `CLAUDE_ENV_FILE`, require it (unset: write nothing); with
+`scratchpad_dir` present, write `model` to
 `<scratchpad_dir>/tasks-model` (delete the file when `model` is absent) and append
 
 ```sh
@@ -582,13 +616,15 @@ export TASKS_AGENT="claude-code${TASKS_MODEL:+/$TASKS_MODEL}"
 with `<state>` single-quote-escaped; without `scratchpad_dir`, append
 `export TASKS_AGENT=claude-code` and `export TASKS_MODEL=`. On `PostModelSwitch`, with
 `scratchpad_dir`: write `to_model` to the state file, or delete it when `to_model` is
-absent. Any other event, missing variable, or exception: write nothing, exit 0.
+absent — `CLAUDE_ENV_FILE` is never set for this event and must not be required. Any
+other event, or any exception: write nothing, exit 0.
 
 Tests: SessionStart with/without `model` and with/without `scratchpad_dir`, each
 starting from an existing state file and `TASKS_MODEL=old` in the hook environment;
-PostModelSwitch with and without `to_model`; a `bash -c 'source $ENV; echo $TASKS_AGENT
-$TASKS_MODEL'` assertion before and after a switch payload with `TASKS_MODEL` pre-set;
-a malformed stdin exits 0 and writes nothing.
+PostModelSwitch with and without `to_model`, run with `CLAUDE_ENV_FILE` removed from
+the hook environment and still asserting the state file changes; a
+`bash -c 'source $ENV; echo $TASKS_AGENT $TASKS_MODEL'` assertion before and after a
+switch payload with `TASKS_MODEL` pre-set; a malformed stdin exits 0 and writes nothing.
 
 ### Piece B (ai): register the hook and set Codex harness-only
 
@@ -597,12 +633,16 @@ a malformed stdin exits 0 and writes nothing.
 modify `codex/config.toml` `[shell_environment_policy]` `set` to include
 `TASKS_AGENT = "codex"`. Depends on Piece A.
 
-Acceptance (spec, live transition): in a fresh Claude Code session under model A,
+Acceptance (spec, live transition), in a scratch project so no real record or registry
+entry is touched: in a fresh Claude Code session, `D=$(mktemp -d) && cd $D && git init -q
+&& export XDG_CONFIG_HOME=$(mktemp -d) && tasks init --prefix prb`; under model A,
 `tasks add "probe A"` and confirm `agent` is `claude-code/<A>`; `/model` to B;
-`tasks add "probe B"` and confirm `claude-code/<B>`; `tasks done` the second and confirm
-`model` is `<B>`; drop both probes. Record the result on the piece. If the second add
-still shows A, apply the spec's fallback (harness-only exports) and note why in the
-spec. In a Codex session, `tasks add "probe"` shows `agent: codex` and no `model`.
+`tasks add "probe B"` and confirm `claude-code/<B>`; `tasks start` then `tasks done`
+the second and confirm `model` is `<B>`; delete the scratch directories (`done` →
+`dropped` is not a permitted transition, so the probes are not dropped). Record the
+result on the piece. If the second add still shows A, apply the spec's fallback
+(harness-only exports) and note why in the spec. In a Codex session, the same scratch
+recipe with `tasks add "probe"` shows `agent: codex` and no `model`.
 
 ### Goal closeout
 
