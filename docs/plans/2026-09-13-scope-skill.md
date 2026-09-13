@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** draft — awaiting review.
+**Status:** approved; implementation in progress (2026-09-13).
 
 **Goal:** Ship a deliberate `/scope` pass that turns ideas into supported next actions, briefs, questions, shelves, or drop proposals, and demonstrate it on real Prism work.
 
@@ -46,7 +46,7 @@ There are two implementation tasks: an independently usable, tested skill; then 
 
 - [ ] **Step 1: Prepare the trial packet and record a baseline before writing the skill.**
 
-Use an ignored, plan-specific scratch directory. Give fresh agents the existing tasks/curate guidance, the following scenario facts, and the request below; do not give baseline agents the proposed scope skill, its design, this plan, or the assessor's answers. Trials propose concrete commands/artifacts against the supplied records; they never mutate real projects. The real CLI execution check is Task 2.
+Use an ignored, plan-specific scratch directory. Give fresh agents the existing tasks/curate guidance, the following scenario facts, and the request below; do not give baseline agents the proposed scope skill, its design, this plan, or the assessor's answers. The main packet proposes concrete commands/artifacts against supplied snapshots so the mid-pass change is deterministic. Step 3 also executes the three-verdict packet against real scratch-project records; Task 2 remains the real-project acceptance pass.
 
 Request:
 
@@ -88,7 +88,7 @@ After the default pass, send this follow-up to each agent:
 
 > Now explicitly scope demo-a10007 and demo-a10009. Existing research has not finished. Reuse the supplied documents and task graph; return only the additional changes you would make.
 
-Run five fresh-context baseline trials and save exact outputs. Assess manually against the table below. Record actual failures and quotations; do not invent a failing baseline if the agents already comply. If no failure appears, add the concrete project ambiguity the baseline omitted and repeat before authoring new guidance. Do not weaken the acceptance contract to manufacture success.
+Run three fresh-context baseline trials and save exact outputs. Go beyond three only when those first three disagree; resolve the specific disagreement rather than increasing every case count. Assess manually against the table below. Record actual failures and quotations; do not invent a failing baseline if the agents already comply. If no failure appears, add the concrete project ambiguity the baseline omitted and repeat before authoring new guidance. Do not weaken the acceptance contract to manufacture success.
 
 | Check | Required result |
 |---|---|
@@ -138,9 +138,9 @@ The actual task substitutes repository paths and waiting idea ids found during t
 
 - [ ] **Step 3: Repeat the same trials with the skill, then exercise the remaining verdict branches.**
 
-Run five fresh-context trials of the identical packet with the new skill loaded. Check every result against every applicable row; keep the baseline/green variants comparable. Fix observed misunderstandings and rerun affected cases. Reading the skill back is not a passing application test.
+Run three fresh-context trials of the identical packet with the new skill loaded. Check every result against every applicable row; keep the baseline/green variants comparable. Fix observed misunderstandings and rerun affected cases. Reading the skill back is not a passing application test.
 
-Also run one small explicit-id application packet: one idea has a supplied commit proving it landed (proposal only), one is waiting on a named external capability (shelf with that wake condition), and one requires an unprovided personal preference with no useful design alternatives (question in body). All start as unclaimed ideas and their pre-write snapshots are unchanged. Expect three different supported verdicts, exactly one scope note each, no executed drop, and no forced brief/spec. Repeat this packet after relevant wording corrections.
+Also execute one small explicit-id packet in a real ignored scratch project per wording revision. Use a disposable XDG_CONFIG_HOME and XDG_STATE_HOME for every fixture command, initialize with tasks init --prefix demo, commit its seed data, and create a .worktrees/review linked worktree. Never register this fixture in the real user registry. Create ideas through the CLI and extract add results from the top-level id field; add returns {id, action}, not a task object. One idea has a real fixture commit proving it landed (proposal only), one waits on a named external capability (shelf with that wake condition), and one requires an unprovided personal preference with no useful design alternatives (question in body). Run the skill unscoped from the review worktree with these explicit ids and inspect the resulting files and show output, not a proposed transcript. Expect three supported verdicts, exactly one scope note per member, an additional shelved: note from shelve itself, no executed drop, and no forced brief/spec. Verify fixture main is unchanged, root defaults to a JSON object pointing at registered main while unscoped writes stayed in the review worktree, and list rows lack notes so verdict/eligibility reads used show. Reset to the clean seed in a new trial worktree for each wording revision; keep this packet to one execution per revision.
 
 Record inputs, observed baseline errors, representative output excerpts, green outcomes, and limitations in the validation note. Keep trial transcripts in ignored scratch, not committed reports. Do not introduce a test runner or a Rust test merely to scan skill text.
 
@@ -153,7 +153,7 @@ Record inputs, observed baseline errors, representative output excerpts, green o
 
 - [ ] **Step 5: Check and commit the tested skill.**
 
-Inspect the frontmatter, referenced CLI help and every doc link; run `git diff --check`, `tasks check`, and `just check`. Record the trial evidence on the step task, close that step, and commit the named skill/docs/task files with `feat(scope): add a tested idea scoping skill`. Keep the parent skill piece open for Task 2's real acceptance. The scope-pass design status becomes `scope skill written; real-cluster acceptance pending`, not fully implemented yet.
+Inspect the frontmatter, referenced CLI help and every doc link; run `git diff --check`, `tasks check`, and `just check`. Record the trial evidence on the step task, close that step, and commit the named skill/docs/task files with `feat(scope): add a tested idea scoping skill`. Keep the parent skill piece open for Task 2's real acceptance. The scope-pass design status becomes `scope skill written; real-cluster acceptance pending`, not fully implemented yet. Correct §4.5's known stale “four parts” count to the five fields already enumerated in this same Task 1 commit.
 
 ### Task 2: Run real Prism acceptance, correct the handoff, and close the skill piece
 
@@ -195,7 +195,7 @@ If the pass demonstrates a skill defect, correct that wording, rerun its control
 
 Use `tasks -C "$scope_tasks_root" note tasks-0d50ff "<acceptance result>"` with the actual Prism checkout/commit, member ids, summary, and what the skill text got wrong (or an evidence-backed “no correction needed”). Update the validation note with baseline/green counts and the real pass/rerun observations. Do not claim a real pass if only scripted trials ran.
 
-Correct the spec's status to implemented only after these checks exist, and correct its stale “four parts” count to the five research fields it already enumerates. Mark this plan's steps completed from the tree and evidence. Grep README, AGENTS, skills and current specs for stale pending-skill or contradictory workflow claims and fix relevant drift.
+Correct the spec's status to implemented only after these checks exist; the research-field count was already corrected in Task 1. Mark this plan's steps completed from the tree and evidence. Grep README, AGENTS, skills and current specs for stale pending-skill or contradictory workflow claims and fix relevant drift.
 
 Run `just gate` once on the final tasks tree, then close this step and `tasks-0d50ff` with `tasks check` before committing. Inspect `prime` closeout for `tasks-019c60`: close it only when both pieces and acceptance are complete and claim rules allow it. Do not force another session's live claim; record completed pieces and leave the goal for its holder if necessary. Commit as `docs(scope): record real-cluster acceptance`. Retain both branches for review; integration is separate.
 
