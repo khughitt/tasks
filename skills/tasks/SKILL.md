@@ -31,6 +31,11 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    agent, else the first ready task, in full; `tasks next --all-projects` does the same
    across every registered project, and `tasks next
    --project <prefix>` reads one of them.
+   `tasks quiet` lists work parked waiting for an idle host across every registered
+   project, priority first, as resume briefs with the checkout to open; `-n 1` is the
+   top of the queue and `--project <prefix>` narrows it. It is the person's bedtime
+   view, not a picker: resume an entry by opening a session in the checkout it names
+   and running `tasks start <id>` there.
 3. `tasks start <id>` before changing code. It records you as owner.
    `start` also records a claim outside git, visible from every worktree of the project,
    with the session identity and a liveness handle. A task claimed by another live session
@@ -49,7 +54,7 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    decide), `approval` (you hold a recommendation and want it confirmed), `environment`
    (the checkout or machine cannot run the work), `dependency` (another task or project
    must land first), `session` (the session is ending before the work is), `capability`
-   (the work needs more reasoning than this session can supply).
+   (the work needs more reasoning than this session can supply), `quiet` (the host is in use; the work is prepared and unattended and needs only an idle machine).
    Escalate on an observable trigger, not a feeling: the implementation needs a decision
    the spec or plan leaves unresolved; investigation reveals interacting behaviour outside
    the assessed scope; a bounded attempt makes no progress or has no way to establish
@@ -62,6 +67,14 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    so a person can decompose or reassign it. An environment or credential failure is
    `--reason environment` and never raises the rating. If the command reports that the
    escalation was not recorded, rerun it as it was.
+   When a preflight or benchmark refuses on host load (CPU, GPU, load average, a
+   competing application), park with
+   `tasks park <id> "<the check to rerun, then what follows>" --reason quiet --waiting-on user --minutes <n>`,
+   adding `--needs headless` when the desktop session itself is the load and must be
+   stopped first (`idle`, the default, means the desktop may stay up but nothing else
+   runs). `--minutes` is the expected wall-clock length once started and is required;
+   the queue is read before bed. `quiet` is not `environment` (a missing tool or a
+   restart) and not `decision` (a session the person must attend).
    `prime` lists parked work first with where it was left; `ready` omits work waiting on
    the user; `list --parked` is the picker's feed.
 6. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are

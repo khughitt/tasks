@@ -1,6 +1,6 @@
 # Quiet queue: work that waits for an idle host
 
-Status: draft (2026-09-13)
+Status: implemented (2026-09-13)
 Task: tasks-811e02
 
 ## 1. Problem

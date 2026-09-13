@@ -92,8 +92,10 @@ Rules, in the shape the model-provenance design fixed:
 | `dependency`  | another task or project must land first                                          |
 | `session`     | the session ended before the work did — context exhausted, time, crash           |
 
-A seventh word, `capability`, is defined in `2026-09-12-task-complexity-design.md` §5; it
-is the one reason with a companion field.
+A seventh word, `capability`, is defined in `2026-09-12-task-complexity-design.md` §5.
+An eighth word, `quiet`, is defined in `2026-09-13-quiet-queue-design.md` §3 and carries
+the idle-host recipe fields described there; capability's complexity field remains
+independent of quiet's recipe.
 
 - **Parsing.** A `Reason` enum in `claims.rs` beside `WaitingOn`, with `ALL`, `parse`,
   and `as_str`, `serde(rename_all = "lowercase")`. A value outside the six is a
@@ -114,7 +116,7 @@ is the one reason with a companion field.
   `tree`, and `ParkedRow` — gains `reason`, `null` when absent, so `park.reason` is the
   JSON path everywhere and no row type carries a second copy. The pretty parked
   listings print it after the who, in the same parenthetical the note uses.
-- **Completion.** `complete::reason` offers the six values;
+- **Completion.** `complete::reason` offers the eight values;
   `ArgValueCandidates` on the flag, as for `--waiting-on`.
 - **Rename.** Park entries migrate through `tasks rename` byte-for-byte as today; the
   new key rides along.

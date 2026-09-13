@@ -1,5 +1,7 @@
 # Quiet Queue Implementation Plan
 
+Status: implemented (2026-09-13)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A park reason `quiet` with a recorded recipe (`needs`, `minutes`), and a `tasks quiet` command that lists such parks across every project as resume briefs, resolved from each park's recorded checkout first.
@@ -46,7 +48,7 @@
 **Interfaces:**
 - Produces: `claims::Reason::Quiet` (`"quiet"`); `claims::Needs { Idle, Headless }` with `ALL`, `parse(&str) -> Result<Needs>`, `as_str(self) -> &'static str`; `Park.needs: Option<Needs>`, `Park.minutes: Option<u32>`; `claims::describe_stop(who: WaitingOn, reason: Option<Reason>, needs: Option<Needs>, minutes: Option<u32>) -> String`; `complete::needs() -> Vec<CompletionCandidate>`; `ParkInfo.needs`, `ParkInfo.minutes`; `park::run(ctx, id, next_step, waiting_on, reason, complexity, needs: Option<String>, minutes: Option<u32>)`; the note form `parked (waiting on user, quiet; idle, 50 min): <next step>`.
 
-- [ ] **Step 1: Write the failing unit tests in `src/claims.rs`**
+- [x] **Step 1: Write the failing unit tests in `src/claims.rs`**
 
 Replace `reason_parses_its_seven_values_only` with `reason_parses_its_eight_values_only`, delete `describe_stop_names_the_who_and_the_reason_when_given` (the new `describe_stop_appends_the_recipe_when_present` covers both of its assertions), and add the rest. In the existing `sample_park()` helper, and in every other `Park { ... }` literal in the test module (`a_park_without_a_reason_loads_and_a_park_with_one_writes_the_key`, `inserting_a_park_displaces_a_claim_on_the_same_id`, `inserting_a_claim_displaces_a_park_on_the_same_id`, any other `grep -n "Park {" src/claims.rs` finds), add `needs: None, minutes: None,` after `reason: ...,`.
 
@@ -172,7 +174,7 @@ Replace `reason_parses_its_seven_values_only` with `reason_parses_its_eight_valu
     }
 ```
 
-- [ ] **Step 2: Write the failing integration tests in `tests/cli.rs`**
+- [x] **Step 2: Write the failing integration tests in `tests/cli.rs`**
 
 Add after line 1042:
 
@@ -368,7 +370,7 @@ fn start_on_a_quiet_park_removes_the_entry_and_its_recipe() {
 }
 ```
 
-- [ ] **Step 3: Run both test sets to verify they fail**
+- [x] **Step 3: Run both test sets to verify they fail**
 
 Run: `cargo test --bin tasks claims::`
 Expected: compile errors naming `Reason::Quiet`, `Needs`, `needs`, `minutes`, and the four-argument `describe_stop`.
@@ -376,7 +378,7 @@ Expected: compile errors naming `Reason::Quiet`, `Needs`, `needs`, `minutes`, an
 Run: `cargo test --test cli quiet_park`
 Expected: compile succeeds (the integration tests only drive the binary) and the tests fail: `--minutes` is an unknown argument (exit 2) and `--reason quiet` alone succeeds today.
 
-- [ ] **Step 4: Add `Reason::Quiet`, the `Needs` enum, the fields, and the recipe in `describe_stop`**
+- [x] **Step 4: Add `Reason::Quiet`, the `Needs` enum, the fields, and the recipe in `describe_stop`**
 
 In `src/claims.rs`, change the `Reason` doc comment and enum:
 
@@ -491,7 +493,7 @@ In `Park`, after the `reason` field:
     pub minutes: Option<u32>,
 ```
 
-- [ ] **Step 5: Carry the fields through `ParkInfo` and completion**
+- [x] **Step 5: Carry the fields through `ParkInfo` and completion**
 
 In `src/output.rs`, change the two `describe_stop` calls (in `show_text` around line 942 and `parked_table` around line 1101) to `crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)` and add to `ParkInfo`:
 
@@ -511,7 +513,7 @@ pub fn needs() -> Vec<CompletionCandidate> {
 }
 ```
 
-- [ ] **Step 6: Add the flags to the CLI and the dispatch**
+- [x] **Step 6: Add the flags to the CLI and the dispatch**
 
 In `src/cli.rs`, in the `Park` variant after the `complexity` field:
 
@@ -556,7 +558,7 @@ In `src/commands/mod.rs`, extend the dispatch:
         ),
 ```
 
-- [ ] **Step 7: Validate and record the recipe in `park::run`**
+- [x] **Step 7: Validate and record the recipe in `park::run`**
 
 In `src/commands/park.rs`, add `Needs` to the `use crate::claims::{...}` line and change the signature, with the repo's targeted allowance above it:
 
@@ -608,7 +610,7 @@ Immediately *after* the whole `let escalation = match (reason, complexity) { ...
 
 Change the note call to `describe_stop(waiting_on, reason, needs, minutes)` and the `Park` literal to carry `needs, minutes,` after `reason,`. `grep -rn "Park {\|describe_stop(" src/` must then show no other call site without the new fields or arguments.
 
-- [ ] **Step 8: Run the tests and the gate**
+- [x] **Step 8: Run the tests and the gate**
 
 Run: `cargo test --bin tasks claims::`
 Expected: ok, every unit test passes.
@@ -619,7 +621,7 @@ Expected: ok, including the three new tests and the pre-existing reason tests.
 Run: `just check`
 Expected: fmt, clippy, and `tasks check` all pass. A `dead_code` or `too_many_arguments` failure here means a helper landed without its consumer; fix it in this task, never with a broader `allow`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 tasks done tasks-fff91a "quiet reason, Needs enum, Park.needs/minutes, park --needs/--minutes with validation, the note form, and park.needs/minutes in every view"
@@ -643,7 +645,7 @@ git commit -m "feat(park): quiet reason with a needs and minutes recipe"
 
 The resolver refactor and the command land in one commit because `Prefer::Recorded` has no constructor until `quiet::run` exists, and an unconstructed variant fails the gate. The refactor is still verified on its own: step 3 runs the whole suite after it, before the command exists.
 
-- [ ] **Step 1: Write the failing integration tests**
+- [x] **Step 1: Write the failing integration tests**
 
 Add to `tests/cli.rs` after `a_task_parked_only_in_another_checkout_is_listed_from_there_and_never_next`:
 
@@ -860,12 +862,12 @@ fn quiet_includes_a_store_only_entry_last() {
 
 And in `project_and_all_projects_conflict_on_every_read_command`, change the loop list to `["list", "ready", "next", "prime", "tree", "tags", "quiet"]`.
 
-- [ ] **Step 2: Run the new tests to verify they fail**
+- [x] **Step 2: Run the new tests to verify they fail**
 
 Run: `cargo test --test cli quiet`
 Expected: the `quiet_*` tests and `a_park_whose_task_file_was_deleted_in_its_own_checkout_still_warns_unavailable` fail with exit 2, `quiet` is not a subcommand (the deleted-file test fails on its `quiet` iteration; its `list --parked` and `prime` iterations pass today, which is the point).
 
-- [ ] **Step 3: Restructure the resolver around a preference**
+- [x] **Step 3: Restructure the resolver around a preference**
 
 Replace the body of `src/commands/parked.rs` from `pub fn rows` through the end of `fn resolve_elsewhere` (keep the `candidates` function below untouched) with:
 
@@ -1041,7 +1043,7 @@ Compare `unavailable`'s two `fell_back == false` outputs against the two `format
 
 Run the whole suite now, before the command exists, to prove the refactor changed nothing observable: `cargo test`. Expected: every pre-existing test passes; only the six new tests from step 1 fail. (`Prefer::Recorded` is unconstructed at this point, so `just check` would fail on `dead_code`; that is why this step does not commit.)
 
-- [ ] **Step 4: Add the CLI variant and the dispatch**
+- [x] **Step 4: Add the CLI variant and the dispatch**
 
 In `src/cli.rs`, after the `Tags` variant:
 
@@ -1083,7 +1085,7 @@ In `src/commands/mod.rs`: add `pub mod quiet;` to the module list (alphabetical,
         }
 ```
 
-- [ ] **Step 5: Write `src/commands/quiet.rs`**
+- [x] **Step 5: Write `src/commands/quiet.rs`**
 
 ```rust
 //! `tasks quiet`: the queue of work parked waiting for an idle host
@@ -1145,7 +1147,7 @@ pub fn run(mut ctx: ReadCtx, limit: Option<usize>) -> Result<Output> {
 
 `quiet` passes `Some(Reason::Quiet)` so unrelated review, decision, and other parks are filtered before recorded-checkout resolution; their warnings never leak into the quiet output. `list --parked` and `prime` pass `None` and retain warnings for every parked entry.
 
-- [ ] **Step 6: Add the output type and the pretty briefs**
+- [x] **Step 6: Add the output type and the pretty briefs**
 
 In `src/output.rs`, after `ParkedOut`:
 
@@ -1201,7 +1203,7 @@ pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter) -> String {
 }
 ```
 
-- [ ] **Step 7: Run the tests and the gate**
+- [x] **Step 7: Run the tests and the gate**
 
 Run: `cargo test --test cli quiet`
 Expected: ok; the six new tests and the conflict test pass. If `quiet_lists_quiet_parks_across_projects_by_priority_then_park_time` fails on the `worktree` assertion, `park.worktree` is `ctx.project.root.display()` and `TestEnv::init` canonicalizes the temp path, so the two should match; if not, compare after `canonicalize()` on the test side.
@@ -1212,7 +1214,7 @@ Expected: ok, whole suite.
 Run: `just check`
 Expected: passes; `Prefer::Recorded` now has its constructor in `quiet::run`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 tasks done tasks-0f780e "parked resolver takes a registered-or-recorded preference; tasks quiet lists quiet parks across projects as resume briefs, recorded checkout first, warnings kept"
@@ -1232,7 +1234,7 @@ git commit -m "feat(cli): tasks quiet lists work parked for an idle host as resu
 
 **Interfaces:** none; documentation only.
 
-- [ ] **Step 1: Skill step 5: the reason and the recipe**
+- [x] **Step 1: Skill step 5: the reason and the recipe**
 
 In `skills/tasks/SKILL.md` step 5, change the sentence listing the reasons so it ends `..., \`session\` (the session is ending before the work is), \`capability\` (the work needs more reasoning than this session can supply), \`quiet\` (the host is in use; the work is prepared and unattended and needs only an idle machine).` Then, after the sentence "An environment or credential failure is `--reason environment` and never raises the rating.", add:
 
@@ -1247,7 +1249,7 @@ In `skills/tasks/SKILL.md` step 5, change the sentence listing the reasons so it
    restart) and not `decision` (a session the person must attend).
 ```
 
-- [ ] **Step 2: Skill step 2: where the queue is read**
+- [x] **Step 2: Skill step 2: where the queue is read**
 
 In step 2, after the sentence ending "`tasks next --project <prefix>` reads one of them.", add:
 
@@ -1259,7 +1261,7 @@ In step 2, after the sentence ending "`tasks next --project <prefix>` reads one 
    and running `tasks start <id>` there.
 ```
 
-- [ ] **Step 3: README**
+- [x] **Step 3: README**
 
 Add a row to the reason table after `capability`:
 
@@ -1274,11 +1276,11 @@ After the sentence "`start` resumes it, and `prime` lists parked work first." ad
     tasks quiet                      # what could run tonight, across every project; -n 1 for the top
 ```
 
-- [ ] **Step 4: Doc comments and spec status**
+- [x] **Step 4: Doc comments and spec status**
 
 `grep -rn "seven" src/claims.rs src/complete.rs` and change each vocabulary count to eight. In `docs/specs/2026-09-13-quiet-queue-design.md`, change `Status: draft (2026-09-13)` to `Status: implemented (<today's date>)`.
 
-- [ ] **Step 5: Reinstall and verify the tracker used by the protocol is the new code**
+- [x] **Step 5: Reinstall and verify the tracker used by the protocol is the new code**
 
 Run: `cargo install --path .`
 Expected: succeeds.
@@ -1286,7 +1288,7 @@ Expected: succeeds.
 Run: `tasks quiet --pretty`
 Expected: exit 0 and the real queue: the quiet parks across the registered projects, or nothing if none has been re-parked under `quiet` yet (existing entries still carry `environment`; re-parking them is the projects' business, not this task's).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 just check

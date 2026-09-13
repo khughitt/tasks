@@ -227,8 +227,10 @@ record write.
 
 `capability` joins the reason vocabulary of
 docs/specs/2026-09-11-park-reason-and-stamps-design.md §4 as a seventh word: the work
-needs more reasoning than this session can supply. It is the one reason with a
-companion field, because it is the one stop whose response is a routing change. An
+needs more reasoning than this session can supply. It carries its own complexity
+companion field because its response is a routing change. The separate `quiet`
+reason carries the idle-host recipe defined in
+`2026-09-13-quiet-queue-design.md` §3. An
 environment or credential failure is `--reason environment` and must not raise the
 rating: the difficulty did not change, the machine did.
 

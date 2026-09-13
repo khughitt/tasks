@@ -73,11 +73,14 @@ optionally why:
 | `dependency`  | another task or project must land first                                          |
 | `session`     | the session ended before the work did — context exhausted, time, crash           |
 | `capability`  | the work needs more reasoning than this session can supply; `--complexity` raises the rating |
+| `quiet`       | the host is in use; the work is prepared, unattended, and needs only an idle machine — `--minutes <n>` (required) and `--needs idle\|headless` record the recipe |
 
 `start` resumes it, and `prime` lists parked work first. Every record also carries two
 stamps written only by status changes: `started`, the first time work began, and
 `completed`, the latest completion (cleared by a reopen). Design:
 `docs/specs/2026-09-11-park-reason-and-stamps-design.md`.
+`tasks quiet` lists quiet parks across every registered project as resume briefs (design:
+`docs/specs/2026-09-13-quiet-queue-design.md`).
 
 Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped`.
 `shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and
@@ -116,6 +119,8 @@ from a clone):
     tasks tree                       # the goal hierarchy
     tasks next                       # parked work waiting on you, else the first ready task
     tasks park <id> "next step" --reason review   # set it down; tasks list --parked to see what is parked
+    tasks park <id> "rerun the preflight" --reason quiet --waiting-on user --minutes 50  # needs an idle host
+    tasks quiet                      # what could run tonight, across every project; -n 1 for the top
     tasks shelve <id> "when the dependency lands" # keep open work out of active views
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project
