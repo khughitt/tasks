@@ -109,10 +109,12 @@ A sourced `add` is idempotent: when the project already holds a task with that s
 written, so refiling a batch from one origin never duplicates. The other flags on a reused
 call are ignored, not merged — `tasks edit` that id if the record should change.
 
-Every command that takes an id writes to the project that id's prefix names, so
+Every write command that takes an id writes to the project that id's prefix names, so
 `tasks note`, `tasks dep`, `tasks edit`, and the status commands work on a task in another
-registered project without leaving the current one. A prefix matching the current project
-always means this checkout.
+registered project without leaving the current one, or from outside every project.
+`show` and bare `tree <id>` follow the same rule. A prefix matching the current project
+always means this checkout; without a local project, the registry supplies the root.
+Malformed local configuration still fails. `feedback` needs a local project for its `from:` tag.
 
 The read commands say where to look instead of inferring it from an id: `list`, `ready`,
 `next`, `prime`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one registered

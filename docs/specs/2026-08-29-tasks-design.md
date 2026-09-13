@@ -551,18 +551,19 @@ A prefix is *unreachable* when it is not registered, or its path or the task fil
 exist. Unreachable ids are warnings in `show`/`list`/`check` and errors (`unresolvable_id`)
 in `dep --on` and `add --depends`.
 
-Read scope is explicit, never inferred from an id: `--project` and `--all-projects` are
-the only way a read command leaves the local project. Id routing is a separate rule, and
-`tree <id>` does not have it.
+Read scope is explicit through `--project` and `--all-projects`. `show` and bare
+`tree <id>` also route by the id's prefix; an explicit scope on `tree` takes precedence.
 
-A write command that takes an existing id (`edit`, `note`, `start`, `done`, `drop`,
-`block`, `unblock`, `dep`) writes to the project that id's prefix names, by the rule
+A write command that takes an existing id (`edit`, `note`, `start`, `park`, `done`, `drop`,
+`block`, `unblock`, `shelve`, `unshelve`, `dep`) writes to the project that id's prefix names, by the rule
 `show` and `root` already use: a prefix matching the local project keeps that checkout, so
 `-C` and worktrees still win over the registered root; any other prefix is followed through
 the registry, and an unregistered or unreachable one is `unresolvable_id`. The mutation lock
 and the claim store key off the resolved project, so a cross-project write locks and claims
-in the target, not the caller. A local project is still required — only `add --project` and
-the two read-scope flags run without one.
+in the target, not the caller. Without a local project, id-directed commands resolve
+through the registry: the prefix already supplies the target. Only `no_project` permits
+this route; invalid local configuration still fails. `feedback` requires a local project
+for its provenance tag.
 
 The same seven read commands (list, ready, prime, tree, next, tags, sample) take
 `--project <p>` and `--all-projects`, which conflict. Both locate no local project.

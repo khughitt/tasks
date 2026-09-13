@@ -5,18 +5,11 @@ use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
 use crate::resolve::Resolver;
-use crate::scope::Origin;
 use time::OffsetDateTime;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &id)?;
-    let foreign;
-    let project: &Project = if id.prefix == ctx.project.prefix {
-        &ctx.project
-    } else {
-        foreign = crate::scope::open_registered(&ctx.registry, &id.prefix, Origin::Id(&id))?;
-        &foreign
-    };
+    let project = &ctx.project;
     let task = project.read_task(&id)?;
     let all = project.scan()?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(project.prefix.as_str()))?;

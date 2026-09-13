@@ -1,6 +1,7 @@
 # Multi-project support — design
 
 **Status:** implemented 2026-09-04; see docs/plans/2026-09-04-multi-project.md. Task: tasks-3029be.
+ID-directed commands also work without a local project as of 2026-09-13 (tasks-120a02).
 
 ## 1. Problem
 
@@ -36,14 +37,11 @@ visiting each checkout in turn.
   or the set of reachable registered projects. Reachability is decided in one function, so
   `list`, `ready`, `prime`, `tree`, `next`, `tags`, `sample`, and `projects` cannot drift in how they
   treat a missing root. `--all-projects` is only defined on the read commands. Write
-  commands keep a mandatory local project, with exactly one exception: `add --project`
-  names its target explicitly and locates no local project (§4.3). Dispatch must therefore
-  open the local project lazily for `add`, after the flag is known, rather than eagerly
-  for every command as it does today.
-
-  Superseded in part: a write command that takes an existing id now writes to the project
-  that id's prefix names, still requiring a local project but no longer requiring it to be
-  the target. See §6 of docs/specs/2026-08-29-tasks-design.md.
+  commands require a local project except when the target is explicit: `add --project`
+  names a registered project (§4.3), and an existing task id names its project by prefix.
+  ID-directed commands preserve a matching local checkout; without one they use the
+  registry, because the id already identifies the destination. `show` and bare `tree <id>`
+  use the same rule. See §6 of docs/specs/2026-08-29-tasks-design.md.
 - **`next` answers "what do I do now" in one call.** It is the head of `ready` in the
   `show` shape, per project or across all of them.
 - **Tags get visibility, not a vocabulary.** `tags --all-projects` shows which tags are
@@ -111,8 +109,9 @@ as today: unreachable projects, unreachable dependencies, and uncommitted task f
 
 ### 3.3 Local scope
 
-Unchanged. The project is located by walking up from the current directory or `-C`, and
-its absence is `no_project`.
+Without an explicit scope or a target id, the project is located by walking up from the
+current directory or `-C`, and its absence is `no_project`. ID-directed commands use the
+registry only when no local project exists; malformed local configuration still errors.
 
 ## 4. Commands
 
@@ -164,7 +163,7 @@ tasks projects
     warnings of §3.2 (empty registry, unregistered current project) are emitted.
 ```
 
-`show` is unchanged: a foreign id already routes through the registry. `graph` stays local.
+`show` routes by id, including without a local project. `graph` stays local.
 
 ### 4.3 `add --project`
 

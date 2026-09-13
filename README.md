@@ -138,6 +138,11 @@ from a clone):
     tasks done sci-4f2a9c "landed in 1a2b3c"  # open-work rule: closes once its child is closed
     tasks check                      # validate files, links, plan steps, dependencies
 
+Commands targeting an existing id, including `show`, `tree <id>`, `note`, and `start`,
+work from outside every project: the prefix selects the registered root. Inside a
+project, a matching prefix keeps the current checkout, including a worktree selected
+with `-C`. `feedback` still needs a local project for its provenance tag.
+
 A recurring task closes normally: `done` records the completion and anchors its next
 cycle. When due, it appears in `ready` with status `done`; use `start` before completing
 the next occurrence. Early runs are allowed. `--every` accepts positive whole days or

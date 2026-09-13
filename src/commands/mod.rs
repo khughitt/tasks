@@ -70,6 +70,20 @@ pub struct Ctx {
 }
 
 impl Ctx {
+    fn new(project: Project, registry: Registry, routing: Routing) -> Self {
+        Self {
+            project,
+            registry,
+            warnings: Vec::new(),
+            lock: None,
+            routing,
+            claims: None,
+            pending_claim: None,
+            recovered: false,
+            clear_escalation: None,
+        }
+    }
+
     /// The claim store, loaded on first use. Only reachable with the lock held, so every
     /// read-check-write against it sits inside one critical section.
     pub fn claims_mut(&mut self) -> Result<&mut ClaimStore> {
@@ -231,17 +245,7 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
     let project = Project::locate(&start)?;
     let registry = Registry::load()?;
     reject_stale_local(&registry, &project)?;
-    Ok(Ctx {
-        project,
-        registry,
-        warnings: Vec::new(),
-        lock: None,
-        routing: Routing::Local,
-        claims: None,
-        pending_claim: None,
-        recovered: false,
-        clear_escalation: None,
-    })
+    Ok(Ctx::new(project, registry, Routing::Local))
 }
 
 /// A checkout whose own prefix the registry has retired. Nothing else sees this:
@@ -259,20 +263,32 @@ pub fn reject_stale_local(registry: &Registry, project: &Project) -> Result<()> 
     Ok(())
 }
 
-/// The write context for the project an id names. A prefix matching the local project
+/// The context for the project an id names. A prefix matching the local project
 /// keeps that checkout, so `-C` and worktrees still win; any other prefix is followed
-/// through the registry, the rule `show` and `root` already use. A local project is
-/// still required, so a cwd outside every project fails exactly as before. The lock and
-/// the claim store key off `ctx.project`, so both follow the id to its project.
-pub fn open_id_write_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
-    let mut ctx = open_ctx(dir)?;
-    let id = parse_id(&ctx.registry, id)?;
-    let routing = if id.prefix == ctx.project.prefix {
-        Routing::Local
-    } else {
-        ctx.project = crate::scope::open_registered(&ctx.registry, &id.prefix, Origin::Id(&id))?;
-        Routing::Registered(id.prefix)
+/// through the registry. With no local project, the registry is the only target.
+fn open_id_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
+    let mut ctx = match open_ctx(dir) {
+        Ok(ctx) => ctx,
+        Err(Error::NoProject(_)) => {
+            let registry = Registry::load()?;
+            let id = parse_id(&registry, id)?;
+            let project = crate::scope::open_registered(&registry, &id.prefix, Origin::Id(&id))?;
+            return Ok(Ctx::new(project, registry, Routing::Registered(id.prefix)));
+        }
+        Err(error) => return Err(error),
     };
+    let id = parse_id(&ctx.registry, id)?;
+    if id.prefix != ctx.project.prefix {
+        ctx.project = crate::scope::open_registered(&ctx.registry, &id.prefix, Origin::Id(&id))?;
+        ctx.routing = Routing::Registered(id.prefix);
+    }
+    Ok(ctx)
+}
+
+/// The lock and claim store follow the resolved project, including outside a checkout.
+pub fn open_id_write_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
+    let mut ctx = open_id_ctx(dir, id)?;
+    let routing = ctx.routing.clone();
     lock_and_revalidate(&mut ctx, &routing)?;
     Ok(ctx)
 }
@@ -349,24 +365,18 @@ pub fn open_id_read_ctx(
     scope: &ScopeArgs,
     id: Option<&str>,
 ) -> Result<ReadCtx> {
-    let mut ctx = open_read_ctx(dir, scope)?;
     if scope.project.is_some() || scope.all_projects {
-        return Ok(ctx);
+        return open_read_ctx(dir, scope);
     }
     let Some(id) = id else {
-        return Ok(ctx);
+        return open_read_ctx(dir, scope);
     };
-    let id = parse_id(&ctx.registry, id)?;
-    if let Scope::Local(project) = &ctx.scope
-        && id.prefix != project.prefix
-    {
-        ctx.scope = Scope::Local(crate::scope::open_registered(
-            &ctx.registry,
-            &id.prefix,
-            Origin::Id(&id),
-        )?);
-    }
-    Ok(ctx)
+    let ctx = open_id_ctx(dir, id)?;
+    Ok(ReadCtx {
+        scope: Scope::Local(ctx.project),
+        registry: ctx.registry,
+        warnings: ctx.warnings,
+    })
 }
 
 pub struct ReadCtx {
@@ -982,8 +992,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             project,
             fields,
         } => {
-            // The one write command that may run without a local project (spec §2):
-            // an explicit target replaces the lookup, and the unchanged `add` validates
+            // An explicit target replaces the lookup, and `add` validates
             // every field against whichever project it is handed.
             let routing = project.clone().map_or(Routing::Local, Routing::Registered);
             let mut ctx = match project {
@@ -991,24 +1000,14 @@ pub fn run(cli: Cli) -> Result<Output> {
                     let registry = Registry::load()?;
                     let project =
                         crate::scope::open_registered(&registry, &prefix, Origin::Prefix)?;
-                    Ctx {
-                        project,
-                        registry,
-                        warnings: Vec::new(),
-                        lock: None,
-                        routing: routing.clone(),
-                        claims: None,
-                        pending_claim: None,
-                        recovered: false,
-                        clear_escalation: None,
-                    }
+                    Ctx::new(project, registry, routing.clone())
                 }
                 None => open_ctx(dir)?,
             };
             lock_and_revalidate(&mut ctx, &routing)?;
             add::run(ctx, title, status, fields)
         }
-        Command::Show { id } => show::run(open_ctx(dir)?, id),
+        Command::Show { id } => show::run(open_id_ctx(dir, &id)?, id),
         Command::List {
             statuses,
             tags,

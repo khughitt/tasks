@@ -8000,12 +8000,79 @@ fn write_commands_follow_the_id_prefix_across_projects() {
         env.fail(&ops, &["note", "fam-000001", "x"]),
         "task_not_found"
     );
-    // and a local project is still required
+    // with no local project, the prefix still names the target
     let nowhere = tempfile::tempdir().unwrap();
+    env.json(nowhere.path(), &["note", &piece, "from outside"]);
     assert_eq!(
-        env.fail(nowhere.path(), &["note", &piece, "x"]),
+        env.json(&fam, &["show", &piece])["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["text"],
+        "from outside"
+    );
+}
+
+#[test]
+fn id_commands_route_from_outside_every_project() {
+    let mut env = TestEnv::new();
+    let fam = env.init("fam");
+    let nowhere = tempfile::tempdir().unwrap();
+    let id = id_of(env.json(&fam, &["add", "Available everywhere"]));
+
+    for command in ["show", "note", "start"] {
+        assert_eq!(
+            env.complete(nowhere.path(), "bash", 2, &["tasks", command, "fam-"]),
+            [id.as_str()]
+        );
+    }
+    assert_eq!(env.json(nowhere.path(), &["show", &id])["task"]["id"], id);
+    assert_eq!(
+        env.json(nowhere.path(), &["tree", &id])["nodes"][0]["id"],
+        id
+    );
+    env.json(nowhere.path(), &["start", &id]);
+    let shown = env.json(&fam, &["show", &id]);
+    assert_eq!(shown["task"]["status"], "doing");
+    assert!(shown["claim"].is_object(), "{shown}");
+    assert!(
+        env.read(&fam, &format!("tasks/{id}.md"))
+            .contains("status: doing")
+    );
+    assert!(!nowhere.path().join("tasks").exists());
+
+    alias_registry(&env, "old", "fam");
+    let retired = id.replacen("fam-", "old-", 1);
+    env.json(nowhere.path(), &["note", &retired, "via retired prefix"]);
+    assert_eq!(
+        env.json(nowhere.path(), &["show", &retired])["task"]["id"],
+        id
+    );
+
+    for command in ["show", "tree", "start"] {
+        assert_eq!(
+            env.fail(nowhere.path(), &[command, "zzz-000001"]),
+            "unresolvable_id"
+        );
+        assert_eq!(
+            env.fail(nowhere.path(), &[command, "fam-000001"]),
+            "task_not_found"
+        );
+    }
+    assert_eq!(env.fail(nowhere.path(), &["tree"]), "no_project");
+    assert_eq!(
+        env.fail(
+            nowhere.path(),
+            &["feedback", "Example", "--category", "gap"]
+        ),
         "no_project"
     );
+
+    // A broken local config is an error, even when the id names a healthy registry root.
+    write_doc(nowhere.path(), "tasks/.config.toml", "not valid toml");
+    for command in ["show", "tree", "start"] {
+        assert_eq!(env.fail(nowhere.path(), &[command, &id]), "config");
+    }
 }
 
 #[test]
