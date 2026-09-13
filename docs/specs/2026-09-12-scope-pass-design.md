@@ -120,8 +120,10 @@ park entry, as `drop` does and `block` does not: the release intent's `clear_par
 covers `shelved` beside `done` and `dropped`. That same path clears a recorded
 escalation, and shelving keeps that consequence: the saved next step and the rating
 escalation both existed to drive resumption, and a shelved task is not resumed; it is
-unshelved and scoped again. The escalation's removal is reported in the warning the
-release path already emits.
+unshelved and scoped again. The removal is reported with the `cleared the escalation of
+...` warning the release path already has; today that warning is emitted only for an
+explicit reassessment (`edit --complexity`), not for `clear_park` alone, so emitting it
+on `shelve` is new behaviour, covered in §6.
 
 ### 3.4 JSON shapes
 
@@ -183,7 +185,7 @@ Exactly one per idea.
 | verdict | when | writes |
 |---|---|---|
 | `scoped` | the approach is established and correctness has a check | `edit --status todo -p --size --complexity`, body rewritten to answer why, what done looks like, where to look; children via `--parent` when it is too big for one task |
-| `briefed` | decisions remain that a brief can frame | the idea stays `idea`, reparented under the cluster's goal, note names the brief; the brief covers it (§4.4); research or design tasks as needed (§4.5) |
+| `briefed` | decisions remain that a brief can frame | the idea stays `idea`, associated with the cluster's goal under §4.4 (existing parents preserved), note names the brief; the brief covers it; research or design tasks as needed (§4.5) |
 | `question` | not resolvable without the user, and a brief would not help | `## Open questions` in the body; relayed in the summary |
 | `shelved` | worth keeping, not worth looking at now | `tasks shelve <id> "<wake condition>"` |
 | `drop` | the thing landed, or the premise is gone, or another task covers it | status untouched; the `scope:` note carries `proposal: drop, <commit or other id>`; relayed in the summary |
@@ -243,7 +245,12 @@ A research task is answerable or it is not filed. Its body has four parts:
 - the **bound**: what is enough (a reproduction, a measurement at N settings, one
   reference implementation read);
 - the **expected result**: a recommendation supported by the evidence named, recorded
-  as a note on the task and a paragraph in the brief.
+  as a note on the task and a paragraph in the brief;
+- the **ideas it wakes**: the ids waiting on the answer, with the instruction to run
+  `tasks note <id> "<one line of the finding>"` on each when the task is done. §4.1
+  readmits an idea to the default pool only on a later note; a research task closed
+  without these notes leaves its cluster excluded indefinitely, so the notes are part
+  of `done`, in the same commit.
 
 Its title names the outcome ("Establish whether niri reads `light-ior` per window"), it
 is a `todo` child of the goal with priority, size, and complexity by the rubric.
@@ -314,8 +321,9 @@ End-to-end in `tests/cli.rs` for the status:
   root unless `--all`.
 - `done` on a goal with a shelved child refuses; a `todo` depending on a shelved task is
   absent from `ready` and `check` warns naming both ids.
-- `shelve` on a parked task clears the park entry and a recorded escalation, with the
-  existing warning; `park` on a shelved task refuses and names `unshelve`.
+- `shelve` on a parked task clears the park entry and a recorded escalation and emits
+  the `cleared the escalation` warning (new for this path); `park` on a shelved task
+  refuses and names `unshelve`.
 - `shelve` on a goal with an unshelved open descendant refuses and names it; succeeds
   once every descendant is shelved or closed.
 - Editor path: a save that changes another status to `shelved` refuses; a save that
