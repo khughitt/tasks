@@ -1,13 +1,14 @@
 ---
 id: tasks-dc599b
 title: Encourage recording the creating coding agent and model on every agent-created task
-status: doing
+status: done
 priority: 2
 process: planned
-owner: feat/tasks-dc599b-provenance
+owner: main
 created: 2026-09-13T18:19:44Z
-updated: 2026-09-13T20:50:32Z
+updated: 2026-09-13T21:12:22Z
 started: 2026-09-13T19:46:03Z
+completed: 2026-09-13T21:12:22Z
 depends: [ops-a405cc, ai-d5a56c]
 tags: []
 spec: docs/specs/2026-09-13-creation-provenance-design.md
@@ -31,3 +32,4 @@ Captured by Codex (GPT-6) from this user request.
 - 2026-09-13T20:19:12Z (feat/tasks-dc599b-provenance): parked (waiting on user, review): Review .worktrees/tasks-dc599b-provenance/docs/plans/2026-09-13-creation-provenance.md; on approval add the two step children with --process direct, file Pieces A/B in ops and ai, dep the goal on them, then execute Task 1
 - 2026-09-13T20:50:32Z (feat/tasks-dc599b-provenance): Plan approved with fixes (9b4b726). Steps: tasks-74a629 (Task 1), tasks-ca6718 (Task 2). Pieces: ops-a405cc (hook), ai-d5a56c (registration, codex, live acceptance); goal depends on both.
 - 2026-09-13T20:50:32Z (feat/tasks-dc599b-provenance): parked (waiting on agent): Goal waits on tasks-74a629, tasks-ca6718, ops-a405cc, ai-d5a56c; closeout after the live acceptance on ai-d5a56c
+- 2026-09-13T21:12:22Z (main): Creation provenance landed: optional opaque agent field (<harness>/<model>) stamped at add/feedback from --agent or TASKS_AGENT, edit corrections, JSON/pretty, docs and skill rule (tasks 5086fec); ops claude-provenance hook keeps the model in a scratchpad state file with command-time exports and follows PostModelSwitch (ops 3b58b2a); ai registers it and exports codex harness-only (ai d0eddc7). Live check: opus-5 → sonnet-5 followed on both agent and model. TASKS_MODEL, unwired since tasks-222dab, now works as a side effect.

@@ -69,10 +69,10 @@ unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.
 `TASKS_AGENT` per harness process records which harness and model filed each task
 (`<harness>/<model>`, or the harness alone): `add` and `feedback` stamp the record's
 `agent` field from it, `add --agent` overrides it, and `tasks edit --agent`/`--no-agent`
-corrects a stamp. The harness owns exporting it: the design wires Claude Code through
-an ops session-start and model-switch hook and exports the harness alone for Codex
-(both tracked as separate pieces in those projects until they land); other harnesses
-pass `--agent` when they know their ids. Design:
+corrects a stamp. The harness owns exporting it: Claude Code is wired through the ops
+`claude-provenance` hook (session start and model switch, so the stamp follows
+`/model`), Codex exports the harness alone, and other harnesses pass `--agent` when
+they know their ids. Design:
 `docs/specs/2026-09-13-creation-provenance-design.md`.
 `TASKS_MAX_COMPLEXITY` per harness process is the envelope a session picks within:
 `ready`, `next`, and `prime` hide tasks rated above it and unassessed tasks, and say how

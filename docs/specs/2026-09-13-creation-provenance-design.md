@@ -1,6 +1,6 @@
 # Creation provenance: record the agent that filed a task
 
-Status: locally implemented (2026-09-13); harness pieces ops-a405cc and ai-d5a56c open
+Status: implemented (2026-09-13). CLI on tasks main; hook ops-a405cc and wiring ai-d5a56c landed; the live /model transition passed (opus-5 → sonnet-5, both stamps followed).
 Task: tasks-dc599b
 
 ## Problem
