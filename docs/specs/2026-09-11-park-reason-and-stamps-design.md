@@ -98,7 +98,7 @@ the idle-host recipe fields described there; capability's complexity field remai
 independent of quiet's recipe.
 
 - **Parsing.** A `Reason` enum in `claims.rs` beside `WaitingOn`, with `ALL`, `parse`,
-  and `as_str`, `serde(rename_all = "lowercase")`. A value outside the six is a
+  and `as_str`, `serde(rename_all = "lowercase")`. A value outside the eight is a
   validation error listing them, in `WaitingOn::parse`'s shape. The flag is optional and
   has no default.
 - **Independence.** Any reason combines with either `--waiting-on`. `--reason approval
@@ -123,7 +123,7 @@ independent of quiet's recipe.
 
 ## 5. Docs
 
-`skills/tasks/SKILL.md` step 5 gains the flag and the six words in one sentence, with the
+`skills/tasks/SKILL.md` step 5 gains the flag and the eight words in one sentence, with the
 instruction to record a reason when one of them fits and to leave it off otherwise — a
 park is frequent and must stay cheap. The README's park section gains the vocabulary
 table and names `started` and `completed` in prose; it has no record-format section to
@@ -148,7 +148,7 @@ record as a finding. Integration cases that carry the contract:
 - An editor save that sets, moves, or clears either stamp is refused with the named error.
 - `park --reason review` writes the entry, `park.reason` in `show`, `next`, `prime`, and
   `list --parked` JSON, and the note in the parenthetical form; `park` without the flag writes `null`
-  and the old note form; `--reason nope` fails listing the six; re-park without the flag
+  and the old note form; `--reason nope` fails listing the eight; re-park without the flag
   drops a previous reason.
 - A store file written before this change (no `reason` key) loads.
 - JSON for `show`, `list`, and `prime` carries `started` and `completed`; pretty `show`
