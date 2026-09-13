@@ -34,9 +34,9 @@ tasks-5b73bf so they are derived from passes rather than guessed.
 
     tasks sample [-n N] [--project <prefix> | --all-projects] [--older-than <days>] [--seed <u64>]
 
-- **Pool.** Tasks whose status is `idea`, `todo`, or `blocked`; not `doing`, `done`, or
-  `dropped`. A task with a live claim is excluded. A task whose most recent note starts
-  with `curate:` and carries a `proposal:` segment is excluded: its proposal is awaiting
+- **Pool.** Tasks whose status is `idea`, `todo`, or `blocked`; not `doing`, `shelved`,
+  `done`, or `dropped`. A task with a live claim is excluded. A task whose most recent note
+  starts with `curate:` or `scope:` and carries a `proposal:` segment is excluded: its proposal is awaiting
   the human, and re-drawing it would only re-report it. Any later note clears that, so
   the human answers by writing one. A task whose `updated` is within
   `--older-than` days of now is excluded; the default is 7. `--older-than 0` skips the
@@ -136,7 +136,7 @@ log) runs in that same root.
 **Repeat reviews.** The age window governs them. A `keep` or `refined` task re-enters the
 pool after `--older-than` days like any other and is reviewed again; that is the
 maintenance, not a waste of a draw. The only persistent skip is a pending proposal, and
-`sample` enforces it: a task whose most recent note is a `curate:` note carrying a
+`sample` enforces it: a task whose most recent note is a `curate:` or `scope:` note carrying a
 `proposal:` segment is never drawn, and comes back as a `pending` warning with the
 proposal text so the human sees it again. The skill relays those warnings in its summary
 and needs no check of its own. Any later note clears it. The human records the decision
@@ -173,8 +173,8 @@ link to tasks-5b73bf.
 
 End-to-end in `tests/cli.rs` against the built binary:
 
-- Pool: `doing`, `done`, and `dropped` are never drawn; a task with a live claim is never
-  drawn and produces the omission warning; a task whose latest note is a `curate:` note
+- Pool: `doing`, `shelved`, `done`, and `dropped` are never drawn; a task with a live claim
+  is never drawn and produces the omission warning; a task whose latest note is a `curate:` or `scope:` note
   with a `proposal:` is never drawn and produces the pending warning, while a `curate:`
   note without one or a later note of any kind leaves the task in; a task updated within
   the window is never drawn; `--older-than 0` admits every open task, future-dated ones

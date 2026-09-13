@@ -13,6 +13,9 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 1. `tasks prime` — roadmap (the open goal tree), closeout (goals whose work is all
    done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
+   Use the `scope` skill for a deliberate idea review.
+   A `shelved` task is out of active work: `list --status shelved` sees it, and
+   `tasks unshelve <id>` brings it back as an idea.
    A session under a cutoff (`TASKS_MAX_COMPLEXITY=<low|mid|high>` set by its harness, or
    `--max-complexity <level>` on `ready`/`next`) picks only through `ready` and `next`, which
    hide tasks rated above the level and unassessed tasks and say in warnings how many they
@@ -110,6 +113,13 @@ no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
 ## Recording work
 
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
+- Deliberate idea review: `/scope [<id>... | --tag <tag>] [--project <prefix>]`.
+- Not now, but kept: `tasks shelve <id> "<what would bring it back>"`. Shelved work is open
+  (it still blocks dependents and holds its goal open) but hidden from `list`, `ready`, and
+  `prime`'s roadmap and ready sections. A surviving shelved park overlay remains visible in
+  `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
+  `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
+  returns it to `idea`.
 - A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
@@ -176,7 +186,8 @@ all moved aliases), and remove the inventory last.
 
 - **brainstorming** runs against an existing task and attaches with
   `tasks edit <id> --spec <topic>`; deliverables become children with
-  `--parent <id> --spec <topic>`.
+  `--parent <id> --spec <topic>`. When a scope brief files a design task,
+  brainstorming attaches there and finishes its draft design.
 - **writing-plans** attaches with `tasks edit <id> --plan <topic>` and adds one child
   per `### Task N:` heading with `--parent <id> --plan <topic> --step "Task N: <title>"`
   and `--complexity <level>` on every step child — a plan is evidence for a lower

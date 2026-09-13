@@ -25,7 +25,8 @@ derivable is the next step and who it waits on. That is what park records.
 One command, `tasks park`, that converts the caller's hold on a task into a **park entry**
 in the shared claim store: when it was parked, the one-line next step, whether it waits on
 the user or the agent, and the session that set it down. The record itself gains only a
-note. Status is untouched; park works on any open task. `start` replaces the park entry
+note. Status is untouched; park works on any open task except `shelved`. `start` replaces
+the park entry
 with a live claim; `done` and `drop` remove it. `prime` gains a `parked` section, `next`
 prefers parked work that waits on the agent, `ready` omits work that waits on the user, and
 `list --parked` feeds pickers.
@@ -51,7 +52,8 @@ is parked there, and losing the store file costs the overlay, never a task.
 
     tasks park <id> "<next step>" [--waiting-on user|agent]
 
-- `<id>` may be any open task: idea, todo, doing, or blocked. A done or dropped task fails
+- `<id>` may be an active open task: idea, todo, doing, or blocked. A shelved task fails
+  with an invalid-transition error that names `tasks unshelve`; a done or dropped task fails
   with the invalid-transition error, from and to spelled `done` (or `dropped`) and
   `parked`.
 - `<next step>` is a non-empty single line, validated with the same rule and error shape

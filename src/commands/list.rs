@@ -65,7 +65,7 @@ pub fn list(
             // Most of a healthy series is closed at any moment (spec §5.2).
             true
         } else {
-            task.status.is_open()
+            task.status.is_open() && task.status != Status::Shelved
         };
         let tags_ok = tags.iter().all(|tag| task.tags.contains(tag));
         let owner_ok = owner
@@ -359,7 +359,15 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         .cloned()
         .collect();
     sort_list(&mut doing);
-    let roadmap = crate::hierarchy::forest(&all, None, false, Some(&claims), &ctx.registry, now);
+    let roadmap = crate::hierarchy::forest(
+        &all,
+        None,
+        false,
+        crate::hierarchy::Shelved::Hidden,
+        Some(&claims),
+        &ctx.registry,
+        now,
+    );
     // closeout is an invitation to run `done`, so it holds only what `done` will accept.
     // Children are one gate and dependencies are the other; listing a goal its dependencies
     // still hold would invite a close the tool then refuses with `open_dependencies`. Held

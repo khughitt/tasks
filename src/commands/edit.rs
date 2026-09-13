@@ -129,6 +129,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
             ctx.refuse_foreign_live_claim(&task.id)?;
             ctx.preserve_claim_store(&task.id);
         } else {
+            if to == Status::Shelved {
+                refuse_shelving(&task.id)?;
+            }
             transition(&mut ctx, &mut task, to, args.force)?;
         }
     }
@@ -220,6 +223,9 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;
         ctx.preserve_claim_store(&original.id);
     } else {
+        if status == Status::Shelved {
+            refuse_shelving(&original.id).map_err(keep)?;
+        }
         transition(&mut ctx, &mut edited, status, false).map_err(keep)?;
     }
 
@@ -240,6 +246,13 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ));
     }
     Ok(id_out(ctx, &edited))
+}
+
+/// Only `shelve` collects the wake condition required to enter the shelf.
+fn refuse_shelving(id: &crate::model::TaskId) -> Result<()> {
+    Err(Error::Validation(format!(
+        "use `tasks shelve {id} \"<wake condition>\"` to shelve a task"
+    )))
 }
 
 fn create_edit_temp(

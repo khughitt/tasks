@@ -341,6 +341,19 @@ pub enum Command {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
     },
+    /// Put a task out of active work: status=shelved, hidden from the default views,
+    /// open for dependencies. The wake condition is required and becomes the note.
+    Shelve {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        /// What would bring the task back.
+        wake: String,
+    },
+    /// Return a shelved task to idea.
+    Unshelve {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+    },
     /// Add or remove dependencies.
     Dep {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]

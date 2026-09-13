@@ -41,6 +41,8 @@ Each step is idempotent.
        tasks tree                       # the goal hierarchy
        tasks start <id>                 # claim it
        tasks note <id> "<one line>"     # when scope or understanding changes
+       tasks shelve <id> "<wake condition>" # keep open work out of active views
+       tasks unshelve <id>              # bring it back as an idea
        tasks done <id> "<what landed>"  # in the same commit as the code
        tasks check                      # before every commit
        tasks feedback "<about the tool>" --category friction   # file friction upstream
@@ -77,6 +79,10 @@ stamps written only by status changes: `started`, the first time work began, and
 `completed`, the latest completion (cleared by a reopen). Design:
 `docs/specs/2026-09-11-park-reason-and-stamps-design.md`.
 
+Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped`.
+`shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and
+`tasks unshelve <id>` to return it as an idea.
+
 ## Install
 
 From a checkout:
@@ -110,6 +116,8 @@ from a clone):
     tasks tree                       # the goal hierarchy
     tasks next                       # parked work waiting on you, else the first ready task
     tasks park <id> "next step" --reason review   # set it down; tasks list --parked to see what is parked
+    tasks shelve <id> "when the dependency lands" # keep open work out of active views
+    tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project
     tasks prime --project fam        # read another registered project; also list, ready,
                                      #   next, tree, tags, sample. Needs no local project.
@@ -185,6 +193,8 @@ so it applies to every project:
     mkdir -p ~/.agents/skills && ln -s "$PWD/skills/tasks" ~/.agents/skills/tasks   # other harnesses
     ln -s "$PWD/skills/curate" ~/.claude/skills/curate
     ln -s "$PWD/skills/curate" ~/.agents/skills/curate   # other harnesses
+    ln -s "$PWD/skills/scope" ~/.claude/skills/scope
+    ln -s "$PWD/skills/scope" ~/.agents/skills/scope     # other harnesses
 
 or per project, when a project needs to pin its own copy:
 
@@ -194,6 +204,9 @@ or per project, when a project needs to pin its own copy:
 
 `skills/curate/SKILL.md` is the maintenance pass: `/curate` samples open tasks and
 refines them within fixed bounds.
+
+`skills/scope/SKILL.md` is the deliberate idea review between capture and maintenance:
+`/scope` turns a bounded cluster into supported next actions and handoffs.
 
 ## Feedback
 

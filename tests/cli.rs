@@ -373,6 +373,188 @@ fn write_park(
 }
 
 #[test]
+fn shelved_is_hidden_from_default_views_but_counted() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.json(&sci, &["shelve", &id, "later"]);
+
+    let ids = |value: &serde_json::Value| -> Vec<String> {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(ids(&env.json(&sci, &["list"])).is_empty());
+    assert_eq!(
+        ids(&env.json(&sci, &["list", "--status", "shelved"])),
+        std::slice::from_ref(&id)
+    );
+    assert!(ids(&env.json(&sci, &["ready"])).is_empty());
+    assert!(env.json(&sci, &["next"])["next"].is_null());
+    let eligible = id_of(env.json(&sci, &["add", "Eligible", "--status", "idea"]));
+    assert_eq!(
+        ids(&env.json(
+            &sci,
+            &["sample", "-n", "5", "--seed", "1", "--older-than", "0"]
+        )),
+        [eligible]
+    );
+
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["counts"]["shelved"], 1);
+    assert_eq!(prime["counts"]["idea"], 1);
+    assert!(env.pretty(&sci, &["prime"]).contains("shelved 1"));
+}
+
+#[test]
+fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "2"]));
+    let child = id_of(env.json(&sci, &["add", "Child", "--parent", &goal]));
+    let subgoal = id_of(env.json(&sci, &["add", "Subgoal", "--parent", &goal]));
+    let leaf = id_of(env.json(&sci, &["add", "Leaf", "--parent", &subgoal]));
+    let root = id_of(env.json(&sci, &["add", "Root", "--status", "idea"]));
+    let root_child = id_of(env.json(&sci, &["add", "Root child", "--parent", &root]));
+    env.json(&sci, &["shelve", &child, "later"]);
+    env.json(&sci, &["shelve", &leaf, "later"]);
+    env.json(&sci, &["shelve", &subgoal, "later"]);
+    env.json(&sci, &["shelve", &root_child, "later"]);
+    env.json(&sci, &["shelve", &root, "later"]);
+
+    let tree = env.json(&sci, &["tree"]);
+    assert_eq!(tree["nodes"].as_array().unwrap().len(), 1, "{tree}");
+    assert_eq!(tree["nodes"][0]["id"], goal);
+    let children = tree["nodes"][0]["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2);
+    assert!(children.iter().any(|node| node["id"] == child));
+    let subgoal_node = children.iter().find(|node| node["id"] == subgoal).unwrap();
+    assert_eq!(subgoal_node["children"][0]["id"], leaf);
+    assert_eq!(
+        env.json(&sci, &["tree", "--all"])["nodes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["roadmap"].as_array().unwrap().len(), 1, "{prime}");
+    assert_eq!(prime["roadmap"][0]["id"], goal);
+    fn assert_no_shelves(nodes: &[serde_json::Value]) {
+        for node in nodes {
+            assert_ne!(node["status"], "shelved", "{node}");
+            if let Some(children) = node["children"].as_array() {
+                assert_no_shelves(children);
+            }
+        }
+    }
+    assert_no_shelves(prime["roadmap"].as_array().unwrap());
+
+    let shown = env.json(&sci, &["show", &goal]);
+    assert_eq!(
+        shown["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == child)
+            .unwrap()["status"],
+        "shelved"
+    );
+    assert_eq!(
+        env.json(&sci, &["projects"])["projects"][0]["counts"]["shelved"],
+        5
+    );
+
+    let error = error_of(&env, &sci, &["done", &goal]);
+    assert_eq!(error["error"]["kind"], "open_descendants");
+    assert!(error["error"]["detail"].as_str().unwrap().contains(&leaf));
+    assert_eq!(env.json(&sci, &["show", &goal])["task"]["status"], "todo");
+
+    env.json(&sci, &["unshelve", &child]);
+    env.json(&sci, &["unshelve", &root_child]);
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["roadmap"].as_array().unwrap().len(), 1, "{prime}");
+    assert_eq!(prime["roadmap"][0]["id"], goal);
+    assert_eq!(prime["roadmap"][0]["children"][0]["id"], child);
+    assert!(
+        prime["roadmap"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|node| node["id"] != root)
+    );
+    assert_eq!(
+        env.json(&sci, &["tree"])["nodes"].as_array().unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn parked_shelved_task_is_visible_but_never_a_next_candidate() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.json(&sci, &["shelve", &id, "later"]);
+    write_park(
+        &env,
+        "sci",
+        &id,
+        "agent-a",
+        "agent",
+        &sci.display().to_string(),
+    );
+
+    assert!(env.json(&sci, &["next"])["next"].is_null());
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["parked"][0]["status"], "shelved");
+    let parked = env.json(&sci, &["list", "--parked"]);
+    assert_eq!(parked["tasks"][0]["status"], "shelved");
+}
+
+#[test]
+fn check_warns_when_open_work_depends_on_shelved_work() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let dep = id_of(env.json(&sci, &["add", "Dep", "-p", "2"]));
+    let work = id_of(env.json(&sci, &["add", "Work", "-p", "2", "--depends", &dep]));
+    env.json(&sci, &["shelve", &dep, "later"]);
+
+    assert!(
+        env.json(&sci, &["ready"])["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|task| task["id"] != work)
+    );
+
+    let check = env.json(&sci, &["check"]);
+    let warning = check["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|warning| warning["kind"] == "shelved_dep")
+        .unwrap_or_else(|| panic!("{check}"));
+    assert_eq!(warning["id"], work);
+    assert_eq!(
+        warning["detail"],
+        format!("depends on shelved {dep}: unshelve it or drop the dependency")
+    );
+
+    env.json(&sci, &["shelve", &work, "later"]);
+    assert!(
+        !env.json(&sci, &["check"])["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["kind"] == "shelved_dep")
+    );
+}
+
+#[test]
 fn park_appears_in_show_and_list_json_and_pretty_show() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
@@ -5368,14 +5550,14 @@ fn projects_pretty_prints_one_header_and_aligned_columns() {
     let mut lines = text.lines();
     assert_eq!(
         lines.next().unwrap(),
-        "project  idea  todo  doing  blocked  total  activity"
+        "project  idea  todo  doing  blocked  shelved  total  activity"
     );
     // header-width columns, two-space gutters, counts right-aligned under their labels
     assert_eq!(
         lines.next().unwrap(),
         format!(
-            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>5}  {day}",
-            "sci", 1, 0, 0, 0, 2
+            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>7}  {:>5}  {day}",
+            "sci", 1, 0, 0, 0, 0, 2
         )
     );
 }
@@ -5393,8 +5575,8 @@ fn projects_pretty_marks_an_unreachable_row_without_breaking_the_grid() {
     assert_eq!(
         row,
         format!(
-            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>5}  unreachable",
-            "fam", "-", "-", "-", "-", "-"
+            "{:<7}  {:>4}  {:>4}  {:>5}  {:>7}  {:>7}  {:>5}  unreachable",
+            "fam", "-", "-", "-", "-", "-", "-"
         ),
         "{text}"
     );
@@ -5420,7 +5602,7 @@ fn projects_pretty_reveals_closed_columns_on_request() {
     let opened = env.pretty(nowhere.path(), &["projects", "--closed"]);
     assert_eq!(
         opened.lines().next().unwrap(),
-        "project  idea  todo  doing  blocked  done  dropped  total  activity"
+        "project  idea  todo  doing  blocked  shelved  done  dropped  total  activity"
     );
 }
 
@@ -5461,13 +5643,13 @@ fn prime_counts_line_uses_the_same_columns_as_projects() {
     let text = env.pretty(&sci, &["prime"]);
     assert_eq!(
         text.lines().nth(1).unwrap(),
-        "idea 0  todo 1  doing 0  blocked 0  total 2"
+        "idea 0  todo 1  doing 0  blocked 0  shelved 0  total 2"
     );
 
     let opened = env.pretty(&sci, &["prime", "--closed"]);
     assert_eq!(
         opened.lines().nth(1).unwrap(),
-        "idea 0  todo 1  doing 0  blocked 0  done 1  dropped 0  total 2"
+        "idea 0  todo 1  doing 0  blocked 0  shelved 0  done 1  dropped 0  total 2"
     );
 }
 
@@ -5540,6 +5722,18 @@ fn as_agent(env: &TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::
     cmd.env("TASKS_SESSION", session)
         .env("TASKS_SESSION_PID", std::process::id().to_string());
     cmd
+}
+
+/// The parsed `{"error": {"kind", "detail"}}` of a command expected to exit 1.
+fn error_of(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let out = env.cmd(dir).args(args).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stderr).unwrap()
 }
 
 #[test]
@@ -7552,7 +7746,9 @@ fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
             4,
             &["tasks", "edit", "sci-000001", "--status", ""]
         ),
-        ["idea", "todo", "doing", "blocked", "done", "dropped"]
+        [
+            "idea", "todo", "doing", "blocked", "shelved", "done", "dropped"
+        ]
     );
     assert_eq!(
         env.complete(&sci, "bash", 4, &["tasks", "add", "T", "--status", ""]),
@@ -10306,6 +10502,71 @@ fn sample_draws_only_from_the_curable_pool() {
 }
 
 #[test]
+fn sample_treats_a_scope_proposal_like_a_curate_proposal() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let pending = old_task(&env, &dir, "Pending", &["--status", "idea"]);
+    env.json(
+        &dir,
+        &[
+            "note",
+            &pending,
+            "scope: drop; landed in abc1234; proposal: drop, abc1234",
+        ],
+    );
+    stamp(
+        &dir,
+        &pending,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+    let readmitted = old_task(&env, &dir, "Readmitted", &["--status", "idea"]);
+    env.json(
+        &dir,
+        &["note", &readmitted, "scope: drop; proposal: drop, dup of x"],
+    );
+    env.json(&dir, &["note", &readmitted, "declined: keep it"]);
+    stamp(
+        &dir,
+        &readmitted,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+    let briefed = old_task(&env, &dir, "Briefed", &["--status", "idea"]);
+    env.json(
+        &dir,
+        &[
+            "note",
+            &briefed,
+            "scope: briefed; brief: docs/notes/x-brief.md",
+        ],
+    );
+    stamp(
+        &dir,
+        &briefed,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+
+    let v = env.json(&dir, &["sample", "-n", "10", "--seed", "1"]);
+    let mut ids = sampled_ids(&v);
+    ids.sort();
+    let mut expected = vec![readmitted.clone(), briefed.clone()];
+    expected.sort();
+    assert_eq!(
+        ids, expected,
+        "a scope verdict without a proposal stays in the pool"
+    );
+    let warnings = v["warnings"].as_array().unwrap();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap() == format!("{pending} pending: drop, abc1234")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
 fn sample_older_than_zero_admits_fresh_tasks_and_goals_stay_in() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -12085,5 +12346,207 @@ fn check_warns_on_an_open_plan_step_without_a_rating() {
             .iter()
             .any(|w| w["kind"] == "unrated_step"),
         "closed steps are silent: {v}"
+    );
+}
+
+#[test]
+fn shelve_writes_the_status_and_the_note_and_unshelve_returns_to_idea() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2", "--size", "s"]));
+    let v = env.json(&sci, &["shelve", &id, "when profiles have two consumers"]);
+    assert_eq!(v["id"], id);
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["status"], "shelved");
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(
+        notes.last().unwrap()["text"],
+        "shelved: when profiles have two consumers"
+    );
+    assert_eq!(shown["task"]["size"], "s", "fields survive the shelf");
+
+    env.json(&sci, &["unshelve", &id]);
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["status"], "idea");
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(notes.last().unwrap()["text"], "unshelved");
+}
+
+#[test]
+fn shelve_requires_a_wake_condition_and_unshelve_requires_shelved() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let out = env.cmd(&sci).args(["shelve", &id]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "usage error, nothing written");
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
+
+    let err = error_of(&env, &sci, &["unshelve", &id]);
+    assert_eq!(err["error"]["kind"], "invalid_transition");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("unshelve requires shelved")
+    );
+}
+
+#[test]
+fn shelve_follows_the_claim_rules_and_clears_a_park_and_its_escalation() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let held = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    write_claim(&env, "sci", &held, "agent-z", true);
+    let err = as_agent(&env, &sci, "agent-a")
+        .args(["shelve", &held, "later"])
+        .output()
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&err.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "claimed");
+
+    let parked = id_of(env.json(&sci, &["add", "Parked", "-p", "2", "--complexity", "low"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &parked])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &parked,
+            "stuck",
+            "--reason",
+            "capability",
+            "--complexity",
+            "high",
+        ])
+        .assert()
+        .success();
+    assert!(!env.json(&sci, &["show", &parked])["escalation"].is_null());
+
+    let v: serde_json::Value = {
+        let out = as_agent(&env, &sci, "agent-a")
+            .args(["shelve", &parked, "after the rack lands"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let warnings = v["warnings"].as_array().unwrap();
+    assert!(
+        warnings.iter().any(|w| w
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("cleared the escalation of {parked} to high"))),
+        "{warnings:?}"
+    );
+    let shown = env.json(&sci, &["show", &parked]);
+    assert!(shown["park"].is_null(), "shelving clears the park entry");
+    assert!(shown["escalation"].is_null(), "and its escalation");
+    assert!(shown["claim"].is_null(), "and releases the claim");
+}
+
+#[test]
+fn shelve_refuses_a_goal_with_unshelved_open_descendants() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "2"]));
+    let a = id_of(env.json(&sci, &["add", "A", "--parent", &goal]));
+    let b = id_of(env.json(&sci, &["add", "B", "--parent", &goal]));
+    let err = error_of(&env, &sci, &["shelve", &goal, "someday"]);
+    assert_eq!(err["error"]["kind"], "open_descendants");
+    let detail = err["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains(&a) && detail.contains(&b), "{detail}");
+    assert_eq!(env.json(&sci, &["show", &goal])["task"]["status"], "todo");
+
+    env.json(&sci, &["shelve", &a, "someday"]);
+    env.json(&sci, &["done", &b, "landed"]);
+    env.json(&sci, &["shelve", &goal, "someday"]);
+    assert_eq!(
+        env.json(&sci, &["show", &goal])["task"]["status"],
+        "shelved"
+    );
+}
+
+#[test]
+fn start_and_park_refuse_a_shelved_task_and_name_unshelve() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.json(&sci, &["shelve", &id, "later"]);
+    for args in [
+        vec!["start", id.as_str()],
+        vec!["park", id.as_str(), "next"],
+    ] {
+        let err = error_of(&env, &sci, &args);
+        assert_eq!(err["error"]["kind"], "invalid_transition", "{args:?}");
+        assert!(
+            err["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("tasks unshelve"),
+            "{args:?}: {err}"
+        );
+    }
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "shelved");
+    assert!(env.json(&sci, &["show", &id])["park"].is_null());
+}
+
+#[test]
+fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    let err = error_of(&env, &sci, &["edit", &id, "--status", "shelved"]);
+    assert_eq!(err["error"]["kind"], "validation");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("tasks shelve")
+    );
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
+
+    let into = editor_script(&sci, "sed -i 's/^status: todo$/status: shelved/' \"$1\"");
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &into)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "validation");
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
+
+    env.json(&sci, &["shelve", &id, "later"]);
+    let retitle = editor_script(&sci, "sed -i 's/^title: T$/title: Renamed/' \"$1\"");
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &retitle)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["title"], "Renamed");
+    assert_eq!(
+        shown["task"]["status"], "shelved",
+        "an edit keeps the shelf"
+    );
+
+    env.json(&sci, &["edit", &id, "--status", "todo"]);
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["status"],
+        "todo",
+        "explicit reopen"
     );
 }

@@ -24,6 +24,7 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
             &tasks,
             root.as_ref(),
             all,
+            crate::hierarchy::Shelved::UnderShownParent,
             None,
             &ctx.registry,
             now,

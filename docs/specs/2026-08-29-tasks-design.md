@@ -2,7 +2,8 @@
 
 **Status:** implemented (2026-08-29; spec roots extended 2026-09-02; doc roots made
 configurable per project 2026-09-03; hierarchy 2026-09-03; feedback 2026-09-03;
-color 2026-09-03; source 2026-09-06; source dedup and filter 2026-09-07); see
+color 2026-09-03; source 2026-09-06; source dedup and filter 2026-09-07;
+shelved 2026-09-13); see
 docs/plans/2026-08-29-tasks.md.
 
 ## 1. Purpose
@@ -109,7 +110,7 @@ Free-form markdown body.
 |------------|---------------------|----------|-------|
 | `id`       | `<prefix>-<hex6>`   | yes      | Immutable. Must equal the filename stem. |
 | `title`    | string              | yes      | One line; no newlines. |
-| `status`   | enum                | yes      | `idea`, `todo`, `doing`, `blocked`, `done`, `dropped`. |
+| `status`   | enum                | yes      | `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, `dropped`. |
 | `priority` | int 0–4             | yes      | 0 = most urgent. Default 2. |
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
 | `parallel` | bool                | no       | Safe to run beside other tasks marked `parallel`. Omitted when false. |
@@ -143,7 +144,7 @@ on the first note.
 
 ### 3.3 Lifecycle
 
-Statuses are *open* (`idea`, `todo`, `doing`, `blocked`) or *closed* (`done`, `dropped`).
+Statuses are *open* (`idea`, `todo`, `doing`, `blocked`, `shelved`) or *closed* (`done`, `dropped`).
 Closed counts as satisfied for dependency purposes.
 
 Allowed transitions, enforced by every write path including `edit --status` and the
@@ -161,6 +162,9 @@ is open and has no override. It applies to `done` and to `edit --status done` al
 
 - `idea`: unscoped; never appears in `ready`.
 - `blocked`: explicit judgment, distinct from "has open dependencies".
+- `shelved`: open but out of sight; entered only by `tasks shelve <id> "<wake condition>"`,
+  hidden from `list`, `ready`, `next`, `sample`, and `prime`'s roadmap, counted in `prime`
+  and `projects`. `edit --status shelved` refuses. See `2026-09-12-scope-pass-design.md` §3.
 - Parking is not a status. `tasks park` records where a task was set down in the shared
   claim store; see `2026-09-09-park-design.md`.
 
@@ -280,7 +284,9 @@ tasks sample [-n N] [--older-than DAYS] [--seed U64] [--project P | --all-projec
     at most 36500; 0 skips the age check, so even a future-dated record is admitted).
     Rows are list rows. Fewer than N in the pool returns the
     pool with a warning; an empty pool is an empty list, exit 0. --seed fixes the draw.
-    Live-claim omissions are warned like ready's. The read side of the curate skill
+    A task whose most recent `curate:` or `scope:` note carries a `proposal:` is excluded
+    and reported as pending. Live-claim omissions are warned like ready's. The read side
+    of the curate skill
     (docs/specs/2026-09-08-task-curation-design.md).
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
@@ -304,7 +310,8 @@ tasks start [--force] <id>
 tasks park <id> <next-step> [--waiting-on user|agent]
     Set a task down: record the one-line next step, who it waits on (default agent), and
     this session in the shared claim store, and append a note. Status is untouched; any
-    open task may be parked. start replaces the entry (resume); done and drop remove it. A
+    open task except `shelved` may be parked. `start` replaces the entry (resume); `done`
+    and `drop` remove it. A
     live claim held by another session refuses with claimed. See 2026-09-09-park-design.md.
 
 tasks done <id> [message] [--force]
@@ -317,6 +324,11 @@ tasks drop <id> [message]
 tasks block <id> [message]
 tasks unblock <id>
     status=blocked (message appended as a note) / status=todo.
+
+tasks shelve <id> "<wake condition>" / tasks unshelve <id>
+    status=shelved (the wake condition appended as `shelved: ...`; refuses a goal with
+    open descendants that are not shelved; clears a park entry and its escalation) /
+    status=idea. `start` and `park` refuse a shelved task.
 
 tasks dep <id> --on <id>...  |  tasks dep <id> --rm <id>...
     Add or remove dependencies. --on rejects cycles (§6.1) and unresolvable ids.
@@ -431,11 +443,11 @@ ready  -> { tasks: [TaskSummary], warnings }
 graph  -> { format: "mermaid"|"dot", text: string, warnings }
 check  -> { errors: [{ id: string|null, file: string, kind, detail }],
             warnings: [{ id, file, kind, detail }] }
-prime  -> { prefix, counts: { idea, todo, doing, blocked, done, dropped },
+prime  -> { prefix, counts: { idea, todo, doing, blocked, shelved, done, dropped },
             ready: [TaskSummary], doing: [TaskSummary], warnings }
 init, unregister
        -> { prefix, root, warnings }    unregister reports the root it removed
-edit, note, start, done, drop, block, unblock, dep
+edit, note, start, done, drop, block, unblock, shelve, unshelve, dep
        -> { id, warnings }
 add    -> { id, action: "created"|"reused", warnings }
           "reused" only under --source; see the command above

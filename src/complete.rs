@@ -95,8 +95,9 @@ pub fn prefixes() -> Vec<CompletionCandidate> {
 /// Subcommands whose first positional is a task id. `add`'s is a title, so it has no
 /// subject; guessing one there would read `tasks add fam-000001 --parent <TAB>` as an
 /// invocation against `fam`.
-const ID_FIRST: [&str; 11] = [
-    "show", "root", "tree", "edit", "note", "start", "done", "drop", "block", "unblock", "dep",
+const ID_FIRST: [&str; 13] = [
+    "show", "root", "tree", "edit", "note", "start", "done", "drop", "block", "unblock", "shelve",
+    "unshelve", "dep",
 ];
 
 /// What the words on the command line say about the invocation. Only the parts the

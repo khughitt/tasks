@@ -112,6 +112,18 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     ),
                 ));
             }
+            if task.status.is_open()
+                && task.status != Status::Shelved
+                && let Ok(Some(dependency_task)) = foreign(&dependency_id)
+                && dependency_task.status == Status::Shelved
+            {
+                warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "shelved_dep",
+                    format!("depends on shelved {dependency}: unshelve it or drop the dependency"),
+                ));
+            }
             if dependency_id.prefix == ctx.project.prefix {
                 if !ctx.project.task_path(&dependency_id).try_exists()? {
                     errors.push(finding(

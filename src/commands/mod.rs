@@ -36,6 +36,9 @@ pub enum ClaimIntent {
     Acquire(crate::claims::Claim),
     Release {
         clear_park: bool,
+        /// Report a removed escalation even without an explicit reassessment. `shelve`
+        /// sets it because a shelved task is not resumed; `done` and `drop` stay silent.
+        announce_escalation: bool,
     },
     Park {
         park: crate::claims::Park,
@@ -209,7 +212,8 @@ impl Ctx {
             (
                 id.clone(),
                 ClaimIntent::Release {
-                    clear_park: matches!(to, Status::Done | Status::Dropped),
+                    clear_park: matches!(to, Status::Done | Status::Dropped | Status::Shelved),
+                    announce_escalation: to == Status::Shelved,
                 },
             )
         });
@@ -803,7 +807,13 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             };
             Err(error.with_suffix(&suffix))
         }
-        Some((id, ClaimIntent::Release { clear_park })) => {
+        Some((
+            id,
+            ClaimIntent::Release {
+                clear_park,
+                announce_escalation,
+            },
+        )) => {
             ctx.project.write_task(&ctx.registry, task)?;
             let store = ctx.claims_mut()?;
             store.prune_dead();
@@ -818,7 +828,9 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             }
             match store.save() {
                 Ok(()) => {
-                    if let (Some(_), Some(escalation)) = (&clear_escalation, &removed_escalation) {
+                    if let Some(escalation) = &removed_escalation
+                        && (clear_escalation.is_some() || announce_escalation)
+                    {
                         ctx.warnings.push(format!(
                             "cleared the escalation of {id} to {} recorded by session {} at {}",
                             escalation.level.as_str(),
@@ -832,6 +844,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                         Status::Done => format!("run `tasks done {id}`"),
                         Status::Dropped => format!("run `tasks drop {id}`"),
                         Status::Blocked => format!("run `tasks block {id}`"),
+                        Status::Shelved => format!("run `tasks shelve {id} \"<wake condition>\"`"),
                         Status::Todo | Status::Idea | Status::Doing => {
                             "the store is unchanged and a same-status edit will not retry cleanup"
                                 .into()
@@ -1075,6 +1088,8 @@ pub fn run(cli: Cli) -> Result<Output> {
         ),
         Command::Block { id, message } => status::block(open_id_write_ctx(dir, &id)?, id, message),
         Command::Unblock { id } => status::unblock(open_id_write_ctx(dir, &id)?, id),
+        Command::Shelve { id, wake } => status::shelve(open_id_write_ctx(dir, &id)?, id, wake),
+        Command::Unshelve { id } => status::unshelve(open_id_write_ctx(dir, &id)?, id),
         Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),

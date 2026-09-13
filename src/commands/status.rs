@@ -5,6 +5,12 @@ use crate::output::Output;
 
 pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
+    if task.status == Status::Shelved {
+        return Err(Error::InvalidTransition(
+            "shelved".into(),
+            format!("doing (`tasks unshelve {id}` first)"),
+        ));
+    }
     let before = ctx.warnings.len();
     transition(&mut ctx, &mut task, Status::Doing, force)?;
     let owner = owner_name(&ctx.project)?;
@@ -145,6 +151,45 @@ pub fn unblock(mut ctx: Ctx, id: String) -> Result<Output> {
         ));
     }
     transition(&mut ctx, &mut task, Status::Todo, false)?;
+    save(&mut ctx, &mut task)?;
+    Ok(id_out(ctx, &task))
+}
+
+/// A goal is shelved only after its open descendants are; `ready` reads each child's own
+/// status, so shelving the goal alone would hide it while its children stayed eligible.
+pub fn shelve(mut ctx: Ctx, id: String, wake: String) -> Result<Output> {
+    let mut task = load(&ctx, &id)?;
+    crate::format::validate_line("wake condition", &wake)?;
+    let all = ctx.project.scan()?;
+    let unshelved: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry)
+        .iter()
+        .filter(|descendant| descendant.status != Status::Shelved)
+        .map(|descendant| descendant.id.to_string())
+        .collect();
+    if !unshelved.is_empty() {
+        return Err(Error::OpenDescendants(
+            task.id.to_string(),
+            format!("{} (shelve or close them first)", unshelved.join(", ")),
+        ));
+    }
+    transition(&mut ctx, &mut task, Status::Shelved, false)?;
+    let owner = owner_name(&ctx.project)?;
+    append_note(&mut task, &owner, &format!("shelved: {wake}"))?;
+    save(&mut ctx, &mut task)?;
+    Ok(id_out(ctx, &task))
+}
+
+pub fn unshelve(mut ctx: Ctx, id: String) -> Result<Output> {
+    let mut task = load(&ctx, &id)?;
+    if task.status != Status::Shelved {
+        return Err(Error::InvalidTransition(
+            task.status.as_str().into(),
+            "idea (unshelve requires shelved)".into(),
+        ));
+    }
+    transition(&mut ctx, &mut task, Status::Idea, false)?;
+    let owner = owner_name(&ctx.project)?;
+    append_note(&mut task, &owner, "unshelved")?;
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))
 }

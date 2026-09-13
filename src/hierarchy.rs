@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::model::{Task, TaskId};
+use crate::model::{Status, Task, TaskId};
 use crate::output::{TaskSummary, TreeNode};
 use crate::query::ready_order;
 use crate::registry::Registry;
@@ -125,6 +125,23 @@ pub fn open_descendants<'a>(tasks: &'a [Task], id: &TaskId, registry: &Registry)
         .collect()
 }
 
+pub fn is_active(task: &Task) -> bool {
+    task.status.is_open() && task.status != Status::Shelved
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Shelved {
+    Hidden,
+    UnderShownParent,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Visibility {
+    All,
+    Hidden,
+    UnderShownParent,
+}
+
 /// spec §4.7: `is_ready` excludes any task with children, so a cadence on a goal could
 /// never fire. Refuse it at the write rather than leave a silent dead end. Scans only when
 /// a cadence is actually set, which is rare.
@@ -149,14 +166,15 @@ pub fn validate_periodic(project: &Project, registry: &Registry, task: &Task) ->
 }
 
 /// The forest under `root` (or every root when `None`). Without `include_closed`, a node
-/// is kept when it is open or has an open descendant, so a closed ancestor of open work
-/// stays visible as context. Roots and siblings are in ready order. A task whose parent is
+/// is kept when it is active, has an active descendant, or is a shelved child in
+/// `Shelved::UnderShownParent` mode. Roots and siblings are in ready order. A task whose parent is
 /// missing from `all` is treated as a root; members of a parent cycle are not shown at all
 /// (`check` reports them as `parent_cycle`).
 pub fn forest(
     all: &[Task],
     root: Option<&TaskId>,
     include_closed: bool,
+    shelved: Shelved,
     claims: Option<&crate::claims::ClaimSnapshot>,
     registry: &Registry,
     now: OffsetDateTime,
@@ -176,13 +194,21 @@ pub fn forest(
             })
             .collect(),
     };
+    let visibility = if include_closed {
+        Visibility::All
+    } else if shelved == Shelved::UnderShownParent {
+        Visibility::UnderShownParent
+    } else {
+        Visibility::Hidden
+    };
     tops.sort_by(|a, b| ready_order(a, b));
     tops.into_iter()
+        .filter(|task| visibility == Visibility::All || task.status != Status::Shelved)
         .filter_map(|task| {
             node(
                 all,
                 task,
-                include_closed,
+                visibility,
                 claims,
                 registry,
                 &mut std::collections::HashSet::new(),
@@ -195,7 +221,7 @@ pub fn forest(
 fn node(
     all: &[Task],
     task: &Task,
-    include_closed: bool,
+    visibility: Visibility,
     claims: Option<&crate::claims::ClaimSnapshot>,
     registry: &Registry,
     visited: &mut std::collections::HashSet<TaskId>,
@@ -204,9 +230,15 @@ fn node(
     if !visited.insert(task.id.clone()) {
         return None;
     }
-    let keep = include_closed
-        || task.status.is_open()
-        || !open_descendants(all, &task.id, registry).is_empty();
+    let keep = visibility == Visibility::All
+        || if task.status == Status::Shelved {
+            visibility == Visibility::UnderShownParent
+        } else {
+            is_active(task)
+                || open_descendants(all, &task.id, registry)
+                    .iter()
+                    .any(|descendant| is_active(descendant))
+        };
     if !keep {
         return None;
     }
@@ -216,7 +248,7 @@ fn node(
         summary: TaskSummary::of(task, all, claims, registry, now),
         children: kids
             .into_iter()
-            .filter_map(|child| node(all, child, include_closed, claims, registry, visited, now))
+            .filter_map(|child| node(all, child, visibility, claims, registry, visited, now))
             .collect(),
     })
 }
@@ -334,7 +366,7 @@ mod tests {
         let open_deep = task("xx-000004", Some("xx-000003"), Status::Todo);
         let all = [root, closed_leaf, closed_mid, open_deep];
         let now = crate::time::parse("2026-01-01T00:00:00Z").unwrap();
-        let nodes = forest(&all, None, false, None, &registry, now);
+        let nodes = forest(&all, None, false, Shelved::Hidden, None, &registry, now);
         assert_eq!(nodes.len(), 1);
         let kids: Vec<&str> = nodes[0]
             .children
@@ -344,15 +376,23 @@ mod tests {
         assert_eq!(kids, ["xx-000003"]);
         assert_eq!(nodes[0].children[0].children[0].summary.id, "xx-000004");
         assert_eq!(
-            forest(&all, None, true, None, &registry, now)[0]
+            forest(&all, None, true, Shelved::Hidden, None, &registry, now)[0]
                 .children
                 .len(),
             2
         );
         assert_eq!(
-            forest(&all, Some(&all[2].id), true, None, &registry, now)[0]
-                .summary
-                .id,
+            forest(
+                &all,
+                Some(&all[2].id),
+                true,
+                Shelved::Hidden,
+                None,
+                &registry,
+                now
+            )[0]
+            .summary
+            .id,
             "xx-000003"
         );
     }

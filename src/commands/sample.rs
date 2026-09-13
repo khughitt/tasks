@@ -4,7 +4,7 @@
 //! (`idea`, `todo`, `blocked`), not live-claimed, and not touched within the age window.
 //! Age and status exclusions are silent. A live-claim omission is reported with the
 //! message `ready` uses (minus its takeover hint), and a task whose latest note is a
-//! `curate:` note still carrying a `proposal:` for the human is reported as pending, so
+//! `curate:` or `scope:` note still carrying a `proposal:` for the human is reported as pending, so
 //! a reader can tell a small pool from a busy one and an unanswered proposal never
 //! re-enters the pool by age alone.
 
@@ -13,11 +13,13 @@ use crate::error::Result;
 use crate::model::{Status, Task};
 use crate::output::{DateColumn, ListOut, Output, TaskSummary};
 
-/// The proposal text of a task whose most recent note is a curate note awaiting the
+/// The proposal text of a task whose most recent note is a curate or scope note awaiting the
 /// human's decision. Any later note clears it, which is how the human answers.
 fn pending_proposal(task: &Task) -> Option<&str> {
     let text = task.notes.last()?.text.as_str();
-    let rest = text.strip_prefix("curate:")?;
+    let rest = text
+        .strip_prefix("curate:")
+        .or_else(|| text.strip_prefix("scope:"))?;
     rest.split_once("proposal:")
         .map(|(_, proposal)| proposal.trim())
 }
