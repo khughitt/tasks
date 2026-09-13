@@ -1,6 +1,6 @@
 # Scope pass: a `scope` skill and a `shelved` status
 
-Status: `shelved` implemented (2026-09-13, see docs/plans/2026-09-12-shelved-status.md); `scope` skill pending (tasks-0d50ff)
+Status: `shelved` implemented (2026-09-13, see docs/plans/2026-09-12-shelved-status.md); `scope` skill written, real-cluster acceptance pending (tasks-0d50ff)
 Task: tasks-019c60; pieces tasks-470e8c (`shelved`), tasks-0d50ff (`scope` skill)
 
 ## 1. Problem
@@ -242,7 +242,7 @@ because it has children. The research tasks are its children too.
 
 ### 4.5 Research and design tasks
 
-A research task is answerable or it is not filed. Its body has four parts:
+A research task is answerable or it is not filed. Its body has five parts:
 
 - the **question**, one sentence, specific enough that two people would agree when it
   is answered;

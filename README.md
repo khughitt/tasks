@@ -193,6 +193,8 @@ so it applies to every project:
     mkdir -p ~/.agents/skills && ln -s "$PWD/skills/tasks" ~/.agents/skills/tasks   # other harnesses
     ln -s "$PWD/skills/curate" ~/.claude/skills/curate
     ln -s "$PWD/skills/curate" ~/.agents/skills/curate   # other harnesses
+    ln -s "$PWD/skills/scope" ~/.claude/skills/scope
+    ln -s "$PWD/skills/scope" ~/.agents/skills/scope     # other harnesses
 
 or per project, when a project needs to pin its own copy:
 
@@ -202,6 +204,9 @@ or per project, when a project needs to pin its own copy:
 
 `skills/curate/SKILL.md` is the maintenance pass: `/curate` samples open tasks and
 refines them within fixed bounds.
+
+`skills/scope/SKILL.md` is the deliberate idea review between capture and maintenance:
+`/scope` turns a bounded cluster into supported next actions and handoffs.
 
 ## Feedback
 

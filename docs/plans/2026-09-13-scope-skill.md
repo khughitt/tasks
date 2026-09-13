@@ -44,7 +44,7 @@ There are two implementation tasks: an independently usable, tested skill; then 
 
 **Interfaces:** Consumes `tasks list/show/root/tree/edit/add/note/shelve`, the existing complexity rubric, and `curate`'s root/revalidation discipline. Produces `/scope [<id>... | --tag <tag>] [--project <prefix>]`, five verdicts, and linked handoff documents. Task 2 loads this file explicitly; a global install is unnecessary for acceptance.
 
-- [ ] **Step 1: Prepare the trial packet and record a baseline before writing the skill.**
+- [x] **Step 1: Prepare the trial packet and record a baseline before writing the skill.**
 
 Use an ignored, plan-specific scratch directory. Give fresh agents the existing tasks/curate guidance, the following scenario facts, and the request below; do not give baseline agents the proposed scope skill, its design, this plan, or the assessor's answers. The main packet proposes concrete commands/artifacts against supplied snapshots so the mid-pass change is deterministic. Step 3 also executes the three-verdict packet against real scratch-project records; Task 2 remains the real-project acceptance pass.
 
@@ -103,7 +103,7 @@ Run three fresh-context baseline trials and save exact outputs. Go beyond three 
 
 The expected next action is not a predetermined feature choice. Judge whether the decision follows the supplied evidence and contract.
 
-- [ ] **Step 2: Author one self-contained skill from the spec and observed failures.**
+- [x] **Step 2: Author one self-contained skill from the spec and observed failures.**
 
 Use this frontmatter:
 
@@ -136,7 +136,7 @@ Ideas it wakes: On completion, run tasks note on each named waiting idea with th
 
 The actual task substitutes repository paths and waiting idea ids found during the pass. Preserve the full source material when shortening task bodies. These are instructions for the agent, not CLI-enforced task kinds.
 
-- [ ] **Step 3: Repeat the same trials with the skill, then exercise the remaining verdict branches.**
+- [x] **Step 3: Repeat the same trials with the skill, then exercise the remaining verdict branches.**
 
 Run three fresh-context trials of the identical packet with the new skill loaded. Check every result against every applicable row; keep the baseline/green variants comparable. Fix observed misunderstandings and rerun affected cases. Reading the skill back is not a passing application test.
 
@@ -144,14 +144,14 @@ Also execute one small explicit-id packet in a real ignored scratch project per 
 
 Record inputs, observed baseline errors, representative output excerpts, green outcomes, and limitations in the validation note. Keep trial transcripts in ignored scratch, not committed reports. Do not introduce a test runner or a Rust test merely to scan skill text.
 
-- [ ] **Step 4: Add discovery and design handoff pointers.**
+- [x] **Step 4: Add discovery and design handoff pointers.**
 
 - In `skills/tasks/SKILL.md` step 2, extend “Never pick an idea; scope it first” with `Use the scope skill for a deliberate idea review.` Add one recording-work bullet showing `/scope [<id>... | --tag <tag>] [--project <prefix>]`. In “With superpowers”, state that a design task from a scope brief is where brainstorming attaches and finishes a draft design.
 - In `README.md`'s Agent skill section, describe scope as deliberate idea review between capture and maintenance. Add scope symlink examples beside the existing curate examples for both harness directories. These are documentation examples; do not execute global install commands from a development worktree.
 - In `AGENTS.md`, add the deliberate `/scope` invocation and the new `skills/scope/SKILL.md` layout entry. Do not make scoping an automatic session sweep.
 - Keep curate's existing bounds intact; its `scope:` pending-prefix text already landed with the CLI.
 
-- [ ] **Step 5: Check and commit the tested skill.**
+- [x] **Step 5: Check and commit the tested skill.**
 
 Inspect the frontmatter, referenced CLI help and every doc link; run `git diff --check`, `tasks check`, and `just check`. Record the trial evidence on the step task, close that step, and commit the named skill/docs/task files with `feat(scope): add a tested idea scoping skill`. Keep the parent skill piece open for Task 2's real acceptance. The scope-pass design status becomes `scope skill written; real-cluster acceptance pending`, not fully implemented yet. Correct §4.5's known stale “four parts” count to the five fields already enumerated in this same Task 1 commit.
 
