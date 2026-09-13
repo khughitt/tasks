@@ -70,6 +70,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_parent
         || fields.source.is_some()
         || args.no_source
+        || fields.agent.is_some()
+        || args.no_agent
         || args.model.is_some()
         || args.no_model
         || args.no_tags
@@ -99,6 +101,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     if args.no_source {
         task.source = None;
+    }
+    if args.no_agent {
+        task.agent = None;
     }
     if args.no_complexity {
         task.complexity = None;

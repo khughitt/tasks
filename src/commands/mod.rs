@@ -519,6 +519,10 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
         validate_line("source", source)?;
         task.source = Some(source.clone());
     }
+    if let Some(agent) = &fields.agent {
+        validate_line("agent", agent)?;
+        task.agent = Some(agent.clone());
+    }
     if let Some(spec) = &fields.spec {
         task.spec = Some(resolver.resolve_doc(DocKind::Spec, spec)?);
     }
@@ -584,21 +588,39 @@ pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
     Ok(open)
 }
 
-/// The model the harness reports for this completion, from `TASKS_MODEL`. Unset or
-/// empty records nothing; a non-Unicode value is an explicit error, never a silent skip.
-fn completion_model() -> Result<Option<String>> {
-    match std::env::var_os("TASKS_MODEL") {
+/// A provenance variable the harness exports (`TASKS_MODEL`, `TASKS_AGENT`). Unset or
+/// empty records nothing; a non-Unicode or multi-line value is an explicit error, never
+/// a silent skip.
+fn provenance_var(name: &str) -> Result<Option<String>> {
+    match std::env::var_os(name) {
         None => Ok(None),
         Some(value) => {
             let value = value
                 .into_string()
-                .map_err(|_| Error::Validation("TASKS_MODEL is not valid Unicode".into()))?;
+                .map_err(|_| Error::Validation(format!("{name} is not valid Unicode")))?;
             if value.is_empty() {
                 return Ok(None);
             }
-            crate::format::validate_line("TASKS_MODEL", &value)?;
+            crate::format::validate_line(name, &value)?;
             Ok(Some(value))
         }
+    }
+}
+
+/// The model the harness reports for this completion, from `TASKS_MODEL`.
+fn completion_model() -> Result<Option<String>> {
+    provenance_var("TASKS_MODEL")
+}
+
+/// The agent filing a task: an explicit `--agent` when given, validated first so a bad
+/// environment cannot fail an add that names a valid agent; otherwise `TASKS_AGENT`.
+pub fn creation_agent(explicit: Option<&str>) -> Result<Option<String>> {
+    match explicit {
+        Some(agent) => {
+            validate_line("agent", agent)?;
+            Ok(Some(agent.to_string()))
+        }
+        None => provenance_var("TASKS_AGENT"),
     }
 }
 

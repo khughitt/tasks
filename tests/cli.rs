@@ -13391,3 +13391,289 @@ fn process_does_not_change_selection_or_starting() {
             .is_null()
     );
 }
+
+#[test]
+fn add_stamps_agent_from_the_flag_then_the_variable_and_absence_records_nothing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+
+    let from_env = id_of(
+        serde_json::from_slice(
+            &env.cmd(&sci)
+                .args(["add", "Env", "-p", "2"])
+                .env("TASKS_AGENT", "crush/kimi-k3")
+                .assert()
+                .success()
+                .get_output()
+                .stdout,
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        env.json(&sci, &["show", &from_env])["task"]["agent"],
+        "crush/kimi-k3"
+    );
+    assert!(
+        env.read(&sci, &format!("tasks/{from_env}.md"))
+            .contains("\nagent: crush/kimi-k3\n")
+    );
+
+    let from_flag = id_of(
+        serde_json::from_slice(
+            &env.cmd(&sci)
+                .args(["add", "Flag", "-p", "2", "--agent", "codex/gpt-6"])
+                .env("TASKS_AGENT", "crush/kimi-k3")
+                .assert()
+                .success()
+                .get_output()
+                .stdout,
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        env.json(&sci, &["show", &from_flag])["task"]["agent"],
+        "codex/gpt-6"
+    );
+
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+    let shown = env.json(&sci, &["show", &plain]);
+    assert!(
+        shown["task"].get("agent").is_some(),
+        "key present when absent: {shown}"
+    );
+    assert!(shown["task"]["agent"].is_null());
+
+    let empty = id_of(
+        serde_json::from_slice(
+            &env.cmd(&sci)
+                .args(["add", "Empty", "-p", "2"])
+                .env("TASKS_AGENT", "")
+                .assert()
+                .success()
+                .get_output()
+                .stdout,
+        )
+        .unwrap(),
+    );
+    assert!(env.json(&sci, &["show", &empty])["task"]["agent"].is_null());
+}
+
+#[test]
+fn invalid_tasks_agent_fails_add_unless_the_flag_names_a_valid_agent() {
+    use std::os::unix::ffi::OsStrExt;
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let before = std::fs::read_dir(sci.join("tasks")).unwrap().count();
+
+    let out = env
+        .cmd(&sci)
+        .args(["add", "Bad", "-p", "2"])
+        .env("TASKS_AGENT", std::ffi::OsStr::from_bytes(b"\xff\xfe"))
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        err_detail(&out).contains("TASKS_AGENT is not valid Unicode"),
+        "{}",
+        err_detail(&out)
+    );
+
+    let out = env
+        .cmd(&sci)
+        .args(["add", "Bad", "-p", "2"])
+        .env("TASKS_AGENT", "a\nb")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        err_detail(&out).contains("TASKS_AGENT must be a single line"),
+        "{}",
+        err_detail(&out)
+    );
+    assert_eq!(
+        std::fs::read_dir(sci.join("tasks")).unwrap().count(),
+        before,
+        "a failed add writes nothing"
+    );
+
+    for bad in [
+        std::ffi::OsStr::from_bytes(b"\xff\xfe"),
+        std::ffi::OsStr::new("a\nb"),
+    ] {
+        let id = id_of(
+            serde_json::from_slice(
+                &env.cmd(&sci)
+                    .args(["add", "Good", "-p", "2", "--agent", "codex/gpt-6"])
+                    .env("TASKS_AGENT", bad)
+                    .assert()
+                    .success()
+                    .get_output()
+                    .stdout,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            env.json(&sci, &["show", &id])["task"]["agent"],
+            "codex/gpt-6"
+        );
+    }
+}
+
+#[test]
+fn feedback_stamps_agent_from_the_variable_only() {
+    let (env, _target, reporter) = feedback_env();
+    let out: serde_json::Value = serde_json::from_slice(
+        &env.cmd(&reporter)
+            .args([
+                "feedback",
+                "the flag is hard to find",
+                "--category",
+                "friction",
+            ])
+            .env("TASKS_AGENT", "claude-code/claude-opus-5")
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    )
+    .unwrap();
+    let id = out["id"].as_str().unwrap();
+    assert_eq!(
+        env.json(&reporter, &["show", id])["task"]["agent"],
+        "claude-code/claude-opus-5"
+    );
+    // feedback has no --agent flag
+    env.cmd(&reporter)
+        .args([
+            "feedback",
+            "x",
+            "--category",
+            "friction",
+            "--agent",
+            "codex",
+        ])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn edit_never_reads_tasks_agent_and_agent_flags_replace_and_clear() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+
+    env.cmd(&sci)
+        .args(["edit", &id, "--title", "Renamed"])
+        .env("TASKS_AGENT", "crush/kimi-k3")
+        .assert()
+        .success();
+    assert!(
+        env.json(&sci, &["show", &id])["task"]["agent"].is_null(),
+        "an edit under the variable does not claim creation"
+    );
+
+    env.json(&sci, &["edit", &id, "--agent", "codex/gpt-6"]);
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["agent"],
+        "codex/gpt-6"
+    );
+    env.json(&sci, &["edit", &id, "--no-agent"]);
+    assert!(env.json(&sci, &["show", &id])["task"]["agent"].is_null());
+    assert!(!env.read(&sci, &format!("tasks/{id}.md")).contains("agent:"));
+
+    assert_eq!(env.fail(&sci, &["edit", &id, "--agent", ""]), "validation");
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--agent", "a\nb"]),
+        "validation"
+    );
+    env.cmd(&sci)
+        .args(["edit", &id, "--agent", "x", "--no-agent"])
+        .assert()
+        .code(2);
+
+    // an editor save is validated through the record parser: an empty value is refused
+    // and the record is left as it was
+    env.json(&sci, &["edit", &id, "--agent", "codex/gpt-6"]);
+    let editor = editor_script(&sci, "sed -i 's|^agent: .*$|agent: \"\"|' \"$1\"");
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &editor)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{}", err_detail(&out));
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["agent"],
+        "codex/gpt-6"
+    );
+
+    // a value with reserved characters is quoted on disk and round-trips byte for byte
+    env.json(
+        &sci,
+        &["edit", &id, "--agent", "crush/kimi-k3 [nightly]: b"],
+    );
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["agent"],
+        "crush/kimi-k3 [nightly]: b"
+    );
+    assert!(
+        env.read(&sci, &format!("tasks/{id}.md"))
+            .contains("\nagent: \"crush/kimi-k3 [nightly]: b\"\n")
+    );
+}
+
+#[test]
+fn summary_rows_and_parked_rows_carry_agent() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let stamped = id_of(
+        serde_json::from_slice(
+            &env.cmd(&sci)
+                .args(["add", "Stamped", "-p", "2"])
+                .env("TASKS_AGENT", "codex/gpt-6")
+                .assert()
+                .success()
+                .get_output()
+                .stdout,
+        )
+        .unwrap(),
+    );
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+
+    for view in [vec!["list"], vec!["ready"]] {
+        let rows = env.json(&sci, &view);
+        let rows = rows["tasks"].as_array().unwrap();
+        let row = rows.iter().find(|row| row["id"] == stamped).unwrap();
+        assert_eq!(row["agent"], "codex/gpt-6", "{view:?}");
+        let row = rows.iter().find(|row| row["id"] == plain).unwrap();
+        assert!(
+            row.get("agent").is_some() && row["agent"].is_null(),
+            "{view:?}"
+        );
+    }
+
+    env.json(&sci, &["park", &stamped, "resume here"]);
+    let prime = env.json(&sci, &["prime"]);
+    let parked = prime["parked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == stamped)
+        .unwrap()
+        .clone();
+    assert_eq!(parked["agent"], "codex/gpt-6");
+
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "show", &stamped])
+        .assert()
+        .success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout);
+    assert!(text.contains("agent: codex/gpt-6\n"), "{text}");
+    let out = env.cmd(&sci).args(["--pretty", "list"]).assert().success();
+    let text = String::from_utf8_lossy(&out.get_output().stdout);
+    assert!(
+        !text.contains("codex/gpt-6"),
+        "tables gain no column: {text}"
+    );
+}

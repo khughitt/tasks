@@ -111,6 +111,7 @@ mod tests {
             tags: vec![],
             source: None,
             model: None,
+            agent: None,
             spec: spec.map(Into::into),
             plan: plan.map(Into::into),
             step: step.map(Into::into),
@@ -444,6 +445,11 @@ pub struct Task {
     /// latest completion transition; `None` when unknown or cleared. Stored and returned,
     /// never interpreted. See docs/specs/2026-09-10-model-provenance-design.md.
     pub model: Option<String>,
+    /// The harness and model that filed the task (`<harness>/<model>`, or the harness
+    /// alone), from `add --agent` or `TASKS_AGENT` at creation; `None` when unknown.
+    /// Stored and returned, never interpreted. Independent of `model`, which is the
+    /// completion side. See docs/specs/2026-09-13-creation-provenance-design.md.
+    pub agent: Option<String>,
     pub spec: Option<String>,
     pub plan: Option<String>,
     pub step: Option<String>,

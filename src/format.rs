@@ -3,7 +3,7 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 23] = [
+const KEYS: [&str; 24] = [
     "id",
     "title",
     "status",
@@ -24,6 +24,7 @@ const KEYS: [&str; 23] = [
     "tags",
     "source",
     "model",
+    "agent",
     "spec",
     "plan",
     "step",
@@ -135,6 +136,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         tags: list("tags")?,
         source: scalar("source")?,
         model: scalar("model")?,
+        agent: scalar("agent")?,
         spec: scalar("spec")?,
         plan: scalar("plan")?,
         step: scalar("step")?,
@@ -331,6 +333,9 @@ pub fn validate_task(t: &Task) -> Result<()> {
     if let Some(model) = &t.model {
         validate_line("model", model)?;
     }
+    if let Some(agent) = &t.agent {
+        validate_line("agent", agent)?;
+    }
     if t.depends.contains(&t.id) {
         return Err(Error::Validation("task cannot depend on itself".into()));
     }
@@ -397,6 +402,9 @@ pub fn serialize_task(t: &Task) -> String {
     }
     if let Some(v) = &t.model {
         pairs.push(("model".into(), s(v)));
+    }
+    if let Some(v) = &t.agent {
+        pairs.push(("agent".into(), s(v)));
     }
     if let Some(v) = &t.spec {
         pairs.push(("spec".into(), s(v)));
@@ -469,6 +477,21 @@ mod tests {
             );
             assert!(parse_task(&text, "x").is_err());
         }
+    }
+
+    #[test]
+    fn agent_round_trips_after_model_and_rejects_multi_line() {
+        let text = MINIMAL.replace(
+            "tags: []\n",
+            "tags: []\nsource: mind6-1\nmodel: claude-opus-5\nagent: codex/gpt-6\n",
+        );
+        let task = parse_task(&text, "x").unwrap();
+        assert_eq!(task.agent.as_deref(), Some("codex/gpt-6"));
+        assert_eq!(serialize_task(&task), text);
+
+        let mut bad = task.clone();
+        bad.agent = Some("a\nb".into());
+        assert!(validate_task(&bad).is_err());
     }
 
     #[test]

@@ -479,7 +479,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let project = crate::repo::Project::init(dir.path(), "sci").unwrap();
         let dependency =
-            crate::commands::add::blank(&project, "Dependency".into(), Status::Todo).unwrap();
+            crate::commands::add::blank(&project, "Dependency".into(), Status::Todo, None).unwrap();
         std::fs::write(project.root.join(crate::repo::CONFIG_REL), "not toml = [").unwrap();
         let mut registry = crate::registry::Registry::default();
         registry.register("sci", &project.root).unwrap();

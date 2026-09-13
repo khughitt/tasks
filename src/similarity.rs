@@ -109,6 +109,7 @@ mod tests {
             tags: vec!["feedback".into()],
             source: None,
             model: None,
+            agent: None,
             spec: None,
             plan: None,
             step: None,

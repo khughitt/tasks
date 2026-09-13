@@ -8,8 +8,14 @@ use crate::repo::Project;
 
 /// A new task in `project` with a fresh id, timestamps of now, and every other field at
 /// its default. The single constructor behind `add` and `feedback`, so a file created
-/// in another project is shaped exactly as one created locally.
-pub fn blank(project: &Project, title: String, status: Status) -> Result<Task> {
+/// in another project is shaped exactly as one created locally. `agent` is the resolved
+/// creation stamp (`creation_agent`), passed in so both creators share one rule.
+pub fn blank(
+    project: &Project,
+    title: String,
+    status: Status,
+    agent: Option<String>,
+) -> Result<Task> {
     let now = crate::time::now();
     Ok(Task {
         id: project.new_id()?,
@@ -32,6 +38,7 @@ pub fn blank(project: &Project, title: String, status: Status) -> Result<Task> {
         tags: vec![],
         source: None,
         model: None,
+        agent,
         spec: None,
         plan: None,
         step: None,
@@ -88,7 +95,8 @@ pub fn run(mut ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Re
             }));
         }
     }
-    let mut task = blank(&ctx.project, title, status)?;
+    let agent = super::creation_agent(fields.agent.as_deref())?;
+    let mut task = blank(&ctx.project, title, status, agent)?;
     apply_fields(&ctx, &mut task, &fields)?;
     create(&ctx.project, &ctx.registry, &mut task)?;
     Ok(Output::Add(AddOut {

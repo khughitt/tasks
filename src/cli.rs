@@ -84,6 +84,11 @@ pub struct FieldArgs {
     /// message id. Never interpreted. On `edit` this replaces; see `--no-source`.
     #[arg(long)]
     pub source: Option<String>,
+    /// The harness and model filing the task, `<harness>/<model>` or the harness alone.
+    /// On `add` this overrides `TASKS_AGENT`; on `edit` it replaces the stamp. Never
+    /// interpreted; see `--no-agent`.
+    #[arg(long)]
+    pub agent: Option<String>,
 }
 
 /// The flags `edit` adds to the shared field flags.
@@ -107,6 +112,9 @@ pub struct EditArgs {
     /// Clear the source.
     #[arg(long, conflicts_with = "source")]
     pub no_source: bool,
+    /// Clear the agent stamp.
+    #[arg(long, conflicts_with = "agent")]
+    pub no_agent: bool,
     /// Clear the complexity rating (back to unassessed).
     #[arg(long, conflicts_with = "complexity")]
     pub no_complexity: bool,

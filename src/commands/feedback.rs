@@ -138,7 +138,8 @@ fn create(
     category: &str,
     from: &str,
 ) -> Result<Task> {
-    let mut task = super::add::blank(target, summary, Status::Idea)?;
+    let agent = super::creation_agent(None)?;
+    let mut task = super::add::blank(target, summary, Status::Idea, agent)?;
     task.tags = vec!["feedback".into(), category.into(), from.into()];
     task.body = body;
     super::create(target, registry, &mut task)?;
