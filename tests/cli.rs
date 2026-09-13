@@ -5542,6 +5542,18 @@ fn as_agent(env: &TestEnv, dir: &std::path::Path, session: &str) -> assert_cmd::
     cmd
 }
 
+/// The parsed `{"error": {"kind", "detail"}}` of a command expected to exit 1.
+fn error_of(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let out = env.cmd(dir).args(args).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stderr).unwrap()
+}
+
 #[test]
 fn prime_lists_parked_before_ready_and_ready_omits_user_parked_work() {
     let mut env = TestEnv::new();
@@ -12087,5 +12099,127 @@ fn check_warns_on_an_open_plan_step_without_a_rating() {
             .iter()
             .any(|w| w["kind"] == "unrated_step"),
         "closed steps are silent: {v}"
+    );
+}
+
+#[test]
+fn shelve_writes_the_status_and_the_note_and_unshelve_returns_to_idea() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2", "--size", "s"]));
+    let v = env.json(&sci, &["shelve", &id, "when profiles have two consumers"]);
+    assert_eq!(v["id"], id);
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["status"], "shelved");
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(
+        notes.last().unwrap()["text"],
+        "shelved: when profiles have two consumers"
+    );
+    assert_eq!(shown["task"]["size"], "s", "fields survive the shelf");
+
+    env.json(&sci, &["unshelve", &id]);
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["status"], "idea");
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(notes.last().unwrap()["text"], "unshelved");
+}
+
+#[test]
+fn shelve_requires_a_wake_condition_and_unshelve_requires_shelved() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let out = env.cmd(&sci).args(["shelve", &id]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "usage error, nothing written");
+    assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
+
+    let err = error_of(&env, &sci, &["unshelve", &id]);
+    assert_eq!(err["error"]["kind"], "invalid_transition");
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("unshelve requires shelved")
+    );
+}
+
+#[test]
+fn shelve_follows_the_claim_rules_and_clears_a_park_and_its_escalation() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let held = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    write_claim(&env, "sci", &held, "agent-z", true);
+    let err = as_agent(&env, &sci, "agent-a")
+        .args(["shelve", &held, "later"])
+        .output()
+        .unwrap();
+    let err: serde_json::Value = serde_json::from_slice(&err.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "claimed");
+
+    let parked = id_of(env.json(&sci, &["add", "Parked", "-p", "2", "--complexity", "low"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &parked])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &parked,
+            "stuck",
+            "--reason",
+            "capability",
+            "--complexity",
+            "high",
+        ])
+        .assert()
+        .success();
+    assert!(!env.json(&sci, &["show", &parked])["escalation"].is_null());
+
+    let v: serde_json::Value = {
+        let out = as_agent(&env, &sci, "agent-a")
+            .args(["shelve", &parked, "after the rack lands"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let warnings = v["warnings"].as_array().unwrap();
+    assert!(
+        warnings.iter().any(|w| w
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("cleared the escalation of {parked} to high"))),
+        "{warnings:?}"
+    );
+    let shown = env.json(&sci, &["show", &parked]);
+    assert!(shown["park"].is_null(), "shelving clears the park entry");
+    assert!(shown["escalation"].is_null(), "and its escalation");
+    assert!(shown["claim"].is_null(), "and releases the claim");
+}
+
+#[test]
+fn shelve_refuses_a_goal_with_unshelved_open_descendants() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "2"]));
+    let a = id_of(env.json(&sci, &["add", "A", "--parent", &goal]));
+    let b = id_of(env.json(&sci, &["add", "B", "--parent", &goal]));
+    let err = error_of(&env, &sci, &["shelve", &goal, "someday"]);
+    assert_eq!(err["error"]["kind"], "open_descendants");
+    let detail = err["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains(&a) && detail.contains(&b), "{detail}");
+    assert_eq!(env.json(&sci, &["show", &goal])["task"]["status"], "todo");
+
+    env.json(&sci, &["shelve", &a, "someday"]);
+    env.json(&sci, &["done", &b, "landed"]);
+    env.json(&sci, &["shelve", &goal, "someday"]);
+    assert_eq!(
+        env.json(&sci, &["show", &goal])["task"]["status"],
+        "shelved"
     );
 }
