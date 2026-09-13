@@ -113,18 +113,28 @@ the projects that own them, blocking this goal (`tasks dep tasks-dc599b --on <pi
     `export TASKS_MODEL="$(cat '<state>' 2>/dev/null)"` and
     `export TASKS_AGENT="claude-code${TASKS_MODEL:+/$TASKS_MODEL}"`. The preamble runs
     before each Bash command, so the substitution re-reads the file every time. When
-    `scratchpad_dir` is absent it appends `export TASKS_AGENT=claude-code` only.
-    When `$CLAUDE_ENV_FILE` is absent it writes nothing.
+    `scratchpad_dir` is absent it appends `export TASKS_AGENT=claude-code` and
+    `export TASKS_MODEL=` — the empty export clears any model inherited from the
+    launching shell, which the CLI reads as "no model". When `$CLAUDE_ENV_FILE` is
+    absent it writes nothing.
   - A new `PostModelSwitch` hook, `hooks/claude-postmodelswitch`, writes `to_model` to
-    the same state file. A missing `scratchpad_dir` or `to_model` writes nothing.
+    the same state file. A payload with `scratchpad_dir` but no `to_model` removes the
+    file, so the next command records the harness alone rather than the previous
+    model. A missing `scratchpad_dir` writes nothing.
   - Both hooks keep the session-start contract: advisory, exit 0, never fail the
-    session. Paths are shell-quoted. Subagents inherit the session's file; a subagent
-    running under another model is attributed to the session's model (deferred).
-  - Acceptance is a live transition, not only the unit tests: start a session, `/model`
-    to a different model, `tasks add`, and confirm the record carries the new model;
-    then `tasks done` and confirm `model` matches. If the preamble proves not to be
-    re-evaluated per command, fall back to `export TASKS_AGENT=claude-code` alone and
-    record why in this spec.
+    session. Paths are shell-quoted.
+  - **What `<model>` means under Claude Code:** the enclosing session's model, as
+    SessionStart and PostModelSwitch report it. A subagent runs in the same session
+    and its `tasks` commands carry the session's stamp even when the subagent is
+    configured for another model. The field's contract is narrowed to say so for this
+    harness; per-subagent attribution needs a signal the preamble can see and is
+    deferred.
+  - Acceptance is a live transition, not only the unit tests, and it must distinguish
+    per-command evaluation from one-time initialisation: under model A, `tasks add`
+    and confirm the stamp is A; `/model` to B; `tasks add` and confirm B; `tasks done`
+    and confirm `model` is B. If the preamble proves not to be re-evaluated per
+    command, fall back to `export TASKS_AGENT=claude-code` and `export TASKS_MODEL=`
+    alone and record why in this spec.
 - **Codex (ai).** Harness-only, because the effective model is not knowable from
   config: `codex/config.toml` sets `TASKS_AGENT = "codex"` through the shell
   environment policy and exports no `TASKS_MODEL`. Promote to `codex/<model>` when a
@@ -147,8 +157,9 @@ the projects that own them, blocking this goal (`tasks dep tasks-dc599b --on <pi
   the hook cannot be made reliable.
 - Per-note or per-edit attribution; notes already carry the owner identity.
 - Retroactive stamping of existing records.
-- Subagent attribution under Claude Code: a subagent on another model shares the
-  session's state file. `agent_id`/`agent_type` are in the hook input if this matters.
+- Per-subagent attribution under Claude Code. The meaning is narrowed to the session's
+  model above; `agent_id`/`agent_type` reach hooks, but the Bash preamble would need
+  its own signal to record the harness alone for a subagent's commands.
 
 ## Testing
 
@@ -170,7 +181,12 @@ Mirroring the `model` cases in `tests/cli.rs` and the format units:
 - Ops hooks: unit tests feed session-start JSON with and without `model` and with and
   without `scratchpad_dir`, asserting the state file and the lines appended to a
   temporary `CLAUDE_ENV_FILE`, and that nothing is written when the variable is unset;
-  then feed a PostModelSwitch payload and assert the state file changes. A shell-level
-  test sources the env file before and after the switch payload and asserts
-  `TASKS_AGENT` and `TASKS_MODEL` follow it. The live `/model` transition above is the
-  acceptance check for the piece.
+  then feed a PostModelSwitch payload and assert the state file changes. Every
+  unknown-model path starts from an existing stamp: a state file already holding a
+  model, and `TASKS_MODEL` already set in the hook's environment — session start
+  without `model`, session start without `scratchpad_dir`, and a switch payload
+  without `to_model` must each leave the next command with no model. A shell-level
+  test sources the env file (with `TASKS_MODEL` pre-set) before and after the switch
+  payload and asserts `TASKS_AGENT` and `TASKS_MODEL` follow it. The live transition
+  above is the acceptance check for the piece; a shell test cannot prove the harness
+  re-runs the preamble.
