@@ -428,9 +428,11 @@ fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
     let tree = env.json(&sci, &["tree"]);
     assert_eq!(tree["nodes"].as_array().unwrap().len(), 1, "{tree}");
     assert_eq!(tree["nodes"][0]["id"], goal);
-    assert_eq!(tree["nodes"][0]["children"][0]["id"], child);
-    assert_eq!(tree["nodes"][0]["children"][1]["id"], subgoal);
-    assert_eq!(tree["nodes"][0]["children"][1]["children"][0]["id"], leaf);
+    let children = tree["nodes"][0]["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2);
+    assert!(children.iter().any(|node| node["id"] == child));
+    let subgoal_node = children.iter().find(|node| node["id"] == subgoal).unwrap();
+    assert_eq!(subgoal_node["children"][0]["id"], leaf);
     assert_eq!(
         env.json(&sci, &["tree", "--all"])["nodes"]
             .as_array()
@@ -453,7 +455,15 @@ fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
     assert_no_shelves(prime["roadmap"].as_array().unwrap());
 
     let shown = env.json(&sci, &["show", &goal]);
-    assert_eq!(shown["children"][0]["status"], "shelved");
+    assert_eq!(
+        shown["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["id"] == child)
+            .unwrap()["status"],
+        "shelved"
+    );
     assert_eq!(
         env.json(&sci, &["projects"])["projects"][0]["counts"]["shelved"],
         5
@@ -463,6 +473,24 @@ fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
     assert_eq!(error["error"]["kind"], "open_descendants");
     assert!(error["error"]["detail"].as_str().unwrap().contains(&leaf));
     assert_eq!(env.json(&sci, &["show", &goal])["task"]["status"], "todo");
+
+    env.json(&sci, &["unshelve", &child]);
+    env.json(&sci, &["unshelve", &root_child]);
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["roadmap"].as_array().unwrap().len(), 1, "{prime}");
+    assert_eq!(prime["roadmap"][0]["id"], goal);
+    assert_eq!(prime["roadmap"][0]["children"][0]["id"], child);
+    assert!(
+        prime["roadmap"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|node| node["id"] != root)
+    );
+    assert_eq!(
+        env.json(&sci, &["tree"])["nodes"].as_array().unwrap().len(),
+        1
+    );
 }
 
 #[test]
