@@ -86,10 +86,15 @@ Shown wherever hiding it would make a view lie:
 
 - `show` lists dependencies and children with their statuses; a shelved one appears as
   `shelved`.
-- `tree` shows shelved children of an open goal. A goal that cannot close because a
-  shelved child is open must show that child; hiding it would leave the goal looking
-  finished with no visible reason it is not. Shelved roots (no parent, or a closed
-  parent) are hidden unless `--all`.
+- `tree` shows a shelved node whenever its parent is shown, recursively: a goal that
+  cannot close because a shelved child is open must show that child, and a shelved
+  subgoal must show the shelved leaf that keeps it open. Shelved roots (no parent, or a
+  hidden parent) are hidden unless `--all`. `prime`'s roadmap shares the walk but hides
+  every shelved row; the two views pass their own mode.
+- `next` has two feeds, `ready` and the parked candidates; both refuse a shelved task,
+  so a park entry that survived a failed store cleanup after `shelve` cannot hand the
+  task out. That entry still appears in `prime`'s parked section and `list --parked`,
+  with the record's status, because a leftover entry is an anomaly to show, not hide.
 - `check` warns when an open task that is not itself shelved depends on a shelved one:
   `<id> depends on shelved <dep>: unshelve it or drop the dependency`. This is the
   blocker exposure for `ready`: a `todo` whose dependency is shelved is not ready, and

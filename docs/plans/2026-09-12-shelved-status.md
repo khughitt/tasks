@@ -17,7 +17,7 @@
 - Never edit `tasks/*.md` by hand; `tasks check` before every commit; `just check` is the pre-commit hook (`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `tasks check`).
 - Conventional commits; no AI-attribution trailers.
 - Work in `.worktrees/scope/` on branch `scope`. Every path below is relative to that worktree.
-- Run the suite with `cargo test` (or one test with `cargo test --test cli <name>`); the end-to-end tests build the binary themselves.
+- The package has only a binary target: focused unit tests run as `cargo test --bin tasks <filter>`, one end-to-end test as `cargo test --test cli <name>`, and the full suite as `just test` (the repository's timing wrapper); the end-to-end tests build the binary themselves.
 
 ---
 
@@ -66,7 +66,7 @@ In `src/model.rs`, extend the two existing tests:
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `cargo test --lib model::tests`
+Run: `cargo test --bin tasks model::tests`
 Expected: compile error, `no variant named Shelved`.
 
 - [ ] **Step 3: Add the variant**
@@ -186,7 +186,7 @@ and add `(Style::Status(Status::Shelved), "2;34"),` to the table the test at `:1
 
 - [ ] **Step 5: Build, run the unit tests, then the whole suite**
 
-Run: `cargo build && cargo test --lib && cargo test`
+Run: `cargo build && cargo test --bin tasks model::tests && just test`
 Expected: all pass. If a `tests/cli.rs` test pins the exact `counts` object of `prime` or `projects` (search `"blocked":` in `tests/cli.rs`), add `"shelved": 0` at the same position in that expectation — that is the contract change this task makes, nothing else.
 
 - [ ] **Step 6: Commit**
@@ -462,7 +462,7 @@ Any other constructor of `ClaimIntent::Release` in the tree (grep `ClaimIntent::
 
 - [ ] **Step 5: Run the new tests, then the suite**
 
-Run: `cargo test --test cli shelve && cargo test`
+Run: `cargo test --test cli shelve && just test`
 Expected: all pass. The existing test `reassessment_clears_on_every_edit_shape_and_closing_clears_too` still passes: `done`/`drop` behaviour is unchanged.
 
 - [ ] **Step 6: Commit**
@@ -624,7 +624,7 @@ Editor path (`:217-224`):
 
 - [ ] **Step 4: Run the tests, then the suite**
 
-Run: `cargo test --test cli shelved && cargo test`
+Run: `cargo test --test cli shelved && just test`
 Expected: all pass.
 
 - [ ] **Step 5: Commit**
@@ -640,13 +640,14 @@ git commit -m "feat(cli): refuse start, park, and edits into shelved"
 
 **Files:**
 - Modify: `src/commands/list.rs:60-70` and `:150-160` (the two default status filters)
-- Modify: `src/hierarchy.rs:150-215` (`forest`/`node`)
+- Modify: `src/commands/parked.rs:89-102` (`candidates`, the second feed of `next`)
+- Modify: `src/hierarchy.rs:150-215` (`forest`/`node`) and its callers `src/commands/tree.rs:23`, `src/commands/list.rs:362`, and the unit tests at `src/hierarchy.rs:337-353`
 - Modify: `src/commands/check.rs:98-140` (the dependency loop)
 - Test: `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `Status::Shelved`, `tasks shelve`.
-- Produces: `hierarchy::is_active(&Task) -> bool` (open and not shelved), used by `node`.
+- Consumes: `Status::Shelved`, `tasks shelve`, the `write_park` test helper at `tests/cli.rs:356`.
+- Produces: `hierarchy::is_active(&Task) -> bool` (open and not shelved); `hierarchy::Shelved { Hidden, UnderShownParent }`, a new parameter of `forest` after `include_closed`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -706,22 +707,66 @@ fn a_shelved_child_stays_visible_where_hiding_it_would_lie() {
     assert_eq!(children.len(), 1);
     assert_eq!(children[0]["status"], "shelved");
 
-    // tree: the goal shows its shelved child; the shelved root is hidden unless --all
+    // tree: the goal shows its shelved child, and a shelved subgoal shows the shelved
+    // leaf that keeps it open; the shelved root is hidden unless --all
+    let subgoal = id_of(env.json(&sci, &["add", "Subgoal", "--parent", &goal]));
+    let leaf = id_of(env.json(&sci, &["add", "Leaf", "--parent", &subgoal]));
+    env.json(&sci, &["shelve", &leaf, "later"]);
+    env.json(&sci, &["shelve", &subgoal, "later"]);
     let tree = env.json(&sci, &["tree"]);
     let roots = tree["nodes"].as_array().unwrap();
     assert_eq!(roots.len(), 1, "{tree}");
     assert_eq!(roots[0]["id"], goal);
-    assert_eq!(roots[0]["children"][0]["id"], child);
+    let kids = roots[0]["children"].as_array().unwrap();
+    let mut kid_ids: Vec<&str> = kids.iter().map(|k| k["id"].as_str().unwrap()).collect();
+    kid_ids.sort();
+    let mut expected = vec![child.as_str(), subgoal.as_str()];
+    expected.sort();
+    assert_eq!(kid_ids, expected, "{tree}");
+    let shown_subgoal = kids.iter().find(|k| k["id"] == subgoal).unwrap();
+    assert_eq!(shown_subgoal["children"][0]["id"], leaf, "{tree}");
     let all = env.json(&sci, &["tree", "--all"]);
     assert_eq!(all["nodes"].as_array().unwrap().len(), 2);
 
-    // prime: the goal is in the roadmap and not in closeout
+    // prime: the goal is in the roadmap without any shelved row, and not in closeout
     let prime = env.json(&sci, &["prime"]);
     assert_eq!(prime["roadmap"][0]["id"], goal);
+    fn statuses(node: &serde_json::Value, out: &mut Vec<String>) {
+        out.push(node["status"].as_str().unwrap().to_string());
+        for child in node["children"].as_array().unwrap() {
+            statuses(child, out);
+        }
+    }
+    let mut seen = Vec::new();
+    for node in prime["roadmap"].as_array().unwrap() {
+        statuses(node, &mut seen);
+    }
+    assert!(!seen.iter().any(|s| s == "shelved"), "roadmap hides every shelved row: {prime}");
+    assert_eq!(seen.len(), 1, "only the goal itself: {prime}");
     assert!(prime["closeout"].as_array().unwrap().is_empty());
 
     // done refuses while the shelved child is open
     assert_eq!(env.fail(&sci, &["done", &goal, "finished"]), "open_descendants");
+}
+
+#[test]
+fn next_never_hands_out_a_shelved_task_even_with_a_surviving_park_entry() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.json(&sci, &["shelve", &id, "later"]);
+    // A failed store cleanup after `shelve` can leave the park entry behind (spec §3.3
+    // names the recovery); the picker must still refuse it.
+    write_park(&env, "sci", &id, "agent-a", "agent", &sci.display().to_string());
+    assert!(env.json(&sci, &["next"])["next"].is_null());
+    let prime = env.json(&sci, &["prime"]);
+    assert!(prime["ready"].as_array().unwrap().is_empty());
+    // The leftover entry is an anomaly, and the parked section shows it as one: the
+    // row carries the record's status, which is how a reader notices and repairs it.
+    let parked = prime["parked"].as_array().unwrap();
+    assert_eq!(parked.len(), 1, "{prime}");
+    assert_eq!(parked[0]["id"], id);
+    assert_eq!(parked[0]["status"], "shelved");
 }
 
 #[test]
@@ -759,8 +804,8 @@ fn a_dependency_on_a_shelved_task_holds_ready_and_check_names_it() {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `cargo test --test cli shelved_ && cargo test --test cli shelved_child && cargo test --test cli shelved_task`
-Expected: `list` shows the shelved task; `tree` shows the shelved root; `check` has no `shelved_dep` warning.
+Run: `cargo test --test cli shelved`
+Expected: four failures: `list` shows the shelved task; `tree` shows the shelved root; `next` hands out the parked shelved task; `check` has no `shelved_dep` warning.
 
 - [ ] **Step 3: Hide from `list`**
 
@@ -788,9 +833,27 @@ At `:150-160` (`list_parked`), the same substitution:
             };
 ```
 
-`ready`, `next`, and `sample` need no change: `is_actionable` is `todo` or due, and `sample`'s pool names its statuses.
+`ready` and `sample` need no change: `is_actionable` is `todo` or due, and `sample`'s pool names its statuses. `next` has a second feed, `parked::candidates`, which accepts every open status but `blocked`; add the shelf to that exclusion in `src/commands/parked.rs:95-98`:
 
-- [ ] **Step 4: The hierarchy rule**
+```rust
+        if park.waiting_on != WaitingOn::Agent
+            || !task.status.is_open()
+            || matches!(task.status, Status::Blocked | Status::Shelved)
+            || !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty()
+        {
+            continue;
+        }
+```
+
+`parked::rows` (the parked section of `prime` and `list --parked`) is left alone on purpose: it lists store entries, and a park entry surviving on a shelved record is an anomaly the row should show, not hide.
+
+- [ ] **Step 4: The hierarchy rule, one mode per view**
+
+`tree` and `prime`'s roadmap share `forest` but have different contracts (spec §3.2): the
+roadmap hides every shelved row; `tree` shows a shelved node whenever its parent is shown,
+so a goal that cannot close shows why, all the way down (`active goal → shelved subgoal →
+shelved leaf` shows the leaf: it is what keeps the subgoal open). A shelved root is hidden
+in both unless `--all`.
 
 `src/hierarchy.rs`. Add beside `open_descendants`:
 
@@ -800,26 +863,84 @@ At `:150-160` (`list_parked`), the same substitution:
 pub fn is_active(task: &Task) -> bool {
     task.status.is_open() && task.status != Status::Shelved
 }
+
+/// What `forest` does with a shelved node it reaches through a kept parent. A shelved
+/// root is hidden either way unless closed nodes are included.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Shelved {
+    /// `prime`'s roadmap: no shelved row anywhere.
+    Hidden,
+    /// `tree`: shown under a shown parent, recursively, so the reason a goal cannot
+    /// close is visible.
+    UnderShownParent,
+}
 ```
 
-(import `Status` from `crate::model` if the module does not already.) Then in `node`:
+(import `Status` from `crate::model` if the module does not already.) `forest` gains the
+parameter after `include_closed` and passes it, with `via_parent: bool`, into `node`:
 
 ```rust
+pub fn forest(
+    all: &[Task],
+    root: Option<&TaskId>,
+    include_closed: bool,
+    shelved: Shelved,
+    claims: Option<&crate::claims::ClaimSnapshot>,
+    registry: &Registry,
+    now: OffsetDateTime,
+) -> Vec<TreeNode> {
+    // tops unchanged ...
+    tops.into_iter()
+        .filter_map(|task| {
+            node(all, task, include_closed, shelved, false, claims, registry,
+                 &mut std::collections::HashSet::new(), now)
+        })
+        .collect()
+}
+
+fn node(
+    all: &[Task],
+    task: &Task,
+    include_closed: bool,
+    shelved: Shelved,
+    via_parent: bool,
+    claims: Option<&crate::claims::ClaimSnapshot>,
+    registry: &Registry,
+    visited: &mut std::collections::HashSet<TaskId>,
+    now: OffsetDateTime,
+) -> Option<TreeNode> {
+    if !visited.insert(task.id.clone()) {
+        return None;
+    }
     let keep = include_closed
         || is_active(task)
         // A closed or shelved ancestor of active work stays visible as context.
         || open_descendants(all, &task.id, registry).iter().any(|d| is_active(d))
-        // A shelved child of an active parent is shown: hiding it would leave the goal
-        // looking finished with no visible reason it is not. A shelved root, or one under
-        // a closed or shelved parent, is hidden.
-        || (task.status == Status::Shelved
-            && task.parent.as_ref().is_some_and(|parent| {
-                let parent = registry.canonical_id(parent);
-                all.iter().any(|candidate| candidate.id == parent && is_active(candidate))
-            }));
+        // Reached through a kept parent: the view decides.
+        || (task.status == Status::Shelved && via_parent && shelved == Shelved::UnderShownParent);
+    if !keep {
+        return None;
+    }
+    let mut kids = children(all, &task.id, registry);
+    kids.sort_by(|a, b| ready_order(a, b));
+    Some(TreeNode {
+        summary: TaskSummary::of(task, all, claims, registry, now),
+        children: kids
+            .into_iter()
+            .filter_map(|child| {
+                node(all, child, include_closed, shelved, true, claims, registry, visited, now)
+            })
+            .collect(),
+    })
+}
 ```
 
-Update the doc comment on `forest` to say: "Without `include_closed`, a node is kept when it is open and not shelved, has such a descendant, or is a shelved child of such a parent."
+Callers: `src/commands/tree.rs:23` passes `crate::hierarchy::Shelved::UnderShownParent`;
+`src/commands/list.rs:362` (the roadmap) passes `crate::hierarchy::Shelved::Hidden`; the
+three unit tests at `src/hierarchy.rs:337-353` pass `Shelved::Hidden`. Update the doc
+comment on `forest`: "Without `include_closed`, a node is kept when it is open and not
+shelved, has such a descendant, or (with `Shelved::UnderShownParent`) is a shelved child of
+a kept parent."
 
 - [ ] **Step 5: The `check` warning**
 
@@ -844,13 +965,13 @@ Update the doc comment on `forest` to say: "Without `include_closed`, a node is 
 
 - [ ] **Step 6: Run the tests, then the suite**
 
-Run: `cargo test --test cli shelved && cargo test`
+Run: `cargo test --test cli shelved && just test`
 Expected: all pass. If an existing `tree`/`prime` test pinned the old `forest` keep rule for closed ancestors, the new rule keeps them for *active* descendants only; a closed ancestor of only-shelved work is now hidden, which is the spec's rule — adjust that test's fixture, not the rule.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/commands/list.rs src/hierarchy.rs src/commands/check.rs tests/cli.rs
+git add src/commands/list.rs src/commands/parked.rs src/hierarchy.rs src/commands/tree.rs src/commands/check.rs tests/cli.rs
 git commit -m "feat: hide shelved from the default views and name shelved dependencies"
 ```
 
@@ -929,7 +1050,7 @@ Update the module doc comment's "`curate:` note" to "`curate:` or `scope:` note"
 
 - [ ] **Step 4: Run the test, then the suite**
 
-Run: `cargo test --test cli sample && cargo test`
+Run: `cargo test --test cli sample && just test`
 Expected: all pass.
 
 - [ ] **Step 5: Commit**
@@ -1023,7 +1144,7 @@ git commit -m "docs: record the shelved status and close tasks-470e8c"
 
 **Spec coverage (§3, §4.7, §6):**
 - §3.1 commands, required message, claim rules, goal guard, `unshelve` → idea, `edit --status shelved` and editor refusals, editor edits of a shelved record — Tasks 2, 3.
-- §3.2 hidden from `list`/`prime`/`sample`/`ready`/`next`; counted in `prime`/`projects`; `show`, `tree` child rule, `tree --all`, `check` warning — Task 4 (Task 1 for counts).
+- §3.2 hidden from `list`/`prime`/`sample`/`ready`/`next` (both feeds of `next`); counted in `prime`/`projects`; `show`, `tree` child rule (recursive) versus the roadmap's blanket hide, `tree --all`, `check` warning — Task 4 (Task 1 for counts).
 - §3.3 open by construction (dependencies, `done` refusal, descendants, forest); `start`/`park` refuse; park entry and escalation cleared, warning new — Tasks 1, 2, 3, 4.
 - §3.4 JSON: enum value, counts, id shape, check text — Tasks 1, 2, 4; completion candidates come from `Status::ALL` (Task 1).
 - §4.7 `sample` `scope:` prefix — Task 5.
