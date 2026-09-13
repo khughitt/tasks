@@ -1,7 +1,7 @@
 # Explicit task process
 
 Status: implemented (landed on main 2026-09-13, commits 6917eac..38b060e). Cross-project
-rollout: ai-69ccac landed 2026-09-13; ai-e8dcc5 remains open.
+rollout: ai-69ccac and ai-e8dcc5 closed 2026-09-13.
 Task: tasks-61cc5c
 
 ## Problem and evidence
@@ -108,13 +108,13 @@ Ideas still need scoping before implementation, even if they already carry a val
 
 Scoping sets process alongside size and complexity. A planner explicitly assigns
 process to each step child; curation may fill a missing choice with evidence.
-Both the writing-plans integration in `skills/tasks/SKILL.md` and the shared
-plan-writing skill's child-creation command must include `--process` alongside
-`--complexity`. Use `--process direct` when the reviewed plan settles the work;
-do not infer it from parentage. The shared skill update is tracked as ai-e8dcc5,
-after this CLI lands; update the canonical skill and distribute it through its
-normal install flow, not by editing a plugin cache. The rollout remains incomplete
-until that follow-up lands. During this feature's planning the installed CLI lacked
+The writing-plans integration in `skills/tasks/SKILL.md` is the adapter: its
+child-creation command must include `--process` alongside `--complexity`. Use
+`--process direct` when the reviewed plan settles the work; do not infer it from
+parentage. ai-e8dcc5 investigated changing the shared writing-plans skill as well and
+found no locally owned copy: the harness loads it from an upstream plugin, and the
+local clone is pristine upstream. It closed without a skill fork, as `--complexity`
+did; the tasks skill carries the integration. During this feature's planning the installed CLI lacked
 the field, so child bodies recorded the intended process. Task 1 installed the
 supporting binary and explicitly set the parent to planned and both children to direct.
 If direct work reveals an unresolved design decision or expands beyond its stated
@@ -158,5 +158,5 @@ skills, README, and base reference. All three skills passed structural validatio
 manual review covered the direct, planned, and unassessed scenarios and found no
 material inconsistencies. `just check` passed with the same expected warning.
 These checks establish the local deliverables, not a completed live-agent rollout.
-ai-69ccac has since landed; ai-e8dcc5 remains open. At merge, tasks-7ba741 was assessed direct from
+ai-69ccac and ai-e8dcc5 have since closed. At merge, tasks-7ba741 was assessed direct from
 the main checkout as the user directed, leaving `tasks check` clean.

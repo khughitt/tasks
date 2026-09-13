@@ -4,7 +4,7 @@
 > task-by-task in the existing worktree. Steps use checkboxes for tracking.
 
 Status: implemented (landed on main 2026-09-13); both tasks complete.
-External rollout: ai-69ccac landed 2026-09-13; ai-e8dcc5 remains open.
+External rollout: ai-69ccac and ai-e8dcc5 closed 2026-09-13.
 
 **Goal:** Store and display an explicit direct/planned process choice without
 changing which tasks can be selected or started.

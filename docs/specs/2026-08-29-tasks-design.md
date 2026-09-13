@@ -710,9 +710,9 @@ existing sample. No bulk backfill is required.
 This repo's AGENTS.md adopts the policy. Other projects must adopt it themselves
 before relying on the field to override their generic skill triggers. The global
 worktree rule was widened separately by ai-69ccac (landed 2026-09-13): that fixes the
-ran-on-main incident without any CLI change. ai-e8dcc5 separately updates and
-distributes the shared writing-plans skill's child command to match this repo's
-`--complexity <level> --process <value>` integration. Neither follow-up is completed
+ran-on-main incident without any CLI change. ai-e8dcc5 confirmed the shared
+writing-plans skill is upstream-owned, so the `--complexity <level> --process <value>`
+child command lives only in the tasks skill's integration. Neither follow-up was completed
 by the local feature; see `2026-09-13-task-process-design.md`.
 
 ## 9. Adoption in existing projects

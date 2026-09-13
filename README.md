@@ -206,10 +206,11 @@ does not run skills or create worktrees.
 Projects must adopt the process policy in their agent instructions (see the install
 snippet above) before it can take precedence over generic brainstorming triggers.
 This repo has adopted it. The separate global worktree-rule widening landed as
-`ai-69ccac` (2026-09-13); it fixes the ran-on-main incident without a CLI change. `ai-e8dcc5`
-tracks updating and distributing the shared plan-writing skill so its child command
-mirrors `--complexity <level> --process <value>`. These rollout tasks are separate
-from this repo's implementation. Design: `docs/specs/2026-09-13-task-process-design.md`.
+`ai-69ccac` (2026-09-13); it fixes the ran-on-main incident without a CLI change. The
+writing-plans integration lives in the tasks skill's child command
+(`--complexity <level> --process <value>`), not in the upstream plan-writing skill;
+`ai-e8dcc5` confirmed there is no locally owned copy to change. These rollout tasks
+are separate from this repo's implementation. Design: `docs/specs/2026-09-13-task-process-design.md`.
 
 ## Completions
 
