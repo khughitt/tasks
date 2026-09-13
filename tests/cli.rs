@@ -394,12 +394,18 @@ fn shelved_is_hidden_from_default_views_but_counted() {
     );
     assert!(ids(&env.json(&sci, &["ready"])).is_empty());
     assert!(env.json(&sci, &["next"])["next"].is_null());
-    assert!(ids(&env.json(&sci, &["sample", "-n", "5", "--seed", "1"])).is_empty());
+    let eligible = id_of(env.json(&sci, &["add", "Eligible", "--status", "idea"]));
+    assert_eq!(
+        ids(&env.json(
+            &sci,
+            &["sample", "-n", "5", "--seed", "1", "--older-than", "0"]
+        )),
+        [eligible]
+    );
 
     let prime = env.json(&sci, &["prime"]);
     assert_eq!(prime["counts"]["shelved"], 1);
-    assert_eq!(prime["counts"]["idea"], 0);
-    assert!(prime["roadmap"].as_array().unwrap().is_empty());
+    assert_eq!(prime["counts"]["idea"], 1);
     assert!(env.pretty(&sci, &["prime"]).contains("shelved 1"));
 }
 
@@ -409,9 +415,13 @@ fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
     let sci = env.init("sci");
     let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "2"]));
     let child = id_of(env.json(&sci, &["add", "Child", "--parent", &goal]));
+    let subgoal = id_of(env.json(&sci, &["add", "Subgoal", "--parent", &goal]));
+    let leaf = id_of(env.json(&sci, &["add", "Leaf", "--parent", &subgoal]));
     let root = id_of(env.json(&sci, &["add", "Root", "--status", "idea"]));
     let root_child = id_of(env.json(&sci, &["add", "Root child", "--parent", &root]));
     env.json(&sci, &["shelve", &child, "later"]);
+    env.json(&sci, &["shelve", &leaf, "later"]);
+    env.json(&sci, &["shelve", &subgoal, "later"]);
     env.json(&sci, &["shelve", &root_child, "later"]);
     env.json(&sci, &["shelve", &root, "later"]);
 
@@ -419,6 +429,8 @@ fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
     assert_eq!(tree["nodes"].as_array().unwrap().len(), 1, "{tree}");
     assert_eq!(tree["nodes"][0]["id"], goal);
     assert_eq!(tree["nodes"][0]["children"][0]["id"], child);
+    assert_eq!(tree["nodes"][0]["children"][1]["id"], subgoal);
+    assert_eq!(tree["nodes"][0]["children"][1]["children"][0]["id"], leaf);
     assert_eq!(
         env.json(&sci, &["tree", "--all"])["nodes"]
             .as_array()
@@ -427,19 +439,30 @@ fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
         2
     );
 
-    env.json(&sci, &["unshelve", &child]);
-    env.json(&sci, &["unshelve", &root_child]);
     let prime = env.json(&sci, &["prime"]);
     assert_eq!(prime["roadmap"].as_array().unwrap().len(), 1, "{prime}");
     assert_eq!(prime["roadmap"][0]["id"], goal);
-    assert_eq!(prime["roadmap"][0]["children"][0]["id"], child);
-    assert!(
-        prime["roadmap"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|node| node["id"] != root)
+    fn assert_no_shelves(nodes: &[serde_json::Value]) {
+        for node in nodes {
+            assert_ne!(node["status"], "shelved", "{node}");
+            if let Some(children) = node["children"].as_array() {
+                assert_no_shelves(children);
+            }
+        }
+    }
+    assert_no_shelves(prime["roadmap"].as_array().unwrap());
+
+    let shown = env.json(&sci, &["show", &goal]);
+    assert_eq!(shown["children"][0]["status"], "shelved");
+    assert_eq!(
+        env.json(&sci, &["projects"])["projects"][0]["counts"]["shelved"],
+        5
     );
+
+    let error = error_of(&env, &sci, &["done", &goal]);
+    assert_eq!(error["error"]["kind"], "open_descendants");
+    assert!(error["error"]["detail"].as_str().unwrap().contains(&leaf));
+    assert_eq!(env.json(&sci, &["show", &goal])["task"]["status"], "todo");
 }
 
 #[test]
@@ -471,6 +494,14 @@ fn check_warns_when_open_work_depends_on_shelved_work() {
     let dep = id_of(env.json(&sci, &["add", "Dep", "-p", "2"]));
     let work = id_of(env.json(&sci, &["add", "Work", "-p", "2", "--depends", &dep]));
     env.json(&sci, &["shelve", &dep, "later"]);
+
+    assert!(
+        env.json(&sci, &["ready"])["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|task| task["id"] != work)
+    );
 
     let check = env.json(&sci, &["check"]);
     let warning = check["warnings"]
