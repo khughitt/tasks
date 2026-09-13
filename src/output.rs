@@ -377,6 +377,12 @@ pub struct ParkedOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct QuietOut {
+    pub tasks: Vec<ParkedRow>,
+    pub warnings: Vec<String>,
+}
+
 /// Which date a pretty row shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DateColumn {
@@ -635,6 +641,7 @@ pub enum Output {
     Next(Box<NextOut>),
     List(ListOut),
     Parked(ParkedOut),
+    Quiet(QuietOut),
     Prime(PrimeOut),
     Graph(GraphOut),
     Check(CheckOut),
@@ -705,6 +712,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
         },
         Output::List(o) => table(&o.tasks, o.date, painter, any_parallel(&o.tasks)),
         Output::Parked(o) => parked_table(&o.tasks, painter),
+        Output::Quiet(o) => quiet_briefs(&o.tasks, painter),
         Output::Prime(o) => {
             // One decision for the whole output: prime's blocks align today only because
             // every width is fixed, and a per-section decision would break that.
@@ -1113,6 +1121,40 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter) -> String {
     rendered
 }
 
+pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter) -> String {
+    let mut rendered = String::new();
+    for (index, row) in rows.iter().enumerate() {
+        let Some(park) = &row.park else {
+            continue;
+        };
+        if index > 0 {
+            rendered.push('\n');
+        }
+        let id = painter.paint(Style::Chrome, &row.id);
+        let priority = match row.priority {
+            Some(priority) => format!("P{priority}"),
+            None => "P-".into(),
+        };
+        let needs = park.needs.map(crate::claims::Needs::as_str).unwrap_or("-");
+        let minutes = match park.minutes {
+            Some(minutes) => format!("{minutes} min"),
+            None => "-".into(),
+        };
+        rendered.push_str(&format!(
+            "{id}  {priority}  {needs:<8}  {minutes:>8}  parked {}  {}\n",
+            crate::time::day(&park.at),
+            row.title
+        ));
+        rendered
+            .push_str(&painter.paint(Style::Chrome, &format!("        next: {}", park.next_step)));
+        rendered.push('\n');
+        rendered
+            .push_str(&painter.paint(Style::Chrome, &format!("        in:   {}", park.worktree)));
+        rendered.push('\n');
+    }
+    rendered
+}
+
 pub fn render_error(e: &Error) -> String {
     serde_json::json!({ "error": { "kind": e.kind(), "detail": e.to_string() } }).to_string()
 }
@@ -1135,6 +1177,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Next(o) => o.warnings.clone(),
         Output::List(o) => o.warnings.clone(),
         Output::Parked(o) => o.warnings.clone(),
+        Output::Quiet(o) => o.warnings.clone(),
         Output::Prime(o) => o.warnings.clone(),
         Output::Graph(o) => o.warnings.clone(),
         Output::Check(o) => o

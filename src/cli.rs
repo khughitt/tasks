@@ -434,4 +434,20 @@ pub enum Command {
         #[command(flatten)]
         scope: ScopeArgs,
     },
+    /// Work parked waiting for an idle host, as resume briefs.
+    Quiet {
+        /// At most this many briefs.
+        #[arg(short = 'n', long)]
+        limit: Option<usize>,
+        /// One registered project instead of all of them.
+        #[arg(
+            long,
+            conflicts_with = "all_projects",
+            add = ArgValueCandidates::new(crate::complete::prefixes)
+        )]
+        project: Option<String>,
+        /// The default; accepted for consistency with other read commands.
+        #[arg(long)]
+        all_projects: bool,
+    },
 }

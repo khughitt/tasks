@@ -9,6 +9,7 @@ pub mod list;
 pub mod park;
 pub mod parked;
 pub mod projects;
+pub mod quiet;
 pub mod rename;
 pub mod root;
 pub mod sample;
@@ -1101,6 +1102,17 @@ pub fn run(cli: Cli) -> Result<Output> {
             tree::run(open_id_read_ctx(dir, &scope, id.as_deref())?, id, all)
         }
         Command::Tags { statuses, scope } => tags::run(open_read_ctx(dir, &scope)?, statuses),
+        Command::Quiet {
+            limit,
+            project,
+            all_projects: _,
+        } => {
+            let scope = ScopeArgs {
+                all_projects: project.is_none(),
+                project,
+            };
+            quiet::run(open_read_ctx(dir, &scope)?, limit)
+        }
         Command::Feedback {
             summary,
             category,

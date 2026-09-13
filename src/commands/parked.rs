@@ -10,11 +10,27 @@ use crate::repo::Project;
 use std::path::Path;
 use time::OffsetDateTime;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Prefer {
+    Registered,
+    Recorded,
+}
+
 pub fn rows(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
+) -> Result<Vec<ParkedRow>> {
+    rows_preferring(ctx, all, claims, now, Prefer::Registered)
+}
+
+pub fn rows_preferring(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &ClaimSnapshot,
+    now: OffsetDateTime,
+    prefer: Prefer,
 ) -> Result<Vec<ParkedRow>> {
     let mut entries: Vec<(&String, &Park)> = claims.parks().collect();
     entries.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| a.0.cmp(b.0)));
@@ -30,38 +46,89 @@ pub fn rows(
                 continue;
             }
         };
-        if let Some(task) = all.iter().find(|task| task.id == id) {
-            rows.push(ParkedRow::resolved(
-                TaskSummary::of(task, all, Some(claims), &ctx.registry, now),
-                Phase::of(task),
-            ));
-            continue;
-        }
-        match resolve_elsewhere(&id, park, claims, &ctx.registry, now) {
-            Ok(Some(row)) => {
-                ctx.warnings.push(format!(
-                    "{id} is parked in {}; resume it from that checkout",
-                    park.worktree
-                ));
-                rows.push(row);
+        let registered = all
+            .iter()
+            .find(|task| task.id == id)
+            .map(|task| resolved_row(task, all, claims, &ctx.registry, now));
+        let recorded_is_scanned = ctx
+            .scope
+            .projects()
+            .iter()
+            .any(|project| project.root == Path::new(&park.worktree));
+        let row = match (prefer, registered) {
+            (_, Some(row)) if recorded_is_scanned => Some(row),
+            (Prefer::Registered, Some(row)) => Some(row),
+            (Prefer::Registered, None) => recorded_or_fallback(ctx, &id, park, claims, now, None),
+            (Prefer::Recorded, registered) => {
+                recorded_or_fallback(ctx, &id, park, claims, now, registered)
             }
-            Ok(None) => {
-                ctx.warnings.push(format!(
-                    "{id} is parked in {}, which is unavailable; the row shows the park entry only",
-                    park.worktree
-                ));
-                rows.push(ParkedRow::unresolved(key, park));
-            }
-            Err(error) => {
-                ctx.warnings.push(format!("{id} is parked in {}, which is unavailable ({error}); the row shows the park entry only", park.worktree));
-                rows.push(ParkedRow::unresolved(key, park));
-            }
-        }
+        };
+        rows.push(row.unwrap_or_else(|| ParkedRow::unresolved(key, park)));
     }
     Ok(rows)
 }
 
-fn resolve_elsewhere(
+fn resolved_row(
+    task: &Task,
+    all: &[Task],
+    claims: &ClaimSnapshot,
+    registry: &Registry,
+    now: OffsetDateTime,
+) -> ParkedRow {
+    ParkedRow::resolved(
+        TaskSummary::of(task, all, Some(claims), registry, now),
+        Phase::of(task),
+    )
+}
+
+fn recorded_or_fallback(
+    ctx: &mut ReadCtx,
+    id: &TaskId,
+    park: &Park,
+    claims: &ClaimSnapshot,
+    now: OffsetDateTime,
+    fallback: Option<ParkedRow>,
+) -> Option<ParkedRow> {
+    match resolve_recorded(id, park, claims, &ctx.registry, now) {
+        Ok(Some(row)) => {
+            ctx.warnings.push(format!(
+                "{id} is parked in {}; resume it from that checkout",
+                park.worktree
+            ));
+            Some(row)
+        }
+        Ok(None) => {
+            ctx.warnings
+                .push(unavailable(id, park, None, fallback.is_some()));
+            fallback
+        }
+        Err(error) => {
+            ctx.warnings
+                .push(unavailable(id, park, Some(&error), fallback.is_some()));
+            fallback
+        }
+    }
+}
+
+fn unavailable(
+    id: &TaskId,
+    park: &Park,
+    error: Option<&crate::error::Error>,
+    fell_back: bool,
+) -> String {
+    let cause = error.map(|error| format!(" ({error})")).unwrap_or_default();
+    let shown = if fell_back {
+        "showing the registered copy"
+    } else {
+        "the row shows the park entry only"
+    };
+    format!(
+        "{id} is parked in {}, which is unavailable{cause}; {shown}",
+        park.worktree
+    )
+}
+
+fn resolve_recorded(
     id: &TaskId,
     park: &Park,
     claims: &ClaimSnapshot,

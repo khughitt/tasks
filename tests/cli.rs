@@ -2172,7 +2172,7 @@ fn project_and_all_projects_conflict_on_every_read_command() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     env.init("fam");
-    for command in ["list", "ready", "next", "prime", "tree", "tags"] {
+    for command in ["list", "ready", "next", "prime", "tree", "tags", "quiet"] {
         let out = env
             .cmd(&sci)
             .args([command, "--project", "fam", "--all-projects"])
@@ -6182,6 +6182,286 @@ fn a_task_parked_only_in_another_checkout_is_listed_from_there_and_never_next() 
         env.fail(&main, &["list", "--parked", "--parent", &goal]),
         "task_not_found"
     );
+}
+
+fn unregistered_checkout(prefix: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(path.join("tasks")).unwrap();
+    std::fs::write(
+        path.join("tasks/.config.toml"),
+        format!("prefix = \"{prefix}\"\n"),
+    )
+    .unwrap();
+    (dir, path)
+}
+
+#[test]
+fn a_park_whose_task_file_was_deleted_in_its_own_checkout_still_warns_unavailable() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "finish",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "5",
+        ])
+        .assert()
+        .success();
+    std::fs::remove_file(sci.join(format!("tasks/{id}.md"))).unwrap();
+
+    for args in [vec!["list", "--parked"], vec!["prime"], vec!["quiet"]] {
+        let v = env.json(&sci, &args);
+        let rows = if args[0] == "prime" {
+            &v["parked"]
+        } else {
+            &v["tasks"]
+        };
+        let row = &rows.as_array().unwrap()[0];
+        assert_eq!(row["id"], id, "{args:?}: {v}");
+        assert!(row["status"].is_null(), "store-only: {v}");
+        assert_eq!(row["title"], "T");
+        assert!(
+            v["warnings"]
+                .to_string()
+                .contains("which is unavailable; the row shows the park entry only"),
+            "{args:?}: {v}"
+        );
+    }
+}
+
+#[test]
+fn quiet_lists_quiet_parks_across_projects_by_priority_then_park_time() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let nowhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.json(nowhere.path(), &["quiet"]),
+        serde_json::json!({"tasks": [], "warnings": []})
+    );
+    assert_eq!(env.pretty(nowhere.path(), &["quiet"]).trim(), "");
+
+    let later = id_of(env.json(&sci, &["add", "Later capture", "-p", "2"]));
+    let review = id_of(env.json(&sci, &["add", "Sheet", "-p", "0"]));
+    let first = id_of(env.json(&fam, &["add", "First capture", "-p", "2"]));
+    let urgent = id_of(env.json(&fam, &["add", "Urgent sweep", "-p", "1"]));
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &review,
+            "look",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "review",
+        ])
+        .assert()
+        .success();
+    as_agent(&env, &fam, "agent-a")
+        .args([
+            "park",
+            &first,
+            "run it",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "30",
+        ])
+        .assert()
+        .success();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &later,
+            "run it too",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "45",
+            "--needs",
+            "headless",
+        ])
+        .assert()
+        .success();
+    as_agent(&env, &fam, "agent-a")
+        .args([
+            "park",
+            &urgent,
+            "sweep",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "5",
+        ])
+        .assert()
+        .success();
+
+    let v = env.json(nowhere.path(), &["quiet"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        [urgent.as_str(), first.as_str(), later.as_str()],
+        "{v}"
+    );
+    assert_eq!(v["warnings"], serde_json::json!([]));
+    assert_eq!(v["tasks"][2]["park"]["needs"], "headless");
+    assert_eq!(v["tasks"][2]["park"]["minutes"], 45);
+    assert_eq!(
+        v["tasks"][2]["park"]["worktree"],
+        sci.to_string_lossy().as_ref()
+    );
+    let one = env.json(nowhere.path(), &["quiet", "-n", "1"]);
+    assert_eq!(one["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(one["tasks"][0]["id"], urgent);
+    let only_sci = env.json(nowhere.path(), &["quiet", "--project", "sci"]);
+    assert_eq!(only_sci["tasks"].as_array().unwrap().len(), 1);
+    assert_eq!(only_sci["tasks"][0]["id"], later);
+    let explicit = env.json(&sci, &["quiet", "--all-projects"]);
+    assert_eq!(explicit["tasks"].as_array().unwrap().len(), 3);
+    let text = env.pretty(nowhere.path(), &["quiet"]);
+    let brief = text.lines().collect::<Vec<_>>();
+    assert!(
+        brief[0].starts_with(&urgent)
+            && brief[0].contains("P1")
+            && brief[0].contains("idle")
+            && brief[0].contains("5 min")
+            && brief[0].contains("Urgent sweep"),
+        "{text}"
+    );
+    assert!(brief[1].trim_start().starts_with("next: sweep"), "{text}");
+    assert!(
+        brief[2].trim_start().starts_with("in:") && brief[2].contains(&*fam.to_string_lossy()),
+        "{text}"
+    );
+    assert_eq!(brief[3], "", "one blank line between briefs: {text}");
+    assert!(
+        text.contains("headless") && text.contains("45 min"),
+        "{text}"
+    );
+}
+
+#[test]
+fn quiet_resolves_from_the_recorded_checkout_before_the_registered_copy() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    let (_keep, wt) = unregistered_checkout("sci");
+    let id = id_of(env.json(&main, &["add", "Capture", "-p", "3"]));
+    std::fs::copy(
+        main.join(format!("tasks/{id}.md")),
+        wt.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+    env.json(&main, &["done", &id, "closed on main"]);
+    env.json(&wt, &["edit", &id, "-p", "1"]);
+    as_agent(&env, &wt, "agent-a")
+        .args([
+            "park",
+            &id,
+            "capture",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "20",
+        ])
+        .assert()
+        .success();
+    let parked = env.json(&main, &["list", "--parked"]);
+    assert!(parked["tasks"].as_array().unwrap().is_empty(), "{parked}");
+    let v = env.json(&main, &["quiet"]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1, "{v}");
+    assert_eq!(v["tasks"][0]["id"], id);
+    assert_eq!(v["tasks"][0]["status"], "todo");
+    assert_eq!(v["tasks"][0]["priority"], 1);
+    assert_eq!(
+        v["tasks"][0]["park"]["worktree"],
+        wt.to_string_lossy().as_ref()
+    );
+    assert!(
+        v["warnings"]
+            .to_string()
+            .contains("resume it from that checkout"),
+        "{v}"
+    );
+    std::fs::remove_dir_all(wt.join("tasks")).unwrap();
+    let v = env.json(&main, &["quiet"]);
+    assert!(v["tasks"].as_array().unwrap().is_empty(), "{v}");
+    assert!(
+        v["warnings"]
+            .to_string()
+            .contains("showing the registered copy"),
+        "{v}"
+    );
+}
+
+#[test]
+fn quiet_keeps_scan_warnings_when_the_queue_is_empty() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    let v = env.json(&sci, &["quiet"]);
+    assert_eq!(v["tasks"], serde_json::json!([]));
+    assert_eq!(v["warnings"].as_array().unwrap().len(), 1, "{v}");
+    assert!(v["warnings"][0].as_str().unwrap().contains("fam"), "{v}");
+    let out = env.cmd(&sci).args(["--pretty", "quiet"]).output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unreachable"));
+}
+
+#[test]
+fn quiet_includes_a_store_only_entry_last() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let real = id_of(env.json(&sci, &["add", "Real", "-p", "3"]));
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &real,
+            "run",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "10",
+        ])
+        .assert()
+        .success();
+    let path = env.claim_store("sci");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("[parks.\"sci-0000ff\"]\nowner = \"someone\"\nsession = \"s\"\nhost = \"h\"\nworktree = \"/gone\"\nat = \"2026-01-02T00:00:00Z\"\nnext_step = \"finish\"\nwaiting_on = \"user\"\nreason = \"quiet\"\nneeds = \"idle\"\nminutes = 15\ntitle = \"Ghost\"\n");
+    std::fs::write(&path, text).unwrap();
+    let v = env.json(&sci, &["quiet", "--project", "sci"]);
+    let rows = v["tasks"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{v}");
+    assert_eq!(rows[0]["id"], real);
+    assert_eq!(rows[1]["id"], "sci-0000ff");
+    assert!(rows[1]["priority"].is_null());
+    assert_eq!(rows[1]["title"], "Ghost");
+    assert_eq!(rows[1]["park"]["minutes"], 15);
+    let text = env.pretty(&sci, &["quiet", "--project", "sci"]);
+    assert!(text.contains("sci-0000ff  P-"), "{text}");
 }
 
 #[test]
