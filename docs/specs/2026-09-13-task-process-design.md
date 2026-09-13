@@ -1,13 +1,16 @@
 # Explicit task process
 
-Status: draft — awaiting user review; no implementation has started.
+Status: approved with review edits applied (2026-09-13); not implemented.
 Task: tasks-61cc5c
 
 ## Problem and evidence
 
 The task reports that prism-28e29c ran directly on main because the agent followed
 the tasks protocol without entering the brainstorming and worktree workflow. That
-incident is the motivating report, not independently reproduced here.
+incident is the motivating report, not independently reproduced here. It has two
+causes: skipping brainstorming without an explicit decision is addressed by the
+process field; running on main is addressed by widening the global worktree rule.
+The latter requires no CLI change.
 
 In this checkout at e60925a, no task field records that choice. `Phase::of` in
 `src/model.rs` derives a parked task's phase from status and document links; a todo
@@ -51,6 +54,10 @@ An explicit user instruction to work in place still wins.
 
 This deliberately extends the existing brainstorming-and-planning worktree rule to
 direct code changes. Selecting direct saves document ceremony, not isolation.
+The cross-project incident is closed by widening the trigger in the global rule,
+tracked separately as ai-69ccac. That small policy fix can land independently of
+this feature. Updating this repo's instructions alone does not fix the next direct
+task in prism; this feature must not claim that it does.
 
 The CLI stores and reports the selection; it does not launch skills, create
 worktrees, infer approval from files, or police Git branches. The shipped tasks
@@ -78,10 +85,14 @@ state this adoption requirement rather than promise universal enforcement.
   reinterpret `phase` or any existing key.
 - Pretty summary rows gain a process column (`direct`, `planned`, or `-`);
   pretty show/next identify the value as `Process: …`, using `unassessed` for null.
-  Parked rows show process alongside their existing phase.
+  Parked rows show process alongside their existing phase. For example, a link-less
+  todo may show `process: planned` and `phase: implementing`: the former requires
+  document reviews, while the latter is only the existing link-derived resume hint.
 - Process does not change readiness, ordering, selection, or claim handling.
-  Add a `process_missing` check warning for todo/doing records without it, including
-  goals and plan steps. Ideas, shelved records, and closed records do not warn.
+  Add a `process_missing` check warning for doing records without it, including
+  goals and plan steps. Todo, idea, shelved, and closed records do not warn.
+  The decision is due before implementation starts; an unassessed todo is not a
+  drift finding. This avoids recurring backlog noise without a bulk backfill.
   Starting an unassessed task remains allowed by the CLI.
 
 No process filter, default setting, inheritance, additional approval-state field,
@@ -96,6 +107,15 @@ Ideas still need scoping before implementation, even if they already carry a val
 
 Scoping sets process alongside size and complexity. A planner explicitly assigns
 process to each step child; curation may fill a missing choice with evidence.
+Both the writing-plans integration in `skills/tasks/SKILL.md` and the shared
+plan-writing skill's child-creation command must include `--process` alongside
+`--complexity`. Use `--process direct` when the reviewed plan settles the work;
+do not infer it from parentage. The shared skill update is tracked as ai-e8dcc5,
+after this CLI lands; update the canonical skill and distribute it through its
+normal install flow, not by editing a plugin cache. The rollout remains incomplete
+until that follow-up lands. The field does not exist in the installed CLI during
+this feature's own planning: record intended process in child bodies now and set
+the field explicitly when the supporting binary is available.
 If direct work reveals an unresolved design decision or expands beyond its stated
 scope, note the evidence, change it to planned, and prepare the reviewable spec.
 Bounded implementation choices already covered by the task do not force escalation.
@@ -119,12 +139,14 @@ Use the existing tests in `tests/cli.rs` and record/model tests, without new too
 - Ready, next (ready and parked paths), prime, show, and parked JSON expose the
   same stored choice; pretty output identifies it. Existing picker ordering and
   eligibility remain unchanged, including when process is missing.
-- Check warns for unassessed todo/doing records and stays quiet for assessed,
-  idea, shelved, and closed records. Completion offers the two values.
+- Check warns for unassessed doing records and stays quiet for assessed,
+  todo, idea, shelved, and closed records. Completion offers the two values.
 - Review the protocol against three examples: a direct small fix still gets a
   worktree; a planned change reaches both document reviews; an unassessed task
   gets an explicit decision before implementation. An existing plan link alone
   neither assigns process nor proves its approval.
 
 Run `just gate` and reinstall with `cargo install --path .` after CLI changes.
-The current deliverable is this draft; implementation planning follows its review.
+The design review approved this approach with the global-policy follow-up and
+doing-only warning applied before planning. The implementation plan has its own
+review gate; neither implementation nor the cross-project rollout is complete.
