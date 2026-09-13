@@ -81,7 +81,7 @@ Two optional fields on `Park`, valid only with `--reason quiet`:
 
 | Field     | Flag              | Values                    | Meaning                                                              |
 |-----------|-------------------|---------------------------|----------------------------------------------------------------------|
-| `needs`   | `--needs <cond>`  | `idle` (default), `headless` | `idle`: the desktop session may stay up but nothing else runs. `headless`: no graphical session; the person logs out or hands the work an isolated display. |
+| `needs`   | `--needs <cond>`  | `idle` (default), `headless` | `idle`: the desktop session may stay up but nothing else runs. `headless`: the ordinary desktop session is stopped; the person logs out before the work starts. |
 | `minutes` | `--minutes <n>`   | 1 to 1440                 | Expected wall-clock minutes once started, including any warm-up the recipe names. |
 
 Rules:
@@ -90,6 +90,12 @@ Rules:
   "`--reason quiet` needs `--minutes <n>`". The whole value of the queue is being able to
   decide before bed; an agent that prepared a capture knows its length. `--needs` defaults
   to `idle` when `--reason quiet` is given, so the common case costs one flag.
+- **`headless` is one condition.** It means the desktop session is down, nothing less: a
+  capture that needs an isolated display while the desktop keeps running is not
+  headless, it is `idle` with a display of its own. How the work then obtains a display
+  (a TTY, a nested compositor, an isolated DRM lease) is recipe detail and belongs in
+  the next step, not in the vocabulary. The person preparing for bed reads `headless`
+  as "log out first" and `idle` as "stop using it", and nothing else.
 - **Refused otherwise.** `--needs` or `--minutes` without `--reason quiet` is a validation
   error naming the flag: "`--minutes` on park needs `--reason quiet`", in the shape of the
   `--complexity` rule in `park.rs`.
@@ -121,11 +127,26 @@ Lists quiet parks as resume briefs. Rules:
   and the command is run from wherever the person happens to be. `--project <prefix>`
   narrows to one project. `--all-projects` is accepted and redundant. The command needs no
   local project.
-- **Rows.** The rows of `parked::rows` filtered to `park.reason == quiet`. A row
-  resolved from another checkout is included with the same warning the parked listing
-  gives; a store-only row (task file unreachable) is included with its snapshot title, as
-  §5.3 of the park design allows. Closed tasks whose park survived are excluded, as
-  `list --parked` excludes them.
+- **Rows.** The quiet park entries of every prefix in scope, filtered to
+  `park.reason == quiet`, each resolved **from its recorded checkout first**. The parked
+  listing (`parked::rows`) prefers the registered checkout's copy of a task and opens
+  `park.worktree` only when that copy is absent; for a queue that order is wrong. A task
+  reopened and parked in a worktree may still read `done` in the registered checkout,
+  and its priority there may be stale, so the registered copy can hide the entry or
+  missort it. The queue resolves in this order:
+  1. `park.worktree`, when it is a checkout of the same prefix holding the task
+     (`resolve_elsewhere`'s test). Its status, priority, and title are the row's.
+  2. The registered checkout's copy, when the worktree is gone or no longer holds the
+     task, with the warning "`<id>` is parked in `<worktree>`, which is unavailable;
+     showing the registered copy".
+  3. Store-only, with the snapshot title, when neither holds it, as §5.3 of the park
+     design allows.
+  A row resolved from a worktree other than the registered root carries the parked
+  listing's "resume it from that checkout" warning. The resolver is one function shared
+  with `parked::rows`, taking the preference as a parameter, so the two views cannot
+  drift in what "resolved elsewhere" means; the parked listing's own order is unchanged.
+  Closed tasks are excluded after resolution, so a task closed only in the registered
+  checkout and still open in its worktree stays in the queue.
 - **Order.** Priority ascending, then park time ascending, then id. A queue is first in,
   first out within a priority; the person takes the top item. Store-only rows have no
   priority and sort last.
@@ -143,8 +164,12 @@ Lists quiet parks as resume briefs. Rules:
   The `in:` line is the checkout to open an agent in; the id is what to `tasks start`
   there. No launch command is printed: how an agent is launched belongs to the harness,
   and tying it to this view is the quick-launch idea (tasks-202e1f), not this one.
-- **Empty.** No rows prints nothing in pretty mode and `{"tasks":[],"warnings":[]}` in
-  JSON; exit status 0. An empty queue is not an error.
+- **Empty.** No rows is not an error: exit status 0, `tasks` is `[]`, and pretty mode
+  prints no rows. Warnings are never dropped for being alone: an all-projects scan that
+  skipped an unreachable project reports it in `warnings` (and on stderr in pretty mode)
+  whether or not any row survived, since the missing project may be the one holding
+  tonight's work. `{"tasks":[],"warnings":[]}` therefore means one thing only: every
+  registered project was scanned and none holds a quiet park.
 
 ## 6. Documentation and protocol
 
@@ -185,8 +210,17 @@ Integration cases in `tests/cli.rs` that carry the contract:
   reason; `--project <prefix>` narrows; `-n 1` returns the first row only.
 - A quiet park whose checkout is a worktree of the project appears with the "parked in …;
   resume it from that checkout" warning and its `park.worktree` set to that path.
-- A quiet park on a task since closed does not appear.
-- An empty queue is `{"tasks":[],"warnings":[]}` with exit 0.
+- **Differing copies.** The registered checkout holds the task as `done` at priority 3;
+  a worktree of the same project holds it reopened as `todo` at priority 1 and parks it
+  there with `--reason quiet`. `tasks quiet` lists it, at priority 1, with the worktree
+  as `park.worktree`; `list --parked` from the registered root still omits it, as today.
+  With the worktree directory removed, the queue falls back to the registered copy with
+  the "unavailable; showing the registered copy" warning, and the row's `done` status
+  then excludes it.
+- A quiet park on a task closed in its recorded checkout does not appear.
+- **Empty with warnings.** A registry naming an unreachable project and no quiet park
+  anywhere else: `tasks` is `[]`, `warnings` names the project, exit 0. With every
+  project reachable and no quiet park: `{"tasks":[],"warnings":[]}`.
 - Pretty output prints the brief with the `next:` and `in:` lines.
 
 ## 8. Second phase, not this design
