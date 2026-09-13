@@ -122,6 +122,8 @@ Free-form markdown body.
 | `parent`   | task id             | no       | Same project; must exist; a task cannot be its own ancestor. Written after `depends`. |
 | `tags`     | list of strings     | yes      | May be empty. The only grouping mechanism. |
 | `source`   | string              | no       | Opaque origin reference (a URL, a message id); single line; never interpreted. Written after `tags`. See `2026-09-06-task-source-design.md`. |
+| `model`    | string              | no       | Model id the harness reported (`TASKS_MODEL`) for the latest completion; single line; never interpreted. Written after `source`. See `2026-09-10-model-provenance-design.md`. |
+| `agent`    | string              | no       | Harness and model that filed the task (`<harness>/<model>`, or the harness alone), from `add --agent` or `TASKS_AGENT`; single line; never interpreted. Written after `model`. See `2026-09-13-creation-provenance-design.md`. |
 | `spec`     | repo-relative path  | no       | Must be an existing file under one of the project's spec roots (§2). |
 | `plan`     | repo-relative path  | no       | Must be an existing file under one of the project's plan roots (§2). |
 | `step`     | string              | no       | Exact text of a heading inside `plan`. Requires `plan`. |

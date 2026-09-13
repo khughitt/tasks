@@ -88,6 +88,14 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    completion stamps the record's `model` field with it — latest-completion attribution,
    cleared by a recompletion without the variable; `tasks edit --model/--no-model`
    corrects it.
+   Every task an agent files carries `agent`, the harness and model that created it
+   (`<harness>/<model>`, or the harness alone), from `TASKS_AGENT` when the harness
+   exports it. When it is unset and you know your harness and model ids, pass
+   `--agent <harness>/<model>` on `add`; when you know only the harness, pass that;
+   when unsure, pass nothing — never guess. `feedback` has no flag: supply the variable
+   on that invocation, `TASKS_AGENT=<harness>/<model> tasks feedback …`. Under Claude
+   Code the model half is the enclosing session's model. `tasks edit --agent/--no-agent`
+   corrects a stamp; an edit never reads the variable.
    Recurring sweeps use `--every 30d` (positive whole days or weeks, up to 36500 days;
    goals cannot recur). `done` closes normally, anchors the next cycle, and writes an
    occurrence note. A due recurrence appears in `ready` still marked `done`; use `start`
@@ -97,7 +105,7 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--every/--no-every`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all. When the project keeps a
@@ -173,7 +181,7 @@ the document reviews.
   `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
   `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
   returns it to `idea`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--source <ref>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"]`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or

@@ -3,7 +3,7 @@
 > **For agentic workers:** Use superpowers:executing-plans to implement this plan
 > task-by-task in the existing worktree. Steps use checkboxes for tracking.
 
-Status: draft (2026-09-13); awaiting plan review.
+Status: implemented locally (2026-09-13); Tasks 1–2 complete, Pieces A/B open in ops and ai.
 Cross-project pieces (ops hook, ai wiring) are filed in those projects and block the
 goal; they are described under **Pieces in other projects**, not as numbered tasks.
 

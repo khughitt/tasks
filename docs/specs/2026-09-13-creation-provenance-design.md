@@ -1,6 +1,6 @@
 # Creation provenance: record the agent that filed a task
 
-Status: draft (2026-09-13)
+Status: locally implemented (2026-09-13); harness pieces ops-a405cc and ai-d5a56c open
 Task: tasks-dc599b
 
 ## Problem

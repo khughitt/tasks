@@ -66,6 +66,14 @@ its liveness. `ready` and `next` omit live claims with an explanatory warning. S
 `TASKS_MODEL` per harness process records which model completed each task: a fresh
 `done` stamps the record's `model` field from it (and clears the stamp when it is
 unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.
+`TASKS_AGENT` per harness process records which harness and model filed each task
+(`<harness>/<model>`, or the harness alone): `add` and `feedback` stamp the record's
+`agent` field from it, `add --agent` overrides it, and `tasks edit --agent`/`--no-agent`
+corrects a stamp. The harness owns exporting it: the design wires Claude Code through
+an ops session-start and model-switch hook and exports the harness alone for Codex
+(both tracked as separate pieces in those projects until they land); other harnesses
+pass `--agent` when they know their ids. Design:
+`docs/specs/2026-09-13-creation-provenance-design.md`.
 `TASKS_MAX_COMPLEXITY` per harness process is the envelope a session picks within:
 `ready`, `next`, and `prime` hide tasks rated above it and unassessed tasks, and say how
 many. `--max-complexity` on `ready`/`next` overrides it for one call. Design:
@@ -114,7 +122,7 @@ from a clone):
     tasks unregister sci             # drop a stale prefix and its aliases; files are untouched
     tasks rename dot dots            # rename a registered prefix; old ids still resolve
     tasks rename dot dots --explain  # diagnose an interruption without locks or writes
-    tasks add "Bank the ledger" -p 1 --size m --complexity low --process direct --tag ledger
+    tasks add "Bank the ledger" -p 1 --size m --complexity low --process direct --tag ledger --agent codex/gpt-6
     tasks add "Emit rows" --parent sci-4f2a9c
     tasks edit <id> --process planned # choose a workflow explicitly
     tasks edit <id> --no-process     # clear it to unassessed
