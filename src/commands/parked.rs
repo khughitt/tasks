@@ -94,7 +94,7 @@ pub fn candidates(ctx: &mut ReadCtx, all: &[Task], claims: &ClaimSnapshot) -> Re
         };
         if park.waiting_on != WaitingOn::Agent
             || !task.status.is_open()
-            || task.status == Status::Blocked
+            || matches!(task.status, Status::Blocked | Status::Shelved)
             || !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty()
         {
             continue;

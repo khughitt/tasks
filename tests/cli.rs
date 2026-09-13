@@ -373,6 +373,129 @@ fn write_park(
 }
 
 #[test]
+fn shelved_is_hidden_from_default_views_but_counted() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.json(&sci, &["shelve", &id, "later"]);
+
+    let ids = |value: &serde_json::Value| -> Vec<String> {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(ids(&env.json(&sci, &["list"])).is_empty());
+    assert_eq!(
+        ids(&env.json(&sci, &["list", "--status", "shelved"])),
+        std::slice::from_ref(&id)
+    );
+    assert!(ids(&env.json(&sci, &["ready"])).is_empty());
+    assert!(env.json(&sci, &["next"])["next"].is_null());
+    assert!(ids(&env.json(&sci, &["sample", "-n", "5", "--seed", "1"])).is_empty());
+
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["counts"]["shelved"], 1);
+    assert_eq!(prime["counts"]["idea"], 0);
+    assert!(prime["roadmap"].as_array().unwrap().is_empty());
+    assert!(env.pretty(&sci, &["prime"]).contains("shelved 1"));
+}
+
+#[test]
+fn tree_shows_shelved_children_but_roadmap_hides_every_shelved_node() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "2"]));
+    let child = id_of(env.json(&sci, &["add", "Child", "--parent", &goal]));
+    let root = id_of(env.json(&sci, &["add", "Root", "--status", "idea"]));
+    let root_child = id_of(env.json(&sci, &["add", "Root child", "--parent", &root]));
+    env.json(&sci, &["shelve", &child, "later"]);
+    env.json(&sci, &["shelve", &root_child, "later"]);
+    env.json(&sci, &["shelve", &root, "later"]);
+
+    let tree = env.json(&sci, &["tree"]);
+    assert_eq!(tree["nodes"].as_array().unwrap().len(), 1, "{tree}");
+    assert_eq!(tree["nodes"][0]["id"], goal);
+    assert_eq!(tree["nodes"][0]["children"][0]["id"], child);
+    assert_eq!(
+        env.json(&sci, &["tree", "--all"])["nodes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    env.json(&sci, &["unshelve", &child]);
+    env.json(&sci, &["unshelve", &root_child]);
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["roadmap"].as_array().unwrap().len(), 1, "{prime}");
+    assert_eq!(prime["roadmap"][0]["id"], goal);
+    assert_eq!(prime["roadmap"][0]["children"][0]["id"], child);
+    assert!(
+        prime["roadmap"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|node| node["id"] != root)
+    );
+}
+
+#[test]
+fn parked_shelved_task_is_visible_but_never_a_next_candidate() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.json(&sci, &["shelve", &id, "later"]);
+    write_park(
+        &env,
+        "sci",
+        &id,
+        "agent-a",
+        "agent",
+        &sci.display().to_string(),
+    );
+
+    assert!(env.json(&sci, &["next"])["next"].is_null());
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["parked"][0]["status"], "shelved");
+    let parked = env.json(&sci, &["list", "--parked"]);
+    assert_eq!(parked["tasks"][0]["status"], "shelved");
+}
+
+#[test]
+fn check_warns_when_open_work_depends_on_shelved_work() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let dep = id_of(env.json(&sci, &["add", "Dep", "-p", "2"]));
+    let work = id_of(env.json(&sci, &["add", "Work", "-p", "2", "--depends", &dep]));
+    env.json(&sci, &["shelve", &dep, "later"]);
+
+    let check = env.json(&sci, &["check"]);
+    let warning = check["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|warning| warning["kind"] == "shelved_dep")
+        .unwrap_or_else(|| panic!("{check}"));
+    assert_eq!(warning["id"], work);
+    assert_eq!(
+        warning["detail"],
+        format!("depends on shelved {dep}: unshelve it or drop the dependency")
+    );
+
+    env.json(&sci, &["shelve", &work, "later"]);
+    assert!(
+        !env.json(&sci, &["check"])["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["kind"] == "shelved_dep")
+    );
+}
+
+#[test]
 fn park_appears_in_show_and_list_json_and_pretty_show() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
