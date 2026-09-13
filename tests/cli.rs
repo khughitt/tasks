@@ -10443,6 +10443,71 @@ fn sample_draws_only_from_the_curable_pool() {
 }
 
 #[test]
+fn sample_treats_a_scope_proposal_like_a_curate_proposal() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let pending = old_task(&env, &dir, "Pending", &["--status", "idea"]);
+    env.json(
+        &dir,
+        &[
+            "note",
+            &pending,
+            "scope: drop; landed in abc1234; proposal: drop, abc1234",
+        ],
+    );
+    stamp(
+        &dir,
+        &pending,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+    let readmitted = old_task(&env, &dir, "Readmitted", &["--status", "idea"]);
+    env.json(
+        &dir,
+        &["note", &readmitted, "scope: drop; proposal: drop, dup of x"],
+    );
+    env.json(&dir, &["note", &readmitted, "declined: keep it"]);
+    stamp(
+        &dir,
+        &readmitted,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+    let briefed = old_task(&env, &dir, "Briefed", &["--status", "idea"]);
+    env.json(
+        &dir,
+        &[
+            "note",
+            &briefed,
+            "scope: briefed; brief: docs/notes/x-brief.md",
+        ],
+    );
+    stamp(
+        &dir,
+        &briefed,
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    );
+
+    let v = env.json(&dir, &["sample", "-n", "10", "--seed", "1"]);
+    let mut ids = sampled_ids(&v);
+    ids.sort();
+    let mut expected = vec![readmitted.clone(), briefed.clone()];
+    expected.sort();
+    assert_eq!(
+        ids, expected,
+        "a scope verdict without a proposal stays in the pool"
+    );
+    let warnings = v["warnings"].as_array().unwrap();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap() == format!("{pending} pending: drop, abc1234")),
+        "{warnings:?}"
+    );
+}
+
+#[test]
 fn sample_older_than_zero_admits_fresh_tasks_and_goals_stay_in() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
