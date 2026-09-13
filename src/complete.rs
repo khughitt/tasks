@@ -49,13 +49,18 @@ pub fn waiting_on() -> Vec<CompletionCandidate> {
     plain(crate::claims::WaitingOn::ALL.iter().map(|who| who.as_str()))
 }
 
-/// The seven `park --reason` accepts.
+/// The eight `park --reason` accepts.
 pub fn reason() -> Vec<CompletionCandidate> {
     plain(
         crate::claims::Reason::ALL
             .iter()
             .map(|reason| reason.as_str()),
     )
+}
+
+/// The two `park --needs` accepts.
+pub fn needs() -> Vec<CompletionCandidate> {
+    plain(crate::claims::Needs::ALL.iter().map(|needs| needs.as_str()))
 }
 
 /// The keys `query::SortKey::parse` accepts.

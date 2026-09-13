@@ -120,10 +120,7 @@ impl WaitingOn {
     }
 }
 
-/// Why the work stopped, from the seven-word vocabulary of
-/// docs/specs/2026-09-11-park-reason-and-stamps-design.md §4 and
-/// docs/specs/2026-09-12-task-complexity-design.md §5. Orthogonal to `WaitingOn`:
-/// the readers act on who, this only describes the stop.
+/// Why the work stopped, from the eight-word vocabulary of the park designs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Reason {
@@ -134,10 +131,11 @@ pub enum Reason {
     Dependency,
     Session,
     Capability,
+    Quiet,
 }
 
 impl Reason {
-    pub const ALL: [Reason; 7] = [
+    pub const ALL: [Reason; 8] = [
         Reason::Review,
         Reason::Decision,
         Reason::Approval,
@@ -145,6 +143,7 @@ impl Reason {
         Reason::Dependency,
         Reason::Session,
         Reason::Capability,
+        Reason::Quiet,
     ];
 
     pub fn parse(s: &str) -> Result<Reason> {
@@ -170,16 +169,62 @@ impl Reason {
             Reason::Dependency => "dependency",
             Reason::Session => "session",
             Reason::Capability => "capability",
+            Reason::Quiet => "quiet",
         }
     }
 }
 
-/// The parenthetical the park note and the park views share: `user` or `user, review`.
-pub fn describe_stop(who: WaitingOn, reason: Option<Reason>) -> String {
-    match reason {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Needs {
+    Idle,
+    Headless,
+}
+
+impl Needs {
+    pub const ALL: [Needs; 2] = [Needs::Idle, Needs::Headless];
+
+    pub fn parse(s: &str) -> Result<Needs> {
+        Needs::ALL
+            .into_iter()
+            .find(|needs| needs.as_str() == s)
+            .ok_or_else(|| {
+                let accepted: Vec<&str> = Needs::ALL.iter().map(|needs| needs.as_str()).collect();
+                Error::Validation(format!(
+                    "--needs must be one of {}, got {s:?}",
+                    accepted.join(", ")
+                ))
+            })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Needs::Idle => "idle",
+            Needs::Headless => "headless",
+        }
+    }
+}
+
+pub fn describe_stop(
+    who: WaitingOn,
+    reason: Option<Reason>,
+    needs: Option<Needs>,
+    minutes: Option<u32>,
+) -> String {
+    let mut text = match reason {
         Some(reason) => format!("{}, {}", who.as_str(), reason.as_str()),
         None => who.as_str().to_string(),
+    };
+    let recipe: Vec<String> = needs
+        .map(|needs| needs.as_str().to_string())
+        .into_iter()
+        .chain(minutes.map(|minutes| format!("{minutes} min")))
+        .collect();
+    if !recipe.is_empty() {
+        text.push_str("; ");
+        text.push_str(&recipe.join(", "));
     }
+    text
 }
 
 /// A task set down with its next step: the store's other entry kind. No liveness, no
@@ -199,6 +244,10 @@ pub struct Park {
     /// before the vocabulary existed and whenever `park` ran without `--reason`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<Reason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs: Option<Needs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<u32>,
     /// Snapshot at park time, for rows whose task file is unreachable (spec §5.3).
     pub title: String,
 }
@@ -1114,6 +1163,8 @@ mod tests {
             next_step: "write §3".into(),
             waiting_on: WaitingOn::Agent,
             reason: None,
+            needs: None,
+            minutes: None,
             title: "T".into(),
         }
     }
@@ -1144,7 +1195,7 @@ mod tests {
     }
 
     #[test]
-    fn reason_parses_its_seven_values_only() {
+    fn reason_parses_its_eight_values_only() {
         for (text, reason) in [
             ("review", Reason::Review),
             ("decision", Reason::Decision),
@@ -1153,6 +1204,7 @@ mod tests {
             ("dependency", Reason::Dependency),
             ("session", Reason::Session),
             ("capability", Reason::Capability),
+            ("quiet", Reason::Quiet),
         ] {
             assert_eq!(Reason::parse(text).unwrap(), reason);
             assert_eq!(reason.as_str(), text);
@@ -1161,7 +1213,7 @@ mod tests {
             Err(Error::Validation(detail)) => {
                 assert!(
                     detail.contains(
-                        "review, decision, approval, environment, dependency, session, capability"
+                        "review, decision, approval, environment, dependency, session, capability, quiet"
                     ),
                     "{detail}"
                 );
@@ -1172,12 +1224,96 @@ mod tests {
     }
 
     #[test]
-    fn describe_stop_names_the_who_and_the_reason_when_given() {
-        assert_eq!(describe_stop(WaitingOn::User, None), "user");
+    fn needs_parses_its_two_values_only() {
+        assert_eq!(Needs::parse("idle").unwrap(), Needs::Idle);
+        assert_eq!(Needs::parse("headless").unwrap(), Needs::Headless);
+        assert_eq!(Needs::Idle.as_str(), "idle");
+        assert_eq!(Needs::Headless.as_str(), "headless");
+        match Needs::parse("sometimes") {
+            Err(Error::Validation(detail)) => {
+                assert!(detail.contains("idle, headless"), "{detail}");
+                assert!(detail.contains("\"sometimes\""), "{detail}");
+            }
+            other => panic!("expected a validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn describe_stop_appends_the_recipe_when_present() {
+        assert_eq!(describe_stop(WaitingOn::User, None, None, None), "user");
         assert_eq!(
-            describe_stop(WaitingOn::Agent, Some(Reason::Session)),
+            describe_stop(WaitingOn::Agent, Some(Reason::Session), None, None),
             "agent, session"
         );
+        assert_eq!(
+            describe_stop(
+                WaitingOn::User,
+                Some(Reason::Quiet),
+                Some(Needs::Idle),
+                Some(50)
+            ),
+            "user, quiet; idle, 50 min"
+        );
+        assert_eq!(
+            describe_stop(
+                WaitingOn::User,
+                Some(Reason::Quiet),
+                Some(Needs::Headless),
+                None
+            ),
+            "user, quiet; headless"
+        );
+        assert_eq!(
+            describe_stop(WaitingOn::User, Some(Reason::Quiet), None, Some(5)),
+            "user, quiet; 5 min"
+        );
+    }
+
+    #[test]
+    fn a_quiet_park_round_trips_its_recipe_and_old_files_load() {
+        let (dir, mut store) = store_from(A_PARK);
+        let two = TaskId::parse("sci-000002").unwrap();
+        assert_eq!(store.park(&two).unwrap().needs, None);
+        assert_eq!(store.park(&two).unwrap().minutes, None);
+
+        let three = TaskId::parse("sci-000003").unwrap();
+        store.insert_park(
+            &three,
+            Park {
+                owner: "o".into(),
+                session: "a".into(),
+                host: "h".into(),
+                worktree: "/w".into(),
+                at: "2026-09-13T10:00:00Z".into(),
+                next_step: "rerun the preflight".into(),
+                waiting_on: WaitingOn::User,
+                reason: Some(Reason::Quiet),
+                needs: Some(Needs::Headless),
+                minutes: Some(50),
+                title: "T".into(),
+            },
+        );
+        store.save().unwrap();
+        let path = dir.path().join("sci.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("reason = \"quiet\""), "{text}");
+        assert!(text.contains("needs = \"headless\""), "{text}");
+        assert!(text.contains("minutes = 50"), "{text}");
+        let reloaded = ClaimStore::load_from(&path).unwrap();
+        let park = reloaded.park(&three).unwrap();
+        assert_eq!(park.needs, Some(Needs::Headless));
+        assert_eq!(park.minutes, Some(50));
+    }
+
+    #[test]
+    fn the_store_does_not_police_a_recipe_without_the_quiet_reason() {
+        let text = format!("{A_PARK}needs = \"idle\"\nminutes = 20\n");
+        let (_dir, store) = store_from(&text);
+        let two = TaskId::parse("sci-000002").unwrap();
+        let park = store.park(&two).unwrap();
+        assert_eq!(park.reason, None);
+        assert_eq!(park.needs, Some(Needs::Idle));
+        assert_eq!(park.minutes, Some(20));
     }
 
     #[test]
@@ -1202,6 +1338,8 @@ mod tests {
                 next_step: "open the sheet".into(),
                 waiting_on: WaitingOn::User,
                 reason: Some(Reason::Review),
+                needs: None,
+                minutes: None,
                 title: "T".into(),
             },
         );
@@ -1233,6 +1371,8 @@ mod tests {
                 next_step: "x".into(),
                 waiting_on: WaitingOn::User,
                 reason: None,
+                needs: None,
+                minutes: None,
                 title: "T".into(),
             },
         );

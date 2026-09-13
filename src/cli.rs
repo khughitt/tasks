@@ -304,7 +304,7 @@ pub enum Command {
         )]
         waiting_on: String,
         /// Why the work stopped: review, decision, approval, environment, dependency,
-        /// session, or capability. Optional; absent means not recorded.
+        /// session, capability, or quiet. Optional; absent means not recorded.
         #[arg(
             long,
             value_name = "WHY",
@@ -315,6 +315,12 @@ pub enum Command {
         /// record and, when waiting on the agent, to the shared store as an escalation.
         #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
         complexity: Option<String>,
+        /// With --reason quiet: what a free host means for this work.
+        #[arg(long, value_name = "COND", add = ArgValueCandidates::new(crate::complete::needs))]
+        needs: Option<String>,
+        /// With --reason quiet: expected wall-clock minutes once started, 1 to 1440.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..=1440))]
+        minutes: Option<u32>,
     },
     /// Close a task as done.
     Done {

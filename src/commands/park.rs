@@ -1,11 +1,12 @@
 use super::{ClaimIntent, Ctx, append_note, id_out, load, owner_name, save};
-use crate::claims::{Escalation, Liveness, Park, Reason, WaitingOn, describe_stop};
+use crate::claims::{Escalation, Liveness, Needs, Park, Reason, WaitingOn, describe_stop};
 use crate::error::{Error, Result};
 use crate::model::{Complexity, Status};
 use crate::output::Output;
 
 /// Set a task down (spec §3). Validate everything, refuse a foreign live claim, then let
 /// `save` write the note and the entry in that order.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     mut ctx: Ctx,
     id: String,
@@ -13,6 +14,8 @@ pub fn run(
     waiting_on: String,
     reason: Option<String>,
     complexity: Option<String>,
+    needs: Option<String>,
+    minutes: Option<u32>,
 ) -> Result<Output> {
     let mut task = load(&ctx, &id)?;
     if !task.status.is_open() {
@@ -123,6 +126,28 @@ pub fn run(
         }
         (_, None) => None,
     };
+    let needs = needs.as_deref().map(Needs::parse).transpose()?;
+    let (needs, minutes) = match (reason, needs, minutes) {
+        (Some(Reason::Quiet), needs, Some(minutes)) => {
+            (Some(needs.unwrap_or(Needs::Idle)), Some(minutes))
+        }
+        (Some(Reason::Quiet), _, None) => {
+            return Err(Error::Validation(
+                "--reason quiet needs --minutes <n>".into(),
+            ));
+        }
+        (_, Some(_), _) => {
+            return Err(Error::Validation(
+                "--needs on park needs --reason quiet".into(),
+            ));
+        }
+        (_, None, Some(_)) => {
+            return Err(Error::Validation(
+                "--minutes on park needs --reason quiet".into(),
+            ));
+        }
+        (_, None, None) => (None, None),
+    };
     if let Some(level) = complexity {
         task.complexity = Some(level);
     }
@@ -132,7 +157,7 @@ pub fn run(
         &owner,
         &format!(
             "parked (waiting on {}): {next_step}",
-            describe_stop(waiting_on, reason)
+            describe_stop(waiting_on, reason, needs, minutes)
         ),
     )?;
     let park = Park {
@@ -144,6 +169,8 @@ pub fn run(
         next_step,
         waiting_on,
         reason,
+        needs,
+        minutes,
         title: task.title.clone(),
     };
     ctx.pending_claim = Some((task.id.clone(), ClaimIntent::Park { park, escalation }));

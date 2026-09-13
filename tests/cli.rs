@@ -1041,6 +1041,232 @@ fn park_without_a_reason_records_none_and_re_parking_drops_a_previous_one() {
 }
 
 #[test]
+fn a_quiet_park_records_its_recipe_in_the_entry_the_note_and_every_park_view() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "rerun the readiness preflight, then capture",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "50",
+        ])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["park"]["reason"], "quiet");
+    assert_eq!(v["park"]["needs"], "idle");
+    assert_eq!(v["park"]["minutes"], 50);
+    assert_eq!(
+        env.json(&sci, &["list", "--parked"])["tasks"][0]["park"]["minutes"],
+        50
+    );
+    assert_eq!(
+        env.json(&sci, &["prime"])["parked"][0]["park"]["needs"],
+        "idle"
+    );
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(raw.contains("parked (waiting on user, quiet; idle, 50 min): rerun the readiness preflight, then capture"), "{raw}");
+    assert!(
+        env.pretty(&sci, &["show", &id])
+            .contains("waiting on user, quiet; idle, 50 min since")
+    );
+    assert!(
+        env.pretty(&sci, &["list", "--parked"])
+            .contains("waits on user, quiet; idle, 50 min")
+    );
+
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "log out, then run the power capture",
+            "--reason",
+            "quiet",
+            "--needs",
+            "headless",
+            "--minutes",
+            "90",
+        ])
+        .assert()
+        .success();
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(next["next"]["task"]["id"], id);
+    assert_eq!(next["next"]["park"]["needs"], "headless");
+    assert_eq!(next["next"]["park"]["minutes"], 90);
+
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "read the sheet",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "review",
+        ])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["park"]["reason"], "review");
+    assert!(
+        v["park"]["needs"].is_null() && v["park"]["minutes"].is_null(),
+        "{v}"
+    );
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "write §3"])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert!(
+        v["park"]["needs"].is_null() && v["park"]["minutes"].is_null(),
+        "{v}"
+    );
+}
+
+#[test]
+fn quiet_park_flags_are_validated_together() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+
+    let err = error_of(&env, &sci, &["park", &id, "x", "--reason", "quiet"]);
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("--reason quiet needs --minutes <n>"),
+        "{err}"
+    );
+    let err = error_of(&env, &sci, &["park", &id, "x", "--minutes", "10"]);
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("--minutes on park needs --reason quiet"),
+        "{err}"
+    );
+    let err = error_of(&env, &sci, &["park", &id, "x", "--needs", "idle"]);
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("--needs on park needs --reason quiet"),
+        "{err}"
+    );
+    let err = error_of(
+        &env,
+        &sci,
+        &[
+            "park",
+            &id,
+            "x",
+            "--reason",
+            "environment",
+            "--minutes",
+            "10",
+        ],
+    );
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("--minutes on park needs --reason quiet"),
+        "{err}"
+    );
+    let err = error_of(
+        &env,
+        &sci,
+        &[
+            "park",
+            &id,
+            "x",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "10",
+            "--needs",
+            "sometimes",
+        ],
+    );
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("idle, headless"),
+        "{err}"
+    );
+    let err = error_of(
+        &env,
+        &sci,
+        &[
+            "park",
+            &id,
+            "x",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "10",
+            "--complexity",
+            "high",
+        ],
+    );
+    assert!(
+        err["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("--complexity on park needs --reason capability"),
+        "{err}"
+    );
+    for bad in ["0", "1441"] {
+        let out = env
+            .cmd(&sci)
+            .args(["park", &id, "x", "--reason", "quiet", "--minutes", bad])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "--minutes {bad}");
+    }
+    assert!(env.json(&sci, &["show", &id])["park"].is_null());
+}
+
+#[test]
+fn start_on_a_quiet_park_removes_the_entry_and_its_recipe() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    as_agent(&env, &sci, "agent-a")
+        .args([
+            "park",
+            &id,
+            "capture",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "5",
+        ])
+        .assert()
+        .success();
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &id]);
+    assert!(v["park"].is_null(), "{v}");
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert!(!store.contains("minutes"), "{store}");
+}
+
+#[test]
 fn claim_appears_in_show_and_list_json() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
