@@ -48,8 +48,12 @@ The brief count is a ceiling (at most three per pass), never the measure.
     tasks shelve <id> "<wake condition>"
     tasks unshelve <id>
 
-`shelve` moves any open task to `shelved` and appends the note
-`shelved: <wake condition>`. The message is required: a shelf without a wake condition
+`shelve` moves an open task to `shelved` and appends the note
+`shelved: <wake condition>`. A goal with open descendants that are not themselves
+shelved is refused with a typed error naming those descendants: `ready` reads each
+child's own status and never its parent's, so shelving the goal alone would hide the
+goal while its children stayed eligible for implementation. Shelve the children first
+(or drop them); the goal follows. No cascade is implied. The message is required: a shelf without a wake condition
 is a drop with worse bookkeeping. The wake condition names what would bring the task
 back ("when profiles have more than one consumer", "after the rack UI lands", "if the
 slow-draw investigation blames noise"). `shelve` follows the claim rules `block`
@@ -61,10 +65,12 @@ refuses with `claimed` when another live session holds the task.
 on the shelf is scoping. The record keeps its priority, size, complexity, and links, so
 `edit --status todo` is one command when the work was already scoped.
 
-`edit --status shelved` and a status of `shelved` saved through the editor are refused
-with a typed error naming `tasks shelve`: the wake condition is the entry ticket, and
-only the command collects it. `edit --status` from `shelved` to any other open status
-is allowed; it is the reopen path for a person who knows what they want.
+`edit --status shelved` and an editor save that *changes* a status to `shelved` are
+refused with a typed error naming `tasks shelve`: the wake condition is the entry
+ticket, and only the command collects it. An editor save that keeps an already-shelved
+status is an ordinary edit (title, body, tags) and succeeds. `edit --status` from
+`shelved` to any other open status is allowed; it is the reopen path for a person who
+knows what they want.
 
 ### 3.2 Visibility
 
@@ -108,8 +114,14 @@ naming `unshelve`, so a picker cannot resume it by accident and the shelf is lef
 on purpose.
 
 `park` does not apply: a shelved task is not set down mid-work, it is out of work.
-`shelve` on a parked task clears the park entry, as `drop` does and `block` does not:
-the release intent's `clear_park` covers `shelved` beside `done` and `dropped`.
+`park` on a shelved task refuses with a typed error naming `unshelve`; today `park`
+checks only `is_open`, so this is a new guard. `shelve` on a parked task clears the
+park entry, as `drop` does and `block` does not: the release intent's `clear_park`
+covers `shelved` beside `done` and `dropped`. That same path clears a recorded
+escalation, and shelving keeps that consequence: the saved next step and the rating
+escalation both existed to drive resumption, and a shelved task is not resumed; it is
+unshelved and scoped again. The escalation's removal is reported in the warning the
+release path already emits.
 
 ### 3.4 JSON shapes
 
@@ -128,22 +140,35 @@ Completion candidates for `--status` and the status column in `--pretty` rows in
 
 ### 4.1 Batch selection
 
-Explicit ids are the batch, exactly. Otherwise the skill reads every `idea` in the
-project (`tasks list --status idea`, narrowed by `--tag` when given), clusters them, and
-picks **one** cluster of roughly three to five ideas that share a parent, a source, a
-tag, or plainly the same subsystem. It states the cluster and why in one line and
-proceeds; choosing a cluster is not the user's job. Preference order when several
-clusters qualify: one that already has a goal or brief (a rerun improves the handoff),
-then the one with the most members, then the oldest. A pool with no cluster of two or
-more takes the oldest three ideas as singletons.
+Explicit ids are the batch, exactly, and the only way to revisit a cluster whose
+previous pass is still waiting on something. Otherwise the skill reads every `idea` in
+the project (`tasks list --status idea`, narrowed by `--tag` when given) and drops from
+the pool every idea a previous pass already handled: one whose most recent note starts
+with `scope:` (any verdict), and one carrying a pending `proposal:`. An idea re-enters
+the pool when a later note lands on it, which is how research findings, an answer from
+the user, or an `unshelve` reopen a cluster; the pass that answers a brief's question
+writes that note. Without this rule the default pick would return to the same briefed
+cluster every run while its research is still open.
+
+The eligible pool is clustered, and the skill picks **one** cluster of roughly three to
+five ideas that share a parent, a source, a tag, or plainly the same subsystem. It
+states the cluster and why in one line and proceeds; choosing a cluster is not the
+user's job. Preference order when several qualify: the one with the most members, then
+the oldest. A pool with no cluster of two or more takes the oldest three ideas as
+singletons.
 
 The cluster is provisional from titles. Step 4.2 confirms or splits it; a member the
 evidence shows unrelated is left as it was, with no note.
 
 ### 4.2 Same root, then evidence
 
-Before any read of a member, fix the root the way `curate` does (`tasks root <id>`, then
-every command as `tasks -C <root> ...`), and keep `task.updated` from the first `show`.
+Before any read of a member, fix the root and run every later command for it as
+`tasks -C <root> ...`, with `curate`'s two cases exactly: an unscoped pass uses the
+current project checkout (the nearest ancestor holding `tasks/.config.toml`), and a
+`--project` pass uses the path `tasks root <id>` prints. Never `tasks root` for an
+unscoped pass: from a worktree it names the main checkout, so the pass would select
+the worktree's records and then read and write main's. Keep `task.updated` from the
+first `show`.
 
 Per idea: `show`; the `source` (a mindful thought is read with `mindful --json show`);
 the parent and `tree` when it has one; grep the code and docs the record names; `git
@@ -161,7 +186,7 @@ Exactly one per idea.
 | `briefed` | decisions remain that a brief can frame | the idea stays `idea`, reparented under the cluster's goal, note names the brief; the brief covers it (§4.4); research or design tasks as needed (§4.5) |
 | `question` | not resolvable without the user, and a brief would not help | `## Open questions` in the body; relayed in the summary |
 | `shelved` | worth keeping, not worth looking at now | `tasks shelve <id> "<wake condition>"` |
-| `drop` | the thing landed, or the premise is gone, or another task covers it | nothing; proposal in the summary with the commit or the other id |
+| `drop` | the thing landed, or the premise is gone, or another task covers it | status untouched; the `scope:` note carries `proposal: drop, <commit or other id>`; relayed in the summary |
 
 `scoped` is the exception, not the default. The test is the one the complexity rubric
 already states for `low` and `mid`: the approach is established and the context is
@@ -198,11 +223,15 @@ brief actually proposes one reviewable design, it is written as a spec under
 brainstorming session finishes rather than starts. The pass may write at most three
 briefs or draft specs.
 
-The cluster's **goal** is the existing parent when the members share one, else a new
-`todo` goal filed by the pass, priority 2, body one paragraph, `--source` pointing at the
-brief's repo-relative path. The goal is `todo` because filing research tasks under it
-is a commitment to settle the cluster; it is never picked by `ready` because it has
-children. Members become its children; the research tasks are its other children.
+The cluster's **goal** is the parent the members already share, when they share one.
+Otherwise the pass files a new `todo` goal (priority 2, body one paragraph, `--source`
+the brief's repo-relative path) and parents under it only the members that had **no
+parent**. A member that belongs to another goal keeps that parent: reparenting it would
+remove an obligation from a goal someone else scoped and could hand that goal to
+`closeout` early. Such a member is associated through the brief (its id in §6) and its
+`scope:` note, not through the hierarchy. The goal is `todo` because filing research
+tasks under it is a commitment to settle the cluster; it is never picked by `ready`
+because it has children. The research tasks are its children too.
 
 ### 4.5 Research and design tasks
 
@@ -240,7 +269,14 @@ brief for the same cluster, and it retains every source link and prior note.
 One note per member: `scope: <verdict>; <what changed>[; brief: <path>][; proposal:
 <text>]`. The note is the audit trail, and it moves the task out of `sample`'s pool for
 the age window, so `curate` does not redo the pass. A `proposal:` segment appears only
-on `drop`; `sample` reports such a task as pending, as it does for `curate` proposals.
+on `drop`, and it is the one write a `drop` verdict makes.
+
+`tasks sample`'s pending rule today recognises only a `curate:` note; it gains
+`scope:` as a second prefix with the same `proposal:` parse, so a scope proposal is
+excluded from the pool and reported as `<id> pending: <proposal>` exactly as a curate
+proposal is. That is a CLI change owned by tasks-470e8c (the CLI piece of this goal)
+and tested in §6; the skill must not land before it, or its drop proposals would be
+re-drawn and re-reported by every curate pass.
 
 Summary to the user: the cluster and why; one line per member with its verdict; the
 brief or spec paths for review; then the decisions that are the user's, grouped and
@@ -278,7 +314,14 @@ End-to-end in `tests/cli.rs` for the status:
   root unless `--all`.
 - `done` on a goal with a shelved child refuses; a `todo` depending on a shelved task is
   absent from `ready` and `check` warns naming both ids.
-- `shelve` on a parked task clears the park entry.
+- `shelve` on a parked task clears the park entry and a recorded escalation, with the
+  existing warning; `park` on a shelved task refuses and names `unshelve`.
+- `shelve` on a goal with an unshelved open descendant refuses and names it; succeeds
+  once every descendant is shelved or closed.
+- Editor path: a save that changes another status to `shelved` refuses; a save that
+  edits the body of an already-shelved task succeeds and keeps the status.
+- `sample` excludes a task whose latest note is `scope: drop; ...; proposal: ...` and
+  reports it pending; a later note readmits it.
 - `rename` moves a shelved record like any open one.
 
 The skill is prose; its acceptance test is the first pass run against a real cluster

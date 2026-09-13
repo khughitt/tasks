@@ -7,7 +7,7 @@ size: l
 complexity: high
 owner: scope
 created: 2026-09-13T01:42:27Z
-updated: 2026-09-13T01:45:04Z
+updated: 2026-09-13T02:04:17Z
 started: 2026-09-13T01:42:27Z
 depends: []
 tags: [skill, curation]
@@ -19,3 +19,4 @@ A bounded pass over a cluster of related ideas that leaves each one with a suppo
 ## Notes
 
 - 2026-09-13T01:45:04Z (scope): brainstormed 2026-09-12: spec drafted at docs/specs/2026-09-12-scope-pass-design.md; understood vs committed split, briefs under docs/notes, shelved is open and hidden; awaiting spec review
+- 2026-09-13T02:04:17Z (scope): spec review 2026-09-12: six points resolved (worktree root, goal shelving guard, pool eligibility, preserve parents, sample scope: prefix, editor rule); skill piece now depends on the CLI piece

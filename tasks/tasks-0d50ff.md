@@ -6,8 +6,8 @@ priority: 2
 size: m
 complexity: mid
 created: 2026-09-13T01:42:27Z
-updated: 2026-09-13T01:45:04Z
-depends: []
+updated: 2026-09-13T02:04:17Z
+depends: [tasks-470e8c]
 parent: tasks-019c60
 tags: [skill]
 spec: docs/specs/2026-09-12-scope-pass-design.md
