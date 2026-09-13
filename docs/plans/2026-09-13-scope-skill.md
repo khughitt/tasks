@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** approved; implementation in progress (2026-09-13).
+**Status:** implemented and accepted on `scope` (2026-09-13); retained for integration review. Real Prism pass committed separately as `6887eae` on `scope-acceptance`; see [validation](../notes/2026-09-13-scope-skill-validation.md).
 
 **Goal:** Ship a deliberate `/scope` pass that turns ideas into supported next actions, briefs, questions, shelves, or drop proposals, and demonstrate it on real Prism work.
 
@@ -161,13 +161,13 @@ Inspect the frontmatter, referenced CLI help and every doc link; run `git diff -
 
 **Interfaces:** Consumes Task 1's tested skill and installed CLI. Produces a reviewable real cluster handoff and rerun evidence. Task 1's behavior tests do not substitute for this acceptance pass.
 
-- [ ] **Step 1: Prepare an isolated checkout of current Prism.**
+- [x] **Step 1: Prepare an isolated checkout of current Prism.**
 
 Resolve Prism through `tasks --pretty root prism-b8b589`; read its `AGENTS.md` and inspect status/history. Recheck the candidate ids with read-only `show`; snapshot current statuses, parents, sources, notes and claims. On 2026-09-13 the five below are ideas. The sixth provisional spec example, `prism-e08ee6`, is already todo and is context only.
 
 Create a fresh Prism worktree with `git worktree add .worktrees/scope-acceptance -b scope-acceptance` from the Prism root (use an unused suffix if it already exists). Run `just setup` if that checkout defines it. Do not change the Prism registry root. Do not copy or overwrite live task records to hide differences between the new checkout and main; document an uncommitted relevant input as a limitation and select current eligible work from the actual checkout.
 
-- [ ] **Step 2: Run one real pass with the skill explicitly loaded.**
+- [x] **Step 2: Run one real pass with the skill explicitly loaded.**
 
 Before leaving the tasks worktree, capture its path for tracking commands:
 
@@ -185,13 +185,13 @@ This is deliberately unscoped: member reads and writes must stay in the Prism wo
 
 Save the exact resulting user summary and links in the tasks-repo validation note. Record which selected ids stayed ideas, became actionable, or received another verdict; the number of briefs/specs; created follow-up ids; and the evidence for the decisions. Show the concrete handoff paths relative to Prism's main checkout. Check that relevant main-checkout files were unchanged by the pass.
 
-- [ ] **Step 3: Exercise the default exclusion and explicit rerun against the resulting state.**
+- [x] **Step 3: Exercise the default exclusion and explicit rerun against the resulting state.**
 
 Read the idea pool and its latest notes to show processed members are excluded by the default rule; do not process another unrelated cluster just to test exclusion. Then run an explicit rerun on the processed ideas that remain ideas. Compare artifacts and task graph before/after: no second goal/document, no duplicate research, unchanged existing parents and sources, retained prior notes. Updates must add evidence or sharpen a question; do not force changes simply to demonstrate a write. If no processed ideas remain ideas, record that fact and use Task 1's explicit-rerun scenario as the existing-brief coverage.
 
 If the pass demonstrates a skill defect, correct that wording, rerun its controlled scenario, and use the explicit rerun for the real handoff. Do not repeatedly add live notes until a transcript looks clean. Record partial operations and repairs honestly. Run Prism's required checks and commit only the pass-owned files; preserve that branch/worktree for user review, without merge or push.
 
-- [ ] **Step 4: Record acceptance and finish the tasks branch.**
+- [x] **Step 4: Record acceptance and finish the tasks branch.**
 
 Use `tasks -C "$scope_tasks_root" note tasks-0d50ff "<acceptance result>"` with the actual Prism checkout/commit, member ids, summary, and what the skill text got wrong (or an evidence-backed “no correction needed”). Update the validation note with baseline/green counts and the real pass/rerun observations. Do not claim a real pass if only scripted trials ran.
 

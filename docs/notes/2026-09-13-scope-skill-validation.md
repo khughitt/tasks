@@ -88,9 +88,97 @@ expected fixture artifact that did not change the chosen root or final records. 
 rendered an escaped apostrophe; that output polish did not affect the verdict or audit
 contract.
 
-## Remaining acceptance
+## Controlled trial totals
 
 Task 1 completed three baseline trials, three initial green trials, one focused green
 trial prompted by their sole disagreement, and two actual CLI packets, one per wording
-revision. Task 2 still runs the skill against the real Prism cluster and tests its
-explicit rerun; the controlled trials do not substitute for that acceptance.
+revision. The real acceptance below applies the skill to current Prism code and records; it is
+separate from these controlled trials.
+
+
+## Real Prism acceptance
+
+Explicitly loaded `skills/scope/SKILL.md` from the tasks `.worktrees/scope` checkout,
+then ran the unscoped equivalent of `/scope prism-b8b589 prism-920f31 prism-8a8eac
+prism-49a068 prism-ad2b12` from Prism `.worktrees/scope-acceptance`. The registered
+Prism main was clean at `6941146`; `git worktree add` created the acceptance checkout
+from that commit. Its justfile has no setup recipe. Every explicit task command after
+root selection used `-C` with the appropriate pinned checkout, including tasks-repo
+tracking from Prism. No registry changes or selected-idea starts occurred.
+
+The five first-show and pre-write records were unchanged, unclaimed ideas. The separate
+`prism-e08ee6` was already todo and remained context only. Read all open records, both
+related goal trees, the profile/reset source and tests, the plugin contract, current
+context/reset specs, and relevant ancestor commits. The original Mindful reference
+could not be resolved: verified `mindful show --help`, then `mindful --json show
+1e2513d2f5ea48609022559f3c687d01` returned `no thought matching`. The brief names this
+unknown; the captured source strings and bodies remain intact.
+
+Results at Prism commit `6887eae9d02078914067003b5e23d4326d3f2bbc` on
+`scope-acceptance`:
+
+| Member | Verdict | Evidence / next action |
+|---|---|---|
+| prism-b8b589 | briefed, stays idea | Direct persistence exists; marker lifetime across asynchronous writes/switches remains a design choice. |
+| prism-920f31 | briefed, stays idea | Existing inactive rename/delete paths and tests establish backend support; management targeting remains a panel design. |
+| prism-ad2b12 | briefed, stays idea | Neutral writes and remove-override differ; existing prism-bf3ae9 already owns the decision. |
+| prism-8a8eac | shelved | Existing capture defers New's initial values until reset/autosave decisions, with a 2026-11-10 review. |
+| prism-49a068 | shelved | Existing capture defers default presentation until reset/autosave decides base reachability, with the same review. |
+
+One 550-word, six-section brief; zero draft specs, research tasks, promotions, drops,
+or question verdicts. New goal `prism-3415ef` parents only the three previously
+unparented members. `prism-b8b589` and `prism-920f31` keep `prism-2f0b4b`. New
+high-complexity design `prism-e37618` covers only those two profile controls and requires
+finding notes on both waiting ideas when complete. Existing `prism-bf3ae9` is reused for
+reset, with its wake-note instruction in the brief; neither it nor either existing goal
+was rewritten. No new research is warranted for behavior already established by code
+and tests. Every member received exactly one scope audit note; shelves also received
+the native shelf note. Original bodies, sources and prior notes were checked intact.
+
+Reviewable artifacts, relative to Prism's main checkout:
+
+- `.worktrees/scope-acceptance/docs/notes/2026-09-13-profile-editing-brief.md`
+- `.worktrees/scope-acceptance/tasks/prism-3415ef.md`
+- `.worktrees/scope-acceptance/tasks/prism-e37618.md`
+
+The pass changed those three files and only the five selected task records. A hash
+comparison of all 161 main-checkout task/document files, plus clean main git status,
+confirmed main was untouched. `just gate` passed: zero task errors/warnings, 327 Node
+tests, and the Lua plugin suite. Explicit `tasks -C <prism-worktree> check`,
+`git diff --check`, and the pre-commit hook passed. The retained branch was committed
+without merging, pushing, changing runtime plugin links, or installing the skill globally.
+
+## Default exclusion and explicit rerun
+
+A read-only `list --status idea` plus `show` inspection excluded the three briefed
+members because each latest note starts with `scope:`. The two shelved members were
+absent from the idea pool. No unrelated cluster was processed.
+
+The explicit rerun `/scope prism-b8b589 prism-920f31 prism-ad2b12` re-read the members,
+existing goal, design, reset/autosave work and handoff. Their questions remained
+unanswered. It reused the same brief, goal, design and reset task and made zero writes:
+no new evidence justified editing artifacts or adding another audit note. Task/document
+hashes before and after were identical, including sources, parents and prior notes.
+No skill wording correction was demonstrated by this pass or rerun.
+
+## Exact user summary
+
+> Profile editing cluster: these five ideas share profile controls, write targets, and reset behavior.
+>
+> - prism-b8b589 — briefed; marker lifecycle needs design.
+> - prism-920f31 — briefed; inactive rename/delete already works; panel targeting needs design.
+> - prism-8a8eac — shelved; New’s starting state waits for reset/autosave decisions.
+> - prism-49a068 — shelved; default presentation waits for reset/autosave decisions.
+> - prism-ad2b12 — briefed; reuse prism-bf3ae9 to settle reset semantics.
+>
+> Handoff: Prism `.worktrees/scope-acceptance/docs/notes/2026-09-13-profile-editing-brief.md`; goal prism-3415ef; design prism-e37618. The original Mindful source was unavailable.
+>
+> Shelved: prism-8a8eac and prism-49a068 wake after prism-bf3ae9 settles reset semantics and prism-46035b settles wallpaper autosave; retain their 2026-11-10 review date. Explicit rerun found unchanged evidence and reused the handoff without writes.
+
+## Tasks closeout
+
+Final `just gate` passed: formatting, Clippy with warnings denied, zero task check
+errors/warnings, 167 unit tests and 275 CLI tests. Both `tasks-39a041` and
+`tasks-0d50ff` completed in this change. `prime` offered `tasks-019c60` for closeout
+with zero open descendants, but its foreign live claim remained held; the umbrella
+was left unchanged for its holder. The pre-commit `tasks check` passed after closure.
