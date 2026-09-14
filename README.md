@@ -252,15 +252,14 @@ color selected through the environment, and an explicit `--color` overrides it.
 
 ## Agent skill
 
-`skills/tasks/SKILL.md` teaches agents the session protocol. Install it once at user level
-so it applies to every project:
+`skills/tasks/SKILL.md` teaches agents the session protocol. Install every skill at user
+level so they apply to every project, from a checkout of this repo:
 
-    mkdir -p ~/.claude/skills && ln -s "$PWD/skills/tasks" ~/.claude/skills/tasks
-    mkdir -p ~/.agents/skills && ln -s "$PWD/skills/tasks" ~/.agents/skills/tasks   # other harnesses
-    ln -s "$PWD/skills/curate" ~/.claude/skills/curate
-    ln -s "$PWD/skills/curate" ~/.agents/skills/curate   # other harnesses
-    ln -s "$PWD/skills/scope" ~/.claude/skills/scope
-    ln -s "$PWD/skills/scope" ~/.agents/skills/scope     # other harnesses
+    just install-skills
+
+The recipe symlinks each `skills/*` directory into `~/.claude/skills` and
+`~/.agents/skills` (the latter for other harnesses) and is idempotent: re-run it after
+a pull adds a skill.
 
 or per project, when a project needs to pin its own copy:
 

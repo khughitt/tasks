@@ -30,6 +30,11 @@ check:
 
 gate: check test
 
+# Link every skills/* directory into ~/.claude/skills and ~/.agents/skills. Idempotent;
+# re-run after a pull adds a skill.
+install-skills:
+    {{tt}} install-skills -- sh -c 'set -e; for dest in "$HOME/.claude/skills" "$HOME/.agents/skills"; do mkdir -p "$dest"; for skill in "{{justfile_directory()}}"/skills/*; do [ -d "$skill" ] || continue; name=$(basename "$skill"); ln -sfn "$skill" "$dest/$name"; echo "$dest/$name"; done; done'
+
 # What the pre-commit hook runs: `check`'s command under its own hook target.
 hook-pre-commit:
     {{tt}} hook-pre-commit -- sh -c '{{check_cmd}}'
