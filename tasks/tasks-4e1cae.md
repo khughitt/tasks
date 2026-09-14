@@ -5,8 +5,9 @@ status: todo
 priority: 3
 size: xs
 complexity: low
+process: direct
 created: 2026-09-07T08:29:07Z
-updated: 2026-09-13T16:47:44Z
+updated: 2026-09-14T11:46:16Z
 depends: []
 tags: [docs]
 ---
@@ -16,3 +17,4 @@ The final review of the source field found the JSON shapes block in docs/specs/2
 ## Notes
 
 - 2026-09-13T16:47:44Z (main): Complexity low: the task already enumerates the field table, JSON shapes, usage blocks, skill recipes, README examples, and Task literal sites. Writing and checking that single checklist needs no remaining design decision.
+- 2026-09-14T11:46:16Z (main): Process direct: the body enumerates every place a field must be recorded; the work is writing that checklist into the design spec, and verification is each item naming a real location.

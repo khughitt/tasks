@@ -5,8 +5,9 @@ status: todo
 priority: 3
 size: xs
 complexity: low
+process: direct
 created: 2026-09-04T02:03:12Z
-updated: 2026-09-13T16:47:44Z
+updated: 2026-09-14T11:46:16Z
 depends: []
 tags: [cli]
 ---
@@ -19,3 +20,4 @@ Done: any invocation with `TASKS_FORMAT` set to something other than `json` or `
 
 - 2026-09-09T11:05:38Z (design/curation): curate: refined; body now states the done condition and the behaviour change; facts unchanged
 - 2026-09-13T16:47:44Z (main): Complexity low: main.rs still selects the (true, _) format arm before rejecting invalid TASKS_FORMAT. Validation before override selection is established, and the task specifies the failing value, exit code, and regression check.
+- 2026-09-14T11:46:16Z (main): Process direct: the body fixes the arm to change, the error and exit code to reuse, and the regression test to add; no design choice remains.
