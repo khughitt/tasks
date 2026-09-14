@@ -173,6 +173,31 @@ is open and has no override. It applies to `done` and to `edit --status done` al
 
 `ready` = status `todo`, no children, and every entry in `depends` is closed.
 
+### 3.4 Recording a new field
+
+The final review of the `source` field found this spec's §5.1 JSON shapes block had not
+been updated; the plan's file list had missed it. The checklist for any field added to
+the task record, written once so future field plans copy it into their File Structure
+sections instead of reconstructing it:
+
+1. §3.1 field table — the row: type, required, and the note saying what sets the field
+   and where it sits in the frontmatter order.
+2. §5.1 JSON shapes — a `+=` addendum line naming every shape the field reaches (`Task`,
+   `TaskSummary`, `ParkedRow`, or a command payload); the addenda, not edits to the
+   original block, are the record of later changes.
+3. §5 add and edit usage blocks — the flag on `tasks add`, the same flag on
+   `tasks edit`'s `[same field flags as add]` line, and the `--no-<field>` clearer
+   beside them when the field can be unset.
+4. skills/tasks/SKILL.md — both the scoped-task `add` recipe under "Recording work" and
+   the flag list in the "Never edit `tasks/*.md` directly" paragraph.
+5. README.md — the `add`/`edit` example block and any field-specific prose.
+6. src — model.rs (`Task` and the `task_with` test helper), format.rs (`KEYS`, the
+   `parse_task` literal, `validate_task`, `serialize_task`'s pairs, and a round-trip
+   test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`, `ParkedRow::unresolved`,
+   and the `row` test helper), and, when the field has a flag, `cli.rs` with
+   `commands/add.rs` and `commands/edit.rs`. Shell completion needs no entry: it walks
+   clap's own definitions.
+
 ## 4. Identity and collisions
 
 Ids are `<prefix>-<hex6>`: the repo's prefix from `.config.toml` plus six random lowercase
