@@ -1,13 +1,15 @@
 ---
 id: tasks-ffa10e
 title: "just install-skills: link every skills/* into the harness skill dirs"
-status: todo
+status: doing
 priority: 3
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-09-13T18:25:02Z
-updated: 2026-09-13T18:25:02Z
+updated: 2026-09-14T10:34:09Z
+started: 2026-09-14T10:34:09Z
 depends: []
 tags: [docs]
 ---
