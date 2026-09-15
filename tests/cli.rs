@@ -6216,7 +6216,9 @@ fn editor_saves_follow_the_one_thing_per_save_rule_for_defer() {
 
     env.json(&sci, &["edit", &plain, "--status", "todo"]);
     env.json(&sci, &["edit", &plain, "--defer", "30d"]);
-    assert!(env.json(&sci, &["show", &plain])["task"]["defer"].is_string());
+    let value = env.json(&sci, &["show", &plain]);
+    assert_eq!(value["task"]["status"], "todo");
+    assert!(value["task"]["defer"].is_string());
 }
 
 /// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
