@@ -1,12 +1,15 @@
 ---
 id: tasks-be6fcc
 title: "One-shot defer date: hide an open task from ready until a date"
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: mid
+process: planned
+owner: main
 created: 2026-09-11T01:15:26Z
-updated: 2026-09-13T16:47:42Z
+updated: 2026-09-15T12:38:29Z
+started: 2026-09-15T12:38:29Z
 depends: []
 tags: [quick-add, cli, periodic]
 source: "mindful:thought:1e2513d2f5ea48609022559f3c687d01"
@@ -23,3 +26,4 @@ Motivating records: prism-49a068 and prism-8a8eac, both carrying 'revisit 2026-1
 ## Notes
 
 - 2026-09-13T16:47:42Z (main): Complexity mid: the outcome and read-time date approach are defined; bounded choices remain for date semantics, recurrence coexistence, dependency readiness, and consistent omission across ready, next, prime, and sample. Reassess after the design resolves those choices.
+- 2026-09-15T12:38:29Z (main): Process planned: the body leaves design choices open (coexistence with --every, dependency readiness of deferred tasks, idea deferral, sample behaviour, grammar of relative dates) and the field touches every picker; a reviewed spec settles them before code.
