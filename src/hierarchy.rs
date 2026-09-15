@@ -149,7 +149,7 @@ enum Visibility {
     UnderShownParent,
 }
 
-/// spec §4.7: `is_ready` excludes any task with children, so a cadence on a goal could
+/// spec §4.7: `readiness` excludes any task with children, so a cadence on a goal could
 /// never fire. Refuse it at the write rather than leave a silent dead end. Scans only when
 /// a cadence is actually set, which is rare.
 pub fn validate_periodic(project: &Project, registry: &Registry, task: &Task) -> Result<()> {

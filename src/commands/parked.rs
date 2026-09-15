@@ -157,8 +157,14 @@ fn resolve_recorded(
     )))
 }
 
-pub fn candidates(ctx: &mut ReadCtx, all: &[Task], claims: &ClaimSnapshot) -> Result<Vec<Task>> {
+pub fn candidates(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &ClaimSnapshot,
+    now: time::OffsetDateTime,
+) -> Result<crate::query::Picked> {
     let mut found = Vec::new();
+    let mut deferred = Vec::new();
     for task in all {
         let Some(park) = claims.park(&task.id) else {
             continue;
@@ -181,9 +187,16 @@ pub fn candidates(ctx: &mut ReadCtx, all: &[Task], claims: &ClaimSnapshot) -> Re
             }
         }
         if !held {
-            found.push((park.at.clone(), task.clone()));
+            if crate::defer::is_deferred(task, now) {
+                deferred.push(task.clone());
+            } else {
+                found.push((park.at.clone(), task.clone()));
+            }
         }
     }
     found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.id.cmp(&b.1.id)));
-    Ok(found.into_iter().map(|(_, task)| task).collect())
+    Ok(crate::query::Picked {
+        tasks: found.into_iter().map(|(_, task)| task).collect(),
+        deferred,
+    })
 }

@@ -7,7 +7,8 @@ use crate::output::{
     TaskSummary,
 };
 use crate::query::{
-    SortKey, is_actionable, is_ready, sort_by_key, sort_list, sort_periodic, sort_ready,
+    Picked, Readiness, SortKey, deferred_omission, is_candidate, readiness, sort_by_key, sort_list,
+    sort_periodic, sort_ready,
 };
 use crate::scope::Scope;
 use std::collections::HashMap;
@@ -190,10 +191,10 @@ pub fn ready_tasks(
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
     now: OffsetDateTime,
-) -> Result<Vec<Task>> {
+) -> Result<Picked> {
     let mut warnings = Vec::new();
     let mut closed: HashMap<TaskId, Option<bool>> = HashMap::new();
-    for task in all.iter().filter(|task| is_actionable(task, now)) {
+    for task in all.iter().filter(|task| is_candidate(task, now)) {
         for dependency in &task.depends {
             if closed.contains_key(dependency) {
                 continue;
@@ -205,8 +206,9 @@ pub fn ready_tasks(
     }
     let lookup = |id: &TaskId| -> Option<bool> { closed.get(id).copied().flatten() };
     let mut ready = Vec::new();
+    let mut deferred = Vec::new();
     for task in all {
-        if !is_actionable(task, now) {
+        if !is_candidate(task, now) {
             continue;
         }
         for dependency in &task.depends {
@@ -218,8 +220,10 @@ pub fn ready_tasks(
             }
         }
         let has_children = !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty();
-        if is_ready(task, has_children, &lookup, now) {
-            ready.push(task.clone());
+        match readiness(task, has_children, &lookup, now) {
+            Readiness::Ready => ready.push(task.clone()),
+            Readiness::Deferred => deferred.push(task.clone()),
+            Readiness::Not => {}
         }
     }
     sort_ready(&mut ready);
@@ -244,8 +248,17 @@ pub fn ready_tasks(
         }
         _ => true,
     });
+    deferred.retain(|task| {
+        claims.live(&task.id).is_none()
+            && !claims
+                .park(&task.id)
+                .is_some_and(|park| park.waiting_on == WaitingOn::User)
+    });
     ctx.warnings.extend(warnings);
-    Ok(ready)
+    Ok(Picked {
+        tasks: ready,
+        deferred,
+    })
 }
 
 pub fn ready(
@@ -259,18 +272,25 @@ pub fn ready(
     let size = size.map(|size| Size::parse(&size)).transpose()?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let mut tasks = ready_tasks(&mut ctx, &all, &claims, now)?;
+    let mut picked = ready_tasks(&mut ctx, &all, &claims, now)?;
     if let Some(cutoff) = cutoff {
-        let hidden = crate::complexity::apply(&mut tasks, cutoff, &claims);
+        let hidden = crate::complexity::apply(&mut picked.tasks, cutoff, &claims);
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
+        let _ = crate::complexity::apply(&mut picked.deferred, cutoff, &claims);
     }
     if let Some(size) = size {
-        tasks.retain(|task| task.size == Some(size));
+        picked.tasks.retain(|task| task.size == Some(size));
+        picked.deferred.retain(|task| task.size == Some(size));
     }
     if parallel {
-        tasks.retain(|task| task.parallel);
+        picked.tasks.retain(|task| task.parallel);
+        picked.deferred.retain(|task| task.parallel);
     }
+    if let Some(warning) = deferred_omission(&picked.deferred) {
+        ctx.warnings.push(warning);
+    }
+    let mut tasks = picked.tasks;
     if let Some(limit) = limit {
         tasks.truncate(limit);
     }
@@ -291,20 +311,30 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let candidates = super::parked::candidates(&mut ctx, &all, &claims)?;
+    let candidates = super::parked::candidates(&mut ctx, &all, &claims, now)?;
     let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
     // One pool in pick order — parked candidates first, then the ready list — with each
     // task once, so a parked todo that is also ready is hidden and counted once.
-    let mut pool = candidates;
-    for task in ready {
+    let mut pool = candidates.tasks;
+    for task in ready.tasks {
         if !pool.iter().any(|candidate| candidate.id == task.id) {
             pool.push(task);
+        }
+    }
+    let mut omitted = candidates.deferred;
+    for task in ready.deferred {
+        if !omitted.iter().any(|held| held.id == task.id) {
+            omitted.push(task);
         }
     }
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut pool, cutoff, &claims);
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
+        let _ = crate::complexity::apply(&mut omitted, cutoff, &claims);
+    }
+    if let Some(warning) = deferred_omission(&omitted) {
+        ctx.warnings.push(warning);
     }
     let next = match pool.into_iter().next() {
         None => None,
@@ -352,7 +382,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     };
     let counts = Counts::of(&all);
     let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let mut ready = ready_tasks(&mut ctx, &all, &claims, now)?;
+    let mut ready = ready_tasks(&mut ctx, &all, &claims, now)?.tasks;
     let mut doing: Vec<Task> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())

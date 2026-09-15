@@ -42,6 +42,9 @@ pub fn sample(
         if !matches!(task.status, Status::Idea | Status::Todo | Status::Blocked) {
             continue;
         }
+        if crate::defer::is_deferred(task, now) {
+            continue;
+        }
         if let Some(cutoff) = cutoff
             && crate::time::parse(&task.updated)? > cutoff
         {

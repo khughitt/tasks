@@ -128,24 +128,59 @@ pub fn render_graph(tasks: &[Task], format: GraphFormat) -> String {
     rendered
 }
 
-/// Eligible to be worked on now: an open `todo`, or a recurrence that has come back
-/// around (spec §4.2). Every caller of `ready` uses this one definition; three
-/// independent `status == Todo` checks used to have to agree.
-pub fn is_actionable(task: &Task, now: OffsetDateTime) -> bool {
+/// An open `todo` or a recurrence that has come back around: the pool `ready` draws from
+/// before the deferral gate (periodic §4.2).
+pub fn is_candidate(task: &Task, now: OffsetDateTime) -> bool {
     task.status == Status::Todo || crate::periodic::is_due(task, now)
+}
+
+/// Eligible to be worked on now (defer §4.1): a candidate that no deferral is holding.
+pub fn is_actionable(task: &Task, now: OffsetDateTime) -> bool {
+    is_candidate(task, now) && !crate::defer::is_deferred(task, now)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Readiness {
+    Ready,
+    Deferred,
+    Not,
 }
 
 /// `lookup` returns Some(closed?) for a reachable dependency, None if unreachable.
 /// A task with children is a goal, not work, and is never ready.
-pub fn is_ready(
+pub fn readiness(
     task: &Task,
     has_children: bool,
     lookup: &dyn Fn(&TaskId) -> Option<bool>,
     now: OffsetDateTime,
-) -> bool {
-    is_actionable(task, now)
-        && !has_children
-        && task.depends.iter().all(|d| lookup(d) == Some(true))
+) -> Readiness {
+    if !is_candidate(task, now)
+        || has_children
+        || !task.depends.iter().all(|d| lookup(d) == Some(true))
+    {
+        Readiness::Not
+    } else if is_actionable(task, now) {
+        Readiness::Ready
+    } else {
+        Readiness::Deferred
+    }
+}
+
+/// What a picker found: the tasks it may hand out, and the ones a deferral held back.
+#[derive(Default)]
+pub struct Picked {
+    pub tasks: Vec<Task>,
+    pub deferred: Vec<Task>,
+}
+
+/// The one-line omission warning, or `None` when nothing was held back.
+pub fn deferred_omission(deferred: &[Task]) -> Option<String> {
+    let next = deferred.iter().filter_map(|task| task.defer).min()?;
+    Some(format!(
+        "{} deferred task{} omitted, next due {next}; `tasks list --deferred` shows them",
+        deferred.len(),
+        if deferred.len() == 1 { "" } else { "s" },
+    ))
 }
 
 /// The order `list` prints in. `Priority` is the default (priority, updated desc, id);
@@ -279,15 +314,16 @@ mod tests {
         let closed_all = |_: &TaskId| Some(true);
         let open_one = |id: &TaskId| Some(id.hex != "000002");
         let unreachable = |id: &TaskId| if id.prefix == "yy" { None } else { Some(true) };
-        assert!(is_ready(&a, false, &closed_all, now));
-        assert!(!is_ready(&a, false, &open_one, now));
-        assert!(!is_ready(&a, false, &unreachable, now));
+        assert_eq!(readiness(&a, false, &closed_all, now), Readiness::Ready);
+        assert_eq!(readiness(&a, false, &open_one, now), Readiness::Not);
+        assert_eq!(readiness(&a, false, &unreachable, now), Readiness::Not);
         let idea = t("xx-000009", Status::Idea, 0, None, &[]);
-        assert!(!is_ready(&idea, false, &closed_all, now));
+        assert_eq!(readiness(&idea, false, &closed_all, now), Readiness::Not);
         let doing = t("xx-000008", Status::Doing, 0, None, &[]);
-        assert!(!is_ready(&doing, false, &closed_all, now));
-        assert!(
-            !is_ready(&a, true, &closed_all, now),
+        assert_eq!(readiness(&doing, false, &closed_all, now), Readiness::Not);
+        assert_eq!(
+            readiness(&a, true, &closed_all, now),
+            Readiness::Not,
             "parents are never ready"
         );
     }
@@ -419,7 +455,10 @@ mod tests {
         due.every = Some(crate::periodic::Interval::parse("30d").unwrap());
         due.last_done = Some("2026-09-09T11:00:00Z".into());
         assert!(is_actionable(&due, now));
-        assert!(is_ready(&due, false, &|_| Some(true), now));
+        assert_eq!(
+            readiness(&due, false, &|_| Some(true), now),
+            Readiness::Ready
+        );
 
         let mut undue = due.clone();
         undue.last_done = Some("2026-10-08T11:00:00Z".into());
@@ -427,15 +466,36 @@ mod tests {
 
         // Every other gate still applies to a due record.
         assert!(
-            !is_ready(&due, true, &|_| Some(true), now),
+            readiness(&due, true, &|_| Some(true), now) == Readiness::Not,
             "goals never ready"
         );
         let mut held = due.clone();
         held.depends = vec![TaskId::parse("sci-000010").unwrap()];
         assert!(
-            !is_ready(&held, false, &|_| Some(false), now),
+            readiness(&held, false, &|_| Some(false), now) == Readiness::Not,
             "an open dependency holds a due record too"
         );
+    }
+
+    #[test]
+    fn a_deferred_todo_is_a_candidate_but_not_actionable() {
+        let now = crate::time::parse("2026-09-15T12:00:00Z").unwrap();
+        let mut held = t("sci-000001", Status::Todo, 2, None, &[]);
+        held.defer = Some(crate::defer::Defer::parse("2026-11-10").unwrap());
+        assert!(is_candidate(&held, now));
+        assert!(!is_actionable(&held, now));
+        assert_eq!(
+            readiness(&held, false, &|_| Some(true), now),
+            Readiness::Deferred
+        );
+        let mut due = held.clone();
+        due.defer = Some(crate::defer::Defer::parse("2026-09-01").unwrap());
+        assert!(is_actionable(&due, now));
+        assert_eq!(
+            readiness(&due, false, &|_| Some(true), now),
+            Readiness::Ready
+        );
+        assert_eq!(readiness(&held, true, &|_| Some(true), now), Readiness::Not);
     }
 
     #[test]

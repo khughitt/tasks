@@ -88,6 +88,11 @@ pub fn is_due(task: &Task, now: OffsetDateTime) -> bool {
     task.defer.is_some_and(|defer| now.date() >= defer.0)
 }
 
+/// Hidden from the pickers: the date is still ahead of the UTC calendar day (spec §4).
+pub fn is_deferred(task: &Task, now: OffsetDateTime) -> bool {
+    task.defer.is_some_and(|defer| now.date() < defer.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,14 +238,15 @@ mod tests {
     }
 
     #[test]
-    fn due_flips_at_the_utc_day_boundary() {
+    fn deferred_and_due_flip_at_the_utc_day_boundary() {
         let task = deferred(Status::Todo, Some("2026-11-10"));
+        assert!(is_deferred(&task, at("2026-11-09T23:59:59Z")));
         assert!(!is_due(&task, at("2026-11-09T23:59:59Z")));
+        assert!(!is_deferred(&task, at("2026-11-10T00:00:00Z")));
         assert!(is_due(&task, at("2026-11-10T00:00:00Z")));
         assert!(is_due(&task, at("2026-11-11T12:00:00Z")));
-        assert!(!is_due(
-            &deferred(Status::Todo, None),
-            at("2026-11-10T00:00:00Z")
-        ));
+        let plain = deferred(Status::Todo, None);
+        assert!(!is_deferred(&plain, at("2026-11-10T00:00:00Z")));
+        assert!(!is_due(&plain, at("2026-11-10T00:00:00Z")));
     }
 }

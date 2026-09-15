@@ -14006,3 +14006,267 @@ fn summary_rows_and_parked_rows_carry_agent() {
         "tables gain no column: {text}"
     );
 }
+
+#[test]
+fn deferred_work_is_hidden_from_ready_next_and_sample_with_one_warning() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let soon = id_of(env.json(&sci, &["add", "Soon", "-p", "0", "--defer", "2099-01-02"]));
+    let later = id_of(env.json(&sci, &["add", "Later", "-p", "0", "--defer", "2099-06-01"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "3"]));
+    let idea = id_of(env.json(
+        &sci,
+        &["add", "Idea", "--status", "idea", "--defer", "2099-01-02"],
+    ));
+    let ready = env.json(&sci, &["ready"]);
+    let ids: Vec<&str> = ready["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![plain.as_str()], "{ready}");
+    assert_eq!(ready["warnings"].as_array().unwrap().len(), 1, "{ready}");
+    assert_eq!(
+        ready["warnings"][0],
+        "2 deferred tasks omitted, next due 2099-01-02; `tasks list --deferred` shows them"
+    );
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(next["next"]["task"]["id"], plain);
+    assert!(
+        next["warnings"]
+            .to_string()
+            .contains("2 deferred tasks omitted"),
+        "{next}"
+    );
+    for seed in ["1", "2", "3", "4", "5"] {
+        let sample = env.json(
+            &sci,
+            &["sample", "-n", "10", "--older-than", "0", "--seed", seed],
+        );
+        let ids: Vec<&str> = sample["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec![plain.as_str()], "seed {seed}: {sample}");
+    }
+    let _ = (&soon, &later, &idea);
+}
+
+#[test]
+fn deferral_omissions_count_only_what_would_otherwise_be_handed_out() {
+    let mut env = TestEnv::new();
+    let (sci, other) = two_roots(&mut env);
+    let counted = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Counted",
+            "-p",
+            "1",
+            "--size",
+            "s",
+            "--complexity",
+            "low",
+            "--defer",
+            "2099-01-02",
+        ],
+    ));
+    let waiting = id_of(env.json(&sci, &["add", "Waiting", "--defer", "2099-01-02"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &waiting, "ask", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let claimed = id_of(env.json(&sci, &["add", "Claimed", "--defer", "2099-01-02"]));
+    std::fs::copy(
+        sci.join(format!("tasks/{claimed}.md")),
+        other.join(format!("tasks/{claimed}.md")),
+    )
+    .unwrap();
+    as_agent(&env, &other, "agent-b")
+        .args(["start", &claimed])
+        .assert()
+        .success();
+    let gate = id_of(env.json(&sci, &["add", "Gate"]));
+    env.json(
+        &sci,
+        &["add", "Held", "--defer", "2099-01-02", "--depends", &gate],
+    );
+    let big = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Big",
+            "--size",
+            "l",
+            "--complexity",
+            "high",
+            "--defer",
+            "2099-01-02",
+        ],
+    ));
+    let ready = env.json(&sci, &["ready"]);
+    assert!(
+        ready["warnings"]
+            .to_string()
+            .contains("2 deferred tasks omitted"),
+        "counted and big: {ready}"
+    );
+    let ready = env.json(&sci, &["ready", "--size", "s"]);
+    assert!(
+        ready["warnings"]
+            .to_string()
+            .contains("1 deferred task omitted"),
+        "{ready}"
+    );
+    let ready = env.json(&sci, &["ready", "--parallel"]);
+    assert!(
+        !ready["warnings"].to_string().contains("deferred task"),
+        "{ready}"
+    );
+    let ready = env.json(&sci, &["ready", "--max-complexity", "low"]);
+    assert!(
+        ready["warnings"]
+            .to_string()
+            .contains("1 deferred task omitted"),
+        "{ready}"
+    );
+    let next = env.json(&sci, &["next", "--max-complexity", "low"]);
+    assert!(
+        next["warnings"]
+            .to_string()
+            .contains("1 deferred task omitted"),
+        "{next}"
+    );
+    let _ = (&counted, &big);
+}
+
+#[test]
+fn a_due_deferral_is_back_in_ready_next_and_sample() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let due = id_of(env.json(&sci, &["add", "Due", "-p", "0"]));
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^priority: 0$/priority: 0\\ndefer: 2026-01-01/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &due])
+        .env("EDITOR", &editor)
+        .assert()
+        .success();
+    let ready = env.json(&sci, &["ready"]);
+    assert_eq!(ready["tasks"][0]["id"], due);
+    assert_eq!(ready["tasks"][0]["deferred"]["due"], true);
+    assert!(ready["warnings"].as_array().unwrap().is_empty(), "{ready}");
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(next["next"]["task"]["id"], due);
+    assert_eq!(next["next"]["deferred"]["due"], true, "{next}");
+    let sample = env.json(
+        &sci,
+        &["sample", "-n", "10", "--older-than", "0", "--seed", "1"],
+    );
+    assert_eq!(sample["tasks"][0]["id"], due);
+}
+
+#[test]
+fn a_deferred_parked_idea_is_omitted_from_next_with_the_warning() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let idea = id_of(env.json(
+        &sci,
+        &["add", "Idea", "--status", "idea", "--defer", "2099-01-02"],
+    ));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &idea, "scope it"])
+        .assert()
+        .success();
+    let next = env.json(&sci, &["next"]);
+    assert!(next["next"].is_null(), "{next}");
+    assert!(
+        next["warnings"]
+            .to_string()
+            .contains("1 deferred task omitted, next due 2099-01-02"),
+        "{next}"
+    );
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["parked"][0]["id"], idea, "{prime}");
+    let todo = id_of(env.json(&sci, &["add", "Todo", "--defer", "2099-01-02"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &todo, "resume"])
+        .assert()
+        .success();
+    let next = env.json(&sci, &["next"]);
+    assert!(
+        next["warnings"]
+            .to_string()
+            .contains("2 deferred tasks omitted"),
+        "{next}"
+    );
+}
+
+#[test]
+fn quiet_judges_the_copy_it_would_hand_out() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    let (_keep, wt) = unregistered_checkout("sci");
+    let copy = |id: &str| {
+        std::fs::copy(
+            main.join(format!("tasks/{id}.md")),
+            wt.join(format!("tasks/{id}.md")),
+        )
+        .unwrap()
+    };
+    let park = |env: &TestEnv, id: &str| {
+        as_agent(env, &wt, "agent-a")
+            .args([
+                "park",
+                id,
+                "bench",
+                "--waiting-on",
+                "user",
+                "--reason",
+                "quiet",
+                "--minutes",
+                "20",
+            ])
+            .assert()
+            .success()
+    };
+    let a = id_of(env.json(&main, &["add", "A", "-p", "1"]));
+    copy(&a);
+    env.json(&wt, &["edit", &a, "--defer", "2099-01-02"]);
+    park(&env, &a);
+    let b = id_of(env.json(&main, &["add", "B", "-p", "1"]));
+    copy(&b);
+    env.json(&main, &["edit", &b, "--defer", "2099-01-02"]);
+    park(&env, &b);
+    let v = env.json(&main, &["quiet"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![b.as_str()], "{v}");
+    assert!(v["tasks"][0]["deferred"].is_null(), "{v}");
+    assert_eq!(
+        v["tasks"][0]["park"]["worktree"],
+        wt.to_string_lossy().as_ref()
+    );
+}
+
+#[test]
+fn a_deferred_todo_still_holds_its_dependents() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let gate = id_of(env.json(&sci, &["add", "Gate", "--defer", "2099-01-02"]));
+    let after = id_of(env.json(&sci, &["add", "After", "--depends", &gate]));
+    let ready = env.json(&sci, &["ready"]);
+    assert!(ready["tasks"].as_array().unwrap().is_empty(), "{ready}");
+    env.json(&sci, &["start", &gate]);
+    env.json(&sci, &["done", &gate, "opened"]);
+    assert_eq!(env.json(&sci, &["ready"])["tasks"][0]["id"], after);
+}

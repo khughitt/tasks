@@ -25,6 +25,7 @@ pub fn run(mut ctx: ReadCtx, limit: Option<usize>) -> Result<Output> {
                 .is_some_and(|park| park.reason == Some(Reason::Quiet))
         })
         .filter(|row| row.status.is_none_or(|status| status.is_open()))
+        .filter(|row| !row.deferred.as_ref().is_some_and(|deferred| !deferred.due))
         .collect();
     tasks.sort_by(|a, b| {
         let priority = |row: &ParkedRow| row.priority.unwrap_or(u8::MAX);
