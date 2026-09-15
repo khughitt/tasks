@@ -8,9 +8,9 @@ complexity: mid
 process: planned
 owner: be6fcc-defer
 created: 2026-09-11T01:15:26Z
-updated: 2026-09-15T14:19:46Z
+updated: 2026-09-15T14:31:47Z
 started: 2026-09-15T12:38:29Z
-completed: 2026-09-15T14:19:46Z
+completed: 2026-09-15T14:31:47Z
 depends: []
 tags: [quick-add, cli, periodic]
 source: "mindful:thought:1e2513d2f5ea48609022559f3c687d01"
@@ -33,3 +33,5 @@ Motivating records: prism-49a068 and prism-8a8eac, both carrying 'revisit 2026-1
 - 2026-09-15T14:16:46Z (be6fcc-defer): took over a live claim held by session 935bf565-993e-4f8e-bc6c-637567fcd051 (owner main, host titan, pid 1974023, worktree /mnt/ssd/Dropbox/tasks, since 2026-09-15T12:38:29Z, age 5897s, live)
 - 2026-09-15T14:16:46Z (be6fcc-defer): User requested implementation of the reviewed plan in the existing worktree; resumed the parent claim for implementation closeout. User chose to keep both motivating Prism records shelved and skip their date migration.
 - 2026-09-15T14:19:46Z (be6fcc-defer): defer date: --defer/--no-defer, pickers skip it with one warning, list --deferred, prime line, check findings; Prism migration skipped by user decision
+- 2026-09-15T14:28:40Z (be6fcc-defer): Final review found repeated block clears defer and two targeted coverage gaps; applying shared-transition fix and tests.
+- 2026-09-15T14:31:47Z (be6fcc-defer): defer date feature finalized: repeated block preserves the date; due-only prime and malformed defer scan coverage added

@@ -1637,6 +1637,25 @@ fn check_reports_deferred_goals_and_deferrals_on_the_wrong_status() {
             .any(|e| e["kind"] == "parse" && e["file"].as_str().unwrap().contains(&both)),
         "{v}"
     );
+
+    let malformed = id_of(env.json(&sci, &["add", "Malformed"]));
+    let path = sci.join(format!("tasks/{malformed}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("priority: 2\n", "priority: 2\ndefer: not-a-date\n"),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "parse" && e["file"].as_str().unwrap().contains(&malformed)),
+        "{v}"
+    );
 }
 
 #[test]
@@ -6199,6 +6218,14 @@ fn every_status_transition_spends_a_deferral() {
         env.json(&sci, &["show", &kept])["task"]["defer"].is_string(),
         "same status is not a transition"
     );
+
+    let blocked = id_of(env.json(&sci, &["add", "Blocked", "--defer", "2099-01-02"]));
+    env.json(&sci, &["block", &blocked, "blocked"]);
+    env.json(&sci, &["edit", &blocked, "--defer", "2099-01-02"]);
+    env.json(&sci, &["block", &blocked, "still blocked"]);
+    let v = env.json(&sci, &["show", &blocked]);
+    assert_eq!(v["task"]["status"], "blocked");
+    assert_eq!(v["task"]["defer"], "2099-01-02", "{v}");
 }
 
 #[test]
@@ -14401,7 +14428,7 @@ fn prime_carries_the_deferred_line_and_aggregate() {
     assert!(empty["deferred"]["next"].is_null());
     assert!(!env.pretty(&sci, &["prime"]).contains("deferred:"));
 
-    env.json(&sci, &["add", "Later", "--defer", "2099-06-01"]);
+    let later = id_of(env.json(&sci, &["add", "Later", "--defer", "2099-06-01"]));
     let idea = id_of(env.json(
         &sci,
         &["add", "Soon", "--status", "idea", "--defer", "2099-01-02"],
@@ -14443,6 +14470,17 @@ fn prime_carries_the_deferred_line_and_aggregate() {
     let line = pretty.lines().find(|l| l.starts_with("deferred:")).unwrap();
     assert!(line.ends_with("; 1 due"), "{line}");
     assert!(pretty.contains("due 2026-01-01"), "{pretty}");
+
+    env.json(&sci, &["edit", &later, "--no-defer"]);
+    let v = env.json(&sci, &["prime"]);
+    assert_eq!(v["deferred"]["waiting"], 0);
+    assert!(v["deferred"]["next"].is_null());
+    assert!(v["deferred"]["in_days"].is_null());
+    assert_eq!(v["deferred"]["due"], 1);
+    let pretty = env.pretty(&sci, &["prime"]);
+    let line = pretty.lines().find(|l| l.starts_with("deferred:")).unwrap();
+    assert_eq!(line, "deferred: 0 waiting; 1 due");
+    assert!(!line.contains("next"), "{line}");
 
     let show = env.pretty(&sci, &["show", &idea]);
     assert!(

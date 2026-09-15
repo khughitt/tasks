@@ -709,9 +709,11 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     } else if task.status == Status::Done && to != Status::Done {
         task.completed = None;
     }
+    if task.status != to {
+        // spec §2.2: a deferral is spent by a status change.
+        task.defer = None;
+    }
     task.status = to;
-    // spec §2.2: a deferral is spent by attention, and every transition is attention.
-    task.defer = None;
     if completing && let Some(every) = task.every {
         let next = crate::periodic::add(crate::time::parse(&now)?, every).ok_or_else(|| {
             Error::Validation(format!(
