@@ -562,7 +562,11 @@ mod tests {
         }
     }
 
+    // 1,572,480 snapshots take ~7 s in a debug build and floor every `cargo test` that
+    // includes them, so the inner loop skips this one; `just test` and the pre-push gate
+    // run it with `--include-ignored`.
     #[test]
+    #[ignore = "exhaustive: ~7 s in debug; the full suite runs it with --include-ignored"]
     fn every_enumerated_snapshot_gets_the_verdict_the_spec_names() {
         let started = std::time::Instant::now();
         let mut counts = BTreeMap::new();

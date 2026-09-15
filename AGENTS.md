@@ -45,8 +45,12 @@ An explicit user instruction to work in place wins.
 
     just gate
 
-`just check` is the seconds-long part (`cargo fmt --check`, `cargo clippy --all-targets
--- -D warnings`, `tasks check`); `just test` is `cargo test`. Every recipe runs through
+Tests: `just test-fast [<name>]` while working; the pre-push hook runs `just gate`. Run
+`just test` yourself only if hooks are not installed. `test-fast` is `cargo test` with an
+optional name filter and skips the `#[ignore]`d exhaustive enumeration; `just test` is the
+whole suite, ignored tests included. Never run `cargo test` directly: the recipe runs the
+same command and records it. `just check` is the seconds-long part (`cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, `tasks check`). Every recipe runs through
 the vendored timing wrapper `tools/tt`, which records the run for the cross-project test
 and CI audit (ops `docs/specs/2026-09-04-test-ci-audit-design.md`). The git hooks in
 `.githooks/` run `check` at pre-commit and `gate` at pre-push; on a fresh clone, run

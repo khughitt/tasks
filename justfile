@@ -9,18 +9,20 @@ tt := "python3 tools/tt"
 
 # The three commands, each written once. Recipes and hooks all run these, so a hook can
 # never drift from the gate it is supposed to be. Avoid single quotes inside them.
-# This is a single Rust crate with one integration-test binary, so there is no finer
-# grain to select: the fast target is the suite. The report shows the gap as equal
-# durations; a curated subset is the follow-up if that gap costs too much.
+# This is a single Rust crate, so there is no affected-only selection; the two grains
+# it does have are the ones the baseline showed being used. `test-fast` takes an
+# optional name filter, because every recorded bypass was `cargo test <name>` for one
+# test, and it skips tests marked `#[ignore]`: the exhaustive rename::classify
+# enumeration alone costs ~7 s in debug. `test` runs everything, ignored included.
 fast_cmd := "cargo test"
-test_cmd := "cargo test"
+test_cmd := "cargo test -- --include-ignored"
 check_cmd := "python3 tools/ops-check && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
 
-# The inner loop; here, the whole suite.
-test-fast:
-    {{tt}} test-fast -- sh -c '{{fast_cmd}}'
+# The inner loop: the non-ignored suite, or the tests whose names contain `filter`.
+test-fast *filter:
+    {{tt}} test-fast -- sh -c '{{fast_cmd}} {{filter}}'
 
-# The full suite.
+# The full suite, ignored tests included.
 test:
     {{tt}} test -- sh -c '{{test_cmd}}'
 
