@@ -1579,6 +1579,67 @@ fn check_reports_parent_problems() {
 }
 
 #[test]
+fn check_reports_deferred_goals_and_deferrals_on_the_wrong_status() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal", "--defer", "2099-01-02"]));
+    let kid = id_of(env.json(&sci, &["add", "Kid"]));
+    // Reachable only by hand: both writers refuse the pair (§3.3).
+    let path = sci.join(format!("tasks/{kid}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", &format!("depends: []\nparent: {goal}\n")),
+    )
+    .unwrap();
+    let closed = id_of(env.json(&sci, &["add", "Closed"]));
+    env.json(&sci, &["done", &closed, "x"]);
+    let path = sci.join(format!("tasks/{closed}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("priority: 2\n", "priority: 2\ndefer: 2099-01-02\n"),
+    )
+    .unwrap();
+
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert!(!out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<(&str, &str)> = v["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["kind"].as_str().unwrap(), e["id"].as_str().unwrap()))
+        .collect();
+    assert!(kinds.contains(&("deferred_goal", goal.as_str())), "{v}");
+    assert!(kinds.contains(&("defer_status", closed.as_str())), "{v}");
+    assert!(
+        !kinds.iter().any(|(kind, _)| *kind == "parse"),
+        "the status rule is not parsing's: {v}"
+    );
+
+    // Parsing still owns the shape rules: defer beside every fails the scan.
+    let both = id_of(env.json(&sci, &["add", "Both", "--every", "30d"]));
+    let path = sci.join(format!("tasks/{both}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("every: 30d\n", "every: 30d\ndefer: 2099-01-02\n"),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "parse" && e["file"].as_str().unwrap().contains(&both)),
+        "{v}"
+    );
+}
+
+#[test]
 fn add_writes_a_valid_file_and_show_reads_it_back() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

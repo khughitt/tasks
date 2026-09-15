@@ -220,6 +220,32 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ));
             }
         }
+        if task.defer.is_some() {
+            let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
+            if !kids.is_empty() {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "deferred_goal",
+                    format!(
+                        "is deferred and has children ({}); a goal is never ready, so the deferral hides nothing",
+                        kids.iter().map(|kid| kid.id.to_string()).collect::<Vec<_>>().join(", ")
+                    ),
+                ));
+            }
+            // spec §3.2: the status rule lives here and in the writers, not in parsing.
+            if !crate::defer::can_carry(task.status) {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "defer_status",
+                    format!(
+                        "is {} and carries defer; a deferral may sit only on an idea, todo, or blocked task",
+                        task.status.as_str()
+                    ),
+                ));
+            }
+        }
         for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
             let Some(path) = path else { continue };
             if !ctx.project.root.join(path).is_file() {
