@@ -11865,6 +11865,50 @@ fn the_periodic_object_is_the_json_contract() {
 }
 
 #[test]
+fn deferred_object_rides_show_list_next_and_parked_rows() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Later", "--defer", "2099-01-02"]));
+    let plain = id_of(env.json(&sci, &["add", "Now"]));
+    let v = env.json(&sci, &["show", &id]);
+    assert_eq!(v["deferred"]["until"], "2099-01-02");
+    assert_eq!(v["deferred"]["due"], false);
+    assert!(env.json(&sci, &["show", &plain])["deferred"].is_null());
+    let list = env.json(&sci, &["list"]);
+    let row = list["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["id"] == id)
+        .unwrap();
+    assert_eq!(row["deferred"]["until"], "2099-01-02");
+    assert_eq!(row["deferred"]["due"], false);
+
+    // A due record, through the editor (§8).
+    let due = id_of(env.json(&sci, &["add", "Due", "--status", "idea"]));
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\ndefer: 2026-01-01/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &due])
+        .env("EDITOR", &editor)
+        .assert()
+        .success();
+    let v = env.json(&sci, &["show", &due]);
+    assert_eq!(v["deferred"]["until"], "2026-01-01");
+    assert_eq!(v["deferred"]["due"], true);
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &id, "later"])
+        .assert()
+        .success();
+    let parked = env.json(&sci, &["list", "--parked"]);
+    assert_eq!(parked["tasks"][0]["id"], id);
+    assert_eq!(parked["tasks"][0]["deferred"]["until"], "2099-01-02");
+}
+
+#[test]
 fn a_due_row_shows_its_cadence_and_due_date() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

@@ -112,6 +112,7 @@ pub fn describe(
             .and_then(|snapshot| snapshot.escalation(&task.id))
             .cloned(),
         periodic: crate::output::PeriodicInfo::of(&task, now),
+        deferred: crate::output::DeferredInfo::of(&task, now),
         task,
     })
 }

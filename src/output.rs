@@ -118,6 +118,7 @@ pub struct ShowFields {
     pub park: Option<ParkInfo>,
     pub escalation: Option<crate::claims::Escalation>,
     pub periodic: Option<PeriodicInfo>,
+    pub deferred: Option<DeferredInfo>,
 }
 
 #[derive(Serialize)]
@@ -160,6 +161,7 @@ pub struct TaskSummary {
     pub park: Option<ParkInfo>,
     pub escalation: Option<crate::claims::Escalation>,
     pub periodic: Option<PeriodicInfo>,
+    pub deferred: Option<DeferredInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -245,6 +247,24 @@ impl PeriodicInfo {
     }
 }
 
+/// A record's deferral and whether the clock has spent it (spec §5.4). Named apart from
+/// the raw `Task.defer` string so the two shapes never collide.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeferredInfo {
+    pub until: String,
+    pub due: bool,
+}
+
+impl DeferredInfo {
+    pub fn of(task: &Task, now: OffsetDateTime) -> Option<DeferredInfo> {
+        let until = task.defer?;
+        Some(DeferredInfo {
+            until: until.to_string(),
+            due: crate::defer::is_due(task, now),
+        })
+    }
+}
+
 impl TaskSummary {
     /// `all` is the scan the row came from; counts are computed against it.
     pub fn of(
@@ -287,6 +307,7 @@ impl TaskSummary {
                 .and_then(|snapshot| snapshot.escalation(&task.id))
                 .cloned(),
             periodic: PeriodicInfo::of(task, now),
+            deferred: DeferredInfo::of(task, now),
         }
     }
 }
@@ -318,6 +339,7 @@ pub struct ParkedRow {
     pub park: Option<ParkInfo>,
     pub escalation: Option<crate::claims::Escalation>,
     pub phase: Option<crate::model::Phase>,
+    pub deferred: Option<DeferredInfo>,
 }
 
 impl ParkedRow {
@@ -348,6 +370,7 @@ impl ParkedRow {
             park: summary.park,
             escalation: summary.escalation,
             phase: Some(phase),
+            deferred: summary.deferred,
         }
     }
     pub fn unresolved(id: &str, park: &crate::claims::Park) -> ParkedRow {
@@ -377,6 +400,7 @@ impl ParkedRow {
             park: Some(ParkInfo::of(park)),
             escalation: None,
             phase: None,
+            deferred: None,
         }
     }
 }
@@ -1238,6 +1262,7 @@ mod tests {
             park: None,
             escalation: None,
             periodic: None,
+            deferred: None,
             parallel,
         }
     }

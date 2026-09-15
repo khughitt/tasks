@@ -3,9 +3,9 @@
 //! periodic dueness is. See docs/specs/2026-09-15-defer-design.md.
 
 use crate::error::{Error, Result};
-use crate::model::Status;
+use crate::model::{Status, Task};
 use std::fmt;
-use time::{Date, Month};
+use time::{Date, Month, OffsetDateTime};
 
 fn bad(value: &str, detail: &str) -> Error {
     Error::Validation(format!("bad defer date {value:?}: {detail}"))
@@ -83,12 +83,54 @@ pub fn can_carry(status: Status) -> bool {
     matches!(status, Status::Idea | Status::Todo | Status::Blocked)
 }
 
+/// The deferral has been spent by the clock but not yet by attention (spec §4).
+pub fn is_due(task: &Task, now: OffsetDateTime) -> bool {
+    task.defer.is_some_and(|defer| now.date() >= defer.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::TaskId;
 
     fn day(s: &str) -> Date {
         Defer::parse(s).unwrap().0
+    }
+
+    fn at(s: &str) -> OffsetDateTime {
+        crate::time::parse(s).unwrap()
+    }
+
+    fn deferred(status: Status, defer: Option<&str>) -> Task {
+        Task {
+            id: TaskId::parse("sci-000001").unwrap(),
+            title: "Later".into(),
+            status,
+            priority: 2,
+            size: None,
+            complexity: None,
+            process: None,
+            parallel: false,
+            every: None,
+            defer: defer.map(|date| Defer::parse(date).unwrap()),
+            owner: None,
+            created: "2026-01-01T00:00:00Z".into(),
+            updated: "2026-01-01T00:00:00Z".into(),
+            started: None,
+            completed: None,
+            last_done: None,
+            depends: vec![],
+            parent: None,
+            tags: vec![],
+            source: None,
+            model: None,
+            agent: None,
+            spec: None,
+            plan: None,
+            step: None,
+            body: String::new(),
+            notes: vec![],
+        }
     }
 
     #[test]
@@ -188,5 +230,17 @@ mod tests {
         ] {
             assert!(!can_carry(status), "{status:?}");
         }
+    }
+
+    #[test]
+    fn due_flips_at_the_utc_day_boundary() {
+        let task = deferred(Status::Todo, Some("2026-11-10"));
+        assert!(!is_due(&task, at("2026-11-09T23:59:59Z")));
+        assert!(is_due(&task, at("2026-11-10T00:00:00Z")));
+        assert!(is_due(&task, at("2026-11-11T12:00:00Z")));
+        assert!(!is_due(
+            &deferred(Status::Todo, None),
+            at("2026-11-10T00:00:00Z")
+        ));
     }
 }
