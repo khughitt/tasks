@@ -736,13 +736,14 @@ Links alone never prove approval. Both paths keep appropriate debugging, testing
 verification, and code review. If direct work outgrows its scope or exposes an
 unresolved design decision, note the evidence and reassess it to planned.
 
-Both code paths reuse an isolated task worktree or create one with `git worktree add`
-under `.worktrees/`, then run `just setup` when defined. Planned work creates it before
-the spec. Read-only investigation and task-record maintenance alone need no new
-worktree, and explicit user overrides win. This is instruction policy; the CLI does
-not launch skills, create worktrees, or require process on `start`. Scoping chooses
-process with size/complexity; curation can fill missing choices with evidence in its
-existing sample. No bulk backfill is required.
+Both code paths commit the task record before they reuse an isolated task worktree or
+create one with `git worktree add` under `.worktrees/`. They then run `just setup` when
+defined, otherwise only the root guide's explicit setup command; they never guess an
+installer. Planned work creates the worktree before the spec. Read-only investigation and
+task-record maintenance alone need no new worktree, and explicit user overrides win. This
+is instruction policy; the CLI does not launch skills, create worktrees, or require
+process on `start`. Scoping chooses process with size/complexity; curation can fill
+missing choices with evidence in its existing sample. No bulk backfill is required.
 
 This repo's AGENTS.md adopts the policy. Other projects must adopt it themselves
 before relying on the field to override their generic skill triggers. The global

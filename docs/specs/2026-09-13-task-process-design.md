@@ -46,12 +46,13 @@ Debugging, applicable checks, and review remain necessary on either path.
 
 ## Workspace and instruction policy
 
-Separate isolation from planning: both paths use an isolated worktree when changing
-repository code. Reuse the task's existing worktree when resuming; otherwise create
-one with `git worktree add` under `.worktrees/`, then run `just setup` when defined.
+Separate isolation from planning: both paths commit the task record before using an
+isolated worktree for repository code. Reuse the task's existing worktree when resuming;
+otherwise create one with `git worktree add` under `.worktrees/`, then run `just setup`
+when defined or only the root guide's explicit setup command. Do not guess an installer.
 Planned work creates it before drafting the spec, following the existing user rule.
-Read-only investigation and task-record maintenance alone need no new worktree.
-An explicit user instruction to work in place still wins.
+Read-only investigation and task-record maintenance alone need no new worktree. An
+explicit user instruction to work in place still wins.
 
 This deliberately extends the existing brainstorming-and-planning worktree rule to
 direct code changes. Selecting direct saves document ceremony, not isolation.

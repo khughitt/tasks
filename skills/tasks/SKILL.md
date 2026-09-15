@@ -159,13 +159,14 @@ task, record the evidence and change it to planned before continuing implementat
 Bounded choices covered by the task do not require that change. Both paths retain
 applicable debugging, testing, verification, and code-review skills.
 
-Both code paths use an isolated task worktree: reuse it on resume, or create one
-with `git worktree add` under `.worktrees/`, then run `just setup` if defined.
-Planned work creates it before drafting the spec. Read-only investigation and
-task-record maintenance alone need no new worktree. Explicit user instructions to
-work in place win. This field does not override higher-priority instructions;
-other projects must adopt the policy in their agent instructions before relying
-on direct to waive mandatory brainstorming. The CLI never launches skills or
+Both code paths use an isolated task worktree: commit the task record before creating
+one with `git worktree add` under `.worktrees/`, or reuse it on resume. Then run `just
+setup` when defined; otherwise run only the root guide's explicit setup command. Do not
+guess an installer. Planned work creates the worktree before drafting the spec.
+Read-only investigation and task-record maintenance alone need no new worktree. Explicit
+user instructions to work in place win. This field does not override higher-priority
+instructions; other projects must adopt the policy in their agent instructions before
+relying on direct to waive mandatory brainstorming. The CLI never launches skills or
 creates worktrees, and does not gate selection or `start` on process.
 
 `add --process` and `edit --process` accept `direct` or `planned`;
