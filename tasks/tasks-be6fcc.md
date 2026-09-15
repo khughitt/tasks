@@ -8,12 +8,13 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-11T01:15:26Z
-updated: 2026-09-15T12:43:12Z
+updated: 2026-09-15T13:05:11Z
 started: 2026-09-15T12:38:29Z
 depends: []
 tags: [quick-add, cli, periodic]
 source: "mindful:thought:1e2513d2f5ea48609022559f3c687d01"
 spec: docs/specs/2026-09-15-defer-design.md
+plan: docs/plans/2026-09-15-defer.md
 ---
 
 A one-shot date that hides an open task until it arrives: 'revisit this idea in two months' has no home today. The only date mechanism is --every, anchored on each completion (docs/specs/2026-09-09-periodic-design.md), so a fresh recurring task is ready at once and only its second occurrence is deferred.
