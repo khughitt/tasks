@@ -31,7 +31,7 @@ pub fn sample(
     seed: Option<u64>,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
-    let now = time::OffsetDateTime::now_utc();
+    let now = crate::time::parse(&crate::time::now())?;
     // Bounded to <= 36500 at the CLI, so the cast is exact and the subtraction stays far
     // inside OffsetDateTime's range. Zero means no age check at all: a future-dated
     // record from clock skew is still admitted.
