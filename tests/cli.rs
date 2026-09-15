@@ -6109,6 +6109,116 @@ fn defer_flag_conflicts_are_usage_errors() {
     assert!(env.json(&sci, &["show", &id])["task"]["defer"].is_null());
 }
 
+#[test]
+fn every_status_transition_spends_a_deferral() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let cases: Vec<(&str, Vec<&str>)> = vec![
+        ("todo", vec!["start"]),
+        ("todo", vec!["done", "landed"]),
+        ("todo", vec!["drop", "no"]),
+        ("todo", vec!["shelve", "later"]),
+        ("idea", vec!["edit", "--status", "todo"]),
+    ];
+    for (status, action) in cases {
+        let id = id_of(env.json(&sci, &["add", "T", "--status", status, "--defer", "30d"]));
+        let mut args: Vec<&str> = vec![action[0], &id];
+        args.extend(&action[1..]);
+        env.json(&sci, &args);
+        let value = env.json(&sci, &["show", &id]);
+        assert!(value["task"]["defer"].is_null(), "{action:?} left {value}");
+    }
+
+    let kept = id_of(env.json(&sci, &["add", "Kept", "--defer", "30d"]));
+    env.json(&sci, &["edit", &kept, "-p", "0"]);
+    env.json(&sci, &["note", &kept, "still later"]);
+    assert!(env.json(&sci, &["show", &kept])["task"]["defer"].is_string());
+    env.json(&sci, &["edit", &kept, "--status", "todo"]);
+    assert!(
+        env.json(&sci, &["show", &kept])["task"]["defer"].is_string(),
+        "same status is not a transition"
+    );
+}
+
+#[test]
+fn editor_saves_follow_the_one_thing_per_save_rule_for_defer() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "--defer", "30d"]));
+
+    let editor = editor_script(&sci, "sed -i 's/^status: todo$/status: doing/' \"$1\"");
+    env.cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &editor)
+        .assert()
+        .success();
+    let value = env.json(&sci, &["show", &id]);
+    assert_eq!(value["task"]["status"], "doing");
+    assert!(value["task"]["defer"].is_null(), "{value}");
+
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\ndefer: 2099-01-02/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &editor)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(err_kind(&out), "validation");
+    assert!(
+        err_detail(&out).contains("is doing"),
+        "{}",
+        err_detail(&out)
+    );
+    assert!(env.json(&sci, &["show", &id])["task"]["defer"].is_null());
+
+    let both = id_of(env.json(
+        &sci,
+        &["add", "Both", "--status", "idea", "--defer", "2099-01-02"],
+    ));
+    let editor = editor_script(
+        &sci,
+        "sed -i -e 's/^status: idea$/status: todo/' -e 's/^defer: 2099-01-02$/defer: 2099-06-01/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &both])
+        .env("EDITOR", &editor)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        err_detail(&out).contains("cannot also change defer"),
+        "{}",
+        err_detail(&out)
+    );
+    let value = env.json(&sci, &["show", &both]);
+    assert_eq!(value["task"]["status"], "idea");
+    assert_eq!(value["task"]["defer"], "2099-01-02");
+
+    let plain = id_of(env.json(&sci, &["add", "Plain", "--status", "idea"]));
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\ndefer: 2026-01-01/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &plain])
+        .env("EDITOR", &editor)
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &plain])["task"]["defer"],
+        "2026-01-01"
+    );
+
+    env.json(&sci, &["edit", &plain, "--status", "todo"]);
+    env.json(&sci, &["edit", &plain, "--defer", "30d"]);
+    assert!(env.json(&sci, &["show", &plain])["task"]["defer"].is_string());
+}
+
 /// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
 /// store keyed by prefix.
 fn two_roots(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {

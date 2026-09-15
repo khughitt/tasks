@@ -233,6 +233,25 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     }
     super::dep::ensure_acyclic(&ctx, &edited).map_err(keep)?;
     let status = edited.status;
+    // spec §2.2: a save may change the status or the date, never both, since the
+    // transition below clears the date and would silently discard a new one.
+    if status != original.status && edited.defer != original.defer {
+        return Err(keep(Error::Validation(
+            "a save that changes the status cannot also change defer; change the status \
+             first, then set the date"
+                .into(),
+        )));
+    }
+    // spec §3.2: the status rule is the writers' to enforce. A status-changing save
+    // reaches `transition`, which clears the field; an equal-status save must not leave
+    // a deferral on a status that cannot carry one.
+    if status == original.status && edited.defer.is_some() && !crate::defer::can_carry(status) {
+        return Err(keep(Error::Validation(format!(
+            "{} is {}; a deferral can only sit on an idea, todo, or blocked task",
+            original.id,
+            status.as_str()
+        ))));
+    }
     edited.status = original.status;
     if status == original.status {
         ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;
