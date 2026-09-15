@@ -61,6 +61,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_parallel
         || fields.every.is_some()
         || args.no_every
+        || fields.defer.is_some()
+        || args.no_defer
         || !fields.tags.is_empty()
         || !fields.depends.is_empty()
         || fields.spec.is_some()
@@ -98,6 +100,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     if args.no_every {
         task.every = None;
         task.last_done = None;
+    }
+    if args.no_defer {
+        task.defer = None;
     }
     if args.no_source {
         task.source = None;

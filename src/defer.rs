@@ -3,6 +3,7 @@
 //! periodic dueness is. See docs/specs/2026-09-15-defer-design.md.
 
 use crate::error::{Error, Result};
+use crate::model::Status;
 use std::fmt;
 use time::{Date, Month};
 
@@ -38,6 +39,25 @@ impl Defer {
         .map_err(|error| bad(value, &error.to_string()))?;
         Ok(Defer(date))
     }
+
+    /// Resolves an absolute date or interval measured from `today`.
+    pub fn resolve(value: &str, today: Date) -> Result<Defer> {
+        let date = if value.ends_with('d') || value.ends_with('w') {
+            let interval = crate::periodic::Interval::parse(value)?;
+            today
+                .checked_add(time::Duration::days(interval.days()))
+                .ok_or_else(|| bad(value, "not a representable date"))?
+        } else {
+            Defer::parse(value)?.0
+        };
+        if date <= today {
+            return Err(bad(
+                value,
+                &format!("must be after today ({})", Defer(today)),
+            ));
+        }
+        Ok(Defer(date))
+    }
 }
 
 impl fmt::Display for Defer {
@@ -58,9 +78,18 @@ impl serde::Serialize for Defer {
     }
 }
 
+/// The statuses on which a deferral is meaningful.
+pub fn can_carry(status: Status) -> bool {
+    matches!(status, Status::Idea | Status::Todo | Status::Blocked)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn day(s: &str) -> Date {
+        Defer::parse(s).unwrap().0
+    }
 
     #[test]
     fn parses_and_prints_a_calendar_date() {
@@ -98,6 +127,66 @@ mod tests {
             "2026-1a-10",
         ] {
             assert!(Defer::parse(bad).is_err(), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn resolve_accepts_a_future_date_or_an_interval_from_today() {
+        let today = day("2026-09-15");
+        assert_eq!(
+            Defer::resolve("2026-11-10", today).unwrap().to_string(),
+            "2026-11-10"
+        );
+        assert_eq!(
+            Defer::resolve("60d", today).unwrap().to_string(),
+            "2026-11-14"
+        );
+        assert_eq!(
+            Defer::resolve("8w", today).unwrap().to_string(),
+            "2026-11-10"
+        );
+        assert_eq!(
+            Defer::resolve("1d", today).unwrap().to_string(),
+            "2026-09-16"
+        );
+    }
+
+    #[test]
+    fn resolve_refuses_today_the_past_and_bad_intervals() {
+        let today = day("2026-09-15");
+        for bad in [
+            "2026-09-15",
+            "2026-09-14",
+            "2020-01-01",
+            "0d",
+            "0w",
+            "30m",
+            "d",
+        ] {
+            assert!(
+                Defer::resolve(bad, today).is_err(),
+                "{bad} should be rejected"
+            );
+        }
+        let error = Defer::resolve("2026-09-15", today).unwrap_err().to_string();
+        assert!(
+            error.contains("must be after today (2026-09-15)"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn only_picker_statuses_carry_a_deferral() {
+        assert!(can_carry(Status::Idea));
+        assert!(can_carry(Status::Todo));
+        assert!(can_carry(Status::Blocked));
+        for status in [
+            Status::Doing,
+            Status::Shelved,
+            Status::Done,
+            Status::Dropped,
+        ] {
+            assert!(!can_carry(status), "{status:?}");
         }
     }
 }

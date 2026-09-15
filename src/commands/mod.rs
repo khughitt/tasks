@@ -484,6 +484,17 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
     if let Some(every) = &fields.every {
         task.every = Some(crate::periodic::Interval::parse(every)?);
     }
+    if let Some(value) = &fields.defer {
+        if !crate::defer::can_carry(task.status) {
+            return Err(Error::Validation(format!(
+                "{} is {}; a deferral can only sit on an idea, todo, or blocked task",
+                task.id,
+                task.status.as_str()
+            )));
+        }
+        let today = crate::time::parse(&crate::time::now())?.date();
+        task.defer = Some(crate::defer::Defer::resolve(value, today)?);
+    }
     // Setting only. `edit --no-parallel` clears it before this runs, mirroring --no-tags.
     if fields.parallel {
         task.parallel = true;
@@ -699,6 +710,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         task.completed = None;
     }
     task.status = to;
+    task.defer = None;
     if completing && let Some(every) = task.every {
         let next = crate::periodic::add(crate::time::parse(&now)?, every).ok_or_else(|| {
             Error::Validation(format!(

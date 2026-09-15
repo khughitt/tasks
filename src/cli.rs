@@ -66,6 +66,9 @@ pub struct FieldArgs {
     /// Make this a recurrence: `<n>d` or `<n>w`, measured from each completion.
     #[arg(long, add = ArgValueCandidates::new(crate::complete::intervals))]
     pub every: Option<String>,
+    /// Hide this task until a date: `YYYY-MM-DD`, or `<n>d`/`<n>w` from today.
+    #[arg(long, add = ArgValueCandidates::new(crate::complete::defer_dates))]
+    pub defer: Option<String>,
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
@@ -96,7 +99,7 @@ pub struct FieldArgs {
 pub struct EditArgs {
     #[arg(long)]
     pub title: Option<String>,
-    #[arg(long, add = ArgValueCandidates::new(crate::complete::statuses))]
+    #[arg(long, conflicts_with = "defer", add = ArgValueCandidates::new(crate::complete::statuses))]
     pub status: Option<String>,
     #[arg(long)]
     pub force: bool,
@@ -109,6 +112,9 @@ pub struct EditArgs {
     /// Stop the recurrence, clearing both the cadence and its anchor.
     #[arg(long, conflicts_with = "every")]
     pub no_every: bool,
+    /// Clear the deferral.
+    #[arg(long, conflicts_with = "defer")]
+    pub no_defer: bool,
     /// Clear the source.
     #[arg(long, conflicts_with = "source")]
     pub no_source: bool,

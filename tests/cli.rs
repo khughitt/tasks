@@ -5936,6 +5936,184 @@ fn projects_sort_is_command_level_and_reorders_the_json() {
     );
 }
 
+#[test]
+fn defer_stores_an_absolute_date_from_either_form_and_clears() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fixed = id_of(env.json(
+        &sci,
+        &["add", "Fixed", "--status", "idea", "--defer", "2099-01-02"],
+    ));
+    let v = env.json(&sci, &["show", &fixed]);
+    assert_eq!(v["task"]["defer"], "2099-01-02");
+    let text = std::fs::read_to_string(sci.join(format!("tasks/{fixed}.md"))).unwrap();
+    assert!(text.contains("\ndefer: 2099-01-02\n"), "{text}");
+
+    let relative = id_of(env.json(
+        &sci,
+        &["add", "Relative", "--status", "idea", "--defer", "60d"],
+    ));
+    let stored = env.json(&sci, &["show", &relative])["task"]["defer"].clone();
+    let today = time::OffsetDateTime::now_utc().date();
+    let expected = today + time::Duration::days(60);
+    assert_eq!(
+        stored,
+        format!(
+            "{:04}-{:02}-{:02}",
+            expected.year(),
+            expected.month() as u8,
+            expected.day()
+        )
+    );
+
+    env.json(&sci, &["edit", &fixed, "--defer", "8w"]);
+    assert_ne!(
+        env.json(&sci, &["show", &fixed])["task"]["defer"],
+        "2099-01-02"
+    );
+    env.json(&sci, &["edit", &fixed, "--no-defer"]);
+    assert!(env.json(&sci, &["show", &fixed])["task"]["defer"].is_null());
+    env.json(&sci, &["edit", &fixed, "--defer", "2099-01-02", "-p", "1"]);
+    let v = env.json(&sci, &["show", &fixed]);
+    assert_eq!(v["task"]["defer"], "2099-01-02");
+    assert_eq!(v["task"]["priority"], 1);
+    env.json(&sci, &["edit", &fixed, "--status", "todo"]);
+    assert!(env.json(&sci, &["show", &fixed])["task"]["defer"].is_null());
+}
+
+#[test]
+fn defer_refuses_bad_values_and_incompatible_records() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let today = time::OffsetDateTime::now_utc().date();
+    let today = format!(
+        "{:04}-{:02}-{:02}",
+        today.year(),
+        today.month() as u8,
+        today.day()
+    );
+    for bad in [today.as_str(), "2020-01-01", "0d", "soon", "2099-13-01"] {
+        let error = error_of(&env, &sci, &["add", "Bad", "--defer", bad]);
+        assert_eq!(error["error"]["kind"], "validation", "{bad}: {error}");
+    }
+    let error = error_of(&env, &sci, &["add", "Bad", "--defer", &today]);
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("must be after today")
+    );
+
+    let sweep = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    let error = error_of(&env, &sci, &["edit", &sweep, "--defer", "30d"]);
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("defer and every cannot both be set")
+    );
+    let later = id_of(env.json(&sci, &["add", "Later", "--defer", "30d"]));
+    let error = error_of(&env, &sci, &["edit", &later, "--every", "30d"]);
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("defer and every cannot both be set")
+    );
+    let error = error_of(
+        &env,
+        &sci,
+        &["add", "Both", "--every", "30d", "--defer", "30d"],
+    );
+    assert_eq!(error["error"]["kind"], "validation");
+
+    let goal = id_of(env.json(&sci, &["add", "Goal"]));
+    env.json(&sci, &["add", "Kid", "--parent", &goal]);
+    let error = error_of(&env, &sci, &["edit", &goal, "--defer", "30d"]);
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("cannot be deferred"),
+        "{error}"
+    );
+    let error = error_of(&env, &sci, &["add", "Orphan", "--parent", &later]);
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("is deferred and cannot have children"),
+        "{error}"
+    );
+    let loose = id_of(env.json(&sci, &["add", "Loose"]));
+    let error = error_of(&env, &sci, &["edit", &loose, "--parent", &later]);
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("is deferred and cannot have children"),
+        "{error}"
+    );
+
+    let before = env.read(&sci, &format!("tasks/{loose}.md"));
+    let reparent = editor_script(
+        &sci,
+        &format!("sed -i '/^priority:/a parent: {later}' \"$1\""),
+    );
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &reparent)
+        .args(["edit", &loose])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("is deferred and cannot have children"),
+        "{error}"
+    );
+    assert_eq!(env.read(&sci, &format!("tasks/{loose}.md")), before);
+
+    let busy = id_of(env.json(&sci, &["add", "Busy"]));
+    env.json(&sci, &["start", &busy]);
+    let error = error_of(&env, &sci, &["edit", &busy, "--defer", "30d"]);
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("is doing"),
+        "{error}"
+    );
+    let closed = id_of(env.json(&sci, &["add", "Closed"]));
+    env.json(&sci, &["done", &closed, "x"]);
+    let error = error_of(&env, &sci, &["edit", &closed, "--defer", "30d"]);
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("is done"),
+        "{error}"
+    );
+}
+
+#[test]
+fn defer_flag_conflicts_are_usage_errors() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "--status", "idea"]));
+    for args in [
+        vec!["edit", id.as_str(), "--defer", "30d", "--no-defer"],
+        vec!["edit", id.as_str(), "--status", "todo", "--defer", "30d"],
+    ] {
+        env.cmd(&sci).args(&args).assert().code(2);
+    }
+    assert!(env.json(&sci, &["show", &id])["task"]["defer"].is_null());
+}
+
 /// Two project roots sharing one prefix: what a main checkout and a worktree look like to a
 /// store keyed by prefix.
 fn two_roots(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {

@@ -29,11 +29,18 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
             "parent {parent} does not exist"
         )));
     }
-    // spec §4.7: a recurrence is never a goal, so nothing may hang beneath one.
-    if project.read_task(&parent)?.every.is_some() {
+    // A recurrence or deferred task is never a goal, so nothing may hang beneath one.
+    let parent_record = project.read_task(&parent)?;
+    if parent_record.every.is_some() {
         return Err(Error::Validation(format!(
             "{parent} is a recurrence and cannot have children; clear its cadence with \
              `tasks edit {parent} --no-every` first"
+        )));
+    }
+    if parent_record.defer.is_some() {
+        return Err(Error::Validation(format!(
+            "{parent} is deferred and cannot have children; clear the date with \
+             `tasks edit {parent} --no-defer` first"
         )));
     }
     let mut path = vec![task_id];
@@ -154,6 +161,27 @@ pub fn validate_periodic(project: &Project, registry: &Registry, task: &Task) ->
     if !kids.is_empty() {
         return Err(Error::Validation(format!(
             "{} has children ({}) and cannot be a recurrence; a task with children is a \
+             goal, and a goal is never ready",
+            task.id,
+            kids.iter()
+                .map(|kid| kid.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    Ok(())
+}
+
+/// A deferred task with children would never appear in a picker.
+pub fn validate_defer(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
+    if task.defer.is_none() {
+        return Ok(());
+    }
+    let all = project.scan()?;
+    let kids = children(&all, &task.id, registry);
+    if !kids.is_empty() {
+        return Err(Error::Validation(format!(
+            "{} has children ({}) and cannot be deferred; a task with children is a \
              goal, and a goal is never ready",
             task.id,
             kids.iter()

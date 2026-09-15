@@ -78,6 +78,11 @@ pub fn intervals() -> Vec<CompletionCandidate> {
     plain(["7d", "14d", "30d", "90d"])
 }
 
+/// Convenience candidates for `--defer`; any valid date or interval is accepted.
+pub fn defer_dates() -> Vec<CompletionCandidate> {
+    plain(["30d", "60d", "90d"])
+}
+
 /// The keys `commands::projects::ProjectSort::parse` accepts. Separate from `sorts`:
 /// projects rank by size and activity, tasks by priority and their own dates.
 pub fn project_sorts() -> Vec<CompletionCandidate> {
