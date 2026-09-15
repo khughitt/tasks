@@ -237,6 +237,9 @@ pub enum Command {
         /// Only tasks with a cadence, soonest due first, at any status.
         #[arg(long, conflicts_with_all = ["sort", "reverse", "parked"])]
         periodic: bool,
+        /// Only deferred tasks, soonest date first; due ones lead.
+        #[arg(long, conflicts_with_all = ["sort", "reverse", "parked", "periodic"])]
+        deferred: bool,
 
         #[command(flatten)]
         scope: ScopeArgs,

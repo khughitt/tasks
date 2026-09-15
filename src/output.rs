@@ -613,6 +613,16 @@ pub struct PeriodicSummary {
     pub in_days: Option<i64>,
 }
 
+/// The `prime` line for deferrals (defer §5.3): what is waiting, the soonest date, and
+/// what has come due but still carries its date — the revisit queue.
+#[derive(Serialize, Default)]
+pub struct DeferredSummary {
+    pub waiting: usize,
+    pub next: Option<String>,
+    pub in_days: Option<i64>,
+    pub due: usize,
+}
+
 #[derive(Serialize)]
 pub struct PrimeOut {
     /// The local project; null under --all-projects.
@@ -621,6 +631,7 @@ pub struct PrimeOut {
     pub projects: Vec<String>,
     pub counts: Counts,
     pub periodic: PeriodicSummary,
+    pub deferred: DeferredSummary,
     /// Pretty-only, like `ProjectsOut`: JSON always carries every count.
     #[serde(skip)]
     pub closed: bool,
@@ -788,6 +799,22 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                     crate::time::day(next)
                 ));
             }
+            if o.deferred.waiting > 0 || o.deferred.due > 0 {
+                let mut line = match (&o.deferred.next, o.deferred.in_days) {
+                    (Some(next), Some(days)) => {
+                        format!(
+                            "deferred: {} waiting, next {next} (in {days}d)",
+                            o.deferred.waiting
+                        )
+                    }
+                    _ => format!("deferred: {} waiting", o.deferred.waiting),
+                };
+                if o.deferred.due > 0 {
+                    line.push_str(&format!("; {} due", o.deferred.due));
+                }
+                rendered.push_str(&line);
+                rendered.push('\n');
+            }
 
             rendered.push_str(&format!(
                 "\n{}\n",
@@ -951,6 +978,10 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
             rendered.push_str(&format!("\n# periodic\ndue: {due}\n"));
         }
     }
+    if let Some(deferred) = &o.deferred {
+        let state = if deferred.due { " (due)" } else { "" };
+        rendered.push_str(&format!("\n# deferred\nuntil: {}{state}\n", deferred.until));
+    }
     let related_row = |id: &str, status: Option<Status>, title: &str| {
         let status = match status {
             Some(status) => painter.paint(Style::Status(status), status.as_str()),
@@ -1060,13 +1091,14 @@ pub fn table(
         let date = match date {
             DateColumn::Updated => crate::time::day(&row.updated).to_string(),
             DateColumn::Created => crate::time::day(&row.created).to_string(),
-            DateColumn::Due => match &row.periodic {
-                Some(periodic) => match (&periodic.due, periodic.due_now) {
+            DateColumn::Due => match (&row.periodic, &row.deferred) {
+                (Some(periodic), _) => match (&periodic.due, periodic.due_now) {
                     (Some(due), _) => crate::time::day(due).to_string(),
                     (None, true) => "now".into(),
                     (None, false) => "-".into(),
                 },
-                None => "-".into(),
+                (None, Some(deferred)) => deferred.until.clone(),
+                (None, None) => "-".into(),
             },
         };
         let id = painter.paint(Style::Chrome, &row.id);
@@ -1105,6 +1137,16 @@ pub fn table(
             }
             _ => String::new(),
         };
+        // A deferred row says why it is absent from `ready`; a due one says why it is back.
+        let deferral = match &row.deferred {
+            Some(deferred) if deferred.due => {
+                painter.paint(Style::Emphasis, &format!("  due {}", deferred.until))
+            }
+            Some(deferred) => {
+                painter.paint(Style::Emphasis, &format!("  defer {}", deferred.until))
+            }
+            None => String::new(),
+        };
         let owner = match &row.claim {
             Some(claim) if claim.live => format!(" @{} [{}]", claim.owner, claim.session),
             Some(claim) => format!(" @{} [{} stale]", claim.owner, claim.session),
@@ -1123,7 +1165,7 @@ pub fn table(
             (true, false) => "   ",
         };
         rendered.push_str(&format!(
-            "{id}  {priority} {size:<2} {complexity:<4} {process:<7} {status} {mark}{date}  {}{tags}{cadence}{owner}\n",
+            "{id}  {priority} {size:<2} {complexity:<4} {process:<7} {status} {mark}{date}  {}{tags}{cadence}{deferral}{owner}\n",
             row.title
         ));
     }

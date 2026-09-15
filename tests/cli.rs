@@ -14270,3 +14270,122 @@ fn a_deferred_todo_still_holds_its_dependents() {
     env.json(&sci, &["done", &gate, "opened"]);
     assert_eq!(env.json(&sci, &["ready"])["tasks"][0]["id"], after);
 }
+
+#[test]
+fn list_deferred_orders_by_date_with_due_first_and_conflicts_with_orderings() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let later = id_of(env.json(
+        &sci,
+        &["add", "Later", "--defer", "2099-06-01", "--tag", "x"],
+    ));
+    let soon = id_of(env.json(
+        &sci,
+        &["add", "Soon", "--status", "idea", "--defer", "2099-01-02"],
+    ));
+    let due = id_of(env.json(&sci, &["add", "Due", "--tag", "x"]));
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\ndefer: 2026-01-01/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &due])
+        .env("EDITOR", &editor)
+        .assert()
+        .success();
+    env.json(&sci, &["add", "Plain"]);
+    let v = env.json(&sci, &["list", "--deferred"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![due.as_str(), soon.as_str(), later.as_str()],
+        "{v}"
+    );
+    let v = env.json(&sci, &["list", "--deferred", "--tag", "x"]);
+    let ids: Vec<&str> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![due.as_str(), later.as_str()], "{v}");
+    let pretty = env.pretty(&sci, &["list", "--deferred"]);
+    assert!(pretty.contains("2099-06-01"), "{pretty}");
+    assert!(pretty.contains("defer 2099-06-01"), "{pretty}");
+    assert!(pretty.contains("due 2026-01-01"), "{pretty}");
+    for extra in [
+        vec!["--sort", "updated"],
+        vec!["--reverse"],
+        vec!["--parked"],
+        vec!["--periodic"],
+    ] {
+        let mut args = vec!["list", "--deferred"];
+        args.extend(extra);
+        env.cmd(&sci).args(&args).assert().code(2);
+    }
+}
+
+#[test]
+fn prime_carries_the_deferred_line_and_aggregate() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let empty = env.json(&sci, &["prime"]);
+    assert_eq!(empty["deferred"]["waiting"], 0);
+    assert_eq!(empty["deferred"]["due"], 0);
+    assert!(empty["deferred"]["next"].is_null());
+    assert!(!env.pretty(&sci, &["prime"]).contains("deferred:"));
+
+    env.json(&sci, &["add", "Later", "--defer", "2099-06-01"]);
+    let idea = id_of(env.json(
+        &sci,
+        &["add", "Soon", "--status", "idea", "--defer", "2099-01-02"],
+    ));
+    let v = env.json(&sci, &["prime"]);
+    assert_eq!(v["deferred"]["waiting"], 2);
+    assert_eq!(v["deferred"]["next"], "2099-01-02");
+    assert!(v["deferred"]["in_days"].as_i64().unwrap() > 0, "{v}");
+    assert_eq!(v["deferred"]["due"], 0);
+    let pretty = env.pretty(&sci, &["prime"]);
+    let line = pretty
+        .lines()
+        .find(|l| l.starts_with("deferred:"))
+        .unwrap_or_else(|| panic!("{pretty}"));
+    assert!(
+        line.starts_with("deferred: 2 waiting, next 2099-01-02 (in "),
+        "{line}"
+    );
+    assert!(!line.contains("due"), "{line}");
+    assert!(
+        pretty.contains("defer 2099-01-02"),
+        "roadmap rows carry the marker: {pretty}"
+    );
+
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^defer: 2099-01-02$/defer: 2026-01-01/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &idea])
+        .env("EDITOR", &editor)
+        .assert()
+        .success();
+    let v = env.json(&sci, &["prime"]);
+    assert_eq!(v["deferred"]["waiting"], 1);
+    assert_eq!(v["deferred"]["next"], "2099-06-01");
+    assert_eq!(v["deferred"]["due"], 1);
+    let pretty = env.pretty(&sci, &["prime"]);
+    let line = pretty.lines().find(|l| l.starts_with("deferred:")).unwrap();
+    assert!(line.ends_with("; 1 due"), "{line}");
+    assert!(pretty.contains("due 2026-01-01"), "{pretty}");
+
+    let show = env.pretty(&sci, &["show", &idea]);
+    assert!(
+        show.contains("# deferred\nuntil: 2026-01-01 (due)\n"),
+        "{show}"
+    );
+}

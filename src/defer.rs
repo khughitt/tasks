@@ -58,6 +58,10 @@ impl Defer {
         }
         Ok(Defer(date))
     }
+
+    pub fn date(self) -> Date {
+        self.0
+    }
 }
 
 impl fmt::Display for Defer {
@@ -86,6 +90,11 @@ pub fn can_carry(status: Status) -> bool {
 /// The deferral has been spent by the clock but not yet by attention (spec §4).
 pub fn is_due(task: &Task, now: OffsetDateTime) -> bool {
     task.defer.is_some_and(|defer| now.date() >= defer.0)
+}
+
+/// Whole calendar days from `now` to `date`, the figure `prime` prints (spec §5.3).
+pub fn days_until(date: Date, now: OffsetDateTime) -> i64 {
+    (date - now.date()).whole_days()
 }
 
 /// Hidden from the pickers: the date is still ahead of the UTC calendar day (spec §4).
@@ -153,6 +162,16 @@ mod tests {
             "\"2026-11-10\""
         );
         assert!(Defer::parse("2026-01-05").unwrap() < Defer::parse("2026-11-10").unwrap());
+    }
+
+    #[test]
+    fn days_until_counts_calendar_days_not_elapsed_periods() {
+        assert_eq!(days_until(day("2026-11-10"), at("2026-11-09T23:59:59Z")), 1);
+        assert_eq!(days_until(day("2026-11-10"), at("2026-11-10T00:00:01Z")), 0);
+        assert_eq!(
+            days_until(day("2026-11-10"), at("2026-09-15T12:00:00Z")),
+            56
+        );
     }
 
     #[test]

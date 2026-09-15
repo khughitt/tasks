@@ -3,8 +3,8 @@ use crate::claims::WaitingOn;
 use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{
-    Counts, DateColumn, ListOut, NextOut, Output, ParkedOut, ParkedRow, PeriodicSummary, PrimeOut,
-    TaskSummary,
+    Counts, DateColumn, DeferredSummary, ListOut, NextOut, Output, ParkedOut, ParkedRow,
+    PeriodicSummary, PrimeOut, TaskSummary,
 };
 use crate::query::{
     Picked, Readiness, SortKey, deferred_omission, is_candidate, readiness, sort_by_key, sort_list,
@@ -34,6 +34,7 @@ pub fn list(
     reverse: bool,
     parked: bool,
     periodic: bool,
+    deferred: bool,
 ) -> Result<Output> {
     let sort = match sort {
         Some(key) => SortKey::parse(&key)?,
@@ -60,6 +61,7 @@ pub fn list(
     }
     tasks.retain(|task| {
         let periodic_ok = !periodic || task.every.is_some();
+        let deferred_ok = !deferred || task.defer.is_some();
         let status_ok = if !statuses.is_empty() {
             statuses.contains(&task.status)
         } else if periodic {
@@ -80,7 +82,7 @@ pub fn list(
                 .as_ref()
                 .is_some_and(|parent| ctx.registry.canonical_id(parent) == *p)
         });
-        periodic_ok && status_ok && tags_ok && owner_ok && source_ok && parent_ok
+        periodic_ok && deferred_ok && status_ok && tags_ok && owner_ok && source_ok && parent_ok
     });
     for task in &tasks {
         for dependency in &task.depends {
@@ -94,6 +96,9 @@ pub fn list(
     }
     if periodic {
         sort_periodic(&mut tasks, now);
+    } else if deferred {
+        // Soonest first, due ones leading; every row has a date by the filter above.
+        tasks.sort_by(|a, b| a.defer.cmp(&b.defer).then_with(|| a.id.cmp(&b.id)));
     } else {
         sort_by_key(&mut tasks, sort);
         if reverse {
@@ -106,7 +111,7 @@ pub fn list(
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         warnings: ctx.warnings,
-        date: if periodic {
+        date: if periodic || deferred {
             DateColumn::Due
         } else {
             sort.date_column()
@@ -380,6 +385,21 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         next_due: next.map(crate::time::format),
         in_days: next.map(|due| crate::periodic::days_until(due, now)),
     };
+    let waiting: Vec<crate::defer::Defer> = all
+        .iter()
+        .filter(|task| crate::defer::is_deferred(task, now))
+        .filter_map(|task| task.defer)
+        .collect();
+    let next = waiting.iter().min().copied();
+    let deferred = DeferredSummary {
+        waiting: waiting.len(),
+        next: next.map(|defer| defer.to_string()),
+        in_days: next.map(|defer| crate::defer::days_until(defer.date(), now)),
+        due: all
+            .iter()
+            .filter(|task| crate::defer::is_due(task, now))
+            .count(),
+    };
     let counts = Counts::of(&all);
     let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let mut ready = ready_tasks(&mut ctx, &all, &claims, now)?.tasks;
@@ -481,6 +501,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         projects: ctx.scope.prefixes(),
         counts,
         periodic,
+        deferred,
         closed,
         ready: ready
             .iter()

@@ -1056,6 +1056,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             reverse,
             parked,
             periodic,
+            deferred,
             scope,
         } => list::list(
             open_read_ctx(dir, &scope)?,
@@ -1068,6 +1069,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             reverse,
             parked,
             periodic,
+            deferred,
         ),
         Command::Ready {
             size,
