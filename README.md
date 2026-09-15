@@ -129,6 +129,9 @@ from a clone):
     tasks add "Curation sweep" --every 30d  # days or weeks since each completion
     tasks list --periodic            # recurring tasks, soonest due first
     tasks edit <sweep-id> --every 2w # change the cadence; --no-every clears it and its anchor
+    tasks add "Revisit the cache idea" --status idea --defer 60d  # hidden from the pickers until then
+    tasks list --deferred            # deferred tasks, soonest first; due ones lead
+    tasks edit <id> --no-defer       # clear it; any status change clears it too
     tasks add "Reply to Dana" --source "mail:<42@example.org>"  # where it came from; never interpreted
     tasks add "Reply to Dana" --source "mail:<42@example.org>"  # again: reuses the id, writes nothing
     tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)

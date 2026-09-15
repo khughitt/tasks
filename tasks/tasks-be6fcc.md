@@ -1,15 +1,16 @@
 ---
 id: tasks-be6fcc
 title: "One-shot defer date: hide an open task from ready until a date"
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: be6fcc-defer
 created: 2026-09-11T01:15:26Z
-updated: 2026-09-15T13:05:11Z
+updated: 2026-09-15T14:19:46Z
 started: 2026-09-15T12:38:29Z
+completed: 2026-09-15T14:19:46Z
 depends: []
 tags: [quick-add, cli, periodic]
 source: "mindful:thought:1e2513d2f5ea48609022559f3c687d01"
@@ -29,3 +30,6 @@ Motivating records: prism-49a068 and prism-8a8eac, both carrying 'revisit 2026-1
 
 - 2026-09-13T16:47:42Z (main): Complexity mid: the outcome and read-time date approach are defined; bounded choices remain for date semantics, recurrence coexistence, dependency readiness, and consistent omission across ready, next, prime, and sample. Reassess after the design resolves those choices.
 - 2026-09-15T12:38:29Z (main): Process planned: the body leaves design choices open (coexistence with --every, dependency readiness of deferred tasks, idea deferral, sample behaviour, grammar of relative dates) and the field touches every picker; a reviewed spec settles them before code.
+- 2026-09-15T14:16:46Z (be6fcc-defer): took over a live claim held by session 935bf565-993e-4f8e-bc6c-637567fcd051 (owner main, host titan, pid 1974023, worktree /mnt/ssd/Dropbox/tasks, since 2026-09-15T12:38:29Z, age 5897s, live)
+- 2026-09-15T14:16:46Z (be6fcc-defer): User requested implementation of the reviewed plan in the existing worktree; resumed the parent claim for implementation closeout. User chose to keep both motivating Prism records shelved and skip their date migration.
+- 2026-09-15T14:19:46Z (be6fcc-defer): defer date: --defer/--no-defer, pickers skip it with one warning, list --deferred, prime line, check findings; Prism migration skipped by user decision

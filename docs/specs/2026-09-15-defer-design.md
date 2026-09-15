@@ -1,6 +1,6 @@
 # Deferred tasks: a one-shot date that hides work until it arrives
 
-Status: draft
+Status: implemented (2026-09-15)
 Task: tasks-be6fcc; feedback tasks-f5ab4a; motivating records prism-49a068 and prism-8a8eac
 
 ## 1. Problem
@@ -123,7 +123,7 @@ an anchor — subject to §2.2's one-thing-per-save rule.
 
 ### 3.3 Goals
 
-`is_ready` excludes any task with children, so `defer` on a goal would hide nothing from
+`readiness` excludes any task with children, so `defer` on a goal would hide nothing from
 `ready`; it would only mark the roadmap row. That is a silent dead end, and it is refused
 the way `every` is (periodic §4.7): `--defer` is refused when the task has children,
 setting or changing `parent` is refused when the prospective parent carries `defer`, and
@@ -204,8 +204,9 @@ Wherever a row of a deferred or due record renders — `list`, `ready`, `next`, 
 ready and roadmap sections, `tree` — the date follows the title in the emphasis style
 where the periodic marker sits (the two never coexist, §2.4): `defer 2026-11-10` while
 deferred, `due 2026-11-10` once the date has passed. Every one of those views renders
-through `output::table`, so the marker has one site. The row's date column is untouched,
-for the reason periodic §5.1 gives: one `DateColumn` per list.
+through the shared summary renderers: `output::table` for list, ready, prime, and tree
+rows, and the show renderer for `next`. The row's date column is untouched, for the
+reason periodic §5.1 gives: one `DateColumn` per list.
 
 `show --pretty` renders `defer` and whether it is due.
 
@@ -296,9 +297,9 @@ work" (an idea to revisit later is `tasks add "<title>" --status idea --defer 60
 `ready` omission rule and `list --deferred` in the session protocol, and the note that
 `start` spends a deferral.
 
-Closing the task also moves the two motivating prism records onto the field
-(`tasks edit prism-49a068 --defer 2026-11-10`, and the same for prism-8a8eac, from any
-checkout by prefix routing) and records the outcome on feedback tasks-f5ab4a.
+The user chose to keep the two motivating Prism records shelved and skip their date
+migration, so this landing makes no Prism writes. The outcome is recorded on feedback
+tasks-f5ab4a.
 
 ## 8. Testing
 

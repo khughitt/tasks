@@ -1,10 +1,10 @@
 ---
 id: tasks-f5ab4a
 title: "No one-shot due or defer date: a task cannot be hidden from ready until a future date"
-status: idea
+status: dropped
 priority: 2
 created: 2026-09-11T01:13:18Z
-updated: 2026-09-11T01:15:26Z
+updated: 2026-09-15T14:19:46Z
 depends: []
 tags: [feedback, gap, "from:prism"]
 ---
@@ -14,3 +14,5 @@ Wanted 'revisit this idea in two months'. The only date mechanism is --every <n>
 ## Notes
 
 - 2026-09-11T01:15:26Z (main): Scoped as tasks-be6fcc at the user's request; this report stays in the triage queue for the maintainer.
+- 2026-09-15T14:19:46Z (be6fcc-defer): Landed as tasks-be6fcc: --defer <date|Nd|Nw> hides a task from the pickers until the date; cleared by any status change.
+- 2026-09-15T14:19:46Z (be6fcc-defer): implemented by tasks-be6fcc

@@ -16,6 +16,10 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
    Use the `scope` skill for a deliberate idea review.
    A `shelved` task is out of active work: `list --status shelved` sees it, and
    `tasks unshelve <id>` brings it back as an idea.
+   A deferred task (`defer: <date>`) is hidden from `ready`, `next`, `quiet`, and `sample`
+   until its date; `ready` and `next` say in one warning how many they hid, `prime`'s
+   `deferred:` line counts what is waiting and what has come due, and `tasks list --deferred`
+   lists them. `start` on a deferred task works and spends the deferral.
    A session under a cutoff (`TASKS_MAX_COMPLEXITY=<low|mid|high>` set by its harness, or
    `--max-complexity <level>` on `ready`/`next`) picks only through `ready` and `next`, which
    hide tasks rated above the level and unassessed tasks and say in warnings how many they
@@ -105,7 +109,7 @@ managed only through the CLI. Output is JSON unless `--pretty` is given.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--spec/--plan/--step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all. When the project keeps a
@@ -174,6 +178,9 @@ the document reviews.
 ## Recording work
 
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
+- A thought to revisit later: `tasks add "<title>" --status idea --defer 60d` (or a date,
+  `--defer 2026-11-10`); every status change clears the date, so scope it with
+  `edit --status todo` first and defer it in a second command when both are wanted.
 - Deliberate idea review: `/scope [<id>... | --tag <tag>] [--project <prefix>]`.
 - Not now, but kept: `tasks shelve <id> "<what would bring it back>"`. Shelved work is open
   (it still blocks dependents and holds its goal open) but hidden from `list`, `ready`, and
@@ -181,7 +188,7 @@ the document reviews.
   `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
   `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
   returns it to `idea`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"]`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or

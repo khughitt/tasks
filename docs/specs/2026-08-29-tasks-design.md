@@ -115,6 +115,7 @@ Free-form markdown body.
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
 | `process`  | enum                | no       | `direct` or `planned`; absent means unassessed. Explicitly chosen, never inferred or inherited. See `2026-09-13-task-process-design.md`. |
 | `parallel` | bool                | no       | Safe to run beside other tasks marked `parallel`. Omitted when false. |
+| `defer`    | `YYYY-MM-DD`        | no       | One-shot calendar date; the pickers skip the task until it arrives. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status transition. Never beside `every`. Written after `every`. See `2026-09-15-defer-design.md`. |
 | `owner`    | string              | no       | Advisory tracked-file owner; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
 | `updated`  | RFC 3339 UTC        | yes      | Set by every write command. |
@@ -249,7 +250,7 @@ tasks unregister <prefix>
     an unregistered prefix is an error, not a no-op. Project files are untouched; only
     ~/.config/tasks/projects.toml changes.
 
-tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel]
+tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel] [--defer DATE|<n>d|<n>w]
           [--process direct|planned]
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
           [--source REF] [--parent ID] [--project PREFIX]
@@ -321,6 +322,7 @@ tasks sample [-n N] [--older-than DAYS] [--seed U64] [--project P | --all-projec
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
            [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
+           [--no-defer]
            [--source REF | --no-source]
            [--process direct|planned | --no-process]
     With flags: update those fields. Without flags: open an editable copy in $EDITOR
@@ -517,6 +519,14 @@ park        -> { id, warnings }
 rename      += parks: int                     park entries carried to the target store
 
 prime       += projects: [string]; prefix is string|null (null under --all-projects)
+Task        += defer: "YYYY-MM-DD"|null
+TaskSummary += deferred: { until: "YYYY-MM-DD", due: bool }|null
+show        += deferred: { until, due }|null            next carries the same object
+ParkedRow   += deferred: { until, due }|null            from the copy the row resolved to
+prime       += deferred: { waiting: int, next: "YYYY-MM-DD"|null, in_days: int|null, due: int }
+list        += --deferred: every record carrying defer, date ascending, due first
+ready/next  += one warning naming how many deferred records were omitted and the next date
+check       += kinds deferred_goal, defer_status (errors)
 next        -> { next: ShowFields|null, warnings }   ShowFields = show without warnings
 root        -> { prefix, root, warnings }
 tags        -> { tags: [{ tag, count, projects: { <prefix>: int } }], warnings }
