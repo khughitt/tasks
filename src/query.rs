@@ -245,6 +245,7 @@ mod tests {
             process: None,
             parallel: false,
             every: None,
+            defer: None,
             owner: None,
             created: format!("2026-08-29T00:00:0{}Z", priority),
             updated: "2026-08-29T00:00:00Z".into(),

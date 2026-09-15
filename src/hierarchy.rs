@@ -276,6 +276,7 @@ mod tests {
             process: None,
             parallel: false,
             every: None,
+            defer: None,
             owner: None,
             created: "2026-09-03T00:00:00Z".into(),
             updated: "2026-09-03T00:00:00Z".into(),

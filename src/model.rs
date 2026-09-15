@@ -100,6 +100,7 @@ mod tests {
             process: None,
             parallel: false,
             every: None,
+            defer: None,
             owner: None,
             created: "2026-09-09T00:00:00Z".into(),
             updated: "2026-09-09T00:00:00Z".into(),
@@ -421,6 +422,10 @@ pub struct Task {
     /// The recurrence interval. A closed task carrying one falls due again; an open one is
     /// an ordinary task. See docs/specs/2026-09-09-periodic-design.md.
     pub every: Option<crate::periodic::Interval>,
+    /// A one-shot calendar date that keeps the record out of the pickers until it
+    /// arrives. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status
+    /// transition. See docs/specs/2026-09-15-defer-design.md.
+    pub defer: Option<crate::defer::Defer>,
     pub owner: Option<String>,
     pub created: String,
     pub updated: String,

@@ -74,6 +74,7 @@ mod tests {
             process: None,
             parallel: false,
             every: every.map(|e| Interval::parse(e).unwrap()),
+            defer: None,
             owner: None,
             created: "2026-01-01T00:00:00Z".into(),
             updated: "2026-01-01T00:00:00Z".into(),

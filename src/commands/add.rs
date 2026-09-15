@@ -27,6 +27,7 @@ pub fn blank(
         process: None,
         parallel: false,
         every: None,
+        defer: None,
         owner: None,
         created: now.clone(),
         updated: now,

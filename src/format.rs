@@ -3,7 +3,7 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 24] = [
+const KEYS: [&str; 25] = [
     "id",
     "title",
     "status",
@@ -13,6 +13,7 @@ const KEYS: [&str; 24] = [
     "process",
     "parallel",
     "every",
+    "defer",
     "owner",
     "created",
     "updated",
@@ -120,6 +121,10 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         parallel: boolean("parallel")?,
         every: scalar("every")?
             .map(|value| crate::periodic::Interval::parse(&value))
+            .transpose()
+            .map_err(|e| perr(file, e.to_string()))?,
+        defer: scalar("defer")?
+            .map(|value| crate::defer::Defer::parse(&value))
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
         owner: scalar("owner")?,
@@ -309,6 +314,12 @@ pub fn validate_task(t: &Task) -> Result<()> {
         }
         _ => {}
     }
+    if t.defer.is_some() && t.every.is_some() {
+        return Err(Error::Validation(format!(
+            "defer and every cannot both be set on {}; a recurrence already defers from each completion",
+            t.id
+        )));
+    }
     if t.step.is_some() && t.plan.is_none() {
         return Err(Error::Validation("step requires plan".into()));
     }
@@ -372,6 +383,9 @@ pub fn serialize_task(t: &Task) -> String {
     }
     if let Some(every) = t.every {
         pairs.push(("every".into(), s(&every.to_string())));
+    }
+    if let Some(defer) = t.defer {
+        pairs.push(("defer".into(), Value::Raw(defer.to_string())));
     }
     if let Some(o) = &t.owner {
         pairs.push(("owner".into(), s(o)));
@@ -545,6 +559,39 @@ mod tests {
         assert!(parse_task(&with("last_done: 2026-09-01T08:00:00Z"), "f").is_err());
         assert!(parse_task(&with("every: 30d\nlast_done: nonsense"), "f").is_err());
         assert!(parse_task(&with("every: 1d\nlast_done: 9999-12-31T00:00:00Z"), "f").is_err());
+    }
+
+    #[test]
+    fn defer_round_trips_after_every_and_is_omitted_when_absent() {
+        let mut task = parse_task(FULL, "f").unwrap();
+        assert_eq!(task.defer, None);
+        assert!(!serialize_task(&task).contains("defer:"));
+        task.defer = Some(crate::defer::Defer::parse("2026-11-10").unwrap());
+        let text = serialize_task(&task);
+        assert!(
+            text.contains("size: m\ndefer: 2026-11-10\n"),
+            "defer follows the shape fields: {text}"
+        );
+        let back = parse_task(&text, "f").unwrap();
+        assert_eq!(back.defer, task.defer);
+    }
+
+    #[test]
+    fn defer_is_read_as_a_date_even_unquoted_and_never_beside_every() {
+        let with = |line: &str| FULL.replace("size: m\n", &format!("size: m\n{line}\n"));
+        let t = parse_task(&with("defer: 2026-11-10"), "f").unwrap();
+        assert_eq!(t.defer.unwrap().to_string(), "2026-11-10");
+        let t = parse_task(&with("defer: \"2026-11-10\""), "f").unwrap();
+        assert_eq!(t.defer.unwrap().to_string(), "2026-11-10");
+        assert!(parse_task(&with("defer: 2026-11-10T00:00:00Z"), "f").is_err());
+        assert!(parse_task(&with("defer: soon"), "f").is_err());
+        let error = parse_task(&with("every: 30d\ndefer: 2026-11-10"), "f")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("defer and every cannot both be set"),
+            "{error}"
+        );
     }
     #[test]
     fn parent_roundtrips_after_depends() {

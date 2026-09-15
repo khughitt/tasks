@@ -628,6 +628,7 @@ mod tests {
             process: None,
             parallel: false,
             every: None,
+            defer: None,
             owner: None,
             created: crate::time::now(),
             updated: crate::time::now(),
