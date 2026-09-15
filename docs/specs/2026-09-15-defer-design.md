@@ -46,6 +46,15 @@ commands, as it does for periodic dueness (periodic §4.3).
 
 Edits that do not change status leave the field alone; `--no-defer` clears it on demand.
 
+A new deferral and a status change cannot travel in one write, because the order in
+which they apply would decide the outcome: `edit` applies fields before it transitions,
+so `edit <idea> --status todo --defer 60d` would set the date, clear it, and hand back an
+immediately ready task with no error. `--status` therefore conflicts with `--defer` on
+`edit` (a clap conflict), and an editor save that changes the status must leave `defer`
+exactly as the original had it — the transition then clears it; a save that changes both
+is refused naming the two-save sequence. Scoping an idea into a deferred todo is two
+commands: `edit --status todo`, then `edit --defer 60d`.
+
 ### 2.3 Attention, not blocking
 
 A deferred record is open. Its dependents stay held exactly as they are held by any open
@@ -89,17 +98,27 @@ best-effort as ever.
 
 ### 3.2 Invariants
 
-`validate_task` enforces, so that a violating record does not load at all and reaches
-`check` as a `parse` finding (periodic §6):
+Two invariants are status-free and belong in `validate_task`, so a violating record does
+not load at all and reaches `check` as a `parse` finding (periodic §6):
 
 - `defer` is a valid calendar date;
-- `defer` is absent on a closed record (`done`, `dropped`) and on `doing` and `shelved`,
-  since every path into those statuses clears it (§2.2); it may sit on `idea`, `todo`,
-  and `blocked`;
 - `defer` and `every` are never both present (§2.4).
 
-An editor save may set, change, or clear `defer` — it is ordinary intent, not an anchor —
-and the saved record passes through the same validation.
+The third is about status: `defer` may sit on `idea`, `todo`, and `blocked`, and on
+nothing else, since every path into the other statuses clears it (§2.2). It is
+deliberately **not** in `validate_task`. The editor parses and validates the saved text
+before it transitions (`src/commands/edit.rs`), so a save that moves a deferred todo to
+`doing` and leaves the date alone — the ordinary case, and exactly what §2.2 promises to
+clear — would fail validation before `transition` ever saw it. The rule is enforced
+instead where a deferral is written: `--defer` refuses on a record whose status cannot
+carry one, naming the status; an editor save that keeps the status and sets or keeps
+`defer` on such a record is refused the same way; and a save that changes the status
+reaches `transition`, which clears the field. A record arriving by merge or hand edit
+with `defer` on a `doing`, `shelved`, or closed status parses and is reported by `check`
+as `defer_status` (§6).
+
+An editor save may otherwise set, change, or clear `defer` — it is ordinary intent, not
+an anchor — subject to §2.2's one-thing-per-save rule.
 
 ### 3.3 Goals
 
@@ -154,8 +173,19 @@ One predicate, `is_deferred`, applied by everything that hands out work:
   which already excludes them, and the parked-waiting-on-agent candidates, which are
   filtered by `is_deferred` too. A park and a deferral on one record is the user saying
   "resume" and "not yet" at once; the deferral wins because it is the later, dated
-  instruction, and `prime` still lists the park so nothing is lost.
-- **`quiet`** filters its parked candidates the same way, for the same reason.
+  instruction, and `prime` still lists the park so nothing is lost. `next` counts its
+  omissions over its own pool — the parked candidates and the ready list, each record
+  once — so a deferred parked idea, which `ready` never sees, is still named in the
+  warning rather than producing a silent "nothing ready"; the warning has the same shape
+  as `ready`'s.
+- **`quiet`** filters its parked rows the same way. Its rows resolve to the parked
+  worktree's copy of the record when there is one (`rows_preferring(Prefer::Recorded)`),
+  and that copy may carry a different date from the registered checkout's — a deferral
+  set in one and not yet merged into the other. `ParkedRow` therefore carries the
+  `deferred` object (§5.4) computed from the copy the row resolved to, and `quiet`
+  filters on it: each picker judges the copy it would hand out. `next`'s candidates come
+  from the registered scan and are judged there. An unresolved row has no record and no
+  deferral.
 - **`sample`** excludes deferred records silently, beside its age and status exclusions;
   a due one is drawn.
 
@@ -216,7 +246,9 @@ field so the two shapes never collide:
 "deferred": { "until": "2026-11-10", "due": false }
 ```
 
-Present whenever `defer` is set, `null` otherwise. `due` is `is_defer_due`.
+Present whenever `defer` is set, `null` otherwise. `due` is `is_defer_due`. `ParkedRow`
+carries the same `deferred` object, from the copy of the record the row resolved to
+(§4.2), `null` for an unresolved row.
 
 `PrimeOut` gains the aggregate its line renders:
 
@@ -231,11 +263,13 @@ Present whenever `defer` is set, `null` otherwise. `due` is `is_defer_due`.
 Enforced in `validate_task`, hence surfacing as `parse` findings from `check` (§3.2): a
 malformed date, `defer` on a status that cannot carry it, and `defer` beside `every`.
 
-`check` has one finding of its own, the one that spans two files:
+`check` has two findings of its own: one spans two files, the other is the status rule
+that §3.2 keeps out of parsing:
 
-| Finding         | Level | Condition                            |
-|-----------------|-------|--------------------------------------|
-| `deferred_goal` | error | `defer` on a task that has children  |
+| Finding         | Level | Condition                                                  |
+|-----------------|-------|------------------------------------------------------------|
+| `deferred_goal` | error | `defer` on a task that has children                        |
+| `defer_status`  | error | `defer` on a `doing`, `shelved`, `done`, or `dropped` record |
 
 Refusals at the moment of the write, each a validation error naming the value or the ids:
 
@@ -243,8 +277,10 @@ Refusals at the moment of the write, each a validation error naming the value or
 - `--defer` on a task carrying `every`, and `--every` on a task carrying `defer` (§2.4);
 - `--defer` on a task with children, and parenting under a task that carries `defer`
   (§3.3);
-- `--defer` on a `doing`, `shelved`, or closed record, since the invariant of §3.2 would
-  fail on save; the error names the status.
+- `--defer` on a `doing`, `shelved`, or closed record, and an editor save that keeps such
+  a status and carries `defer` (§3.2); the error names the status;
+- `edit --status` with `--defer`, as a clap conflict, and an editor save that changes the
+  status and the date together (§2.2);
 - `--defer` and `--no-defer` together, as a clap conflict.
 
 ## 7. Documentation and protocol
@@ -281,15 +317,25 @@ End-to-end coverage in `tests/cli.rs`:
 - every status transition clears the field: `start`, `done`, `drop`, `shelve`, and
   `edit --status todo` on a deferred idea; an `edit` that changes only priority keeps it;
   `--no-defer` clears it; `--defer` with `--no-defer` is a flag conflict;
+- the editor path of §3.2: a save that changes a deferred todo's status to `doing` and
+  leaves the date succeeds and the saved record has no `defer`; a save that keeps the
+  status `doing` and adds a date is refused naming the status; a save that changes the
+  status and the date together is refused, and the record is unchanged;
+- the combined-write rule of §2.2: `edit --status todo --defer 60d` is a flag conflict,
+  and the two-command sequence leaves a deferred todo;
 - a parked-waiting-on-agent record that is deferred is not returned by `next` and not
-  listed by `quiet`, and `prime` still lists the park;
+  listed by `quiet`, `prime` still lists the park, and `next` carries the omission
+  warning even when the deferred record is an idea and the ready list is empty;
+- `quiet` judges the resolved copy: with the parked worktree's record deferred and the
+  main checkout's not, the row is omitted; with the dates reversed, it is listed, and the
+  row's `deferred` object reports the worktree's copy;
 - a deferred todo holds its dependents and does not satisfy them (§2.3);
 - `prime`'s line and its JSON aggregate across waiting-only, due-only, and both;
 - `list --deferred` ordering with a due record leading, its intersection with `--tag`,
   and its conflicts with `--periodic`, `--parked`, `--sort`, and `--reverse`;
-- `check` reports `deferred_goal` on a hand-written pair, and a hand-written record with
-  `defer` on a `done` status, with `defer` beside `every`, or with a malformed date fails
-  the scan as a `parse` finding;
+- `check` reports `deferred_goal` on a hand-written pair and `defer_status` on a
+  hand-written `done` record carrying `defer`; a hand-written record with `defer` beside
+  `every` or with a malformed date fails the scan as a `parse` finding;
 - frontmatter round-trip with the field present and absent, and the nested JSON shape in
   `list`, `show`, and `next`.
 
