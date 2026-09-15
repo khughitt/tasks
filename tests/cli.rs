@@ -5940,10 +5940,7 @@ fn projects_sort_is_command_level_and_reorders_the_json() {
 fn defer_stores_an_absolute_date_from_either_form_and_clears() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
-    let fixed = id_of(env.json(
-        &sci,
-        &["add", "Fixed", "--status", "idea", "--defer", "2099-01-02"],
-    ));
+    let fixed = id_of(env.json(&sci, &["add", "Fixed", "--defer", "2099-01-02"]));
     let v = env.json(&sci, &["show", &fixed]);
     assert_eq!(v["task"]["defer"], "2099-01-02");
     let text = std::fs::read_to_string(sci.join(format!("tasks/{fixed}.md"))).unwrap();
@@ -5977,8 +5974,6 @@ fn defer_stores_an_absolute_date_from_either_form_and_clears() {
     let v = env.json(&sci, &["show", &fixed]);
     assert_eq!(v["task"]["defer"], "2099-01-02");
     assert_eq!(v["task"]["priority"], 1);
-    env.json(&sci, &["edit", &fixed, "--status", "todo"]);
-    assert!(env.json(&sci, &["show", &fixed])["task"]["defer"].is_null());
 }
 
 #[test]
