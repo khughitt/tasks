@@ -77,8 +77,9 @@ validation error naming both.
 | `defer` | a calendar date, `YYYY-MM-DD`  | `add --defer`, `edit --defer`, the editor save; cleared by `--no-defer` and by every status transition (§2.2) |
 
 In `serialize_task` (`src/format.rs`) it sits with the shape fields after `every`; in
-`KEYS` and `parse_task` likewise. `quote_timestamps` gains `defer`, because a bare
-`2026-11-10` is a YAML timestamp scalar exactly as the RFC 3339 fields are.
+`KEYS` and `parse_task` likewise. `quote_timestamps` is untouched: it exists because the
+frontmatter parser reserves `:` and an RFC 3339 stamp carries two, whereas a bare
+`2026-11-10` has no reserved character and parses as the scalar it is.
 
 ### 3.1 The grammar of `--defer`
 
