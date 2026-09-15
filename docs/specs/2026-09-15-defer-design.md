@@ -184,8 +184,9 @@ One predicate, `is_deferred`, applied by everything that hands out work:
   set in one and not yet merged into the other. `ParkedRow` therefore carries the
   `deferred` object (§5.4) computed from the copy the row resolved to, and `quiet`
   filters on it: each picker judges the copy it would hand out. `next`'s candidates come
-  from the registered scan and are judged there. An unresolved row has no record and no
-  deferral.
+  from the command's selected scope — the worktree it runs in for a plain `tasks next`,
+  the registered roots under `--project` or `--all-projects` — and are judged there. An
+  unresolved row has no record and no deferral.
 - **`sample`** excludes deferred records silently, beside its age and status exclusions;
   a due one is drawn.
 
@@ -261,7 +262,7 @@ carries the same `deferred` object, from the copy of the record the row resolved
 ## 6. Validation and errors
 
 Enforced in `validate_task`, hence surfacing as `parse` findings from `check` (§3.2): a
-malformed date, `defer` on a status that cannot carry it, and `defer` beside `every`.
+malformed date, and `defer` beside `every`.
 
 `check` has two findings of its own: one spans two files, the other is the status rule
 that §3.2 keeps out of parsing:
