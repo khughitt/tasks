@@ -2,6 +2,239 @@ mod common;
 use common::TestEnv;
 
 #[test]
+fn lifecycle_provenance_survives_claim_and_park_release() {
+    for (source, key) in [
+        ("CLAUDE_CODE_SESSION_ID", "claude-code:native-a"),
+        ("CODEX_SESSION_ID", "codex:native-a"),
+        ("CODEX_THREAD_ID", "codex:native-a"),
+    ] {
+        let mut env = TestEnv::new();
+        let dir = env.init("sci");
+        let id = id_of(env.json(&dir, &["add", "Provenance"]));
+        let run = |args: &[&str]| {
+            let out = env
+                .cmd(&dir)
+                .env(source, "native-a")
+                .env("CLAUDE_PID", std::process::id().to_string())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["start", &id]);
+        let first = env.json(&dir, &["show", &id]);
+        let claim = &first["claim"];
+        assert_eq!(claim["live"], true);
+        if source == "CLAUDE_CODE_SESSION_ID" {
+            assert_eq!(claim["session"], "native-a");
+        } else {
+            assert!(claim["session"].as_str().unwrap().starts_with("sid:"));
+        }
+        assert_eq!(first["task"]["notes"][0]["text"], "started");
+        run(&["start", &id]);
+        let refreshed = env.json(&dir, &["show", &id]);
+        assert_eq!(refreshed["task"]["started"], first["task"]["started"]);
+        assert_eq!(refreshed["claim"]["started"], claim["started"]);
+        run(&["park", &id, "continue here"]);
+        let parked = env.json(&dir, &["show", &id]);
+        assert!(parked["claim"].is_null());
+        assert!(!parked["park"].is_null());
+        let earlier = parked["task"]["notes"].as_array().unwrap().clone();
+        run(&["start", &id]);
+        run(&["done", &id, "landed"]);
+        let closed = env.json(&dir, &["show", &id]);
+        assert!(closed["claim"].is_null() && closed["park"].is_null());
+        let notes = closed["task"]["notes"].as_array().unwrap();
+        assert_eq!(&notes[..earlier.len()], earlier);
+        assert_eq!(
+            notes
+                .iter()
+                .map(|n| n["text"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                "started",
+                "resumed",
+                "parked (waiting on agent): continue here",
+                "resumed",
+                "done",
+                "landed"
+            ]
+        );
+        for note in notes {
+            assert_eq!(note["harness_session"], key);
+            assert_eq!(note["harness_session_source"], source);
+        }
+        run(&["done", &id]);
+        assert_eq!(
+            env.json(&dir, &["show", &id])["task"]["notes"],
+            closed["task"]["notes"]
+        );
+    }
+}
+
+#[test]
+fn lifecycle_provenance_covers_editor_and_flag_transitions() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Edited", "--status", "todo"]));
+    let editor = editor_script(&dir, "sed -i 's/status: todo/status: doing/' \"$1\"");
+    env.cmd(&dir)
+        .env("CODEX_SESSION_ID", "native-a")
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .assert()
+        .success();
+    env.cmd(&dir)
+        .env("CODEX_SESSION_ID", "native-a")
+        .args(["park", &id, "continue here"])
+        .assert()
+        .success();
+    let parked = env.json(&dir, &["show", &id]);
+    env.cmd(&dir)
+        .env("CODEX_SESSION_ID", "native-a")
+        .args(["edit", &id, "--status", "doing"])
+        .assert()
+        .success();
+    let same = env.json(&dir, &["show", &id]);
+    assert_eq!(same["park"], parked["park"]);
+    assert_eq!(same["task"]["notes"], parked["task"]["notes"]);
+    env.cmd(&dir)
+        .env("CODEX_SESSION_ID", "native-a")
+        .args(["edit", &id, "--status", "done"])
+        .assert()
+        .success();
+    let shown = env.json(&dir, &["show", &id]);
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 3);
+    assert_eq!(notes[0]["text"], "started");
+    assert_eq!(notes[2]["text"], "done");
+    assert!(
+        notes
+            .iter()
+            .all(|n| n["harness_session"] == "codex:native-a")
+    );
+
+    for (close, marker, every) in [
+        ("drop", "dropped", false),
+        ("done", "done", false),
+        ("done", "completed; next due ", true),
+    ] {
+        let id = id_of(env.json(&dir, &["add", "Close"]));
+        if every {
+            env.json(&dir, &["edit", &id, "--every", "30d"]);
+        }
+        env.cmd(&dir)
+            .env("CODEX_SESSION_ID", "native-a")
+            .args([close, &id])
+            .assert()
+            .success();
+        let shown = env.json(&dir, &["show", &id]);
+        let notes = shown["task"]["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0]["text"].as_str().unwrap().starts_with(marker));
+        assert_eq!(notes[0]["harness_session"], "codex:native-a");
+    }
+}
+
+#[test]
+fn lifecycle_provenance_conflicts_warn_without_becoming_notes() {
+    for pretty in [false, true] {
+        let mut env = TestEnv::new();
+        let dir = env.init("sci");
+        let id = id_of(env.json(&dir, &["add", "Conflict"]));
+        let mut cmd = env.cmd(&dir);
+        cmd.env("CODEX_SESSION_ID", "secret-a")
+            .env("CODEX_THREAD_ID", "secret-b");
+        if pretty {
+            cmd.arg("--pretty");
+        }
+        let out = cmd.args(["start", &id]).output().unwrap();
+        assert!(out.status.success());
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            combined.contains("unknown harness provenance"),
+            "{combined}"
+        );
+        assert!(!combined.contains("secret-a") && !combined.contains("secret-b"));
+        let shown = env.json(&dir, &["show", &id]);
+        let notes = shown["task"]["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0]["text"], "started");
+        assert!(notes[0].get("harness_session").is_none());
+        env.json(&dir, &["park", &id, "unknown still works"]);
+        let shown = env.json(&dir, &["show", &id]);
+        assert!(shown["task"]["notes"][1].get("harness_session").is_none());
+    }
+}
+
+#[test]
+fn lifecycle_provenance_does_not_change_override_claims_or_plain_notes() {
+    for with_pid in [false, true] {
+        let mut env = TestEnv::new();
+        let dir = env.init("sci");
+        let id = id_of(env.json(&dir, &["add", "Claims"]));
+        let run = |args: &[&str], native: bool| {
+            let mut cmd = env.cmd(&dir);
+            cmd.env("TASKS_SESSION", "worker");
+            if with_pid {
+                cmd.env("TASKS_SESSION_PID", std::process::id().to_string());
+            }
+            if native {
+                cmd.env("CODEX_SESSION_ID", "native-a");
+            }
+            cmd.args(args).assert().success();
+        };
+        run(&["start", &id], false);
+        let before: toml::Value =
+            toml::from_str(&env.read(env.home.path(), ".local/state/tasks/claims/sci.toml"))
+                .unwrap();
+        run(&["start", &id], true);
+        let after: toml::Value =
+            toml::from_str(&env.read(env.home.path(), ".local/state/tasks/claims/sci.toml"))
+                .unwrap();
+        assert_eq!(before["claims"][&id].get("pid").is_some(), with_pid);
+        assert_eq!(before["claims"][&id].get("pid_start").is_some(), with_pid);
+        for field in ["session", "pid", "pid_start", "boot_id", "started"] {
+            assert_eq!(
+                before["claims"][&id].get(field),
+                after["claims"][&id].get(field),
+                "{field}"
+            );
+        }
+        assert_eq!(env.json(&dir, &["show", &id])["claim"]["live"], true);
+        for native in [false, true] {
+            run(&["note", &id, "heartbeat"], native);
+        }
+        let shown = env.json(&dir, &["show", &id]);
+        let notes = shown["task"]["notes"].as_array().unwrap();
+        assert_eq!(notes[1]["harness_session"], "codex:native-a");
+        assert!(
+            notes[2..]
+                .iter()
+                .all(|n| n.get("harness_session").is_none())
+        );
+        let before_denied = env.read(&dir, &format!("tasks/{id}.md"));
+        let out = as_agent(&env, &dir, "foreign")
+            .env("CODEX_SESSION_ID", "native-b")
+            .args(["done", &id])
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "claimed");
+        assert_eq!(env.read(&dir, &format!("tasks/{id}.md")), before_denied);
+        run(&["done", &id], with_pid);
+        assert!(env.json(&dir, &["show", &id])["claim"].is_null());
+    }
+}
+
+#[test]
 fn list_help_shows_sort_values_and_examples() {
     let env = TestEnv::new();
     let out = env
@@ -3570,7 +3803,12 @@ fn cleanup_retry_releases_this_checkouts_claim_without_a_second_occurrence() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
-    env.json(&sci, &["start", &id]);
+    env.cmd(&sci)
+        .env("CODEX_SESSION_ID", "native-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let notes_before = env.json(&sci, &["show", &id])["task"]["notes"].clone();
     let path = sci.join(format!("tasks/{id}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(
@@ -3592,6 +3830,10 @@ fn cleanup_retry_releases_this_checkouts_claim_without_a_second_occurrence() {
     );
     let file = env.read(&sci, &format!("tasks/{id}.md"));
     assert!(file.contains("last_done: 2026-01-01T00:00:00Z"), "{file}");
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["notes"],
+        notes_before
+    );
     assert!(
         !file.contains("completed; next due") && !file.contains("landed"),
         "{file}"
@@ -7343,6 +7585,7 @@ fn done_retries_a_failed_release_after_a_status_edit() {
     let original = std::fs::metadata(state_dir).unwrap().permissions();
     std::fs::set_permissions(state_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let out = as_agent(&env, &sci, "agent-a")
+        .env("CODEX_SESSION_ID", "native-a")
         .args(["edit", &id, "--status", "done"])
         .output();
     std::fs::set_permissions(state_dir, original).unwrap();
@@ -7363,6 +7606,12 @@ fn done_retries_a_failed_release_after_a_status_edit() {
     let shown = env.json(&sci, &["show", &id]);
     assert_eq!(shown["task"]["status"], "done");
     assert_eq!(shown["park"]["next_step"], "continue here");
+    let notes_before = shown["task"]["notes"].as_array().unwrap().clone();
+    assert_eq!(notes_before.last().unwrap()["text"], "done");
+    assert_eq!(
+        notes_before.last().unwrap()["harness_session"],
+        "codex:native-a"
+    );
 
     // `start --force` cannot recover this: can_transition rejects done -> doing.
     let out = as_agent(&env, &sci, "agent-a")
@@ -7379,6 +7628,19 @@ fn done_retries_a_failed_release_after_a_status_edit() {
     let shown = env.json(&sci, &["show", &id]);
     assert!(shown["claim"].is_null(), "{shown}");
     assert!(shown["park"].is_null(), "{shown}");
+    assert_eq!(
+        &shown["task"]["notes"].as_array().unwrap()[..notes_before.len()],
+        notes_before
+    );
+    assert_eq!(
+        shown["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["text"] == "done")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -7925,17 +8187,20 @@ fn a_failed_task_write_leaves_no_claim_behind() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let before = env.read(&sci, &format!("tasks/{id}.md"));
 
     // Read still works; `atomic_write` cannot create its temp file.
     let tasks_dir = sci.join("tasks");
     let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
     std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let out = as_agent(&env, &sci, "agent-a")
+        .env("CODEX_SESSION_ID", "native-a")
         .args(["start", &id])
         .output();
     std::fs::set_permissions(&tasks_dir, original).unwrap();
     let out = out.unwrap();
     assert_eq!(out.status.code(), Some(1));
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), before);
 
     assert!(
         env.json(&sci, &["show", &id])["claim"].is_null(),

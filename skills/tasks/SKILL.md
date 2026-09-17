@@ -182,6 +182,32 @@ the document reviews.
 
 ## Recording work
 
+### Lifecycle provenance
+
+Start/resume, park and close notes automatically carry optional `harness_session`
+and `harness_session_source` fields in JSON, persisted as an indented `provenance:`
+JSON continuation under the note bullet. Sources are `CLAUDE_CODE_SESSION_ID`
+(`claude-code:<id>`), `CODEX_SESSION_ID` or `CODEX_THREAD_ID` (`codex:<id>`);
+agreeing Codex variables prefer `CODEX_SESSION_ID`. Missing/empty native input
+omits both fields; invalid/conflicting input omits them and warns without preventing
+the lifecycle operation. A qualified `TASKS_SESSION` conflicting with the native
+key warns too; it never supplies or replaces the native source.
+
+This is independent of claim identity and liveness: Codex without a claim override
+still claims as `sid:<pid>`. Do not set `TASKS_SESSION` merely for obs.
+Generated lifecycle markers are `started`, `resumed`, `done`, `dropped`,
+`parked (waiting on …): <next step>`, and `completed; next due <YYYY-MM-DD>`.
+Close-message notes are stamped but are not lifecycle markers; plain `tasks note`,
+feedback, shelf notes and takeover commentary remain unstamped. Consumers use
+generated text, not the presence of fields, to identify transitions.
+User text can equal a marker; the pair-only schema cannot disambiguate that collision.
+
+Before deploying the writer, install the provenance-capable reader on every host
+reading synced task files: older binaries reject the whole stamped file. Roll out
+reader-only commit `57311fc` first; see the README for the complete contract.
+
+### Task operations
+
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
 - A thought to revisit later: `tasks add "<title>" --status idea --defer 60d` (or a date,
   `--defer 2026-11-10`); every status change clears the date, so scope it with

@@ -1,4 +1,4 @@
-use super::{Ctx, append_note, id_out, load, owner_name, save, transition};
+use super::{Ctx, append_lifecycle_note, append_note, id_out, load, owner_name, save, transition};
 use crate::error::{Error, Result};
 use crate::model::{Status, Task};
 use crate::output::Output;
@@ -17,7 +17,10 @@ pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
     task.owner = Some(owner.clone());
     // A takeover displaces someone; the task's own record should say so, not just the
     // ephemeral warning stream.
-    for takeover in &ctx.warnings[before..] {
+    for takeover in ctx.warnings[before..]
+        .iter()
+        .filter(|w| w.starts_with("took over "))
+    {
         append_note(&mut task, &owner, takeover)?;
     }
     save(&mut ctx, &mut task)?;
@@ -132,7 +135,7 @@ pub fn close(
         && !ctx.recovered
     {
         let owner = owner_name(&ctx.project)?;
-        append_note(&mut task, &owner, &message)?;
+        append_lifecycle_note(&mut ctx, &mut task, &owner, &message)?;
     }
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))

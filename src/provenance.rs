@@ -16,13 +16,6 @@ pub fn validate(provenance: &HarnessProvenance) -> Result<(), String> {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Reader-first rollout; Task 2 connects the lifecycle writer"
-    )
-)]
 pub fn resolve_from(
     get: impl Fn(&str) -> Option<OsString>,
 ) -> Result<Option<HarnessProvenance>, String> {

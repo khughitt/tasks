@@ -71,8 +71,8 @@ its liveness. `ready` and `next` omit live claims with an explanatory warning. S
 `TASKS_SESSION` per agent when agents share a terminal or harness process; use
 `tasks start --force <id>` for an explicit, recorded takeover.
 
-Note provenance has **reader support only** during the staged rollout: commands do
-not yet generate stamps. A stamped note has one indented JSON continuation:
+Lifecycle notes automatically record native harness provenance, independently of
+claim identity and liveness. A stamped note has one indented JSON continuation:
 
 ```markdown
 - 2026-09-17T20:00:00Z (worker): started
@@ -81,14 +81,36 @@ not yet generate stamps. A stamped note has one indented JSON continuation:
 
 `tasks show` exposes these optional fields directly on the note; both are absent
 when unknown. The source names only `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`,
-or `CODEX_THREAD_ID`, with a matching `claude-code:` or `codex:` key. This metadata
-does not change claim identity or liveness. `TASKS_SESSION` remains a claim override,
-not a provenance source.
+or `CODEX_THREAD_ID`, with a matching `claude-code:` or `codex:` key. Agreeing Codex
+variables select `CODEX_SESSION_ID`. Missing/empty native values leave both fields
+absent; conflicting or invalid inputs also leave them absent and emit a warning,
+without blocking an otherwise valid lifecycle operation. A qualified `TASKS_SESSION`
+override that disagrees with the native key is a conflict; a matching override never
+replaces the native source. Other claim overrides remain independent. Do not set
+`TASKS_SESSION` merely to improve observability: it is a claim override, not a
+provenance source. Codex still uses its `sid:<pid>` claim fallback without an override.
 
-Install this reader with `cargo install --path .` on **every host reading synced
-task files before deploying the writer**. Older binaries reject the whole file
-when they encounter a provenance continuation. Rollout and the pending lifecycle
-writer are tracked in `docs/plans/2026-09-17-lifecycle-provenance.md`.
+The generated lifecycle texts are the consumer contract (including status edits):
+
+- `started` on first start; `resumed` on subsequent starts, including owner refresh.
+- `parked (waiting on …): <next step>`, using the existing park reason vocabulary.
+- `done` or `dropped` on a genuine close transition.
+- `completed; next due <YYYY-MM-DD>` instead of `done` for a recurring completion.
+
+These notes persist after claims and parks are released. Close-message notes are also
+stamped, but user messages are **not lifecycle markers**. Consumers such as obs derive
+transition kinds from generated texts, not simply from the presence of provenance.
+There is no serialized marker kind: arbitrary user text can equal a generated text
+(for example, a close message of `resumed`). Text matching alone cannot disambiguate
+that collision; consumers must retain that uncertainty.
+Plain `tasks note`, shelf notes, feedback and takeover commentary remain unstamped.
+
+Reader-first deployment is required: install reader-only commit `57311fc` (or a
+descendant) on **every host reading synced task files before deploying the writer**.
+Older binaries reject the whole file when they encounter a provenance continuation.
+The titan and Europa reader checks and writer delivery are recorded in
+`docs/plans/2026-09-17-lifecycle-provenance.md`. Use `cargo install --locked --path .`
+to install the checked dependency versions.
 
 `TASKS_MODEL` per harness process records which model completed each task: a fresh
 `done` stamps the record's `model` field from it (and clears the stamp when it is

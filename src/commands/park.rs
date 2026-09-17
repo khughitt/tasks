@@ -1,4 +1,4 @@
-use super::{ClaimIntent, Ctx, append_note, id_out, load, owner_name, save};
+use super::{ClaimIntent, Ctx, append_lifecycle_note, id_out, load, owner_name, save};
 use crate::claims::{Escalation, Liveness, Needs, Park, Reason, WaitingOn, describe_stop};
 use crate::error::{Error, Result};
 use crate::model::{Complexity, Status};
@@ -152,7 +152,8 @@ pub fn run(
         task.complexity = Some(level);
     }
 
-    append_note(
+    append_lifecycle_note(
+        &mut ctx,
         &mut task,
         &owner,
         &format!(

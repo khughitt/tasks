@@ -587,6 +587,15 @@ pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn append_lifecycle_note(ctx: &mut Ctx, task: &mut Task, by: &str, text: &str) -> Result<()> {
+    append_note(task, by, text)?;
+    match crate::provenance::resolve_from(|name| std::env::var_os(name)) {
+        Ok(provenance) => task.notes.last_mut().expect("just appended").provenance = provenance,
+        Err(diagnostic) => ctx.warnings.push(diagnostic),
+    }
+    Ok(())
+}
+
 /// Ids of dependencies that are open or unreachable.
 pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
@@ -698,6 +707,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         }
     }
     let completing = to == Status::Done && task.status != Status::Done;
+    let first_start = task.started.is_none();
     // One instant for everything this transition stamps, so a recurring completion's
     // `completed` and `last_done` agree to the second (spec §3).
     let now = crate::time::now();
@@ -723,10 +733,22 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         })?;
         task.last_done = Some(now);
         let owner = owner_name(&ctx.project)?;
-        append_note(
+        append_lifecycle_note(
+            ctx,
             task,
             &owner,
             &format!("completed; next due {}", next.date()),
+        )?;
+    } else if closing {
+        let owner = owner_name(&ctx.project)?;
+        append_lifecycle_note(ctx, task, &owner, to.as_str())?;
+    } else if to == Status::Doing {
+        let owner = owner_name(&ctx.project)?;
+        append_lifecycle_note(
+            ctx,
+            task,
+            &owner,
+            if first_start { "started" } else { "resumed" },
         )?;
     }
     Ok(())
