@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this plan task-by-task, with independent diff review before completion.
 
-Status: approved with the user's three review adjustments, 2026-09-17. Task 1 is implemented and independently reviewed (499 tests passed); merge/install remains below. Task 2 is parked at the cross-host reader gate.
+Status: approved with the user's three review adjustments, 2026-09-17. Task 1 is merged and installed on titan; independent review and all 499 tests passed. Task 2 is parked pending Europa's reader rollout.
 
 **Goal:** Persist the approved harness-session key on task lifecycle notes without changing claim identity or liveness.
 
@@ -20,6 +20,12 @@ tasks-8921f4 holds the ancestry design independently; tasks-c9199a remains the p
 
 Confirmed reader hosts: titan and europa (Europa). Europa's reader installation and
 isolated stamped-fixture check require user confirmation before the writer proceeds.
+
+Rollout evidence: titan installed reader-only commit `57311fc` with `cargo install
+--path .` on 2026-09-17. The installed binary passed `show`, a title-only `edit`,
+and another `show` against an isolated stamped fixture, preserving the complete
+note (including both provenance fields); config and state were isolated from the
+real registry. Europa is pending. No production lifecycle stamp writer is enabled.
 
 ## Global constraints
 
@@ -131,7 +137,7 @@ if let Some(provenance) = &n.provenance {
 ```
 
 - [x] Run `just test-fast provenance`, `just test-fast format::tests`, and `just gate`. Obtain independent diff review; commit as `feat: persist optional harness provenance on notes`. The reviewer found positional-array acceptance in Serde; the regression failed before the object guard and passed after it. Final full gate: 188 unit tests and 311 CLI tests passed; review cleared.
-- [ ] Merge Task 1 separately and `cargo install --path .` on titan. This task adds format support, not a production stamp writer. Record rollout evidence per host before Task 2.
+- [x] Merge Task 1 separately and `cargo install --path .` on titan. This task adds format support, not a production stamp writer. Rollout evidence is recorded above; Europa remains Task 2's gate.
 
 ### Task 2: Stamp lifecycle notes without changing claims
 
