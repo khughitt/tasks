@@ -7,12 +7,14 @@ size: l
 complexity: high
 process: planned
 created: 2026-09-17T00:50:54Z
-updated: 2026-09-17T17:39:07Z
+updated: 2026-09-17T19:33:59Z
 depends: [relay-06b1da]
 tags: []
 source: ops-998bbb
 agent: codex
 ---
+
+Approved obs prerequisite (separate from the relay-identity design below): implement the fixed harness_session and harness_session_source lifecycle-note fields from ops docs/specs/2026-09-17-session-provenance-design.md. Read native CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID/CODEX_THREAD_ID for provenance only; preserve claim identity and liveness, including Claude native PID capture and Codex sid:<pid>. Add ordinary start/resume notes and extend park/close notes, retaining timestamps across claim release; no new store and no rewriting old notes. Missing/conflicting provenance stays unknown; arbitrary TASKS_SESSION overrides are not relabeled. Claude subagents correctly share the parent's session key. Field naming and source selection are approved, not a pending design decision. ops-79f409 still owns the attended Codex evidence; obs Task 2 consumes this note-stamping deliverable, not the separate ancestry feature.
 
 Approved source: ops docs/specs/2026-09-16-relay-design.md (reviewed after d7e2c33); execution brief: ops docs/plans/2026-09-16-relay-bootstrap.md (approved after bc53c51 with review corrections).
 
@@ -44,3 +46,4 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
 - 2026-09-17T16:57:15Z (main): Consumer requirement from obs-045db1 charter review: expose qualified harness session identity for task/session joins and preserve a timestamped association across start/resume/park/close and claim release. Current parks retain tagged session only in the shared store; start has no durable session note. Account for claude:<id> historical parks versus claude-code:<id> relay keys and raw Claude claim ids. Coordinate native session provenance with the ops task filed from obs-045db1. This is an input to this task’s pending identity design, not approval of a new storage contract.
 - 2026-09-17T17:02:07Z (main): Session provenance producer is ops-79f409. Obs input needs the native qualified key (claude-code:<id> or codex:<id>) and a timestamped task association surviving claim/park release; existing park capture superseded tasks-abfd3d but cannot cover an unparked stopped turn on its own.
 - 2026-09-17T17:39:07Z (main): Obs plan-review steering: satisfy the durable association requirement by stamping ops-79f409's qualified TASKS_SESSION key into existing timestamped task notes, not a new store. Parks already append notes; ordinary starts currently only stamp started (notes are takeover-only), so add start/resume notes and extend park/close notes. Preserve source timestamps across claim release. Obs now treats sid as unknown and has no Node ancestry bridge. This narrows obs's consumer requirement; the existing tasks identity design still needs its own review.
+- 2026-09-17T19:33:59Z (main): Supersedes the 17:39 TASKS_SESSION-export steering: the approved ops-79f409 design fixes harness_session and harness_session_source in lifecycle notes, separate from claim identity. Implement that contract without redesigning fields or changing liveness; broader opt-in relay ancestry remains separately designed. Obs joins Codex notes even while claims remain sid:<pid>. No implementation performed in this synchronization.
