@@ -210,11 +210,17 @@ pub enum Command {
         id: String,
     },
     /// List tasks (open by default).
+    #[command(
+        after_help = "Examples:\n  tasks list --sort updated\n  tasks list --status todo --tag cli"
+    )]
     List {
-        #[arg(long = "status", add = ArgValueCandidates::new(crate::complete::statuses))]
+        /// Filter by status (repeatable): idea, todo, doing, blocked, shelved, done, or dropped.
+        #[arg(long = "status", value_name = "STATUS", add = ArgValueCandidates::new(crate::complete::statuses))]
         statuses: Vec<String>,
-        #[arg(long = "tag")]
+        /// Filter by tag (repeatable).
+        #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
+        /// Only tasks owned by this value.
         #[arg(long)]
         owner: Option<String>,
         /// Only tasks whose source is exactly this reference; matched byte for byte,
@@ -226,7 +232,7 @@ pub enum Command {
         parent: Option<String>,
         /// Order: priority (default: priority, then last activity), updated, or created
         /// (most recent first). Pretty rows show the date sorted on, else last activity.
-        #[arg(long, add = ArgValueCandidates::new(crate::complete::sorts))]
+        #[arg(long, value_name = "priority|updated|created", add = ArgValueCandidates::new(crate::complete::sorts))]
         sort: Option<String>,
         /// Reverse the chosen order.
         #[arg(long)]

@@ -2,6 +2,28 @@ mod common;
 use common::TestEnv;
 
 #[test]
+fn list_help_shows_sort_values_and_examples() {
+    let env = TestEnv::new();
+    let out = env
+        .cmd(env.home.path())
+        .args(["list", "--help"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Filter by status (repeatable)"), "{text}");
+    assert!(text.contains("Filter by tag (repeatable)"), "{text}");
+    assert!(text.contains("Only tasks owned by this value"), "{text}");
+    assert!(text.contains("--sort <priority|updated|created>"), "{text}");
+    assert!(text.contains("Examples:"), "{text}");
+    assert!(text.contains("tasks list --sort updated"), "{text}");
+    assert!(
+        text.contains("tasks list --status todo --tag cli"),
+        "{text}"
+    );
+}
+
+#[test]
 fn init_creates_layout_and_registers() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
