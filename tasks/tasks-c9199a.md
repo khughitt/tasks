@@ -1,13 +1,15 @@
 ---
 id: tasks-c9199a
 title: Design relay identity without changing native liveness
-status: todo
+status: doing
 priority: 2
 size: l
 complexity: high
 process: planned
+owner: main
 created: 2026-09-17T00:50:54Z
-updated: 2026-09-17T20:57:12Z
+updated: 2026-09-17T21:04:30Z
+started: 2026-09-17T21:04:30Z
 depends: [relay-06b1da]
 tags: []
 source: ops-998bbb
@@ -48,3 +50,4 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
 - 2026-09-17T17:39:07Z (main): Obs plan-review steering: satisfy the durable association requirement by stamping ops-79f409's qualified TASKS_SESSION key into existing timestamped task notes, not a new store. Parks already append notes; ordinary starts currently only stamp started (notes are takeover-only), so add start/resume notes and extend park/close notes. Preserve source timestamps across claim release. Obs now treats sid as unknown and has no Node ancestry bridge. This narrows obs's consumer requirement; the existing tasks identity design still needs its own review.
 - 2026-09-17T19:33:59Z (main): Supersedes the 17:39 TASKS_SESSION-export steering: the approved ops-79f409 design fixes harness_session and harness_session_source in lifecycle notes, separate from claim identity. Implement that contract without redesigning fields or changing liveness; broader opt-in relay ancestry remains separately designed. Obs joins Codex notes even while claims remain sid:<pid>. No implementation performed in this synchronization.
 - 2026-09-17T20:57:12Z (main): ops-79f409 is complete: independently reviewed ops docs/reports/2026-09-17-session-provenance-probe.md verifies native distinctness and command/harness equality for Claude and two attended Codex sessions. Both Codex variables agree with familiar; neither TASKS override is set. Implement the approved harness_session/harness_session_source lifecycle-note contract without changing claims or liveness; evidence acquisition is no longer pending. Note persistence and claim regression checks remain here, separately from broader relay-ancestry design.
+- 2026-09-17T21:04:30Z (main): Starting only the approved lifecycle-note provenance slice. Reuse ops docs/specs/2026-09-17-session-provenance-design.md; write a tasks implementation plan for user review before code changes. Broader opt-in relay ancestry remains separate. Trace includes transition callers (start and flag/editor status edits), park, close without a message, and retry paths. Workspace: .worktrees/lifecycle-provenance.
