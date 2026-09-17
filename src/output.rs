@@ -90,8 +90,10 @@ pub struct ProjectsOut {
 #[derive(Serialize)]
 pub struct DepInfo {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// Typed, but serde still emits the same lowercase strings as before.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
     pub resolved: bool,
 }
@@ -108,16 +110,27 @@ pub struct Related {
 #[derive(Serialize)]
 pub struct ShowFields {
     pub task: Task,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub step_found: Option<bool>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<DepInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<Related>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Related>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub claim: Option<ClaimInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub park: Option<ParkInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub escalation: Option<crate::claims::Escalation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub periodic: Option<PeriodicInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<DeferredInfo>,
 }
 
@@ -140,27 +153,44 @@ pub struct TaskSummary {
     pub title: String,
     pub status: Status,
     pub priority: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub complexity: Option<Complexity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     pub parallel: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     pub created: String,
     pub updated: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub started: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     pub child_count: usize,
     pub open_descendant_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub claim: Option<ClaimInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub park: Option<ParkInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub escalation: Option<crate::claims::Escalation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub periodic: Option<PeriodicInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<DeferredInfo>,
 }
 
@@ -169,6 +199,7 @@ pub struct ClaimInfo {
     pub owner: String,
     pub session: String,
     pub host: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     pub worktree: String,
     pub started: String,
@@ -198,8 +229,11 @@ pub struct ParkInfo {
     pub at: String,
     pub next_step: String,
     pub waiting_on: crate::claims::WaitingOn,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<crate::claims::Reason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub needs: Option<crate::claims::Needs>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub minutes: Option<u32>,
     pub session: String,
     pub owner: String,
@@ -225,12 +259,14 @@ impl ParkInfo {
 }
 
 /// A record's cadence and where it sits in the cycle (spec §5.4). `due_now` is carried
-/// explicitly because `due: null` cannot distinguish "not applicable" from "due now with
+/// explicitly because an absent `due` cannot distinguish "not applicable" from "due now with
 /// no anchor".
 #[derive(Debug, Clone, Serialize)]
 pub struct PeriodicInfo {
     pub every: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_done: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub due: Option<String>,
     pub due_now: bool,
 }
@@ -316,29 +352,52 @@ impl TaskSummary {
 pub struct ParkedRow {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<Status>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub complexity: Option<Complexity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     pub parallel: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub created: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub updated: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub started: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub child_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub open_descendant_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub claim: Option<ClaimInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub park: Option<ParkInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub escalation: Option<crate::claims::Escalation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub phase: Option<crate::model::Phase>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<DeferredInfo>,
 }
 
@@ -437,6 +496,7 @@ pub struct ListOut {
 pub struct TreeNode {
     #[serde(flatten)]
     pub summary: TaskSummary,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<TreeNode>,
 }
 

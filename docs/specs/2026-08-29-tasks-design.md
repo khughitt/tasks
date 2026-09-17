@@ -453,7 +453,27 @@ tasks feedback <summary> --category friction|gap|idea|positive [-b|--body TEXT]
   failure is reported and exits 1 as above. The same holds for stderr, except that a
   diagnostic that cannot be delivered never changes the exit code.
 
-Shapes (all fields always present; optional fields are `null`):
+Task JSON is sparse (contract change, 2026-09-17):
+
+- `Task`, `TaskSummary`, `ParkedRow`, `ShowFields`, `TreeNode`, and their nested
+  `DepInfo`, `ClaimInfo`, `ParkInfo`, and `PeriodicInfo` omit unset optional fields
+  instead of emitting `null`. Empty task collections (`tags`, `depends`, `notes`,
+  `depends_on`, and `children`) are omitted. This applies wherever those types occur,
+  including `show`, `next`, `list`, `ready`, `sample`, `prime`, `tree`, and `quiet`.
+- Consumers interpret an absent optional field as unset and an absent task collection
+  as empty. An unresolved parked row omits `status`; it still carries `id`, `title`,
+  `parallel`, and its `park` payload. Required scalar values remain present, including
+  `false`, `0`, and empty strings such as `body: ""`.
+- Response containers remain present, including empty `tasks`, `nodes`, `warnings`,
+  and `prime` lists. `next: null` still means nothing is eligible. Non-task output,
+  including project rows, tag rows, findings, and aggregate summaries, is unchanged.
+- This replaces the previous promise that all task fields were always present. Clients
+  must stop requiring optional keys and default missing task collections to empty.
+  Markdown storage and pretty output are unchanged. These rules supersede the older
+  null/empty serialization descriptions in feature design documents.
+
+Shapes below list the available fields. Within the sparse task types, `|null` denotes
+an optional field that is **omitted** when unset, not a literal JSON null:
 
 ```
 Task = {
@@ -472,7 +492,7 @@ show   -> { task: Task,
             claim: ClaimInfo|null,
             spec_path: string|null,    absolute
             plan_path: string|null,    absolute
-            step_found: bool|null,     null when no step
+            step_found: bool|null,     omitted when no step
             depends_on: [{ id, title: string|null, status: string|null, resolved: bool }],
             warnings: [string] }
 list   -> { tasks: [TaskSummary], warnings }
@@ -506,13 +526,13 @@ TaskSummary += park: ParkInfo|null
 show        += park: ParkInfo|null
 ParkInfo     = { at, next_step, waiting_on: "user"|"agent", session, owner, host, worktree }
 ParkedRow    = TaskSummary where status, priority, size, owner, created, updated, source,
-               parent, child_count, and open_descendant_count are nullable; id, title, and
-               parallel remain concrete; tags and depends are arrays (empty when unavailable),
+               parent, child_count, and open_descendant_count are optional; id, title, and
+               parallel remain concrete; tags and depends are arrays (omitted when empty or unavailable),
                + phase: "brainstorming"|"planning"|"implementing"|null
-               status is null only for an entry whose checkout is unavailable
+               status is omitted only for an entry whose checkout is unavailable
 Task        += process: "direct"|"planned"|null
 TaskSummary += process: "direct"|"planned"|null
-ParkedRow   += process: "direct"|"planned"|null     null when unresolved or unassessed
+ParkedRow   += process: "direct"|"planned"|null     omitted when unresolved or unassessed
 prime       += parked: [ParkedRow]            most recently parked first
 list        -> --parked returns { tasks: [ParkedRow], warnings }
 park        -> { id, warnings }

@@ -7,6 +7,10 @@ description: Use when working in a repository that contains tasks/.config.toml o
 
 `tasks` is the repository's task tracker: one markdown file per task under `tasks/`,
 managed only through the CLI. Output is JSON unless `--pretty` is given.
+Task objects omit unset optional fields and empty collections; treat missing optional
+keys as unset and missing task arrays as empty. `false`, `0`, and empty strings remain.
+Response containers (`tasks`, `warnings`, etc.) remain present; `next: null` still means
+nothing is eligible.
 
 ## Session protocol
 
@@ -149,7 +153,7 @@ decides whether brainstorming runs, ahead of generic Superpowers triggers:
 - `planned`: prepare a written design spec for user review, then an implementation
   plan for user review, before implementation. Reuse existing artifacts after
   verifying their contents and review state; links alone never prove approval.
-- Missing (JSON null): unassessed. Read the full task and relevant code, choose with
+- Missing (JSON key omitted): unassessed. Read the full task and relevant code, choose with
   `tasks edit <id> --process direct|planned`, and note the reason before implementation.
   Do not silently default or infer a choice from size, priority, complexity, parents,
   or document links. Ideas still require scoping.

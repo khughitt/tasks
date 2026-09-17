@@ -1717,10 +1717,10 @@ fn add_writes_a_valid_file_and_show_reads_it_back() {
     assert_eq!(s["task"]["body"], "Body text");
     assert_eq!(s["task"]["size"], "m");
     assert_eq!(s["task"]["owner"], serde_json::Value::Null);
-    assert_eq!(s["task"]["notes"], serde_json::json!([]));
+    assert!(s["task"].get("notes").is_none());
     assert_eq!(s["spec_path"], serde_json::Value::Null);
     assert_eq!(s["step_found"], serde_json::Value::Null);
-    assert_eq!(s["depends_on"], serde_json::json!([]));
+    assert!(s.get("depends_on").is_none());
     assert_eq!(s["warnings"], serde_json::json!([]));
 }
 
@@ -2626,8 +2626,7 @@ fn list_defaults_to_open_and_filters() {
     assert_eq!(env.fail(&dir, &["list", "--status", "weird"]), "validation");
     let summary = &v["tasks"][0];
     for key in [
-        "id", "title", "status", "priority", "size", "owner", "created", "updated", "tags",
-        "depends",
+        "id", "title", "status", "priority", "created", "updated", "tags",
     ] {
         assert!(summary.get(key).is_some(), "summary missing {key}");
     }
@@ -3993,9 +3992,10 @@ fn dep_add_remove_and_local_cycle() {
         serde_json::json!([b])
     );
     env.json(&dir, &["dep", &c, "--rm", &b]);
-    assert_eq!(
-        env.json(&dir, &["show", &c])["task"]["depends"],
-        serde_json::json!([])
+    assert!(
+        env.json(&dir, &["show", &c])["task"]
+            .get("depends")
+            .is_none()
     );
     assert_eq!(env.fail(&dir, &["dep", &c, "--rm", &b]), "validation");
     env.json(&dir, &["dep", &b, "--on", &a]);
@@ -4572,7 +4572,7 @@ fn show_reports_parent_and_children_and_list_filters_by_parent() {
     assert_eq!(shown["parent"]["id"], goal);
     assert_eq!(shown["parent"]["title"], "Goal");
     assert_eq!(shown["parent"]["status"], "todo");
-    assert_eq!(shown["children"], serde_json::json!([]));
+    assert!(shown.get("children").is_none());
     let shown = env.json(&dir, &["show", &goal]);
     assert_eq!(shown["parent"], serde_json::Value::Null);
     let kids: Vec<&str> = shown["children"]
@@ -5704,10 +5704,9 @@ fn a_retired_id_is_one_task_for_routing_dedup_and_removal() {
 
     env.json(&sci, &["dep", &a, "--rm", &retired_b]);
     assert!(
-        env.json(&sci, &["show", &a])["task"]["depends"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+        env.json(&sci, &["show", &a])["task"]
+            .get("depends")
+            .is_none()
     );
 }
 
@@ -6546,7 +6545,7 @@ fn a_task_parked_only_in_another_checkout_is_listed_from_there_and_never_next() 
         .clone();
     assert_eq!(row["title"], "Parent");
     assert!(row["status"].is_null() && row["phase"].is_null() && row["priority"].is_null());
-    assert_eq!(row["depends"], serde_json::json!([]));
+    assert!(row.get("depends").is_none());
     assert_eq!(row["parallel"], false);
     assert_eq!(row["park"]["next_step"], "plan the pieces");
     assert!(
@@ -8506,7 +8505,7 @@ fn edit_tags_append_and_remove_instead_of_replacing() {
     env.json(&sci, &["edit", &id, "--no-tags", "--tag", "cli"]);
     assert_eq!(tags(&env, &id), serde_json::json!(["cli"]));
     env.json(&sci, &["edit", &id, "--no-tags"]);
-    assert_eq!(tags(&env, &id), serde_json::json!([]));
+    assert!(env.json(&sci, &["show", &id])["task"].get("tags").is_none());
 
     let out = env
         .cmd(&sci)
@@ -8563,10 +8562,10 @@ fn source_is_set_by_add_replaced_and_cleared_by_edit() {
             .contains("source:")
     );
 
-    // absent is null, never a missing key
+    // Unset source is omitted.
     let plain = id_of(env.json(&dir, &["add", "Plain"]));
     let shown = env.json(&dir, &["show", &plain]);
-    assert!(shown["task"].get("source").is_some(), "{shown}");
+    assert!(shown["task"].get("source").is_none(), "{shown}");
     assert_eq!(shown["task"]["source"], serde_json::Value::Null);
 
     // empty and multi-line are validation errors on both write paths
@@ -8614,14 +8613,18 @@ fn source_is_set_by_add_replaced_and_cleared_by_edit() {
         .iter()
         .find(|r| r["id"] == plain)
         .unwrap();
-    assert_eq!(plain_row["source"], serde_json::Value::Null);
+    assert!(plain_row.get("source").is_none());
     let ready = env.json(&dir, &["ready"]);
     assert!(
         ready["tasks"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|r| r.get("source").is_some()),
+            .all(|r| if r["id"] == sourced {
+                r["source"] == "note:abc"
+            } else {
+                r.get("source").is_none()
+            }),
         "{ready}"
     );
 }
@@ -11916,16 +11919,10 @@ fn the_periodic_object_is_the_json_contract() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
 
-    // no cadence: null everywhere
+    // No cadence: periodic is omitted everywhere.
     let plain = id_of(env.json(&sci, &["add", "One off"]));
-    assert_eq!(
-        env.json(&sci, &["show", &plain]).get("periodic"),
-        Some(&serde_json::Value::Null)
-    );
-    assert_eq!(
-        env.json(&sci, &["list"])["tasks"][0].get("periodic"),
-        Some(&serde_json::Value::Null)
-    );
+    assert_eq!(env.json(&sci, &["show", &plain]).get("periodic"), None);
+    assert_eq!(env.json(&sci, &["list"])["tasks"][0].get("periodic"), None);
     // close it so it cannot compete for the head of `ready` below
     env.json(&sci, &["done", &plain]);
 
@@ -11933,8 +11930,8 @@ fn the_periodic_object_is_the_json_contract() {
     let open = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
     let v = env.json(&sci, &["show", &open]);
     assert_eq!(v["periodic"]["every"], "30d");
-    assert!(v["periodic"]["last_done"].is_null());
-    assert!(v["periodic"]["due"].is_null());
+    assert!(v["periodic"].get("last_done").is_none());
+    assert!(v["periodic"].get("due").is_none());
     assert_eq!(v["periodic"]["due_now"], false);
 
     // closed and anchored: a computable date, not yet due
@@ -11945,13 +11942,13 @@ fn the_periodic_object_is_the_json_contract() {
     assert!(v["periodic"]["due"].as_str().unwrap().ends_with('Z'));
     assert_eq!(v["periodic"]["due_now"], false);
 
-    // closed and unanchored: due now, with no computable date -- the case `due: null`
+    // Closed and unanchored: due now, with no computable date -- an absent `due`
     // alone cannot express (spec §5.4)
     let due = id_of(env.json(&sci, &["add", "Overdue"]));
     env.json(&sci, &["done", &due]);
     env.json(&sci, &["edit", &due, "--every", "30d"]);
     let v = env.json(&sci, &["show", &due]);
-    assert!(v["periodic"]["due"].is_null());
+    assert!(v["periodic"].get("due").is_none());
     assert_eq!(v["periodic"]["due_now"], true);
 
     // the same object rides on list rows and on next; `due` is the only ready task
@@ -13651,7 +13648,7 @@ fn process_round_trips_and_rejects_invalid_edits() {
     env.json(&dir, &["edit", &id, "--no-process"]);
     env.json(&dir, &["note", &id, "retain absence"]);
     let task = env.json(&dir, &["show", &id]);
-    assert!(task["task"].get("process").unwrap().is_null());
+    assert!(task["task"].get("process").is_none());
     assert!(
         !std::fs::read_to_string(&path)
             .unwrap()
@@ -13722,15 +13719,14 @@ fn process_survives_ready_and_parked_next() {
     assert!(
         env.json(&dir, &["list", "--parked"])["tasks"][0]
             .get("process")
-            .unwrap()
-            .is_null()
+            .is_none()
     );
     assert_eq!(env.json(&dir, &["next"])["next"]["task"]["id"], id);
 
-    // A surviving park with no record has an explicit null, not an omitted field.
+    // A surviving park with no record also omits unset fields.
     std::fs::remove_file(dir.join(format!("tasks/{id}.md"))).unwrap();
     let unresolved = env.json(&dir, &["list", "--parked"]);
-    assert!(unresolved["tasks"][0].get("process").unwrap().is_null());
+    assert!(unresolved["tasks"][0].get("process").is_none());
 }
 
 #[test]
@@ -13783,8 +13779,7 @@ fn process_missing_warns_only_while_doing() {
     assert!(
         env.json(&dir, &["show", &step])["task"]
             .get("process")
-            .unwrap()
-            .is_null()
+            .is_none()
     );
     assert!(!missing(&env.json(&dir, &["check"])));
     env.json(&dir, &["edit", &goal, "--no-process"]);
@@ -13819,15 +13814,14 @@ fn process_does_not_change_selection_or_starting() {
             .map(|row| row["id"].as_str().unwrap())
             .collect();
         assert_eq!(ids, [first.as_str(), second.as_str()]);
-        assert!(ready["tasks"][0].get("process").unwrap().is_null());
+        assert!(ready["tasks"][0].get("process").is_none());
         assert_eq!(env.json(&dir, &["next"])["next"]["task"]["id"], first);
     }
     env.json(&dir, &["start", &first]);
     assert!(
         env.json(&dir, &["show", &first])["task"]
             .get("process")
-            .unwrap()
-            .is_null()
+            .is_none()
     );
 }
 
@@ -13877,8 +13871,8 @@ fn add_stamps_agent_from_the_flag_then_the_variable_and_absence_records_nothing(
     let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
     let shown = env.json(&sci, &["show", &plain]);
     assert!(
-        shown["task"].get("agent").is_some(),
-        "key present when absent: {shown}"
+        shown["task"].get("agent").is_none(),
+        "unset agent must be omitted: {shown}"
     );
     assert!(shown["task"]["agent"].is_null());
 
@@ -14085,10 +14079,7 @@ fn summary_rows_and_parked_rows_carry_agent() {
         let row = rows.iter().find(|row| row["id"] == stamped).unwrap();
         assert_eq!(row["agent"], "codex/gpt-6", "{view:?}");
         let row = rows.iter().find(|row| row["id"] == plain).unwrap();
-        assert!(
-            row.get("agent").is_some() && row["agent"].is_null(),
-            "{view:?}"
-        );
+        assert!(row.get("agent").is_none(), "{view:?}");
     }
 
     env.json(&sci, &["park", &stamped, "resume here"]);
@@ -14509,4 +14500,77 @@ fn prime_carries_the_deferred_line_and_aggregate() {
         show.contains("# deferred\nuntil: 2026-01-01 (due)\n"),
         "{show}"
     );
+}
+
+#[test]
+fn sparse_json_omits_unset_task_fields_but_preserves_values_and_envelopes() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let empty = env.json(&dir, &["list"]);
+    assert_eq!(empty, serde_json::json!({"tasks": [], "warnings": []}));
+    let empty_next = env.json(&dir, &["next"]);
+    assert_eq!(empty_next.get("next"), Some(&serde_json::Value::Null));
+
+    let id = id_of(env.json(&dir, &["add", "Sparse", "-p", "0"]));
+    let raw = env.read(&dir, &format!("tasks/{id}.md"));
+    for command in ["list", "ready"] {
+        let out = env.json(&dir, &[command]);
+        let row = &out["tasks"][0];
+        assert_eq!(row["id"], id);
+        assert_eq!(row["priority"], 0);
+        assert_eq!(row["parallel"], false);
+        assert_eq!(row["child_count"], 0);
+        assert_eq!(row["open_descendant_count"], 0);
+        for key in [
+            "size", "process", "owner", "claim", "park", "tags", "depends",
+        ] {
+            assert!(row.get(key).is_none(), "{command}: {key}: {row}");
+        }
+        assert_eq!(out["warnings"], serde_json::json!([]));
+    }
+    let prime = env.json(&dir, &["prime"]);
+    assert!(prime["ready"][0].get("size").is_none());
+    assert!(prime["roadmap"][0].get("children").is_none());
+    assert_eq!(prime["doing"], serde_json::json!([]));
+    let tree = env.json(&dir, &["tree"]);
+    assert!(tree["nodes"][0].get("children").is_none());
+    let show = env.json(&dir, &["show", &id]);
+    for key in ["size", "tags", "depends", "notes"] {
+        assert!(show["task"].get(key).is_none(), "{key}: {show}");
+    }
+    for key in [
+        "claim",
+        "parent",
+        "spec_path",
+        "step_found",
+        "depends_on",
+        "children",
+    ] {
+        assert!(show.get(key).is_none(), "{key}: {show}");
+    }
+    assert_eq!(show["task"]["body"], "");
+    let next = env.json(&dir, &["next"]);
+    assert_eq!(next["next"]["task"], show["task"]);
+    assert!(next["next"].get("depends_on").is_none());
+    assert_eq!(env.read(&dir, &format!("tasks/{id}.md")), raw);
+
+    env.json(
+        &dir,
+        &["edit", &id, "--tag", "cli", "--size", "s", "--every", "30d"],
+    );
+    let row = &env.json(&dir, &["list"])["tasks"][0];
+    assert_eq!(row["tags"], serde_json::json!(["cli"]));
+    assert_eq!(row["size"], "s");
+    assert_eq!(row["periodic"]["every"], "30d");
+    assert_eq!(row["periodic"]["due_now"], false);
+    assert!(row["periodic"].get("due").is_none());
+    assert!(row["periodic"].get("last_done").is_none());
+    env.json(&dir, &["park", &id, "Resume here"]);
+    let parked = env.json(&dir, &["list", "--parked"]);
+    let row = &parked["tasks"][0];
+    assert!(row.get("depends").is_none());
+    assert!(row.get("parent").is_none());
+    assert_eq!(row["park"]["next_step"], "Resume here");
+    assert!(row["park"].get("reason").is_none());
+    assert_eq!(row["parallel"], false);
 }

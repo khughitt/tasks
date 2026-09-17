@@ -4,6 +4,13 @@ A fast, file-based task tracker for software projects, built for coding agents a
 humans supervising them. One markdown file per task, checked into the project; a single
 Rust binary as the only writer. JSON output by default.
 
+JSON task records omit unset optional fields and empty task collections (`tags`,
+`depends`, `notes`, `depends_on`, `children`). Missing means unset or empty; consumers
+must not require those keys. Values such as `false`, `0`, and `body: ""` remain.
+Response containers such as `tasks: []` and `warnings: []` remain, as does `next: null`
+when nothing is eligible. This replaces the previous always-present task-field contract;
+see [the output contract](docs/specs/2026-08-29-tasks-design.md#51-output-contract).
+
 Design: [`docs/specs/2026-08-29-tasks-design.md`](docs/specs/2026-08-29-tasks-design.md).
 Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-tasks.md).
 
@@ -203,8 +210,8 @@ task worktree under the adopted policy. A direct task that uncovers an unresolve
 design decision or grows beyond its scope needs a note and reassessment to planned.
 Ideas still need scoping. Existing document links do not establish approval.
 
-JSON task, summary, and parked rows expose `process` as a string or null. Pretty
-summary and parked rows show a process column (`-` when unassessed); show and next
+JSON task, summary, and parked rows expose `process` as a string when assessed;
+unassessed rows omit it. Pretty summary and parked rows show a process column (`-` when unassessed); show and next
 print `Process: direct`, `Process: planned`, or `Process: unassessed`. The parked
 `phase` remains a link-derived resume hint: a todo without document links can show
 `phase: implementing` alongside `process: planned`, which still requires both reviews.

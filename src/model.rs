@@ -409,55 +409,74 @@ pub struct Task {
     pub title: String,
     pub status: Status,
     pub priority: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
     /// The judgment the task demands; absent is unassessed. Set by `add`/`edit
     /// --complexity` and by `park --reason capability`. See
     /// docs/specs/2026-09-12-task-complexity-design.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub complexity: Option<Complexity>,
     /// Chosen explicitly; never inferred from complexity, parentage, or document links.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     /// Marked safe to run beside any other task marked parallel. Hand-set; nothing
     /// infers or validates it. See docs/specs/2026-09-06-parallel-candidates-design.md.
     pub parallel: bool,
     /// The recurrence interval. A closed task carrying one falls due again; an open one is
     /// an ordinary task. See docs/specs/2026-09-09-periodic-design.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub every: Option<crate::periodic::Interval>,
     /// A one-shot calendar date that keeps the record out of the pickers until it
     /// arrives. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status
     /// transition. See docs/specs/2026-09-15-defer-design.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub defer: Option<crate::defer::Defer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     pub created: String,
     pub updated: String,
     /// When work first began: stamped by the first transition into `doing` and never
     /// moved. See docs/specs/2026-09-11-park-reason-and-stamps-design.md §3.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub started: Option<String>,
     /// When the task was last completed: stamped by every completing transition and
     /// cleared by any transition out of `done`. Unlike `last_done` it exists on every
     /// record and does not survive a reopen. Same spec, §3.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<String>,
     /// The completion that anchors the current cycle. Stamped only alongside `every`, and
     /// only by a transition that actually completes the task (spec §4.4).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_done: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<TaskId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<TaskId>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     /// Where the task came from: an opaque, single-line reference such as a URL or a
     /// message id. Stored and returned, never interpreted or resolved. See
     /// docs/specs/2026-09-06-task-source-design.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// The model id the harness reported (`TASKS_MODEL`) for the session that ran the
     /// latest completion transition; `None` when unknown or cleared. Stored and returned,
     /// never interpreted. See docs/specs/2026-09-10-model-provenance-design.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// The harness and model that filed the task (`<harness>/<model>`, or the harness
     /// alone), from `add --agent` or `TASKS_AGENT` at creation; `None` when unknown.
     /// Stored and returned, never interpreted. Independent of `model`, which is the
     /// completion side. See docs/specs/2026-09-13-creation-provenance-design.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub step: Option<String>,
     pub body: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<Note>,
 }
