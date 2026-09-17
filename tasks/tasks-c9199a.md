@@ -7,7 +7,7 @@ size: l
 complexity: high
 process: planned
 created: 2026-09-17T00:50:54Z
-updated: 2026-09-17T00:50:54Z
+updated: 2026-09-17T17:02:07Z
 depends: [relay-06b1da]
 tags: []
 source: ops-998bbb
@@ -38,3 +38,8 @@ Darwin epochs must not enter Linux pid_start fields; keep its existing native
 unverifiable path. Incompatible schema changes coordinate the producer and reader.
 
 Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb closure does not mean this deliverable has shipped.
+
+## Notes
+
+- 2026-09-17T16:57:15Z (main): Consumer requirement from obs-045db1 charter review: expose qualified harness session identity for task/session joins and preserve a timestamped association across start/resume/park/close and claim release. Current parks retain tagged session only in the shared store; start has no durable session note. Account for claude:<id> historical parks versus claude-code:<id> relay keys and raw Claude claim ids. Coordinate native session provenance with the ops task filed from obs-045db1. This is an input to this task’s pending identity design, not approval of a new storage contract.
+- 2026-09-17T17:02:07Z (main): Session provenance producer is ops-79f409. Obs input needs the native qualified key (claude-code:<id> or codex:<id>) and a timestamped task association surviving claim/park release; existing park capture superseded tasks-abfd3d but cannot cover an unparked stopped turn on its own.
