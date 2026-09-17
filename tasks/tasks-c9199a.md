@@ -8,40 +8,16 @@ complexity: high
 process: planned
 owner: main
 created: 2026-09-17T00:50:54Z
-updated: 2026-09-17T21:04:30Z
+updated: 2026-09-17T21:09:24Z
 started: 2026-09-17T21:04:30Z
 depends: [relay-06b1da]
 tags: []
 source: ops-998bbb
 agent: codex
+plan: docs/plans/2026-09-17-lifecycle-provenance.md
 ---
 
-Approved obs prerequisite (separate from the relay-identity design below): implement the fixed harness_session and harness_session_source lifecycle-note fields from ops docs/specs/2026-09-17-session-provenance-design.md. Read native CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID/CODEX_THREAD_ID for provenance only; preserve claim identity and liveness, including Claude native PID capture and Codex sid:<pid>. Add ordinary start/resume notes and extend park/close notes, retaining timestamps across claim release; no new store and no rewriting old notes. Missing/conflicting provenance stays unknown; arbitrary TASKS_SESSION overrides are not relabeled. Claude subagents correctly share the parent's session key. Field naming and source selection are approved, not a pending design decision. ops-79f409 still owns the attended Codex evidence; obs Task 2 consumes this note-stamping deliverable, not the separate ancestry feature.
-
-Approved source: ops docs/specs/2026-09-16-relay-design.md (reviewed after d7e2c33); execution brief: ops docs/plans/2026-09-16-relay-bootstrap.md (approved after bc53c51 with review corrections).
-
-Next: write the separate tasks identity design for review, then its implementation plan.
-
-Read tasks `src/claims.rs`, `tests/cli.rs`, and
-`docs/specs/2026-09-05-work-claims-design.md`. Design opt-in configuration and
-identity continuity before implementation; preserve all spec §6 tasks constraints.
-Outside recognized harness ancestry, native identity wins without opening the
-registry, even with host-wide relay enabled. Unknown ancestry is not a shell.
-Inside it, match the nearest harness using same-host PID/start/Linux boot evidence;
-do not skip an unmatched inner harness. Missing, ambiguous or unavailable proof is
-an acquisition error with explicit-identity recovery. Claude hints must agree with
-process proof; shared OpenCode processes do not distinguish independent subagents.
-
-Rust reads schema 1 directly without Node. Copy relay-06b1da's versioned handle fixtures and
-label the oversized Linux value as a format test. Include the real Codex case:
-live harness ancestor, empty snapshot before its first turn's SessionStart hook.
-Test explicit TASKS_SESSION/TASKS_SESSION_PID precedence, nested harnesses, plain
-shells with corrupt/missing registry, and held-claim refresh/release after registry
-loss. Keep existing Live/Stale, takeover/release retries, mutation locking and TTL.
-Darwin epochs must not enter Linux pid_start fields; keep its existing native
-unverifiable path. Incompatible schema changes coordinate the producer and reader.
-
-Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb closure does not mean this deliverable has shipped.
+Two independently deliverable tracks: (1) approved lifecycle-note provenance, implemented by tasks-d51eda and tasks-b07adc using ops docs/specs/2026-09-17-session-provenance-design.md and this task's lifecycle-provenance implementation plan; (2) the separate opt-in relay-ancestry identity design in tasks-8921f4. The ops-79f409 attended evidence is complete. Fixed fields are harness_session and harness_session_source; note provenance must not change native claim identity or liveness. Obs depends only on tasks-b07adc, not the ancestry track. This parent stays open until both tracks are delivered. Lifecycle implementation plan is awaiting user review; no code changes yet.
 
 ## Notes
 
@@ -51,3 +27,4 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
 - 2026-09-17T19:33:59Z (main): Supersedes the 17:39 TASKS_SESSION-export steering: the approved ops-79f409 design fixes harness_session and harness_session_source in lifecycle notes, separate from claim identity. Implement that contract without redesigning fields or changing liveness; broader opt-in relay ancestry remains separately designed. Obs joins Codex notes even while claims remain sid:<pid>. No implementation performed in this synchronization.
 - 2026-09-17T20:57:12Z (main): ops-79f409 is complete: independently reviewed ops docs/reports/2026-09-17-session-provenance-probe.md verifies native distinctness and command/harness equality for Claude and two attended Codex sessions. Both Codex variables agree with familiar; neither TASKS override is set. Implement the approved harness_session/harness_session_source lifecycle-note contract without changing claims or liveness; evidence acquisition is no longer pending. Note persistence and claim regression checks remain here, separately from broader relay-ancestry design.
 - 2026-09-17T21:04:30Z (main): Starting only the approved lifecycle-note provenance slice. Reuse ops docs/specs/2026-09-17-session-provenance-design.md; write a tasks implementation plan for user review before code changes. Broader opt-in relay ancestry remains separate. Trace includes transition callers (start and flag/editor status edits), park, close without a message, and retry paths. Workspace: .worktrees/lifecycle-provenance.
+- 2026-09-17T21:09:24Z (feat/lifecycle-provenance): parked (waiting on user, review): User review required for the lifecycle-note implementation plan at .worktrees/lifecycle-provenance/docs/plans/2026-09-17-lifecycle-provenance.md. Resume tasks-d51eda after approval, then tasks-b07adc; tasks-8921f4 is separate ancestry work. No implementation is running.
