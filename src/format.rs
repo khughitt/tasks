@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::frontmatter::{self, Value};
-use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
+use crate::model::{Complexity, HarnessProvenance, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
 const KEYS: [&str; 25] = [
@@ -175,7 +175,7 @@ pub fn quote_timestamps(fm: &str) -> String {
 
 fn split_body_notes(after: &str, file: &str) -> Result<(String, Vec<Note>)> {
     let mut body = Vec::new();
-    let mut notes = Vec::new();
+    let mut notes: Vec<Note> = Vec::new();
     let mut in_notes = false;
     for line in after.lines() {
         if line == NOTES_DELIMITER {
@@ -187,6 +187,20 @@ fn split_body_notes(after: &str, file: &str) -> Result<(String, Vec<Note>)> {
         }
         if !in_notes {
             body.push(line);
+        } else if let Some(json) = line.strip_prefix("  provenance: ") {
+            let note = notes
+                .last_mut()
+                .ok_or_else(|| perr(file, "orphan provenance line"))?;
+            if note.provenance.is_some() {
+                return Err(perr(file, "duplicate provenance line"));
+            }
+            // Serde structs also accept positional arrays; the note contract is an object.
+            if !json.trim_start().starts_with('{') {
+                return Err(perr(file, "note provenance must be a JSON object"));
+            }
+            let provenance: HarnessProvenance = serde_json::from_str(json)
+                .map_err(|error| perr(file, format!("invalid note provenance: {error}")))?;
+            note.provenance = Some(provenance);
         } else if !line.trim().is_empty() {
             notes.push(
                 parse_note_line(line)
@@ -215,6 +229,7 @@ fn parse_note_line(line: &str) -> Option<Note> {
         at: at.into(),
         by: by.into(),
         text: text.into(),
+        provenance: None,
     })
 }
 
@@ -355,6 +370,9 @@ pub fn validate_task(t: &Task) -> Result<()> {
         crate::time::parse(&n.at)?;
         validate_owner(&n.by)?;
         validate_note_text(&n.text)?;
+        if let Some(provenance) = &n.provenance {
+            crate::provenance::validate(provenance).map_err(Error::Validation)?;
+        }
     }
     Ok(())
 }
@@ -444,6 +462,14 @@ pub fn serialize_task(t: &Task) -> String {
         out.push_str("\n\n");
         for n in &t.notes {
             out.push_str(&format!("- {} ({}): {}\n", n.at, n.by, n.text));
+            if let Some(provenance) = &n.provenance {
+                out.push_str("  provenance: ");
+                out.push_str(
+                    &serde_json::to_string(provenance)
+                        .expect("a pair of strings serializes as JSON"),
+                );
+                out.push('\n');
+            }
         }
     }
     out
@@ -472,6 +498,58 @@ mod tests {
         assert_eq!(t.body, "");
         assert!(t.notes.is_empty());
         assert_eq!(serialize_task(&t), MINIMAL);
+    }
+
+    #[test]
+    fn provenance_continuation_roundtrips_and_flattens_without_changing_old_notes() {
+        let metadata = r#"  provenance: {"harness_session":"codex:opaque : \"id\" \\ tail","harness_session_source":"CODEX_SESSION_ID"}"#;
+        let text = format!("{FULL}{metadata}\n");
+        let task = parse_task(&text, "provenance").unwrap();
+        let json = serde_json::to_value(&task.notes).unwrap();
+        assert!(json[0].get("harness_session").is_none());
+        assert!(json[0].get("harness_session_source").is_none());
+        assert!(json[1].get("provenance").is_none());
+        assert_eq!(json[1]["harness_session"], "codex:opaque : \"id\" \\ tail");
+        assert_eq!(json[1]["harness_session_source"], "CODEX_SESSION_ID");
+        assert_eq!(json[1]["at"], "2026-08-29T16:41:02Z");
+        assert_eq!(json[1]["by"], "slice-12");
+        assert_eq!(json[1]["text"], "split the emitter into sci-a7d1e2.");
+        assert_eq!(serialize_task(&task), text);
+        assert_eq!(parse_task(&serialize_task(&task), "again").unwrap(), task);
+        let plain = format!("{FULL}- 2026-08-29T17:00:00Z (keith): provenance: just text\n");
+        assert_eq!(serialize_task(&parse_task(&plain, "plain").unwrap()), plain);
+    }
+
+    #[test]
+    fn provenance_rejects_malformed_or_unattached_metadata() {
+        for json in [
+            "not json",
+            "{}",
+            "null",
+            "[]",
+            r#"["codex:a","CODEX_SESSION_ID"]"#,
+            r#"{"harness_session":"codex:a"}"#,
+            r#"{"harness_session":null,"harness_session_source":"CODEX_SESSION_ID"}"#,
+            r#"{"harness_session":1,"harness_session_source":"CODEX_SESSION_ID"}"#,
+            r#"{"harness_session":"codex:a","harness_session_source":null}"#,
+            r#"{"harness_session":"codex:a","harness_session_source":1}"#,
+            r#"{"harness_session":"codex:a","harness_session_source":"CODEX_SESSION_ID","extra":true}"#,
+            r#"{"harness_session":"codex:a","harness_session":"codex:b","harness_session_source":"CODEX_SESSION_ID"}"#,
+            r#"{"harness_session":"codex:a","harness_session_source":"CODEX_SESSION_ID","harness_session_source":"CODEX_THREAD_ID"}"#,
+            r#"{"harness_session":"codex:","harness_session_source":"CODEX_SESSION_ID"}"#,
+            r#"{"harness_session":"other:a","harness_session_source":"CODEX_SESSION_ID"}"#,
+            r#"{"harness_session":"claude-code:a","harness_session_source":"CODEX_SESSION_ID"}"#,
+            r#"{"harness_session":"codex:a","harness_session_source":"TASKS_SESSION"}"#,
+            r#"{"harness_session":"codex:a\nb","harness_session_source":"CODEX_SESSION_ID"}"#,
+        ] {
+            assert!(
+                parse_task(&format!("{FULL}  provenance: {json}\n"), "bad").is_err(),
+                "{json}"
+            );
+        }
+        let metadata = "  provenance: {\"harness_session\":\"codex:a\",\"harness_session_source\":\"CODEX_THREAD_ID\"}\n";
+        assert!(parse_task(&format!("{MINIMAL}\n## Notes\n\n{metadata}"), "orphan").is_err());
+        assert!(parse_task(&format!("{FULL}{metadata}{metadata}"), "duplicate").is_err());
     }
 
     #[test]

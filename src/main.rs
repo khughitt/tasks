@@ -11,6 +11,7 @@ mod hierarchy;
 mod model;
 mod output;
 mod periodic;
+mod provenance;
 mod query;
 mod registry;
 mod rename;

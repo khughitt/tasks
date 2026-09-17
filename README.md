@@ -70,6 +70,26 @@ command for human-readable output.
 its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
 `TASKS_SESSION` per agent when agents share a terminal or harness process; use
 `tasks start --force <id>` for an explicit, recorded takeover.
+
+Note provenance has **reader support only** during the staged rollout: commands do
+not yet generate stamps. A stamped note has one indented JSON continuation:
+
+```markdown
+- 2026-09-17T20:00:00Z (worker): started
+  provenance: {"harness_session":"codex:example","harness_session_source":"CODEX_SESSION_ID"}
+```
+
+`tasks show` exposes these optional fields directly on the note; both are absent
+when unknown. The source names only `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`,
+or `CODEX_THREAD_ID`, with a matching `claude-code:` or `codex:` key. This metadata
+does not change claim identity or liveness. `TASKS_SESSION` remains a claim override,
+not a provenance source.
+
+Install this reader with `cargo install --path .` on **every host reading synced
+task files before deploying the writer**. Older binaries reject the whole file
+when they encounter a provenance continuation. Rollout and the pending lifecycle
+writer are tracked in `docs/plans/2026-09-17-lifecycle-provenance.md`.
+
 `TASKS_MODEL` per harness process records which model completed each task: a fresh
 `done` stamps the record's `model` field from it (and clears the stamp when it is
 unset); correct a wrong stamp with `tasks edit --model`/`--no-model`.

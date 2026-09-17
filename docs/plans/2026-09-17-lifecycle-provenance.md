@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this plan task-by-task, with independent diff review before completion.
 
-Status: draft for user review. No implementation changes.
+Status: approved with the user's three review adjustments, 2026-09-17. Task 1 is implemented and independently reviewed (499 tests passed); merge/install remains below. Task 2 is parked at the cross-host reader gate.
 
 **Goal:** Persist the approved harness-session key on task lifecycle notes without changing claim identity or liveness.
 
@@ -18,11 +18,14 @@ The narrower implementation is part of tasks-c9199a; its broader opt-in relay-an
 Task graph: tasks-d51eda (Task 1) → tasks-b07adc (Task 2) → obs-09cb62.
 tasks-8921f4 holds the ancestry design independently; tasks-c9199a remains the parent of both tracks.
 
+Confirmed reader hosts: titan and europa (Europa). Europa's reader installation and
+isolated stamped-fixture check require user confirmation before the writer proceeds.
+
 ## Global constraints
 
 - Fixed serialized fields: `harness_session` and `harness_session_source`, both optional strings, omitted together when unknown.
 - Keys: `claude-code:<native-id>` / `codex:<native-id>`. IDs are opaque, nonempty strings, not necessarily UUIDs.
-- Source names: `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID`, or a verified qualified `TASKS_SESSION`. Agreeing Codex variables select `CODEX_SESSION_ID`.
+- Source names: `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`, or `CODEX_THREAD_ID`. Agreeing Codex variables select `CODEX_SESSION_ID`; a matching claim override never replaces the native source name.
 - `claims::identity_from`, PID/start/boot capture, Live/Stale, TTL, refresh, acquisition/release ordering and mutation locking retain their behavior. In particular, Codex provenance does not change its `sid:<pid>` claim.
 - Missing/conflicting provenance never prevents an otherwise valid lifecycle mutation. Invalid/conflicting inputs produce existing CLI warnings; never dump environment values into a diagnostic.
 - Do not export environment variables, infer from PID/cwd/model/transcripts, rewrite historical notes, or install/change hooks.
@@ -49,14 +52,12 @@ Internally use `Option<HarnessProvenance>` with serde flattening on `Note`, so t
 | One Codex variable | `codex:<id>`, that variable's source |
 | Both Codex variables equal | `codex:<id>`, `CODEX_SESSION_ID` |
 | Both Codex variables differ, or both harnesses have native IDs | Unknown plus warning naming the conflicting variable names |
-| Supported qualified `TASKS_SESSION` exactly equals the resolved native key | That key, source `TASKS_SESSION` |
 | Supported qualified override differs from native key | Unknown plus warning |
-| Qualified override but no native corroboration | Unknown plus warning: cannot verify the override against a native session |
 | Arbitrary claim override plus valid native input | Native provenance; the independent claim override remains untouched |
-| No native input and no verifiable override | Unknown; neither field emitted |
+| No native input, with or without a claim override | Unknown; neither field emitted |
 | Non-Unicode or control-containing relevant input | Unknown plus warning naming the input; no partial stamp |
 
-Unset and empty variables count as absent. Native input conflicts are checked before any override; an override cannot rescue an ambiguous native identity. Prefix-shaped overrides alone are not verification. `TASKS_SESSION_PID` is not read by this resolver.
+Unset and empty variables count as absent. Native input conflicts are checked before any override; an override cannot rescue an ambiguous native identity. `TASKS_SESSION` is checked only for a conflict with a resolved native key, never used as a source. `TASKS_SESSION_PID` is not read by this resolver.
 
 ## File map
 
@@ -94,7 +95,7 @@ pub fn resolve_from(
 ) -> std::result::Result<Option<HarnessProvenance>, String>;
 ```
 
-- [ ] Add failing table-driven resolver tests in `src/provenance.rs` for every row above. Use an injected closure, not mutation of the test process environment. Include a non-UUID ID and a Claude child sharing its parent's value.
+- [x] Add failing table-driven resolver tests in `src/provenance.rs` for every row above. Use an injected closure, not mutation of the test process environment. Include a non-UUID ID and a Claude child sharing its parent's value.
 
 ```rust
 let resolved = resolve_from(|name| match name {
@@ -105,7 +106,7 @@ assert_eq!(resolved.harness_session, "codex:session:a");
 assert_eq!(resolved.harness_session_source, "CODEX_SESSION_ID");
 ```
 
-- [ ] Add format tests alongside the existing `FULL` and `MINIMAL` roundtrips. Attach the example continuation to a valid note fixture, parse, serialize and parse again; assert both flattened JSON fields and unchanged text/time/owner. Exercise all malformed-continuation cases above and an opaque ID containing quote/backslash/colon. Assert an unstamped note omits both fields and old `FULL` roundtrips byte-for-byte.
+- [x] Add format tests alongside the existing `FULL` and `MINIMAL` roundtrips. Attach the example continuation to a valid note fixture, parse, serialize and parse again; assert both flattened JSON fields and unchanged text/time/owner. Exercise all malformed-continuation cases above and an opaque ID containing quote/backslash/colon. Assert an unstamped note omits both fields and old `FULL` roundtrips byte-for-byte.
 
 ```rust
 let note = &parsed.notes[0];
@@ -115,10 +116,10 @@ assert!(json.get("provenance").is_none());
 assert_eq!(parse_task(&serialize_task(&parsed), "roundtrip").unwrap(), parsed);
 ```
 
-- [ ] Run `just test-fast provenance` and the new format checks; observe failure before implementing the missing behavior. A missing member/module compile failure is the initial red check.
-- [ ] Add the paired type and initialize `provenance: None` at the existing two `Note` constructors (`parse_note_line`, `append_note`). Register the resolver module in `main.rs`; implement exactly the resolution table using the four allowlisted variable names and owned `OsString` conversion. Do not change the existing `provenance_var` used for task-level model/agent stamps: its failure semantics differ.
-- [ ] Extend `split_body_notes`: recognize the exact `  provenance: ` prefix only inside Notes, deserialize into the strict pair type, validate it, and attach it to the preceding note once. Other non-bullet lines still fail. Include pair validation in `validate_task`, so construction and parsing obey the same rules. Valid sources must match the harness prefix, except `TASKS_SESSION`, which can label either supported prefix.
-- [ ] Extend the existing note serialization loop, using the existing JSON library:
+- [x] Run `just test-fast provenance` and the new format checks; observe failure before implementing the missing behavior. A missing member/module compile failure is the initial red check.
+- [x] Add the paired type and initialize `provenance: None` at the existing two `Note` constructors (`parse_note_line`, `append_note`). Register the resolver module in `main.rs`; implement exactly the resolution table using the four allowlisted variable names and owned `OsString` conversion. Do not change the existing `provenance_var` used for task-level model/agent stamps: its failure semantics differ.
+- [x] Extend `split_body_notes`: recognize the exact `  provenance: ` prefix only inside Notes, deserialize into the strict pair type, validate it, and attach it to the preceding note once. Other non-bullet lines still fail. Include pair validation in `validate_task`, so construction and parsing obey the same rules. Valid native sources must match the harness prefix.
+- [x] Extend the existing note serialization loop, using the existing JSON library:
 
 ```rust
 if let Some(provenance) = &n.provenance {
@@ -129,7 +130,8 @@ if let Some(provenance) = &n.provenance {
 }
 ```
 
-- [ ] Run `just test-fast provenance`, `just test-fast format::tests`, and `just check`. Review the diff; commit as `feat: persist optional harness provenance on notes`. This task adds format support, not a production stamp writer.
+- [x] Run `just test-fast provenance`, `just test-fast format::tests`, and `just gate`. Obtain independent diff review; commit as `feat: persist optional harness provenance on notes`. The reviewer found positional-array acceptance in Serde; the regression failed before the object guard and passed after it. Final full gate: 188 unit tests and 311 CLI tests passed; review cleared.
+- [ ] Merge Task 1 separately and `cargo install --path .` on titan. This task adds format support, not a production stamp writer. Record rollout evidence per host before Task 2.
 
 ### Task 2: Stamp lifecycle notes without changing claims
 
@@ -138,6 +140,7 @@ Task: tasks-b07adc; depends on tasks-d51eda.
 **Consumes:** Task 1's paired type, format support and `resolve_from`.
 **Produces:** Durable start/resume, park and close associations in `tasks show` and task files, surviving removal of the shared claim/park.
 
+- [ ] **Cross-host reader gate:** confirm Task 1 is merged and `cargo install --path .` has installed its reader on every host reading the Dropbox-synced task files. Record the host inventory, installed revision and a read check using a stamped fixture in isolated storage. Get the user's confirmation for hosts not inspected here; missing evidence keeps this task parked. Do not merge or install Task 2, or write any stamped note into synced task files, before every host passes.
 - [ ] First isolate both `TestEnv::cmd` and `TestEnv::raw` from `CODEX_SESSION_ID` and `CODEX_THREAD_ID`, alongside their existing Claude/override removals. Add failing CLI tests using explicit test-only native values:
 
 ```rust
@@ -182,7 +185,7 @@ Use a closure `|name| std::env::var_os(name)` if required by generic function li
 - [ ] In `status::close`, stamp the existing caller-supplied message when it is appended; preserve its text, existing `!ctx.recovered` guard and ordinary retry behavior. This can leave a generated transition note plus a message note: only the generated transition is a new lifecycle boundary, not every stamped note. Do not deduplicate arbitrary user messages. In `park::run`, replace its existing `append_note` call with `append_lifecycle_note`, preserving the park vocabulary and write order.
 - [ ] Add/extend checks for both flag and editor status paths, same-status edit preserving a park, denied foreign claims producing no note, acquisition rollback, and release cleanup retry. Reuse existing failure-injection fixtures in `tests/cli.rs`; do not build a second harness. Adjust old note-count/index assertions only where the new documented start/close note is the reason.
 - [ ] Prove provenance independence with fixtures for Claude, Codex, absent native data, conflicting native data, and explicit claim overrides with/without a PID. Compare session/PID/start/boot and liveness outcomes against the same claim inputs without Codex provenance. Existing `claims.rs` unit tests continue to cover TTL boundaries and confirmed death/live behavior unchanged. Exercise note heartbeat and guarded release under both known and unknown provenance. Conflicts must return successful lifecycle output with a warning and an unstamped note; pretty output must carry that warning too.
-- [ ] Update README and the shipped tasks skill: native provenance is automatic and independent of claims; do not set `TASKS_SESSION` merely to improve obs. Document the two optional JSON fields, metadata continuation, empty/conflicting behavior, and the explicit-override corroboration rule. Older installed binaries cannot parse the new continuation: upgrade the writer/reader together; do not run an old binary on stamped files.
+- [ ] Update README and the shipped tasks skill: native provenance is automatic and independent of claims; do not set `TASKS_SESSION` merely to improve obs. Document the two optional JSON fields, metadata continuation, empty/conflicting behavior, and override-conflict checking (the source always names a native variable). State the canonical lifecycle text contract in README: exact `started`, `resumed`, `done`, `dropped`; `parked (waiting on …): <next step>` using the existing park vocabulary; and `completed; next due <YYYY-MM-DD>` for recurring completion. obs-09cb62 derives transition kinds from these generated texts, not from the presence of provenance fields. User-message notes are stamped but are not lifecycle markers. Document reader-first deployment: every host must have Task 1 before Task 2 merges, because an older binary rejects the whole stamped task file.
 - [ ] Run `just test-fast`, `just gate`, `tasks check` and `git diff --check`. Obtain independent diff review, fix findings, rerun affected checks. Commit the completed task record with the implementation as `feat: stamp lifecycle notes with native harness provenance`.
 - [ ] Integrate the reviewed branch, then `cargo install --path .` from the integrated checkout per AGENTS.md. Verify the installed reader against a new isolated test task store with an isolated registry, never the real registry. Report note-stamping delivery to obs-09cb62; do not close the separate relay-ancestry deliverable or implement obs diagnostics here.
 
@@ -198,4 +201,4 @@ Use a closure `|name| std::env::var_os(name)` if required by generic function li
 | Native capability evidence | Completed ops-79f409 report, not repeated here |
 | Unknown-rate diagnostics | Remains obs-1ad448, outside this plan |
 
-Review this plan before either task starts. After approval, execute inline in task order and dispatch the independent code reviewer before delivery. If that reviewer is unavailable, park explicitly with the owner and next action; do not imply that review is running.
+Execute the approved plan inline in task order, with independent code review before each delivery. Deliver Task 1 alone first, then stop at Task 2's cross-host reader gate until the user supplies any outstanding host installation evidence. Task 1 being merged or installed on titan does not satisfy that gate. No remote installation is assumed authorized by this plan. If a reviewer is unavailable, park explicitly with the owner and next action; do not imply that review is running.

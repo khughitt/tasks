@@ -396,11 +396,20 @@ impl Phase {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HarnessProvenance {
+    pub harness_session: String,
+    pub harness_session_source: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Note {
     pub at: String,
     pub by: String,
     pub text: String,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<HarnessProvenance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

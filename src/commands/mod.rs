@@ -582,6 +582,7 @@ pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
         at: crate::time::now(),
         by: by.to_string(),
         text: text.to_string(),
+        provenance: None,
     });
     Ok(())
 }
