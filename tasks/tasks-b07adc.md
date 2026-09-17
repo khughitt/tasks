@@ -8,7 +8,7 @@ complexity: high
 process: direct
 owner: feat/lifecycle-provenance
 created: 2026-09-17T21:08:28Z
-updated: 2026-09-17T23:04:29Z
+updated: 2026-09-17T23:06:55Z
 started: 2026-09-17T22:57:08Z
 completed: 2026-09-17T23:04:29Z
 depends: [tasks-d51eda]
@@ -35,3 +35,4 @@ Wire the approved provenance pair into shared start/resume/close transitions and
   provenance: {"harness_session":"codex:01a0b011-5b60-75e3-9188-394f5d6dc474","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-17T23:04:29Z (feat/lifecycle-provenance): Implemented lifecycle provenance in shared start/resume/close and park paths, preserving claims identity/liveness and retries. Independent review approved; 503 tests passed. Both hosts passed reader rollout. Local integration/install verification follows.
   provenance: {"harness_session":"codex:01a0b011-5b60-75e3-9188-394f5d6dc474","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-17T23:06:55Z (feat/lifecycle-provenance): Delivery verified: 8f13112 merged to main; merged full gate passed all 503 tests. Installed on titan with cargo install --locked --path .; isolated prb-7bf418 verified native stamps through start/park/resume/done and title-edit roundtrip, with sid claim unchanged and claim/park released. obs-09cb62 handoff recorded; all its prerequisites are done. Europa reader is compatible; optional writer reinstall remains there.

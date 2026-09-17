@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this plan task-by-task, with independent diff review before completion.
 
-Status: approved with the user's three review adjustments, 2026-09-17. Both reader hosts passed the rollout gate. Task 2 implementation and independent review are complete; all 503 tests pass. Local integration and installed-writer verification are next.
+Status: complete, 2026-09-17. Both reader hosts passed the rollout gate. Task 2 landed as `8f13112`, independently reviewed with no blocking findings; all 503 tests passed before and after integration. Installed-writer verification passed on titan. Europa has the compatible reader; writer installation there remains optional deployment work.
 
 **Goal:** Persist the approved harness-session key on task lifecycle notes without changing claim identity or liveness.
 
@@ -28,7 +28,18 @@ note (including both provenance fields); config and state were isolated from the
 real registry. The user confirmed Europa's installation and supplied `show` output
 for `prb-000001`, preserving `codex:probe` / `CODEX_SESSION_ID` with no warnings.
 Europa's exact installed revision was not independently inspected; its reader behavior
-was verified. Writer implementation can proceed.
+was verified before writer implementation began.
+
+Writer delivery: `8f13112` was fast-forwarded to main and installed on titan with
+`cargo install --locked --path .`. An isolated installed-binary probe on `prb-7bf418`
+verified `started`, park, `resumed`, `done` and a close message with the native pair;
+the Codex claim remained `sid:<pid>`. Notes survived claim/park release and a later
+title edit. Config/state were isolated; no real registry was used. obs-09cb62's
+handoff is recorded; the separate relay-ancestry task remains open.
+
+Independent review also noted the approved schema's text collision limit: arbitrary
+user messages can equal generated lifecycle markers. README, the skill and the obs
+handoff retain this uncertainty rather than inventing a serialized marker kind.
 
 ## Global constraints
 
@@ -196,7 +207,7 @@ Use a closure `|name| std::env::var_os(name)` if required by generic function li
 - [x] Prove provenance independence with fixtures for Claude, Codex, absent native data, conflicting native data, and explicit claim overrides with/without a PID. Compare session/PID/start/boot and liveness outcomes against the same claim inputs without Codex provenance. Existing `claims.rs` unit tests continue to cover TTL boundaries and confirmed death/live behavior unchanged. Exercise note heartbeat and guarded release under both known and unknown provenance. Conflicts must return successful lifecycle output with a warning and an unstamped note; pretty output must carry that warning too.
 - [x] Update README and the shipped tasks skill: native provenance is automatic and independent of claims; do not set `TASKS_SESSION` merely to improve obs. Document the two optional JSON fields, metadata continuation, empty/conflicting behavior, and override-conflict checking (the source always names a native variable). State the canonical lifecycle text contract in README: exact `started`, `resumed`, `done`, `dropped`; `parked (waiting on …): <next step>` using the existing park vocabulary; and `completed; next due <YYYY-MM-DD>` for recurring completion. obs-09cb62 derives transition kinds from these generated texts, not from the presence of provenance fields. User-message notes are stamped but are not lifecycle markers. Document reader-first deployment: every host must have Task 1 before Task 2 merges, because an older binary rejects the whole stamped task file.
 - [x] Run `just test-fast`, `just gate`, `tasks check` and `git diff --check`. Obtain independent diff review, fix findings, rerun affected checks. Commit the completed task record with the implementation as `feat: stamp lifecycle notes with native harness provenance`.
-- [ ] Integrate the reviewed branch, then `cargo install --path .` from the integrated checkout per AGENTS.md. Verify the installed reader against a new isolated test task store with an isolated registry, never the real registry. Report note-stamping delivery to obs-09cb62; do not close the separate relay-ancestry deliverable or implement obs diagnostics here.
+- [x] Integrate the reviewed branch, then `cargo install --locked --path .` from the integrated checkout per AGENTS.md. Verify the installed reader against a new isolated test task store with an isolated registry, never the real registry. Report note-stamping delivery to obs-09cb62; do not close the separate relay-ancestry deliverable or implement obs diagnostics here.
 
 ## Coverage and handoff
 
