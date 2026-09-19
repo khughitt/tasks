@@ -88,13 +88,12 @@ fn main() {
         };
     let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
-    // `check --quiet` says nothing on stdout when it has nothing to report. The rendering
-    // below is otherwise identical, so a hook prints exactly what `check` would once
-    // there is a finding.
-    let quiet = matches!(cli.command, cli::Command::Check { quiet: true });
     match commands::run(cli) {
         Ok(out) => {
-            let silent = quiet
+            // A clean `check` says nothing in JSON mode: it ends every project's pre-commit
+            // hook, the exit status carries the verdict, and nothing parses an empty
+            // report. Pretty mode still prints `ok` for a person at a terminal.
+            let silent = format == Format::Json
                 && matches!(&out, output::Output::Check(check)
                     if check.errors.is_empty() && check.warnings.is_empty());
             if format == Format::Pretty {

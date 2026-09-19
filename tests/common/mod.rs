@@ -108,6 +108,27 @@ impl TestEnv {
         })
     }
 
+    /// `tasks check` as its report. A clean check prints nothing, which is the empty
+    /// report; findings print as JSON. Exit 1 (errors) is the caller's to assert on `cmd`.
+    pub fn check(&self, dir: &Path) -> serde_json::Value {
+        let out = self.cmd(dir).args(["check"]).output().unwrap();
+        assert!(
+            out.status.success(),
+            "tasks check failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        if out.stdout.is_empty() {
+            return serde_json::json!({"errors": [], "warnings": []});
+        }
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+            panic!(
+                "bad json from check: {e}\n{}",
+                String::from_utf8_lossy(&out.stdout)
+            )
+        })
+    }
+
     pub fn pretty(&self, dir: &Path, args: &[&str]) -> String {
         let mut all = vec!["--pretty"];
         all.extend_from_slice(args);

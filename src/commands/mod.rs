@@ -1161,7 +1161,7 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Unshelve { id } => status::unshelve(open_id_write_ctx(dir, &id)?, id),
         Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
-        Command::Check { .. } => check::run(open_ctx(dir)?),
+        Command::Check => check::run(open_ctx(dir)?),
         Command::Tree { id, all, scope } => {
             tree::run(open_id_read_ctx(dir, &scope, id.as_deref())?, id, all)
         }

@@ -210,8 +210,7 @@ from a clone):
     tasks note sci-4f2a9c "spec §4 no longer holds"
     tasks done sci-91be03 "rows emitted"
     tasks done sci-4f2a9c "landed in 1a2b3c"  # open-work rule: closes once its child is closed
-    tasks check                      # validate files, links, plan steps, dependencies
-    tasks check -q                   # the same, silent on a clean tree: for hooks
+    tasks check                      # validate files, links, plan steps, dependencies; silent when clean
 
 Commands targeting an existing id, including `show`, `tree <id>`, `note`, and `start`,
 work from outside every project: the prefix selects the registered root. Inside a

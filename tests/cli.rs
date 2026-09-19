@@ -409,12 +409,7 @@ fn tags_carry_the_dictionary_meaning_and_check_holds_open_work_to_it() {
 
     // No dictionary: meanings are null and check says nothing about tags.
     assert!(env.json(&sci, &["tags"])["tags"][0]["meaning"].is_null());
-    assert!(
-        env.json(&sci, &["check"])["warnings"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(env.check(&sci)["warnings"].as_array().unwrap().is_empty());
 
     write_dictionary(&sci, "sci", &[("testing", "Tests, gates, and CI.")]);
     let local = env.json(&sci, &["tags"]);
@@ -433,19 +428,14 @@ fn tags_carry_the_dictionary_meaning_and_check_holds_open_work_to_it() {
     assert!(text.contains("testing  Tests, gates, and CI."), "{text}");
 
     // The open task carrying the undefined tag is a finding; a closed one is not.
-    let warnings = env.json(&sci, &["check"])["warnings"].clone();
+    let warnings = env.check(&sci)["warnings"].clone();
     let warnings = warnings.as_array().unwrap();
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert_eq!(warnings[0]["kind"], "undefined_tag");
     assert!(warnings[0]["detail"].as_str().unwrap().contains("\"perf\""));
     let id = warnings[0]["id"].as_str().unwrap().to_string();
     env.json(&sci, &["done", &id, "landed"]);
-    assert!(
-        env.json(&sci, &["check"])["warnings"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(env.check(&sci)["warnings"].as_array().unwrap().is_empty());
 
     // Across projects the first registered dictionary that defines the tag wins.
     write_dictionary(&fam, "fam", &[("testing", "fam's reading.")]);
@@ -786,7 +776,7 @@ fn check_warns_when_open_work_depends_on_shelved_work() {
             .all(|task| task["id"] != work)
     );
 
-    let check = env.json(&sci, &["check"]);
+    let check = env.check(&sci);
     let warning = check["warnings"]
         .as_array()
         .unwrap()
@@ -801,7 +791,7 @@ fn check_warns_when_open_work_depends_on_shelved_work() {
 
     env.json(&sci, &["shelve", &work, "later"]);
     assert!(
-        !env.json(&sci, &["check"])["warnings"]
+        !env.check(&sci)["warnings"]
             .as_array()
             .unwrap()
             .iter()
@@ -1571,7 +1561,7 @@ fn read_commands_do_not_take_the_mutation_lock() {
     std::fs::remove_file(&lock).unwrap();
 
     env.json(&sci, &["show", &id]);
-    env.json(&sci, &["check"]);
+    env.check(&sci);
     env.json(&sci, &["graph"]);
     assert!(!lock.exists(), "read commands must not create the lock");
 
@@ -2243,7 +2233,7 @@ fn configured_doc_roots_replace_the_defaults() {
         env.fail(&dir, &["add", "x", "--spec", "old"]),
         "doc_not_found"
     );
-    let check = env.json(&dir, &["check"]);
+    let check = env.check(&dir);
     assert_eq!(check["errors"].as_array().unwrap().len(), 0, "{check}");
 }
 
@@ -3470,7 +3460,7 @@ fn check_reports_completed_stamp_on_an_open_record() {
     let path = sci.join(format!("tasks/{id}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, text.replace("status: done", "status: todo")).unwrap();
-    let v = env.json(&sci, &["check"]);
+    let v = env.check(&sci);
     assert!(v["errors"].as_array().unwrap().is_empty(), "{v}");
     let warnings = v["warnings"].as_array().unwrap();
     assert_eq!(warnings.len(), 1, "{v}");
@@ -3482,7 +3472,7 @@ fn check_reports_completed_stamp_on_an_open_record() {
     let path = sci.join(format!("tasks/{dropped}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, text.replace("status: done", "status: dropped")).unwrap();
-    let v = env.json(&sci, &["check"]);
+    let v = env.check(&sci);
     assert!(
         v["warnings"].as_array().unwrap().iter().any(|warning| {
             warning["kind"] == "completed_stamp_on_open_task" && warning["id"] == dropped
@@ -4327,7 +4317,7 @@ fn check_passes_clean_repo_and_reports_drift() {
         .as_str()
         .unwrap()
         .to_string();
-    let v = env.json(&dir, &["check"]);
+    let v = env.check(&dir);
     assert_eq!(v["errors"], serde_json::json!([]));
     assert_eq!(v["warnings"], serde_json::json!([]));
 
@@ -4375,24 +4365,22 @@ fn check_passes_clean_repo_and_reports_drift() {
 }
 
 #[test]
-fn check_quiet_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
+fn check_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let a = env.json(&dir, &["add", "A"])["id"]
         .as_str()
         .unwrap()
         .to_string();
-    for args in [
-        &["check", "--quiet"][..],
-        &["check", "-q"][..],
-        &["--pretty", "check", "-q"][..],
-    ] {
-        let out = env.cmd(&dir).args(args).output().unwrap();
-        assert_eq!(out.status.code(), Some(0), "{args:?}");
-        assert!(out.stdout.is_empty(), "{args:?}: {:?}", out.stdout);
-    }
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty(), "{:?}", out.stdout);
+    // pretty mode is for a person who cannot see the exit status
+    let out = env.cmd(&dir).args(["--pretty", "check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
 
-    // warnings alone still exit 0, so quiet must print them or they are lost
+    // warnings alone still exit 0, so they must print or they are lost
     write_doc(&dir, "docs/plans/2026-09-19-p.md", "### Task 1: nobody\n");
     env.json(
         &dir,
@@ -4403,7 +4391,7 @@ fn check_quiet_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
         "docs/plans/2026-09-19-p.md",
         "### Task 1: nobody\n\n### Task 2: unlinked\n",
     );
-    let out = env.cmd(&dir).args(["check", "-q"]).output().unwrap();
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["errors"], serde_json::json!([]));
@@ -4415,20 +4403,13 @@ fn check_quiet_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
             .any(|w| w["kind"] == "unlinked_step"),
         "{v}"
     );
-    let out = env
-        .cmd(&dir)
-        .args(["--pretty", "check", "-q"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("unlinked_step"));
 
-    // errors: the same output and exit status as without the flag
+    // errors print and fail
     std::fs::write(dir.join("tasks/sci-bad.md"), "nope").unwrap();
-    let quiet = env.cmd(&dir).args(["check", "-q"]).output().unwrap();
-    let loud = env.cmd(&dir).args(["check"]).output().unwrap();
-    assert_eq!(quiet.status.code(), Some(1));
-    assert_eq!(quiet.stdout, loud.stdout);
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["errors"].as_array().unwrap().len(), 1, "{v}");
 }
 
 #[test]
@@ -4449,7 +4430,7 @@ fn check_warns_on_plan_headings_without_a_task() {
         .as_str()
         .unwrap()
         .to_string();
-    let check = env.json(&dir, &["check"]);
+    let check = env.check(&dir);
     assert_eq!(check["errors"], serde_json::json!([]));
     let warnings = check["warnings"].as_array().unwrap();
     assert_eq!(warnings.len(), 2, "{check}");
@@ -4484,7 +4465,7 @@ fn check_reports_unparsable_foreign_dependency_as_warning() {
         .to_string();
     env.json(&sci, &["add", "S", "--depends", &f]);
     std::fs::write(fam.join(format!("tasks/{f}.md")), "garbage").unwrap();
-    let v = env.json(&sci, &["check"]); // exit 0: warnings only
+    let v = env.check(&sci); // exit 0: warnings only
     assert_eq!(v["errors"], serde_json::json!([]));
     let wkinds: Vec<&str> = v["warnings"]
         .as_array()
@@ -4512,7 +4493,7 @@ fn check_nudges_a_depends_naming_a_retired_prefix() {
         .replace("fam-", "old-");
     std::fs::write(&path, text).unwrap();
 
-    let v = env.json(&sci, &["check"]);
+    let v = env.check(&sci);
     assert!(
         v["warnings"].as_array().unwrap().iter().any(|w| {
             w["kind"] == "retired_prefix" && w["detail"].as_str().unwrap().contains(&far)
@@ -4520,10 +4501,7 @@ fn check_nudges_a_depends_naming_a_retired_prefix() {
         "{v}"
     );
     assert!(v["errors"].as_array().unwrap().is_empty(), "{v}");
-    assert_eq!(
-        env.json(&fam, &["check"])["warnings"],
-        serde_json::json!([])
-    );
+    assert_eq!(env.check(&fam)["warnings"], serde_json::json!([]));
 }
 
 #[test]
@@ -4748,7 +4726,7 @@ fn check_warns_on_open_child_of_closed_parent() {
     env.json(&dir, &["done", &b]);
     env.json(&dir, &["done", &a]);
     env.json(&dir, &["edit", &b, "--status", "todo"]);
-    let check = env.json(&dir, &["check"]);
+    let check = env.check(&dir);
     assert_eq!(check["errors"], serde_json::json!([]));
     let warnings = check["warnings"].as_array().unwrap();
     assert_eq!(warnings.len(), 1, "{check}");
@@ -5570,13 +5548,16 @@ fn color_is_opt_in_and_never_reaches_json() {
         .unwrap();
     assert!(has_ansi(&colored.stdout));
 
+    // a finding, so the JSON report is non-empty and can be checked for escapes
+    std::fs::write(dir.join("tasks/sci-bad.md"), "nope").unwrap();
     let json = env
         .cmd(&dir)
         .args(["--color", "always", "check"])
         .output()
         .unwrap();
     assert!(!has_ansi(&json.stdout));
-    serde_json::from_slice::<serde_json::Value>(&json.stdout).unwrap();
+    let report = serde_json::from_slice::<serde_json::Value>(&json.stdout).unwrap();
+    assert_eq!(report["errors"].as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -8910,7 +8891,7 @@ fn source_is_set_by_add_replaced_and_cleared_by_edit() {
         .code(2);
 
     // a repository with sourced tasks passes check
-    let check = env.json(&dir, &["check"]);
+    let check = env.check(&dir);
     assert_eq!(check["errors"], serde_json::json!([]), "{check}");
 
     // the flag completes; nothing in complete.rs mentions it
@@ -11239,10 +11220,7 @@ fn rename_every_mutation_boundary_resumes_inside_and_outside_git_including_empty
                     "{label}"
                 );
                 assert!(
-                    env.json(&dir, &["check"])["errors"]
-                        .as_array()
-                        .unwrap()
-                        .is_empty(),
+                    env.check(&dir)["errors"].as_array().unwrap().is_empty(),
                     "{label}"
                 );
             }
@@ -11661,13 +11639,8 @@ fn rename_rewrites_own_refs_and_preserves_hand_written_body_notes_and_foreign_by
         shown["task"]["depends"],
         serde_json::json!(["dots-a00001", foreign_id])
     );
-    assert!(
-        env.json(&dir, &["check"])["errors"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    let check = env.json(&foreign, &["check"]);
+    assert!(env.check(&dir)["errors"].as_array().unwrap().is_empty());
+    let check = env.check(&foreign);
     assert!(
         check["warnings"]
             .as_array()
@@ -12580,7 +12553,7 @@ fn check_reports_what_parsing_cannot_see_about_cadences() {
     env.json(&sci, &["done", &sweep]);
     env.json(&sci, &["done", &goal]);
     env.json(&sci, &["start", &sweep]);
-    let v = env.json(&sci, &["check"]);
+    let v = env.check(&sci);
     let kinds: Vec<&str> = v["warnings"]
         .as_array()
         .unwrap()
@@ -12591,7 +12564,7 @@ fn check_reports_what_parsing_cannot_see_about_cadences() {
 
     // An ordinary open child of a closed parent is still warned about.
     let plain = id_of(env.json(&sci, &["add", "Plain", "--parent", &goal]));
-    let v = env.json(&sci, &["check"]);
+    let v = env.check(&sci);
     let warned: Vec<&str> = v["warnings"]
         .as_array()
         .unwrap()
@@ -13707,7 +13680,7 @@ fn check_warns_on_an_open_plan_step_without_a_rating() {
         ],
     ));
     let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
-    let v = env.json(&sci, &["check"]);
+    let v = env.check(&sci);
     let warnings = v["warnings"].as_array().unwrap();
     assert!(
         warnings
@@ -13720,7 +13693,7 @@ fn check_warns_on_an_open_plan_step_without_a_rating() {
         "missing complexity elsewhere is not a finding"
     );
     env.json(&sci, &["edit", &step, "--complexity", "low"]);
-    let v = env.json(&sci, &["check"]);
+    let v = env.check(&sci);
     assert!(
         !v["warnings"]
             .as_array()
@@ -13731,7 +13704,7 @@ fn check_warns_on_an_open_plan_step_without_a_rating() {
     );
     env.json(&sci, &["edit", &step, "--no-complexity"]);
     env.json(&sci, &["done", &step, "landed"]);
-    let v = env.json(&sci, &["check"]);
+    let v = env.check(&sci);
     assert!(
         !v["warnings"]
             .as_array()
@@ -14063,22 +14036,22 @@ fn process_missing_warns_only_while_doing() {
             .iter()
             .any(|w| w["kind"] == "process_missing")
     };
-    assert!(!missing(&env.json(&dir, &["check"])));
+    assert!(!missing(&env.check(&dir)));
     env.json(&dir, &["start", &id]);
-    assert!(missing(&env.json(&dir, &["check"])));
+    assert!(missing(&env.check(&dir)));
     env.json(&dir, &["edit", &id, "--process", "direct"]);
-    assert!(!missing(&env.json(&dir, &["check"])));
+    assert!(!missing(&env.check(&dir)));
     env.json(&dir, &["edit", &id, "--no-process"]);
-    assert!(missing(&env.json(&dir, &["check"])));
+    assert!(missing(&env.check(&dir)));
     env.json(&dir, &["done", &id]);
-    assert!(!missing(&env.json(&dir, &["check"])));
+    assert!(!missing(&env.check(&dir)));
 
     let idea = id_of(env.json(&dir, &["add", "Idea", "--status", "idea"]));
     let shelved = id_of(env.json(&dir, &["add", "Shelf"]));
     env.json(&dir, &["shelve", &shelved, "not now"]);
     let dropped = id_of(env.json(&dir, &["add", "Drop"]));
     env.json(&dir, &["drop", &dropped, "unneeded"]);
-    assert!(!missing(&env.json(&dir, &["check"])));
+    assert!(!missing(&env.check(&dir)));
     assert_eq!(env.json(&dir, &["show", &idea])["task"]["status"], "idea");
 
     let goal = id_of(env.json(&dir, &["add", "Goal", "--process", "planned"]));
@@ -14103,12 +14076,12 @@ fn process_missing_warns_only_while_doing() {
             .get("process")
             .is_none()
     );
-    assert!(!missing(&env.json(&dir, &["check"])));
+    assert!(!missing(&env.check(&dir)));
     env.json(&dir, &["edit", &goal, "--no-process"]);
     for active in [&goal, &step] {
         env.json(&dir, &["start", active]);
     }
-    let findings = env.json(&dir, &["check"]);
+    let findings = env.check(&dir);
     let ids: Vec<_> = findings["warnings"]
         .as_array()
         .unwrap()

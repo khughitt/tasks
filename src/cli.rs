@@ -414,13 +414,8 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Validate every task file.
-    Check {
-        /// Print nothing on stdout when there are no errors and no warnings; the exit
-        /// status is unchanged. For hooks, where a clean run should be silent.
-        #[arg(short, long)]
-        quiet: bool,
-    },
+    /// Validate every task file. Prints nothing when there is nothing to report.
+    Check,
     /// Session context for agents.
     Prime {
         #[command(flatten)]

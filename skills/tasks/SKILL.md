@@ -6,7 +6,8 @@ description: Use when working in a repository that contains tasks/.config.toml o
 # tasks
 
 `tasks` is the repository's task tracker: one markdown file per task under `tasks/`,
-managed only through the CLI. Output is JSON unless `--pretty` is given.
+managed only through the CLI. Output is JSON unless `--pretty` is given (`check` prints
+nothing when it has nothing to report).
 Task objects omit unset optional fields and empty collections; treat missing optional
 keys as unset and missing task arrays as empty. `false`, `0`, and empty strings remain.
 Response containers (`tasks`, `warnings`, etc.) remain present; `next: null` still means
@@ -110,8 +111,7 @@ nothing is eligible.
    before closing its next occurrence. Early runs are allowed. `list --periodic` shows
    what is coming up; `edit --no-every` stops recurrence and clears its anchor.
 7. `tasks check` before committing. A failing check means a task and its plan/spec drifted apart; fix both.
-   `tasks check -q` prints nothing when there are no errors and no warnings and is
-   otherwise identical; hooks use it so a clean commit is silent.
+   A clean check prints nothing and exits 0; findings print as JSON, and errors exit 1.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 

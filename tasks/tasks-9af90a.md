@@ -1,17 +1,19 @@
 ---
 id: tasks-9af90a
 title: check prints nothing on a clean tree by default; drop --quiet
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: main
 created: 2026-09-19T12:52:22Z
-updated: 2026-09-19T12:52:22Z
+updated: 2026-09-19T12:55:45Z
 started: 2026-09-19T12:52:22Z
+completed: 2026-09-19T12:55:45Z
 depends: []
 tags: []
+model: "claude-opus-5[1m]"
 agent: "claude-code/claude-opus-5[1m]"
 ---
 
@@ -20,4 +22,8 @@ tasks-597472 added -q. Every caller wants it (each project's hook), no consumer 
 ## Notes
 
 - 2026-09-19T12:52:22Z (main): started
+  provenance: {"harness_session":"claude-code:3111d755-79c1-4c78-8c1a-8c2478835ee8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-19T12:55:45Z (tasks-9af90a): done
+  provenance: {"harness_session":"claude-code:3111d755-79c1-4c78-8c1a-8c2478835ee8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-19T12:55:45Z (tasks-9af90a): check JSON mode prints nothing on a clean tree; --quiet removed; --pretty still prints ok; test helper check() for the empty report
   provenance: {"harness_session":"claude-code:3111d755-79c1-4c78-8c1a-8c2478835ee8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
