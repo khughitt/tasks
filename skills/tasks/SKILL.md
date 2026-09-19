@@ -204,9 +204,9 @@ feedback, shelf notes and takeover commentary remain unstamped. Consumers use
 generated text, not the presence of fields, to identify transitions.
 User text can equal a marker; the pair-only schema cannot disambiguate that collision.
 
-Before deploying the writer, install the provenance-capable reader on every host
-reading synced task files: older binaries reject the whole stamped file. Roll out
-reader-only commit `57311fc` first; see the README for the complete contract.
+Binaries older than the provenance writer reject the whole stamped file, so every
+host reading synced task files needs a current `tasks`; the README has the complete
+contract.
 
 ### Task operations
 

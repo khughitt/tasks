@@ -8,11 +8,15 @@ JSON task records omit unset optional fields and empty task collections (`tags`,
 `depends`, `notes`, `depends_on`, `children`). Missing means unset or empty; consumers
 must not require those keys. Values such as `false`, `0`, and `body: ""` remain.
 Response containers such as `tasks: []` and `warnings: []` remain, as does `next: null`
-when nothing is eligible. This replaces the previous always-present task-field contract;
-see [the output contract](docs/specs/2026-08-29-tasks-design.md#51-output-contract).
+when nothing is eligible. See
+[the output contract](docs/specs/2026-08-29-tasks-design.md#51-output-contract).
 
 Design: [`docs/specs/2026-08-29-tasks-design.md`](docs/specs/2026-08-29-tasks-design.md).
 Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-tasks.md).
+
+A terminal front end, [tasks-tui](https://github.com/khughitt/tasks-tui), sits on top of
+the CLI: it shells out to `tasks`, reads the JSON, and launches an agent on a task in a
+new terminal. The CLI is the whole contract; the TUI never touches `tasks/*.md`.
 
 ## For agents
 
@@ -22,10 +26,12 @@ Each step is idempotent.
 1. Install the binary and the skill (once per machine; needs a Rust toolchain):
 
        git clone https://github.com/khughitt/tasks ~/.local/src/tasks
-       cargo install --path ~/.local/src/tasks
-       mkdir -p ~/.claude/skills && ln -sfn ~/.local/src/tasks/skills/tasks ~/.claude/skills/tasks
+       cargo install --locked --path ~/.local/src/tasks
+       just --justfile ~/.local/src/tasks/justfile install-skills
 
-   Other harnesses look in `~/.agents/skills`; symlink there as well if relevant.
+   `install-skills` symlinks every `skills/*` directory into `~/.claude/skills` and
+   `~/.agents/skills` (the latter for other harnesses). Without `just`:
+   `ln -sfn ~/.local/src/tasks/skills/tasks ~/.claude/skills/tasks`.
 
 2. Initialise the project (once per repository):
 
@@ -105,12 +111,9 @@ There is no serialized marker kind: arbitrary user text can equal a generated te
 that collision; consumers must retain that uncertainty.
 Plain `tasks note`, shelf notes, feedback and takeover commentary remain unstamped.
 
-Reader-first deployment is required: install reader-only commit `57311fc` (or a
-descendant) on **every host reading synced task files before deploying the writer**.
-Older binaries reject the whole file when they encounter a provenance continuation.
-The titan and Europa reader checks and writer delivery are recorded in
-`docs/plans/2026-09-17-lifecycle-provenance.md`. Use `cargo install --locked --path .`
-to install the checked dependency versions.
+Binaries older than the provenance writer reject a stamped file outright, so every host
+that reads synced task files needs a current `tasks`. The contract and its rollout are
+recorded in `docs/plans/2026-09-17-lifecycle-provenance.md`.
 
 `TASKS_MODEL` per harness process records which model completed each task: a fresh
 `done` stamps the record's `model` field from it (and clears the stamp when it is
@@ -154,9 +157,9 @@ Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped
 
 ## Install
 
-From a checkout:
+From a checkout (`--locked` installs the checked dependency versions):
 
-    cargo install --path .
+    cargo install --locked --path .
 
 Without a checkout (binary only; the skill still needs the `skills/tasks` directory
 from a clone):
@@ -266,12 +269,9 @@ does not run skills or create worktrees.
 
 Projects must adopt the process policy in their agent instructions (see the install
 snippet above) before it can take precedence over generic brainstorming triggers.
-This repo has adopted it. The separate global worktree-rule widening landed as
-`ai-69ccac` (2026-09-13); it fixes the ran-on-main incident without a CLI change. The
-writing-plans integration lives in the tasks skill's child command
-(`--complexity <level> --process <value>`), not in the upstream plan-writing skill;
-`ai-e8dcc5` confirmed there is no locally owned copy to change. These rollout tasks
-are separate from this repo's implementation. Design: `docs/specs/2026-09-13-task-process-design.md`.
+This repo has adopted it. The writing-plans integration is the tasks skill's child
+command (`--complexity <level> --process <value>`), not the upstream plan-writing skill.
+Design: `docs/specs/2026-09-13-task-process-design.md`.
 
 ## Completions
 
