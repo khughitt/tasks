@@ -4375,6 +4375,63 @@ fn check_passes_clean_repo_and_reports_drift() {
 }
 
 #[test]
+fn check_quiet_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let a = env.json(&dir, &["add", "A"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for args in [
+        &["check", "--quiet"][..],
+        &["check", "-q"][..],
+        &["--pretty", "check", "-q"][..],
+    ] {
+        let out = env.cmd(&dir).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{args:?}");
+        assert!(out.stdout.is_empty(), "{args:?}: {:?}", out.stdout);
+    }
+
+    // warnings alone still exit 0, so quiet must print them or they are lost
+    write_doc(&dir, "docs/plans/2026-09-19-p.md", "### Task 1: nobody\n");
+    env.json(
+        &dir,
+        &["edit", &a, "--plan", "p", "--step", "Task 1: nobody"],
+    );
+    write_doc(
+        &dir,
+        "docs/plans/2026-09-19-p.md",
+        "### Task 1: nobody\n\n### Task 2: unlinked\n",
+    );
+    let out = env.cmd(&dir).args(["check", "-q"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["errors"], serde_json::json!([]));
+    assert!(
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "unlinked_step"),
+        "{v}"
+    );
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "check", "-q"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unlinked_step"));
+
+    // errors: the same output and exit status as without the flag
+    std::fs::write(dir.join("tasks/sci-bad.md"), "nope").unwrap();
+    let quiet = env.cmd(&dir).args(["check", "-q"]).output().unwrap();
+    let loud = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(quiet.status.code(), Some(1));
+    assert_eq!(quiet.stdout, loud.stdout);
+}
+
+#[test]
 fn check_warns_on_plan_headings_without_a_task() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

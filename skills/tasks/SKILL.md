@@ -110,6 +110,8 @@ nothing is eligible.
    before closing its next occurrence. Early runs are allowed. `list --periodic` shows
    what is coming up; `edit --no-every` stops recurrence and clears its anchor.
 7. `tasks check` before committing. A failing check means a task and its plan/spec drifted apart; fix both.
+   `tasks check -q` prints nothing when there are no errors and no warnings and is
+   otherwise identical; hooks use it so a clean commit is silent.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 

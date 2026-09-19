@@ -88,8 +88,15 @@ fn main() {
         };
     let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
+    // `check --quiet` says nothing on stdout when it has nothing to report. The rendering
+    // below is otherwise identical, so a hook prints exactly what `check` would once
+    // there is a finding.
+    let quiet = matches!(cli.command, cli::Command::Check { quiet: true });
     match commands::run(cli) {
         Ok(out) => {
+            let silent = quiet
+                && matches!(&out, output::Output::Check(check)
+                    if check.errors.is_empty() && check.warnings.is_empty());
             if format == Format::Pretty {
                 to_stderr(&output::pretty_warnings(
                     &output::warnings_of(&out),
@@ -97,7 +104,12 @@ fn main() {
                 ));
             }
             let rendered = output::render(&out, format, &stdout_painter);
-            match write_to(std::io::stdout().lock(), &format!("{rendered}\n")) {
+            let written = if silent {
+                Ok(())
+            } else {
+                write_to(std::io::stdout().lock(), &format!("{rendered}\n"))
+            };
+            match written {
                 Ok(()) => {}
                 // The reader closed the pipe -- `tasks show <id> | head`. That is an
                 // ordinary end of output, not a failure, and falling through rather than
