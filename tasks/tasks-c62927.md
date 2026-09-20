@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: main
 created: 2026-09-20T11:30:32Z
-updated: 2026-09-20T13:10:56Z
+updated: 2026-09-20T13:38:51Z
 started: 2026-09-20T13:10:56Z
 depends: []
 tags: [cli, cross-project]
@@ -20,4 +20,6 @@ Adopt the shared CLI vocabulary: vendor tools/cli.toml (and tools/cli_surface.py
 ## Notes
 
 - 2026-09-20T13:10:56Z (main): started
+  provenance: {"harness_session":"claude-code:20e55bde-4aed-4a6f-993d-b44b058f509f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-20T13:38:51Z (tasks-c62927): parked (waiting on agent, dependency): re-vendor tools/cli.toml once the table marks --depends repeatable on add and edit and feedback --category required, rerun just test, then tasks done
   provenance: {"harness_session":"claude-code:20e55bde-4aed-4a6f-993d-b44b058f509f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
