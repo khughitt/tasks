@@ -159,6 +159,30 @@ impl TestEnv {
         v["error"]["kind"].as_str().expect("error.kind").to_string()
     }
 
+    /// A usage error: exit 2, nothing on stdout, and the problem plus at most the usage
+    /// line on stderr. Returns stderr for the caller to check the option and value named.
+    pub fn usage(&self, dir: &Path, args: &[&str]) -> String {
+        let out = self.cmd(dir).args(args).output().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "tasks {:?} should exit 2:\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "stdout must be empty on a usage error"
+        );
+        let err = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            err.lines().count() <= 2,
+            "a usage error is the problem and the usage line: {err}"
+        );
+        err
+    }
+
     pub fn read(&self, dir: &Path, rel: &str) -> String {
         std::fs::read_to_string(dir.join(rel)).unwrap()
     }
@@ -194,8 +218,8 @@ impl TestEnv {
             .collect()
     }
 
-    /// Like `complete`, but drops the still-available global flags (`-C`, `--pretty`,
-    /// `--color`, `--help`) that clap_complete appends after the real candidates when
+    /// Like `complete`, but drops the still-available global flags (`-C`, `--json`,
+    /// `--pretty`, `--color`, `--help`) that clap_complete appends after the real candidates when
     /// completing a bare positional with an empty word. Use this whenever the assertion
     /// checks the candidate list itself (equality, emptiness) rather than membership.
     pub fn complete_values(

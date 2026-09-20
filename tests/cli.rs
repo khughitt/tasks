@@ -247,7 +247,12 @@ fn list_help_shows_sort_values_and_examples() {
     assert!(text.contains("Filter by status (repeatable)"), "{text}");
     assert!(text.contains("Filter by tag (repeatable)"), "{text}");
     assert!(text.contains("Only tasks owned by this value"), "{text}");
-    assert!(text.contains("--sort <priority|updated|created>"), "{text}");
+    assert!(text.contains("--sort <SORT>"), "{text}");
+    assert!(
+        text.contains("priority (then last activity), updated, or created"),
+        "{text}"
+    );
+    assert!(text.contains("[default: priority]"), "{text}");
     assert!(text.contains("Examples:"), "{text}");
     assert!(text.contains("tasks list --sort updated"), "{text}");
     assert!(
@@ -643,7 +648,7 @@ fn shelved_is_hidden_from_default_views_but_counted() {
     assert_eq!(
         ids(&env.json(
             &sci,
-            &["sample", "-n", "5", "--seed", "1", "--older-than", "0"]
+            &["sample", "-n", "5", "--seed", "1", "--older-than", "0d"]
         )),
         [eligible]
     );
@@ -1155,9 +1160,10 @@ fn park_refuses_a_closed_task_and_validates_its_arguments() {
 
     assert_eq!(env.fail(&sci, &["park", &id, ""]), "validation");
     assert_eq!(env.fail(&sci, &["park", &id, "two\nlines"]), "validation");
-    assert_eq!(
-        env.fail(&sci, &["park", &id, "x", "--waiting-on", "nobody"]),
-        "validation"
+    let err = env.usage(&sci, &["park", &id, "x", "--waiting-on", "nobody"]);
+    assert!(
+        err.contains("--waiting-on") && err.contains("nobody"),
+        "{err}"
     );
     assert!(
         env.json(&sci, &["show", &id])["park"].is_null(),
@@ -1275,10 +1281,8 @@ fn park_without_a_reason_records_none_and_re_parking_drops_a_previous_one() {
         "a re-park without the flag records none"
     );
 
-    assert_eq!(
-        env.fail(&sci, &["park", &id, "x", "--reason", "boredom"]),
-        "validation"
-    );
+    let err = env.usage(&sci, &["park", &id, "x", "--reason", "boredom"]);
+    assert!(err.contains("--reason") && err.contains("boredom"), "{err}");
     assert!(
         env.json(&sci, &["show", &id])["park"]["reason"].is_null(),
         "nothing landed"
@@ -1427,8 +1431,7 @@ fn quiet_park_flags_are_validated_together() {
             .contains("--minutes on park needs --reason quiet"),
         "{err}"
     );
-    let err = error_of(
-        &env,
+    let err = env.usage(
         &sci,
         &[
             "park",
@@ -1443,10 +1446,7 @@ fn quiet_park_flags_are_validated_together() {
         ],
     );
     assert!(
-        err["error"]["detail"]
-            .as_str()
-            .unwrap()
-            .contains("idle, headless"),
+        err.contains("--needs") && err.contains("idle, headless"),
         "{err}"
     );
     let err = error_of(
@@ -1966,15 +1966,13 @@ fn body_leading_whitespace_survives_routine_writes() {
 fn add_validates_before_writing() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    assert_eq!(env.fail(&dir, &["add", "x", "-p", "9"]), "validation");
-    assert_eq!(
-        env.fail(&dir, &["add", "x", "--size", "huge"]),
-        "validation"
-    );
-    assert_eq!(
-        env.fail(&dir, &["add", "x", "--status", "done"]),
-        "validation"
-    );
+    // a value outside a closed set is a usage error, refused before anything runs
+    let err = env.usage(&dir, &["add", "x", "-p", "9"]);
+    assert!(err.contains("--priority") && err.contains("'9'"), "{err}");
+    let err = env.usage(&dir, &["add", "x", "--size", "huge"]);
+    assert!(err.contains("--size") && err.contains("huge"), "{err}");
+    let err = env.usage(&dir, &["add", "x", "--status", "done"]);
+    assert!(err.contains("--status") && err.contains("done"), "{err}");
     assert_eq!(
         env.fail(&dir, &["add", "x", "--depends", "sci-ffffff"]),
         "unresolvable_id"
@@ -2846,7 +2844,8 @@ fn list_defaults_to_open_and_filters() {
         ],
     );
     assert_eq!(v["tasks"].as_array().unwrap().len(), 2);
-    assert_eq!(env.fail(&dir, &["list", "--status", "weird"]), "validation");
+    let err = env.usage(&dir, &["list", "--status", "weird"]);
+    assert!(err.contains("--status") && err.contains("weird"), "{err}");
     let summary = &v["tasks"][0];
     for key in [
         "id", "title", "status", "priority", "created", "updated", "tags",
@@ -4289,7 +4288,8 @@ fn graph_renders_open_tasks() {
     assert!(text.contains(&b) && !text.contains(&a), "{text}");
     let value = env.json(&dir, &["graph", "--all", "--format", "dot"]);
     assert!(value["text"].as_str().unwrap().contains(&a));
-    assert_eq!(env.fail(&dir, &["graph", "--format", "png"]), "validation");
+    let err = env.usage(&dir, &["graph", "--format", "png"]);
+    assert!(err.contains("--format") && err.contains("png"), "{err}");
 }
 
 #[test]
@@ -5042,13 +5042,11 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
         ),
         "no_project"
     );
-    assert_eq!(
-        env.fail(
-            &reporter,
-            &["feedback", "probe summary", "--category", "rant"]
-        ),
-        "validation"
+    let err = env.usage(
+        &reporter,
+        &["feedback", "probe summary", "--category", "rant"],
     );
+    assert!(err.contains("--category") && err.contains("rant"), "{err}");
     assert_eq!(
         env.fail(
             &reporter,
@@ -6311,10 +6309,8 @@ fn projects_sort_is_command_level_and_reorders_the_json() {
     assert_eq!(prefixes(&v), ["aaa", "zzz"]);
 
     // the task-shaped keys are not project keys
-    assert_eq!(
-        env.fail(nowhere.path(), &["projects", "--sort", "updated"]),
-        "validation"
-    );
+    let err = env.usage(nowhere.path(), &["projects", "--sort", "updated"]);
+    assert!(err.contains("--sort") && err.contains("updated"), "{err}");
 }
 
 #[test]
@@ -8633,7 +8629,8 @@ fn list_sorts_by_priority_updated_or_created_and_prints_the_date() {
         ids(env.json(&dir, &["list", "--sort", "created", "--reverse"])),
         [a, c, b]
     );
-    assert_eq!(env.fail(&dir, &["list", "--sort", "weird"]), "validation");
+    let err = env.usage(&dir, &["list", "--sort", "weird"]);
+    assert!(err.contains("--sort") && err.contains("weird"), "{err}");
 
     // pretty rows carry the day of last activity, or of creation when sorting by it
     let pretty = |args: &[&str]| -> String {
@@ -9074,7 +9071,7 @@ fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
     let sci = env.init("sci");
     env.init("fam");
 
-    // every status on edit, but only the two `add` accepts
+    // every status but shelved on edit (`shelve` is the way in), only the two `add` accepts
     assert_eq!(
         env.complete(
             &sci,
@@ -9082,6 +9079,10 @@ fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
             4,
             &["tasks", "edit", "sci-000001", "--status", ""]
         ),
+        ["idea", "todo", "doing", "blocked", "done", "dropped"]
+    );
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "list", "--status", ""]),
         [
             "idea", "todo", "doing", "blocked", "shelved", "done", "dropped"
         ]
@@ -11920,7 +11921,7 @@ fn sample_older_than_zero_admits_fresh_tasks_and_goals_stay_in() {
         "{v}"
     );
 
-    let v = env.json(&dir, &["sample", "-n", "10", "--older-than", "0"]);
+    let v = env.json(&dir, &["sample", "-n", "10", "--older-than", "0d"]);
     assert!(
         v["warnings"]
             .as_array()
@@ -11941,19 +11942,21 @@ fn sample_bounds_older_than_at_the_cli() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     old_task(&env, &dir, "T", &[]);
-    for bad in ["36501", "10000000", "18446744073709551615", "-1"] {
-        let out = env
-            .cmd(&dir)
-            .args(["sample", "--older-than", bad])
-            .output()
-            .unwrap();
-        assert_eq!(
-            out.status.code(),
-            Some(2),
-            "--older-than {bad} must be a parse error"
-        );
+    for bad in [
+        "7",
+        "36501d",
+        "5215w",
+        "10000000d",
+        "18446744073709551615d",
+        "0w",
+    ] {
+        let err = env.usage(&dir, &["sample", "--older-than", bad]);
+        assert!(err.contains("--older-than") && err.contains(bad), "{err}");
     }
-    let v = env.json(&dir, &["sample", "--older-than", "36500"]);
+    // a leading minus reads as a flag unless attached to the option
+    let err = env.usage(&dir, &["sample", "--older-than=-1d"]);
+    assert!(err.contains("--older-than") && err.contains("-1d"), "{err}");
+    let v = env.json(&dir, &["sample", "--older-than", "36500d"]);
     assert!(sampled_ids(&v).is_empty(), "{v}");
 }
 
@@ -12669,14 +12672,13 @@ fn complexity_is_set_cleared_listed_and_completed() {
         "unassessed shows a dash: {pretty}"
     );
 
-    assert_eq!(
-        env.fail(&sci, &["add", "Bad", "--complexity", "medium"]),
-        "validation"
+    let err = env.usage(&sci, &["add", "Bad", "--complexity", "medium"]);
+    assert!(
+        err.contains("--complexity") && err.contains("medium"),
+        "{err}"
     );
-    assert_eq!(
-        env.fail(&sci, &["edit", &id, "--complexity", "5"]),
-        "validation"
-    );
+    let err = env.usage(&sci, &["edit", &id, "--complexity", "5"]);
+    assert!(err.contains("--complexity") && err.contains("'5'"), "{err}");
     let out = env
         .cmd(&sci)
         .args(["edit", &id, "--complexity", "low", "--no-complexity"])
@@ -12836,9 +12838,10 @@ fn ready_and_next_hide_above_cutoff_and_unassessed_with_counts() {
         "priority order across the scope"
     );
 
-    assert_eq!(
-        env.fail(&sci, &["ready", "--max-complexity", "huge"]),
-        "validation"
+    let err = env.usage(&sci, &["ready", "--max-complexity", "huge"]);
+    assert!(
+        err.contains("--max-complexity") && err.contains("huge"),
+        "{err}"
     );
     let _ = (high, none);
 }
@@ -12996,20 +12999,21 @@ fn capability_park_validates_the_level_and_records_the_escalation() {
         env.fail(&sci, &["park", &id, "stuck", "--reason", "capability"]),
         "validation"
     );
-    assert_eq!(
-        env.fail(
-            &sci,
-            &[
-                "park",
-                &id,
-                "stuck",
-                "--reason",
-                "capability",
-                "--complexity",
-                "medium"
-            ]
-        ),
-        "validation"
+    let err = env.usage(
+        &sci,
+        &[
+            "park",
+            &id,
+            "stuck",
+            "--reason",
+            "capability",
+            "--complexity",
+            "medium",
+        ],
+    );
+    assert!(
+        err.contains("--complexity") && err.contains("medium"),
+        "{err}"
     );
     // Never below the effective rating.
     env.json(&sci, &["edit", &id, "--complexity", "mid"]);
@@ -13867,14 +13871,9 @@ fn edit_refuses_a_transition_into_shelved_and_allows_edits_of_a_shelved_record()
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
 
-    let err = error_of(&env, &sci, &["edit", &id, "--status", "shelved"]);
-    assert_eq!(err["error"]["kind"], "validation");
-    assert!(
-        err["error"]["detail"]
-            .as_str()
-            .unwrap()
-            .contains("tasks shelve")
-    );
+    // shelved is outside the set `edit --status` accepts; `shelve` is the way in
+    let err = env.usage(&sci, &["edit", &id, "--status", "shelved"]);
+    assert!(err.contains("--status") && err.contains("shelved"), "{err}");
     assert_eq!(env.json(&sci, &["show", &id])["task"]["status"], "todo");
 
     let into = editor_script(&sci, "sed -i 's/^status: todo$/status: shelved/' \"$1\"");
@@ -13928,10 +13927,8 @@ fn process_round_trips_and_rejects_invalid_edits() {
     env.json(&dir, &["note", &id, "retain choice"]);
     assert_eq!(env.json(&dir, &["show", &id])["task"]["process"], "planned");
     let before = std::fs::read(&path).unwrap();
-    assert_eq!(
-        env.fail(&dir, &["edit", &id, "--process", "auto"]),
-        "validation"
-    );
+    let err = env.usage(&dir, &["edit", &id, "--process", "auto"]);
+    assert!(err.contains("--process") && err.contains("auto"), "{err}");
     assert_eq!(std::fs::read(&path).unwrap(), before);
     let out = env
         .cmd(&dir)
@@ -13949,10 +13946,8 @@ fn process_round_trips_and_rejects_invalid_edits() {
             .unwrap()
             .contains("\nprocess:")
     );
-    assert_eq!(
-        env.fail(&dir, &["add", "Bad", "--process", "auto"]),
-        "validation"
-    );
+    let err = env.usage(&dir, &["add", "Bad", "--process", "auto"]);
+    assert!(err.contains("--process") && err.contains("auto"), "{err}");
     assert_eq!(
         env.json(&dir, &["list"])["tasks"].as_array().unwrap().len(),
         1
@@ -14438,7 +14433,7 @@ fn deferred_work_is_hidden_from_ready_next_and_sample_with_one_warning() {
     for seed in ["1", "2", "3", "4", "5"] {
         let sample = env.json(
             &sci,
-            &["sample", "-n", "10", "--older-than", "0", "--seed", seed],
+            &["sample", "-n", "10", "--older-than", "0d", "--seed", seed],
         );
         let ids: Vec<&str> = sample["tasks"]
             .as_array()
@@ -14562,7 +14557,7 @@ fn a_due_deferral_is_back_in_ready_next_and_sample() {
     assert_eq!(next["next"]["deferred"]["due"], true, "{next}");
     let sample = env.json(
         &sci,
-        &["sample", "-n", "10", "--older-than", "0", "--seed", "1"],
+        &["sample", "-n", "10", "--older-than", "0d", "--seed", "1"],
     );
     assert_eq!(sample["tasks"][0]["id"], due);
 }
@@ -14868,4 +14863,431 @@ fn sparse_json_omits_unset_task_fields_but_preserves_values_and_envelopes() {
     assert_eq!(row["park"]["next_step"], "Resume here");
     assert!(row["park"].get("reason").is_none());
     assert_eq!(row["parallel"], false);
+}
+
+// ---- The shared CLI vocabulary: the behaviour half of the conformance test (the
+// structural half is `surface::tests::parser_surface_equals_table`). The vocabulary and
+// its design live with the table vendored as tools/cli.toml; see its header.
+
+fn table_commands() -> Vec<Vec<String>> {
+    let doc: toml::Value = toml::from_str(include_str!("../tools/cli.toml")).unwrap();
+    doc["cli"]["tasks"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            c["path"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        })
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+#[test]
+fn cli_vocabulary_help_version_usage() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let mut paths = table_commands();
+    paths.push(vec![]);
+    for path in &paths {
+        for flag in ["--help", "-h"] {
+            let mut args = path.clone();
+            args.push(flag.to_string());
+            let out = env.cmd(&dir).args(&args).output().unwrap();
+            assert!(
+                out.status.success() && !out.stdout.is_empty() && out.stderr.is_empty(),
+                "{path:?} {flag}"
+            );
+        }
+        if !path.is_empty() {
+            let mut via_help = vec!["help".to_string()];
+            via_help.extend(path.iter().cloned());
+            let mut direct = path.clone();
+            direct.push("--help".into());
+            let a = env.cmd(&dir).args(&via_help).output().unwrap();
+            let b = env.cmd(&dir).args(&direct).output().unwrap();
+            assert_eq!(a.stdout, b.stdout, "help routing for {path:?}");
+        }
+    }
+    for flag in ["--version", "-V"] {
+        let out = env.cmd(&dir).args([flag]).output().unwrap();
+        assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).starts_with("tasks "));
+    }
+    for args in [
+        vec!["bogus"],
+        vec!["list", "--bogus"],
+        vec!["show"],
+        vec!["help", "bogus"],
+    ] {
+        let out = env.cmd(&dir).args(&args).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(
+            out.stdout.is_empty()
+                && !out.stderr.is_empty()
+                && String::from_utf8_lossy(&out.stderr).lines().count() <= 2,
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.init("tasks"); // `feedback` files into the registered `tasks` project; here that is a fixture
+    let id = id_of(env.json(&dir, &["add", "Baseline"]));
+    let i = id.as_str();
+    // (path, binding) -> a real success; the value that must be replaced is the word after the binding, or the binding itself for a positional
+    type Baseline<'a> = ((Vec<&'a str>, &'a str), Vec<&'a str>);
+    let baselines: Vec<Baseline> = vec![
+        (
+            (vec!["add"], "--status"),
+            vec!["add", "B1", "--status", "idea"],
+        ),
+        ((vec!["add"], "--size"), vec!["add", "B2", "--size", "s"]),
+        (
+            (vec!["add"], "--complexity"),
+            vec!["add", "B3", "--complexity", "low"],
+        ),
+        (
+            (vec!["add"], "--process"),
+            vec!["add", "B4", "--process", "direct"],
+        ),
+        (
+            (vec!["add"], "--priority"),
+            vec!["add", "B5", "--priority", "1"],
+        ),
+        (
+            (vec!["edit"], "--status"),
+            vec!["edit", i, "--status", "todo"],
+        ),
+        ((vec!["edit"], "--size"), vec!["edit", i, "--size", "m"]),
+        (
+            (vec!["edit"], "--complexity"),
+            vec!["edit", i, "--complexity", "mid"],
+        ),
+        (
+            (vec!["edit"], "--process"),
+            vec!["edit", i, "--process", "planned"],
+        ),
+        (
+            (vec!["edit"], "--priority"),
+            vec!["edit", i, "--priority", "2"],
+        ),
+        ((vec!["list"], "--status"), vec!["list", "--status", "todo"]),
+        ((vec!["list"], "--sort"), vec!["list", "--sort", "updated"]),
+        ((vec!["tags"], "--status"), vec!["tags", "--status", "todo"]),
+        (
+            (vec!["projects"], "--sort"),
+            vec!["projects", "--sort", "size"],
+        ),
+        ((vec!["ready"], "--size"), vec!["ready", "--size", "m"]),
+        (
+            (vec!["ready"], "--max-complexity"),
+            vec!["ready", "--max-complexity", "low"],
+        ),
+        (
+            (vec!["next"], "--max-complexity"),
+            vec!["next", "--max-complexity", "low"],
+        ),
+        (
+            (vec!["graph"], "--format"),
+            vec!["graph", "--format", "dot"],
+        ),
+        (
+            (vec!["park"], "--waiting-on"),
+            vec!["park", i, "step", "--waiting-on", "user"],
+        ),
+        (
+            (vec!["park"], "--reason"),
+            vec!["park", i, "step", "--reason", "review"],
+        ),
+        (
+            (vec!["park"], "--complexity"),
+            vec![
+                "park",
+                i,
+                "step",
+                "--reason",
+                "capability",
+                "--complexity",
+                "high",
+            ],
+        ),
+        (
+            (vec!["park"], "--needs"),
+            vec![
+                "park",
+                i,
+                "step",
+                "--reason",
+                "quiet",
+                "--waiting-on",
+                "user",
+                "--minutes",
+                "5",
+                "--needs",
+                "idle",
+            ],
+        ),
+        (
+            (vec!["feedback"], "--category"),
+            vec!["feedback", "the tool works", "--category", "positive"],
+        ),
+    ];
+    let table = tasks_surface_enum_rows(); // (path, binding) for every enum option/arg row of `tasks` in tools/cli.toml
+    let covered: std::collections::BTreeSet<_> = baselines
+        .iter()
+        .map(|((p, b), _)| {
+            (
+                p.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                b.to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(covered, table, "every enum row needs a baseline");
+    for ((_, binding), argv) in &baselines {
+        let ok = env.cmd(&dir).args(argv).output().unwrap();
+        assert!(
+            ok.status.success(),
+            "baseline {argv:?}: {}",
+            String::from_utf8_lossy(&ok.stderr)
+        );
+        let pos = argv.iter().position(|w| w == binding).unwrap() + 1;
+        let mut bad = argv.clone();
+        bad[pos] = "__not_in_set__";
+        let out = env.cmd(&dir).args(&bad).output().unwrap();
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{bad:?}");
+        assert!(
+            err.contains(binding) && err.contains("__not_in_set__"),
+            "{bad:?}: {err}"
+        );
+    }
+}
+
+fn tasks_surface_enum_rows() -> std::collections::BTreeSet<(Vec<String>, String)> {
+    let doc: toml::Value = toml::from_str(include_str!("../tools/cli.toml")).unwrap();
+    let mut rows = std::collections::BTreeSet::new();
+    for cmd in doc["cli"]["tasks"]["commands"].as_array().unwrap() {
+        let path: Vec<String> = cmd["path"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap().to_string())
+            .collect();
+        for opt in cmd
+            .get("options")
+            .and_then(|a| a.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if opt["value"].as_str() == Some("enum") {
+                let name = match opt.get("shared") {
+                    Some(k) => doc["vocabulary"]["options"][k.as_str().unwrap()]["names"][0]
+                        .as_str()
+                        .unwrap()
+                        .to_string(),
+                    None => opt["names"][0].as_str().unwrap().to_string(),
+                };
+                rows.insert((path.clone(), name));
+            }
+        }
+        for arg in cmd
+            .get("args")
+            .and_then(|a| a.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if arg["value"].as_str() == Some("enum") {
+                rows.insert((path.clone(), arg["name"].as_str().unwrap().to_string()));
+            }
+        }
+    }
+    rows
+}
+
+#[test]
+fn cli_vocabulary_routing_output() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    // global routing: both placements, and the conflict
+    for args in [
+        vec!["--json", "list"],
+        vec!["list", "--json"],
+        vec!["--pretty", "list"],
+        vec!["list", "--pretty"],
+    ] {
+        assert!(
+            env.cmd(&dir).args(&args).output().unwrap().status.success(),
+            "{args:?}"
+        );
+    }
+    assert_eq!(
+        env.cmd(&dir)
+            .args(["--json", "list", "--pretty"])
+            .output()
+            .unwrap()
+            .status
+            .code(),
+        Some(2)
+    );
+    // json failure: error object on stderr, nothing on stdout
+    let out = env.cmd(&dir).args(["show", "sci-000000"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert!(err["error"]["kind"].is_string() && err["error"]["detail"].is_string());
+    // output precedence: default json; TASKS_FORMAT=pretty flips it; --json wins over the variable
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(
+            &env.cmd(&dir).args(["list"]).output().unwrap().stdout
+        )
+        .is_ok()
+    );
+    let out = env
+        .cmd(&dir)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["list"])
+        .output()
+        .unwrap();
+    assert!(serde_json::from_slice::<serde_json::Value>(&out.stdout).is_err());
+    let out = env
+        .cmd(&dir)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["--json", "list"])
+        .output()
+        .unwrap();
+    assert!(serde_json::from_slice::<serde_json::Value>(&out.stdout).is_ok());
+    // color: accepted both sides, refused outside its set, honoured from the variable
+    assert!(
+        env.cmd(&dir)
+            .args(["--color", "never", "--pretty", "list"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(
+        env.cmd(&dir)
+            .args(["--pretty", "list", "--color", "never"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert_eq!(
+        env.cmd(&dir)
+            .args(["--color", "sometimes", "list"])
+            .output()
+            .unwrap()
+            .status
+            .code(),
+        Some(2)
+    );
+    assert!(
+        env.cmd(&dir)
+            .env("TASKS_COLOR", "always")
+            .args(["--pretty", "list"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    // check: clean prints nothing; findings containing an error print a JSON object and exit 1
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert!(out.status.success() && out.stdout.is_empty());
+    std::fs::write(
+        dir.join("tasks/sci-ffffff.md"),
+        "---\nid: sci-ffffff\ntitle: Broken\nstatus: nonsense\n---\n",
+    )
+    .unwrap();
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&out.stdout)
+            .map(|v| v.is_object())
+            .unwrap_or(false)
+    );
+}
+
+#[test]
+fn cli_vocabulary_completion() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let complete = |words: &[&str], index: usize| {
+        let out = env
+            .cmd(&dir)
+            .env("TASKS_COMPLETE", "zsh")
+            .env("_CLAP_COMPLETE_INDEX", index.to_string())
+            .env("_CLAP_IFS", "\n")
+            .arg("--")
+            .args(words)
+            .output()
+            .unwrap();
+        // clap's zsh callback prints `value:description` (its bash form prints bare values)
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.split(':').next().unwrap_or("").to_string())
+            .collect::<Vec<_>>()
+    };
+    let root = complete(&["tasks", ""], 1);
+    for name in ["add", "list", "sample", "prime", "quiet", "help"] {
+        assert!(root.contains(&name.to_string()), "{root:?}");
+    }
+    assert!(
+        complete(&["tasks", "list", "--"], 2)
+            .iter()
+            .any(|w| w == "--sort")
+    );
+    let sorts = complete(&["tasks", "list", "--sort", ""], 3);
+    for v in ["priority", "updated", "created"] {
+        assert!(sorts.contains(&v.to_string()), "{sorts:?}");
+    }
+    // the script registers the completer when sourced
+    let script = env
+        .cmd(&dir)
+        .env("TASKS_COMPLETE", "zsh")
+        .output()
+        .unwrap()
+        .stdout;
+    let path = dir.join("_tasks");
+    std::fs::write(&path, &script).unwrap();
+    let z = std::process::Command::new("zsh")
+        .args([
+            "-f",
+            "-c",
+            &format!(
+                "autoload -Uz compinit; compinit -D -u; source {}; print -r -- ${{_comps[tasks]}}",
+                path.display()
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&z.stdout).trim(),
+        "_clap_dynamic_completer_tasks"
+    );
+    let script = env
+        .cmd(&dir)
+        .env("TASKS_COMPLETE", "bash")
+        .output()
+        .unwrap()
+        .stdout;
+    std::fs::write(dir.join("tasks.bash"), &script).unwrap();
+    let b = std::process::Command::new("bash")
+        .args([
+            "-c",
+            &format!(
+                "source {}; complete -p tasks",
+                dir.join("tasks.bash").display()
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(b.status.success(), "{}", String::from_utf8_lossy(&b.stderr));
 }

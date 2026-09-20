@@ -69,8 +69,11 @@ Each step is idempotent.
        tasks check                      # before every commit
        tasks feedback "<about the tool>" --category friction   # file friction upstream
 
-Never edit `tasks/*.md` by hand. `tasks --help` lists every command; add `--pretty` to any
-command for human-readable output.
+Never edit `tasks/*.md` by hand. `tasks --help` lists every command and `tasks help <command>`
+one command's; add `--pretty` to any command, before or after its name, for human-readable
+output (`--json` is the default, spelled out). A usage error — an unknown command or option,
+a missing argument, a value outside a closed set — exits 2 with the problem and the usage
+line on stderr; a command that ran and failed exits 1 with one JSON error object there.
 
 `start` also writes a per-project claim outside git, so every worktree sees the session and
 its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
@@ -189,7 +192,7 @@ from a clone):
     tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)
     tasks ready                      # what can be worked on now (JSON)
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
-    tasks sample -n 3                # random open tasks for a curation pass (see skills/curate)
+    tasks sample --limit 3           # random open tasks for a curation pass (see skills/curate)
     tasks tree                       # the goal hierarchy
     tasks next                       # parked work waiting on you, else the first ready task
     tasks park <id> "next step" --reason review   # set it down; tasks list --parked to see what is parked

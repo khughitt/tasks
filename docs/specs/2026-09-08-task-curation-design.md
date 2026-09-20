@@ -32,17 +32,18 @@ tasks-5b73bf so they are derived from passes rather than guessed.
 
 ## `tasks sample`
 
-    tasks sample [-n N] [--project <prefix> | --all-projects] [--older-than <days>] [--seed <u64>]
+    tasks sample [--limit N] [--project <prefix> | --all-projects] [--older-than <age>] [--seed <u64>]
 
 - **Pool.** Tasks whose status is `idea`, `todo`, or `blocked`; not `doing`, `shelved`,
   `done`, or `dropped`. A task with a live claim is excluded. A task whose most recent note
   starts with `curate:` or `scope:` and carries a `proposal:` segment is excluded: its proposal is awaiting
   the human, and re-drawing it would only re-report it. Any later note clears that, so
   the human answers by writing one. A task whose `updated` is within
-  `--older-than` days of now is excluded; the default is 7. `--older-than 0` skips the
-  age check entirely, so a future-dated record (clock skew) is admitted too. The value is
-  bounded at the CLI to 0 through 36500 days (a century); anything else is a clap parse
-  error, so the date arithmetic can never overflow. Goals (tasks with children) stay in the pool; whether a goal is
+  `--older-than` of now is excluded; the value is an age in the shared `<n>d`/`<n>w`
+  grammar and the default is `7d`. `--older-than 0d` skips the age check entirely, so a
+  future-dated record (clock skew) is admitted too. The grammar bounds the value at the
+  CLI to 36500 days (a century); anything else is a usage error, so the date arithmetic
+  can never overflow. Goals (tasks with children) stay in the pool; whether a goal is
   decomposed well is a curation question. Ideas stay in; they are most of the corpus and
   the least examined.
 - **Selection.** Uniform, without replacement. `-n` defaults to 3. `--seed` fixes the
@@ -134,7 +135,7 @@ log) runs in that same root.
    moves the task out of the next sample's pool for the age window.
 
 **Repeat reviews.** The age window governs them. A `keep` or `refined` task re-enters the
-pool after `--older-than` days like any other and is reviewed again; that is the
+pool after the `--older-than` age like any other and is reviewed again; that is the
 maintenance, not a waste of a draw. The only persistent skip is a pending proposal, and
 `sample` enforces it: a task whose most recent note is a `curate:` or `scope:` note carrying a
 `proposal:` segment is never drawn, and comes back as a `pending` warning with the
@@ -177,9 +178,9 @@ End-to-end in `tests/cli.rs` against the built binary:
   is never drawn and produces the omission warning; a task whose latest note is a `curate:` or `scope:` note
   with a `proposal:` is never drawn and produces the pending warning, while a `curate:`
   note without one or a later note of any kind leaves the task in; a task updated within
-  the window is never drawn; `--older-than 0` admits every open task, future-dated ones
+  the window is never drawn; `--older-than 0d` admits every open task, future-dated ones
   included.
-- `-n` larger than the pool returns the pool and a shortfall warning; an empty pool
+- `--limit` larger than the pool returns the pool and a shortfall warning; an empty pool
   returns an empty list, exit 0.
 - The same `--seed` draws the same set in the same order; two seeds differ on a large pool.
 - `--project` draws only from that project; `--all-projects` draws from a pooled list and

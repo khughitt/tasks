@@ -309,10 +309,11 @@ tasks ready [--size S] [--parallel] [-n N] [--project P | --all-projects]
     grouping or weighting (the final id tiebreak orders by prefix only among tasks equal
     on everything else). Omits tasks parked waiting on the user, with a warning.
 
-tasks sample [-n N] [--older-than DAYS] [--seed U64] [--project P | --all-projects]
+tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-projects]
     N tasks (default 3) drawn uniformly without replacement from the curable pool: status
-    idea, todo, or blocked; no live claim; updated more than DAYS days ago (default 7,
-    at most 36500; 0 skips the age check, so even a future-dated record is admitted).
+    idea, todo, or blocked; no live claim; updated longer ago than AGE, an `<n>d`/`<n>w`
+    age (default 7d, at most 36500 days; 0d skips the age check, so even a future-dated
+    record is admitted).
     Rows are list rows. Fewer than N in the pool returns the
     pool with a warning; an empty pool is an empty list, exit 0. --seed fixes the draw.
     A task whose most recent `curate:` or `scope:` note carries a `proposal:` is excluded

@@ -26,16 +26,16 @@ fn pending_proposal(task: &Task) -> Option<&str> {
 
 pub fn sample(
     mut ctx: ReadCtx,
-    count: usize,
-    older_than: u64,
+    limit: usize,
+    older_than: i64,
     seed: Option<u64>,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    // Bounded to <= 36500 at the CLI, so the cast is exact and the subtraction stays far
-    // inside OffsetDateTime's range. Zero means no age check at all: a future-dated
-    // record from clock skew is still admitted.
-    let cutoff = (older_than > 0).then(|| now - time::Duration::days(older_than as i64));
+    // The age grammar (`defer::parse_age`, at the CLI) caps the count at 36500 days, so
+    // the subtraction stays far inside OffsetDateTime's range. Zero means no age check at
+    // all: a future-dated record from clock skew is still admitted.
+    let cutoff = (older_than > 0).then(|| now - time::Duration::days(older_than));
 
     let mut pool: Vec<&Task> = Vec::new();
     for task in &all {
@@ -65,14 +65,14 @@ pub fn sample(
     // Scan order depends on the filesystem; a seed must not.
     pool.sort_by(|a, b| a.id.cmp(&b.id));
     let pool_size = pool.len();
-    if pool_size < count {
+    if pool_size < limit {
         let window = if older_than == 0 {
             "any age".to_string()
         } else {
             format!("not updated in {older_than} days")
         };
         ctx.warnings.push(format!(
-            "asked for {count}; the pool holds {pool_size} (open, unclaimed, not pending, {window})"
+            "asked for {limit}; the pool holds {pool_size} (open, unclaimed, not pending, {window})"
         ));
     }
 
@@ -83,7 +83,7 @@ pub fn sample(
     // Partial Fisher–Yates: the first `take` slots are a uniform draw without replacement.
     // `u64`, not `usize`: fastrand's usize generator differs between 32- and 64-bit
     // targets, and a seed must reproduce the same draw everywhere.
-    let take = count.min(pool_size);
+    let take = limit.min(pool_size);
     for i in 0..take {
         let j = rng.u64(i as u64..pool_size as u64) as usize;
         pool.swap(i, j);

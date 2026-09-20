@@ -62,15 +62,12 @@ fn sort_rows(rows: &mut Vec<ProjectRow>, key: ProjectSort, reverse: bool) {
 
 pub fn run(
     dir: Option<&Path>,
-    sort: Option<&str>,
+    sort: &str,
     reverse: bool,
     closed: bool,
     paths: bool,
 ) -> Result<Output> {
-    let key = sort
-        .map(ProjectSort::parse)
-        .transpose()?
-        .unwrap_or(ProjectSort::Prefix);
+    let key = ProjectSort::parse(sort)?;
     let registry = Registry::load()?;
     let warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
     let mut rows = Vec::new();

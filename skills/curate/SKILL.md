@@ -14,7 +14,7 @@ Default: three tasks from the current project.
 
 ## 1. Sample
 
-    tasks sample -n <n> [--project <prefix> | --all-projects]
+    tasks sample --limit <n> [--project <prefix> | --all-projects]
 
 The pool is already the right one: `idea`, `todo`, or `blocked`; no live claim; no
 proposal still awaiting the human; not updated in the last 7 days. Read the warnings: a

@@ -82,6 +82,17 @@ impl serde::Serialize for Defer {
     }
 }
 
+/// An age: the `<n>d`/`<n>w` half of the deferral grammar read as a count of days. `0d`
+/// is the one spelling of zero, which the deferral grammar has no use for but an age
+/// bound reads as "no age check" (`sample --older-than 0d`). A clap value parser, so a
+/// malformed age is a usage error naming the option.
+pub fn parse_age(value: &str) -> Result<i64> {
+    if value == "0d" {
+        return Ok(0);
+    }
+    Ok(crate::periodic::Interval::parse(value)?.days())
+}
+
 /// The statuses on which a deferral is meaningful.
 pub fn can_carry(status: Status) -> bool {
     matches!(status, Status::Idea | Status::Todo | Status::Blocked)

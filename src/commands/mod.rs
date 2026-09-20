@@ -1047,7 +1047,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             reverse,
             closed,
             paths,
-        } => projects::run(dir, sort.as_deref(), reverse, closed, paths),
+        } => projects::run(dir, &sort, reverse, closed, paths),
         Command::Root { id } => root::run(id, dir),
         Command::Add {
             title,
@@ -1114,11 +1114,11 @@ pub fn run(cli: Cli) -> Result<Output> {
             scope,
         } => list::next(open_read_ctx(dir, &scope)?, max_complexity),
         Command::Sample {
-            count,
+            limit,
             older_than,
             seed,
             scope,
-        } => sample::sample(open_read_ctx(dir, &scope)?, count, older_than, seed),
+        } => sample::sample(open_read_ctx(dir, &scope)?, limit, older_than, seed),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
         Command::Prime { scope, closed } => list::prime(open_read_ctx(dir, &scope)?, closed),
         Command::Note { id, text } => status::note(open_id_write_ctx(dir, &id)?, id, text),

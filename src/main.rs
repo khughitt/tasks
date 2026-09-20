@@ -20,6 +20,8 @@ mod resolve;
 mod scope;
 mod similarity;
 mod style;
+#[cfg(test)]
+mod surface;
 mod time;
 
 use clap::{CommandFactory, Parser};
@@ -43,6 +45,31 @@ fn to_stderr(text: &str) {
     let _ = write_to(std::io::stderr().lock(), text);
 }
 
+/// A usage error in the shape the shared CLI vocabulary asks for: the problem on one
+/// line, then the usage line. clap's own rendering spreads the same content over blank
+/// lines, indented continuations, tips, and a `--help` pointer; the continuations (the
+/// missing arguments, the possible values) are folded into the problem line and the rest
+/// dropped, so a caller reading stderr sees at most two lines.
+fn usage_error(error: &clap::Error) -> String {
+    let rendered = error.render().to_string();
+    let mut lines = rendered.lines();
+    let mut problem = lines.next().unwrap_or("error: usage").to_string();
+    let mut usage = None;
+    for line in lines {
+        if line.starts_with("Usage:") {
+            usage = Some(line);
+        } else if usage.is_none() && line.starts_with(' ') && !line.trim_start().starts_with("tip:")
+        {
+            problem.push(' ');
+            problem.push_str(line.trim());
+        }
+    }
+    match usage {
+        Some(usage) => format!("{problem}\n{usage}\n"),
+        None => format!("{problem}\n"),
+    }
+}
+
 fn main() {
     // Must run before anything writes to stdout. Returns immediately unless
     // TASKS_COMPLETE is set, so an ordinary run pays one getenv.
@@ -50,11 +77,43 @@ fn main() {
         .var("TASKS_COMPLETE")
         .complete();
 
-    let cli = cli::Cli::parse();
-    let format = match (cli.pretty, std::env::var("TASKS_FORMAT").ok().as_deref()) {
-        (true, _) | (false, Some("pretty")) => Format::Pretty,
-        (false, None) | (false, Some("json")) => Format::Json,
-        (false, Some(other)) => {
+    let cli = match cli::Cli::try_parse() {
+        Ok(cli) => cli,
+        // Help and version on stdout at exit 0, and the full help a bare `tasks` earns on
+        // stderr at exit 2: exactly as clap prints them.
+        Err(error)
+            if !error.use_stderr()
+                || error.kind()
+                    == clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand =>
+        {
+            error.exit()
+        }
+        Err(error) => {
+            to_stderr(&usage_error(&error));
+            std::process::exit(2);
+        }
+    };
+    // clap checks a conflict within one command's arguments; a global given before the
+    // command and its rival after it land in different commands, so the pair is checked
+    // here, whatever the placement.
+    if cli.json && cli.pretty {
+        let error = cli::Cli::command().error(
+            clap::error::ErrorKind::ArgumentConflict,
+            "the argument '--json' cannot be used with '--pretty'",
+        );
+        to_stderr(&usage_error(&error));
+        std::process::exit(2);
+    }
+    // The flags win over the variable, which is consulted only when neither is given.
+    let format = match (
+        cli.json,
+        cli.pretty,
+        std::env::var("TASKS_FORMAT").ok().as_deref(),
+    ) {
+        (true, _, _) => Format::Json,
+        (false, true, _) | (false, false, Some("pretty")) => Format::Pretty,
+        (false, false, None) | (false, false, Some("json")) => Format::Json,
+        (false, false, Some(other)) => {
             to_stderr(&format!(
                 "{}\n",
                 output::render_error(&error::Error::Config(format!(

@@ -30,16 +30,13 @@ pub fn list(
     owner: Option<String>,
     source: Option<String>,
     parent: Option<String>,
-    sort: Option<String>,
+    sort: String,
     reverse: bool,
     parked: bool,
     periodic: bool,
     deferred: bool,
 ) -> Result<Output> {
-    let sort = match sort {
-        Some(key) => SortKey::parse(&key)?,
-        None => SortKey::Priority,
-    };
+    let sort = SortKey::parse(&sort)?;
     let statuses = statuses
         .iter()
         .map(|status| Status::parse(status))

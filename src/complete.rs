@@ -11,7 +11,7 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 
 use clap::CommandFactory;
-use clap_complete::CompletionCandidate;
+use clap_complete::{ArgValueCandidates, CompletionCandidate};
 
 use crate::cli::Cli;
 use crate::model::{Complexity, Process, Size, Status, Task, TaskId};
@@ -25,14 +25,78 @@ fn plain(
     values.into_iter().map(CompletionCandidate::new).collect()
 }
 
+/// Marks an `ArgValueCandidates` list as a closed value set (a table-declared enum)
+/// rather than id-directed completion of live data. `surface::kind` reads it.
+///
+/// Attached twice to an option: `add = ValueSet` is the marker the surface walk reads,
+/// and `value_parser = ValueSet` enforces the set, so a value outside it is a usage
+/// error (exit 2) naming the option and the value, as the shared CLI vocabulary requires,
+/// rather than a validation failure after parsing. A typed option whose parser already
+/// enforces the same set (`--priority`, a `u8` range) carries the marker alone.
+#[derive(Clone, Debug)]
+pub struct ValueSet;
+impl clap::builder::ArgExt for ValueSet {}
+
+impl clap::builder::TypedValueParser for ValueSet {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &OsStr,
+    ) -> std::result::Result<String, clap::Error> {
+        use clap::error::{ContextKind, ContextValue, ErrorKind};
+
+        let arg = arg.expect("a ValueSet parser is attached to an argument");
+        let accepted: Vec<String> = arg
+            .get::<ArgValueCandidates>()
+            .expect("a ValueSet argument carries ArgValueCandidates")
+            .candidates()
+            .into_iter()
+            .map(|candidate| candidate.get_value().to_string_lossy().into_owned())
+            .collect();
+        let value = value.to_string_lossy();
+        if accepted.iter().any(|accepted| *accepted == value) {
+            return Ok(value.into_owned());
+        }
+        let mut error = clap::Error::new(ErrorKind::InvalidValue).with_cmd(cmd);
+        error.insert(
+            ContextKind::InvalidArg,
+            ContextValue::String(arg.to_string()),
+        );
+        error.insert(
+            ContextKind::InvalidValue,
+            ContextValue::String(value.into_owned()),
+        );
+        error.insert(ContextKind::ValidValue, ContextValue::Strings(accepted));
+        Err(error)
+    }
+}
+
+/// The five priorities, for completion and for the surface.
+pub fn priorities() -> Vec<CompletionCandidate> {
+    plain(["0", "1", "2", "3", "4"])
+}
+
 /// Every status. `edit --status`, `list --status`, `tags --status`.
 pub fn statuses() -> Vec<CompletionCandidate> {
     plain(Status::ALL.iter().map(|status| status.as_str()))
 }
 
-/// The two `add` accepts; it rejects the rest with a validation error.
+/// The two `add` accepts.
 pub fn add_statuses() -> Vec<CompletionCandidate> {
     plain([Status::Idea.as_str(), Status::Todo.as_str()])
+}
+
+/// The statuses `edit --status` sets: every one but shelved, which only `shelve` enters.
+pub fn edit_statuses() -> Vec<CompletionCandidate> {
+    plain(
+        Status::ALL
+            .iter()
+            .filter(|status| **status != Status::Shelved)
+            .map(|status| status.as_str()),
+    )
 }
 
 pub fn sizes() -> Vec<CompletionCandidate> {
@@ -87,6 +151,15 @@ pub fn defer_dates() -> Vec<CompletionCandidate> {
 /// projects rank by size and activity, tasks by priority and their own dates.
 pub fn project_sorts() -> Vec<CompletionCandidate> {
     plain(["prefix", "size", "activity"])
+}
+
+/// The two `graph --format` renders.
+pub fn graph_formats() -> Vec<CompletionCandidate> {
+    plain(
+        crate::query::GraphFormat::ALL
+            .iter()
+            .map(|format| format.as_str()),
+    )
 }
 
 /// The modes `style::ColorMode::resolve` accepts.

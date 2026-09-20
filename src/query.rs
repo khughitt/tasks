@@ -46,6 +46,8 @@ pub enum GraphFormat {
 }
 
 impl GraphFormat {
+    pub const ALL: [GraphFormat; 2] = [GraphFormat::Mermaid, GraphFormat::Dot];
+
     pub fn parse(value: &str) -> Result<GraphFormat> {
         match value {
             "mermaid" => Ok(GraphFormat::Mermaid),

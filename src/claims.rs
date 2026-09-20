@@ -101,7 +101,8 @@ pub enum WaitingOn {
 }
 
 impl WaitingOn {
-    pub const ALL: [WaitingOn; 2] = [WaitingOn::User, WaitingOn::Agent];
+    /// Default first, the order the shared CLI table lists a value set in.
+    pub const ALL: [WaitingOn; 2] = [WaitingOn::Agent, WaitingOn::User];
 
     pub fn parse(s: &str) -> Result<WaitingOn> {
         WaitingOn::ALL

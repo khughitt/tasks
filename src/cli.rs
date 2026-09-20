@@ -2,6 +2,8 @@ use clap::{Args, Parser, Subcommand};
 use clap_complete::{ArgValueCandidates, ArgValueCompleter};
 use std::path::PathBuf;
 
+use crate::complete::ValueSet;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "tasks",
@@ -12,6 +14,9 @@ pub struct Cli {
     /// Run as if started in this directory.
     #[arg(short = 'C', global = true, value_name = "DIR")]
     pub dir: Option<PathBuf>,
+    /// JSON output (the default; the explicit form of TASKS_FORMAT=json).
+    #[arg(long, global = true, conflicts_with = "pretty")]
+    pub json: bool,
     /// Human-readable output instead of JSON (also TASKS_FORMAT=pretty).
     #[arg(long, global = true)]
     pub pretty: bool,
@@ -21,7 +26,9 @@ pub struct Cli {
         long,
         global = true,
         value_name = "WHEN",
-        add = ArgValueCandidates::new(crate::complete::colors)
+        add = ArgValueCandidates::new(crate::complete::colors),
+        add = ValueSet,
+        value_parser = ValueSet
     )]
     pub color: Option<String>,
     #[command(subcommand)]
@@ -49,30 +56,54 @@ pub struct ScopeArgs {
 pub struct FieldArgs {
     #[arg(short = 'b', long)]
     pub body: Option<String>,
-    #[arg(short = 'p', long)]
+    /// Urgency, 0 (most urgent) to 4.
+    #[arg(
+        short = 'p',
+        long,
+        value_parser = clap::value_parser!(u8).range(0..=4),
+        add = ArgValueCandidates::new(crate::complete::priorities),
+        add = ValueSet
+    )]
     pub priority: Option<u8>,
-    #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
+    /// Effort: xs, s, m, l, or xl.
+    #[arg(
+        long,
+        add = ArgValueCandidates::new(crate::complete::sizes),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
     pub size: Option<String>,
     /// The judgment the task demands: low, mid, or high. Absent is unassessed.
-    #[arg(long, add = ArgValueCandidates::new(crate::complete::complexities))]
+    #[arg(
+        long,
+        add = ArgValueCandidates::new(crate::complete::complexities),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
     pub complexity: Option<String>,
     /// The chosen workflow: direct or planned. Absent is unassessed.
-    #[arg(long, add = ArgValueCandidates::new(crate::complete::processes))]
+    #[arg(
+        long,
+        add = ArgValueCandidates::new(crate::complete::processes),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
     pub process: Option<String>,
     /// Mark as safe to run beside other tasks marked parallel. On `edit` this sets the
     /// flag; see `--no-parallel` to clear it.
     #[arg(long)]
     pub parallel: bool,
     /// Make this a recurrence: `<n>d` or `<n>w`, measured from each completion.
-    #[arg(long, add = ArgValueCandidates::new(crate::complete::intervals))]
+    #[arg(long, value_name = "AGE", add = ArgValueCandidates::new(crate::complete::intervals))]
     pub every: Option<String>,
     /// Hide this task until a date: `YYYY-MM-DD`, or `<n>d`/`<n>w` from today.
-    #[arg(long, add = ArgValueCandidates::new(crate::complete::defer_dates))]
+    #[arg(long, value_name = "WHEN", add = ArgValueCandidates::new(crate::complete::defer_dates))]
     pub defer: Option<String>,
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
-    #[arg(long = "depends", add = ArgValueCompleter::new(crate::complete::resolvable))]
+    /// Depend on another task (repeatable); `dep` edits dependencies later.
+    #[arg(long = "depends", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
     pub depends: Vec<String>,
     #[arg(long)]
     pub spec: Option<String>,
@@ -81,7 +112,7 @@ pub struct FieldArgs {
     #[arg(long)]
     pub step: Option<String>,
     /// Make this task part of another task (same project).
-    #[arg(long, add = ArgValueCompleter::new(crate::complete::destination_ids))]
+    #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::destination_ids))]
     pub parent: Option<String>,
     /// Where the task came from: an opaque, single-line reference such as a URL or a
     /// message id. Never interpreted. On `edit` this replaces; see `--no-source`.
@@ -99,7 +130,15 @@ pub struct FieldArgs {
 pub struct EditArgs {
     #[arg(long)]
     pub title: Option<String>,
-    #[arg(long, conflicts_with = "defer", add = ArgValueCandidates::new(crate::complete::statuses))]
+    /// Move to a status: idea, todo, doing, blocked, done, or dropped. Shelved is
+    /// entered with `shelve`, never here.
+    #[arg(
+        long,
+        conflicts_with = "defer",
+        add = ArgValueCandidates::new(crate::complete::edit_statuses),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
     pub status: Option<String>,
     #[arg(long)]
     pub force: bool,
@@ -155,8 +194,11 @@ pub enum Command {
     },
     /// Rename a registered project's prefix and retain its retired names as aliases.
     Rename {
-        #[arg(add = ArgValueCandidates::new(crate::complete::prefixes))]
+        /// The prefix as registered today.
+        #[arg(value_name = "REF", add = ArgValueCandidates::new(crate::complete::prefixes))]
         old: String,
+        /// The prefix to use from now on.
+        #[arg(value_name = "REF")]
         new: String,
         /// Explain recovery without locks or writes.
         #[arg(long)]
@@ -169,10 +211,16 @@ pub enum Command {
     },
     /// The registry: every project, whether it is reachable, and its status counts.
     Projects {
-        /// Order: prefix (default), size (most tasks first), or activity (most recent
-        /// first). Unreachable projects stay last whatever the order.
-        #[arg(long, add = ArgValueCandidates::new(crate::complete::project_sorts))]
-        sort: Option<String>,
+        /// Order: prefix, size (most tasks first), or activity (most recent first).
+        /// Unreachable projects stay last whatever the order.
+        #[arg(
+            long,
+            default_value = "prefix",
+            add = ArgValueCandidates::new(crate::complete::project_sorts),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
+        sort: String,
         /// Reverse the chosen order.
         #[arg(long)]
         reverse: bool,
@@ -191,10 +239,13 @@ pub enum Command {
     /// Create a task.
     Add {
         title: String,
+        /// Start as todo or as an idea.
         #[arg(
             long,
             default_value = "todo",
-            add = ArgValueCandidates::new(crate::complete::add_statuses)
+            add = ArgValueCandidates::new(crate::complete::add_statuses),
+            add = ValueSet,
+            value_parser = ValueSet
         )]
         status: String,
         /// Create it in this registered project instead of the current one; needs no
@@ -215,7 +266,13 @@ pub enum Command {
     )]
     List {
         /// Filter by status (repeatable): idea, todo, doing, blocked, shelved, done, or dropped.
-        #[arg(long = "status", value_name = "STATUS", add = ArgValueCandidates::new(crate::complete::statuses))]
+        #[arg(
+            long = "status",
+            value_name = "STATUS",
+            add = ArgValueCandidates::new(crate::complete::statuses),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         statuses: Vec<String>,
         /// Filter by tag (repeatable).
         #[arg(long = "tag", value_name = "TAG")]
@@ -228,12 +285,18 @@ pub enum Command {
         #[arg(long)]
         source: Option<String>,
         /// Only direct children of this task.
-        #[arg(long, add = ArgValueCompleter::new(crate::complete::scoped))]
+        #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
         parent: Option<String>,
-        /// Order: priority (default: priority, then last activity), updated, or created
-        /// (most recent first). Pretty rows show the date sorted on, else last activity.
-        #[arg(long, value_name = "priority|updated|created", add = ArgValueCandidates::new(crate::complete::sorts))]
-        sort: Option<String>,
+        /// Order: priority (then last activity), updated, or created (most recent
+        /// first). Pretty rows show the date sorted on, else last activity.
+        #[arg(
+            long,
+            default_value = "priority",
+            add = ArgValueCandidates::new(crate::complete::sorts),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
+        sort: String,
         /// Reverse the chosen order.
         #[arg(long)]
         reverse: bool,
@@ -252,16 +315,29 @@ pub enum Command {
     },
     /// Actionable tasks: todo or due recurrences with all dependencies closed.
     Ready {
-        #[arg(long, add = ArgValueCandidates::new(crate::complete::sizes))]
+        /// Only tasks of this size.
+        #[arg(
+            long,
+            add = ArgValueCandidates::new(crate::complete::sizes),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         size: Option<String>,
         /// Only tasks marked safe to run beside each other.
         #[arg(long)]
         parallel: bool,
-        #[arg(short = 'n', long)]
+        /// At most this many.
+        #[arg(short = 'n', long, value_name = "N")]
         limit: Option<usize>,
         /// Hide tasks rated above this level and unassessed tasks; overrides
         /// TASKS_MAX_COMPLEXITY.
-        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            add = ArgValueCandidates::new(crate::complete::complexities),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         max_complexity: Option<String>,
         #[command(flatten)]
         scope: ScopeArgs,
@@ -270,7 +346,13 @@ pub enum Command {
     Next {
         /// Hide tasks rated above this level and unassessed tasks; overrides
         /// TASKS_MAX_COMPLEXITY.
-        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            add = ArgValueCandidates::new(crate::complete::complexities),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         max_complexity: Option<String>,
         #[command(flatten)]
         scope: ScopeArgs,
@@ -278,20 +360,20 @@ pub enum Command {
     /// Random open tasks for a curation pass: idea, todo, or blocked; not live-claimed;
     /// not updated within --older-than days. Rows are list rows.
     Sample {
-        /// How many to draw (without replacement).
-        #[arg(short = 'n', long, default_value_t = 3)]
-        count: usize,
-        /// Exclude tasks updated within this many days (0 to 36500); 0 skips the age
-        /// check entirely.
+        /// At most this many, drawn without replacement.
+        #[arg(short = 'n', long, value_name = "N", default_value_t = 3)]
+        limit: usize,
+        /// Exclude tasks updated within this age, `<n>d` or `<n>w` up to 36500 days;
+        /// `0d` skips the age check entirely.
         #[arg(
             long,
-            default_value_t = 7,
-            value_name = "DAYS",
-            value_parser = clap::value_parser!(u64).range(0..=36500)
+            value_name = "AGE",
+            default_value = "7d",
+            value_parser = crate::defer::parse_age
         )]
-        older_than: u64,
+        older_than: i64,
         /// Fix the draw so a pass can be reproduced.
-        #[arg(long)]
+        #[arg(long, value_name = "N")]
         seed: Option<u64>,
         #[command(flatten)]
         scope: ScopeArgs,
@@ -329,7 +411,9 @@ pub enum Command {
             long,
             default_value = "agent",
             value_name = "WHO",
-            add = ArgValueCandidates::new(crate::complete::waiting_on)
+            add = ArgValueCandidates::new(crate::complete::waiting_on),
+            add = ValueSet,
+            value_parser = ValueSet
         )]
         waiting_on: String,
         /// Why the work stopped: review, decision, approval, environment, dependency,
@@ -337,17 +421,31 @@ pub enum Command {
         #[arg(
             long,
             value_name = "WHY",
-            add = ArgValueCandidates::new(crate::complete::reason)
+            add = ArgValueCandidates::new(crate::complete::reason),
+            add = ValueSet,
+            value_parser = ValueSet
         )]
         reason: Option<String>,
         /// With --reason capability: the rating the work actually needs. Written to the
         /// record and, when waiting on the agent, to the shared store as an escalation.
-        #[arg(long, value_name = "LEVEL", add = ArgValueCandidates::new(crate::complete::complexities))]
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            add = ArgValueCandidates::new(crate::complete::complexities),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         complexity: Option<String>,
         /// With --reason quiet: what a free host means for this work, idle (the desktop
         /// may stay up but nothing else runs; the default) or headless (the ordinary
         /// desktop session is stopped first).
-        #[arg(long, value_name = "COND", add = ArgValueCandidates::new(crate::complete::needs))]
+        #[arg(
+            long,
+            value_name = "COND",
+            add = ArgValueCandidates::new(crate::complete::needs),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         needs: Option<String>,
         /// With --reason quiet: expected wall-clock minutes once started, 1 to 1440.
         /// Required with that reason; refused with any other.
@@ -396,20 +494,35 @@ pub enum Command {
     Dep {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
+        /// Depend on these tasks.
         #[arg(
             long = "on",
+            value_name = "REF",
             conflicts_with = "rm",
             required_unless_present = "rm",
             num_args = 1..,
             add = ArgValueCompleter::new(crate::complete::resolvable)
         )]
         on: Vec<String>,
-        #[arg(long = "rm", num_args = 1.., add = ArgValueCompleter::new(crate::complete::dependencies))]
+        /// Stop depending on these tasks.
+        #[arg(
+            long = "rm",
+            value_name = "REF",
+            num_args = 1..,
+            add = ArgValueCompleter::new(crate::complete::dependencies)
+        )]
         rm: Vec<String>,
     },
     /// Dependency graph as mermaid or dot.
     Graph {
-        #[arg(long, default_value = "mermaid")]
+        /// mermaid or dot.
+        #[arg(
+            long,
+            default_value = "mermaid",
+            add = ArgValueCandidates::new(crate::complete::graph_formats),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         format: String,
         #[arg(long)]
         all: bool,
@@ -427,14 +540,20 @@ pub enum Command {
     /// File feedback about the tasks tool itself into the upstream tasks project.
     Feedback {
         summary: String,
-        /// friction | gap | idea | positive
-        #[arg(long, add = ArgValueCandidates::new(crate::complete::categories))]
+        /// friction, gap, idea, or positive.
+        #[arg(
+            long,
+            add = ArgValueCandidates::new(crate::complete::categories),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         category: String,
         #[arg(short = 'b', long)]
         body: Option<String>,
         /// Append to this open feedback task instead of matching titles.
         #[arg(
             long,
+            value_name = "REF",
             conflicts_with = "new",
             add = ArgValueCompleter::new(crate::complete::upstream_feedback)
         )]
@@ -458,7 +577,13 @@ pub enum Command {
     },
     /// Tag frequencies (open tasks unless --status), per project.
     Tags {
-        #[arg(long = "status", add = ArgValueCandidates::new(crate::complete::statuses))]
+        /// Count over tasks of this status instead (repeatable).
+        #[arg(
+            long = "status",
+            add = ArgValueCandidates::new(crate::complete::statuses),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
         statuses: Vec<String>,
         #[command(flatten)]
         scope: ScopeArgs,
@@ -466,7 +591,7 @@ pub enum Command {
     /// Work parked waiting for an idle host, as resume briefs.
     Quiet {
         /// At most this many briefs.
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long, value_name = "N")]
         limit: Option<usize>,
         /// One registered project instead of all of them.
         #[arg(
