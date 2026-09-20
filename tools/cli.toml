@@ -10,7 +10,8 @@
 #   arg:    name, value, values, required, variadic
 #   command: path, summary, verb, output, protocol, exception, args, options
 # --json, --pretty, -h/--help, -V/--version, and --color on typed CLIs are implied by the
-# CLI header and never rows; a protocol CLI implies only the help and version ones.
+# CLI header and never rows; a protocol CLI implies only the help and version ones. The
+# root `help` command is implied by the Help rule the same way and is never a row.
 
 [vocabulary.values.when]
 grammar = "YYYY-MM-DD | <n>d | <n>w"
@@ -294,7 +295,7 @@ options = [
   { names = ["--every"], value = "age", role = "set" },
   { names = ["--defer"], value = "when", role = "set" },
   { shared = "tag", role = "set", value = "string", repeatable = true },
-  { names = ["--depends"], value = "ref" },
+  { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
   { names = ["--step"], value = "string" },
@@ -390,7 +391,7 @@ options = [
   { names = ["--every"], value = "age", role = "set" },
   { names = ["--defer"], value = "when", role = "set" },
   { shared = "tag", role = "set", value = "string", repeatable = true },
-  { names = ["--depends"], value = "ref" },
+  { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
   { names = ["--step"], value = "string" },
@@ -493,7 +494,7 @@ path = ["feedback"]
 summary = "File feedback about the tasks tool itself into the upstream tasks project"
 args = [{ name = "summary", value = "string", required = true }]
 options = [
-  { names = ["--category"], value = "enum", values = ["friction", "gap", "idea", "positive"] },
+  { names = ["--category"], value = "enum", values = ["friction", "gap", "idea", "positive"], required = true },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--recur"], value = "ref" },
   { names = ["--new"], value = "none" },
@@ -964,11 +965,6 @@ options = [
 ]
 
 [[cli.mindful.commands]]
-path = ["help"]
-summary = "Show root, command, or nested command help"
-args = [{ name = "command", value = "string", required = false }, { name = "subcommand", value = "string", required = false }]
-
-[[cli.mindful.commands]]
 path = ["history"]
 exception = "--version here selects a version number; the root --version prints the tool version and is root-only"
 summary = "List, read, and repair a node's version history"
@@ -1204,7 +1200,7 @@ options = [
 [[cli.mindful.commands]]
 path = ["structure", "create"]
 summary = "Create a structure, optionally with initial members; nothing is written if one does not resolve"
-args = [{ name = "title", value = "string", required = true }, { name = "thought-ref", value = "ref", required = true }]
+args = [{ name = "title", value = "string", required = true }, { name = "thought-ref", value = "ref", required = false, variadic = true }]
 options = [
   { names = ["--kind"], value = "enum", values = ["set", "journal", "mindmap"] },
   { shared = "as", value = "string" },
