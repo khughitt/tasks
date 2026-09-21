@@ -6,9 +6,12 @@
 # option or command anywhere is an edit here first, then a re-copy (`just vendor-cli`).
 #
 # Row shapes (spec "The table"):
-#   option: names | shared (+ role), value, values, default, arity, repeatable, required
+#   option: names | shared (+ role), value, values, default, arity, repeatable, required, exception
 #   arg:    name, value, values, required, variadic
 #   command: path, summary, verb, output, protocol, exception, args, options
+# `exception` carries the reason wherever a row departs from the vocabulary on purpose: on a
+# command row for its verb, on a shared option row for a value kind that differs from the
+# vocabulary entry's. Any other key on a row is a validation error.
 # --json, --pretty, -h/--help, -V/--version, and --color on typed CLIs are implied by the
 # CLI header and never rows; a protocol CLI implies only the help and version ones. The
 # root `help` command is implied by the Help rule the same way and is never a row.
@@ -352,7 +355,7 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["sample"]
-summary = "Random open tasks for a curation pass: idea, todo, or blocked; not live-claimed; not updated within --older-than days. Rows are list rows"
+summary = "Random open tasks for a curation pass: idea, todo, or blocked; not live-claimed; not updated within the --older-than age. Rows are list rows"
 options = [
   { shared = "limit", value = "int", default = "3" },
   { shared = "older_than", role = "bound", value = "age", default = "7d", repeatable = false },
@@ -865,6 +868,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["generate"]
 summary = "Generate one partition's systems"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
   { names = ["--partition"], value = "enum", values = ["development", "fresh", "new", "new-burn2"], required = true },
@@ -873,6 +877,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["compute"]
 summary = "Compute the measures for one partition"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
   { names = ["--partition"], value = "enum", values = ["development", "fresh", "new", "new-burn2"], required = true },
@@ -888,6 +893,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["validate"]
 summary = "Validate the computed measures"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
 ]
@@ -895,6 +901,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["coupling"]
 summary = "Run the coupling analysis"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
 ]
@@ -902,6 +909,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["surrogate"]
 summary = "Run the surrogate analysis"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
 ]
@@ -1308,11 +1316,10 @@ options = [
 [[cli.mindful.commands]]
 path = ["walk"]
 summary = "Walk the corpus under a lens: a seeded, self-avoiding, biased random walk"
-exception = "--seed takes a string, not the vocabulary's integer: the review walk's seed is the calendar day and the web shares its seeds with the walk URL"
 options = [
   { names = ["--lens"], value = "string" },
   { names = ["--noise"], value = "string" },
-  { shared = "seed", value = "string" },
+  { shared = "seed", value = "string", exception = "a string, not the vocabulary's integer: the review walk's seed is the calendar day and the web shares its seeds with the walk URL" },
   { names = ["--from"], value = "ref" },
   { names = ["--steps"], value = "int" },
   { names = ["--no-semantic"], value = "none" },
@@ -1537,10 +1544,12 @@ summary = "Print a harness's integration settings"
 
 [[cli.familiar.commands]]
 path = ["setup", "claude-code"]
+protocol = "harness settings document: stdout is the JSON settings file in any mode"
 summary = "Print Claude Code integration settings"
 
 [[cli.familiar.commands]]
 path = ["setup", "codex"]
+protocol = "harness settings document: stdout is the JSON settings file in any mode"
 summary = "Print Codex integration settings"
 
 [[cli.familiar.commands]]

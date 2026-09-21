@@ -358,7 +358,7 @@ pub enum Command {
         scope: ScopeArgs,
     },
     /// Random open tasks for a curation pass: idea, todo, or blocked; not live-claimed;
-    /// not updated within --older-than days. Rows are list rows.
+    /// not updated within the --older-than age. Rows are list rows.
     Sample {
         /// At most this many, drawn without replacement.
         #[arg(short = 'n', long, value_name = "N", default_value_t = 3)]
