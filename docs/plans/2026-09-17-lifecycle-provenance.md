@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this plan task-by-task, with independent diff review before completion.
 
-Status: complete, 2026-09-17. Both reader hosts passed the rollout gate. Task 2 landed as `8f13112`, independently reviewed with no blocking findings; all 503 tests passed before and after integration. Installed-writer verification passed on titan. Europa has the compatible reader; writer installation there remains optional deployment work.
+Status: complete, 2026-09-17. Both reader hosts passed the rollout gate. Task 2 landed as `8f13112`, independently reviewed with no blocking findings; all 503 tests passed before and after integration. Installed-writer verification passed on the development host. Europa has the compatible reader; writer installation there remains optional deployment work.
 
 **Goal:** Persist the approved harness-session key on task lifecycle notes without changing claim identity or liveness.
 
@@ -18,10 +18,10 @@ The narrower implementation is part of tasks-c9199a; its broader opt-in relay-an
 Task graph: tasks-d51eda (Task 1) → tasks-b07adc (Task 2) → obs-09cb62.
 tasks-8921f4 holds the ancestry design independently; tasks-c9199a remains the parent of both tracks.
 
-Confirmed reader hosts: titan and europa (Europa). Both installed readers passed
+Confirmed reader hosts: the development host and Europa. Both installed readers passed
 isolated stamped-fixture checks; the cross-host writer gate is satisfied.
 
-Rollout evidence: titan installed reader-only commit `57311fc` with `cargo install
+Rollout evidence: the development host installed reader-only commit `57311fc` with `cargo install
 --path .` on 2026-09-17. The installed binary passed `show`, a title-only `edit`,
 and another `show` against an isolated stamped fixture, preserving the complete
 note (including both provenance fields); config and state were isolated from the
@@ -30,7 +30,7 @@ for `prb-000001`, preserving `codex:probe` / `CODEX_SESSION_ID` with no warnings
 Europa's exact installed revision was not independently inspected; its reader behavior
 was verified before writer implementation began.
 
-Writer delivery: `8f13112` was fast-forwarded to main and installed on titan with
+Writer delivery: `8f13112` was fast-forwarded to main and installed on the development host with
 `cargo install --locked --path .`. An isolated installed-binary probe on `prb-7bf418`
 verified `started`, park, `resumed`, `done` and a close message with the native pair;
 the Codex claim remained `sid:<pid>`. Notes survived claim/park release and a later
@@ -151,7 +151,7 @@ if let Some(provenance) = &n.provenance {
 ```
 
 - [x] Run `just test-fast provenance`, `just test-fast format::tests`, and `just gate`. Obtain independent diff review; commit as `feat: persist optional harness provenance on notes`. The reviewer found positional-array acceptance in Serde; the regression failed before the object guard and passed after it. Final full gate: 188 unit tests and 311 CLI tests passed; review cleared.
-- [x] Merge Task 1 separately and `cargo install --path .` on titan. This task adds format support, not a production stamp writer. Rollout evidence is recorded above; Europa remains Task 2's gate.
+- [x] Merge Task 1 separately and `cargo install --path .` on the development host. This task adds format support, not a production stamp writer. Rollout evidence is recorded above; Europa remains Task 2's gate.
 
 ### Task 2: Stamp lifecycle notes without changing claims
 
@@ -221,4 +221,4 @@ Use a closure `|name| std::env::var_os(name)` if required by generic function li
 | Native capability evidence | Completed ops-79f409 report, not repeated here |
 | Unknown-rate diagnostics | Remains obs-1ad448, outside this plan |
 
-Execute the approved plan inline in task order, with independent code review before each delivery. Deliver Task 1 alone first, then stop at Task 2's cross-host reader gate until the user supplies any outstanding host installation evidence. Task 1 being merged or installed on titan does not satisfy that gate. No remote installation is assumed authorized by this plan. If a reviewer is unavailable, park explicitly with the owner and next action; do not imply that review is running.
+Execute the approved plan inline in task order, with independent code review before each delivery. Deliver Task 1 alone first, then stop at Task 2's cross-host reader gate until the user supplies any outstanding host installation evidence. Task 1 being merged or installed on the development host does not satisfy that gate. No remote installation is assumed authorized by this plan. If a reviewer is unavailable, park explicitly with the owner and next action; do not imply that review is running.
