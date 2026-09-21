@@ -60,7 +60,10 @@ nothing is eligible.
 5. `tasks park <id> "<next step>" [--waiting-on user] [--reason <why>]` before ending a
    turn that waits on the user, or whenever you set work down. It records the next step
    and this session in the shared store, releases your claim, and leaves status alone;
-   `start` resumes it. Add `--reason` when one of these fits, and leave it off otherwise:
+   `start` resumes it. A host pointer a live test repointed into the task's worktree (a
+   launcher symlink, a service unit, a config include) is restored before the park, or
+   the park text names it: the record is where the next session learns of it. Add
+   `--reason` when one of these fits, and leave it off otherwise:
    `review` (the user must inspect and judge an artifact), `decision` (only the user can
    decide), `approval` (you hold a recommendation and want it confirmed), `environment`
    (the checkout or machine cannot run the work), `dependency` (another task or project
@@ -169,6 +172,10 @@ Both code paths use an isolated task worktree: commit the task record before cre
 one with `git worktree add` under `.worktrees/`, or reuse it on resume. Then run `just
 setup` when defined; otherwise run only the root guide's explicit setup command. Do not
 guess an installer. Planned work creates the worktree before drafting the spec.
+Run the worktree's code for a live test by explicit path or an environment override,
+never by repointing a shared launcher or symlink on the host; a pointer that must be
+repointed is noted when it happens (what, from, to, how to restore) and restored before
+`park` or `done`, and a worktree is not removed while a host pointer resolves into it.
 Read-only investigation and task-record maintenance alone need no new worktree. Explicit
 user instructions to work in place win. This field does not override higher-priority
 instructions; other projects must adopt the policy in their agent instructions before
