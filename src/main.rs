@@ -15,6 +15,7 @@ mod periodic;
 mod provenance;
 mod query;
 mod registry;
+mod relay;
 mod rename;
 mod repo;
 mod resolve;
