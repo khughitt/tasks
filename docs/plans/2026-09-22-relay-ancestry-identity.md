@@ -4,7 +4,7 @@
 
 **Goal:** Add an opt-in identity level that names a tasks session by the relay agent it runs under, adopting that agent's process handle as claim proof, without changing liveness or the claim file format.
 
-**Architecture:** A new `src/relay/` module resolves identity in four stages — explicit override, configuration, platform support, ancestry — and only then reads relay's `agents.json` to verify the nearest harness ancestor. `claims::identity_from` gains that level as a lazily-invoked closure, so the stages cannot run out of order. Claim ownership is then decided in two ways rather than one: by identity when it resolves, and otherwise by re-deriving the claim's own recorded process proof locally, which needs no registry. An operation on a claim this caller already owns records the claim's *own* identity, never a freshly resolved one.
+**Architecture:** A new `src/relay/` module resolves identity in four stages — explicit override, configuration, platform support, ancestry — and only then reads relay's `agents.json` to verify the nearest harness ancestor. `claims::identity_from` gains that level as a lazily-invoked closure, so the stages cannot run out of order. Claim ownership is then decided in two ways rather than one: by identity when it resolves, and otherwise by re-deriving the claim's own recorded process proof locally, which needs no registry. Which of the two established ownership decides what gets recorded, and only the proof-only path substitutes the claim's own identity.
 
 **Tech Stack:** Rust 2024, `serde_json` for the schema-1 snapshot, `toml` for the host config, `/proc` for ancestry, process start times, and the effective uid. No new dependencies.
 
@@ -14,7 +14,8 @@
 
 - Relay identity is **opt-in**. With it off, behaviour is byte-for-byte today's, including every path where an unresolvable identity is fatal today. Every task touching an existing path carries a test asserting that.
 - **Explicit identity is authoritative.** With `TASKS_SESSION` set, a session mismatch is foreign — full stop. Ownership proof is a relay-mode fallback and never overrides the explicit pair, because two workers sharing one process are distinguished by nothing else.
-- **Ownership proof never rewrites identity.** An operation on an owned claim records the claim's own session (`claims::continuation_identity`). `existing.session` is never rewritten. Spec §6.4.
+- **Ownership proof never rewrites identity.** When ownership rests on *proof alone*, the operation records the claim's own session (`claims::continuation_identity`). When the resolved identity already matched the claim, that resolved identity is used with its current fields, exactly as today. Either way `existing.session` is never rewritten. Spec §6.4.
+- **Parking releases the claim**, and its proof with it (`Store::insert_park` removes it). Parking and closing a held claim survive registry loss; *resuming* a parked task is a fresh acquisition and needs the registry back or the explicit override.
 - **Acquisition requires resolved identity**, and every path that is not a continuation by the owner is acquisition: first claim, takeover, stale-claim takeover, and `start --force` alike. `--force` displaces an owner; it never substitutes for one.
 - The four stages run in this order, each reached only by passing the one before: explicit override (`TASKS_SESSION`) → configuration → platform support → ancestry. Spec §7. Unknown ancestry is refused **before** the registry is opened, so a registry error can never mask an ancestry error.
 - Liveness is not modified. `claims::liveness` and `liveness_with` keep their current signatures and bodies.
@@ -364,6 +365,8 @@ mod tests {
             ("empty projectKey", snapshot_json("codex:s1", &agent_json(&[("projectKey", "\"\"")]))),
             ("unknown state", snapshot_json("codex:s1", &agent_json(&[("state", "\"sleeping\"")]))),
             ("negative updatedAt", snapshot_json("codex:s1", &agent_json(&[("updatedAt", "-1")]))),
+            ("unsafe updatedAt", snapshot_json("codex:s1", &agent_json(&[("updatedAt", "9007199254740992")]))),
+            ("unsafe revision", r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":9007199254740992,"agents":{}}"#.into()),
             ("missing process", snapshot_json("codex:s1", &agent_json(&[("process", "\u{0}")]))),
             ("pid 0", snapshot_json("codex:s1", &agent_json(&[("process", &format!(r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":0,"start":"900"}}"#))]))),
             ("non-canonical start", snapshot_json("codex:s1", &agent_json(&[("process", &format!(r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":42,"start":"007"}}"#))]))),
@@ -435,6 +438,10 @@ pub struct Snapshot {
 }
 
 const HARNESSES: [&str; 3] = ["claude-code", "codex", "opencode"];
+/// relay's `integer()` is `Number.isSafeInteger(v) && v >= 0`, so its numeric fields stop
+/// at 2^53 - 1. `start` is exempt: it travels as decimal *text* through `parseStart` and
+/// uses the full u64 range.
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const STATES: [&str; 6] = [
     "idle",
     "working",
@@ -657,9 +664,10 @@ fn parse_agent(key: &str, value: &serde_json::Value) -> Result<Agent> {
     if value
         .get("updatedAt")
         .and_then(serde_json::Value::as_u64)
+        .filter(|value| *value <= MAX_SAFE_INTEGER)
         .is_none()
     {
-        return Err(invalid("updatedAt must be a non-negative integer"));
+        return Err(invalid("updatedAt must be a non-negative safe integer"));
     }
     let process = match value.get("process") {
         None => return Err(invalid("process is required")),
@@ -688,7 +696,8 @@ pub fn parse(text: &str) -> Result<Snapshot> {
     let revision = raw
         .get("revision")
         .and_then(serde_json::Value::as_u64)
-        .ok_or_else(|| invalid("revision must be a non-negative integer"))?;
+        .filter(|value| *value <= MAX_SAFE_INTEGER)
+        .ok_or_else(|| invalid("revision must be a non-negative safe integer"))?;
     let map = raw
         .get("agents")
         .and_then(serde_json::Value::as_object)
@@ -1330,6 +1339,39 @@ pub fn same_session(claim_session: &str, comm: &str, session_id: &str) -> bool {
     comm == "claude" && claim_session == format!("claude:{session_id}")
 }
 
+/// Why nothing qualified. Spec §5 requires the harness and platform refusals to name what
+/// was wrong, which the bare "no match" line cannot do, so a row that *is* this process is
+/// diagnosed against each predicate in turn.
+fn no_match(
+    same_process: &[&crate::relay::snapshot::Agent],
+    nearest: &ProcEntry,
+    harness: &str,
+    boot_id: &str,
+) -> String {
+    for agent in same_process {
+        let process = agent.process.as_ref().expect("filtered on a present handle");
+        if agent.harness != harness {
+            return format!(
+                "the agent on pid {} is {:?}, but the nearest ancestor comm {:?} maps to {:?}",
+                nearest.pid, agent.harness, nearest.comm, harness
+            );
+        }
+        if process.platform != "linux" {
+            return format!(
+                "agent {} has a {:?} handle, which is not an identity candidate",
+                agent.id, process.platform
+            );
+        }
+        if process.boot_id.as_deref() != Some(boot_id) {
+            return format!("agent {} was recorded on an earlier boot", agent.id);
+        }
+    }
+    format!(
+        "no relay agent matches the nearest {} ancestor, pid {}",
+        nearest.comm, nearest.pid
+    )
+}
+
 /// `Ok(None)` means the caller is out of scope and the native ladder applies unchanged.
 /// `load` is invoked only once scope is established as a harness boundary.
 pub fn resolve(
@@ -1356,32 +1398,38 @@ pub fn resolve(
     let hint = hint_for(&nearest.comm, get)?;
     let snapshot = load()?;
 
-    // Every predicate of spec §4.3 applies *before* cardinality: a row that cannot qualify
-    // — wrong harness, wrong platform, an earlier boot — is not a rival candidate, and
-    // counting it would turn one good match into a false ambiguity.
-    let qualifying: Vec<&crate::relay::snapshot::Agent> = snapshot
+    // Rows whose handle names this very process. Narrowing here first is what lets a
+    // refusal say *why*: a row that is this process but fails one predicate is worth
+    // naming, an unrelated row is not.
+    let same_process: Vec<&crate::relay::snapshot::Agent> = snapshot
         .agents
         .iter()
         .filter(|agent| {
+            agent.process.as_ref().is_some_and(|process| {
+                process.host == host
+                    && process.pid == nearest.pid
+                    && process.start == nearest.start
+            })
+        })
+        .collect();
+
+    // Every predicate of spec §4.3 applies *before* cardinality: a row that cannot qualify
+    // — wrong harness, wrong platform, an earlier boot — is not a rival candidate, and
+    // counting it would turn one good match into a false ambiguity.
+    let qualifying: Vec<&crate::relay::snapshot::Agent> = same_process
+        .iter()
+        .copied()
+        .filter(|agent| {
             agent.harness == harness
                 && agent.process.as_ref().is_some_and(|process| {
-                    process.platform == "linux"
-                        && process.host == host
-                        && process.pid == nearest.pid
-                        && process.start == nearest.start
-                        && process.boot_id.as_deref() == Some(boot_id)
+                    process.platform == "linux" && process.boot_id.as_deref() == Some(boot_id)
                 })
         })
         .collect();
 
     let agent = match qualifying.as_slice() {
-        [] => {
-            return Err(refuse(format!(
-                "no relay agent matches the nearest {} ancestor, pid {}",
-                nearest.comm, nearest.pid
-            )));
-        }
         [one] => *one,
+        [] => return Err(refuse(no_match(&same_process, &nearest, harness, boot_id))),
         many => {
             let ids: Vec<&str> = many.iter().map(|agent| agent.id.as_str()).collect();
             return Err(refuse(format!(
@@ -1395,6 +1443,8 @@ pub fn resolve(
     if let Some(hint) = hint
         && hint != agent.session_id
     {
+        // A qualifying agent exists, so the disagreement is the environment's, not the
+        // registry's.
         return Err(refuse(format!(
             "the environment names session {hint:?} but the matched agent is {}",
             agent.id
@@ -1685,7 +1735,23 @@ pub fn level() -> Result<Option<resolve::Resolved>> {
 }
 ```
 
-Remove the `#![allow(dead_code)]` line from `src/config.rs`.
+Remove the `#![allow(dead_code)]` line from `src/config.rs` — `relay::enabled` and
+`relay::level` consume it now. **Keep** the one in `src/relay/mod.rs`: `resolve::same_session`
+still has no production consumer until Task 6, and removing the allowance here would fail
+the `-D warnings` gate.
+
+Update the twelve existing `identity_from(…)` call sites in `claims.rs`'s `mod tests` to
+pass the new third argument. They all take the same form:
+
+```rust
+// before
+identity_from(env_of(&[…]), Some(11), &mut Vec::new())
+// after
+identity_from(env_of(&[…]), Some(11), relay_off(), &mut Vec::new())
+```
+
+`grep -n "identity_from(" src/claims.rs` lists all of them; the file has fourteen
+occurrences in total — the definition, the call inside `identity`, and twelve in tests.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1695,7 +1761,7 @@ Expected: PASS, 5 tests. Every pre-existing `claims` test still passes unchanged
 - [ ] **Step 5: Run the whole suite**
 
 Run: `just gate`
-Expected: PASS, with no `dead_code` allows left in `src/`.
+Expected: PASS. `src/relay/mod.rs` still carries its allowance; Task 6 removes the last one.
 
 - [ ] **Step 6: Commit**
 
@@ -1720,9 +1786,14 @@ git commit -m "feat(claims): add the opt-in relay level and carry its process pr
   - `claims::Resolution` — `Resolved(Identity)` | `Failed(Error)`, with `identity(&self) -> Option<&Identity>` and `require(self) -> Result<Identity>`
   - `claims::resolve_identity(warnings: &mut Vec<String>) -> Resolution`
   - `claims::continuation_identity(claim: &Claim) -> Identity`
+  - `claims::name_the_claim(error: Error, held: Option<&str>) -> Error`
   - `claims::proves_ownership(claim: &Claim, scope: &Scope, host: &str, boot_id: Option<&str>, get: &impl Fn(&str) -> Option<String>) -> bool`
+  - `commands::Ownership` — `ByIdentity` | `ByProof` | `Foreign` (`pub(crate)`)
   - `Ctx::resolve_for_guard(&mut self) -> Result<Resolution>` (`pub(crate)`)
-  - `Ctx::owns(&mut self, claim: &Claim, me: &Resolution) -> Result<bool>` (`pub(crate)`)
+  - `Ctx::ownership(&mut self, claim: &Claim, me: &Resolution) -> Result<Ownership>` (`pub(crate)`)
+
+Also removes the last `#![allow(dead_code)]`, from `src/relay/mod.rs`: `same_session` gains
+its production consumer here.
 
 - [ ] **Step 1: Write the failing unit tests**
 
@@ -1918,10 +1989,16 @@ pub fn resolve_identity(warnings: &mut Vec<String>) -> Resolution {
     }
 }
 
-/// The identity to record for an operation on a claim this caller already owns: the
-/// claim's own, never a freshly resolved one. Spec §6.4 — `existing.session` is never
-/// rewritten, so a claim keeps the identity it was created with through every refresh and
-/// release, and enabling relay mid-flight cannot rewrite a natively-keyed claim.
+/// The identity to record when ownership was established by **proof alone** — the claim's
+/// own. Spec §6.4: `existing.session` is never rewritten, so a claim keeps the identity it
+/// was created with, and enabling relay mid-flight cannot re-key a natively-held claim.
+///
+/// This is deliberately *not* used when the resolved identity already matched the claim.
+/// That path keeps using the freshly resolved identity, exactly as today, because the two
+/// agree on the session anyway and the fresh one carries current fields — a repeated
+/// `start` must still be able to replace a stale pid with the one this session supplies,
+/// and a native level's `tagged` form (`codex:<id>` for a claim whose session is the raw
+/// id) must still reach the park and escalation records that `tests/cli.rs` asserts.
 pub fn continuation_identity(claim: &Claim) -> Identity {
     Identity {
         session: claim.session.clone(),
@@ -1940,6 +2017,17 @@ pub fn continuation_identity(claim: &Claim) -> Identity {
 
 /// Spec §6.2: does this caller own `claim`, proved from the claim's own recorded process
 /// handle and the caller's ancestry, with no registry read?
+/// Name the claim an error was raised against, so a resolution failure on a claimed task
+/// tells the operator which session to set `TASKS_SESSION` to. Spec §§5 and 6.5.
+pub fn name_the_claim(error: Error, held: Option<&str>) -> Error {
+    match held {
+        Some(session) => Error::Config(format!(
+            "{error}; the existing claim is held by session {session:?}"
+        )),
+        None => error,
+    }
+}
+
 pub fn proves_ownership(
     claim: &Claim,
     scope: &crate::relay::ancestry::Scope,
@@ -1974,7 +2062,23 @@ pub fn proves_ownership(
 
 - [ ] **Step 4: Write the guard-side implementation**
 
-Add two helpers to `Ctx` in `src/commands/mod.rs`:
+Add the ownership verdict and two helpers to `src/commands/mod.rs`:
+
+```rust
+/// How this caller's right to act on an existing claim was established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ownership {
+    /// The resolved identity equals the claim's session. Today's path, unchanged: the
+    /// resolved identity is used, with its current fields.
+    ByIdentity,
+    /// Identity did not match, or did not resolve at all, but the claim's own recorded
+    /// process proof names this caller's nearest harness boundary.
+    ByProof,
+    /// Not the owner. Anything from here is acquisition.
+    Foreign,
+}
+```
+
 
 ```rust
     /// Resolve identity, keeping a relay-level failure carryable so §6.2.2 can defer it. A
@@ -1988,26 +2092,27 @@ Add two helpers to `Ctx` in `src/commands/mod.rs`:
         }
     }
 
-    /// Spec §6.2.2 steps 2 and 3. `false` means this caller is not the owner, which is the
-    /// point at which acquisition rules apply.
-    pub(crate) fn owns(
+    /// Spec §6.2.2 steps 2 and 3. Which of the two established the caller's right to act
+    /// matters: only proof-only ownership records the claim's own identity, because only
+    /// then is there no resolved identity that already agrees.
+    pub(crate) fn ownership(
         &mut self,
         claim: &crate::claims::Claim,
         me: &crate::claims::Resolution,
-    ) -> Result<bool> {
+    ) -> Result<Ownership> {
         if let Some(identity) = me.identity()
             && claim.session == identity.session
         {
-            return Ok(true);
+            return Ok(Ownership::ByIdentity);
         }
         // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
         // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
         // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
         let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
         if explicit || !crate::relay::enabled()? {
-            return Ok(false);
+            return Ok(Ownership::Foreign);
         }
-        Ok(crate::claims::proves_ownership(
+        let proved = crate::claims::proves_ownership(
             claim,
             &crate::relay::ancestry::current_scope(),
             &crate::claims::hostname(),
@@ -2017,7 +2122,12 @@ Add two helpers to `Ctx` in `src/commands/mod.rs`:
                     .and_then(|value| value.into_string().ok())
                     .filter(|value| !value.is_empty())
             },
-        ))
+        );
+        Ok(if proved {
+            Ownership::ByProof
+        } else {
+            Ownership::Foreign
+        })
     }
 ```
 
@@ -2031,12 +2141,16 @@ absent or stale claim behaves as it does today:
         let Some(existing) = existing else {
             return me.require().map(|_| ());
         };
-        if self.owns(&existing, &me)? {
+        if self.ownership(&existing, &me)? != Ownership::Foreign {
             return Ok(());
         }
         // Not the owner. Today's behaviour resolved an identity here whatever the verdict,
-        // so a relay-level failure must still surface rather than be silently tolerated.
-        me.require()?;
+        // so a relay-level failure must still surface rather than be silently tolerated —
+        // and before any refusal, so the operator sees why identity failed rather than a
+        // refusal that merely follows from it.
+        let held = existing.session.clone();
+        me.require()
+            .map_err(|error| crate::claims::name_the_claim(error, Some(&held)))?;
         let live = crate::claims::liveness(&existing);
         if live == Liveness::Live {
             return Err(Error::Claimed(
@@ -2057,9 +2171,28 @@ Rewrite `claim_guard`:
         let worktree = self.project.root.display().to_string();
 
         let existing = self.claims_mut()?.get(id).cloned();
-        let mine = match &existing {
-            Some(claim) => self.owns(claim, &resolution)?,
-            None => false,
+        let ownership = match &existing {
+            Some(claim) => self.ownership(claim, &resolution)?,
+            None => Ownership::Foreign,
+        };
+        let mine = ownership != Ownership::Foreign;
+
+        // The identity to record, decided *before* any refusal. A held resolution error
+        // must be raised as itself the moment ownership fails (§6.2.2); letting a
+        // `Claimed` refusal return first would hide why identity could not resolve.
+        let me = match (&existing, ownership) {
+            // Ownership by identity means resolution succeeded, so `require` cannot fail.
+            // The resolved identity is used with its current fields, exactly as today: a
+            // repeated `start` still replaces a stale pid, and a native level's `tagged`
+            // form still reaches the park and escalation records.
+            (_, Ownership::ByIdentity) => resolution.require()?,
+            (Some(claim), Ownership::ByProof) => crate::claims::continuation_identity(claim),
+            _ => {
+                let held = existing.as_ref().map(|claim| claim.session.clone());
+                resolution
+                    .require()
+                    .map_err(|error| crate::claims::name_the_claim(error, held.as_deref()))?
+            }
         };
 
         let mut warning = None;
@@ -2087,15 +2220,6 @@ Rewrite `claim_guard`:
                 _ => {}
             }
         }
-
-        // The identity to record. A continuation by the owner — a repeated `start`, a
-        // park, a close — keeps the claim's own identity and needs no fresh resolution, so
-        // a lost registry cannot strand it and enabling relay cannot rewrite its key.
-        // Everything else is acquisition and requires a resolved identity.
-        let me = match (&existing, mine) {
-            (Some(claim), true) => crate::claims::continuation_identity(claim),
-            _ => resolution.require()?,
-        };
 
         self.pending_claim = Some(if to == Status::Doing {
             let now = crate::time::now();
@@ -2156,15 +2280,25 @@ requires a resolved one:
 ```rust
     let resolution = ctx.resolve_for_guard()?;
     let existing = ctx.claims_mut()?.get(&task.id).cloned();
+    let held = existing.as_ref().map(|claim| claim.session.clone());
     let me = match &existing {
-        Some(claim) if ctx.owns(claim, &resolution)? => crate::claims::continuation_identity(claim),
-        _ => resolution.require()?,
+        Some(claim) => match ctx.ownership(claim, &resolution)? {
+            Ownership::ByIdentity => resolution.require()?,
+            Ownership::ByProof => crate::claims::continuation_identity(claim),
+            Ownership::Foreign => resolution
+                .require()
+                .map_err(|error| crate::claims::name_the_claim(error, held.as_deref()))?,
+        },
+        // Parking an unclaimed task records a session, so it is acquisition too.
+        None => resolution.require()?,
     };
 ```
 
 Everything below is unchanged: `me.session` at `:45`, `me.tagged.clone()` at `:117` and
-`me.tagged` at `:166` all still typecheck, and for a proved owner `me.session` equals
-`existing.session`, so the comparison at `:45` takes its own-claim branch as it should.
+`me.tagged` at `:166` all still typecheck. For a proved owner `me.session` equals
+`existing.session`, so the comparison at `:45` takes its own-claim branch; for an ordinary
+identity match the freshly resolved identity is used, so a native Codex park still records
+`codex:<id>` in `me.tagged` — which `tests/cli.rs:118` asserts.
 
 - [ ] **Step 5: Write the command-level continuity tests**
 
@@ -2188,29 +2322,10 @@ fn a_continuity_repeated_start_by_the_owner_keeps_one_claim() {
     assert_eq!(store.matches("session = \"owner\"").count(), 1, "{store}");
 }
 
-#[test]
-fn a_continuity_explicit_mismatch_stays_foreign() {
-    // Two workers in one process tree, told apart only by TASKS_SESSION. Proof must never
-    // merge them, whatever the ancestry says.
-    let mut env = TestEnv::new();
-    let dir = env.init("sci");
-    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
-    env.cmd(&dir)
-        .env("TASKS_SESSION", "worker-a")
-        .env("TASKS_SESSION_PID", &std::process::id().to_string())
-        .args(["start", &id])
-        .assert()
-        .success();
-    let out = env
-        .cmd(&dir)
-        .env("TASKS_SESSION", "worker-b")
-        .env("TASKS_SESSION_PID", &std::process::id().to_string())
-        .args(["done", &id, "not mine"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("claimed"));
-}
+// NOTE: the explicit-mismatch case lives in Task 8 as an acceptance test. It has to run
+// under a harness shim with relay enabled and a matching boundary, or removing the
+// explicit-identity guard from `Ctx::ownership` would leave it passing — proof would never
+// have been consulted in the first place.
 
 #[test]
 fn a_continuity_park_and_close_by_the_owner_still_work() {
@@ -2222,19 +2337,22 @@ fn a_continuity_park_and_close_by_the_owner_still_work() {
     env.cmd(&dir).env(session().0, session().1).args(["park", &id, "next"]).assert().success();
     env.cmd(&dir).env(session().0, session().1).args(["start", &id]).assert().success();
     env.cmd(&dir).env(session().0, session().1).args(["done", &id, "landed"]).assert().success();
-    assert_eq!(env.json(&dir, &["show", &id])["status"], "done");
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
 }
 ```
 
 - [ ] **Step 6: Run the tests**
 
 Run: `just test-fast a_proof_ && just test-fast a_continuation_ && just test-fast a_continuity_`
-Expected: PASS.
+Expected: PASS — 7, 1 and 2 tests.
 
 - [ ] **Step 7: Run the whole suite**
 
 Run: `just gate`
-Expected: PASS — every pre-existing claim, park and status test behaves unchanged.
+Expected: PASS — every pre-existing claim, park and status test behaves unchanged. In
+particular `a_codex_claim_outlives_the_command_that_made_it` (`tests/cli.rs:79`) must still
+see `codex:thread-a` in the park record: it is the regression that catches a continuation
+identity applied where an ordinary identity match belongs.
 
 - [ ] **Step 8: Commit**
 
@@ -2261,7 +2379,7 @@ harness ancestor: a test binary's parent is the test runner, so no ambient ances
 and a test that assumes one silently exercises the out-of-scope path instead.
 
 **Interfaces:**
-- Consumes: `Ctx::resolve_for_guard`, `Ctx::owns`.
+- Consumes: `Ctx::resolve_for_guard`, `Ctx::ownership`, `commands::Ownership`.
 - Produces: `tests/common/mod.rs::harness_shim(dir, home, comm, script) -> std::process::Output` and `WRITE_REGISTRY`.
 
 - [ ] **Step 1: Add the harness shim to the test harness**
@@ -2389,7 +2507,7 @@ fn a_note_lands_when_relay_identity_cannot_resolve() {
     assert!(text.contains("\"warnings\""), "note should have produced output: {text}");
     let shown = env.json(&dir, &["show", &id]);
     assert!(
-        shown["notes"]
+        shown["task"]["notes"]
             .as_array()
             .unwrap()
             .iter()
@@ -2488,7 +2606,7 @@ In `status::note`, replace the identity resolution and the `mine` filter:
     // Use the pruned store so a note cannot revive a stale claim.
     let existing = ctx.claims_mut()?.get(&task.id).cloned();
     let mine = match &existing {
-        Some(claim) => ctx.owns(claim, &me)?,
+        Some(claim) => ctx.ownership(claim, &me)? != crate::commands::Ownership::Foreign,
         None => false,
     };
 
@@ -2510,7 +2628,9 @@ In `status::note`, replace the identity resolution and the `mine` filter:
 ```
 
 The heartbeat block below is unchanged, as is its own warning when the save fails.
-`Ctx::owns` and `Ctx::resolve_for_guard` are `pub(crate)` from Task 6.
+`Ctx::ownership` and `Ctx::resolve_for_guard` are `pub(crate)` from Task 6. `note` does not
+distinguish the two kinds of ownership: it writes no session anywhere, only a `seen`
+timestamp on a claim it leaves otherwise untouched.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -2575,25 +2695,56 @@ fn an_acceptance_relay_claim_is_keyed_by_the_agent_id_with_its_proof() {
 fn an_acceptance_owner_can_park_and_close_after_the_registry_is_removed() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let parked = id_of(env.json(&dir, &["add", "To park", "-p", "2"]));
+    let closed = id_of(env.json(&dir, &["add", "To close", "-p", "2"]));
     let state = relay_on(&env);
 
+    // Two *separately held* claims. Park and close are both releases by the owner, but
+    // `Store::insert_park` removes the claim along with its proof, so a task cannot be
+    // parked and then resumed on the same run: resumption is acquisition again and needs
+    // either a restored registry or the explicit override.
     let script = format!(
-        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+        "{}\nwrite_registry\n\
+         \"$TASKS_BIN\" start {parked}\n\
+         \"$TASKS_BIN\" start {closed}\n\
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
-         \"$TASKS_BIN\" park {id} 'next step'\n\
-         \"$TASKS_BIN\" start {id}\n\
-         \"$TASKS_BIN\" done {id} landed\n",
+         \"$TASKS_BIN\" park {parked} 'next step'\n\
+         \"$TASKS_BIN\" done {closed} landed\n",
         shim_env(&state, "codex", "s1")
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(
         out.status.code(),
         Some(0),
-        "the owner must park, resume and close with the registry gone: {}",
+        "the owner must park and close with the registry gone: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(env.json(&dir, &["show", &id])["status"], "done");
+    assert_eq!(env.json(&dir, &["show", &closed])["task"]["status"], "done");
+}
+
+#[test]
+fn an_acceptance_resuming_a_parked_task_needs_identity_again() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // Parking released the claim and its proof with it, so the resume is a fresh
+    // acquisition. With the registry still gone it must refuse rather than quietly
+    // claim under some other identity.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" park {id} 'next step'\n\
+         \"$TASKS_BIN\" start {id} && echo RESUMED\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("RESUMED"),
+        "a parked task cannot be resumed without a resolvable identity"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("TASKS_SESSION"));
 }
 
 #[test]
@@ -2644,7 +2795,7 @@ fn an_acceptance_nested_harness_cannot_close_the_outer_sessions_task() {
         !text.contains("INNER_CLOSED"),
         "a session nested under the owner must not close its task: {text}"
     );
-    assert_eq!(env.json(&dir, &["show", &id])["status"], "doing");
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
 }
 
 #[test]
@@ -2682,7 +2833,7 @@ fn an_acceptance_contradicted_hint_is_refused_on_a_held_claim() {
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stdout));
-    assert_eq!(env.json(&dir, &["show", &id])["status"], "doing");
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
 }
 
 #[test]
@@ -2743,6 +2894,103 @@ fn an_acceptance_explicit_pair_works_under_a_harness_with_no_registry() {
 }
 
 #[test]
+fn an_acceptance_explicit_mismatch_stays_foreign_under_one_harness() {
+    // Two workers beneath the *same* shim, so the ancestry, host and boot all agree and
+    // the claim's proof names their shared harness process. Only TASKS_SESSION tells them
+    // apart. If `Ctx::ownership` stopped honouring the explicit pair, worker-b's proof
+    // would succeed and this close would land — which is exactly the bypass to catch.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nwrite_registry\n\
+         TASKS_SESSION=worker-a TASKS_SESSION_PID=$$ \"$TASKS_BIN\" start {id}\n\
+         TASKS_SESSION=worker-b TASKS_SESSION_PID=$$ \"$TASKS_BIN\" done {id} 'not mine' \
+           && echo FOREIGN_CLOSED\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("FOREIGN_CLOSED"),
+        "an explicit session mismatch must stay foreign however the ancestry looks"
+    );
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
+}
+
+#[test]
+fn an_acceptance_mode_change_continues_a_natively_held_claim() {
+    // Claim natively with a pid, so the claim carries proof, then enable relay and publish
+    // the matching agent. The session key changes from `c1` to `claude-code:c1`, but the
+    // held claim keeps its own key and is continued by proof — no takeover, no rewrite.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = env.home.path().join("relay-state");
+
+    let native = format!(
+        "{}\nCLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {id}\n\
+         write_registry\n",
+        shim_env(&state, "claude-code", "c1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &native);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert!(store.contains("session = \"c1\""), "claimed natively: {store}");
+
+    // Relay on from here. The same process tree closes the task without --force.
+    relay_on(&env);
+    let after = format!(
+        "{}\nwrite_registry\nCLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
+        shim_env(&state, "claude-code", "c1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &after);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a natively-held claim carrying proof must be continued, not taken over: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
+}
+
+#[test]
+fn an_acceptance_force_cannot_take_over_without_a_resolved_identity() {
+    // A stale foreign claim and no resolvable identity. `--force` may displace an owner,
+    // but a takeover records a new owner and there is none to record.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // Claim as an unrelated session whose pid is long gone, so the claim reads stale.
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "departed")
+        .env("TASKS_SESSION_PID", "999999")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    let script = format!(
+        "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
+         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start --force {id} && echo FORCED\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("FORCED"),
+        "--force must not substitute for an unresolvable identity"
+    );
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("TASKS_SESSION"), "{text}");
+    // The held error names the claim it was raised against, per §§5 and 6.5.
+    assert!(text.contains("departed"), "{text}");
+}
+
+#[test]
 fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -2767,7 +3015,7 @@ fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
 - [ ] **Step 2: Run the acceptance tests**
 
 Run: `just test-fast an_acceptance_`
-Expected: PASS, 10 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 3: Update the documentation**
 
@@ -2776,14 +3024,17 @@ stating: the file is `~/.config/tasks/config.toml` (or `$XDG_CONFIG_HOME/tasks/c
 with `[identity] relay = true`; it is host-local, because relay availability is a property
 of a machine and the per-project `tasks/.config.toml` syncs between hosts; in scope a claim
 is keyed by the relay agent id `<harness>:<sessionId>` and carries that agent's process
-proof; identity is adopted between sessions and never rewrites a held claim; the owner can
-park, resume and close with the registry unavailable; Linux only; and `TASKS_SESSION` sits
-above the level and is the recovery path from every relay identity error.
+proof; identity is adopted between sessions and never rewrites a held claim; the owner can park
+and close a claim it already holds with the registry unavailable, while *resuming* a parked
+task is a fresh acquisition and needs either the registry back or `TASKS_SESSION`; Linux
+only; and `TASKS_SESSION` sits above the level and is the recovery path from every relay
+identity error.
 
 In `skills/tasks/SKILL.md`, extend the claims paragraph of the session protocol with three
 sentences: under relay mode a claim is keyed by the relay agent id, the owner can still
-park and close while the registry is unavailable, and a relay identity error is resolved by
-setting `TASKS_SESSION`/`TASKS_SESSION_PID`.
+park and close a claim it already holds while the registry is unavailable (resuming a
+parked task needs the registry back, since parking releases the claim), and a relay
+identity error is resolved by setting `TASKS_SESSION`/`TASKS_SESSION_PID`.
 
 - [ ] **Step 4: Run the whole suite**
 
