@@ -78,9 +78,16 @@ syncs between hosts, so enabling relay in one repo would enable it on a machine 
 registry).
 
 The file is read only where identity is resolved. `claims::identity` is reached from
-`Ctx::claim_guard`, `Ctx::refuse_foreign_live_claim`, `commands::park` and
-`commands::status` — the claim-mutating paths. Read commands, `check`, and shell
-completion never open it, never walk `/proc`, and never read the registry.
+`Ctx::claim_guard` (`src/commands/mod.rs:169`), `Ctx::refuse_foreign_live_claim`
+(`:121`, called from `edit.rs:144` and `:257`), `commands::park` (`:38`) and
+`commands::status` (`:89`). `note` is not among them. Read commands, `check` and shell
+completion perform **no relay ancestry walk and no registry access** — they still read
+`/proc` for claim liveness, as they do today, and that path is untouched.
+
+The file is also read below the explicit override: `TASKS_SESSION` is resolved first,
+and a session that sets it never opens this file, never walks ancestry and never reads
+the registry. The platform refusal of §7 is part of the relay level, not a startup
+check, so it cannot take away the explicit pair's role as the recovery path.
 
 ## 4. Resolution
 
@@ -132,18 +139,47 @@ Node.
 
 A candidate agent matches the nearest harness ancestor when **all** hold:
 
-- `agent.process` is non-null and `agent.process.host` equals tasks' hostname,
+- `agent.process` is non-null and `agent.process.platform` is `"linux"`,
+- `agent.process.host` equals tasks' hostname,
+- `agent.harness` equals the ancestor's `comm` under the explicit mapping
+  `claude → claude-code`, `codex → codex`, `opencode → opencode`,
 - `agent.process.pid` equals the ancestor pid,
 - `agent.process.start` equals the ancestor's `starttime` as canonical decimal text,
-- on Linux, `agent.process.bootId` equals `/proc/sys/kernel/random/boot_id`.
+- `agent.process.bootId` equals `/proc/sys/kernel/random/boot_id`.
+
+The harness comparison is load-bearing and not implied by the rest. Schema 1 validates
+`harness` and `process` independently, so a `claude-code` row can carry a process handle
+that satisfies host, pid, start and boot for an ancestor whose `comm` is `codex`;
+without this check that row would be adopted and the claim keyed to the wrong session.
+
+The platform comparison is likewise load-bearing rather than defensive. A schema-valid
+Darwin handle has `bootId: null` and so can never satisfy the boot comparison, and
+hostname equality proves nothing about platform. Requiring `"linux"` explicitly states
+the rejection instead of leaving it as a side effect of a null comparison.
 
 Exactly one match adopts. Zero matches, or more than one, is the error of §5 — neither
 the working directory nor a bare pid breaks a tie.
 
-When `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID` or `CODEX_THREAD_ID` is set, it is a
-**hint that must agree**: the matched agent's `sessionId` must equal it, or acquisition
-fails. A disagreement means the process proof and the environment describe different
-sessions, and guessing which is right is exactly what §2.6 forbids.
+Native session variables are **hints that must agree, scoped to the nearest harness**.
+Only the variables belonging to that harness are compared:
+
+| Nearest `comm` | Compared | Rule |
+|---|---|---|
+| `claude` | `CLAUDE_CODE_SESSION_ID` | must equal the matched `sessionId` |
+| `codex` | `CODEX_SESSION_ID`, `CODEX_THREAD_ID` | both must agree with each other and equal the matched `sessionId` |
+| `opencode` | none | no native variable exists; nothing is compared |
+
+A variable belonging to a *different* harness is ignored, because a nested harness
+inherits its parent's environment: a `codex` process started inside a Claude session
+carries `CLAUDE_CODE_SESSION_ID` from that parent while its own proof and its own
+`CODEX_SESSION_ID` are entirely valid. Comparing every set variable would reject that
+session despite correct evidence.
+
+An empty variable is treated as unset and compared against nothing, matching how
+`identity_from` already filters empty values at every native level. For `codex`, if
+only one of the two variables is set it is the one compared; if both are set and
+disagree with each other, that is the error of §5 rather than a warning, because unlike
+the native level there is a verified session available to contradict.
 
 ### 4.4 What is adopted
 
@@ -159,16 +195,14 @@ On a match, the resolved `Identity` is:
 
 The claim then records the matched proof in the fields it already has:
 `pid_start` = `agent.process.start` parsed as `u64`, and `boot_id` =
-`agent.process.bootId`, **only when `agent.process.platform` is `"linux"`**. A Darwin
-handle's `start` is an epoch, not proc ticks, and must never be written into
-`pid_start`; on a non-Linux handle tasks records `pid` alone and the claim falls to the
-existing TTL path.
+`agent.process.bootId`. Both are unconditional here, because §4.3 has already
+established that an adopted handle is Linux: a Darwin `start` is an epoch rather than
+proc ticks and must never reach `pid_start`, and the way this design prevents that is
+by refusing the handle as an identity candidate, not by adopting it partially.
 
-Under §7 a Linux host cannot legitimately meet a Darwin handle — `process.host` must
-equal its own hostname. The platform check is kept anyway, as a schema guard rather
-than a live branch: schema 1 permits `platform: "darwin"`, so a corrupt or foreign
-snapshot can present one, and the cost of refusing to treat its `start` as proc ticks
-is a single comparison. It is tested as a format case, not as a supported platform.
+A Darwin handle therefore never yields a claim, a pid, or a TTL fallback. It remains a
+parsing case only: schema 1 permits `platform: "darwin"`, so the reader must parse one
+without error and then reject it as an identity candidate.
 
 This is a real gain for Codex, whose claims carry no pid today and therefore live by
 the TTL: under relay mode a Codex claim gains pid, start and boot proof, and its
@@ -188,7 +222,10 @@ acquisition**, naming the cause and instructing the caller to set
 | Snapshot fails schema-1 validation | the validation failure |
 | No agent matches the nearest harness ancestor | the harness comm and pid |
 | More than one agent matches | the matching agent ids |
-| A native session variable disagrees with the match | both ids and the variable |
+| A harness-scoped variable disagrees with the match | both ids and the variable |
+| `CODEX_SESSION_ID` and `CODEX_THREAD_ID` disagree with each other | both values |
+| The only candidate's `harness` does not match the ancestor `comm` | both, and the mapping |
+| The only candidate's handle is not `platform: "linux"` | the platform and the agent id |
 
 The "no agent matches" case includes the real Codex situation where a live harness
 ancestor exists but the registry is empty because SessionStart runs at the first turn,
@@ -197,27 +234,101 @@ not at launch. That is an error with recovery instructions, not terminal identit
 None of these is a warning, and none degrades to a lower level: reaching level 3 after
 the scope test said "in scope" is the silent identity switch §2.6 forbids.
 
+These are errors **on acquisition**. On a task that already carries a claim they are held
+rather than raised, and are raised only if ownership proof also fails to establish the
+caller's right to act (§6.2). When raised there, the message additionally names
+`existing.session` so the operator can recover with the explicit pair.
+
 ## 6. Continuity
 
-- **Within a session.** Every claim-mutating command resolves identity independently;
-  there is no cache. The inputs — ancestry, registry, config — are stable within a
-  session, and a cache would be a second source of truth for the thing this design
-  exists to make single. The cost is one `/proc` walk and one JSON read per claim
-  mutation, not per command.
-- **A held claim.** `claim_guard` compares `existing.session` to the resolved session.
-  A claim acquired under native identity and later met by a relay-resolved session is
-  a *foreign* claim by that comparison, which is correct: they are different identity
-  schemes and tasks cannot prove they are the same session. The mode change is
-  therefore made between sessions, per §2.7. A session that enables relay mid-flight
-  and finds its own earlier claim foreign takes it over with `start --force`, which
-  records the takeover in the task's notes as it does today.
-- **Registry loss while holding a claim.** Refresh and release read
-  `existing.session`, not a fresh registry lookup, so a claim already held stays held
-  and releasable with the registry gone. Liveness reads only the captured claim proof
-  and native process data; the registry is never consulted to decide whether an owner
-  is alive.
-- **Recovery.** The explicit pair is the documented escape from every error in §5 and
-  keeps working with relay enabled, since it sits above the relay level.
+### 6.1 Two questions, not one
+
+Every claim-mutating command today asks a single question — is `existing.session` equal
+to mine? — and must resolve caller identity to ask it. Under relay that would make the
+registry a dependency of *releasing* a claim and not merely of taking one, so a registry
+lost mid-session would strand `park`, `done` and `edit` on work already held. Adopting
+`existing.session` unconditionally instead is the opposite failure: any caller could then
+act as the owner.
+
+The resolution is to stop asking one question:
+
+- **Acquisition** — may this caller take this task? Needs a resolved identity, which
+  under relay mode needs the registry. Every §5 error applies, per constraint §2.6.
+- **Continuation** — is this caller the session that already holds this claim? Needs
+  proof of ownership, which the claim already carries, and never needs the registry.
+
+### 6.2 Proving ownership without the registry
+
+A relay-acquired claim records `host`, `pid`, `pid_start` and `boot_id` copied from the
+matched process handle (§4.4) — the same evidence relay itself used. A caller proves
+ownership by re-deriving that evidence locally:
+
+1. `claim.host` equals this host and `claim.boot_id` equals the current boot id, and
+2. some ancestor of the caller has pid `claim.pid` and `starttime` `claim.pid_start`.
+
+The §4.2 ancestry walk already produces that chain, so the proof costs one `/proc` walk
+and no registry read. If both hold, the caller is a descendant of the very process the
+claim names, and is its owner.
+
+This is strictly stronger than adopting `existing.session`. The only caller that can
+satisfy it without being the owning session is one genuinely descended from the same
+harness process — the shared-process case constraint §2.5 already governs by requiring explicit
+`TASKS_SESSION` for agents that claim independently.
+
+The ordering inside `claim_guard`, `refuse_foreign_live_claim`, `park` and `status`, all
+under the existing mutation lock:
+
+1. `TASKS_SESSION` set → identity match, exactly as today.
+2. identity resolved and `existing.session` equals it → owner.
+3. ownership proof holds → owner, **even though identity did not resolve**.
+4. otherwise → foreign claim: today's `Claimed` refusal, or takeover with `--force`.
+
+An identity-resolution failure at step 2 is therefore no longer fatal on a task that is
+already claimed: the error is carried and raised only if steps 3 and 4 also fail to
+establish a right to act. A task with no existing claim goes straight to acquisition,
+where a resolution failure stays fatal.
+
+### 6.3 Claims that carry no proof
+
+Acquisition derives `pid_start` from `me.pid` (`src/commands/mod.rs:213`), so a claim
+carries process proof only when its identity level supplied a pid. Native Claude claims
+without `CLAUDE_PID`, and every Codex claim, have `pid: None` and cannot be proved this
+way. For those, step 3 is unavailable and behaviour is exactly today's: identity match or
+takeover. Relay-acquired claims always carry proof — which is the case that matters,
+since registry loss can only strike a session that had the registry when it acquired.
+
+### 6.4 Mode changes, and the `--force` reconciliation
+
+Relay identity is adopted at **acquisition only**. `existing.session` is never rewritten,
+so a claim keeps the identity it was created with through every refresh and release, as
+constraint §2.7 requires. Step 3 is what makes that survivable: it lets the owner go on acting
+on a natively-keyed claim without the identity scheme still having to produce the same
+string.
+
+So a session that enables relay between sessions and meets its own earlier, natively-keyed
+claim resolves at step 3 whenever that claim carries proof, and falls to takeover only
+when it does not (§6.3). Takeover is the last resort on a mode change, not its ordinary
+path, and is recorded in the task's notes as any takeover is.
+
+### 6.5 Registry loss, liveness, and recovery
+
+Liveness reads only the captured claim proof and native process data, and never the
+registry: a registry that is gone cannot make an owner look dead, and cannot make a dead
+owner look live. Combined with §6.2, a session that acquired under relay and then lost the
+registry can still park, close and release everything it holds, and can still be taken over
+normally once its process is gone.
+
+When identity does not resolve and ownership proof is unavailable, the §5 error names
+`existing.session` verbatim, so the operator can set `TASKS_SESSION` to that string and
+act. The explicit pair sits above the relay level, so this recovery works with relay
+enabled and on a host where §7 refuses the platform.
+
+### 6.6 Within a session
+
+Identity is resolved independently by each claim-mutating command; there is no cache. The
+inputs — ancestry, registry, config — are stable within a session, and a cache would be a
+second source of truth for the thing this design exists to make single. The cost is one
+`/proc` walk and one JSON read per claim mutation, not per command.
 
 ## 7. Platform
 
@@ -228,6 +339,12 @@ that resolves every session to "unknown ancestry". Because the config file is
 host-local, a machine without a readable process tree simply does not enable it, and
 nothing about tasks' behaviour there changes — including its existing
 unverifiable/TTL liveness path, which this design does not touch.
+
+The refusal belongs to the relay level, not to program startup or to config parsing.
+`TASKS_SESSION` is resolved first, so on a host where the platform is refused the
+explicit pair keeps working unchanged and remains the recovery path — the platform
+refusal can never take away the escape from it. A caller that is out of scope (§4.2)
+likewise never reaches the refusal, since the relay level is not consulted at all.
 
 Native Darwin claim liveness, and a Darwin process-tree source, are separate work and
 are not prerequisites for this one.
@@ -257,14 +374,24 @@ Unit, against injected inputs:
 
 - The ladder: explicit pair beats relay; relay beats both native variables; out of
   scope falls to the native variables unchanged; relay off leaves today's behaviour
-  byte-for-byte.
+  byte-for-byte; the §7 platform refusal fires below the explicit pair, so a session
+  with `TASKS_SESSION` set is unaffected by it.
 - The scope test: no harness ancestor with a readable chain, a harness ancestor at
   each depth, an unreadable level before a verdict, and an unmatched inner harness
   that must not be skipped for a matching outer one.
 - The match: exact match; wrong pid; wrong start; wrong boot id; wrong host; two
-  agents on one handle; a null process handle; a Darwin handle (pid adopted,
-  `pid_start` and `boot_id` absent).
-- Agreement: a native variable equal to the matched `sessionId`; one that disagrees.
+  agents on one handle; a null process handle.
+- Harness agreement: a `claude-code` row whose handle satisfies host, pid, start and
+  boot for a `codex` ancestor is refused, not adopted — the case that passes every
+  other predicate.
+- Platform: a schema-valid Darwin handle parses without error and is then **refused**
+  as an identity candidate. No test expects a Darwin handle to yield a claim, a pid,
+  or a TTL fallback.
+- Scoped hints: a `codex` ancestor with a matching `CODEX_SESSION_ID` and an inherited,
+  unrelated `CLAUDE_CODE_SESSION_ID` from an outer Claude session resolves successfully;
+  a `claude` ancestor with a disagreeing `CLAUDE_CODE_SESSION_ID` fails; an `opencode`
+  ancestor with either variable set compares nothing; empty variables are unset; the two
+  Codex variables disagreeing with each other is an error.
 - Schema: versioned handle fixtures copied from relay-06b1da, including the oversized
   Linux `start` value, labelled as a format test.
 - The Codex case: a live `codex` ancestor with an empty registry must produce the
@@ -272,20 +399,50 @@ Unit, against injected inputs:
 - Config: missing file; `relay = false`; `relay = true`; malformed TOML; non-boolean;
   unknown key; neither `XDG_CONFIG_HOME` nor `HOME`.
 
+Continuity, the §6 mechanism, unit where the inputs can be injected:
+
+- **Owner without the registry.** A relay-acquired claim, the registry then removed:
+  the owning caller's park, done and edit all succeed via ownership proof.
+- **Foreign caller without the registry.** The same claim, a caller whose ancestry does
+  not contain the claimed process: refused as foreign, not admitted by proof.
+- **Proof mismatch.** The claimed pid exists but with a different `starttime` (pid
+  reuse); a different `boot_id`; a different `host`. Each refuses.
+- **No proof available.** A claim with `pid: None` (§6.3) falls to identity match or
+  takeover, and never to proof.
+- **Held error.** Identity fails to resolve on a task that is already claimed by this
+  caller: the error is not raised. The same failure with no existing claim: raised.
+- **Mode change.** A natively-keyed claim carrying proof is continued by a
+  relay-resolved session at step 3, without `--force`; the same claim without proof
+  requires `--force` and records the takeover.
+
 End-to-end in `tests/cli.rs`, against the built binary in temp repos with
 `XDG_CONFIG_HOME`, `RELAY_STATE_DIR` and a fixture snapshot:
 
 - Acquisition under relay mode writes a claim keyed by the agent id with the handle's
   proof in `pid`, `pid_start` and `boot_id`.
-- Takeover and release with the registry removed after acquisition.
-- Each §5 error reaches stderr as a `config` error object at exit 1.
+- Park and release with the registry removed after acquisition.
+- Takeover of a relay-acquired claim whose process is gone.
+- Each §5 error reaches stderr as a `config` error object at exit 1, and the
+  already-claimed variant names `existing.session`.
 - Concurrent acquisition under relay mode still produces exactly one winner, under the
   existing mutation lock.
 
 ## 10. Decomposition
 
-Suggested step children for the implementation plan, in order: the host config file;
-the relay snapshot reader and schema-1 validation; the ancestry walk; the relay level
-in `identity_from` with its errors; claim-field adoption and the Darwin rule; the
-end-to-end tests and the skill and README updates. The plan is written and reviewed
-before any of it is implemented.
+Suggested step children for the implementation plan, in order:
+
+1. The host config file and its typed errors.
+2. The relay snapshot reader and schema-1 validation, including Darwin handles as a
+   parse-only case.
+3. The ancestry walk, shared by the scope test and by ownership proof.
+4. The relay level in `identity_from`: match predicate, harness agreement, scoped hints,
+   and the §5 errors.
+5. Claim-field adoption and the §7 platform refusal.
+6. **Continuity**: the acquisition/continuation split, ownership proof, the held-error
+   rule, and the `--force` reconciliation across `claim_guard`,
+   `refuse_foreign_live_claim`, `park` and `status`. This is the step that changes
+   existing call sites rather than adding a new level, and it carries the owner and
+   foreign-caller tests of §9.
+7. The end-to-end tests, and the skill and README updates.
+
+The plan is written and reviewed before any of it is implemented.
