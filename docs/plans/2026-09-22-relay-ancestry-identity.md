@@ -23,7 +23,7 @@
 - Registry reads are Rust-only and reject a non-private path exactly as relay's own `checkPrivate` does. Tasks never spawns Node and never writes to `agents.json`.
 - Recognized harness `comm` names and their agent harnesses: `claude → claude-code`, `codex → codex`, `opencode → opencode`. Exactly these three.
 - Only `platform: "linux"` handles are adopted. A Darwin handle must parse without error and then be refused as an identity candidate.
-- **Every commit builds green under `-D warnings`.** A module whose consumer arrives in a later task carries a file-level `#![allow(dead_code)]` naming the task that removes it — the same device `tests/common/mod.rs` already uses. Task 5 removes them all.
+- **Every commit builds green under `-D warnings`.** A module whose consumer arrives in a later task carries a file-level `#![allow(dead_code)]` naming the task that removes it — the same device `tests/common/mod.rs` already uses. Task 5 removes `src/config.rs`'s; Task 6 removes the last one, from `src/relay/mod.rs`, where `resolve::same_session` finally gains a production consumer.
 - JSON output shapes do not change in this plan.
 - Run `just test-fast <name>` while working and `just gate` before the final commit of each task. Test filters below name **test functions**, not the items under test. Never run `cargo test` directly.
 
@@ -1490,7 +1490,7 @@ git commit -m "feat(relay): match the nearest harness ancestor and adopt its age
 
 **Files:**
 - Modify: `src/claims.rs` (the `Identity` struct and `identity`/`identity_from`)
-- Modify: `src/relay/mod.rs` (the staged entry point; remove its `#![allow(dead_code)]`)
+- Modify: `src/relay/mod.rs` (the staged entry point; **keeps** its `#![allow(dead_code)]` until Task 6)
 - Modify: `src/config.rs` (remove its `#![allow(dead_code)]`)
 - Test: `src/claims.rs`, `src/relay/mod.rs` (inline `mod tests`)
 
@@ -2941,8 +2941,10 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
     // Claim natively with a pid, so the claim carries proof and is keyed `c1`. Then enable
     // relay mid-run: identity now resolves to `claude-code:c1`, which does *not* equal the
     // claim's session, so only proof can establish ownership.
+    // `set -e`: every command here must succeed, and a failed repeated `start` must not be
+    // masked by a `done` that then takes the claim over.
     let script = format!(
-        "{}\nwrite_registry\n\
+        "set -e\n{}\nwrite_registry\n\
          CLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {id}\n\
          cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"$HOME/native.toml\"\n\
          mkdir -p \"$HOME/.config/tasks\"\n\
