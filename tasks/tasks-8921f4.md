@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-09-17T21:08:29Z
-updated: 2026-09-22T13:20:03Z
+updated: 2026-09-22T13:44:40Z
 started: 2026-09-22T13:09:21Z
 depends: [relay-06b1da]
 parent: tasks-c9199a
@@ -52,3 +52,4 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
 - 2026-09-22T13:20:02Z (design/relay-ancestry): Design spec written at docs/specs/2026-09-22-relay-ancestry-identity-design.md and committed on design/relay-ancestry. Three user decisions recorded: host config file ~/.config/tasks/config.toml for the opt-in; matched relay Agent.id becomes the claim session for every in-scope harness; approach A, verify-then-adopt, with native session variables as hints that must agree with process proof. Awaiting user review before the implementation plan.
 - 2026-09-22T13:20:03Z (design/relay-ancestry): parked (waiting on user, review): User review of .worktrees/relay-ancestry/docs/specs/2026-09-22-relay-ancestry-identity-design.md; on approval write the implementation plan with writing-plans, then decompose into step children.
   provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-22T13:44:40Z (design/relay-ancestry): Spec revised on review. Continuity now has a mechanism: acquisition and continuation are separated, and a caller proves ownership of a claim registry-free by re-deriving the claim's own host/boot/pid/pid_start as an ancestor of itself, so registry loss cannot strand park, done or edit; identity-resolution errors are held rather than raised on an already-claimed task. Match gains harness agreement (claude->claude-code, codex->codex, opencode->opencode) and requires platform linux, so a Darwin handle is parse-only and never yields a claim. Native hints are compared only for the nearest harness, fixing nested mixed-harness sessions. Platform refusal sits below the explicit override. Continuity is step 6 of the decomposition with owner/foreign-caller tests.
