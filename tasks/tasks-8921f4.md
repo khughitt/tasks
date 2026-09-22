@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/relay-ancestry
 created: 2026-09-17T21:08:29Z
-updated: 2026-09-22T14:07:37Z
+updated: 2026-09-22T14:15:42Z
 started: 2026-09-22T13:09:21Z
 depends: [relay-06b1da]
 parent: tasks-c9199a
@@ -16,6 +16,7 @@ tags: []
 source: tasks-c9199a
 agent: codex
 spec: docs/specs/2026-09-22-relay-ancestry-identity-design.md
+plan: docs/plans/2026-09-22-relay-ancestry-identity.md
 ---
 
 Approved source: ops docs/specs/2026-09-16-relay-design.md (reviewed after d7e2c33); execution brief: ops docs/plans/2026-09-16-relay-bootstrap.md (approved after bc53c51 with review corrections).
