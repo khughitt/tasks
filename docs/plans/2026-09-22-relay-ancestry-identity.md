@@ -4,24 +4,27 @@
 
 **Goal:** Add an opt-in identity level that names a tasks session by the relay agent it runs under, adopting that agent's process handle as claim proof, without changing liveness or the claim file format.
 
-**Architecture:** A new `src/relay/` module resolves identity in four stages — explicit override, configuration, platform support, ancestry — and only then reads relay's `agents.json` to verify the nearest harness ancestor. `claims::identity_from` gains that level as a lazily-invoked closure, so the stages cannot run out of order. Claim ownership is then decided in two ways rather than one: by identity when it resolves, and otherwise by re-deriving the claim's own recorded process proof locally, which needs no registry.
+**Architecture:** A new `src/relay/` module resolves identity in four stages — explicit override, configuration, platform support, ancestry — and only then reads relay's `agents.json` to verify the nearest harness ancestor. `claims::identity_from` gains that level as a lazily-invoked closure, so the stages cannot run out of order. Claim ownership is then decided in two ways rather than one: by identity when it resolves, and otherwise by re-deriving the claim's own recorded process proof locally, which needs no registry. An operation on a claim this caller already owns records the claim's *own* identity, never a freshly resolved one.
 
-**Tech Stack:** Rust 2024, `serde`/`serde_json` (already dependencies) for the schema-1 snapshot, `toml` for the host config, `/proc` for ancestry and process start times. No new dependencies.
+**Tech Stack:** Rust 2024, `serde_json` for the schema-1 snapshot, `toml` for the host config, `/proc` for ancestry, process start times, and the effective uid. No new dependencies.
 
 **Spec:** `docs/specs/2026-09-22-relay-ancestry-identity-design.md`
 
 ## Global Constraints
 
-- Relay identity is **opt-in**. With it off, behaviour is byte-for-byte today's. Every task that touches an existing path carries a test asserting that.
-- The four stages run in this order and each is reached only by passing the one before: explicit override (`TASKS_SESSION`) → configuration → platform support → ancestry. Spec §7.
+- Relay identity is **opt-in**. With it off, behaviour is byte-for-byte today's, including every path where an unresolvable identity is fatal today. Every task touching an existing path carries a test asserting that.
+- **Explicit identity is authoritative.** With `TASKS_SESSION` set, a session mismatch is foreign — full stop. Ownership proof is a relay-mode fallback and never overrides the explicit pair, because two workers sharing one process are distinguished by nothing else.
+- **Ownership proof never rewrites identity.** An operation on an owned claim records the claim's own session (`claims::continuation_identity`). `existing.session` is never rewritten. Spec §6.4.
+- **Acquisition requires resolved identity**, and every path that is not a continuation by the owner is acquisition: first claim, takeover, stale-claim takeover, and `start --force` alike. `--force` displaces an owner; it never substitutes for one.
+- The four stages run in this order, each reached only by passing the one before: explicit override (`TASKS_SESSION`) → configuration → platform support → ancestry. Spec §7. Unknown ancestry is refused **before** the registry is opened, so a registry error can never mask an ancestry error.
 - Liveness is not modified. `claims::liveness` and `liveness_with` keep their current signatures and bodies.
 - The claim file format does not change. Adopted proof goes into the existing `pid`, `pid_start`, `boot_id`, `host` fields.
-- Registry reads are Rust-only. Tasks never spawns Node and never writes to `agents.json`.
+- Registry reads are Rust-only and reject a non-private path exactly as relay's own `checkPrivate` does. Tasks never spawns Node and never writes to `agents.json`.
 - Recognized harness `comm` names and their agent harnesses: `claude → claude-code`, `codex → codex`, `opencode → opencode`. Exactly these three.
 - Only `platform: "linux"` handles are adopted. A Darwin handle must parse without error and then be refused as an identity candidate.
-- Every takeover requires a resolved identity. `--force` displaces an owner; it never substitutes for one.
+- **Every commit builds green under `-D warnings`.** A module whose consumer arrives in a later task carries a file-level `#![allow(dead_code)]` naming the task that removes it — the same device `tests/common/mod.rs` already uses. Task 5 removes them all.
 - JSON output shapes do not change in this plan.
-- Run `just test-fast <name>` while working and `just gate` before the final commit of each task. Never run `cargo test` directly.
+- Run `just test-fast <name>` while working and `just gate` before the final commit of each task. Test filters below name **test functions**, not the items under test. Never run `cargo test` directly.
 
 ---
 
@@ -38,7 +41,7 @@
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to a new `src/config.rs`:
+Create `src/config.rs` containing only this test module for now:
 
 ```rust
 #[cfg(test)]
@@ -46,7 +49,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_file_without_the_key_leaves_relay_off() {
+    fn a_config_without_the_key_leaves_relay_off() {
         assert_eq!(
             HostConfig::parse("", "c.toml").unwrap(),
             HostConfig { relay_identity: false }
@@ -58,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    fn the_relay_key_is_read() {
+    fn a_config_relay_key_is_read() {
         assert_eq!(
             HostConfig::parse("[identity]\nrelay = true\n", "c.toml").unwrap(),
             HostConfig { relay_identity: true }
@@ -70,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    fn a_typo_is_loud_rather_than_silently_off() {
+    fn a_config_typo_is_loud_rather_than_silently_off() {
         for text in [
             "[identity]\nrelayy = true\n",   // unknown key in the table
             "[identityy]\nrelay = true\n",   // unknown table
@@ -86,21 +89,24 @@ mod tests {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `just test-fast config`
-Expected: FAIL — `src/config.rs` does not exist, or `HostConfig` is not defined.
+Run: `just test-fast a_config_`
+Expected: FAIL — `HostConfig` is not defined.
 
 - [ ] **Step 3: Write the implementation**
 
-At the top of `src/config.rs`, above the test module:
+Above the test module in `src/config.rs`:
 
 ```rust
+// The relay level is this file's only consumer and arrives in Task 5, which removes this.
+#![allow(dead_code)]
+
 use crate::error::{Error, Result};
 use std::path::PathBuf;
 
 /// The host-local configuration, `$XDG_CONFIG_HOME/tasks/config.toml` or
 /// `$HOME/.config/tasks/config.toml`. Host-local deliberately: relay availability is a
-/// property of a machine, and the per-project `tasks/.config.toml` is committed and
-/// syncs between hosts.
+/// property of a machine, and the per-project `tasks/.config.toml` is committed and syncs
+/// between hosts.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HostConfig {
     pub relay_identity: bool,
@@ -157,14 +163,21 @@ impl HostConfig {
 }
 ```
 
+Note the inner attribute must be the file's first line, above the `use` statements.
+
 Add `mod config;` to `src/main.rs` beside the other `mod` declarations.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `just test-fast config`
+Run: `just test-fast a_config_`
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the commit builds green**
+
+Run: `just check`
+Expected: PASS — `cargo clippy --all-targets -- -D warnings` is clean because of the file-level allow.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/config.rs src/main.rs
@@ -182,142 +195,220 @@ git commit -m "feat(config): a host-local tasks config.toml with the relay ident
 
 The spec's §8 sketches a single `src/relay.rs`; a three-file `src/relay/` directory is the same decomposition with one responsibility per file, following the existing `src/rename/` precedent.
 
+This reader is a **second implementation of a published schema**, so it must refuse
+everything the producer refuses. A row tasks accepts but relay would reject is a row whose
+meaning tasks has guessed at. The validation below mirrors `validateSnapshot`,
+`validateAgent`, `validateHandle` and `checkPrivate` in relay's `src/protocol.js` and
+`src/bus/store.js`.
+
 **Interfaces:**
 - Consumes: `crate::error::{Error, Result}`.
 - Produces:
   - `relay::snapshot::Handle { platform: String, host: String, boot_id: Option<String>, pid: u32, start: u64 }`
-  - `relay::snapshot::Agent { id: String, harness: String, session_id: String, process: Option<Handle> }`
-  - `relay::snapshot::Snapshot { agents: Vec<Agent> }`
+  - `relay::snapshot::Agent { id: String, harness: String, session_id: String, scope: String, process: Option<Handle> }`
+  - `relay::snapshot::Snapshot { generation: String, revision: u64, agents: Vec<Agent> }`
   - `relay::snapshot::path() -> Result<PathBuf>`
   - `relay::snapshot::parse(text: &str) -> Result<Snapshot>`
   - `relay::snapshot::load() -> Result<Snapshot>`
 
 - [ ] **Step 1: Write the failing tests**
 
-In `src/relay/snapshot.rs`:
+Create `src/relay/snapshot.rs` with this test module:
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn linux_agent(id: &str, harness: &str, session: &str, pid: u32, start: &str) -> String {
+    const BOOT: &str = "0f9d5a1e-1c2b-4d3e-8f4a-5b6c7d8e9f01";
+
+    /// A complete, schema-valid agent. Tests mutate one field at a time from here, so a
+    /// refusal can only be caused by the field under test.
+    fn agent_json(overrides: &[(&str, &str)]) -> String {
+        let mut fields: Vec<(&str, String)> = vec![
+            ("id", "\"codex:s1\"".into()),
+            ("harness", "\"codex\"".into()),
+            ("sessionId", "\"s1\"".into()),
+            ("scope", "\"session\"".into()),
+            ("cwd", "\"/w\"".into()),
+            ("repoRoot", "null".into()),
+            ("remote", "null".into()),
+            ("projectKey", "\"k\"".into()),
+            ("project", "\"p\"".into()),
+            ("state", "\"idle\"".into()),
+            ("updatedAt", "1".into()),
+            (
+                "process",
+                format!(
+                    r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":42,"start":"900"}}"#
+                ),
+            ),
+        ];
+        for (key, value) in overrides {
+            match fields.iter_mut().find(|(name, _)| name == key) {
+                Some(slot) => slot.1 = (*value).to_string(),
+                None => fields.push((key, (*value).to_string())),
+            }
+        }
+        let body = fields
+            .iter()
+            .filter(|(_, value)| value != "\u{0}") // the sentinel for "omit this field"
+            .map(|(key, value)| format!("\"{key}\":{value}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("{{{body}}}")
+    }
+
+    fn snapshot_json(key: &str, agent: &str) -> String {
         format!(
-            r#""{id}": {{"id":"{id}","harness":"{harness}","sessionId":"{session}",
-              "scope":"session","cwd":"/w","repoRoot":null,"remote":null,
-              "projectKey":"k","project":"p","state":"idle","updatedAt":1,
-              "process":{{"platform":"linux","host":"testhost",
-                "bootId":"0f9d5a1e-1c2b-4d3e-8f4a-5b6c7d8e9f01","pid":{pid},"start":"{start}"}}}}"#
+            r#"{{"schema":1,"generation":"11111111-2222-4333-8444-555555555555",
+               "revision":7,"agents":{{"{key}":{agent}}}}}"#
         )
     }
 
-    fn snapshot_of(agents: &str) -> String {
-        format!(
-            r#"{{"schema":1,"generation":"11111111-2222-4333-8444-555555555555",
-               "revision":7,"agents":{{{agents}}}}}"#
-        )
+    fn valid() -> String {
+        snapshot_json("codex:s1", &agent_json(&[]))
     }
 
     #[test]
-    fn a_valid_snapshot_parses_every_field() {
-        let text = snapshot_of(&linux_agent("codex:s1", "codex", "s1", 42, "998877"));
-        let snapshot = parse(&text).unwrap();
-        assert_eq!(snapshot.agents.len(), 1);
+    fn a_snapshot_parses_every_field() {
+        let snapshot = parse(&valid()).unwrap();
+        assert_eq!(snapshot.generation, "11111111-2222-4333-8444-555555555555");
+        assert_eq!(snapshot.revision, 7);
         let agent = &snapshot.agents[0];
         assert_eq!(agent.id, "codex:s1");
         assert_eq!(agent.harness, "codex");
         assert_eq!(agent.session_id, "s1");
+        assert_eq!(agent.scope, "session");
         let process = agent.process.as_ref().unwrap();
         assert_eq!(process.platform, "linux");
         assert_eq!(process.host, "testhost");
         assert_eq!(process.pid, 42);
-        assert_eq!(process.start, 998877);
-        assert!(process.boot_id.is_some());
+        assert_eq!(process.start, 900);
+        assert_eq!(process.boot_id.as_deref(), Some(BOOT));
     }
 
     #[test]
-    fn a_darwin_handle_parses_and_keeps_its_platform() {
-        // Parse-only: refusing it as an identity candidate is Task 4's job, and it must
-        // not be refused here by being unreadable.
-        let text = snapshot_of(
-            r#""codex:d1": {"id":"codex:d1","harness":"codex","sessionId":"d1",
-               "scope":"session","cwd":"/w","repoRoot":null,"remote":null,
-               "projectKey":"k","project":"p","state":"idle","updatedAt":1,
-               "process":{"platform":"darwin","host":"mac","bootId":null,
-                 "pid":9,"start":"1750000000"}}"#,
-        );
-        let snapshot = parse(&text).unwrap();
+    fn a_snapshot_accepts_a_darwin_handle_for_parsing_only() {
+        // Refusing it as an identity candidate is Task 4's job; it must not be refused
+        // here by being unreadable.
+        let agent = agent_json(&[(
+            "process",
+            r#"{"platform":"darwin","host":"mac","bootId":null,"pid":9,"start":"1750000000"}"#,
+        )]);
+        let snapshot = parse(&snapshot_json("codex:s1", &agent)).unwrap();
         assert_eq!(snapshot.agents[0].process.as_ref().unwrap().platform, "darwin");
     }
 
     #[test]
-    fn the_largest_linux_start_is_a_format_case_not_an_overflow() {
-        let text = snapshot_of(&linux_agent("codex:s2", "codex", "s2", 42, "18446744073709551615"));
+    fn a_snapshot_accepts_the_largest_start_and_refuses_an_overflow() {
+        let big = agent_json(&[(
+            "process",
+            &format!(
+                r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":42,"start":"18446744073709551615"}}"#
+            ),
+        )]);
         assert_eq!(
-            parse(&text).unwrap().agents[0].process.as_ref().unwrap().start,
+            parse(&snapshot_json("codex:s1", &big)).unwrap().agents[0]
+                .process
+                .as_ref()
+                .unwrap()
+                .start,
             u64::MAX
         );
-        let over = snapshot_of(&linux_agent("codex:s3", "codex", "s3", 42, "18446744073709551616"));
-        assert!(parse(&over).is_err());
+        let over = agent_json(&[(
+            "process",
+            &format!(
+                r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":42,"start":"18446744073709551616"}}"#
+            ),
+        )]);
+        assert!(parse(&snapshot_json("codex:s1", &over)).is_err());
     }
 
     #[test]
-    fn a_null_process_handle_is_valid() {
-        let text = snapshot_of(
-            r#""codex:n1": {"id":"codex:n1","harness":"codex","sessionId":"n1",
-               "scope":"session","cwd":"/w","repoRoot":null,"remote":null,
-               "projectKey":"k","project":"p","state":"idle","updatedAt":1,
-               "process":null}"#,
+    fn a_snapshot_accepts_a_null_handle_and_an_opencode_process_scope() {
+        let null_handle = agent_json(&[("process", "null")]);
+        assert!(parse(&snapshot_json("codex:s1", &null_handle)).unwrap().agents[0]
+            .process
+            .is_none());
+        let opencode = agent_json(&[
+            ("id", "\"opencode:o1\""),
+            ("harness", "\"opencode\""),
+            ("sessionId", "\"o1\""),
+            ("scope", "\"process\""),
+        ]);
+        assert_eq!(
+            parse(&snapshot_json("opencode:o1", &opencode)).unwrap().agents[0].scope,
+            "process"
         );
-        assert!(parse(&text).unwrap().agents[0].process.is_none());
     }
 
     #[test]
-    fn schema_violations_are_refused() {
-        let cases = [
-            snapshot_of(&linux_agent("codex:s1", "codex", "MISMATCH", 42, "1")), // id != harness:session
-            snapshot_of(&linux_agent("wrong-key", "codex", "s1", 42, "1")),      // map key != id
-            snapshot_of(&linux_agent("nope:s1", "nope", "s1", 42, "1")),         // unknown harness
-            snapshot_of(&linux_agent("codex:s1", "codex", "s1", 0, "1")),        // pid out of range
-            snapshot_of(&linux_agent("codex:s1", "codex", "s1", 42, "007")),     // non-canonical start
-            r#"{"schema":2,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#.into(),
-            "not json".into(),
+    fn a_snapshot_refuses_what_the_producer_refuses() {
+        let cases: Vec<(&str, String)> = vec![
+            ("schema 2", r#"{"schema":2,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#.into()),
+            ("no generation", r#"{"schema":1,"revision":1,"agents":{}}"#.into()),
+            ("bad generation", r#"{"schema":1,"generation":"nope","revision":1,"agents":{}}"#.into()),
+            ("no revision", r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","agents":{}}"#.into()),
+            ("no agents", r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1}"#.into()),
+            ("not json", "not json".into()),
+            ("key != id", snapshot_json("other", &agent_json(&[]))),
+            ("id != harness:session", snapshot_json("codex:s1", &agent_json(&[("sessionId", "\"other\"")]))),
+            ("unknown harness", snapshot_json("nope:s1", &agent_json(&[("id", "\"nope:s1\""), ("harness", "\"nope\"")]))),
+            ("wrong scope for harness", snapshot_json("codex:s1", &agent_json(&[("scope", "\"process\"")]))),
+            ("relative cwd", snapshot_json("codex:s1", &agent_json(&[("cwd", "\"w\"")]))),
+            ("missing cwd", snapshot_json("codex:s1", &agent_json(&[("cwd", "\u{0}")]))),
+            ("missing remote", snapshot_json("codex:s1", &agent_json(&[("remote", "\u{0}")]))),
+            ("empty remote", snapshot_json("codex:s1", &agent_json(&[("remote", "\"\"")]))),
+            ("relative repoRoot", snapshot_json("codex:s1", &agent_json(&[("repoRoot", "\"rel\"")]))),
+            ("empty projectKey", snapshot_json("codex:s1", &agent_json(&[("projectKey", "\"\"")]))),
+            ("unknown state", snapshot_json("codex:s1", &agent_json(&[("state", "\"sleeping\"")]))),
+            ("negative updatedAt", snapshot_json("codex:s1", &agent_json(&[("updatedAt", "-1")]))),
+            ("missing process", snapshot_json("codex:s1", &agent_json(&[("process", "\u{0}")]))),
+            ("pid 0", snapshot_json("codex:s1", &agent_json(&[("process", &format!(r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":0,"start":"900"}}"#))]))),
+            ("non-canonical start", snapshot_json("codex:s1", &agent_json(&[("process", &format!(r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":42,"start":"007"}}"#))]))),
+            ("bad boot uuid", snapshot_json("codex:s1", &agent_json(&[("process", r#"{"platform":"linux","host":"testhost","bootId":"not-a-uuid","pid":42,"start":"900"}"#)]))),
+            ("darwin with a bootId", snapshot_json("codex:s1", &agent_json(&[("process", &format!(r#"{{"platform":"darwin","host":"mac","bootId":"{BOOT}","pid":9,"start":"1"}}"#))]))),
+            ("missing bootId", snapshot_json("codex:s1", &agent_json(&[("process", r#"{"platform":"linux","host":"testhost","pid":42,"start":"900"}"#)]))),
         ];
-        for text in cases {
-            assert!(parse(&text).is_err(), "{text}");
+        for (name, text) in cases {
+            assert!(parse(&text).is_err(), "{name} must be refused: {text}");
         }
     }
 
     #[test]
-    fn an_empty_registry_is_a_valid_empty_snapshot() {
-        let text = snapshot_of("");
-        assert!(parse(&text).unwrap().agents.is_empty());
+    fn a_snapshot_with_no_agents_is_valid_and_empty() {
+        let text = r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#;
+        assert!(parse(text).unwrap().agents.is_empty());
     }
 }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `just test-fast snapshot`
-Expected: FAIL — module does not exist.
+Run: `just test-fast a_snapshot_`
+Expected: FAIL — the module does not exist.
 
 - [ ] **Step 3: Write the implementation**
 
 `src/relay/mod.rs`:
 
 ```rust
+// The identity ladder is this module's consumer and arrives in Task 5, which removes this.
+#![allow(dead_code)]
+
 pub mod snapshot;
 ```
 
-Top of `src/relay/snapshot.rs`:
+Above the test module in `src/relay/snapshot.rs`:
 
 ```rust
 use crate::error::{Error, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// relay's published process handle. `start` is opaque here: on Linux it is the same
-/// `starttime` tick count `/proc/<pid>/stat` reports, and on Darwin an epoch, which is
-/// why the platform travels with it and why only Linux handles are ever adopted.
+/// `starttime` tick count `/proc/<pid>/stat` reports, and on Darwin an epoch, which is why
+/// the platform travels with it and why only Linux handles are ever adopted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Handle {
     pub platform: String,
@@ -332,20 +423,60 @@ pub struct Agent {
     pub id: String,
     pub harness: String,
     pub session_id: String,
+    pub scope: String,
     pub process: Option<Handle>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snapshot {
+    pub generation: String,
+    pub revision: u64,
     pub agents: Vec<Agent>,
 }
 
-/// The three harnesses relay publishes. Tasks refuses any other value rather than
-/// carrying a session it cannot map back to a `comm`.
 const HARNESSES: [&str; 3] = ["claude-code", "codex", "opencode"];
+const STATES: [&str; 6] = [
+    "idle",
+    "working",
+    "needs-input",
+    "needs-approval",
+    "done",
+    "error",
+];
 
 fn invalid(detail: &str) -> Error {
     Error::Config(format!("relay registry: {detail}"))
+}
+
+/// relay's own uuid predicate: version 1-8, variant 8/9/a/b, case-insensitive.
+fn is_uuid(value: &str) -> bool {
+    let groups = [8usize, 4, 4, 4, 12];
+    let parts: Vec<&str> = value.split('-').collect();
+    if parts.len() != groups.len() {
+        return false;
+    }
+    for (part, width) in parts.iter().zip(groups) {
+        if part.len() != width || !part.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return false;
+        }
+    }
+    let version = parts[2].as_bytes()[0];
+    let variant = parts[3].as_bytes()[0].to_ascii_lowercase();
+    (b'1'..=b'8').contains(&version) && matches!(variant, b'8' | b'9' | b'a' | b'b')
+}
+
+/// Canonical decimal u64 text, exactly as relay's `parseStart` produces it: no leading
+/// zeros, no sign, no separators.
+fn parse_start(value: &str) -> Result<u64> {
+    let canonical = value == "0"
+        || (value.starts_with(|c: char| c.is_ascii_digit() && c != '0')
+            && value.bytes().all(|b| b.is_ascii_digit()));
+    if !canonical {
+        return Err(invalid(&format!("start {value:?} is not canonical decimal")));
+    }
+    value
+        .parse()
+        .map_err(|_| invalid(&format!("start {value:?} does not fit in u64")))
 }
 
 /// `$RELAY_STATE_DIR`, else `$XDG_STATE_HOME/relay`, else `$HOME/.local/state/relay`.
@@ -367,25 +498,181 @@ pub fn path() -> Result<PathBuf> {
     Ok(dir.join("agents.json"))
 }
 
+/// Our own uid, without a libc dependency: `/proc/self` is owned by the process's uid.
+/// Linux-only, which relay identity already is.
+fn own_uid() -> Result<u32> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata("/proc/self")
+        .map(|meta| meta.uid())
+        .map_err(|error| invalid(&format!("cannot read /proc/self: {error}")))
+}
+
+/// relay's `checkPrivate`: no symlink, the expected type, owned by us, and exactly 0700
+/// for a directory or 0600 for a file. `Ok(false)` means absent.
+fn check_private(path: &Path, directory: bool) -> Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(invalid(&format!(
+                "cannot inspect {}: {error}",
+                path.display()
+            )));
+        }
+    };
+    let expected_mode = if directory { 0o700 } else { 0o600 };
+    let type_ok = if directory {
+        meta.is_dir()
+    } else {
+        meta.is_file()
+    };
+    if meta.file_type().is_symlink()
+        || !type_ok
+        || meta.uid() != own_uid()?
+        || meta.mode() & 0o7777 != expected_mode
+    {
+        return Err(invalid(&format!(
+            "{} must be privately owned with a safe type and mode",
+            path.display()
+        )));
+    }
+    Ok(true)
+}
+
 pub fn load() -> Result<Snapshot> {
     let path = path()?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| invalid("the registry path has no directory"))?;
+    if !check_private(dir, true)? {
+        return Err(invalid(&format!("{} does not exist", dir.display())));
+    }
+    if !check_private(&path, false)? {
+        return Err(invalid(&format!("{} does not exist", path.display())));
+    }
     let text = std::fs::read_to_string(&path)
         .map_err(|error| invalid(&format!("{}: {error}", path.display())))?;
     parse(&text)
 }
 
-/// Canonical decimal u64 text, exactly as relay's `parseStart` produces it: no leading
-/// zeros, no sign, no separators.
-fn parse_start(value: &str) -> Result<u64> {
-    let canonical = value == "0"
-        || (value.starts_with(|c: char| c.is_ascii_digit() && c != '0')
-            && value.bytes().all(|b| b.is_ascii_digit()));
-    if !canonical {
-        return Err(invalid(&format!("start {value:?} is not canonical decimal")));
-    }
+fn text_field(value: &serde_json::Value, field: &str) -> Result<String> {
     value
-        .parse()
-        .map_err(|_| invalid(&format!("start {value:?} does not fit in u64")))
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| invalid(&format!("{field} must be non-empty text")))
+}
+
+/// `null` or non-empty text, with the field required to be present — relay distinguishes
+/// an explicit null from an absent key, and so must this.
+fn nullable_text(value: &serde_json::Value, field: &str, absolute: bool) -> Result<Option<String>> {
+    match value.get(field) {
+        None => Err(invalid(&format!("{field} is required"))),
+        Some(serde_json::Value::Null) => Ok(None),
+        Some(_) => {
+            let text = text_field(value, field)?;
+            if absolute && !Path::new(&text).is_absolute() {
+                return Err(invalid(&format!("{field} must be an absolute path")));
+            }
+            Ok(Some(text))
+        }
+    }
+}
+
+fn parse_handle(value: &serde_json::Value) -> Result<Handle> {
+    let platform = text_field(value, "platform")?;
+    if platform != "linux" && platform != "darwin" {
+        return Err(invalid("platform must be linux or darwin"));
+    }
+    let host = text_field(value, "host")?;
+    let pid = value
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|pid| *pid >= 1 && *pid <= u32::MAX as u64)
+        .ok_or_else(|| invalid("handle pid out of range"))? as u32;
+    let start = parse_start(&text_field(value, "start")?)?;
+    let boot_id = match value.get("bootId") {
+        None => return Err(invalid("bootId is required")),
+        Some(serde_json::Value::Null) => None,
+        Some(id) => {
+            let id = id
+                .as_str()
+                .ok_or_else(|| invalid("bootId must be text or null"))?;
+            if platform != "linux" {
+                return Err(invalid("only a linux handle carries a bootId"));
+            }
+            if !is_uuid(id) {
+                return Err(invalid(&format!("bootId {id:?} is not a uuid")));
+            }
+            Some(id.to_string())
+        }
+    };
+    Ok(Handle {
+        platform,
+        host,
+        boot_id,
+        pid,
+        start,
+    })
+}
+
+fn parse_agent(key: &str, value: &serde_json::Value) -> Result<Agent> {
+    if !value.is_object() {
+        return Err(invalid(&format!("agent {key:?} is not an object")));
+    }
+    let id = text_field(value, "id")?;
+    let harness = text_field(value, "harness")?;
+    let session_id = text_field(value, "sessionId")?;
+    if !HARNESSES.contains(&harness.as_str()) {
+        return Err(invalid(&format!("unknown harness {harness:?}")));
+    }
+    if id != format!("{harness}:{session_id}") || id != key {
+        return Err(invalid(&format!("agent {key:?} has an inconsistent id")));
+    }
+    let scope = text_field(value, "scope")?;
+    let expected_scope = if harness == "opencode" {
+        "process"
+    } else {
+        "session"
+    };
+    if scope != expected_scope {
+        return Err(invalid(&format!(
+            "agent {key:?} has scope {scope:?}, expected {expected_scope:?}"
+        )));
+    }
+    let cwd = text_field(value, "cwd")?;
+    if !Path::new(&cwd).is_absolute() {
+        return Err(invalid("cwd must be an absolute path"));
+    }
+    nullable_text(value, "repoRoot", true)?;
+    nullable_text(value, "remote", false)?;
+    text_field(value, "projectKey")?;
+    text_field(value, "project")?;
+    let state = text_field(value, "state")?;
+    if !STATES.contains(&state.as_str()) {
+        return Err(invalid(&format!("unknown state {state:?}")));
+    }
+    if value
+        .get("updatedAt")
+        .and_then(serde_json::Value::as_u64)
+        .is_none()
+    {
+        return Err(invalid("updatedAt must be a non-negative integer"));
+    }
+    let process = match value.get("process") {
+        None => return Err(invalid("process is required")),
+        Some(serde_json::Value::Null) => None,
+        Some(handle) => Some(parse_handle(handle)?),
+    };
+    Ok(Agent {
+        id,
+        harness,
+        session_id,
+        scope,
+        process,
+    })
 }
 
 pub fn parse(text: &str) -> Result<Snapshot> {
@@ -394,6 +681,14 @@ pub fn parse(text: &str) -> Result<Snapshot> {
     if raw.get("schema").and_then(serde_json::Value::as_u64) != Some(1) {
         return Err(invalid("schema must be 1"));
     }
+    let generation = text_field(&raw, "generation")?;
+    if !is_uuid(&generation) {
+        return Err(invalid("generation must be a uuid"));
+    }
+    let revision = raw
+        .get("revision")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| invalid("revision must be a non-negative integer"))?;
     let map = raw
         .get("agents")
         .and_then(serde_json::Value::as_object)
@@ -401,75 +696,14 @@ pub fn parse(text: &str) -> Result<Snapshot> {
 
     let mut agents = Vec::with_capacity(map.len());
     for (key, value) in map {
-        let text_at = |field: &str| {
-            value
-                .get(field)
-                .and_then(serde_json::Value::as_str)
-                .filter(|s| !s.trim().is_empty())
-                .map(str::to_string)
-        };
-        let id = text_at("id").ok_or_else(|| invalid("agent id must be text"))?;
-        let harness = text_at("harness").ok_or_else(|| invalid("harness must be text"))?;
-        let session_id = text_at("sessionId").ok_or_else(|| invalid("sessionId must be text"))?;
-        if !HARNESSES.contains(&harness.as_str()) {
-            return Err(invalid(&format!("unknown harness {harness:?}")));
-        }
-        if id != format!("{harness}:{session_id}") || id != *key {
-            return Err(invalid(&format!("agent {key:?} has an inconsistent id")));
-        }
-
-        let process = match value.get("process") {
-            None | Some(serde_json::Value::Null) => None,
-            Some(handle) => {
-                let handle_text = |field: &str| {
-                    handle
-                        .get(field)
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
-                };
-                let platform = handle_text("platform")
-                    .filter(|p| p == "linux" || p == "darwin")
-                    .ok_or_else(|| invalid("platform must be linux or darwin"))?;
-                let host =
-                    handle_text("host").ok_or_else(|| invalid("handle host must be text"))?;
-                let pid = handle
-                    .get("pid")
-                    .and_then(serde_json::Value::as_u64)
-                    .filter(|pid| *pid >= 1 && *pid <= u32::MAX as u64)
-                    .ok_or_else(|| invalid("handle pid out of range"))? as u32;
-                let start = parse_start(
-                    &handle_text("start").ok_or_else(|| invalid("start must be text"))?,
-                )?;
-                let boot_id = match handle.get("bootId") {
-                    None | Some(serde_json::Value::Null) => None,
-                    Some(value) => {
-                        let id = value
-                            .as_str()
-                            .ok_or_else(|| invalid("bootId must be text or null"))?;
-                        if platform != "linux" {
-                            return Err(invalid("only a linux handle carries a bootId"));
-                        }
-                        Some(id.to_string())
-                    }
-                };
-                Some(Handle {
-                    platform,
-                    host,
-                    boot_id,
-                    pid,
-                    start,
-                })
-            }
-        };
-        agents.push(Agent {
-            id,
-            harness,
-            session_id,
-            process,
-        });
+        agents.push(parse_agent(key, value)?);
     }
     agents.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(Snapshot { agents })
+    Ok(Snapshot {
+        generation,
+        revision,
+        agents,
+    })
 }
 ```
 
@@ -477,10 +711,15 @@ Add `mod relay;` to `src/main.rs`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `just test-fast snapshot`
+Run: `just test-fast a_snapshot_`
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the commit builds green**
+
+Run: `just check`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/relay/ src/main.rs
@@ -496,6 +735,9 @@ git commit -m "feat(relay): read and validate the schema-1 agent registry in Rus
 - Modify: `src/relay/mod.rs` (add `pub mod ancestry;`)
 - Test: `src/relay/ancestry.rs` (inline `mod tests`)
 
+The walk is shared: the scope test of spec §4.2 and the ownership proof of §6.2 both need
+the same nearest boundary.
+
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
 - Produces:
@@ -506,12 +748,12 @@ git commit -m "feat(relay): read and validate the schema-1 agent registry in Rus
   - `relay::ancestry::walk(from: u32, read: impl Fn(u32) -> Option<String>) -> Scope`
   - `relay::ancestry::read_stat(pid: u32) -> Option<String>`
   - `relay::ancestry::self_ppid() -> Option<u32>`
-
-The walk is shared: the scope test of spec §4.2 and the ownership proof of §6.2 both need the same nearest boundary.
+  - `relay::ancestry::proc_available() -> bool`
+  - `relay::ancestry::current_scope() -> Scope`
 
 - [ ] **Step 1: Write the failing tests**
 
-In `src/relay/ancestry.rs`:
+Create `src/relay/ancestry.rs` with this test module:
 
 ```rust
 #[cfg(test)]
@@ -521,10 +763,7 @@ mod tests {
 
     /// `pid (comm) state ppid …` with starttime at remainder index 19.
     fn stat(pid: u32, comm: &str, ppid: u32, start: u64) -> String {
-        let filler = (0..17)
-            .map(|n| n.to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let filler = (0..17).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
         format!("{pid} ({comm}) S {ppid} {filler} {start} x")
     }
 
@@ -537,9 +776,9 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_parses_a_comm_containing_spaces_and_parentheses() {
-        let entry = parse_entry("7 (weird ) name) S 3 a b c d e f g h i j k l m n o p q 4242 x")
-            .unwrap();
+    fn an_ancestry_entry_parses_a_comm_containing_spaces_and_parentheses() {
+        let entry =
+            parse_entry("7 (weird ) name) S 3 a b c d e f g h i j k l m n o p q 4242 x").unwrap();
         assert_eq!(entry.pid, 7);
         assert_eq!(entry.comm, "weird ) name");
         assert_eq!(entry.ppid, 3);
@@ -547,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn the_nearest_harness_ancestor_wins() {
+    fn an_ancestry_walk_stops_at_the_nearest_harness() {
         // tasks(10) -> codex(9) -> claude(8) -> sh(2) -> init(1)
         let read = tree(&[
             (9, "codex", 8, 900),
@@ -566,20 +805,20 @@ mod tests {
     }
 
     #[test]
-    fn a_plain_shell_chain_is_outside() {
+    fn an_ancestry_walk_of_a_plain_shell_is_outside() {
         let read = tree(&[(5, "zsh", 2, 500), (2, "systemd", 1, 200), (1, "init", 0, 1)]);
         assert!(matches!(walk(5, read), Scope::Outside));
     }
 
     #[test]
-    fn an_unreadable_level_is_unknown_not_outside() {
-        // 5 is readable, its parent 4 is not: the verdict is unknown, never Outside.
+    fn an_ancestry_walk_reports_unknown_rather_than_outside() {
+        // 5 is readable, its parent 4 is not: unknown ancestry is never Outside.
         let read = tree(&[(5, "zsh", 4, 500)]);
         assert!(matches!(walk(5, read), Scope::Unknown(4)));
     }
 
     #[test]
-    fn every_recognized_comm_is_matched() {
+    fn an_ancestry_walk_matches_every_recognized_comm() {
         for (comm, harness) in HARNESS_COMMS {
             let read = tree(&[(9, comm, 1, 900), (1, "init", 0, 1)]);
             match walk(9, read) {
@@ -591,7 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn a_cyclic_chain_terminates() {
+    fn an_ancestry_walk_terminates_on_a_cycle() {
         let read = tree(&[(5, "zsh", 6, 500), (6, "zsh", 5, 600)]);
         assert!(matches!(walk(5, read), Scope::Unknown(_)));
     }
@@ -600,12 +839,12 @@ mod tests {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `just test-fast ancestry`
-Expected: FAIL — module does not exist.
+Run: `just test-fast an_ancestry_`
+Expected: FAIL — the module does not exist.
 
 - [ ] **Step 3: Write the implementation**
 
-Top of `src/relay/ancestry.rs`:
+Above the test module in `src/relay/ancestry.rs`:
 
 ```rust
 /// One process on the caller's ancestry chain.
@@ -628,9 +867,9 @@ pub enum Scope {
     Unknown(u32),
 }
 
-/// `comm` as the kernel reports it, and the agent `harness` relay publishes for it.
-/// The `tty` predicate relay's own adapters apply belongs to qualified process
-/// resolution, not to this test: a headless harness must not become a shell caller.
+/// `comm` as the kernel reports it, and the agent `harness` relay publishes for it. The
+/// `tty` predicate relay's own adapters apply belongs to qualified process resolution, not
+/// to this test: a headless harness must not become a shell caller.
 pub const HARNESS_COMMS: [(&str, &str); 3] = [
     ("claude", "claude-code"),
     ("codex", "codex"),
@@ -640,9 +879,9 @@ pub const HARNESS_COMMS: [(&str, &str); 3] = [
 /// A chain longer than this is malformed; walking it forever is not an option.
 const MAX_DEPTH: usize = 64;
 
-/// The `comm` field can contain spaces and parentheses, so everything after the *last*
-/// `)` is positional: state is field 1, ppid field 2, start time field 20 — the same
-/// rule `claims::parse_proc_stat` documents for fields 3 and 22 of the whole line.
+/// The `comm` field can contain spaces and parentheses, so everything after the *last* `)`
+/// is positional: state is field 1, ppid field 2, start time field 20 — the same rule
+/// `claims::parse_proc_stat` documents for fields 3 and 22 of the whole line.
 pub fn parse_entry(line: &str) -> Option<ProcEntry> {
     let pid = line.split_whitespace().next()?.parse().ok()?;
     let open = line.find('(')?;
@@ -661,12 +900,27 @@ pub fn read_stat(pid: u32) -> Option<String> {
     std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
 }
 
-pub fn self_ppid() -> Option<u32> {
-    parse_entry(&read_stat_self()?).map(|entry| entry.ppid)
+fn read_self_stat() -> Option<String> {
+    std::fs::read_to_string("/proc/self/stat").ok()
 }
 
-fn read_stat_self() -> Option<String> {
-    std::fs::read_to_string("/proc/self/stat").ok()
+/// Whether this host exposes the process tree at all. Stage 3 of spec §7 asks this, not
+/// what the target triple says: a Linux build without a mounted `/proc` cannot establish
+/// scope either.
+pub fn proc_available() -> bool {
+    read_self_stat().is_some()
+}
+
+pub fn self_ppid() -> Option<u32> {
+    parse_entry(&read_self_stat()?).map(|entry| entry.ppid)
+}
+
+/// This caller's own position, resolved against the live `/proc`.
+pub fn current_scope() -> Scope {
+    match self_ppid() {
+        Some(ppid) => walk(ppid, read_stat),
+        None => Scope::Unknown(0),
+    }
 }
 
 /// Walk upward from `from`, returning the nearest harness ancestor. An unreadable level
@@ -704,10 +958,15 @@ Add `pub mod ancestry;` to `src/relay/mod.rs`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `just test-fast ancestry`
+Run: `just test-fast an_ancestry_`
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the commit builds green**
+
+Run: `just check`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/relay/
@@ -724,24 +983,29 @@ git commit -m "feat(relay): walk process ancestry to the nearest harness boundar
 - Test: `src/relay/resolve.rs` (inline `mod tests`)
 
 **Interfaces:**
-- Consumes: `snapshot::{Snapshot, Agent, Handle}`, `ancestry::{Scope, ProcEntry, HARNESS_COMMS}`.
+- Consumes: `snapshot::{Snapshot, Agent}`, `ancestry::{Scope, ProcEntry, HARNESS_COMMS}`.
 - Produces:
   - `relay::resolve::Resolved { session: String, pid: u32, pid_start: u64, boot_id: String, host: String }`
   - `relay::resolve::hint_for(comm: &str, get: &impl Fn(&str) -> Option<String>) -> Result<Option<String>>`
   - `relay::resolve::same_session(claim_session: &str, comm: &str, session_id: &str) -> bool`
-  - `relay::resolve::resolve(scope: Scope, snapshot: &Snapshot, host: &str, boot_id: Option<&str>, get: &impl Fn(&str) -> Option<String>) -> Result<Option<Resolved>>` — `Ok(None)` means out of scope.
+  - `relay::resolve::resolve(scope: Scope, load: impl FnOnce() -> Result<Snapshot>, host: &str, boot_id: Option<&str>, get: &impl Fn(&str) -> Option<String>) -> Result<Option<Resolved>>`
+
+The snapshot arrives as a **closure**, not a value. Unknown ancestry and out-of-scope are
+both decided before it is called, so the registry is never opened for a caller whose scope
+is not established and a registry error can never mask an ancestry error.
 
 - [ ] **Step 1: Write the failing tests**
 
-In `src/relay/resolve.rs`:
+Create `src/relay/resolve.rs` with this test module:
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::relay::snapshot::{Agent, Handle, Snapshot};
+    use crate::relay::snapshot::{Agent, Handle};
 
     const BOOT: &str = "0f9d5a1e-1c2b-4d3e-8f4a-5b6c7d8e9f01";
+    const OTHER_BOOT: &str = "22222222-2222-4222-8222-222222222222";
 
     fn ancestor(comm: &str, pid: u32, start: u64) -> Scope {
         Scope::Harness(ProcEntry {
@@ -752,23 +1016,28 @@ mod tests {
         })
     }
 
-    fn agent(harness: &str, session: &str, platform: &str, pid: u32, start: u64) -> Agent {
+    fn agent(harness: &str, session: &str, platform: &str, pid: u32, start: u64, boot: &str) -> Agent {
         Agent {
             id: format!("{harness}:{session}"),
             harness: harness.into(),
             session_id: session.into(),
+            scope: if harness == "opencode" { "process" } else { "session" }.into(),
             process: Some(Handle {
                 platform: platform.into(),
                 host: "testhost".into(),
-                boot_id: (platform == "linux").then(|| BOOT.to_string()),
+                boot_id: (platform == "linux").then(|| boot.to_string()),
                 pid,
                 start,
             }),
         }
     }
 
-    fn snapshot(agents: Vec<Agent>) -> Snapshot {
-        Snapshot { agents }
+    fn snap(agents: Vec<Agent>) -> Snapshot {
+        Snapshot {
+            generation: "11111111-2222-4333-8444-555555555555".into(),
+            revision: 1,
+            agents,
+        }
     }
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
@@ -785,16 +1054,23 @@ mod tests {
         }
     }
 
-    fn go(scope: Scope, snap: &Snapshot, e: &impl Fn(&str) -> Option<String>) -> Result<Option<Resolved>> {
-        resolve(scope, snap, "testhost", Some(BOOT), e)
+    fn go(
+        scope: Scope,
+        agents: Vec<Agent>,
+        e: &impl Fn(&str) -> Option<String>,
+    ) -> Result<Option<Resolved>> {
+        resolve(scope, || Ok(snap(agents)), "testhost", Some(BOOT), e)
     }
 
     #[test]
-    fn an_exact_match_adopts_the_agent_id_and_its_proof() {
-        let snap = snapshot(vec![agent("codex", "s1", "linux", 42, 900)]);
-        let resolved = go(ancestor("codex", 42, 900), &snap, &env(&[]))
-            .unwrap()
-            .unwrap();
+    fn a_match_adopts_the_agent_id_and_its_proof() {
+        let resolved = go(
+            ancestor("codex", 42, 900),
+            vec![agent("codex", "s1", "linux", 42, 900, BOOT)],
+            &env(&[]),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(resolved.session, "codex:s1");
         assert_eq!(resolved.pid, 42);
         assert_eq!(resolved.pid_start, 900);
@@ -803,129 +1079,179 @@ mod tests {
     }
 
     #[test]
-    fn out_of_scope_yields_none_without_consulting_the_snapshot() {
-        assert!(go(Scope::Outside, &snapshot(vec![]), &env(&[]))
-            .unwrap()
-            .is_none());
+    fn a_match_is_not_attempted_out_of_scope() {
+        let out = resolve(
+            Scope::Outside,
+            || panic!("the registry must not be opened out of scope"),
+            "testhost",
+            Some(BOOT),
+            &env(&[]),
+        )
+        .unwrap();
+        assert!(out.is_none());
     }
 
     #[test]
-    fn unknown_ancestry_is_an_error_not_a_shell() {
-        assert!(go(Scope::Unknown(7), &snapshot(vec![]), &env(&[])).is_err());
+    fn a_match_refuses_unknown_ancestry_before_opening_the_registry() {
+        let error = resolve(
+            Scope::Unknown(7),
+            || panic!("the registry must not be opened for unknown ancestry"),
+            "testhost",
+            Some(BOOT),
+            &env(&[]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains('7'), "{error}");
+        assert!(error.contains("TASKS_SESSION"), "{error}");
     }
 
     #[test]
-    fn the_harness_must_agree_with_the_ancestor_comm() {
+    fn a_match_requires_the_harness_to_agree_with_the_ancestor_comm() {
         // Satisfies host, pid, start and boot for a codex ancestor, but is a claude-code
         // row. Without the harness comparison this would be adopted and key the claim to
         // the wrong session.
-        let snap = snapshot(vec![agent("claude-code", "c1", "linux", 42, 900)]);
-        let error = go(ancestor("codex", 42, 900), &snap, &env(&[]))
-            .unwrap_err()
-            .to_string();
+        let error = go(
+            ancestor("codex", 42, 900),
+            vec![agent("claude-code", "c1", "linux", 42, 900, BOOT)],
+            &env(&[]),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("codex"), "{error}");
     }
 
     #[test]
-    fn a_darwin_handle_is_refused_as_an_identity_candidate() {
-        let snap = snapshot(vec![agent("codex", "s1", "darwin", 42, 900)]);
-        let error = go(ancestor("codex", 42, 900), &snap, &env(&[]))
-            .unwrap_err()
-            .to_string();
+    fn a_match_refuses_a_darwin_handle() {
+        let error = go(
+            ancestor("codex", 42, 900),
+            vec![agent("codex", "s1", "darwin", 42, 900, BOOT)],
+            &env(&[]),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("darwin"), "{error}");
     }
 
     #[test]
-    fn proof_must_match_in_every_component() {
-        let snap = snapshot(vec![agent("codex", "s1", "linux", 42, 900)]);
-        assert!(go(ancestor("codex", 43, 900), &snap, &env(&[])).is_err()); // pid
-        assert!(go(ancestor("codex", 42, 901), &snap, &env(&[])).is_err()); // start
-        assert!(resolve(ancestor("codex", 42, 900), &snap, "other", Some(BOOT), &env(&[])).is_err()); // host
-        assert!(resolve(
-            ancestor("codex", 42, 900),
-            &snap,
-            "testhost",
-            Some("22222222-2222-4222-8222-222222222222"),
-            &env(&[])
-        )
-        .is_err()); // boot
+    fn a_match_requires_every_proof_component() {
+        let agents = || vec![agent("codex", "s1", "linux", 42, 900, BOOT)];
+        assert!(go(ancestor("codex", 43, 900), agents(), &env(&[])).is_err()); // pid
+        assert!(go(ancestor("codex", 42, 901), agents(), &env(&[])).is_err()); // start
+        assert!(
+            resolve(ancestor("codex", 42, 900), || Ok(snap(agents())), "elsewhere", Some(BOOT), &env(&[]))
+                .is_err()
+        ); // host
+        assert!(
+            resolve(ancestor("codex", 42, 900), || Ok(snap(agents())), "testhost", Some(OTHER_BOOT), &env(&[]))
+                .is_err()
+        ); // boot
     }
 
     #[test]
-    fn an_empty_registry_under_a_live_harness_is_the_explicit_identity_error() {
+    fn a_match_on_an_empty_registry_is_the_explicit_identity_error() {
         // The real Codex case: SessionStart runs at the first turn, not at launch.
-        let error = go(ancestor("codex", 42, 900), &snapshot(vec![]), &env(&[]))
+        let error = go(ancestor("codex", 42, 900), vec![], &env(&[]))
             .unwrap_err()
             .to_string();
         assert!(error.contains("TASKS_SESSION"), "{error}");
     }
 
     #[test]
-    fn two_agents_on_one_handle_are_ambiguous() {
-        let snap = snapshot(vec![
-            agent("codex", "s1", "linux", 42, 900),
-            agent("codex", "s2", "linux", 42, 900),
-        ]);
-        let error = go(ancestor("codex", 42, 900), &snap, &env(&[]))
-            .unwrap_err()
-            .to_string();
+    fn a_match_is_ambiguous_only_among_fully_qualifying_candidates() {
+        // Two rows share the handle and both qualify: ambiguous.
+        let error = go(
+            ancestor("codex", 42, 900),
+            vec![
+                agent("codex", "s1", "linux", 42, 900, BOOT),
+                agent("codex", "s2", "linux", 42, 900, BOOT),
+            ],
+            &env(&[]),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("codex:s1") && error.contains("codex:s2"), "{error}");
+
+        // A stale row from an earlier boot shares host, pid and start but cannot qualify.
+        // Exactly one candidate satisfies the spec, so this must resolve, not refuse.
+        let resolved = go(
+            ancestor("codex", 42, 900),
+            vec![
+                agent("codex", "old", "linux", 42, 900, OTHER_BOOT),
+                agent("codex", "s1", "linux", 42, 900, BOOT),
+            ],
+            &env(&[]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.session, "codex:s1");
+
+        // Likewise a wrong-harness row and a darwin row alongside one good row.
+        let resolved = go(
+            ancestor("codex", 42, 900),
+            vec![
+                agent("claude-code", "c1", "linux", 42, 900, BOOT),
+                agent("codex", "d1", "darwin", 42, 900, BOOT),
+                agent("codex", "s1", "linux", 42, 900, BOOT),
+            ],
+            &env(&[]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.session, "codex:s1");
     }
 
     #[test]
     fn a_hint_from_another_harness_is_ignored() {
-        // A codex session nested under a claude one inherits CLAUDE_CODE_SESSION_ID.
-        // Its own proof and its own variable are valid and must be accepted.
-        let snap = snapshot(vec![agent("codex", "s1", "linux", 42, 900)]);
+        // A codex session nested under a claude one inherits CLAUDE_CODE_SESSION_ID. Its
+        // own proof and its own variable are valid and must be accepted.
         let e = env(&[("CLAUDE_CODE_SESSION_ID", "outer"), ("CODEX_SESSION_ID", "s1")]);
         assert_eq!(
-            go(ancestor("codex", 42, 900), &snap, &e).unwrap().unwrap().session,
+            go(ancestor("codex", 42, 900), vec![agent("codex", "s1", "linux", 42, 900, BOOT)], &e)
+                .unwrap()
+                .unwrap()
+                .session,
             "codex:s1"
         );
     }
 
     #[test]
     fn a_hint_for_the_nearest_harness_must_agree() {
-        let snap = snapshot(vec![agent("claude-code", "c1", "linux", 42, 900)]);
-        let e = env(&[("CLAUDE_CODE_SESSION_ID", "different")]);
-        assert!(go(ancestor("claude", 42, 900), &snap, &e).is_err());
-        let ok = env(&[("CLAUDE_CODE_SESSION_ID", "c1")]);
-        assert!(go(ancestor("claude", 42, 900), &snap, &ok).unwrap().is_some());
+        let agents = || vec![agent("claude-code", "c1", "linux", 42, 900, BOOT)];
+        let wrong = env(&[("CLAUDE_CODE_SESSION_ID", "different")]);
+        assert!(go(ancestor("claude", 42, 900), agents(), &wrong).is_err());
+        let right = env(&[("CLAUDE_CODE_SESSION_ID", "c1")]);
+        assert!(go(ancestor("claude", 42, 900), agents(), &right).unwrap().is_some());
     }
 
     #[test]
-    fn the_two_codex_variables_must_agree_with_each_other() {
-        let snap = snapshot(vec![agent("codex", "s1", "linux", 42, 900)]);
-        let e = env(&[("CODEX_SESSION_ID", "s1"), ("CODEX_THREAD_ID", "other")]);
-        assert!(go(ancestor("codex", 42, 900), &snap, &e).is_err());
-        // Either alone is the one compared.
+    fn a_hint_pair_for_codex_must_agree_with_itself() {
+        let agents = || vec![agent("codex", "s1", "linux", 42, 900, BOOT)];
+        let split = env(&[("CODEX_SESSION_ID", "s1"), ("CODEX_THREAD_ID", "other")]);
+        assert!(go(ancestor("codex", 42, 900), agents(), &split).is_err());
         let only_thread = env(&[("CODEX_THREAD_ID", "s1")]);
-        assert!(go(ancestor("codex", 42, 900), &snap, &only_thread).unwrap().is_some());
+        assert!(go(ancestor("codex", 42, 900), agents(), &only_thread).unwrap().is_some());
     }
 
     #[test]
-    fn an_empty_variable_is_unset() {
-        let snap = snapshot(vec![agent("claude-code", "c1", "linux", 42, 900)]);
-        let e = env(&[("CLAUDE_CODE_SESSION_ID", "")]);
-        assert!(go(ancestor("claude", 42, 900), &snap, &e).unwrap().is_some());
+    fn a_hint_that_is_empty_is_unset_and_opencode_compares_none() {
+        let claude = vec![agent("claude-code", "c1", "linux", 42, 900, BOOT)];
+        let empty = env(&[("CLAUDE_CODE_SESSION_ID", "")]);
+        assert!(go(ancestor("claude", 42, 900), claude, &empty).unwrap().is_some());
+
+        let opencode = vec![agent("opencode", "o1", "linux", 42, 900, BOOT)];
+        let noisy = env(&[("CLAUDE_CODE_SESSION_ID", "x"), ("CODEX_SESSION_ID", "y")]);
+        assert!(go(ancestor("opencode", 42, 900), opencode, &noisy).unwrap().is_some());
     }
 
     #[test]
-    fn opencode_compares_no_variable() {
-        let snap = snapshot(vec![agent("opencode", "o1", "linux", 42, 900)]);
-        let e = env(&[("CLAUDE_CODE_SESSION_ID", "x"), ("CODEX_SESSION_ID", "y")]);
-        assert!(go(ancestor("opencode", 42, 900), &snap, &e).unwrap().is_some());
-    }
-
-    #[test]
-    fn known_representations_of_one_session_compare_equal() {
+    fn a_session_compares_equal_across_its_known_representations_only() {
         for stored in ["c1", "claude:c1", "claude-code:c1"] {
             assert!(same_session(stored, "claude", "c1"), "{stored}");
         }
         for stored in ["s1", "codex:s1"] {
             assert!(same_session(stored, "codex", "s1"), "{stored}");
         }
-        // Anything else is a genuine mismatch, never a change of notation.
         assert!(!same_session("claude-code:other", "claude", "c1"));
         assert!(!same_session("sid:4242", "claude", "c1"));
         assert!(!same_session("codex:c1", "claude", "c1"));
@@ -935,12 +1261,12 @@ mod tests {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `just test-fast resolve`
-Expected: FAIL — module does not exist.
+Run: `just test-fast a_match_ && just test-fast a_hint_ && just test-fast a_session_`
+Expected: FAIL — the module does not exist.
 
 - [ ] **Step 3: Write the implementation**
 
-Top of `src/relay/resolve.rs`:
+Above the test module in `src/relay/resolve.rs`:
 
 ```rust
 use crate::error::{Error, Result};
@@ -957,7 +1283,8 @@ pub struct Resolved {
     pub host: String,
 }
 
-const SET_EXPLICIT: &str = "set TASKS_SESSION and TASKS_SESSION_PID to name this session explicitly";
+const SET_EXPLICIT: &str =
+    "set TASKS_SESSION and TASKS_SESSION_PID to name this session explicitly";
 
 fn refuse(detail: String) -> Error {
     Error::Config(format!("relay identity: {detail}; {SET_EXPLICIT}"))
@@ -986,26 +1313,28 @@ pub fn hint_for(comm: &str, get: &impl Fn(&str) -> Option<String>) -> Result<Opt
     }
 }
 
-/// Whether `claim_session` names the session `session_id` under `comm`'s harness. The
-/// same session is written more than one way across the levels: natively a Claude claim
-/// stores the raw id, its tagged form is `claude:<id>`, and a relay agent id is
-/// `claude-code:<id>`. Exactly those known forms compare equal; any other difference is
-/// a real mismatch, never a change of notation.
+/// Whether `claim_session` names the session `session_id` under `comm`'s harness. The same
+/// session is written more than one way across the levels: natively a Claude claim stores
+/// the raw id, its tagged form is `claude:<id>`, and a relay agent id is
+/// `claude-code:<id>`. Exactly those known forms compare equal; any other difference is a
+/// real mismatch, never a change of notation.
 pub fn same_session(claim_session: &str, comm: &str, session_id: &str) -> bool {
-    let mut forms = vec![session_id.to_string()];
-    if let Some(harness) = harness_for(comm) {
-        forms.push(format!("{harness}:{session_id}"));
+    if claim_session == session_id {
+        return true;
     }
-    if comm == "claude" {
-        forms.push(format!("claude:{session_id}"));
+    if let Some(harness) = harness_for(comm)
+        && claim_session == format!("{harness}:{session_id}")
+    {
+        return true;
     }
-    forms.iter().any(|form| form == claim_session)
+    comm == "claude" && claim_session == format!("claude:{session_id}")
 }
 
 /// `Ok(None)` means the caller is out of scope and the native ladder applies unchanged.
+/// `load` is invoked only once scope is established as a harness boundary.
 pub fn resolve(
     scope: Scope,
-    snapshot: &Snapshot,
+    load: impl FnOnce() -> Result<Snapshot>,
     host: &str,
     boot_id: Option<&str>,
     get: &impl Fn(&str) -> Option<String>,
@@ -1022,20 +1351,30 @@ pub fn resolve(
     let harness = harness_for(&nearest.comm)
         .ok_or_else(|| refuse(format!("unrecognized harness {:?}", nearest.comm)))?;
     let boot_id = boot_id.ok_or_else(|| refuse("the host boot id is unreadable".into()))?;
+    // The hint is read before the registry so a self-contradicting pair is reported as
+    // itself rather than as a match failure.
+    let hint = hint_for(&nearest.comm, get)?;
+    let snapshot = load()?;
 
-    let matched: Vec<&crate::relay::snapshot::Agent> = snapshot
+    // Every predicate of spec §4.3 applies *before* cardinality: a row that cannot qualify
+    // — wrong harness, wrong platform, an earlier boot — is not a rival candidate, and
+    // counting it would turn one good match into a false ambiguity.
+    let qualifying: Vec<&crate::relay::snapshot::Agent> = snapshot
         .agents
         .iter()
         .filter(|agent| {
-            agent.process.as_ref().is_some_and(|process| {
-                process.host == host
-                    && process.pid == nearest.pid
-                    && process.start == nearest.start
-            })
+            agent.harness == harness
+                && agent.process.as_ref().is_some_and(|process| {
+                    process.platform == "linux"
+                        && process.host == host
+                        && process.pid == nearest.pid
+                        && process.start == nearest.start
+                        && process.boot_id.as_deref() == Some(boot_id)
+                })
         })
         .collect();
 
-    let agent = match matched.as_slice() {
+    let agent = match qualifying.as_slice() {
         [] => {
             return Err(refuse(format!(
                 "no relay agent matches the nearest {} ancestor, pid {}",
@@ -1053,26 +1392,7 @@ pub fn resolve(
         }
     };
 
-    if agent.harness != harness {
-        return Err(refuse(format!(
-            "the agent matching pid {} is {:?}, but the nearest ancestor comm {:?} maps to {:?}",
-            nearest.pid, agent.harness, nearest.comm, harness
-        )));
-    }
-    let process = agent.process.as_ref().expect("filtered on a present handle");
-    if process.platform != "linux" {
-        return Err(refuse(format!(
-            "agent {} has a {:?} handle, which is not an identity candidate",
-            agent.id, process.platform
-        )));
-    }
-    if process.boot_id.as_deref() != Some(boot_id) {
-        return Err(refuse(format!(
-            "agent {} was recorded on an earlier boot",
-            agent.id
-        )));
-    }
-    if let Some(hint) = hint_for(&nearest.comm, get)?
+    if let Some(hint) = hint
         && hint != agent.session_id
     {
         return Err(refuse(format!(
@@ -1081,6 +1401,7 @@ pub fn resolve(
         )));
     }
 
+    let process = agent.process.as_ref().expect("filtered on a present handle");
     Ok(Some(Resolved {
         session: agent.id.clone(),
         pid: process.pid,
@@ -1095,10 +1416,15 @@ Add `pub mod resolve;` to `src/relay/mod.rs`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `just test-fast resolve`
+Run: `just test-fast a_match_ && just test-fast a_hint_ && just test-fast a_session_`
 Expected: PASS, 13 tests.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the commit builds green**
+
+Run: `just check`
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/relay/
@@ -1110,10 +1436,10 @@ git commit -m "feat(relay): match the nearest harness ancestor and adopt its age
 ### Task 5: The level in the ladder, adoption, and the platform refusal
 
 **Files:**
-- Modify: `src/claims.rs:8-88` (the `Identity` struct and `identity`/`identity_from`)
-- Modify: `src/relay/mod.rs` (add the staged entry point)
-- Modify: `src/commands/mod.rs:210-218` (claim field adoption)
-- Test: `src/claims.rs` (inline `mod tests`), `src/relay/mod.rs` (inline `mod tests`)
+- Modify: `src/claims.rs` (the `Identity` struct and `identity`/`identity_from`)
+- Modify: `src/relay/mod.rs` (the staged entry point; remove its `#![allow(dead_code)]`)
+- Modify: `src/config.rs` (remove its `#![allow(dead_code)]`)
+- Test: `src/claims.rs`, `src/relay/mod.rs` (inline `mod tests`)
 
 **Interfaces:**
 - Consumes: `relay::resolve::Resolved`, `config::HostConfig`, `relay::ancestry`, `relay::snapshot`.
@@ -1121,19 +1447,21 @@ git commit -m "feat(relay): match the nearest harness ancestor and adopt its age
   - `claims::Proof { pid_start: u64, boot_id: String, host: String }`
   - `claims::Identity` gains `pub proof: Option<Proof>`
   - `claims::identity_from(get, session_pid, relay: impl FnOnce() -> Result<Option<Resolved>>, warnings) -> Result<Identity>`
-  - `relay::level() -> Result<Option<Resolved>>` — stages 2, 3 and 4 of spec §7
-  - `claims::identity(warnings) -> Result<Identity>` keeps its signature, passing `relay::level`
+  - `relay::stage_platform(enabled: bool, proc_available: bool) -> Result<()>`
+  - `relay::enabled() -> Result<bool>`
+  - `relay::level() -> Result<Option<Resolved>>`
+  - `claims::identity(warnings)` keeps its signature, passing `relay::level`
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `src/claims.rs`'s `mod tests`:
+Add to `src/claims.rs`'s existing `mod tests`:
 
 ```rust
-    fn no_relay() -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {
+    fn relay_off() -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {
         || Ok(None)
     }
 
-    fn relay_says(session: &str) -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {
+    fn relay_resolves(session: &str) -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {
         let session = session.to_string();
         move || {
             Ok(Some(crate::relay::resolve::Resolved {
@@ -1147,11 +1475,11 @@ Add to `src/claims.rs`'s `mod tests`:
     }
 
     #[test]
-    fn the_explicit_pair_beats_relay_and_relay_is_never_consulted() {
+    fn a_ladder_explicit_pair_short_circuits_the_relay_level() {
         let identity = identity_from(
             env_of(&[("TASKS_SESSION", "explicit"), ("TASKS_SESSION_PID", "7")]),
             Some(11),
-            || panic!("the relay level must not be reached when TASKS_SESSION is set"),
+            || panic!("the relay level must not run when TASKS_SESSION is set"),
             &mut Vec::new(),
         )
         .unwrap();
@@ -1161,11 +1489,11 @@ Add to `src/claims.rs`'s `mod tests`:
     }
 
     #[test]
-    fn relay_beats_the_native_variables_and_carries_its_proof() {
+    fn a_ladder_relay_level_beats_the_native_variables() {
         let identity = identity_from(
             env_of(&[("CLAUDE_CODE_SESSION_ID", "raw")]),
             Some(11),
-            relay_says("claude-code:raw"),
+            relay_resolves("claude-code:raw"),
             &mut Vec::new(),
         )
         .unwrap();
@@ -1179,11 +1507,11 @@ Add to `src/claims.rs`'s `mod tests`:
     }
 
     #[test]
-    fn out_of_scope_leaves_the_native_ladder_untouched() {
+    fn a_ladder_out_of_scope_leaves_the_native_levels_untouched() {
         let identity = identity_from(
             env_of(&[("CLAUDE_CODE_SESSION_ID", "raw")]),
             Some(11),
-            no_relay(),
+            relay_off(),
             &mut Vec::new(),
         )
         .unwrap();
@@ -1193,7 +1521,7 @@ Add to `src/claims.rs`'s `mod tests`:
     }
 
     #[test]
-    fn a_relay_error_is_returned_rather_than_falling_to_a_lower_level() {
+    fn a_ladder_relay_error_does_not_fall_to_a_lower_level() {
         let error = identity_from(
             env_of(&[("CLAUDE_CODE_SESSION_ID", "raw")]),
             Some(11),
@@ -1206,7 +1534,7 @@ Add to `src/claims.rs`'s `mod tests`:
     }
 ```
 
-Add to a new `mod tests` in `src/relay/mod.rs`:
+Add a `mod tests` to `src/relay/mod.rs`:
 
 ```rust
 #[cfg(test)]
@@ -1214,23 +1542,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_unsupported_platform_refuses_only_once_relay_is_enabled() {
-        assert!(matches!(stage_platform(false, "macos"), Ok(())));
-        let error = stage_platform(true, "macos").unwrap_err().to_string();
-        assert!(error.contains("macos"), "{error}");
-        assert!(stage_platform(true, "linux").is_ok());
+    fn a_stage_platform_refusal_needs_both_relay_on_and_no_proc() {
+        // Relay off: the stage is never reached, whatever the host offers.
+        assert!(stage_platform(false, false).is_ok());
+        assert!(stage_platform(false, true).is_ok());
+        // Relay on: a host with a readable process tree passes; one without is refused.
+        assert!(stage_platform(true, true).is_ok());
+        let error = stage_platform(true, false).unwrap_err().to_string();
+        assert!(error.contains("/proc"), "{error}");
+        assert!(error.contains("TASKS_SESSION"), "{error}");
     }
 }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `just test-fast identity_ && just test-fast stage_platform`
-Expected: FAIL — `identity_from` takes three arguments, `Identity` has no `proof`, `stage_platform` is undefined.
+Run: `just test-fast a_ladder_ && just test-fast a_stage_`
+Expected: FAIL — `identity_from` takes three arguments, `Identity` has no `proof`, and
+`stage_platform` is undefined.
 
 - [ ] **Step 3: Write the implementation**
 
-In `src/claims.rs`, extend the identity types and the ladder:
+In `src/claims.rs`, add `Proof`, extend `Identity`, and insert the level:
 
 ```rust
 /// Process proof adopted from a matched relay handle, written into the claim's existing
@@ -1250,13 +1583,22 @@ pub struct Identity {
 }
 ```
 
-Every existing `Identity { … }` literal in `claims.rs` gains `proof: None`. Then, in
-`identity_from`, insert the relay level immediately after the `TASKS_SESSION` block and
-before the `CLAUDE_CODE_SESSION_ID` block:
+Every existing `Identity { … }` literal in `claims.rs` gains `proof: None`. Change the
+signature and insert the relay level immediately after the `TASKS_SESSION` block, before
+the `CLAUDE_CODE_SESSION_ID` block:
+
+```rust
+pub fn identity_from(
+    get: impl Fn(&str) -> Option<OsString>,
+    session_pid: Option<u32>,
+    relay: impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>>,
+    warnings: &mut Vec<String>,
+) -> Result<Identity> {
+```
 
 ```rust
     // Stage 1 of spec §7 is above: an explicit pair short-circuits, so the relay level is
-    // never invoked and its stages never run.
+    // never invoked and none of its stages run.
     if let Some(resolved) = relay()? {
         return Ok(Identity {
             tagged: resolved.session.clone(),
@@ -1271,18 +1613,7 @@ before the `CLAUDE_CODE_SESSION_ID` block:
     }
 ```
 
-and change the signature to:
-
-```rust
-pub fn identity_from(
-    get: impl Fn(&str) -> Option<OsString>,
-    session_pid: Option<u32>,
-    relay: impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>>,
-    warnings: &mut Vec<String>,
-) -> Result<Identity> {
-```
-
-with `identity` passing the production level:
+and pass the production level from `identity`:
 
 ```rust
 pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
@@ -1295,7 +1626,8 @@ pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
 }
 ```
 
-In `src/relay/mod.rs`, add the staged entry point:
+Replace the contents of `src/relay/mod.rs` — the `#![allow(dead_code)]` goes, because the
+ladder now consumes it:
 
 ```rust
 pub mod ancestry;
@@ -1305,39 +1637,43 @@ pub mod snapshot;
 use crate::config::HostConfig;
 use crate::error::{Error, Result};
 
-/// Stage 3 of spec §7. The refusal belongs to the relay level, not to startup: a session
-/// with `TASKS_SESSION` set never reaches it, so it can never take away the recovery path.
-pub fn stage_platform(enabled: bool, os: &str) -> Result<()> {
-    if enabled && os != "linux" {
-        return Err(Error::Config(format!(
-            "relay identity is enabled but unsupported on {os}: the ancestry walk needs \
-             /proc. Disable [identity].relay, or set TASKS_SESSION to name this session."
-        )));
+/// Whether the relay level is configured on. Read by callers that treat a relay-level
+/// failure differently from a native one.
+pub fn enabled() -> Result<bool> {
+    Ok(HostConfig::load()?.relay_identity)
+}
+
+/// Stage 3 of spec §7, asking what the host offers rather than what the target triple
+/// says: a Linux build without a mounted `/proc` cannot establish scope either. The
+/// refusal belongs to the relay level, not to startup, so a session with `TASKS_SESSION`
+/// set never reaches it and it can never take away the recovery path.
+pub fn stage_platform(enabled: bool, proc_available: bool) -> Result<()> {
+    if enabled && !proc_available {
+        return Err(Error::Config(
+            "relay identity is enabled but this host does not expose /proc, so ancestry \
+             cannot be established. Disable [identity].relay, or set TASKS_SESSION and \
+             TASKS_SESSION_PID to name this session explicitly."
+                .into(),
+        ));
     }
     Ok(())
 }
 
-/// Stages 2, 3 and 4 of spec §7, in order. `Ok(None)` means relay is off or the caller
-/// is out of scope; either way the native ladder applies unchanged.
+/// Stages 2, 3 and 4 of spec §7, in order. `Ok(None)` means relay is off or the caller is
+/// out of scope; either way the native ladder applies unchanged.
 pub fn level() -> Result<Option<resolve::Resolved>> {
     // Stage 2: configuration. Nothing below runs when relay is not enabled.
-    if !HostConfig::load()?.relay_identity {
+    if !enabled()? {
         return Ok(None);
     }
     // Stage 3: platform support.
-    stage_platform(true, std::env::consts::OS)?;
-    // Stage 4: ancestry, then the registry.
-    let scope = match ancestry::self_ppid() {
-        Some(ppid) => ancestry::walk(ppid, ancestry::read_stat),
-        None => ancestry::Scope::Unknown(0),
-    };
-    if matches!(scope, ancestry::Scope::Outside) {
-        return Ok(None);
-    }
-    let snapshot = snapshot::load()?;
+    stage_platform(true, ancestry::proc_available())?;
+    // Stage 4: ancestry, and only then the registry. `resolve` decides `Outside` and
+    // `Unknown` before calling the loader, so an unknown-ancestry caller is refused as
+    // such rather than by whatever the registry read would have said.
     resolve::resolve(
-        scope,
-        &snapshot,
+        ancestry::current_scope(),
+        snapshot::load,
         &crate::claims::hostname(),
         crate::claims::boot_id().as_deref(),
         &|key| {
@@ -1349,45 +1685,23 @@ pub fn level() -> Result<Option<resolve::Resolved>> {
 }
 ```
 
-In `src/commands/mod.rs`, replace the `pid_start` derivation in `claim_guard` so adopted
-proof is used when present:
-
-```rust
-                ClaimIntent::Acquire(crate::claims::Claim {
-                    owner,
-                    pid_start: match &me.proof {
-                        Some(proof) => Some(proof.pid_start),
-                        None => me.pid.and_then(|pid| match crate::claims::proc_stat(pid) {
-                            crate::claims::ProcStat::Found { starttime, .. } => Some(starttime),
-                            _ => None,
-                        }),
-                    },
-                    boot_id: match &me.proof {
-                        Some(proof) => Some(proof.boot_id.clone()),
-                        None => crate::claims::boot_id(),
-                    },
-                    host: match &me.proof {
-                        Some(proof) => proof.host.clone(),
-                        None => crate::claims::hostname(),
-                    },
-                    session: me.session,
-                    pid: me.pid,
-                    worktree,
-                    started,
-                    seen: now,
-                }),
-```
+Remove the `#![allow(dead_code)]` line from `src/config.rs`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `just test-fast claims && just test-fast relay`
-Expected: PASS. Every pre-existing `claims` test still passes unchanged.
+Run: `just test-fast a_ladder_ && just test-fast a_stage_`
+Expected: PASS, 5 tests. Every pre-existing `claims` test still passes unchanged.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the whole suite**
+
+Run: `just gate`
+Expected: PASS, with no `dead_code` allows left in `src/`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/claims.rs src/relay/ src/commands/mod.rs
-git commit -m "feat(claims): add the opt-in relay level and adopt its process proof"
+git add src/claims.rs src/relay/ src/config.rs
+git commit -m "feat(claims): add the opt-in relay level and carry its process proof"
 ```
 
 ---
@@ -1395,29 +1709,29 @@ git commit -m "feat(claims): add the opt-in relay level and adopt its process pr
 ### Task 6: Continuity in the guards
 
 **Files:**
-- Modify: `src/claims.rs` (add `Resolution` and `proves_ownership`)
-- Modify: `src/commands/mod.rs:120-137` (`refuse_foreign_live_claim`), `:168-200` (`claim_guard`)
-- Modify: `src/commands/park.rs:38`
-- Test: `src/claims.rs` (inline `mod tests`)
+- Modify: `src/claims.rs` (add `Resolution`, `continuation_identity`, `proves_ownership`)
+- Modify: `src/commands/mod.rs` (`refuse_foreign_live_claim`, `claim_guard`, new `Ctx` helpers)
+- Modify: `src/commands/park.rs`
+- Test: `src/claims.rs` (inline `mod tests`), `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `claims::{Claim, Identity, Proof}`, `relay::ancestry::{Scope, ProcEntry}`, `relay::resolve::same_session`.
+- Consumes: `claims::{Claim, Identity, Proof}`, `relay::ancestry`, `relay::resolve::{hint_for, same_session}`, `relay::enabled`.
 - Produces:
-  - `claims::Resolution` — `Resolved(Identity)` | `Failed(Error)`, with
-    `Resolution::identity(&self) -> Option<&Identity>` and `Resolution::require(self) -> Result<Identity>`
+  - `claims::Resolution` — `Resolved(Identity)` | `Failed(Error)`, with `identity(&self) -> Option<&Identity>` and `require(self) -> Result<Identity>`
   - `claims::resolve_identity(warnings: &mut Vec<String>) -> Resolution`
+  - `claims::continuation_identity(claim: &Claim) -> Identity`
   - `claims::proves_ownership(claim: &Claim, scope: &Scope, host: &str, boot_id: Option<&str>, get: &impl Fn(&str) -> Option<String>) -> bool`
-  - `Ctx::owns(&mut self, claim: &Claim, me: &Resolution) -> bool` (`pub(crate)`, Task 7 calls it)
-  - `Ctx::resolve_for_guard(&mut self) -> Result<Resolution>`
+  - `Ctx::resolve_for_guard(&mut self) -> Result<Resolution>` (`pub(crate)`)
+  - `Ctx::owns(&mut self, claim: &Claim, me: &Resolution) -> Result<bool>` (`pub(crate)`)
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing unit tests**
 
 Add to `src/claims.rs`'s `mod tests`:
 
 ```rust
     use crate::relay::ancestry::{ProcEntry, Scope};
 
-    const BOOT: &str = "0f9d5a1e-1c2b-4d3e-8f4a-5b6c7d8e9f01";
+    const PROOF_BOOT: &str = "0f9d5a1e-1c2b-4d3e-8f4a-5b6c7d8e9f01";
 
     fn claim_of(session: &str, pid: Option<u32>, pid_start: Option<u64>) -> Claim {
         Claim {
@@ -1425,7 +1739,7 @@ Add to `src/claims.rs`'s `mod tests`:
             session: session.into(),
             pid,
             pid_start,
-            boot_id: Some(BOOT.into()),
+            boot_id: Some(PROOF_BOOT.into()),
             host: "testhost".into(),
             worktree: "/w".into(),
             started: "2026-09-22T00:00:00Z".into(),
@@ -1434,7 +1748,12 @@ Add to `src/claims.rs`'s `mod tests`:
     }
 
     fn nearest(comm: &str, pid: u32, start: u64) -> Scope {
-        Scope::Harness(ProcEntry { pid, ppid: 1, comm: comm.into(), start })
+        Scope::Harness(ProcEntry {
+            pid,
+            ppid: 1,
+            comm: comm.into(),
+            start,
+        })
     }
 
     fn no_env() -> impl Fn(&str) -> Option<String> {
@@ -1442,99 +1761,126 @@ Add to `src/claims.rs`'s `mod tests`:
     }
 
     #[test]
-    fn the_owner_is_proved_from_the_claims_own_contents() {
+    fn a_proof_establishes_the_owner_from_the_claims_own_contents() {
         let claim = claim_of("codex:s1", Some(42), Some(900));
         assert!(proves_ownership(
             &claim,
             &nearest("codex", 42, 900),
             "testhost",
-            Some(BOOT),
+            Some(PROOF_BOOT),
             &no_env()
         ));
     }
 
     #[test]
-    fn a_nested_harness_cannot_prove_the_outer_sessions_claim() {
-        // Claude(8) owns the claim; a codex(9) session launched beneath it has 8 among
-        // its ancestors but its *nearest* boundary is 9. It must be refused.
+    fn a_proof_refuses_a_session_nested_under_the_owner() {
+        // claude(8) owns the claim; a codex(9) session launched beneath it has 8 among its
+        // ancestors, but its *nearest* boundary is 9. Two distinct harness processes with
+        // two distinct identities: it must be refused.
         let claim = claim_of("claude-code:c1", Some(8), Some(800));
         assert!(!proves_ownership(
             &claim,
             &nearest("codex", 9, 900),
             "testhost",
-            Some(BOOT),
+            Some(PROOF_BOOT),
             &no_env()
         ));
     }
 
     #[test]
-    fn a_contradicted_hint_defeats_the_proof() {
+    fn a_proof_is_defeated_by_a_contradicted_hint() {
         let claim = claim_of("claude-code:c1", Some(42), Some(900));
         let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".to_string());
         assert!(!proves_ownership(
             &claim,
             &nearest("claude", 42, 900),
             "testhost",
-            Some(BOOT),
+            Some(PROOF_BOOT),
             &env
         ));
     }
 
     #[test]
-    fn a_known_representation_change_still_proves_ownership() {
+    fn a_proof_survives_a_known_representation_change() {
         for stored in ["c1", "claude:c1", "claude-code:c1"] {
             let claim = claim_of(stored, Some(42), Some(900));
             let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".to_string());
             assert!(
-                proves_ownership(&claim, &nearest("claude", 42, 900), "testhost", Some(BOOT), &env),
+                proves_ownership(&claim, &nearest("claude", 42, 900), "testhost", Some(PROOF_BOOT), &env),
                 "{stored}"
             );
         }
     }
 
     #[test]
-    fn proof_fails_on_a_reused_pid_a_new_boot_or_another_host() {
+    fn a_proof_fails_on_pid_reuse_a_new_boot_or_another_host() {
         let claim = claim_of("codex:s1", Some(42), Some(900));
-        let scope = nearest("codex", 42, 901); // pid reused: different starttime
-        assert!(!proves_ownership(&claim, &scope, "testhost", Some(BOOT), &no_env()));
-        let scope = nearest("codex", 42, 900);
         assert!(!proves_ownership(
             &claim,
-            &scope,
+            &nearest("codex", 42, 901),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("codex", 42, 900),
             "testhost",
             Some("22222222-2222-4222-8222-222222222222"),
             &no_env()
         ));
-        assert!(!proves_ownership(&claim, &scope, "other", Some(BOOT), &no_env()));
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("codex", 42, 900),
+            "elsewhere",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
     }
 
     #[test]
-    fn a_claim_without_proof_cannot_be_proved() {
+    fn a_proof_is_unavailable_without_recorded_process_evidence() {
         // Native Claude without CLAUDE_PID, and every Codex claim, carry pid: None.
         let claim = claim_of("codex:s1", None, None);
         assert!(!proves_ownership(
             &claim,
             &nearest("codex", 42, 900),
             "testhost",
-            Some(BOOT),
+            Some(PROOF_BOOT),
             &no_env()
         ));
     }
 
     #[test]
-    fn out_of_scope_and_unknown_ancestry_prove_nothing() {
+    fn a_proof_needs_an_established_harness_boundary() {
         let claim = claim_of("codex:s1", Some(42), Some(900));
-        assert!(!proves_ownership(&claim, &Scope::Outside, "testhost", Some(BOOT), &no_env()));
-        assert!(!proves_ownership(&claim, &Scope::Unknown(4), "testhost", Some(BOOT), &no_env()));
+        assert!(!proves_ownership(&claim, &Scope::Outside, "testhost", Some(PROOF_BOOT), &no_env()));
+        assert!(!proves_ownership(&claim, &Scope::Unknown(4), "testhost", Some(PROOF_BOOT), &no_env()));
+    }
+
+    #[test]
+    fn a_continuation_identity_is_the_claims_own() {
+        let claim = claim_of("codex:s1", Some(42), Some(900));
+        let me = continuation_identity(&claim);
+        assert_eq!(me.session, "codex:s1");
+        assert_eq!(me.tagged, "codex:s1");
+        assert_eq!(me.pid, Some(42));
+        let proof = me.proof.unwrap();
+        assert_eq!(proof.pid_start, 900);
+        assert_eq!(proof.boot_id, PROOF_BOOT);
+        assert_eq!(proof.host, "testhost");
+
+        // A claim with no recorded proof yields an identity with none.
+        assert!(continuation_identity(&claim_of("codex:s1", None, None)).proof.is_none());
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 2: Run the unit tests to verify they fail**
 
-Run: `just test-fast proves_ownership`
-Expected: FAIL — `proves_ownership` is undefined.
+Run: `just test-fast a_proof_ && just test-fast a_continuation_`
+Expected: FAIL — `proves_ownership` and `continuation_identity` are undefined.
 
-- [ ] **Step 3: Write the implementation**
+- [ ] **Step 3: Write the claims-side implementation**
 
 In `src/claims.rs`:
 
@@ -1572,6 +1918,26 @@ pub fn resolve_identity(warnings: &mut Vec<String>) -> Resolution {
     }
 }
 
+/// The identity to record for an operation on a claim this caller already owns: the
+/// claim's own, never a freshly resolved one. Spec §6.4 — `existing.session` is never
+/// rewritten, so a claim keeps the identity it was created with through every refresh and
+/// release, and enabling relay mid-flight cannot rewrite a natively-keyed claim.
+pub fn continuation_identity(claim: &Claim) -> Identity {
+    Identity {
+        session: claim.session.clone(),
+        tagged: claim.session.clone(),
+        pid: claim.pid,
+        proof: match (claim.pid_start, &claim.boot_id) {
+            (Some(pid_start), Some(boot_id)) => Some(Proof {
+                pid_start,
+                boot_id: boot_id.clone(),
+                host: claim.host.clone(),
+            }),
+            _ => None,
+        },
+    }
+}
+
 /// Spec §6.2: does this caller own `claim`, proved from the claim's own recorded process
 /// handle and the caller's ancestry, with no registry read?
 pub fn proves_ownership(
@@ -1588,7 +1954,7 @@ pub fn proves_ownership(
         return false;
     };
     // 1. same host, same boot.
-    if claim.host != host || claim.boot_id.as_deref() != boot_id || boot_id.is_none() {
+    if boot_id.is_none() || claim.host != host || claim.boot_id.as_deref() != boot_id {
         return false;
     }
     // 2. the *nearest* harness boundary, not any ancestor: a session nested under the
@@ -1596,8 +1962,8 @@ pub fn proves_ownership(
     if nearest.pid != pid || nearest.start != pid_start {
         return false;
     }
-    // 3. a scoped hint must not contradict the claim, so that deferring a resolution
-    //    error cannot turn a contradicted session into an accepted owner.
+    // 3. a scoped hint must not contradict the claim, so that deferring a resolution error
+    //    cannot turn a contradicted session into an accepted owner.
     match crate::relay::resolve::hint_for(&nearest.comm, get) {
         Ok(Some(hint)) => crate::relay::resolve::same_session(&claim.session, &nearest.comm, &hint),
         Ok(None) => true,
@@ -1606,41 +1972,14 @@ pub fn proves_ownership(
 }
 ```
 
-In `src/commands/mod.rs`, add the shared ownership decision to `Ctx`:
+- [ ] **Step 4: Write the guard-side implementation**
+
+Add two helpers to `Ctx` in `src/commands/mod.rs`:
 
 ```rust
-    /// Spec §6.2.2 steps 2 and 3. `None` means this caller is not the owner, which is
-    /// the point at which acquisition rules apply.
-    fn owns(&mut self, claim: &crate::claims::Claim, me: &crate::claims::Resolution) -> bool {
-        if let Some(identity) = me.identity()
-            && claim.session == identity.session
-        {
-            return true;
-        }
-        let scope = match crate::relay::ancestry::self_ppid() {
-            Some(ppid) => crate::relay::ancestry::walk(ppid, crate::relay::ancestry::read_stat),
-            None => crate::relay::ancestry::Scope::Unknown(0),
-        };
-        crate::claims::proves_ownership(
-            claim,
-            &scope,
-            &crate::claims::hostname(),
-            crate::claims::boot_id().as_deref(),
-            &|key| {
-                std::env::var_os(key)
-                    .and_then(|value| value.into_string().ok())
-                    .filter(|value| !value.is_empty())
-            },
-        )
-    }
-```
-
-Add the shared resolution helper beside it. A relay-level failure is carryable; a native
-failure stays fatal, which is what keeps relay-off behaviour byte-for-byte today's:
-
-```rust
-    /// Resolve identity, keeping a relay-level failure carryable so §6.2.2 can defer it.
-    /// A failure with relay off is raised here, exactly where `identity` raised it before.
+    /// Resolve identity, keeping a relay-level failure carryable so §6.2.2 can defer it. A
+    /// failure with relay off is raised here, exactly where `identity` raised it before,
+    /// which is what holds the relay-off guarantee at every call site rather than at some.
     pub(crate) fn resolve_for_guard(&mut self) -> Result<crate::claims::Resolution> {
         let me = crate::claims::resolve_identity(&mut self.warnings);
         match me {
@@ -1648,48 +1987,82 @@ failure stays fatal, which is what keeps relay-off behaviour byte-for-byte today
             other => Ok(other),
         }
     }
-```
 
-Rewrite `refuse_foreign_live_claim`. It guards an edit rather than acquiring anything, so
-it needs no identity when there is no claim and none when the claim is stale — and when it
-does refuse, refusing records no owner and so needs none either:
-
-```rust
-    pub fn refuse_foreign_live_claim(&mut self, id: &TaskId) -> Result<()> {
-        let Some(existing) = self.claims_mut()?.get(id).cloned() else {
-            return Ok(());
-        };
-        let live = crate::claims::liveness(&existing);
-        if live != Liveness::Live {
-            return Ok(());
+    /// Spec §6.2.2 steps 2 and 3. `false` means this caller is not the owner, which is the
+    /// point at which acquisition rules apply.
+    pub(crate) fn owns(
+        &mut self,
+        claim: &crate::claims::Claim,
+        me: &crate::claims::Resolution,
+    ) -> Result<bool> {
+        if let Some(identity) = me.identity()
+            && claim.session == identity.session
+        {
+            return Ok(true);
         }
-        let me = self.resolve_for_guard()?;
-        if self.owns(&existing, &me) {
-            return Ok(());
+        // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
+        // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
+        // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
+        let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
+        if explicit || !crate::relay::enabled()? {
+            return Ok(false);
         }
-        Err(Error::Claimed(
-            id.to_string(),
-            Ctx::describe_claim(&existing, &live),
+        Ok(crate::claims::proves_ownership(
+            claim,
+            &crate::relay::ancestry::current_scope(),
+            &crate::claims::hostname(),
+            crate::claims::boot_id().as_deref(),
+            &|key| {
+                std::env::var_os(key)
+                    .and_then(|value| value.into_string().ok())
+                    .filter(|value| !value.is_empty())
+            },
         ))
     }
 ```
 
-Rewrite the head of `claim_guard`. The only structural changes are `resolve_for_guard` in
-place of `identity`, `self.owns(…)` in place of `existing.session == me.session`, and
-`me.require()?` before every path that records an owner:
+Rewrite `refuse_foreign_live_claim`. Identity is resolved first, exactly as before, so an
+absent or stale claim behaves as it does today:
+
+```rust
+    pub fn refuse_foreign_live_claim(&mut self, id: &TaskId) -> Result<()> {
+        let me = self.resolve_for_guard()?;
+        let existing = self.claims_mut()?.get(id).cloned();
+        let Some(existing) = existing else {
+            return me.require().map(|_| ());
+        };
+        if self.owns(&existing, &me)? {
+            return Ok(());
+        }
+        // Not the owner. Today's behaviour resolved an identity here whatever the verdict,
+        // so a relay-level failure must still surface rather than be silently tolerated.
+        me.require()?;
+        let live = crate::claims::liveness(&existing);
+        if live == Liveness::Live {
+            return Err(Error::Claimed(
+                id.to_string(),
+                Ctx::describe_claim(&existing, &live),
+            ));
+        }
+        Ok(())
+    }
+```
+
+Rewrite `claim_guard`:
 
 ```rust
     fn claim_guard(&mut self, id: &TaskId, to: Status, force: bool) -> Result<()> {
-        let me = self.resolve_for_guard()?;
+        let resolution = self.resolve_for_guard()?;
         let owner = owner_name(&self.project)?;
         let worktree = self.project.root.display().to_string();
 
-        let mut warning = None;
         let existing = self.claims_mut()?.get(id).cloned();
         let mine = match &existing {
-            Some(existing) => self.owns(existing, &me),
+            Some(claim) => self.owns(claim, &resolution)?,
             None => false,
         };
+
+        let mut warning = None;
         if let Some(existing) = &existing {
             let live = crate::claims::liveness(existing);
             match (&live, mine) {
@@ -1699,8 +2072,6 @@ place of `identity`, `self.owns(…)` in place of `existing.session == me.sessio
                         Ctx::describe_claim(existing, &live),
                     ));
                 }
-                // Both remaining branches take the claim over, and a takeover records a
-                // new owner: `--force` displaces an owner but never substitutes for one.
                 (Liveness::Live, false) => {
                     warning = Some(format!(
                         "took over a live claim held by {}",
@@ -1717,14 +2088,21 @@ place of `identity`, `self.owns(…)` in place of `existing.session == me.sessio
             }
         }
 
+        // The identity to record. A continuation by the owner — a repeated `start`, a
+        // park, a close — keeps the claim's own identity and needs no fresh resolution, so
+        // a lost registry cannot strand it and enabling relay cannot rewrite its key.
+        // Everything else is acquisition and requires a resolved identity.
+        let me = match (&existing, mine) {
+            (Some(claim), true) => crate::claims::continuation_identity(claim),
+            _ => resolution.require()?,
+        };
+
         self.pending_claim = Some(if to == Status::Doing {
-            // Acquisition, whether first claim or takeover: identity is required here.
-            let me = me.require()?;
             let now = crate::time::now();
-            let started = existing
-                .filter(|_| mine)
-                .map(|existing| existing.started.clone())
-                .unwrap_or_else(|| now.clone());
+            let started = match (&existing, mine) {
+                (Some(claim), true) => claim.started.clone(),
+                _ => now.clone(),
+            };
             (
                 id.clone(),
                 ClaimIntent::Acquire(crate::claims::Claim {
@@ -1752,7 +2130,6 @@ place of `identity`, `self.owns(…)` in place of `existing.session == me.sessio
                 }),
             )
         } else {
-            // A release by its owner: proof is enough, so a lost registry cannot strand it.
             (
                 id.clone(),
                 ClaimIntent::Release {
@@ -1769,35 +2146,101 @@ place of `identity`, `self.owns(…)` in place of `existing.session == me.sessio
     }
 ```
 
-This supersedes the Task 5 edit to the `Acquire` literal: the field adoption is the same,
-and it now lives in the rewritten function.
-
-In `src/commands/park.rs:38`, replace the identity line with the same shape. A park is a
-release by its owner, so it proceeds on proof:
+In `src/commands/park.rs`, replace the identity line at `:38`. `park` needs a concrete
+`Identity` because it writes `me.tagged` into both the park entry (`:117`) and the
+escalation record (`:166`), and compares `me.session` at `:45`; resolving to a
+`Resolution` there would not compile. A proved owner supplies its continuation identity;
+anything else — parking an unclaimed task, taking over a stale claim — is acquisition and
+requires a resolved one:
 
 ```rust
-    let me = ctx.resolve_for_guard()?;
+    let resolution = ctx.resolve_for_guard()?;
+    let existing = ctx.claims_mut()?.get(&task.id).cloned();
+    let me = match &existing {
+        Some(claim) if ctx.owns(claim, &resolution)? => crate::claims::continuation_identity(claim),
+        _ => resolution.require()?,
+    };
 ```
 
-and wherever the function compares `existing.session` to `me.session`, use
-`ctx.owns(&existing, &me)` instead. Park records no new owner, so it never calls
-`require()`.
+Everything below is unchanged: `me.session` at `:45`, `me.tagged.clone()` at `:117` and
+`me.tagged` at `:166` all still typecheck, and for a proved owner `me.session` equals
+`existing.session`, so the comparison at `:45` takes its own-claim branch as it should.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 5: Write the command-level continuity tests**
 
-Run: `just test-fast claims && just test-fast commands`
+Add to `tests/cli.rs`. These use the explicit pair, so they exercise continuity and the
+acquisition rules without needing a harness ancestor; Task 8 covers the relay paths:
+
+```rust
+#[test]
+fn a_continuity_repeated_start_by_the_owner_keeps_one_claim() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    for _ in 0..2 {
+        env.cmd(&dir)
+            .env("TASKS_SESSION", "owner")
+            .args(["start", &id])
+            .assert()
+            .success();
+    }
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(store.matches("session = \"owner\"").count(), 1, "{store}");
+}
+
+#[test]
+fn a_continuity_explicit_mismatch_stays_foreign() {
+    // Two workers in one process tree, told apart only by TASKS_SESSION. Proof must never
+    // merge them, whatever the ancestry says.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "worker-a")
+        .env("TASKS_SESSION_PID", &std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    let out = env
+        .cmd(&dir)
+        .env("TASKS_SESSION", "worker-b")
+        .env("TASKS_SESSION_PID", &std::process::id().to_string())
+        .args(["done", &id, "not mine"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("claimed"));
+}
+
+#[test]
+fn a_continuity_park_and_close_by_the_owner_still_work() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let session = || ("TASKS_SESSION", "owner");
+    env.cmd(&dir).env(session().0, session().1).args(["start", &id]).assert().success();
+    env.cmd(&dir).env(session().0, session().1).args(["park", &id, "next"]).assert().success();
+    env.cmd(&dir).env(session().0, session().1).args(["start", &id]).assert().success();
+    env.cmd(&dir).env(session().0, session().1).args(["done", &id, "landed"]).assert().success();
+    assert_eq!(env.json(&dir, &["show", &id])["status"], "done");
+}
+```
+
+- [ ] **Step 6: Run the tests**
+
+Run: `just test-fast a_proof_ && just test-fast a_continuation_ && just test-fast a_continuity_`
 Expected: PASS.
 
-- [ ] **Step 5: Run the whole suite**
+- [ ] **Step 7: Run the whole suite**
 
 Run: `just gate`
-Expected: PASS — no pre-existing claim or park test changes behaviour.
+Expected: PASS — every pre-existing claim, park and status test behaves unchanged.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/claims.rs src/commands/mod.rs src/commands/park.rs
-git commit -m "feat(claims): prove claim ownership without the registry; takeover still needs identity"
+git add src/claims.rs src/commands/mod.rs src/commands/park.rs tests/cli.rs
+git commit -m "feat(claims): prove claim ownership without the registry; acquisition still needs identity"
 ```
 
 ---
@@ -1805,42 +2248,145 @@ git commit -m "feat(claims): prove claim ownership without the registry; takeove
 ### Task 7: Continuity in `note`
 
 **Files:**
-- Modify: `src/commands/status.rs:82-124`
+- Modify: `src/commands/status.rs` (`note`, beginning at `:82`)
+- Modify: `tests/common/mod.rs` (clear `RELAY_STATE_DIR`; add the harness shim helper)
 - Test: `tests/cli.rs`
 
 `note` is deliberately not folded into Task 6's common path. It guards nothing: it never
 refuses a foreign claim and never touches one, and its identity resolution exists only to
-decide whether to refresh its own claim's heartbeat.
+decide whether to refresh its own claim's heartbeat. Spec §6.6.
+
+This task introduces the harness shim, because it is the first test here that needs a real
+harness ancestor: a test binary's parent is the test runner, so no ambient ancestry exists
+and a test that assumes one silently exercises the out-of-scope path instead.
 
 **Interfaces:**
-- Consumes: `Ctx::resolve_for_guard`, `Ctx::owns`, `relay::enabled`.
-- Produces: no new public interface.
+- Consumes: `Ctx::resolve_for_guard`, `Ctx::owns`.
+- Produces: `tests/common/mod.rs::harness_shim(dir, home, comm, script) -> std::process::Output` and `WRITE_REGISTRY`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add the harness shim to the test harness**
+
+In `tests/common/mod.rs`, add `.env_remove("RELAY_STATE_DIR")` to both `cmd` and `raw`,
+beside the existing `.env_remove("XDG_STATE_HOME")`, so no test inherits a real registry.
+Then add:
+
+```rust
+/// Run `script` under a process whose `comm` is `comm`, so the `tasks` it launches has a
+/// recognized harness ancestor. A copy of `/bin/sh` supplies the comm. Nothing is
+/// `exec`ed: `exec` would replace the shim with `tasks`, which would inherit the shim's
+/// pid and its parent, destroying the ancestry under test.
+pub fn harness_shim(
+    dir: &Path,
+    home: &Path,
+    comm: &str,
+    script: &str,
+) -> std::process::Output {
+    use std::os::unix::fs::PermissionsExt;
+    let shim = home.join(comm);
+    std::fs::copy("/bin/sh", &shim).unwrap();
+    let mut perms = std::fs::metadata(&shim).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&shim, perms).unwrap();
+    std::process::Command::new(&shim)
+        .arg("-c")
+        .arg(script)
+        .current_dir(dir)
+        .env("HOME", home)
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("TASKS_FORMAT")
+        .env_remove("TASKS_OWNER")
+        .env_remove("TASKS_SESSION")
+        .env_remove("TASKS_SESSION_PID")
+        .env_remove("TASKS_MODEL")
+        .env_remove("TASKS_AGENT")
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("CLAUDE_PID")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("CODEX_THREAD_ID")
+        .env("USER", "tester")
+        .env("TASKS_BIN", assert_cmd::cargo::cargo_bin("tasks"))
+        .output()
+        .unwrap()
+}
+
+/// Shell function that writes a one-agent registry naming the *shim's own* process, with
+/// the private mode relay requires, then leaves `$TASKS_BIN` ready to run.
+///
+/// The start token must come from `/proc/$$/stat`, the shim's own stat file. Reading
+/// `/proc/self/stat` inside a `$(…)` substitution reads the *substituting* process — a
+/// different process with a different start token — and pairing that with `$$` produces a
+/// handle that matches only if two processes happened to start within one clock tick.
+pub const WRITE_REGISTRY: &str = r#"
+write_registry() {
+  start=$(awk '{print $22}' "/proc/$$/stat")
+  boot=$(cat /proc/sys/kernel/random/boot_id)
+  host=$(cat /proc/sys/kernel/hostname)
+  mkdir -p "$RELAY_STATE_DIR"
+  chmod 700 "$RELAY_STATE_DIR"
+  cat > "$RELAY_STATE_DIR/agents.json" <<EOF
+{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,
+ "agents":{"$AGENT_ID":{"id":"$AGENT_ID","harness":"$HARNESS","sessionId":"$SESSION",
+  "scope":"session","cwd":"/w","repoRoot":null,"remote":null,"projectKey":"k",
+  "project":"p","state":"idle","updatedAt":1,
+  "process":{"platform":"linux","host":"$host","bootId":"$boot","pid":$$,"start":"$start"}}}}
+EOF
+  chmod 600 "$RELAY_STATE_DIR/agents.json"
+}
+"#;
+```
+
+Add a helper to `tests/cli.rs` that turns on relay for a test home and returns the state
+directory:
+
+```rust
+/// Enable relay identity for this test's HOME and return its relay state directory.
+fn relay_on(env: &TestEnv) -> std::path::PathBuf {
+    let config = env.home.path().join(".config/tasks/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "[identity]\nrelay = true\n").unwrap();
+    env.home.path().join("relay-state")
+}
+
+/// The preamble every shim script shares: exports, then the registry writer.
+fn shim_env(state: &std::path::Path, harness: &str, session: &str) -> String {
+    format!(
+        "RELAY_STATE_DIR={}\nHARNESS={harness}\nSESSION={session}\nAGENT_ID={harness}:{session}\n\
+         export RELAY_STATE_DIR HARNESS SESSION AGENT_ID TASKS_BIN\n{}",
+        state.display(),
+        common::WRITE_REGISTRY
+    )
+}
+```
+
+- [ ] **Step 2: Write the failing tests**
 
 Add to `tests/cli.rs`:
 
 ```rust
 #[test]
-fn note_never_fails_on_an_unresolvable_relay_identity() {
+fn a_note_lands_when_relay_identity_cannot_resolve() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
 
-    // Relay enabled, with a state directory that holds no registry at all.
-    let config = env.home.path().join(".config/tasks/config.toml");
-    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-    std::fs::write(&config, "[identity]\nrelay = true\n").unwrap();
-    let state = env.home.path().join("empty-relay-state");
-    std::fs::create_dir_all(&state).unwrap();
+    // In scope under a live codex ancestor, but the registry holds no agents — the real
+    // Codex case before its first SessionStart. Identity cannot resolve; the note must
+    // land anyway, and must say why the heartbeat was skipped.
+    let script = format!(
+        "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
+         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n\
+         \"$TASKS_BIN\" note {id} 'still lands'\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
 
-    let out = env
-        .cmd(&dir)
-        .env("RELAY_STATE_DIR", &state)
-        .args(["note", &id, "still lands"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    // `start` is acquisition and must fail; `note` must still succeed.
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("\"warnings\""), "note should have produced output: {text}");
     let shown = env.json(&dir, &["show", &id]);
     assert!(
         shown["notes"]
@@ -1853,7 +2399,30 @@ fn note_never_fails_on_an_unresolvable_relay_identity() {
 }
 
 #[test]
-fn a_foreign_note_is_accepted_and_leaves_the_foreign_claim_alone() {
+fn a_note_warns_when_ownership_evidence_is_unavailable() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // Claim under a working registry, then remove it and note with a contradicted hint so
+    // neither identity nor proof can establish ownership.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CODEX_SESSION_ID=someone-else \"$TASKS_BIN\" note {id} 'orphan note'\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("heartbeat") && text.contains("not refreshed"),
+        "an unprovable claim must say the heartbeat was skipped: {text}"
+    );
+}
+
+#[test]
+fn a_note_from_a_foreign_session_leaves_the_claim_alone() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
@@ -1865,23 +2434,41 @@ fn a_foreign_note_is_accepted_and_leaves_the_foreign_claim_alone() {
         .success();
     let before = std::fs::read_to_string(env.claim_store("sci")).unwrap();
 
-    env.cmd(&dir)
+    let out = env
+        .cmd(&dir)
         .env("TASKS_SESSION", "stranger")
         .args(["note", &id, "from elsewhere"])
-        .assert()
-        .success();
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
     let after = std::fs::read_to_string(env.claim_store("sci")).unwrap();
     assert_eq!(before, after, "a foreign note must not refresh or alter the claim");
+    // An ordinary foreign note resolved its identity fine, so it must not warn.
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("heartbeat"));
+}
+
+#[test]
+fn a_note_with_relay_off_is_unchanged_under_a_harness_ancestor() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    // No config file: relay is off, so the harness ancestor is irrelevant and the native
+    // ladder resolves as it always has.
+    let script = format!("\"$TASKS_BIN\" start {id}\n\"$TASKS_BIN\" note {id} 'native'\n");
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("heartbeat"));
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `just test-fast note_never_fails && just test-fast a_foreign_note`
-Expected: the first FAILs with a `config` error at exit 1; the second passes already and
+Run: `just test-fast a_note_`
+Expected: `a_note_lands_when_relay_identity_cannot_resolve` and
+`a_note_warns_when_ownership_evidence_is_unavailable` FAIL; the other two pass already and
 must keep passing.
 
-- [ ] **Step 3: Write the implementation**
+- [ ] **Step 4: Write the implementation**
 
 In `status::note`, replace the identity resolution and the `mine` filter:
 
@@ -1890,218 +2477,168 @@ In `status::note`, replace the identity resolution and the `mine` filter:
     // means a corrupt store returns an error after the note has already landed, and the
     // obvious retry then duplicates it.
     //
-    // A relay-level resolution failure is not fatal here: `note` guards nothing, so a
-    // lost registry must not cost the caller a note. A claim that can be neither matched
-    // nor proved is simply not ours, which is the same outcome as a foreign claim.
+    // `resolve_for_guard` is what keeps the two failure kinds apart, and is why `note`
+    // needs no special case of its own: with relay off it raises exactly where `identity`
+    // raised before, so an unresolvable native identity is still fatal and the note still
+    // does not land; with relay on it carries the failure, and the note lands.
     let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
     save(&mut ctx, &mut task)?;
 
     // Use the pruned store so a note cannot revive a stale claim.
     let existing = ctx.claims_mut()?.get(&task.id).cloned();
-    let mine = existing.filter(|claim| ctx.owns(claim, &me));
+    let mine = match &existing {
+        Some(claim) => ctx.owns(claim, &me)?,
+        None => false,
+    };
+
+    // The note has landed. If a claim exists that we could not establish ownership of
+    // *because our own identity did not resolve*, say so: silence here would look
+    // identical to an ordinary foreign note, which is a different situation entirely.
+    if let Some(claim) = &existing
+        && !mine
+        && me.identity().is_none()
+    {
+        ctx.warnings.push(format!(
+            "the note landed, but the claim heartbeat on {} was not refreshed (this \
+             session's identity could not be resolved, so ownership of the claim held by \
+             {} could not be established); the claim may look stale to other sessions",
+            task.id, claim.session
+        ));
+    }
+    let mine = existing.filter(|_| mine);
 ```
 
-`Ctx::owns` and `Ctx::resolve_for_guard` are both `pub(crate)` for this call site. The
-heartbeat block below is unchanged, as is its warning on a failed save.
+The heartbeat block below is unchanged, as is its own warning when the save fails.
+`Ctx::owns` and `Ctx::resolve_for_guard` are `pub(crate)` from Task 6.
 
-`resolve_for_guard` is what keeps the two cases apart, and is the reason `note` needs no
-special-casing of its own: with relay off it raises exactly where `identity` raised
-before, so an unresolvable native identity is still fatal and the note still does not
-land; with relay on it carries the failure, `owns` answers `false`, and the note lands
-with no heartbeat — the same outcome as a foreign claim, which `note` has always allowed.
+- [ ] **Step 5: Run the tests to verify they pass**
 
-Add to `src/relay/mod.rs`:
+Run: `just test-fast a_note_`
+Expected: PASS, 4 tests.
 
-```rust
-/// Whether the relay level is configured on at all. Read by callers that treat a
-/// relay-level failure differently from a native one.
-pub fn enabled() -> Result<bool> {
-    Ok(HostConfig::load()?.relay_identity)
-}
-```
+- [ ] **Step 6: Run the whole suite**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+Run: `just gate`
+Expected: PASS.
 
-Run: `just test-fast note`
-Expected: PASS, both tests.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/commands/status.rs src/relay/mod.rs tests/cli.rs
+git add src/commands/status.rs tests/
 git commit -m "feat(note): keep the heartbeat on proof and never lose a note to relay resolution"
 ```
 
-**Note on `relay::enabled`:** `resolve_for_guard` (Task 6) calls it, so it must exist by
-the end of Task 6. Add it there if Task 6 is implemented first; this task's step is a
-no-op in that case.
-
 ---
 
-### Task 8: End-to-end acceptance tests and documentation
+### Task 8: Acceptance tests and documentation
 
 **Files:**
-- Modify: `tests/common/mod.rs:19-40` and `:43-66` (clear `RELAY_STATE_DIR` in `cmd` and `raw`)
 - Modify: `tests/cli.rs`
 - Modify: `README.md`, `skills/tasks/SKILL.md`
 - Test: `tests/cli.rs`
 
-The reviewer asked for the nested-harness, contradictory-hint, registry-loss and relay-off
-cases as explicit acceptance tests. They need a real harness ancestor, which a test cannot
-get from the test runner — so each spawns a copy of `/bin/sh` named for the harness, which
-writes a registry naming its own pid and start time and then runs `tasks` as a child.
-Nothing is `exec`ed: `exec` would replace the shim and destroy the ancestry under test.
+The four cases the spec review asked to keep explicit — nested harness, contradictory hint,
+registry loss, relay off — plus acquisition and the private-path refusal. All reuse
+`harness_shim` and `WRITE_REGISTRY` from Task 7.
 
 **Interfaces:**
 - Consumes: everything above.
-- Produces: `tests/cli.rs::harness_shim(env, comm, script) -> std::process::Output`.
+- Produces: no new interface.
 
-- [ ] **Step 1: Add the harness shim helper and the acceptance tests**
+- [ ] **Step 1: Write the acceptance tests**
 
 Add to `tests/cli.rs`:
 
 ```rust
-/// Run `script` under a process whose `comm` is `comm`, so the `tasks` it launches has a
-/// recognized harness ancestor. A copy of `/bin/sh` supplies the comm; the script writes
-/// the registry from its own `/proc/self/stat` because the pid is not known until then.
-fn harness_shim(dir: &std::path::Path, home: &std::path::Path, comm: &str, script: &str) -> std::process::Output {
-    let shim = home.join(comm);
-    std::fs::copy("/bin/sh", &shim).unwrap();
-    let mut perms = std::fs::metadata(&shim).unwrap().permissions();
-    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
-    std::fs::set_permissions(&shim, perms).unwrap();
-    std::process::Command::new(&shim)
-        .arg("-c")
-        .arg(script)
-        .current_dir(dir)
-        .env("HOME", home)
-        .env_remove("XDG_CONFIG_HOME")
-        .env_remove("XDG_STATE_HOME")
-        .env_remove("TASKS_SESSION")
-        .env_remove("TASKS_SESSION_PID")
-        .env_remove("CLAUDE_CODE_SESSION_ID")
-        .env_remove("CODEX_SESSION_ID")
-        .env_remove("CODEX_THREAD_ID")
-        .env("USER", "tester")
-        .env("TASKS_BIN", assert_cmd::cargo::cargo_bin("tasks"))
-        .output()
-        .unwrap()
-}
-
-/// Shell that writes a one-agent registry naming this shim's own process, then runs tasks.
-/// `comm` here has no spaces or parentheses, so field 22 is safe to take positionally.
-const WRITE_REGISTRY_THEN: &str = r#"
-set -e
-start=$(awk '{print $22}' /proc/self/stat)
-boot=$(cat /proc/sys/kernel/random/boot_id)
-host=$(cat /proc/sys/kernel/hostname)
-mkdir -p "$RELAY_STATE_DIR"
-cat > "$RELAY_STATE_DIR/agents.json" <<EOF
-{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,
- "agents":{"$AGENT_ID":{"id":"$AGENT_ID","harness":"$HARNESS","sessionId":"$SESSION",
-  "scope":"session","cwd":"/w","repoRoot":null,"remote":null,"projectKey":"k",
-  "project":"p","state":"idle","updatedAt":1,
-  "process":{"platform":"linux","host":"$host","bootId":"$boot","pid":$$,"start":"$start"}}}}
-EOF
-"#;
-
-fn relay_home(env: &TestEnv) -> (std::path::PathBuf, std::path::PathBuf) {
-    let config = env.home.path().join(".config/tasks/config.toml");
-    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-    std::fs::write(&config, "[identity]\nrelay = true\n").unwrap();
-    let state = env.home.path().join(".local/state/relay");
-    (config, state)
-}
-
 #[test]
-fn relay_mode_keys_a_claim_by_the_agent_id_with_the_handles_proof() {
+fn an_acceptance_relay_claim_is_keyed_by_the_agent_id_with_its_proof() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
-    let (_, state) = relay_home(&env);
+    let state = relay_on(&env);
 
     let script = format!(
-        "{WRITE_REGISTRY_THEN}\nexport RELAY_STATE_DIR HARNESS SESSION AGENT_ID\n\"$TASKS_BIN\" start {id}\n"
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
     );
-    let out = harness_shim(
-        &dir,
-        env.home.path(),
-        "codex",
-        &format!(
-            "RELAY_STATE_DIR={}\nHARNESS=codex\nSESSION=s1\nAGENT_ID=codex:s1\n{script}",
-            state.display()
-        ),
-    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
 
     let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
-    assert!(store.contains("codex:s1"), "{store}");
+    assert!(store.contains("session = \"codex:s1\""), "{store}");
     assert!(store.contains("pid_start"), "{store}");
     assert!(store.contains("boot_id"), "{store}");
 }
 
 #[test]
-fn the_owner_can_park_after_the_registry_is_removed() {
+fn an_acceptance_owner_can_park_and_close_after_the_registry_is_removed() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
-    let (_, state) = relay_home(&env);
+    let state = relay_on(&env);
 
     let script = format!(
-        "{WRITE_REGISTRY_THEN}\nexport RELAY_STATE_DIR HARNESS SESSION AGENT_ID\n\
-         \"$TASKS_BIN\" start {id}\n\
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
-         \"$TASKS_BIN\" park {id} 'next step'\n"
+         \"$TASKS_BIN\" park {id} 'next step'\n\
+         \"$TASKS_BIN\" start {id}\n\
+         \"$TASKS_BIN\" done {id} landed\n",
+        shim_env(&state, "codex", "s1")
     );
-    let out = harness_shim(
-        &dir,
-        env.home.path(),
-        "codex",
-        &format!(
-            "RELAY_STATE_DIR={}\nHARNESS=codex\nSESSION=s1\nAGENT_ID=codex:s1\n{script}",
-            state.display()
-        ),
-    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(
         out.status.code(),
         Some(0),
-        "the owner must be able to park with the registry gone: {}",
+        "the owner must park, resume and close with the registry gone: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    assert_eq!(env.json(&dir, &["show", &id])["status"], "done");
 }
 
 #[test]
-fn a_nested_harness_cannot_close_the_outer_sessions_task() {
+fn an_acceptance_repeated_start_after_registry_loss_keeps_the_held_identity() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
-    let (_, state) = relay_home(&env);
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(store.matches("session = \"codex:s1\"").count(), 1, "{store}");
+}
+
+#[test]
+fn an_acceptance_nested_harness_cannot_close_the_outer_sessions_task() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
 
     // A claude shim claims the task, then runs a codex shim beneath itself which tries to
     // close it. The inner session's nearest boundary is the codex process, so its
-    // ownership proof against the claude claim must fail and the close must be refused.
+    // ownership proof against the claude claim must fail.
+    use std::os::unix::fs::PermissionsExt;
     let inner = env.home.path().join("codex");
     std::fs::copy("/bin/sh", &inner).unwrap();
     let mut perms = std::fs::metadata(&inner).unwrap().permissions();
-    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    perms.set_mode(0o755);
     std::fs::set_permissions(&inner, perms).unwrap();
 
     let script = format!(
-        "{WRITE_REGISTRY_THEN}\nexport RELAY_STATE_DIR HARNESS SESSION AGENT_ID TASKS_BIN\n\
-         \"$TASKS_BIN\" start {id}\n\
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
          \"{}\" -c '\"$TASKS_BIN\" done {id} landed' && echo INNER_CLOSED\n",
+        shim_env(&state, "claude-code", "c1"),
         inner.display()
     );
-    let out = harness_shim(
-        &dir,
-        env.home.path(),
-        "claude",
-        &format!(
-            "RELAY_STATE_DIR={}\nHARNESS=claude-code\nSESSION=c1\nAGENT_ID=claude-code:c1\n{script}",
-            state.display()
-        ),
-    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
         !text.contains("INNER_CLOSED"),
@@ -2111,106 +2648,113 @@ fn a_nested_harness_cannot_close_the_outer_sessions_task() {
 }
 
 #[test]
-fn a_contradicted_hint_is_refused_even_though_the_proof_matches() {
+fn an_acceptance_contradicted_hint_is_refused_at_acquisition() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
-    let (_, state) = relay_home(&env);
+    let state = relay_on(&env);
 
     let script = format!(
-        "{WRITE_REGISTRY_THEN}\nexport RELAY_STATE_DIR HARNESS SESSION AGENT_ID\n\
-         CODEX_SESSION_ID=someone-else \"$TASKS_BIN\" start {id}\n"
+        "{}\nwrite_registry\nCODEX_SESSION_ID=someone-else \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
     );
-    let out = harness_shim(
-        &dir,
-        env.home.path(),
-        "codex",
-        &format!(
-            "RELAY_STATE_DIR={}\nHARNESS=codex\nSESSION=s1\nAGENT_ID=codex:s1\n{script}",
-            state.display()
-        ),
-    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(text.contains("someone-else") && text.contains("codex:s1"), "{text}");
 }
 
 #[test]
-fn an_empty_registry_under_a_live_harness_refuses_rather_than_using_terminal_identity() {
+fn an_acceptance_contradicted_hint_is_refused_on_a_held_claim() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
-    let (_, state) = relay_home(&env);
-    std::fs::create_dir_all(&state).unwrap();
-    std::fs::write(
-        state.join("agents.json"),
-        r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#,
-    )
-    .unwrap();
+    let state = relay_on(&env);
 
-    let out = harness_shim(
-        &dir,
-        env.home.path(),
-        "codex",
-        &format!(
-            "RELAY_STATE_DIR={} \"$TASKS_BIN\" start {id}\n",
-            state.display()
-        ),
+    // The claim is held and carries proof; the registry is then removed, so ownership can
+    // only come from proof. A contradicted hint must defeat it — a deferred resolution
+    // error must not become an accepted owner.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CODEX_SESSION_ID=someone-else \"$TASKS_BIN\" done {id} landed\n",
+        shim_env(&state, "codex", "s1")
     );
-    assert_eq!(out.status.code(), Some(1));
-    let text = String::from_utf8_lossy(&out.stderr);
-    assert!(text.contains("TASKS_SESSION"), "{text}");
-    let store = env.claim_store("sci");
-    assert!(!store.exists() || !std::fs::read_to_string(&store).unwrap().contains("sid:"));
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stdout));
+    assert_eq!(env.json(&dir, &["show", &id])["status"], "doing");
 }
 
 #[test]
-fn the_explicit_pair_still_works_under_a_live_harness_with_an_empty_registry() {
+fn an_acceptance_empty_registry_refuses_rather_than_using_terminal_identity() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
-    let (_, state) = relay_home(&env);
-    std::fs::create_dir_all(&state).unwrap();
-    std::fs::write(
-        state.join("agents.json"),
-        r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#,
-    )
-    .unwrap();
+    let state = relay_on(&env);
 
-    let out = harness_shim(
-        &dir,
-        env.home.path(),
-        "codex",
-        &format!(
-            "RELAY_STATE_DIR={} TASKS_SESSION=explicit \"$TASKS_BIN\" start {id}\n",
-            state.display()
-        ),
+    let script = format!(
+        "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
+         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
     );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("TASKS_SESSION"));
+    let store = env.claim_store("sci");
+    assert!(
+        !store.exists() || !std::fs::read_to_string(&store).unwrap().contains("sid:"),
+        "terminal identity must never be used in scope"
+    );
+}
+
+#[test]
+fn an_acceptance_world_readable_registry_is_refused() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nwrite_registry\nchmod 644 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("privately owned"));
+}
+
+#[test]
+fn an_acceptance_explicit_pair_works_under_a_harness_with_no_registry() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "RELAY_STATE_DIR={} TASKS_SESSION=explicit \"$TASKS_BIN\" start {id}\n",
+        state.display()
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(std::fs::read_to_string(env.claim_store("sci")).unwrap().contains("explicit"));
 }
 
 #[test]
-fn relay_off_leaves_a_harness_session_on_the_native_ladder() {
+fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
-    // No config file at all: relay is off, and the registry below is never consulted.
-    let state = env.home.path().join(".local/state/relay");
+    // No config file: relay is off, and the registry below is never consulted.
+    let state = env.home.path().join("relay-state");
 
     let script = format!(
-        "{WRITE_REGISTRY_THEN}\nexport RELAY_STATE_DIR HARNESS SESSION AGENT_ID\n\
-         CODEX_SESSION_ID=s1 \"$TASKS_BIN\" start {id}\n"
+        "{}\nwrite_registry\nCODEX_SESSION_ID=s1 \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
     );
-    let out = harness_shim(
-        &dir,
-        env.home.path(),
-        "codex",
-        &format!(
-            "RELAY_STATE_DIR={}\nHARNESS=codex\nSESSION=s1\nAGENT_ID=codex:s1\n{script}",
-            state.display()
-        ),
-    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
     assert!(
@@ -2220,34 +2764,33 @@ fn relay_off_leaves_a_harness_session_on_the_native_ladder() {
 }
 ```
 
-- [ ] **Step 2: Clear `RELAY_STATE_DIR` in the harness**
+- [ ] **Step 2: Run the acceptance tests**
 
-In `tests/common/mod.rs`, add `.env_remove("RELAY_STATE_DIR")` to both `cmd` and `raw`,
-beside the existing `.env_remove("XDG_STATE_HOME")`, so no test inherits a real registry.
+Run: `just test-fast an_acceptance_`
+Expected: PASS, 10 tests.
 
-- [ ] **Step 3: Run the acceptance tests**
+- [ ] **Step 3: Update the documentation**
 
-Run: `just test-fast relay_mode && just test-fast nested_harness && just test-fast contradicted_hint && just test-fast registry`
-Expected: PASS.
+In `README.md`, add a subsection to the claims documentation, `Relay identity (opt-in)`,
+stating: the file is `~/.config/tasks/config.toml` (or `$XDG_CONFIG_HOME/tasks/config.toml`)
+with `[identity] relay = true`; it is host-local, because relay availability is a property
+of a machine and the per-project `tasks/.config.toml` syncs between hosts; in scope a claim
+is keyed by the relay agent id `<harness>:<sessionId>` and carries that agent's process
+proof; identity is adopted between sessions and never rewrites a held claim; the owner can
+park, resume and close with the registry unavailable; Linux only; and `TASKS_SESSION` sits
+above the level and is the recovery path from every relay identity error.
 
-- [ ] **Step 4: Update the documentation**
+In `skills/tasks/SKILL.md`, extend the claims paragraph of the session protocol with three
+sentences: under relay mode a claim is keyed by the relay agent id, the owner can still
+park and close while the registry is unavailable, and a relay identity error is resolved by
+setting `TASKS_SESSION`/`TASKS_SESSION_PID`.
 
-In `README.md`, add a section under the claims documentation describing
-`~/.config/tasks/config.toml`, the `[identity] relay` key, that it is host-local and
-opt-in, that identity is adopted between sessions rather than during one, and that
-`TASKS_SESSION` remains the recovery path from any relay identity error.
-
-In `skills/tasks/SKILL.md`, extend the claims paragraph of the session protocol: under
-relay mode a claim is keyed by the relay agent id (`<harness>:<sessionId>`), the owner can
-still park and close with the registry unavailable, and a relay identity error is resolved
-by setting `TASKS_SESSION`/`TASKS_SESSION_PID`.
-
-- [ ] **Step 5: Run the whole suite**
+- [ ] **Step 4: Run the whole suite**
 
 Run: `just gate`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add tests/ README.md skills/tasks/SKILL.md
