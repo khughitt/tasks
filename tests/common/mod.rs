@@ -21,6 +21,7 @@ impl TestEnv {
         c.env("HOME", self.home.path())
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
+            .env_remove("RELAY_STATE_DIR")
             .env_remove("TASKS_FORMAT")
             .env_remove("TASKS_COMPLETE")
             .env_remove("TASKS_OWNER")
@@ -47,6 +48,7 @@ impl TestEnv {
             .env("HOME", self.home.path())
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
+            .env_remove("RELAY_STATE_DIR")
             .env_remove("TASKS_FORMAT")
             .env_remove("TASKS_COMPLETE")
             .env_remove("TASKS_OWNER")
@@ -235,3 +237,71 @@ impl TestEnv {
             .collect()
     }
 }
+/// Run `script` under a process whose `comm` is `comm`, so the `tasks` it launches has a
+/// recognized harness ancestor. A symlink to `/bin/sh` supplies the comm: the kernel takes
+/// `comm` from the basename of the path passed to `execve`, not from the resolved target,
+/// so a link named `codex` runs `sh` under the comm `codex`. It must be a link rather than
+/// a copy — a copy opens an executable for writing, and a sibling test thread that forks
+/// between the copy's open and its close inherits that writable descriptor, which makes the
+/// `execve` here fail with `ETXTBSY`. Nothing is `exec`ed from the script either: `exec`
+/// would replace the shim with `tasks`, which would inherit the shim's pid and its parent,
+/// destroying the ancestry under test.
+///
+/// `exit $?` is appended for the same reason: `sh -c` optimizes away the fork for the
+/// *last* command of its script and `execve`s it in place, so a script ending in the
+/// command under test would silently replace the shim with `tasks` — leaving `tasks` with
+/// the shim's own pid and the test runner as its parent, and no harness ancestor at all.
+/// Making a builtin the last command keeps every invocation a real child, and `$?` carries
+/// the script's status out unchanged.
+pub fn harness_shim(dir: &Path, home: &Path, comm: &str, script: &str) -> std::process::Output {
+    let shim = home.join(comm);
+    if !shim.exists() {
+        std::os::unix::fs::symlink("/bin/sh", &shim).unwrap();
+    }
+    std::process::Command::new(&shim)
+        .arg("-c")
+        .arg(format!("{script}\nexit $?\n"))
+        .current_dir(dir)
+        .env("HOME", home)
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_STATE_HOME")
+        .env_remove("TASKS_FORMAT")
+        .env_remove("TASKS_OWNER")
+        .env_remove("TASKS_SESSION")
+        .env_remove("TASKS_SESSION_PID")
+        .env_remove("TASKS_MODEL")
+        .env_remove("TASKS_AGENT")
+        .env_remove("CLAUDE_CODE_SESSION_ID")
+        .env_remove("CLAUDE_PID")
+        .env_remove("CODEX_SESSION_ID")
+        .env_remove("CODEX_THREAD_ID")
+        .env("USER", "tester")
+        .env("TASKS_BIN", assert_cmd::cargo::cargo_bin("tasks"))
+        .output()
+        .unwrap()
+}
+
+/// Shell function that writes a one-agent registry naming the *shim's own* process, with
+/// the private mode relay requires, then leaves `$TASKS_BIN` ready to run.
+///
+/// The start token must come from `/proc/$$/stat`, the shim's own stat file. Reading
+/// `/proc/self/stat` inside a `$(…)` substitution reads the *substituting* process — a
+/// different process with a different start token — and pairing that with `$$` produces a
+/// handle that matches only if two processes happened to start within one clock tick.
+pub const WRITE_REGISTRY: &str = r#"
+write_registry() {
+  start=$(awk '{print $22}' "/proc/$$/stat")
+  boot=$(cat /proc/sys/kernel/random/boot_id)
+  host=$(cat /proc/sys/kernel/hostname)
+  mkdir -p "$RELAY_STATE_DIR"
+  chmod 700 "$RELAY_STATE_DIR"
+  cat > "$RELAY_STATE_DIR/agents.json" <<EOF
+{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,
+ "agents":{"$AGENT_ID":{"id":"$AGENT_ID","harness":"$HARNESS","sessionId":"$SESSION",
+  "scope":"session","cwd":"/w","repoRoot":null,"remote":null,"projectKey":"k",
+  "project":"p","state":"idle","updatedAt":1,
+  "process":{"platform":"linux","host":"$host","bootId":"$boot","pid":$$,"start":"$start"}}}}
+EOF
+  chmod 600 "$RELAY_STATE_DIR/agents.json"
+}
+"#;

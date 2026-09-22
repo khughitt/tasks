@@ -84,18 +84,39 @@ pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
     let owner = owner_name(&ctx.project)?;
     append_note(&mut task, &owner, &text)?;
     // Identity and the store are resolved *before* the file write. Doing it afterwards
-    // means an unresolvable identity or a corrupt store returns an error after the note has
-    // already landed, and the obvious retry then duplicates it.
-    let me = crate::claims::identity(&mut ctx.warnings)?;
+    // means a corrupt store returns an error after the note has already landed, and the
+    // obvious retry then duplicates it.
+    //
+    // `resolve_for_guard` is what keeps the two failure kinds apart, and is why `note`
+    // needs no special case of its own: with relay off it raises exactly where `identity`
+    // raised before, so an unresolvable native identity is still fatal and the note still
+    // does not land; with relay on it carries the failure, and the note lands.
+    let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
     save(&mut ctx, &mut task)?;
 
     // Use the pruned store so a note cannot revive a stale claim.
-    let mine = ctx
-        .claims_mut()?
-        .get(&task.id)
-        .cloned()
-        .filter(|claim| claim.session == me.session);
+    let existing = ctx.claims_mut()?.get(&task.id).cloned();
+    let mine = match &existing {
+        Some(claim) => ctx.ownership(claim, &me)? != crate::commands::Ownership::Foreign,
+        None => false,
+    };
+
+    // The note has landed. If a claim exists that we could not establish ownership of
+    // *because our own identity did not resolve*, say so: silence here would look
+    // identical to an ordinary foreign note, which is a different situation entirely.
+    if let Some(claim) = &existing
+        && !mine
+        && me.identity().is_none()
+    {
+        ctx.warnings.push(format!(
+            "the note landed, but the claim heartbeat on {} was not refreshed (this \
+             session's identity could not be resolved, so ownership of the claim held by \
+             {} could not be established); the claim may look stale to other sessions",
+            task.id, claim.session
+        ));
+    }
+    let mine = existing.filter(|_| mine);
 
     // The heartbeat, and only on our own claim: `note` never touches a foreign one and is
     // never refused. It is still serialized under the mutation lock, because a note rewrites

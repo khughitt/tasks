@@ -159,6 +159,42 @@ Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped
 `shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and
 `tasks unshelve <id>` to return it as an idea.
 
+### Relay identity (opt-in)
+
+A host that runs the relay agent registry can key claims by the harness
+session itself rather than by the terminal. It is off by default; turn it on in
+`~/.config/tasks/config.toml` (or `$XDG_CONFIG_HOME/tasks/config.toml`):
+
+```toml
+[identity]
+relay = true
+```
+
+The file is host-local on purpose. Whether relay runs is a property of a machine, while the
+per-project `tasks/.config.toml` syncs between hosts, so the switch does not belong there.
+
+With it on, `tasks` walks its own process ancestry to the nearest harness process and looks
+that process up in relay's agent registry, matching on host, boot id, pid and process start
+time, and requiring the registry's harness to agree with the ancestor it found. On a match
+the claim is keyed by the relay agent id — `<harness>:<sessionId>`, such as
+`codex:01J…` — and records that agent's process handle as the claim's proof. Because the id
+belongs to the session rather than to the terminal, a claim survives the command that made
+it and is recognized again by the same session later.
+
+That proof is also what the session's own commands read back: the owner can `park` or
+`done` a claim it already holds even when the registry has gone away, because ownership is
+re-derived from what the claim itself recorded. Two limits follow from the same rule.
+Parking *releases* the claim, so resuming a parked task is a fresh acquisition and needs
+either the registry back or `TASKS_SESSION`. And a session nested inside another harness
+session is a different session: its nearest boundary is its own harness process, so it
+cannot act on the outer session's claims.
+
+Enabling relay never rewrites a claim already held: a claim keeps the identity it was
+created with. The level is Linux-only — it needs `/proc` — and it sits *below*
+`TASKS_SESSION` in the ladder, which is why every relay identity error ends by telling you
+to set `TASKS_SESSION` and `TASKS_SESSION_PID`. That override is the recovery path from all
+of them, and it also remains the way to tell apart several agents sharing one process.
+
 ## Install
 
 From a checkout (`--locked` installs the checked dependency versions):

@@ -15386,3 +15386,581 @@ fn cli_vocabulary_completion() {
         .unwrap();
     assert!(b.status.success(), "{}", String::from_utf8_lossy(&b.stderr));
 }
+#[test]
+fn a_continuity_repeated_start_by_the_owner_keeps_one_claim() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    for _ in 0..2 {
+        env.cmd(&dir)
+            .env("TASKS_SESSION", "owner")
+            .args(["start", &id])
+            .assert()
+            .success();
+    }
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(store.matches("session = \"owner\"").count(), 1, "{store}");
+}
+
+// NOTE: the explicit-mismatch case lives in Task 8 as an acceptance test. It has to run
+// under a harness shim with relay enabled and a matching boundary, or removing the
+// explicit-identity guard from `Ctx::ownership` would leave it passing — proof would never
+// have been consulted in the first place.
+
+#[test]
+fn a_continuity_park_and_close_by_the_owner_still_work() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let session = || ("TASKS_SESSION", "owner");
+    env.cmd(&dir)
+        .env(session().0, session().1)
+        .args(["start", &id])
+        .assert()
+        .success();
+    env.cmd(&dir)
+        .env(session().0, session().1)
+        .args(["park", &id, "next"])
+        .assert()
+        .success();
+    env.cmd(&dir)
+        .env(session().0, session().1)
+        .args(["start", &id])
+        .assert()
+        .success();
+    env.cmd(&dir)
+        .env(session().0, session().1)
+        .args(["done", &id, "landed"])
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
+}
+/// Enable relay identity for this test's HOME and return its relay state directory.
+fn relay_on(env: &TestEnv) -> std::path::PathBuf {
+    let config = env.home.path().join(".config/tasks/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "[identity]\nrelay = true\n").unwrap();
+    env.home.path().join("relay-state")
+}
+
+/// The preamble every shim script shares: exports, then the registry writer.
+fn shim_env(state: &std::path::Path, harness: &str, session: &str) -> String {
+    format!(
+        "RELAY_STATE_DIR={}\nHARNESS={harness}\nSESSION={session}\nAGENT_ID={harness}:{session}\n\
+         export RELAY_STATE_DIR HARNESS SESSION AGENT_ID TASKS_BIN\n{}",
+        state.display(),
+        common::WRITE_REGISTRY
+    )
+}
+#[test]
+fn a_note_lands_when_relay_identity_cannot_resolve() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // In scope under a live codex ancestor, but the registry holds no agents — the real
+    // Codex case before its first SessionStart. Identity cannot resolve; the note must
+    // land anyway, and must say why the heartbeat was skipped.
+    let script = format!(
+        "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
+         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n\
+         \"$TASKS_BIN\" note {id} 'still lands'\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+
+    // `start` is acquisition and must fail; `note` must still succeed.
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("\"warnings\""),
+        "note should have produced output: {text}"
+    );
+    let shown = env.json(&dir, &["show", &id]);
+    assert!(
+        shown["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|note| note["text"].as_str().unwrap().contains("still lands")),
+        "the note must land even though relay identity could not resolve"
+    );
+}
+
+#[test]
+fn a_note_warns_when_ownership_evidence_is_unavailable() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // Claim under a working registry, then remove it and note with a contradicted hint so
+    // neither identity nor proof can establish ownership.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CODEX_SESSION_ID=someone-else \"$TASKS_BIN\" note {id} 'orphan note'\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("heartbeat") && text.contains("not refreshed"),
+        "an unprovable claim must say the heartbeat was skipped: {text}"
+    );
+}
+
+#[test]
+fn a_note_from_a_foreign_session_leaves_the_claim_alone() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "owner")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    let before = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+
+    let out = env
+        .cmd(&dir)
+        .env("TASKS_SESSION", "stranger")
+        .args(["note", &id, "from elsewhere"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let after = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(
+        before, after,
+        "a foreign note must not refresh or alter the claim"
+    );
+    // An ordinary foreign note resolved its identity fine, so it must not warn.
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("heartbeat"));
+}
+
+#[test]
+fn a_note_with_relay_off_is_unchanged_under_a_harness_ancestor() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    // No config file: relay is off, so the harness ancestor is irrelevant and the native
+    // ladder resolves as it always has.
+    let script = format!("\"$TASKS_BIN\" start {id}\n\"$TASKS_BIN\" note {id} 'native'\n");
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("heartbeat"));
+}
+
+#[test]
+fn an_acceptance_relay_claim_is_keyed_by_the_agent_id_with_its_proof() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert!(store.contains("session = \"codex:s1\""), "{store}");
+    assert!(store.contains("pid_start"), "{store}");
+    assert!(store.contains("boot_id"), "{store}");
+}
+
+#[test]
+fn an_acceptance_owner_can_park_and_close_after_the_registry_is_removed() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let parked = id_of(env.json(&dir, &["add", "To park", "-p", "2"]));
+    let closed = id_of(env.json(&dir, &["add", "To close", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // Two *separately held* claims. Park and close are both releases by the owner, but
+    // `Store::insert_park` removes the claim along with its proof, so a task cannot be
+    // parked and then resumed on the same run: resumption is acquisition again and needs
+    // either a restored registry or the explicit override.
+    let script = format!(
+        "{}\nwrite_registry\n\
+         \"$TASKS_BIN\" start {parked}\n\
+         \"$TASKS_BIN\" start {closed}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" park {parked} 'next step'\n\
+         \"$TASKS_BIN\" done {closed} landed\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "the owner must park and close with the registry gone: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(env.json(&dir, &["show", &closed])["task"]["status"], "done");
+}
+
+#[test]
+fn an_acceptance_resuming_a_parked_task_needs_identity_again() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // Parking released the claim and its proof with it, so the resume is a fresh
+    // acquisition. With the registry still gone it must refuse rather than quietly
+    // claim under some other identity.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" park {id} 'next step'\n\
+         \"$TASKS_BIN\" start {id} && echo RESUMED\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("RESUMED"),
+        "a parked task cannot be resumed without a resolvable identity"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("TASKS_SESSION"));
+}
+
+#[test]
+fn an_acceptance_repeated_start_after_registry_loss_keeps_the_held_identity() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(
+        store.matches("session = \"codex:s1\"").count(),
+        1,
+        "{store}"
+    );
+}
+
+#[test]
+fn an_acceptance_nested_harness_cannot_close_the_outer_sessions_task() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // A claude shim claims the task, then runs a codex shim beneath itself which tries to
+    // close it. The inner session's nearest boundary is the codex process, so its
+    // ownership proof against the claude claim must fail. `exit $?` closes the inner
+    // script for the reason `harness_shim` documents: without it `sh -c` would `execve`
+    // `tasks` in place of the inner shim, leaving the outer claude process as the nearest
+    // boundary — which is the owner, so the close would land and the test would pass
+    // while proving nothing.
+    // A symlink, not a copy, for the reason `harness_shim` documents.
+    let inner = env.home.path().join("codex");
+    std::os::unix::fs::symlink("/bin/sh", &inner).unwrap();
+
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         \"{}\" -c '\"$TASKS_BIN\" done {id} landed; exit $?' && echo INNER_CLOSED\n",
+        shim_env(&state, "claude-code", "c1"),
+        inner.display()
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !text.contains("INNER_CLOSED"),
+        "a session nested under the owner must not close its task: {text}"
+    );
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
+}
+
+#[test]
+fn an_acceptance_contradicted_hint_is_refused_at_acquisition() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nwrite_registry\nCODEX_SESSION_ID=someone-else \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        text.contains("someone-else") && text.contains("codex:s1"),
+        "{text}"
+    );
+}
+
+#[test]
+fn an_acceptance_contradicted_hint_is_refused_on_a_held_claim() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // The claim is held and carries proof; the registry is then removed, so ownership can
+    // only come from proof. A contradicted hint must defeat it — a deferred resolution
+    // error must not become an accepted owner.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CODEX_SESSION_ID=someone-else \"$TASKS_BIN\" done {id} landed\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
+}
+
+#[test]
+fn an_acceptance_empty_registry_refuses_rather_than_using_terminal_identity() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
+         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("TASKS_SESSION"));
+    let store = env.claim_store("sci");
+    assert!(
+        !store.exists() || !std::fs::read_to_string(&store).unwrap().contains("sid:"),
+        "terminal identity must never be used in scope"
+    );
+}
+
+#[test]
+fn an_acceptance_world_readable_registry_is_refused() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nwrite_registry\nchmod 644 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("privately owned"));
+}
+
+#[test]
+fn an_acceptance_explicit_pair_works_under_a_harness_with_no_registry() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "RELAY_STATE_DIR={} TASKS_SESSION=explicit \"$TASKS_BIN\" start {id}\n",
+        state.display()
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        std::fs::read_to_string(env.claim_store("sci"))
+            .unwrap()
+            .contains("explicit")
+    );
+}
+
+#[test]
+fn an_acceptance_explicit_mismatch_stays_foreign_under_one_harness() {
+    // Two workers beneath the *same* shim, so the ancestry, host and boot all agree and
+    // the claim's proof names their shared harness process. Only TASKS_SESSION tells them
+    // apart. If `Ctx::ownership` stopped honouring the explicit pair, worker-b's proof
+    // would succeed and this close would land — which is exactly the bypass to catch.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    let script = format!(
+        "{}\nwrite_registry\n\
+         TASKS_SESSION=worker-a TASKS_SESSION_PID=$$ \"$TASKS_BIN\" start {id}\n\
+         TASKS_SESSION=worker-b TASKS_SESSION_PID=$$ \"$TASKS_BIN\" done {id} 'not mine' \
+           && echo FOREIGN_CLOSED\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("FOREIGN_CLOSED"),
+        "an explicit session mismatch must stay foreign however the ancestry looks"
+    );
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
+}
+
+#[test]
+fn an_acceptance_mode_change_continues_a_natively_held_claim() {
+    // Acquisition, the configuration change, and the continuation all happen inside **one**
+    // shim. A second `harness_shim` would be a different process whose ancestry cannot
+    // prove anything about the first one's claim, so the close would succeed through
+    // ordinary stale takeover and the test would pass with proof-based continuity broken.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = env.home.path().join("relay-state");
+    let after_start = env.home.path().join("after-start.toml");
+
+    // Claim natively with a pid, so the claim carries proof and is keyed `c1`. Then enable
+    // relay mid-run: identity now resolves to `claude-code:c1`, which does *not* equal the
+    // claim's session, so only proof can establish ownership.
+    // `set -e`: every command here must succeed, and a failed repeated `start` must not be
+    // masked by a `done` that then takes the claim over.
+    let script = format!(
+        "set -e\n{}\nwrite_registry\n\
+         CLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {id}\n\
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"$HOME/native.toml\"\n\
+         mkdir -p \"$HOME/.config/tasks\"\n\
+         printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {id}\n\
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
+        shim_env(&state, "claude-code", "c1"),
+        after_start.display()
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a natively-held claim carrying proof must be continued: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let native = std::fs::read_to_string(env.home.path().join("native.toml")).unwrap();
+    assert!(
+        native.contains("session = \"c1\""),
+        "claimed natively: {native}"
+    );
+
+    // The repeated `start` under relay kept the claim's own key: no re-keying to
+    // `claude-code:c1`, and one claim rather than a takeover of a foreign one.
+    let refreshed = std::fs::read_to_string(&after_start).unwrap();
+    assert!(
+        refreshed.contains("session = \"c1\""),
+        "re-keyed: {refreshed}"
+    );
+    assert!(
+        !refreshed.contains("claude-code:c1"),
+        "re-keyed: {refreshed}"
+    );
+    assert_eq!(refreshed.matches("session = ").count(), 1, "{refreshed}");
+
+    // A continuation is not a takeover, so nothing may have warned about one.
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !text.contains("took over"),
+        "continuation must not take over: {text}"
+    );
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
+}
+
+#[test]
+fn an_acceptance_force_cannot_take_over_without_a_resolved_identity() {
+    // A stale foreign claim and no resolvable identity. `--force` may displace an owner,
+    // but a takeover records a new owner and there is none to record.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // Claim as an unrelated session whose pid is long gone, so the claim reads stale.
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "departed")
+        .env("TASKS_SESSION_PID", "999999")
+        .args(["start", &id])
+        .assert()
+        .success();
+
+    let script = format!(
+        "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
+         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start --force {id} && echo FORCED\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("FORCED"),
+        "--force must not substitute for an unresolvable identity"
+    );
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("TASKS_SESSION"), "{text}");
+    // The held error names the claim it was raised against, per §§5 and 6.5.
+    assert!(text.contains("departed"), "{text}");
+}
+
+#[test]
+fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    // No config file: relay is off, and the registry below is never consulted.
+    let state = env.home.path().join("relay-state");
+
+    let script = format!(
+        "{}\nwrite_registry\nCODEX_SESSION_ID=s1 \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert!(
+        store.contains("session = \"s1\"") && !store.contains("codex:s1"),
+        "relay off must key the claim by the native raw id: {store}"
+    );
+}

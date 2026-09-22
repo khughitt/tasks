@@ -1,18 +1,20 @@
 ---
 id: tasks-c9199a
 title: Design relay identity without changing native liveness
-status: doing
+status: done
 priority: 2
 size: l
 complexity: high
 process: planned
 owner: main
 created: 2026-09-17T00:50:54Z
-updated: 2026-09-17T23:06:55Z
+updated: 2026-09-22T16:30:11Z
 started: 2026-09-17T21:04:30Z
+completed: 2026-09-22T16:30:11Z
 depends: [relay-06b1da]
 tags: []
 source: ops-998bbb
+model: "claude-opus-5[1m]"
 agent: codex
 plan: docs/plans/2026-09-17-lifecycle-provenance.md
 ---
@@ -34,3 +36,7 @@ Two independently deliverable tracks: (1) approved lifecycle-note provenance, im
 - 2026-09-17T23:03:57Z (feat/lifecycle-provenance): parked (waiting on agent, dependency): Agent: tasks-b07adc writer is reviewed and integrating; remaining goal deliverable is the separate planned tasks-8921f4 relay ancestry design.
 - 2026-09-17T23:06:55Z (feat/lifecycle-provenance): parked (waiting on agent, dependency): Agent: lifecycle-note deliverable tasks-b07adc is complete and installed/verified on titan; continue the separate planned tasks-8921f4 relay-ancestry design. No implementation is running on that remaining track.
   provenance: {"harness_session":"codex:01a0b011-5b60-75e3-9188-394f5d6dc474","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-22T16:30:11Z (design/relay-ancestry): done
+  provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-22T16:30:11Z (design/relay-ancestry): Both tracks are delivered. Lifecycle-note provenance landed as tasks-d51eda (reader) and tasks-b07adc (writer), stamping harness_session and harness_session_source into lifecycle notes without touching claim identity or liveness. Relay ancestry identity landed as tasks-8921f4 on design/relay-ancestry: an opt-in level that keys claims by the relay agent id and proves continued ownership from the claim's own recorded process handle, leaving native behaviour unchanged when the opt-in is off. The goal's constraint held throughout — nothing here changed native liveness.
+  provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
