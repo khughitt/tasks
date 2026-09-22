@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-09-17T21:08:29Z
-updated: 2026-09-22T13:44:42Z
+updated: 2026-09-22T13:53:17Z
 started: 2026-09-22T13:09:21Z
 depends: [relay-06b1da]
 parent: tasks-c9199a
@@ -55,3 +55,4 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
 - 2026-09-22T13:44:40Z (design/relay-ancestry): Spec revised on review. Continuity now has a mechanism: acquisition and continuation are separated, and a caller proves ownership of a claim registry-free by re-deriving the claim's own host/boot/pid/pid_start as an ancestor of itself, so registry loss cannot strand park, done or edit; identity-resolution errors are held rather than raised on an already-claimed task. Match gains harness agreement (claude->claude-code, codex->codex, opencode->opencode) and requires platform linux, so a Darwin handle is parse-only and never yields a claim. Native hints are compared only for the nearest harness, fixing nested mixed-harness sessions. Platform refusal sits below the explicit override. Continuity is step 6 of the decomposition with owner/foreign-caller tests.
 - 2026-09-22T13:44:42Z (design/relay-ancestry): parked (waiting on user, review): Re-review of .worktrees/relay-ancestry/docs/specs/2026-09-22-relay-ancestry-identity-design.md, revised against the four review items; on approval write the implementation plan with writing-plans.
   provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-22T13:53:17Z (design/relay-ancestry): Spec revised on second review. Ownership proof is bound to the caller's nearest harness ancestor, not any ancestor, so a Codex session launched under a Claude owner is refused; proof also requires the scoped hint not to contradict the claim session, normalized over the known raw/claude:/claude-code: and raw/codex: forms only. Takeover is acquisition and always requires resolved identity: --force displaces an owner but never substitutes for one, for live claims, stale claims and start --force alike. note is corrected as status.rs:89 inside status::note and handled separately in 6.6: it guards nothing, keeps foreign notes unrefused, decides the heartbeat by proof, and never loses a note to a relay-level resolution failure; relay off stays byte-for-byte. Section 7 now states the stage order explicit override, configuration, platform support, ancestry, limiting the out-of-scope exemption to hosts where ancestry can be established.
