@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/relay-ancestry
 created: 2026-09-17T21:08:29Z
-updated: 2026-09-22T15:18:19Z
+updated: 2026-09-22T15:18:20Z
 started: 2026-09-22T13:09:21Z
 depends: [relay-06b1da]
 parent: tasks-c9199a
@@ -68,3 +68,5 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
 - 2026-09-22T15:00:51Z (design/relay-ancestry): parked (waiting on user, review): Re-review of .worktrees/relay-ancestry/docs/plans/2026-09-22-relay-ancestry-identity.md; on approval start tasks-8103e8 and work the eight steps in dependency order.
   provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-22T15:18:19Z (design/relay-ancestry): Plan revised on third review; all eight findings verified first. Ownership is now a three-way verdict (ByIdentity, ByProof, Foreign): an identity match keeps using the freshly resolved identity exactly as today, so native Codex parks still record codex:<id> — tests/cli.rs:79 is named in the plan as that regression — and a repeated start still replaces a stale pid; only proof-only ownership substitutes the claim's own identity. The identity decision moved above the liveness refusal so a held resolution error is raised as itself rather than masked by Claimed, and claims::name_the_claim appends the held session per spec 5 and 6.5. Store::insert_park removes the claim with its proof, so the registry-loss test now parks and closes two separately held claims and a new test asserts a parked task cannot be resumed without identity; the README and skill wording lost the resume promise. Task 5 now updates the twelve three-argument identity_from test calls and keeps the relay dead_code allowance until Task 6, where same_session gains its consumer. Test JSON reads go through show's task object. The resolver keeps full-predicate filtering before cardinality but diagnoses a zero-candidate refusal against rows naming the same process, restoring the darwin and harness messages. revision and updatedAt are capped at the producer's safe-integer bound while start stays full-range u64 text. The explicit-mismatch test moved under one shim with relay enabled and TASKS_SESSION_PID set, where removing the guard would actually fail it, and the native-to-relay mode change and force-without-identity cases are now acceptance tests.
+- 2026-09-22T15:18:20Z (design/relay-ancestry): parked (waiting on user, review): Re-review of .worktrees/relay-ancestry/docs/plans/2026-09-22-relay-ancestry-identity.md; on approval start tasks-8103e8 and work the eight steps in dependency order.
+  provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
