@@ -3,6 +3,7 @@ mod cli;
 mod commands;
 mod complete;
 mod complexity;
+mod config;
 mod defer;
 mod error;
 mod format;
