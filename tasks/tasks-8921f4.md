@@ -1,13 +1,15 @@
 ---
 id: tasks-8921f4
 title: Design opt-in relay ancestry identity
-status: todo
+status: doing
 priority: 2
 size: l
 complexity: high
 process: planned
+owner: main
 created: 2026-09-17T21:08:29Z
-updated: 2026-09-17T21:08:29Z
+updated: 2026-09-22T13:09:21Z
+started: 2026-09-22T13:09:21Z
 depends: [relay-06b1da]
 parent: tasks-c9199a
 tags: []
@@ -39,3 +41,8 @@ Darwin epochs must not enter Linux pid_start fields; keep its existing native
 unverifiable path. Incompatible schema changes coordinate the producer and reader.
 
 Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb closure does not mean this deliverable has shipped.
+
+## Notes
+
+- 2026-09-22T13:09:21Z (main): started
+  provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
