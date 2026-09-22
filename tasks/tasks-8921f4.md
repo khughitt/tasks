@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/relay-ancestry
 created: 2026-09-17T21:08:29Z
-updated: 2026-09-22T15:28:05Z
+updated: 2026-09-22T15:28:06Z
 started: 2026-09-22T13:09:21Z
 depends: [relay-06b1da]
 parent: tasks-c9199a
@@ -71,3 +71,5 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
 - 2026-09-22T15:18:20Z (design/relay-ancestry): parked (waiting on user, review): Re-review of .worktrees/relay-ancestry/docs/plans/2026-09-22-relay-ancestry-identity.md; on approval start tasks-8103e8 and work the eight steps in dependency order.
   provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-22T15:28:05Z (design/relay-ancestry): Plan revised on fourth review. The mode-change acceptance test now runs acquisition, the config change and the continuation inside one shim, writing the config from the shell mid-run, and copies the claim store after the repeated start so it can assert the session stayed c1, was not re-keyed to claude-code:c1, is a single claim, and produced no takeover warning; a second harness_shim was a different process whose ancestry proved nothing, so the old test passed through stale takeover. Registry load errors are now wrapped by the relay refusal formatter, preserving cause and path while carrying the spec 5 recovery instruction, which the parked-resumption test asserts. Three mechanical fixes: Task 5 keeps the relay dead_code allowance in its replacement block rather than contradicting itself, the park snippet qualifies Ownership through crate::commands, and Task 6 stages src/relay/mod.rs in its commit.
+- 2026-09-22T15:28:06Z (design/relay-ancestry): parked (waiting on user, review): Re-review of .worktrees/relay-ancestry/docs/plans/2026-09-22-relay-ancestry-identity.md; on approval start tasks-8103e8 and work the eight steps in dependency order.
+  provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
