@@ -56,6 +56,13 @@ nothing is eligible.
    Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, when a long-lived process id is available)
    when several agents share one terminal or harness process; otherwise agents that resolve
    to the same session id are indistinguishable to the claim store.
+   On a host with relay identity enabled (`[identity] relay = true` in
+   `~/.config/tasks/config.toml`), a claim is keyed by the relay agent id
+   `<harness>:<sessionId>`, so it belongs to the session rather than to the terminal. The
+   owner can still `park` and `done` a claim it already holds while the registry is
+   unavailable; resuming a parked task needs the registry back, because parking releases
+   the claim and resuming is a fresh acquisition. Any relay identity error is resolved by
+   setting `TASKS_SESSION` and `TASKS_SESSION_PID`, which sit above the level.
 4. `tasks note <id> "<one line>"` whenever scope or understanding changes.
 5. `tasks park <id> "<next step>" [--waiting-on user] [--reason <why>]` before ending a
    turn that waits on the user, or whenever you set work down. It records the next step

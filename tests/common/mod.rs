@@ -246,6 +246,13 @@ impl TestEnv {
 /// `execve` here fail with `ETXTBSY`. Nothing is `exec`ed from the script either: `exec`
 /// would replace the shim with `tasks`, which would inherit the shim's pid and its parent,
 /// destroying the ancestry under test.
+///
+/// `exit $?` is appended for the same reason: `sh -c` optimizes away the fork for the
+/// *last* command of its script and `execve`s it in place, so a script ending in the
+/// command under test would silently replace the shim with `tasks` — leaving `tasks` with
+/// the shim's own pid and the test runner as its parent, and no harness ancestor at all.
+/// Making a builtin the last command keeps every invocation a real child, and `$?` carries
+/// the script's status out unchanged.
 pub fn harness_shim(dir: &Path, home: &Path, comm: &str, script: &str) -> std::process::Output {
     let shim = home.join(comm);
     if !shim.exists() {
@@ -253,7 +260,7 @@ pub fn harness_shim(dir: &Path, home: &Path, comm: &str, script: &str) -> std::p
     }
     std::process::Command::new(&shim)
         .arg("-c")
-        .arg(script)
+        .arg(format!("{script}\nexit $?\n"))
         .current_dir(dir)
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
