@@ -15435,3 +15435,126 @@ fn a_continuity_park_and_close_by_the_owner_still_work() {
         .success();
     assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
 }
+/// Enable relay identity for this test's HOME and return its relay state directory.
+fn relay_on(env: &TestEnv) -> std::path::PathBuf {
+    let config = env.home.path().join(".config/tasks/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "[identity]\nrelay = true\n").unwrap();
+    env.home.path().join("relay-state")
+}
+
+/// The preamble every shim script shares: exports, then the registry writer.
+fn shim_env(state: &std::path::Path, harness: &str, session: &str) -> String {
+    format!(
+        "RELAY_STATE_DIR={}\nHARNESS={harness}\nSESSION={session}\nAGENT_ID={harness}:{session}\n\
+         export RELAY_STATE_DIR HARNESS SESSION AGENT_ID TASKS_BIN\n{}",
+        state.display(),
+        common::WRITE_REGISTRY
+    )
+}
+#[test]
+fn a_note_lands_when_relay_identity_cannot_resolve() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // In scope under a live codex ancestor, but the registry holds no agents — the real
+    // Codex case before its first SessionStart. Identity cannot resolve; the note must
+    // land anyway, and must say why the heartbeat was skipped.
+    let script = format!(
+        "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
+         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n\
+         \"$TASKS_BIN\" note {id} 'still lands'\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+
+    // `start` is acquisition and must fail; `note` must still succeed.
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("\"warnings\""),
+        "note should have produced output: {text}"
+    );
+    let shown = env.json(&dir, &["show", &id]);
+    assert!(
+        shown["task"]["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|note| note["text"].as_str().unwrap().contains("still lands")),
+        "the note must land even though relay identity could not resolve"
+    );
+}
+
+#[test]
+fn a_note_warns_when_ownership_evidence_is_unavailable() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // Claim under a working registry, then remove it and note with a contradicted hint so
+    // neither identity nor proof can establish ownership.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CODEX_SESSION_ID=someone-else \"$TASKS_BIN\" note {id} 'orphan note'\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("heartbeat") && text.contains("not refreshed"),
+        "an unprovable claim must say the heartbeat was skipped: {text}"
+    );
+}
+
+#[test]
+fn a_note_from_a_foreign_session_leaves_the_claim_alone() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "owner")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    let before = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+
+    let out = env
+        .cmd(&dir)
+        .env("TASKS_SESSION", "stranger")
+        .args(["note", &id, "from elsewhere"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let after = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(
+        before, after,
+        "a foreign note must not refresh or alter the claim"
+    );
+    // An ordinary foreign note resolved its identity fine, so it must not warn.
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("heartbeat"));
+}
+
+#[test]
+fn a_note_with_relay_off_is_unchanged_under_a_harness_ancestor() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    // No config file: relay is off, so the harness ancestor is irrelevant and the native
+    // ladder resolves as it always has.
+    let script = format!("\"$TASKS_BIN\" start {id}\n\"$TASKS_BIN\" note {id} 'native'\n");
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("heartbeat"));
+}
