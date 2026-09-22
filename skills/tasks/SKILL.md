@@ -202,8 +202,9 @@ omits both fields; invalid/conflicting input omits them and warns without preven
 the lifecycle operation. A qualified `TASKS_SESSION` conflicting with the native
 key warns too; it never supplies or replaces the native source.
 
-This is independent of claim identity and liveness: Codex without a claim override
-still claims as `sid:<pid>`. Do not set `TASKS_SESSION` merely for obs.
+This is independent of claim identity and liveness, which read the same Codex
+variables on their own: a Codex claim is keyed by the thread id, carries no pid, and
+lives by the TTL. Do not set `TASKS_SESSION` merely for obs.
 Generated lifecycle markers are `started`, `resumed`, `done`, `dropped`,
 `parked (waiting on …): <next step>`, and `completed; next due <YYYY-MM-DD>`.
 Close-message notes are stamped but are not lifecycle markers; plain `tasks note`,

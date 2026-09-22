@@ -118,7 +118,7 @@ impl Ctx {
     }
 
     pub fn refuse_foreign_live_claim(&mut self, id: &TaskId) -> Result<()> {
-        let me = crate::claims::identity()?;
+        let me = crate::claims::identity(&mut self.warnings)?;
         let store = self.claims_mut()?;
         if let Some(existing) = store.get(id) {
             let live = crate::claims::liveness(existing);
@@ -166,7 +166,7 @@ impl Ctx {
     /// hold the shared claim while its own checkout still reads `todo` — the ordinary
     /// cross-worktree case — and its `done` there would otherwise strand the claim.
     fn claim_guard(&mut self, id: &TaskId, to: Status, force: bool) -> Result<()> {
-        let me = crate::claims::identity()?;
+        let me = crate::claims::identity(&mut self.warnings)?;
         let owner = owner_name(&self.project)?;
         let worktree = self.project.root.display().to_string();
         let store = self.claims_mut()?;

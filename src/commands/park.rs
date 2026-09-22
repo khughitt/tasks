@@ -35,7 +35,7 @@ pub fn run(
     let reason = reason.as_deref().map(Reason::parse).transpose()?;
     let complexity = complexity.as_deref().map(Complexity::parse).transpose()?;
     let owner = owner_name(&ctx.project)?;
-    let me = crate::claims::identity()?;
+    let me = crate::claims::identity(&mut ctx.warnings)?;
 
     // The claim rules of §3.1, as a guard: a live foreign claim refuses (no --force), a
     // stale one is taken over with the warning `start` gives, our own is simply replaced.

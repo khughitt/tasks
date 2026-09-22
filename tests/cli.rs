@@ -29,11 +29,10 @@ fn lifecycle_provenance_survives_claim_and_park_release() {
         let first = env.json(&dir, &["show", &id]);
         let claim = &first["claim"];
         assert_eq!(claim["live"], true);
-        if source == "CLAUDE_CODE_SESSION_ID" {
-            assert_eq!(claim["session"], "native-a");
-        } else {
-            assert!(claim["session"].as_str().unwrap().starts_with("sid:"));
-        }
+        assert_eq!(
+            claim["session"], "native-a",
+            "{source} is a claim identity level"
+        );
         assert_eq!(first["task"]["notes"][0]["text"], "started");
         run(&["start", &id]);
         let refreshed = env.json(&dir, &["show", &id]);
@@ -74,6 +73,77 @@ fn lifecycle_provenance_survives_claim_and_park_release() {
             closed["task"]["notes"]
         );
     }
+}
+
+#[test]
+fn a_codex_claim_outlives_the_command_that_made_it() {
+    // Codex runs each command as its own session leader, so a `sid:<pid>` claim would be
+    // dead the moment `start` returned. The thread id is the session instead, and the
+    // claim lives by the TTL: `show` here is a later command, and so is the rival start.
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let as_codex = |thread: &str| {
+        let mut cmd = env.cmd(&sci);
+        cmd.env("CODEX_SESSION_ID", thread)
+            .env("CODEX_THREAD_ID", thread);
+        cmd
+    };
+
+    as_codex("thread-a").args(["start", &id]).assert().success();
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["claim"]["session"], "thread-a");
+    assert_eq!(shown["claim"]["live"], true);
+    assert!(shown["claim"]["pid"].is_null(), "{}", shown["claim"]);
+    assert_eq!(
+        shown["task"]["notes"][0]["harness_session"], "codex:thread-a",
+        "provenance and the claim name the same thread"
+    );
+
+    let out = as_codex("thread-b").args(["start", &id]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(err_kind(&out), "claimed");
+    assert!(
+        err_detail(&out).contains("thread-a"),
+        "{}",
+        err_detail(&out)
+    );
+
+    as_codex("thread-a")
+        .args(["park", &id, "continue here"])
+        .assert()
+        .success();
+    let parked = env.json(&sci, &["show", &id]);
+    assert_eq!(
+        parked["park"]["session"], "codex:thread-a",
+        "the park entry carries the provenance scheme"
+    );
+
+    let out = as_codex("thread-a")
+        .env("CODEX_THREAD_ID", "thread-z")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let warnings = v["warnings"].as_array().unwrap();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("CODEX_SESSION_ID conflicts")),
+        "{warnings:?}"
+    );
+    assert!(
+        env.json(&sci, &["show", &id])["claim"]["session"]
+            .as_str()
+            .unwrap()
+            .starts_with("sid:"),
+        "a conflict falls to the Unix session"
+    );
 }
 
 #[test]
@@ -3807,7 +3877,19 @@ fn cleanup_retry_releases_this_checkouts_claim_without_a_second_occurrence() {
     )
     .unwrap();
 
-    let value = env.json(&sci, &["done", &id, "landed"]);
+    // The same Codex session retries: the thread id is its claim identity.
+    let out = env
+        .cmd(&sci)
+        .env("CODEX_SESSION_ID", "native-a")
+        .args(["done", &id, "landed"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(
         value["warnings"].to_string().contains("already completed"),
         "{value}"

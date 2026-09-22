@@ -1,15 +1,16 @@
 ---
 id: tasks-3190fb
 title: Claim identity from CODEX_SESSION_ID so a Codex claim outlives the command
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: main
 created: 2026-09-22T01:22:01Z
-updated: 2026-09-22T01:29:31Z
+updated: 2026-09-22T01:32:53Z
 started: 2026-09-22T01:29:31Z
+completed: 2026-09-22T01:32:53Z
 depends: []
 tags: []
 agent: "claude-code/claude-opus-5[1m]"
@@ -21,4 +22,8 @@ Observed 2026-09-21 (ai-80b836 probe): claims::identity_from reads TASKS_SESSION
 
 - 2026-09-22T01:22:16Z (main): Origin: ai ai-80b836 (Stop-hook gate probe) and ai docs/notes/2026-09-21-flow-gates-brief.md §5.
 - 2026-09-22T01:29:31Z (main): started
+  provenance: {"harness_session":"claude-code:3a3271ab-fdc9-4ac9-bf0d-7d56a218b361","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-22T01:32:53Z (feat/codex-claim-identity): done
+  provenance: {"harness_session":"claude-code:3a3271ab-fdc9-4ac9-bf0d-7d56a218b361","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-22T01:32:53Z (feat/codex-claim-identity): claims::identity_from reads CODEX_SESSION_ID / CODEX_THREAD_ID as a level between CLAUDE_CODE_SESSION_ID and the Unix fallback: session = thread id, tagged codex:<id>, pid None (TTL liveness); disagreeing pair warns and skips the level. Unit tests beside identity_prefers_the_explicit_pair, e2e a_codex_claim_outlives_the_command_that_made_it; claims spec, park spec §6, README and shipped skill updated.
   provenance: {"harness_session":"claude-code:3a3271ab-fdc9-4ac9-bf0d-7d56a218b361","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

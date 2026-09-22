@@ -23,16 +23,22 @@ pub fn unix_session_id() -> Option<u32> {
     rest.split_whitespace().nth(3)?.parse().ok()
 }
 
-pub fn identity() -> Result<Identity> {
-    identity_from(|key| std::env::var_os(key), unix_session_id())
+pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
+    identity_from(|key| std::env::var_os(key), unix_session_id(), warnings)
 }
 
 /// Session and pid resolve as a pair from a single level. A level that yields a session
 /// but no usable pid yields `pid: None` and falls to the TTL path; it is never welded to
 /// an unrelated fallback pid.
+///
+/// The Codex level reads `CODEX_SESSION_ID`, or `CODEX_THREAD_ID` alone; the two agree
+/// when both are set, and a disagreement warns and skips the level, as provenance does.
+/// Codex runs each command as its own session leader, so the Unix fallback would die with
+/// the command; the level exports no pid, so a Codex claim lives by the TTL.
 pub fn identity_from(
     get: impl Fn(&str) -> Option<OsString>,
     session_pid: Option<u32>,
+    warnings: &mut Vec<String>,
 ) -> Result<Identity> {
     let var = |key: &str| {
         get(key)
@@ -54,6 +60,21 @@ pub fn identity_from(
             pid: pid_of("CLAUDE_PID"),
         });
     }
+    match (var("CODEX_SESSION_ID"), var("CODEX_THREAD_ID")) {
+        (Some(session), Some(thread)) if session != thread => warnings.push(
+            "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls \
+             to the Unix session id"
+                .into(),
+        ),
+        (Some(session), _) | (None, Some(session)) => {
+            return Ok(Identity {
+                tagged: format!("codex:{session}"),
+                session,
+                pid: None,
+            });
+        }
+        (None, None) => {}
+    }
     match session_pid {
         Some(pid) => Ok(Identity {
             session: format!("sid:{pid}"),
@@ -62,7 +83,7 @@ pub fn identity_from(
         }),
         None => Err(Error::Config(
             "cannot determine a session identity: set TASKS_SESSION (no \
-             CLAUDE_CODE_SESSION_ID, and /proc/self/stat is unreadable)"
+             CLAUDE_CODE_SESSION_ID or CODEX_SESSION_ID, and /proc/self/stat is unreadable)"
                 .into(),
         )),
     }
@@ -757,6 +778,7 @@ mod tests {
                 ("CLAUDE_PID", "9"),
             ]),
             Some(11),
+            &mut Vec::new(),
         )
         .unwrap();
         assert_eq!(id.session, "explicit");
@@ -764,8 +786,86 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_session_is_a_level_below_claude_and_above_the_unix_fallback() {
+        let mut warnings = Vec::new();
+        let codex = identity_from(
+            env_of(&[
+                ("CODEX_SESSION_ID", "thread-1"),
+                ("CODEX_THREAD_ID", "thread-1"),
+            ]),
+            Some(11),
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(codex.session, "thread-1", "the raw session matches claims");
+        assert_eq!(
+            codex.tagged, "codex:thread-1",
+            "the provenance key's scheme"
+        );
+        assert_eq!(
+            codex.pid, None,
+            "Codex exports no pid: the claim lives by the TTL, not by the command's session leader"
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        let thread_only = identity_from(
+            env_of(&[("CODEX_THREAD_ID", "thread-2")]),
+            Some(11),
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(thread_only.tagged, "codex:thread-2");
+
+        let claude = identity_from(
+            env_of(&[
+                ("CLAUDE_CODE_SESSION_ID", "claude"),
+                ("CODEX_SESSION_ID", "thread-1"),
+            ]),
+            Some(11),
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(
+            claude.tagged, "claude:claude",
+            "the Claude level is read first"
+        );
+    }
+
+    #[test]
+    fn disagreeing_codex_variables_warn_and_skip_the_level() {
+        let mut warnings = Vec::new();
+        let id = identity_from(
+            env_of(&[
+                ("CODEX_SESSION_ID", "private-a"),
+                ("CODEX_THREAD_ID", "private-b"),
+            ]),
+            Some(11),
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(
+            id.session, "sid:11",
+            "the conflict falls to the Unix session"
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("CODEX_SESSION_ID") && warnings[0].contains("CODEX_THREAD_ID"),
+            "{warnings:?}"
+        );
+        assert!(
+            !warnings[0].contains("private"),
+            "the warning names the variables, not their values: {warnings:?}"
+        );
+    }
+
+    #[test]
     fn a_level_never_borrows_another_levels_pid() {
-        let id = identity_from(env_of(&[("CLAUDE_CODE_SESSION_ID", "claude")]), Some(11)).unwrap();
+        let id = identity_from(
+            env_of(&[("CLAUDE_CODE_SESSION_ID", "claude")]),
+            Some(11),
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert_eq!(id.session, "claude");
         assert_eq!(
             id.pid, None,
@@ -775,14 +875,15 @@ mod tests {
 
     #[test]
     fn falls_back_to_the_unix_session_id() {
-        let id = identity_from(env_of(&[]), Some(11)).unwrap();
+        let id = identity_from(env_of(&[]), Some(11), &mut Vec::new()).unwrap();
         assert_eq!(id.session, "sid:11");
         assert_eq!(id.pid, Some(11));
     }
 
     #[test]
     fn an_empty_variable_does_not_count_as_set() {
-        let id = identity_from(env_of(&[("TASKS_SESSION", "")]), Some(11)).unwrap();
+        let id =
+            identity_from(env_of(&[("TASKS_SESSION", "")]), Some(11), &mut Vec::new()).unwrap();
         assert_eq!(
             id.session, "sid:11",
             "emptiness is filtered inside the helper"
@@ -791,7 +892,7 @@ mod tests {
 
     #[test]
     fn unresolvable_identity_is_an_error_not_a_shared_placeholder() {
-        let error = identity_from(env_of(&[]), None).unwrap_err();
+        let error = identity_from(env_of(&[]), None, &mut Vec::new()).unwrap_err();
         assert_eq!(error.kind(), "config");
         assert!(
             error.to_string().contains("TASKS_SESSION"),
@@ -1172,16 +1273,25 @@ mod tests {
 
     #[test]
     fn identity_tags_the_session_by_the_level_that_resolved_it() {
-        let explicit = identity_from(env_of(&[("TASKS_SESSION", "mine:7")]), Some(11)).unwrap();
+        let explicit = identity_from(
+            env_of(&[("TASKS_SESSION", "mine:7")]),
+            Some(11),
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert_eq!(explicit.tagged, "mine:7", "verbatim; the caller tags it");
-        let claude =
-            identity_from(env_of(&[("CLAUDE_CODE_SESSION_ID", "abc-123")]), Some(11)).unwrap();
+        let claude = identity_from(
+            env_of(&[("CLAUDE_CODE_SESSION_ID", "abc-123")]),
+            Some(11),
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert_eq!(
             claude.session, "abc-123",
             "the raw session still matches claims"
         );
         assert_eq!(claude.tagged, "claude:abc-123");
-        let unix = identity_from(env_of(&[]), Some(11)).unwrap();
+        let unix = identity_from(env_of(&[]), Some(11), &mut Vec::new()).unwrap();
         assert_eq!(unix.tagged, "sid:11");
     }
 

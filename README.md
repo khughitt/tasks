@@ -97,7 +97,8 @@ without blocking an otherwise valid lifecycle operation. A qualified `TASKS_SESS
 override that disagrees with the native key is a conflict; a matching override never
 replaces the native source. Other claim overrides remain independent. Do not set
 `TASKS_SESSION` merely to improve observability: it is a claim override, not a
-provenance source. Codex still uses its `sid:<pid>` claim fallback without an override.
+provenance source. Claim identity reads the same Codex variables on its own: a Codex
+claim is keyed by the thread id, carries no pid, and lives by the TTL.
 
 The generated lifecycle texts are the consumer contract (including status edits):
 

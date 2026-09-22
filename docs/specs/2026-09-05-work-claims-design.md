@@ -120,9 +120,16 @@ falls to the TTL path; it is never paired with an unrelated fallback pid.
    are a first-class consumer and this makes the feature work with no setup. `CLAUDE_PID`
    requires a recent Claude Code; when it is absent, level 2 still supplies the session and
    `pid` is `None`.
-3. The caller's Unix session id, from `/proc/self/stat`.
+3. `CODEX_SESSION_ID`, or `CODEX_THREAD_ID` alone — Codex exports both into every command
+   shell, equal to the thread id its hooks receive as `session_id`. When both are set they
+   must agree; a disagreement warns and skips the level, as lifecycle provenance does.
+   Codex exports no pid, so `pid` is `None` and the claim lives by the TTL. Added
+   2026-09-22 (tasks-3190fb): Codex runs each command as its own session leader, so under
+   level 4 a Codex claim recorded the command's pid and was dead as soon as `start`
+   returned — `ready` and `next` never saw a live Codex claim.
+4. The caller's Unix session id, from `/proc/self/stat`.
 
-Level 3 is **terminal identity, not agent identity**: several agents can share one terminal
+Level 4 is **terminal identity, not agent identity**: several agents can share one terminal
 session, and a terminal outlives the agent that ran in it. It establishes *a* liveness handle
 and distinguishes different terminals; it cannot guarantee distinct agent ownership. Where a
 harness does not provide that distinction, level 1 remains necessary.

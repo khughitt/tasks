@@ -301,6 +301,7 @@ entry stores a tagged copy, following the level that resolved the identity:
 |--------------------------|-------------------------|
 | `TASKS_SESSION`          | verbatim; the caller tags it |
 | `CLAUDE_CODE_SESSION_ID` | `claude:<id>`           |
+| `CODEX_SESSION_ID` / `CODEX_THREAD_ID` | `codex:<id>` |
 | Unix session id          | `sid:<pid>`             |
 
 tasks never reads the value back for anything. A picker decides what a scheme means,

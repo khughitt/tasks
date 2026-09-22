@@ -86,7 +86,7 @@ pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
     // Identity and the store are resolved *before* the file write. Doing it afterwards
     // means an unresolvable identity or a corrupt store returns an error after the note has
     // already landed, and the obvious retry then duplicates it.
-    let me = crate::claims::identity()?;
+    let me = crate::claims::identity(&mut ctx.warnings)?;
     ctx.claims_mut()?;
     save(&mut ctx, &mut task)?;
 
