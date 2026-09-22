@@ -2,4 +2,5 @@
 #![allow(dead_code)]
 
 pub mod ancestry;
+pub mod resolve;
 pub mod snapshot;
