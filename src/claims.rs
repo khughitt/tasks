@@ -770,6 +770,109 @@ pub fn liveness_with(
     }
 }
 
+/// A resolution that may be carried rather than raised. Spec §6.2.2: an identity error is
+/// deferred across the two steps where a right to act can be established without it, and
+/// raised the moment acquisition is reached.
+pub enum Resolution {
+    Resolved(Identity),
+    Failed(Error),
+}
+
+impl Resolution {
+    pub fn identity(&self) -> Option<&Identity> {
+        match self {
+            Resolution::Resolved(identity) => Some(identity),
+            Resolution::Failed(_) => None,
+        }
+    }
+
+    /// Acquisition, including every takeover: `--force` displaces an owner but never
+    /// substitutes for one, so there is nothing to record without a resolved identity.
+    pub fn require(self) -> Result<Identity> {
+        match self {
+            Resolution::Resolved(identity) => Ok(identity),
+            Resolution::Failed(error) => Err(error),
+        }
+    }
+}
+
+pub fn resolve_identity(warnings: &mut Vec<String>) -> Resolution {
+    match identity(warnings) {
+        Ok(identity) => Resolution::Resolved(identity),
+        Err(error) => Resolution::Failed(error),
+    }
+}
+
+/// The identity to record when ownership was established by **proof alone** — the claim's
+/// own. Spec §6.4: `existing.session` is never rewritten, so a claim keeps the identity it
+/// was created with, and enabling relay mid-flight cannot re-key a natively-held claim.
+///
+/// This is deliberately *not* used when the resolved identity already matched the claim.
+/// That path keeps using the freshly resolved identity, exactly as today, because the two
+/// agree on the session anyway and the fresh one carries current fields — a repeated
+/// `start` must still be able to replace a stale pid with the one this session supplies,
+/// and a native level's `tagged` form (`codex:<id>` for a claim whose session is the raw
+/// id) must still reach the park and escalation records that `tests/cli.rs` asserts.
+pub fn continuation_identity(claim: &Claim) -> Identity {
+    Identity {
+        session: claim.session.clone(),
+        tagged: claim.session.clone(),
+        pid: claim.pid,
+        proof: match (claim.pid_start, &claim.boot_id) {
+            (Some(pid_start), Some(boot_id)) => Some(Proof {
+                pid_start,
+                boot_id: boot_id.clone(),
+                host: claim.host.clone(),
+            }),
+            _ => None,
+        },
+    }
+}
+
+/// Name the claim an error was raised against, so a resolution failure on a claimed task
+/// tells the operator which session to set `TASKS_SESSION` to. Spec §§5 and 6.5.
+pub fn name_the_claim(error: Error, held: Option<&str>) -> Error {
+    match held {
+        Some(session) => Error::Config(format!(
+            "{error}; the existing claim is held by session {session:?}"
+        )),
+        None => error,
+    }
+}
+
+/// Spec §6.2: does this caller own `claim`, proved from the claim's own recorded process
+/// handle and the caller's ancestry, with no registry read?
+pub fn proves_ownership(
+    claim: &Claim,
+    scope: &crate::relay::ancestry::Scope,
+    host: &str,
+    boot_id: Option<&str>,
+    get: &impl Fn(&str) -> Option<String>,
+) -> bool {
+    let crate::relay::ancestry::Scope::Harness(nearest) = scope else {
+        return false;
+    };
+    let (Some(pid), Some(pid_start)) = (claim.pid, claim.pid_start) else {
+        return false;
+    };
+    // 1. same host, same boot.
+    if boot_id.is_none() || claim.host != host || claim.boot_id.as_deref() != boot_id {
+        return false;
+    }
+    // 2. the *nearest* harness boundary, not any ancestor: a session nested under the
+    //    owner has the owner among its ancestors and must still be refused.
+    if nearest.pid != pid || nearest.start != pid_start {
+        return false;
+    }
+    // 3. a scoped hint must not contradict the claim, so that deferring a resolution error
+    //    cannot turn a contradicted session into an accepted owner.
+    match crate::relay::resolve::hint_for(&nearest.comm, get) {
+        Ok(Some(hint)) => crate::relay::resolve::same_session(&claim.session, &nearest.comm, &hint),
+        Ok(None) => true,
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -800,6 +903,173 @@ mod tests {
                 .find(|(k, _)| k == key)
                 .map(|(_, v)| OsString::from(v))
         }
+    }
+
+    use crate::relay::ancestry::{ProcEntry, Scope};
+
+    const PROOF_BOOT: &str = "0f9d5a1e-1c2b-4d3e-8f4a-5b6c7d8e9f01";
+
+    fn claim_of(session: &str, pid: Option<u32>, pid_start: Option<u64>) -> Claim {
+        Claim {
+            owner: "tester".into(),
+            session: session.into(),
+            pid,
+            pid_start,
+            boot_id: Some(PROOF_BOOT.into()),
+            host: "testhost".into(),
+            worktree: "/w".into(),
+            started: "2026-09-22T00:00:00Z".into(),
+            seen: "2026-09-22T00:00:00Z".into(),
+        }
+    }
+
+    fn nearest(comm: &str, pid: u32, start: u64) -> Scope {
+        Scope::Harness(ProcEntry {
+            pid,
+            ppid: 1,
+            comm: comm.into(),
+            start,
+        })
+    }
+
+    fn no_env() -> impl Fn(&str) -> Option<String> {
+        |_| None
+    }
+
+    #[test]
+    fn a_proof_establishes_the_owner_from_the_claims_own_contents() {
+        let claim = claim_of("codex:s1", Some(42), Some(900));
+        assert!(proves_ownership(
+            &claim,
+            &nearest("codex", 42, 900),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+    }
+
+    #[test]
+    fn a_proof_refuses_a_session_nested_under_the_owner() {
+        // claude(8) owns the claim; a codex(9) session launched beneath it has 8 among its
+        // ancestors, but its *nearest* boundary is 9. Two distinct harness processes with
+        // two distinct identities: it must be refused.
+        let claim = claim_of("claude-code:c1", Some(8), Some(800));
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("codex", 9, 900),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+    }
+
+    #[test]
+    fn a_proof_is_defeated_by_a_contradicted_hint() {
+        let claim = claim_of("claude-code:c1", Some(42), Some(900));
+        let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".to_string());
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("claude", 42, 900),
+            "testhost",
+            Some(PROOF_BOOT),
+            &env
+        ));
+    }
+
+    #[test]
+    fn a_proof_survives_a_known_representation_change() {
+        for stored in ["c1", "claude:c1", "claude-code:c1"] {
+            let claim = claim_of(stored, Some(42), Some(900));
+            let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".to_string());
+            assert!(
+                proves_ownership(
+                    &claim,
+                    &nearest("claude", 42, 900),
+                    "testhost",
+                    Some(PROOF_BOOT),
+                    &env
+                ),
+                "{stored}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_proof_fails_on_pid_reuse_a_new_boot_or_another_host() {
+        let claim = claim_of("codex:s1", Some(42), Some(900));
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("codex", 42, 901),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("codex", 42, 900),
+            "testhost",
+            Some("22222222-2222-4222-8222-222222222222"),
+            &no_env()
+        ));
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("codex", 42, 900),
+            "elsewhere",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+    }
+
+    #[test]
+    fn a_proof_is_unavailable_without_recorded_process_evidence() {
+        // Native Claude without CLAUDE_PID, and every Codex claim, carry pid: None.
+        let claim = claim_of("codex:s1", None, None);
+        assert!(!proves_ownership(
+            &claim,
+            &nearest("codex", 42, 900),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+    }
+
+    #[test]
+    fn a_proof_needs_an_established_harness_boundary() {
+        let claim = claim_of("codex:s1", Some(42), Some(900));
+        assert!(!proves_ownership(
+            &claim,
+            &Scope::Outside,
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+        assert!(!proves_ownership(
+            &claim,
+            &Scope::Unknown(4),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+    }
+
+    #[test]
+    fn a_continuation_identity_is_the_claims_own() {
+        let claim = claim_of("codex:s1", Some(42), Some(900));
+        let me = continuation_identity(&claim);
+        assert_eq!(me.session, "codex:s1");
+        assert_eq!(me.tagged, "codex:s1");
+        assert_eq!(me.pid, Some(42));
+        let proof = me.proof.unwrap();
+        assert_eq!(proof.pid_start, 900);
+        assert_eq!(proof.boot_id, PROOF_BOOT);
+        assert_eq!(proof.host, "testhost");
+
+        // A claim with no recorded proof yields an identity with none.
+        assert!(
+            continuation_identity(&claim_of("codex:s1", None, None))
+                .proof
+                .is_none()
+        );
     }
 
     fn relay_off() -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {

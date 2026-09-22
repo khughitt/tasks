@@ -15386,3 +15386,52 @@ fn cli_vocabulary_completion() {
         .unwrap();
     assert!(b.status.success(), "{}", String::from_utf8_lossy(&b.stderr));
 }
+#[test]
+fn a_continuity_repeated_start_by_the_owner_keeps_one_claim() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    for _ in 0..2 {
+        env.cmd(&dir)
+            .env("TASKS_SESSION", "owner")
+            .args(["start", &id])
+            .assert()
+            .success();
+    }
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(store.matches("session = \"owner\"").count(), 1, "{store}");
+}
+
+// NOTE: the explicit-mismatch case lives in Task 8 as an acceptance test. It has to run
+// under a harness shim with relay enabled and a matching boundary, or removing the
+// explicit-identity guard from `Ctx::ownership` would leave it passing — proof would never
+// have been consulted in the first place.
+
+#[test]
+fn a_continuity_park_and_close_by_the_owner_still_work() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let session = || ("TASKS_SESSION", "owner");
+    env.cmd(&dir)
+        .env(session().0, session().1)
+        .args(["start", &id])
+        .assert()
+        .success();
+    env.cmd(&dir)
+        .env(session().0, session().1)
+        .args(["park", &id, "next"])
+        .assert()
+        .success();
+    env.cmd(&dir)
+        .env(session().0, session().1)
+        .args(["start", &id])
+        .assert()
+        .success();
+    env.cmd(&dir)
+        .env(session().0, session().1)
+        .args(["done", &id, "landed"])
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
+}

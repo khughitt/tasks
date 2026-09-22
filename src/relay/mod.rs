@@ -1,6 +1,3 @@
-// `resolve::same_session` gains its consumer in Task 6, which removes this.
-#![allow(dead_code)]
-
 pub mod ancestry;
 pub mod resolve;
 pub mod snapshot;

@@ -35,7 +35,20 @@ pub fn run(
     let reason = reason.as_deref().map(Reason::parse).transpose()?;
     let complexity = complexity.as_deref().map(Complexity::parse).transpose()?;
     let owner = owner_name(&ctx.project)?;
-    let me = crate::claims::identity(&mut ctx.warnings)?;
+    let resolution = ctx.resolve_for_guard()?;
+    let existing = ctx.claims_mut()?.get(&task.id).cloned();
+    let held = existing.as_ref().map(|claim| claim.session.clone());
+    let me = match &existing {
+        Some(claim) => match ctx.ownership(claim, &resolution)? {
+            crate::commands::Ownership::ByIdentity => resolution.require()?,
+            crate::commands::Ownership::ByProof => crate::claims::continuation_identity(claim),
+            crate::commands::Ownership::Foreign => resolution
+                .require()
+                .map_err(|error| crate::claims::name_the_claim(error, held.as_deref()))?,
+        },
+        // Parking an unclaimed task records a session, so it is acquisition too.
+        None => resolution.require()?,
+    };
 
     // The claim rules of §3.1, as a guard: a live foreign claim refuses (no --force), a
     // stale one is taken over with the warning `start` gives, our own is simply replaced.

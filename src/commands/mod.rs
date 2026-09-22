@@ -69,6 +69,19 @@ pub struct Ctx {
     clear_escalation: Option<Option<Complexity>>,
 }
 
+/// How this caller's right to act on an existing claim was established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ownership {
+    /// The resolved identity equals the claim's session. Today's path, unchanged: the
+    /// resolved identity is used, with its current fields.
+    ByIdentity,
+    /// Identity did not match, or did not resolve at all, but the claim's own recorded
+    /// process proof names this caller's nearest harness boundary.
+    ByProof,
+    /// Not the owner. Anything from here is acquisition.
+    Foreign,
+}
+
 impl Ctx {
     fn new(project: Project, registry: Registry, routing: Routing) -> Self {
         Self {
@@ -117,17 +130,77 @@ impl Ctx {
         )
     }
 
+    /// Resolve identity, keeping a relay-level failure carryable so §6.2.2 can defer it. A
+    /// failure with relay off is raised here, exactly where `identity` raised it before,
+    /// which is what holds the relay-off guarantee at every call site rather than at some.
+    pub(crate) fn resolve_for_guard(&mut self) -> Result<crate::claims::Resolution> {
+        let me = crate::claims::resolve_identity(&mut self.warnings);
+        match me {
+            crate::claims::Resolution::Failed(error) if !crate::relay::enabled()? => Err(error),
+            other => Ok(other),
+        }
+    }
+
+    /// Spec §6.2.2 steps 2 and 3. Which of the two established the caller's right to act
+    /// matters: only proof-only ownership records the claim's own identity, because only
+    /// then is there no resolved identity that already agrees.
+    pub(crate) fn ownership(
+        &mut self,
+        claim: &crate::claims::Claim,
+        me: &crate::claims::Resolution,
+    ) -> Result<Ownership> {
+        if let Some(identity) = me.identity()
+            && claim.session == identity.session
+        {
+            return Ok(Ownership::ByIdentity);
+        }
+        // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
+        // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
+        // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
+        let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
+        if explicit || !crate::relay::enabled()? {
+            return Ok(Ownership::Foreign);
+        }
+        let proved = crate::claims::proves_ownership(
+            claim,
+            &crate::relay::ancestry::current_scope(),
+            &crate::claims::hostname(),
+            crate::claims::boot_id().as_deref(),
+            &|key| {
+                std::env::var_os(key)
+                    .and_then(|value| value.into_string().ok())
+                    .filter(|value| !value.is_empty())
+            },
+        );
+        Ok(if proved {
+            Ownership::ByProof
+        } else {
+            Ownership::Foreign
+        })
+    }
+
     pub fn refuse_foreign_live_claim(&mut self, id: &TaskId) -> Result<()> {
-        let me = crate::claims::identity(&mut self.warnings)?;
-        let store = self.claims_mut()?;
-        if let Some(existing) = store.get(id) {
-            let live = crate::claims::liveness(existing);
-            if live == Liveness::Live && existing.session != me.session {
-                return Err(Error::Claimed(
-                    id.to_string(),
-                    Ctx::describe_claim(existing, &live),
-                ));
-            }
+        let me = self.resolve_for_guard()?;
+        let existing = self.claims_mut()?.get(id).cloned();
+        let Some(existing) = existing else {
+            return me.require().map(|_| ());
+        };
+        if self.ownership(&existing, &me)? != Ownership::Foreign {
+            return Ok(());
+        }
+        // Not the owner. Today's behaviour resolved an identity here whatever the verdict,
+        // so a relay-level failure must still surface rather than be silently tolerated —
+        // and before any refusal, so the operator sees why identity failed rather than a
+        // refusal that merely follows from it.
+        let held = existing.session.clone();
+        me.require()
+            .map_err(|error| crate::claims::name_the_claim(error, Some(&held)))?;
+        let live = crate::claims::liveness(&existing);
+        if live == Liveness::Live {
+            return Err(Error::Claimed(
+                id.to_string(),
+                Ctx::describe_claim(&existing, &live),
+            ));
         }
         Ok(())
     }
@@ -166,15 +239,38 @@ impl Ctx {
     /// hold the shared claim while its own checkout still reads `todo` — the ordinary
     /// cross-worktree case — and its `done` there would otherwise strand the claim.
     fn claim_guard(&mut self, id: &TaskId, to: Status, force: bool) -> Result<()> {
-        let me = crate::claims::identity(&mut self.warnings)?;
+        let resolution = self.resolve_for_guard()?;
         let owner = owner_name(&self.project)?;
         let worktree = self.project.root.display().to_string();
-        let store = self.claims_mut()?;
+
+        let existing = self.claims_mut()?.get(id).cloned();
+        let ownership = match &existing {
+            Some(claim) => self.ownership(claim, &resolution)?,
+            None => Ownership::Foreign,
+        };
+        let mine = ownership != Ownership::Foreign;
+
+        // The identity to record, decided *before* any refusal. A held resolution error
+        // must be raised as itself the moment ownership fails (§6.2.2); letting a
+        // `Claimed` refusal return first would hide why identity could not resolve.
+        let me = match (&existing, ownership) {
+            // Ownership by identity means resolution succeeded, so `require` cannot fail.
+            // The resolved identity is used with its current fields, exactly as today: a
+            // repeated `start` still replaces a stale pid, and a native level's `tagged`
+            // form still reaches the park and escalation records.
+            (_, Ownership::ByIdentity) => resolution.require()?,
+            (Some(claim), Ownership::ByProof) => crate::claims::continuation_identity(claim),
+            _ => {
+                let held = existing.as_ref().map(|claim| claim.session.clone());
+                resolution
+                    .require()
+                    .map_err(|error| crate::claims::name_the_claim(error, held.as_deref()))?
+            }
+        };
 
         let mut warning = None;
-        if let Some(existing) = store.get(id) {
+        if let Some(existing) = &existing {
             let live = crate::claims::liveness(existing);
-            let mine = existing.session == me.session;
             match (&live, mine) {
                 (Liveness::Live, false) if !(force && to == Status::Doing) => {
                     return Err(Error::Claimed(
@@ -200,24 +296,31 @@ impl Ctx {
 
         self.pending_claim = Some(if to == Status::Doing {
             let now = crate::time::now();
-            let started = self
-                .claims_mut()?
-                .get(id)
-                .filter(|existing| existing.session == me.session)
-                .map(|existing| existing.started.clone())
-                .unwrap_or_else(|| now.clone());
+            let started = match (&existing, mine) {
+                (Some(claim), true) => claim.started.clone(),
+                _ => now.clone(),
+            };
             (
                 id.clone(),
                 ClaimIntent::Acquire(crate::claims::Claim {
                     owner,
-                    pid_start: me.pid.and_then(|pid| match crate::claims::proc_stat(pid) {
-                        crate::claims::ProcStat::Found { starttime, .. } => Some(starttime),
-                        _ => None,
-                    }),
+                    pid_start: match &me.proof {
+                        Some(proof) => Some(proof.pid_start),
+                        None => me.pid.and_then(|pid| match crate::claims::proc_stat(pid) {
+                            crate::claims::ProcStat::Found { starttime, .. } => Some(starttime),
+                            _ => None,
+                        }),
+                    },
+                    boot_id: match &me.proof {
+                        Some(proof) => Some(proof.boot_id.clone()),
+                        None => crate::claims::boot_id(),
+                    },
+                    host: match &me.proof {
+                        Some(proof) => proof.host.clone(),
+                        None => crate::claims::hostname(),
+                    },
                     session: me.session,
                     pid: me.pid,
-                    boot_id: crate::claims::boot_id(),
-                    host: crate::claims::hostname(),
                     worktree,
                     started,
                     seen: now,
