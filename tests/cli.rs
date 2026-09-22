@@ -597,13 +597,26 @@ fn tags_counts_per_project_and_filters_by_status() {
 fn tasks_format_env_must_be_valid() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    let out = env
-        .cmd(&dir)
-        .env("TASKS_FORMAT", "xml")
-        .args(["list"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
+    // A flag overrides a valid TASKS_FORMAT, never the check on an invalid one.
+    for args in [
+        &["list"][..],
+        &["--pretty", "list"][..],
+        &["--json", "list"][..],
+    ] {
+        let out = env
+            .cmd(&dir)
+            .env("TASKS_FORMAT", "xml")
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            text.contains("\"kind\":\"config\"")
+                && text.contains("TASKS_FORMAT must be json or pretty"),
+            "{args:?}: {text}"
+        );
+    }
 }
 
 fn write_doc(dir: &std::path::Path, rel: &str, text: &str) {

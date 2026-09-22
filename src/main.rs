@@ -104,22 +104,14 @@ fn main() {
         to_stderr(&usage_error(&error));
         std::process::exit(2);
     }
-    // The flags win over the variable, which is consulted only when neither is given.
-    let format = match (
+    let format = match Format::resolve(
         cli.json,
         cli.pretty,
         std::env::var("TASKS_FORMAT").ok().as_deref(),
     ) {
-        (true, _, _) => Format::Json,
-        (false, true, _) | (false, false, Some("pretty")) => Format::Pretty,
-        (false, false, None) | (false, false, Some("json")) => Format::Json,
-        (false, false, Some(other)) => {
-            to_stderr(&format!(
-                "{}\n",
-                output::render_error(&error::Error::Config(format!(
-                    "TASKS_FORMAT must be json or pretty, got {other:?}"
-                )))
-            ));
+        Ok(format) => format,
+        Err(error) => {
+            to_stderr(&format!("{}\n", output::render_error(&error)));
             std::process::exit(1);
         }
     };

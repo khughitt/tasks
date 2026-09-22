@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::model::{Complexity, Process, Size, Status, Task};
 use crate::registry::Registry;
 use crate::style::{Painter, Style};
@@ -9,6 +9,28 @@ use time::OffsetDateTime;
 pub enum Format {
     Json,
     Pretty,
+}
+
+impl Format {
+    /// The output format from `--json`, `--pretty`, and `TASKS_FORMAT`. The variable is
+    /// validated whenever it is set: a flag overrides a valid value, never the check on
+    /// an invalid one.
+    pub fn resolve(json: bool, pretty: bool, tasks_format: Option<&str>) -> Result<Format> {
+        let from_env = match tasks_format {
+            None | Some("json") => Format::Json,
+            Some("pretty") => Format::Pretty,
+            Some(other) => {
+                return Err(Error::Config(format!(
+                    "TASKS_FORMAT must be json or pretty, got {other:?}"
+                )));
+            }
+        };
+        Ok(match (json, pretty) {
+            (true, _) => Format::Json,
+            (false, true) => Format::Pretty,
+            (false, false) => from_env,
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -1371,6 +1393,36 @@ mod tests {
 
     fn plain() -> Painter {
         Painter::new(ColorMode::Never, Format::Pretty, false)
+    }
+
+    #[test]
+    fn format_resolution_validates_the_env_var_whenever_it_is_set() {
+        for (json, pretty, env, expected) in [
+            (false, false, None, Format::Json),
+            (false, false, Some("json"), Format::Json),
+            (false, false, Some("pretty"), Format::Pretty),
+            (false, true, None, Format::Pretty),
+            (false, true, Some("json"), Format::Pretty),
+            (false, true, Some("pretty"), Format::Pretty),
+            (true, false, None, Format::Json),
+            (true, false, Some("json"), Format::Json),
+            (true, false, Some("pretty"), Format::Json),
+        ] {
+            assert_eq!(
+                Format::resolve(json, pretty, env).unwrap(),
+                expected,
+                "--json {json}, --pretty {pretty}, TASKS_FORMAT {env:?}"
+            );
+        }
+        for (json, pretty) in [(false, false), (false, true), (true, false)] {
+            let error = Format::resolve(json, pretty, Some("xml"))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("TASKS_FORMAT must be json or pretty"),
+                "--json {json}, --pretty {pretty}: {error}"
+            );
+        }
     }
 
     #[test]
