@@ -1396,7 +1396,10 @@ pub fn resolve(
     // The hint is read before the registry so a self-contradicting pair is reported as
     // itself rather than as a match failure.
     let hint = hint_for(&nearest.comm, get)?;
-    let snapshot = load()?;
+    // The loader's own errors name the cause and the path, but they are registry errors,
+    // not identity errors: they must still carry the §5 recovery instruction, because a
+    // caller whose registry is missing needs to be told how to name itself.
+    let snapshot = load().map_err(|error| refuse(error.to_string()))?;
 
     // Rows whose handle names this very process. Narrowing here first is what lets a
     // refusal say *why*: a row that is this process but fails one predicate is worth
@@ -1676,10 +1679,14 @@ pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
 }
 ```
 
-Replace the contents of `src/relay/mod.rs` — the `#![allow(dead_code)]` goes, because the
-ladder now consumes it:
+Replace the contents of `src/relay/mod.rs`, **keeping** its `#![allow(dead_code)]`. The
+ladder consumes `level` and `enabled`, but `resolve::same_session` has no production
+consumer until Task 6, so removing the allowance here would fail the `-D warnings` gate:
 
 ```rust
+// `resolve::same_session` gains its consumer in Task 6, which removes this.
+#![allow(dead_code)]
+
 pub mod ancestry;
 pub mod resolve;
 pub mod snapshot;
@@ -1793,7 +1800,7 @@ git commit -m "feat(claims): add the opt-in relay level and carry its process pr
   - `Ctx::ownership(&mut self, claim: &Claim, me: &Resolution) -> Result<Ownership>` (`pub(crate)`)
 
 Also removes the last `#![allow(dead_code)]`, from `src/relay/mod.rs`: `same_session` gains
-its production consumer here.
+its production consumer here, so the file is staged in this task's commit.
 
 - [ ] **Step 1: Write the failing unit tests**
 
@@ -2283,9 +2290,9 @@ requires a resolved one:
     let held = existing.as_ref().map(|claim| claim.session.clone());
     let me = match &existing {
         Some(claim) => match ctx.ownership(claim, &resolution)? {
-            Ownership::ByIdentity => resolution.require()?,
-            Ownership::ByProof => crate::claims::continuation_identity(claim),
-            Ownership::Foreign => resolution
+            crate::commands::Ownership::ByIdentity => resolution.require()?,
+            crate::commands::Ownership::ByProof => crate::claims::continuation_identity(claim),
+            crate::commands::Ownership::Foreign => resolution
                 .require()
                 .map_err(|error| crate::claims::name_the_claim(error, held.as_deref()))?,
         },
@@ -2357,7 +2364,7 @@ identity applied where an ordinary identity match belongs.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/claims.rs src/commands/mod.rs src/commands/park.rs tests/cli.rs
+git add src/claims.rs src/commands/mod.rs src/commands/park.rs src/relay/mod.rs tests/cli.rs
 git commit -m "feat(claims): prove claim ownership without the registry; acquisition still needs identity"
 ```
 
@@ -2921,37 +2928,52 @@ fn an_acceptance_explicit_mismatch_stays_foreign_under_one_harness() {
 
 #[test]
 fn an_acceptance_mode_change_continues_a_natively_held_claim() {
-    // Claim natively with a pid, so the claim carries proof, then enable relay and publish
-    // the matching agent. The session key changes from `c1` to `claude-code:c1`, but the
-    // held claim keeps its own key and is continued by proof — no takeover, no rewrite.
+    // Acquisition, the configuration change, and the continuation all happen inside **one**
+    // shim. A second `harness_shim` would be a different process whose ancestry cannot
+    // prove anything about the first one's claim, so the close would succeed through
+    // ordinary stale takeover and the test would pass with proof-based continuity broken.
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
     let state = env.home.path().join("relay-state");
+    let after_start = env.home.path().join("after-start.toml");
 
-    let native = format!(
-        "{}\nCLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {id}\n\
-         write_registry\n",
-        shim_env(&state, "claude-code", "c1")
+    // Claim natively with a pid, so the claim carries proof and is keyed `c1`. Then enable
+    // relay mid-run: identity now resolves to `claude-code:c1`, which does *not* equal the
+    // claim's session, so only proof can establish ownership.
+    let script = format!(
+        "{}\nwrite_registry\n\
+         CLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {id}\n\
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"$HOME/native.toml\"\n\
+         mkdir -p \"$HOME/.config/tasks\"\n\
+         printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {id}\n\
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
+        shim_env(&state, "claude-code", "c1"),
+        after_start.display()
     );
-    let out = common::harness_shim(&dir, env.home.path(), "claude", &native);
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
-    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
-    assert!(store.contains("session = \"c1\""), "claimed natively: {store}");
-
-    // Relay on from here. The same process tree closes the task without --force.
-    relay_on(&env);
-    let after = format!(
-        "{}\nwrite_registry\nCLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
-        shim_env(&state, "claude-code", "c1")
-    );
-    let out = common::harness_shim(&dir, env.home.path(), "claude", &after);
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
     assert_eq!(
         out.status.code(),
         Some(0),
-        "a natively-held claim carrying proof must be continued, not taken over: {}",
+        "a natively-held claim carrying proof must be continued: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+
+    let native = std::fs::read_to_string(env.home.path().join("native.toml")).unwrap();
+    assert!(native.contains("session = \"c1\""), "claimed natively: {native}");
+
+    // The repeated `start` under relay kept the claim's own key: no re-keying to
+    // `claude-code:c1`, and one claim rather than a takeover of a foreign one.
+    let refreshed = std::fs::read_to_string(&after_start).unwrap();
+    assert!(refreshed.contains("session = \"c1\""), "re-keyed: {refreshed}");
+    assert!(!refreshed.contains("claude-code:c1"), "re-keyed: {refreshed}");
+    assert_eq!(refreshed.matches("session = ").count(), 1, "{refreshed}");
+
+    // A continuation is not a takeover, so nothing may have warned about one.
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains("took over"), "continuation must not take over: {text}");
     assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
 }
 
