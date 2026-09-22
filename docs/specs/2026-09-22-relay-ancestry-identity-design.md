@@ -80,7 +80,9 @@ registry).
 The file is read only where identity is resolved. `claims::identity` is reached from
 `Ctx::claim_guard` (`src/commands/mod.rs:169`), `Ctx::refuse_foreign_live_claim`
 (`:121`, called from `edit.rs:144` and `:257`), `commands::park` (`:38`) and
-`commands::status` (`:89`). `note` is not among them. Read commands, `check` and shell
+`status::note` (`status.rs:89`, inside the function beginning at `:82`) — which resolves
+identity for a heartbeat rather than for a guard, and is treated separately in §6.6.
+Read commands, `check` and shell
 completion perform **no relay ancestry walk and no registry access** — they still read
 `/proc` for claim liveness, as they do today, and that path is untouched.
 
@@ -235,9 +237,14 @@ None of these is a warning, and none degrades to a lower level: reaching level 3
 the scope test said "in scope" is the silent identity switch §2.6 forbids.
 
 These are errors **on acquisition**. On a task that already carries a claim they are held
-rather than raised, and are raised only if ownership proof also fails to establish the
-caller's right to act (§6.2). When raised there, the message additionally names
+rather than raised, and are raised as soon as ownership proof fails to establish the
+caller's right to act — including when the caller then attempts a takeover, since a
+takeover is itself acquisition and `--force` does not stand in for an owner that could
+not be resolved (§6.2.2). When raised on a claimed task, the message additionally names
 `existing.session` so the operator can recover with the explicit pair.
+
+`note` is the exception, and the only one: it guards nothing, so a relay-level resolution
+failure there is not an error at all (§6.6).
 
 ## 6. Continuity
 
@@ -261,32 +268,66 @@ The resolution is to stop asking one question:
 
 A relay-acquired claim records `host`, `pid`, `pid_start` and `boot_id` copied from the
 matched process handle (§4.4) — the same evidence relay itself used. A caller proves
-ownership by re-deriving that evidence locally:
+ownership by re-deriving that evidence locally, with no registry read. All three must
+hold:
 
-1. `claim.host` equals this host and `claim.boot_id` equals the current boot id, and
-2. some ancestor of the caller has pid `claim.pid` and `starttime` `claim.pid_start`.
+1. `claim.host` equals this host and `claim.boot_id` equals the current boot id.
+2. The caller's **nearest harness ancestor** — the very process §4.2's scope test
+   selects, not merely some ancestor — has pid `claim.pid` and `starttime`
+   `claim.pid_start`.
+3. The scoped session hint for that nearest harness (§4.3) does not contradict
+   `claim.session`, under the normalization of §6.2.1.
 
-The §4.2 ancestry walk already produces that chain, so the proof costs one `/proc` walk
-and no registry read. If both hold, the caller is a descendant of the very process the
-claim names, and is its owner.
+Condition 2 must be the *nearest* boundary and not any ancestor, or the proof admits a
+caller it should refuse: if a Claude session owns a claim and launches a Codex session
+beneath it, that Codex session has the Claude process among its ancestors and would
+otherwise close the Claude session's task without a takeover. These are two distinct
+harness processes with two distinct identities, so the shared-process exception of
+constraint §2.5 does not apply to them; restricting the proof to the nearest boundary
+refuses the inner session, because its own nearest harness ancestor is the `codex`
+process, not the `claude` one.
 
-This is strictly stronger than adopting `existing.session`. The only caller that can
-satisfy it without being the owning session is one genuinely descended from the same
-harness process — the shared-process case constraint §2.5 already governs by requiring explicit
-`TASKS_SESSION` for agents that claim independently.
+Condition 3 exists because deferring an identity-resolution error (§6.2.2) must not turn
+a contradicted session into an accepted owner. A caller whose scoped hint names a
+different session than the claim is refused on the evidence it does have, rather than
+admitted because the evidence it lacks could not be fetched.
 
-The ordering inside `claim_guard`, `refuse_foreign_live_claim`, `park` and `status`, all
-under the existing mutation lock:
+With all three, the caller is the session the claim names, proved from the claim's own
+contents.
+
+#### 6.2.1 Comparing a claim session to a hint
+
+The same session is written more than one way across the levels: natively a Claude claim
+stores the raw id with `claude:<id>` as its tagged form, while a relay agent id is
+`claude-code:<id>`. Condition 3 therefore compares *normalized* sessions — `<id>`,
+`claude:<id>` and `claude-code:<id>` are one session for a `claude` boundary, and `<id>`
+and `codex:<id>` are one session for a `codex` boundary.
+
+The normalization covers exactly these known representations. Any other difference is a
+genuine session mismatch and contradicts the proof; it is never treated as a change of
+notation. An `opencode` boundary has no native variable, so condition 3 is vacuous there.
+
+#### 6.2.2 Ordering
+
+Inside `claim_guard`, `refuse_foreign_live_claim` and `park`, under the existing mutation
+lock:
 
 1. `TASKS_SESSION` set → identity match, exactly as today.
 2. identity resolved and `existing.session` equals it → owner.
-3. ownership proof holds → owner, **even though identity did not resolve**.
-4. otherwise → foreign claim: today's `Claimed` refusal, or takeover with `--force`.
+3. ownership proof (§6.2) holds → owner, **even though identity did not resolve**.
+4. otherwise → the caller is not the owner, and anything it does from here is
+   **acquisition**: a first claim, or a takeover of someone else's.
 
-An identity-resolution failure at step 2 is therefore no longer fatal on a task that is
-already claimed: the error is carried and raised only if steps 3 and 4 also fail to
-establish a right to act. A task with no existing claim goes straight to acquisition,
-where a resolution failure stays fatal.
+Step 4 requires a resolved identity, always. A takeover records a new owner, and there is
+no valid owner to record when identity did not resolve — so `--force` permits displacing
+an existing owner but never substitutes for identity. This holds for a live claim, for a
+stale claim, and for `start --force` alike: if identity failed to resolve, the held error
+is raised at step 4 rather than suppressed by the flag.
+
+So an identity-resolution failure is deferred only across steps 2 and 3, where a right to
+act can be established without it. It is raised the moment step 4 is reached, and it is
+fatal from the start on a task carrying no claim at all, since that path is acquisition
+by definition.
 
 ### 6.3 Claims that carry no proof
 
@@ -323,7 +364,33 @@ When identity does not resolve and ownership proof is unavailable, the §5 error
 act. The explicit pair sits above the relay level, so this recovery works with relay
 enabled and on a host where §7 refuses the platform.
 
-### 6.6 Within a session
+### 6.6 `note` is a heartbeat, not a guard
+
+`status::note` resolves identity for a different purpose than the guards do. It appends
+the note, then refreshes `seen` on the claim **only when that claim is its own**; it
+never refuses a foreign claim and never touches one, and a failed heartbeat save is a
+warning saying the note landed rather than an error. Identity is resolved before the file
+write so that an unresolvable identity or a corrupt store returns *before* the note lands
+— the obvious retry would otherwise duplicate it.
+
+Two consequences, both of which keep that behaviour rather than fold `note` into §6.2.2:
+
+- The foreign-claim refusal must **not** be applied here. Notes from a foreign session
+  are allowed today, deliberately, and this design does not change that. Step 4 has no
+  meaning in `note`: there is no acquisition to guard, so there is nothing for a refusal
+  or a takeover to decide.
+- Under relay, a lost registry would otherwise make every note fail, and fail before the
+  note landed. So in relay mode a relay-level resolution failure is not fatal in `note`.
+  Ownership is decided by proof (§6.2) first; a claim that can be neither matched nor
+  proved is simply not ours, the note lands, the heartbeat is skipped, and the existing
+  "the note landed, but the claim heartbeat … was not refreshed" warning reports it.
+
+The store read stays ahead of the write, so a corrupt store remains an error before the
+note lands. With relay off, behaviour is byte-for-byte today's, including a fatal
+unresolvable identity: the degradation is scoped to a relay-level failure, which is the
+only new way for resolution to fail.
+
+### 6.7 Within a session
 
 Identity is resolved independently by each claim-mutating command; there is no cache. The
 inputs — ancestry, registry, config — are stable within a session, and a cache would be a
@@ -340,11 +407,26 @@ host-local, a machine without a readable process tree simply does not enable it,
 nothing about tasks' behaviour there changes — including its existing
 unverifiable/TTL liveness path, which this design does not touch.
 
-The refusal belongs to the relay level, not to program startup or to config parsing.
-`TASKS_SESSION` is resolved first, so on a host where the platform is refused the
-explicit pair keeps working unchanged and remains the recovery path — the platform
-refusal can never take away the escape from it. A caller that is out of scope (§4.2)
-likewise never reaches the refusal, since the relay level is not consulted at all.
+The refusal belongs to the relay level, not to program startup or to config parsing. The
+level evaluates in a fixed order, and each stage is reached only by passing the one
+before it:
+
+1. **Explicit override.** `TASKS_SESSION` resolves first and short-circuits everything
+   below it, so the explicit pair keeps working on any host and remains the recovery path
+   from every refusal here.
+2. **Configuration.** With relay not enabled, nothing below is consulted: no platform
+   check, no ancestry walk, no registry read.
+3. **Platform support.** With relay enabled on a host without `/proc`, this is where the
+   `Config` error above is raised, naming the platform.
+4. **Ancestry.** Only here does §4.2 run, and only here can a caller be found in or out
+   of scope.
+
+The out-of-scope exemption of §4.2 is therefore available only on a host where ancestry
+can be established. A `/proc`-less host cannot show that a caller sits outside a harness
+tree, because it cannot see the tree at all; "out of scope" is not a verdict available to
+it, and the stage-3 refusal is what it gets instead. Treating unexaminable ancestry as
+out of scope would be exactly the "unknown is not a shell" error of constraint §2.3,
+committed host-wide.
 
 Native Darwin claim liveness, and a Darwin process-tree source, are separate work and
 are not prerequisites for this one.
@@ -374,8 +456,11 @@ Unit, against injected inputs:
 
 - The ladder: explicit pair beats relay; relay beats both native variables; out of
   scope falls to the native variables unchanged; relay off leaves today's behaviour
-  byte-for-byte; the §7 platform refusal fires below the explicit pair, so a session
-  with `TASKS_SESSION` set is unaffected by it.
+  byte-for-byte.
+- The §7 stage order: with relay enabled on a host without `/proc`, the platform error
+  is raised and no caller is reported out of scope; with `TASKS_SESSION` also set, the
+  explicit pair resolves and the platform error never fires; with relay disabled on the
+  same host, nothing below stage 2 is consulted.
 - The scope test: no harness ancestor with a readable chain, a harness ancestor at
   each depth, an unreadable level before a verdict, and an unmatched inner harness
   that must not be skipped for a matching outer one.
@@ -405,15 +490,47 @@ Continuity, the §6 mechanism, unit where the inputs can be injected:
   the owning caller's park, done and edit all succeed via ownership proof.
 - **Foreign caller without the registry.** The same claim, a caller whose ancestry does
   not contain the claimed process: refused as foreign, not admitted by proof.
+- **Nested harness.** A claim owned by a `claude` session, and a `codex` session launched
+  beneath it: the inner session is **refused**, because its nearest harness ancestor is
+  the `codex` process and not the claimed `claude` one. The test asserts it cannot close
+  or release the outer session's task without a takeover — the case a whole-ancestry
+  proof would wrongly admit.
+- **Contradicted hint.** Proof conditions 1 and 2 hold, but the scoped hint for the
+  nearest harness names a different session: refused, even though identity could not be
+  resolved.
+- **Normalized equality.** A claim session of `<id>`, `claude:<id>` and `claude-code:<id>`
+  each satisfy condition 3 against a `claude` boundary hinting `<id>`; `<id>` and
+  `codex:<id>` likewise for `codex`. Any other differing string is a mismatch, not a
+  change of notation.
 - **Proof mismatch.** The claimed pid exists but with a different `starttime` (pid
   reuse); a different `boot_id`; a different `host`. Each refuses.
 - **No proof available.** A claim with `pid: None` (§6.3) falls to identity match or
   takeover, and never to proof.
-- **Held error.** Identity fails to resolve on a task that is already claimed by this
-  caller: the error is not raised. The same failure with no existing claim: raised.
+- **Held error.** Identity fails to resolve on a task already claimed by this caller and
+  provable: the error is not raised. The same failure with no existing claim: raised.
+- **Takeover needs identity.** With identity unresolved, `--force` is refused and the
+  held error is raised — asserted separately for a live claim, for a stale claim, and for
+  `start --force`. No test shows a takeover recording an owner that could not be
+  resolved.
 - **Mode change.** A natively-keyed claim carrying proof is continued by a
   relay-resolved session at step 3, without `--force`; the same claim without proof
-  requires `--force` and records the takeover.
+  requires `--force`, which in turn requires resolved identity, and records the takeover.
+
+`note`, whose contract differs from the guards (§6.6):
+
+- **Owner heartbeat after registry loss.** A relay-acquired claim, the registry removed:
+  `note` by the owning session still refreshes `seen`, via ownership proof.
+- **Foreign note preserved.** `note` by a foreign session is accepted and leaves the
+  foreign claim untouched and unrefreshed — with the registry present and absent alike.
+  No §6.2.2 refusal reaches `note`.
+- **Unprovable claim.** Relay mode with the registry gone and a claim that can be neither
+  matched nor proved: the note lands, the heartbeat is skipped, and the existing
+  heartbeat warning is emitted. The note is never lost to a resolution error.
+- **Unclaimed task.** `note` on a task carrying no claim succeeds in relay mode with the
+  registry gone.
+- **Relay off.** An unresolvable identity is still fatal and the note still does not
+  land, byte-for-byte today's behaviour.
+- **Corrupt store.** Still an error raised before the note lands, in every mode.
 
 End-to-end in `tests/cli.rs`, against the built binary in temp repos with
 `XDG_CONFIG_HOME`, `RELAY_STATE_DIR` and a fixture snapshot:
@@ -438,11 +555,16 @@ Suggested step children for the implementation plan, in order:
 4. The relay level in `identity_from`: match predicate, harness agreement, scoped hints,
    and the §5 errors.
 5. Claim-field adoption and the §7 platform refusal.
-6. **Continuity**: the acquisition/continuation split, ownership proof, the held-error
-   rule, and the `--force` reconciliation across `claim_guard`,
-   `refuse_foreign_live_claim`, `park` and `status`. This is the step that changes
-   existing call sites rather than adding a new level, and it carries the owner and
-   foreign-caller tests of §9.
-7. The end-to-end tests, and the skill and README updates.
+6. **Continuity in the guards**: the acquisition/continuation split, ownership proof at
+   the nearest harness boundary with its normalized hint comparison, the held-error rule,
+   and the requirement that every takeover resolve identity, across `claim_guard`,
+   `refuse_foreign_live_claim` and `park`. This step changes existing call sites rather
+   than adding a new level, and carries the owner, foreign-caller, nested-harness and
+   takeover tests of §9.
+7. **Continuity in `note`**: ownership by proof for the heartbeat, a non-fatal
+   relay-level resolution failure, and the preserved foreign-note behaviour. Separate
+   from step 6 because `note`'s contract is a heartbeat rather than a guard, and folding
+   it into the common path is the specific mistake §6.6 exists to prevent.
+8. The end-to-end tests, and the skill and README updates.
 
 The plan is written and reviewed before any of it is implemented.
