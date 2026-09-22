@@ -13,6 +13,16 @@ pub struct Identity {
     pub session: String,
     pub pid: Option<u32>,
     pub tagged: String,
+    pub proof: Option<Proof>,
+}
+
+/// Process proof adopted from a matched relay handle, written into the claim's existing
+/// fields. Absent on every native level, which derives what it can from `pid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Proof {
+    pub pid_start: u64,
+    pub boot_id: String,
+    pub host: String,
 }
 
 /// The caller's Unix session id, from `/proc/self/stat` field 6 (field 4 of the remainder
@@ -24,7 +34,12 @@ pub fn unix_session_id() -> Option<u32> {
 }
 
 pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
-    identity_from(|key| std::env::var_os(key), unix_session_id(), warnings)
+    identity_from(
+        |key| std::env::var_os(key),
+        unix_session_id(),
+        crate::relay::level,
+        warnings,
+    )
 }
 
 /// Session and pid resolve as a pair from a single level. A level that yields a session
@@ -38,6 +53,7 @@ pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
 pub fn identity_from(
     get: impl Fn(&str) -> Option<OsString>,
     session_pid: Option<u32>,
+    relay: impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>>,
     warnings: &mut Vec<String>,
 ) -> Result<Identity> {
     let var = |key: &str| {
@@ -51,6 +67,21 @@ pub fn identity_from(
             tagged: session.clone(),
             session,
             pid: pid_of("TASKS_SESSION_PID"),
+            proof: None,
+        });
+    }
+    // Stage 1 of spec §7 is above: an explicit pair short-circuits, so the relay level is
+    // never invoked and none of its stages run.
+    if let Some(resolved) = relay()? {
+        return Ok(Identity {
+            tagged: resolved.session.clone(),
+            session: resolved.session,
+            pid: Some(resolved.pid),
+            proof: Some(Proof {
+                pid_start: resolved.pid_start,
+                boot_id: resolved.boot_id,
+                host: resolved.host,
+            }),
         });
     }
     if let Some(session) = var("CLAUDE_CODE_SESSION_ID") {
@@ -58,6 +89,7 @@ pub fn identity_from(
             tagged: format!("claude:{session}"),
             session,
             pid: pid_of("CLAUDE_PID"),
+            proof: None,
         });
     }
     match (var("CODEX_SESSION_ID"), var("CODEX_THREAD_ID")) {
@@ -71,6 +103,7 @@ pub fn identity_from(
                 tagged: format!("codex:{session}"),
                 session,
                 pid: None,
+                proof: None,
             });
         }
         (None, None) => {}
@@ -80,6 +113,7 @@ pub fn identity_from(
             session: format!("sid:{pid}"),
             tagged: format!("sid:{pid}"),
             pid: Some(pid),
+            proof: None,
         }),
         None => Err(Error::Config(
             "cannot determine a session identity: set TASKS_SESSION (no \
@@ -768,6 +802,84 @@ mod tests {
         }
     }
 
+    fn relay_off() -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {
+        || Ok(None)
+    }
+
+    fn relay_resolves(
+        session: &str,
+    ) -> impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>> {
+        let session = session.to_string();
+        move || {
+            Ok(Some(crate::relay::resolve::Resolved {
+                session,
+                pid: 42,
+                pid_start: 900,
+                boot_id: "boot".into(),
+                host: "testhost".into(),
+            }))
+        }
+    }
+
+    #[test]
+    fn a_ladder_explicit_pair_short_circuits_the_relay_level() {
+        let identity = identity_from(
+            env_of(&[("TASKS_SESSION", "explicit"), ("TASKS_SESSION_PID", "7")]),
+            Some(11),
+            || panic!("the relay level must not run when TASKS_SESSION is set"),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(identity.session, "explicit");
+        assert_eq!(identity.pid, Some(7));
+        assert!(identity.proof.is_none());
+    }
+
+    #[test]
+    fn a_ladder_relay_level_beats_the_native_variables() {
+        let identity = identity_from(
+            env_of(&[("CLAUDE_CODE_SESSION_ID", "raw")]),
+            Some(11),
+            relay_resolves("claude-code:raw"),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(identity.session, "claude-code:raw");
+        assert_eq!(identity.tagged, "claude-code:raw");
+        assert_eq!(identity.pid, Some(42));
+        let proof = identity.proof.unwrap();
+        assert_eq!(proof.pid_start, 900);
+        assert_eq!(proof.boot_id, "boot");
+        assert_eq!(proof.host, "testhost");
+    }
+
+    #[test]
+    fn a_ladder_out_of_scope_leaves_the_native_levels_untouched() {
+        let identity = identity_from(
+            env_of(&[("CLAUDE_CODE_SESSION_ID", "raw")]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(identity.session, "raw");
+        assert_eq!(identity.tagged, "claude:raw");
+        assert!(identity.proof.is_none());
+    }
+
+    #[test]
+    fn a_ladder_relay_error_does_not_fall_to_a_lower_level() {
+        let error = identity_from(
+            env_of(&[("CLAUDE_CODE_SESSION_ID", "raw")]),
+            Some(11),
+            || Err(Error::Config("relay identity: no match".into())),
+            &mut Vec::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("no match"), "{error}");
+    }
+
     #[test]
     fn identity_prefers_the_explicit_pair() {
         let id = identity_from(
@@ -778,6 +890,7 @@ mod tests {
                 ("CLAUDE_PID", "9"),
             ]),
             Some(11),
+            relay_off(),
             &mut Vec::new(),
         )
         .unwrap();
@@ -794,6 +907,7 @@ mod tests {
                 ("CODEX_THREAD_ID", "thread-1"),
             ]),
             Some(11),
+            relay_off(),
             &mut warnings,
         )
         .unwrap();
@@ -811,6 +925,7 @@ mod tests {
         let thread_only = identity_from(
             env_of(&[("CODEX_THREAD_ID", "thread-2")]),
             Some(11),
+            relay_off(),
             &mut warnings,
         )
         .unwrap();
@@ -822,6 +937,7 @@ mod tests {
                 ("CODEX_SESSION_ID", "thread-1"),
             ]),
             Some(11),
+            relay_off(),
             &mut warnings,
         )
         .unwrap();
@@ -840,6 +956,7 @@ mod tests {
                 ("CODEX_THREAD_ID", "private-b"),
             ]),
             Some(11),
+            relay_off(),
             &mut warnings,
         )
         .unwrap();
@@ -863,6 +980,7 @@ mod tests {
         let id = identity_from(
             env_of(&[("CLAUDE_CODE_SESSION_ID", "claude")]),
             Some(11),
+            relay_off(),
             &mut Vec::new(),
         )
         .unwrap();
@@ -875,15 +993,20 @@ mod tests {
 
     #[test]
     fn falls_back_to_the_unix_session_id() {
-        let id = identity_from(env_of(&[]), Some(11), &mut Vec::new()).unwrap();
+        let id = identity_from(env_of(&[]), Some(11), relay_off(), &mut Vec::new()).unwrap();
         assert_eq!(id.session, "sid:11");
         assert_eq!(id.pid, Some(11));
     }
 
     #[test]
     fn an_empty_variable_does_not_count_as_set() {
-        let id =
-            identity_from(env_of(&[("TASKS_SESSION", "")]), Some(11), &mut Vec::new()).unwrap();
+        let id = identity_from(
+            env_of(&[("TASKS_SESSION", "")]),
+            Some(11),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert_eq!(
             id.session, "sid:11",
             "emptiness is filtered inside the helper"
@@ -892,7 +1015,7 @@ mod tests {
 
     #[test]
     fn unresolvable_identity_is_an_error_not_a_shared_placeholder() {
-        let error = identity_from(env_of(&[]), None, &mut Vec::new()).unwrap_err();
+        let error = identity_from(env_of(&[]), None, relay_off(), &mut Vec::new()).unwrap_err();
         assert_eq!(error.kind(), "config");
         assert!(
             error.to_string().contains("TASKS_SESSION"),
@@ -1276,6 +1399,7 @@ mod tests {
         let explicit = identity_from(
             env_of(&[("TASKS_SESSION", "mine:7")]),
             Some(11),
+            relay_off(),
             &mut Vec::new(),
         )
         .unwrap();
@@ -1283,6 +1407,7 @@ mod tests {
         let claude = identity_from(
             env_of(&[("CLAUDE_CODE_SESSION_ID", "abc-123")]),
             Some(11),
+            relay_off(),
             &mut Vec::new(),
         )
         .unwrap();
@@ -1291,7 +1416,7 @@ mod tests {
             "the raw session still matches claims"
         );
         assert_eq!(claude.tagged, "claude:abc-123");
-        let unix = identity_from(env_of(&[]), Some(11), &mut Vec::new()).unwrap();
+        let unix = identity_from(env_of(&[]), Some(11), relay_off(), &mut Vec::new()).unwrap();
         assert_eq!(unix.tagged, "sid:11");
     }
 

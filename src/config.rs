@@ -1,6 +1,3 @@
-// The relay level is this file's only consumer and arrives in Task 5, which removes this.
-#![allow(dead_code)]
-
 use crate::error::{Error, Result};
 use std::path::PathBuf;
 
