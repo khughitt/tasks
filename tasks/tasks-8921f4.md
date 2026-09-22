@@ -1,19 +1,21 @@
 ---
 id: tasks-8921f4
 title: Design opt-in relay ancestry identity
-status: doing
+status: done
 priority: 2
 size: l
 complexity: high
 process: planned
 owner: design/relay-ancestry
 created: 2026-09-17T21:08:29Z
-updated: 2026-09-22T15:28:06Z
+updated: 2026-09-22T16:29:58Z
 started: 2026-09-22T13:09:21Z
+completed: 2026-09-22T16:29:58Z
 depends: [relay-06b1da]
 parent: tasks-c9199a
 tags: []
 source: tasks-c9199a
+model: "claude-opus-5[1m]"
 agent: codex
 spec: docs/specs/2026-09-22-relay-ancestry-identity-design.md
 plan: docs/plans/2026-09-22-relay-ancestry-identity.md
@@ -72,4 +74,8 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
   provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-22T15:28:05Z (design/relay-ancestry): Plan revised on fourth review. The mode-change acceptance test now runs acquisition, the config change and the continuation inside one shim, writing the config from the shell mid-run, and copies the claim store after the repeated start so it can assert the session stayed c1, was not re-keyed to claude-code:c1, is a single claim, and produced no takeover warning; a second harness_shim was a different process whose ancestry proved nothing, so the old test passed through stale takeover. Registry load errors are now wrapped by the relay refusal formatter, preserving cause and path while carrying the spec 5 recovery instruction, which the parked-resumption test asserts. Three mechanical fixes: Task 5 keeps the relay dead_code allowance in its replacement block rather than contradicting itself, the park snippet qualifies Ownership through crate::commands, and Task 6 stages src/relay/mod.rs in its commit.
 - 2026-09-22T15:28:06Z (design/relay-ancestry): parked (waiting on user, review): Re-review of .worktrees/relay-ancestry/docs/plans/2026-09-22-relay-ancestry-identity.md; on approval start tasks-8103e8 and work the eight steps in dependency order.
+  provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-22T16:29:58Z (design/relay-ancestry): done
+  provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-22T16:29:58Z (design/relay-ancestry): Design and implementation both landed on design/relay-ancestry. The spec (docs/specs/2026-09-22-relay-ancestry-identity-design.md) and plan (docs/plans/2026-09-22-relay-ancestry-identity.md) were each reviewed to approval, and all eight plan steps are done: a host-local config opt-in, a schema-1 registry reader, the ancestry walk to the nearest harness boundary, the match with harness agreement and scoped hints, the level in the identity ladder with its platform refusal, ownership proof in the guards separating continuation from acquisition, continuity in note, and fourteen acceptance tests over real process ancestry. Relay off is byte-for-byte the previous behaviour; every relay identity error names TASKS_SESSION as the recovery.
   provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
