@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/relay-ancestry
 created: 2026-09-17T21:08:29Z
-updated: 2026-09-22T14:16:16Z
+updated: 2026-09-22T14:16:18Z
 started: 2026-09-22T13:09:21Z
 depends: [relay-06b1da]
 parent: tasks-c9199a
@@ -62,3 +62,5 @@ Prerequisites: relay-06b1da. Release goal: relay-1231bf. Bootstrap ops-998bbb cl
 - 2026-09-22T14:07:37Z (design/relay-ancestry): resumed
   provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-22T14:16:16Z (design/relay-ancestry): Implementation plan written at docs/plans/2026-09-22-relay-ancestry-identity.md and decomposed into eight step children, ordered by dependency: config, snapshot reader, ancestry walk, relay level, ladder and adoption, guard continuity, note continuity, acceptance tests. Self-review corrected two plan defects: Task 6 described claim_guard and park instead of showing them, and its interfaces named an Ownership type the code does not use; the guards now share Ctx::resolve_for_guard, which raises a native resolution failure where identity raised it before and carries only a relay-level one, so relay-off behaviour stays byte-for-byte. Plan fixtures use a neutral hostname after the pre-commit hook refused the real one.
+- 2026-09-22T14:16:18Z (design/relay-ancestry): parked (waiting on user, review): User review of .worktrees/relay-ancestry/docs/plans/2026-09-22-relay-ancestry-identity.md; on approval start tasks-8103e8 and work the eight steps in dependency order.
+  provenance: {"harness_session":"claude-code:3b265943-33e2-4466-947a-581d11a9cbb0","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
