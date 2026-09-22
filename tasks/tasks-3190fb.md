@@ -1,13 +1,15 @@
 ---
 id: tasks-3190fb
 title: Claim identity from CODEX_SESSION_ID so a Codex claim outlives the command
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-22T01:22:01Z
-updated: 2026-09-22T01:22:16Z
+updated: 2026-09-22T01:29:31Z
+started: 2026-09-22T01:29:31Z
 depends: []
 tags: []
 agent: "claude-code/claude-opus-5[1m]"
@@ -18,3 +20,5 @@ Observed 2026-09-21 (ai-80b836 probe): claims::identity_from reads TASKS_SESSION
 ## Notes
 
 - 2026-09-22T01:22:16Z (main): Origin: ai ai-80b836 (Stop-hook gate probe) and ai docs/notes/2026-09-21-flow-gates-brief.md §5.
+- 2026-09-22T01:29:31Z (main): started
+  provenance: {"harness_session":"claude-code:3a3271ab-fdc9-4ac9-bf0d-7d56a218b361","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
