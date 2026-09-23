@@ -280,8 +280,16 @@ fn parse_agent(key: &str, value: &serde_json::Value) -> Result<Agent> {
 pub fn parse(text: &str) -> Result<Snapshot> {
     let raw: serde_json::Value =
         serde_json::from_str(text).map_err(|error| invalid(&error.to_string()))?;
-    if raw.get("schema").and_then(serde_json::Value::as_u64) != Some(1) {
-        return Err(invalid("schema must be 1"));
+    // Schema 2 changed what `process` names (relay spec 2026-09-23). A schema-1 file can
+    // hold rows that borrowed another session's handle, so it is refused, never read.
+    match raw.get("schema").and_then(serde_json::Value::as_u64) {
+        Some(2) => {}
+        Some(1) => {
+            return Err(invalid(
+                "schema 1 is superseded by schema 2; run `relay reap`, or wait for any hook event",
+            ));
+        }
+        _ => return Err(invalid("schema must be 2")),
     }
     let generation = text_field(&raw, "generation")?;
     if !is_uuid(&generation) {
@@ -354,7 +362,7 @@ mod tests {
 
     fn snapshot_json(key: &str, agent: &str) -> String {
         format!(
-            r#"{{"schema":1,"generation":"11111111-2222-4333-8444-555555555555",
+            r#"{{"schema":2,"generation":"11111111-2222-4333-8444-555555555555",
                "revision":7,"agents":{{"{key}":{agent}}}}}"#
         )
     }
@@ -449,11 +457,11 @@ mod tests {
     #[test]
     fn a_snapshot_refuses_what_the_producer_refuses() {
         let cases: Vec<(&str, String)> = vec![
-            ("schema 2", r#"{"schema":2,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#.into()),
-            ("no generation", r#"{"schema":1,"revision":1,"agents":{}}"#.into()),
-            ("bad generation", r#"{"schema":1,"generation":"nope","revision":1,"agents":{}}"#.into()),
-            ("no revision", r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","agents":{}}"#.into()),
-            ("no agents", r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1}"#.into()),
+            ("schema 3", r#"{"schema":3,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#.into()),
+            ("no generation", r#"{"schema":2,"revision":1,"agents":{}}"#.into()),
+            ("bad generation", r#"{"schema":2,"generation":"nope","revision":1,"agents":{}}"#.into()),
+            ("no revision", r#"{"schema":2,"generation":"11111111-2222-4333-8444-555555555555","agents":{}}"#.into()),
+            ("no agents", r#"{"schema":2,"generation":"11111111-2222-4333-8444-555555555555","revision":1}"#.into()),
             ("not json", "not json".into()),
             ("key != id", snapshot_json("other", &agent_json(&[]))),
             ("id != harness:session", snapshot_json("codex:s1", &agent_json(&[("sessionId", "\"other\"")]))),
@@ -468,7 +476,7 @@ mod tests {
             ("unknown state", snapshot_json("codex:s1", &agent_json(&[("state", "\"sleeping\"")]))),
             ("negative updatedAt", snapshot_json("codex:s1", &agent_json(&[("updatedAt", "-1")]))),
             ("unsafe updatedAt", snapshot_json("codex:s1", &agent_json(&[("updatedAt", "9007199254740992")]))),
-            ("unsafe revision", r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":9007199254740992,"agents":{}}"#.into()),
+            ("unsafe revision", r#"{"schema":2,"generation":"11111111-2222-4333-8444-555555555555","revision":9007199254740992,"agents":{}}"#.into()),
             ("missing process", snapshot_json("codex:s1", &agent_json(&[("process", "\u{0}")]))),
             ("pid 0", snapshot_json("codex:s1", &agent_json(&[("process", &format!(r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":0,"start":"900"}}"#))]))),
             ("non-canonical start", snapshot_json("codex:s1", &agent_json(&[("process", &format!(r#"{{"platform":"linux","host":"testhost","bootId":"{BOOT}","pid":42,"start":"007"}}"#))]))),
@@ -483,7 +491,30 @@ mod tests {
 
     #[test]
     fn a_snapshot_with_no_agents_is_valid_and_empty() {
-        let text = r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#;
+        let text = r#"{"schema":2,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#;
         assert!(parse(text).unwrap().agents.is_empty());
+    }
+
+    #[test]
+    fn a_schema_one_registry_is_superseded_not_read() {
+        let text = r#"{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{}}"#;
+        let error = parse(text).unwrap_err().to_string();
+        assert!(
+            error.contains("schema 1 is superseded by schema 2"),
+            "{error}"
+        );
+        assert!(error.contains("relay reap"), "{error}");
+        assert!(error.contains("wait for any hook event"), "{error}");
+    }
+
+    #[test]
+    fn a_registry_of_an_unknown_schema_is_invalid() {
+        for schema in ["0", "3", "\"2\"", "null"] {
+            let text = format!(
+                r#"{{"schema":{schema},"generation":"11111111-2222-4333-8444-555555555555","revision":1,"agents":{{}}}}"#
+            );
+            let error = parse(&text).unwrap_err().to_string();
+            assert!(error.contains("schema must be 2"), "{schema}: {error}");
+        }
     }
 }

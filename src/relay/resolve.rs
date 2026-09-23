@@ -87,9 +87,10 @@ fn no_match(
         })
     {
         return format!(
-            "agent {} is this {} session but relay recorded no process handle for it; relay \
-             records one only for a harness with a controlling terminal",
-            agent.id, nearest.comm
+            "agent {} is this {} session but relay recorded no process handle for it: relay's \
+             hook found no {} session process among its ancestors, or found only a daemon or \
+             pty host",
+            agent.id, harness, harness
         );
     }
     format!(
@@ -455,9 +456,9 @@ mod tests {
 
     #[test]
     fn a_match_names_a_handle_less_agent_for_this_session() {
-        // relay publishes process: null for a harness without a controlling terminal. The
-        // agent is present and the hint identifies it; only its handle is missing, and the
-        // refusal must say so rather than claim no agent matches.
+        // relay publishes process: null when its hook finds no session process of the
+        // harness. The agent is present and the hint identifies it; only its handle is
+        // missing, and the refusal must say so rather than claim no agent matches.
         let mut headless = agent("claude-code", "c1", "linux", 42, 900, BOOT);
         headless.process = None;
         let error = go(
@@ -469,7 +470,7 @@ mod tests {
         .to_string();
         assert!(error.contains("claude-code:c1"), "{error}");
         assert!(error.contains("no process handle"), "{error}");
-        assert!(error.contains("controlling terminal"), "{error}");
+        assert!(error.contains("daemon or pty host"), "{error}");
         assert!(error.contains("TASKS_SESSION"), "{error}");
     }
 

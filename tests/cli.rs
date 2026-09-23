@@ -15464,7 +15464,7 @@ fn a_note_lands_when_relay_identity_cannot_resolve() {
     // land anyway, and must say why the heartbeat was skipped.
     let script = format!(
         "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
-         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         printf '%s' '{{\"schema\":2,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
          chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" start {id}\n\
          \"$TASKS_BIN\" note {id} 'still lands'\n",
@@ -15756,7 +15756,7 @@ fn an_acceptance_empty_registry_refuses_rather_than_using_terminal_identity() {
 
     let script = format!(
         "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
-         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         printf '%s' '{{\"schema\":2,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
          chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" start {id}\n",
         shim_env(&state, "codex", "s1")
@@ -15786,6 +15786,34 @@ fn an_acceptance_world_readable_registry_is_refused() {
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("privately owned"));
+}
+
+#[test]
+fn an_acceptance_schema_one_registry_is_superseded() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+
+    // A correct row for this very process, but in a schema-1 file: refused, not matched.
+    let script = format!(
+        "{}\nwrite_registry\n\
+         sed -i 's/\"schema\":2,/\"schema\":1,/' \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("superseded"), "{text}");
+    assert!(text.contains("relay reap"), "{text}");
+    assert!(text.contains("TASKS_SESSION"), "{text}");
+    assert!(
+        !env.claim_store("sci").exists()
+            || !std::fs::read_to_string(env.claim_store("sci"))
+                .unwrap()
+                .contains("codex:s1")
+    );
 }
 
 #[test]
@@ -15923,7 +15951,7 @@ fn an_acceptance_force_cannot_take_over_without_a_resolved_identity() {
 
     let script = format!(
         "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
-         printf '%s' '{{\"schema\":1,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         printf '%s' '{{\"schema\":2,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
          chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" start --force {id} && echo FORCED\n",
         shim_env(&state, "codex", "s1")

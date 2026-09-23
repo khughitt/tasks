@@ -296,7 +296,7 @@ write_registry() {
   mkdir -p "$RELAY_STATE_DIR"
   chmod 700 "$RELAY_STATE_DIR"
   cat > "$RELAY_STATE_DIR/agents.json" <<EOF
-{"schema":1,"generation":"11111111-2222-4333-8444-555555555555","revision":1,
+{"schema":2,"generation":"11111111-2222-4333-8444-555555555555","revision":1,
  "agents":{"$AGENT_ID":{"id":"$AGENT_ID","harness":"$HARNESS","sessionId":"$SESSION",
   "scope":"session","cwd":"/w","repoRoot":null,"remote":null,"projectKey":"k",
   "project":"p","state":"idle","updatedAt":1,
