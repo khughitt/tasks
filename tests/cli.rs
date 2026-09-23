@@ -15817,6 +15817,132 @@ fn an_acceptance_schema_one_registry_is_superseded() {
 }
 
 #[test]
+fn an_acceptance_background_session_claims_as_its_versioned_process() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+    let bin = common::claude_version_binary(env.home.path(), "2.1.280");
+
+    let script = format!(
+        "{}\nwrite_registry\necho \"SHIM=$$\"\n\"$TASKS_BIN\" start {id}\n",
+        shim_env(&state, "claude-code", "bg1")
+    );
+    let out = common::harness_shim_at(&bin, &dir, env.home.path(), &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let shim = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("SHIM="))
+        .unwrap();
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert!(store.contains("session = \"claude-code:bg1\""), "{store}");
+    assert!(store.contains(&format!("pid = {shim}\n")), "{store}");
+}
+
+#[test]
+fn an_acceptance_nested_version_session_cannot_continue_the_outer_claim() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+    let bin = common::claude_version_binary(env.home.path(), "2.1.280");
+
+    // The outer claude shim claims the task under its own row, then runs a nested 2.1.280
+    // twice: once with no hint, once with the outer session's id inherited. Each nested
+    // `start`, `park` and `done` must fail. `exit $?` in the inner scripts keeps `tasks` a
+    // child of the nested process, for the reason `harness_shim` documents.
+    let nested = |prefix: &str| {
+        format!(
+            "{prefix}\"{bin}\" -c '\"$TASKS_BIN\" start {id} && echo NESTED_STARTED; \
+             \"$TASKS_BIN\" park {id} next && echo NESTED_PARKED; \
+             \"$TASKS_BIN\" done {id} landed && echo NESTED_CLOSED; exit 0'\n",
+            bin = bin.display()
+        )
+    };
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id} || exit 70\n{}{}",
+        shim_env(&state, "claude-code", "c1"),
+        nested(""),
+        nested("CLAUDE_CODE_SESSION_ID=c1 "),
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for marker in ["NESTED_STARTED", "NESTED_PARKED", "NESTED_CLOSED"] {
+        assert!(!stdout.contains(marker), "{marker}: {stdout}");
+    }
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "doing");
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert!(store.contains("session = \"claude-code:c1\""), "{store}");
+}
+
+#[test]
+fn an_acceptance_version_session_under_claude_never_claims_as_the_outer_session() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = relay_on(&env);
+    let bin = common::claude_version_binary(env.home.path(), "2.1.280");
+
+    // The review chain: tasks -> 2.1.280 -> claude, with a correct row for the outer claude
+    // and no hint. The nearest harness is the version process, which has no row.
+    let script = format!(
+        "{}\nwrite_registry\n\"{}\" -c '\"$TASKS_BIN\" start {id}; exit $?'\n",
+        shim_env(&state, "claude-code", "outer"),
+        bin.display()
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_ne!(out.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("2.1.280"), "{text}");
+    assert!(text.contains("TASKS_SESSION"), "{text}");
+    let store = env.claim_store("sci");
+    assert!(
+        !store.exists()
+            || !std::fs::read_to_string(&store)
+                .unwrap()
+                .contains("claude-code:outer"),
+        "the nested session must never claim as the outer one"
+    );
+}
+
+#[test]
+fn an_acceptance_hosting_process_refuses_before_reading_the_registry() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    // Relay on, and deliberately no registry at all: a refusal that names the role, not a
+    // missing file, shows the registry was never opened.
+    relay_on(&env);
+    let bin = common::claude_version_binary(env.home.path(), "2.1.280");
+    let claude = env.home.path().join("claude");
+    std::os::unix::fs::symlink("/bin/sh", &claude).unwrap();
+
+    for (program, role) in [(&bin, "bg-pty-host"), (&claude, "daemon")] {
+        let script = format!("\"$TASKS_BIN\" start {id}\n");
+        let out = common::shim_with_argument(program, role, &dir, env.home.path(), &script);
+        assert_ne!(out.status.code(), Some(0), "{role}");
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            text.contains(role) && text.contains("not a session"),
+            "{role}: {text}"
+        );
+        assert!(!text.contains("does not exist"), "{role}: {text}");
+    }
+}
+
+#[test]
 fn an_acceptance_explicit_pair_works_under_a_harness_with_no_registry() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

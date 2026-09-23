@@ -258,9 +258,70 @@ pub fn harness_shim(dir: &Path, home: &Path, comm: &str, script: &str) -> std::p
     if !shim.exists() {
         std::os::unix::fs::symlink("/bin/sh", &shim).unwrap();
     }
-    std::process::Command::new(&shim)
+    harness_shim_at(&shim, dir, home, script)
+}
+
+/// `harness_shim` for a shell already at `program`, whose basename becomes the `comm`.
+pub fn harness_shim_at(
+    program: &Path,
+    dir: &Path,
+    home: &Path,
+    script: &str,
+) -> std::process::Output {
+    shim_command(program, dir, home)
         .arg("-c")
         .arg(format!("{script}\nexit $?\n"))
+        .output()
+        .unwrap()
+}
+
+/// Run `script` under `program` with `word` as its `argv[1]`. `sh -c` cannot put a chosen
+/// word there, so the script is a *file* named `word`, run by that relative name from its
+/// own directory; it `cd`s to `dir` first. The file is read by the shell, never
+/// `execve`d, so writing it cannot cause the `ETXTBSY` race `harness_shim` documents.
+pub fn shim_with_argument(
+    program: &Path,
+    word: &str,
+    dir: &Path,
+    home: &Path,
+    script: &str,
+) -> std::process::Output {
+    let scripts = home.join("shim-scripts");
+    std::fs::create_dir_all(&scripts).unwrap();
+    std::fs::write(
+        scripts.join(word),
+        format!("cd '{}' || exit 90\n{script}\nexit $?\n", dir.display()),
+    )
+    .unwrap();
+    shim_command(program, &scripts, home)
+        .arg(word)
+        .output()
+        .unwrap()
+}
+
+/// A copy of `sh` at `<home>/.local/share/claude/versions/<version>`: its `comm` is the
+/// version and its `exe` ends in the versions path, as a background Claude Code session's
+/// does. Unlike `harness_shim`, this has to be a copy, since a symlink's `exe` resolves to
+/// `/bin/sh`'s target. The copy is made by a `cp` child process, so the writable descriptor
+/// lives only in that child and no sibling test thread can inherit it across a fork.
+pub fn claude_version_binary(home: &Path, version: &str) -> std::path::PathBuf {
+    let dir = home.join(".local/share/claude/versions");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(version);
+    if !path.exists() {
+        let status = std::process::Command::new("cp")
+            .arg("/bin/sh")
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success(), "cp /bin/sh {}", path.display());
+    }
+    path
+}
+
+fn shim_command(program: &Path, dir: &Path, home: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    command
         .current_dir(dir)
         .env("HOME", home)
         .env_remove("XDG_CONFIG_HOME")
@@ -276,9 +337,8 @@ pub fn harness_shim(dir: &Path, home: &Path, comm: &str, script: &str) -> std::p
         .env_remove("CODEX_SESSION_ID")
         .env_remove("CODEX_THREAD_ID")
         .env("USER", "tester")
-        .env("TASKS_BIN", assert_cmd::cargo::cargo_bin("tasks"))
-        .output()
-        .unwrap()
+        .env("TASKS_BIN", assert_cmd::cargo::cargo_bin("tasks"));
+    command
 }
 
 /// Shell function that writes a one-agent registry naming the *shim's own* process, with
