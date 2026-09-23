@@ -127,10 +127,11 @@ The walk's reads are injected as today (`read_stat` plus two new readers for `ex
 `snapshot::parse` accepts `schema: 2` only. The agent and handle shapes do not change in
 schema 2; the version marks the new meaning of `Agent.process`.
 
-- `schema: 1` is refused with its own message: "the relay registry at <path> was written
-  under schema 1 and is superseded; run `relay reap`, or wait for any hook event". The
-  resolver wraps it with the `TASKS_SESSION` recovery as it wraps every registry error.
-  It is never read as an empty registry.
+- `schema: 1` is refused with its own message: "relay registry: schema 1 is superseded by
+  schema 2; run `relay reap`, or wait for any hook event". Like every other validation
+  failure it does not name the path, which the parser never sees. The resolver wraps it
+  with the `TASKS_SESSION` recovery as it wraps every registry error. It is never read as
+  an empty registry.
 - Any other value stays "schema must be 2".
 
 A schema-1 file can hold rows that borrowed another session's handle (relay spec, "Rows
@@ -184,12 +185,28 @@ through the walk. Each row supplies `stat` (pid, ppid, comm, and a synthetic sta
 one it does not carry fails as unknown rather than passing. The walk starts at row 0's
 parent, as tasks is the process at row 0 (relay's hook). Assertions per chain:
 
-- `session` non-null → `Scope::Harness` at that pid.
-- `session` null and the chain's harness is `claude-code` → `Scope::Hosting`, unless the
-  nearest harness process of any harness belongs to another harness.
-- `session` null otherwise → the walk must not return a `Harness` boundary of the chain's
-  harness. tasks walks for every harness at once while relay walks for one, so
-  `claude-ancestor-under-codex` legitimately yields the `claude` boundary for tasks.
+- `session` non-null → `Scope::Harness` at that pid, with the chain's harness.
+- `session` null → the exact scope named for that chain in a tasks-local table, since
+  relay's null does not say which of tasks' outcomes applies. At `45f4c47`:
+
+  | Chain | Expected |
+  | --- | --- |
+  | `daemon-nearest` | `Hosting` at pid 300, role `daemon` |
+  | `pty-host-nearest` | `Hosting` at pid 400, role `bg-pty-host` |
+  | `claude-ancestor-under-codex` | `Unknown { pid: 20, file: "cmdline" }` |
+
+  The last one is not a hosting verdict and not a Claude boundary: relay walks for the
+  `codex` harness and never reads the `claude` row's arguments, so the corpus carries
+  `argv: null` for it, while tasks walks for every harness at once, meets that `claude`
+  process first and must read its `cmdline` (§2.2). An unreadable read is unknown, so
+  the vendored chain pins that rule too.
+- A chain with a null `session` that the table does not list fails the test, so a
+  refreshed corpus forces a decision instead of passing on a loose predicate.
+
+The readable cross-harness case, which the corpus cannot express, is a tasks-local unit
+test beside it: the same `claude-ancestor-under-codex` rows with `argv: ["claude"]` on
+pid 20 return `Harness` at pid 20 with harness `claude-code`. The vendored file stays byte
+for byte.
 
 The `terminal` column is not asserted; tasks has no terminal lookup. The Darwin chains
 run too: the walk is pure over its readers, and their comm-only rows need no `exe`.
@@ -254,14 +271,15 @@ which names the same process.
 
 ## 8. Decomposition
 
-Suggested plan steps, in order:
+Plan steps, in order. Each commit builds green, so a change to `Scope` lands with every
+consumer it breaks:
 
-1. Vendor the corpus and its README.
-2. The walk: `Boundary`, the recognition table, the `exe` and `cmdline` readers, roles,
-   `Scope::Hosting` and `Unknown { file }`, and the corpus test.
-3. Resolution and proof by harness: `harness_for`, `hint_for`, `same_session`, the
-   harness-agreement predicate, the `Hosting` refusal, the handle-less text.
-4. Schema 2 and the supersession refusal.
-5. End-to-end: the version shim, the schema-2 registry writer, and the acceptance cases
-   of §6.
-6. README, version 0.2.0, reinstall, and the live check.
+1. The walk and what reads it: the vendored corpus and its README, `Boundary`, the
+   recognition table, the `exe` and `cmdline` readers, roles, `Scope::Hosting` and
+   `Unknown { file }`, the corpus test, and resolution and proof keyed by harness,
+   including the `Hosting` refusal.
+2. Schema 2: the reader, the supersession refusal, the handle-less text, and the test
+   registries moved to schema 2.
+3. End-to-end: the version shim and the acceptance cases of §6.
+4. README, version 0.2.0, the parent spec's amendment notes, and reinstall.
+5. The live check.
