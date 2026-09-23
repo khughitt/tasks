@@ -849,9 +849,10 @@ pub fn proves_ownership(
     boot_id: Option<&str>,
     get: &impl Fn(&str) -> Option<String>,
 ) -> bool {
-    let crate::relay::ancestry::Scope::Harness(nearest) = scope else {
+    let crate::relay::ancestry::Scope::Harness(boundary) = scope else {
         return false;
     };
+    let nearest = &boundary.entry;
     let (Some(pid), Some(pid_start)) = (claim.pid, claim.pid_start) else {
         return false;
     };
@@ -866,8 +867,10 @@ pub fn proves_ownership(
     }
     // 3. a scoped hint must not contradict the claim, so that deferring a resolution error
     //    cannot turn a contradicted session into an accepted owner.
-    match crate::relay::resolve::hint_for(&nearest.comm, get) {
-        Ok(Some(hint)) => crate::relay::resolve::same_session(&claim.session, &nearest.comm, &hint),
+    match crate::relay::resolve::hint_for(boundary.harness, get) {
+        Ok(Some(hint)) => {
+            crate::relay::resolve::same_session(&claim.session, boundary.harness, &hint)
+        }
         Ok(None) => true,
         Err(_) => false,
     }
@@ -905,7 +908,7 @@ mod tests {
         }
     }
 
-    use crate::relay::ancestry::{ProcEntry, Scope};
+    use crate::relay::ancestry::{Boundary, HARNESS_COMMS, ProcEntry, Scope};
 
     const PROOF_BOOT: &str = "0f9d5a1e-1c2b-4d3e-8f4a-5b6c7d8e9f01";
 
@@ -923,13 +926,21 @@ mod tests {
         }
     }
 
+    fn boundary(comm: &str, harness: &'static str, pid: u32, start: u64) -> Boundary {
+        Boundary {
+            entry: ProcEntry {
+                pid,
+                ppid: 1,
+                comm: comm.into(),
+                start,
+            },
+            harness,
+        }
+    }
+
     fn nearest(comm: &str, pid: u32, start: u64) -> Scope {
-        Scope::Harness(ProcEntry {
-            pid,
-            ppid: 1,
-            comm: comm.into(),
-            start,
-        })
+        let &(_, harness) = HARNESS_COMMS.iter().find(|(c, _)| *c == comm).unwrap();
+        Scope::Harness(boundary(comm, harness, pid, start))
     }
 
     fn no_env() -> impl Fn(&str) -> Option<String> {
@@ -1045,10 +1056,61 @@ mod tests {
         ));
         assert!(!proves_ownership(
             &claim,
-            &Scope::Unknown(4),
+            &Scope::Unknown {
+                pid: 4,
+                file: "stat"
+            },
             "testhost",
             Some(PROOF_BOOT),
             &no_env()
+        ));
+    }
+
+    #[test]
+    fn a_proof_is_never_established_by_a_hosting_process() {
+        let claim = claim_of("claude-code:c1", Some(300), Some(3000));
+        assert!(!proves_ownership(
+            &claim,
+            &Scope::Hosting(boundary("claude", "claude-code", 300, 3000), "daemon"),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
+    }
+
+    #[test]
+    fn a_proof_at_a_version_boundary_is_its_own_not_the_outer_sessions() {
+        // The outer claude(500) holds the claim; a nested 2.1.280(600) runs under it, with
+        // the outer session's id inherited. Its boundary is 600, so it proves nothing.
+        let outer = claim_of("claude-code:c1", Some(500), Some(5000));
+        let inherited = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".to_string());
+        let nested = Scope::Harness(boundary("2.1.280", "claude-code", 600, 6000));
+        assert!(!proves_ownership(
+            &outer,
+            &nested,
+            "testhost",
+            Some(PROOF_BOOT),
+            &inherited
+        ));
+        // A claim that the version process itself holds is proved, and its hint is the
+        // Claude Code variable.
+        let own = claim_of("claude-code:bg1", Some(600), Some(6000));
+        let hint = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "bg1".to_string());
+        assert!(proves_ownership(
+            &own,
+            &nested,
+            "testhost",
+            Some(PROOF_BOOT),
+            &hint
+        ));
+        let contradicted =
+            |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".to_string());
+        assert!(!proves_ownership(
+            &own,
+            &nested,
+            "testhost",
+            Some(PROOF_BOOT),
+            &contradicted
         ));
     }
 
