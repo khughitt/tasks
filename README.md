@@ -173,6 +173,12 @@ relay = true
 The file is host-local on purpose. Whether relay runs is a property of a machine, while the
 per-project `tasks/.config.toml` syncs between hosts, so the switch does not belong there.
 
+Turn it on only where relay's hooks actually publish its agent registry. Every `tasks` command
+run under a harness is in scope once the switch is on, and without the registry every
+claim acquisition there refuses. Relay records a process handle only for a harness with a
+controlling terminal, so a headless session (`claude -p`, `codex exec`) is published
+without one and must name itself with `TASKS_SESSION`.
+
 With it on, `tasks` walks its own process ancestry to the nearest harness process and looks
 that process up in relay's agent registry, matching on host, boot id, pid and process start
 time, and requiring the registry's harness to agree with the ancestor it found. On a match
