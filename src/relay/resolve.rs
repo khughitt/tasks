@@ -61,12 +61,16 @@ pub fn same_session(claim_session: &str, comm: &str, session_id: &str) -> bool {
 
 /// Why nothing qualified. Spec §5 requires the harness and platform refusals to name what
 /// was wrong, which the bare "no match" line cannot do, so a row that *is* this process is
-/// diagnosed against each predicate in turn.
+/// diagnosed against each predicate in turn. A row with no handle cannot be tied to this
+/// process, but when the session hint names it, the agent is present and only its handle
+/// is missing, which the operator must be able to tell apart from an absent agent.
 fn no_match(
+    agents: &[crate::relay::snapshot::Agent],
     same_process: &[&crate::relay::snapshot::Agent],
     nearest: &ProcEntry,
     harness: &str,
     boot_id: &str,
+    hint: Option<&str>,
 ) -> String {
     for agent in same_process {
         let process = agent
@@ -88,6 +92,17 @@ fn no_match(
         if process.boot_id.as_deref() != Some(boot_id) {
             return format!("agent {} was recorded on an earlier boot", agent.id);
         }
+    }
+    if let Some(hint) = hint
+        && let Some(agent) = agents.iter().find(|agent| {
+            agent.process.is_none() && agent.harness == harness && agent.session_id == hint
+        })
+    {
+        return format!(
+            "agent {} is this {} session but relay recorded no process handle for it; relay \
+             records one only for a harness with a controlling terminal",
+            agent.id, nearest.comm
+        );
     }
     format!(
         "no relay agent matches the nearest {} ancestor, pid {}",
@@ -153,7 +168,16 @@ pub fn resolve(
 
     let agent = match qualifying.as_slice() {
         [one] => *one,
-        [] => return Err(refuse(no_match(&same_process, &nearest, harness, boot_id))),
+        [] => {
+            return Err(refuse(no_match(
+                &snapshot.agents,
+                &same_process,
+                &nearest,
+                harness,
+                boot_id,
+                hint.as_deref(),
+            )));
+        }
         many => {
             let ids: Vec<&str> = many.iter().map(|agent| agent.id.as_str()).collect();
             return Err(refuse(format!(
@@ -415,6 +439,40 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(resolved.session, "codex:s1");
+    }
+
+    #[test]
+    fn a_match_names_a_handle_less_agent_for_this_session() {
+        // relay publishes process: null for a harness without a controlling terminal. The
+        // agent is present and the hint identifies it; only its handle is missing, and the
+        // refusal must say so rather than claim no agent matches.
+        let mut headless = agent("claude-code", "c1", "linux", 42, 900, BOOT);
+        headless.process = None;
+        let error = go(
+            ancestor("claude", 42, 900),
+            vec![headless],
+            &env(&[("CLAUDE_CODE_SESSION_ID", "c1")]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("claude-code:c1"), "{error}");
+        assert!(error.contains("no process handle"), "{error}");
+        assert!(error.contains("controlling terminal"), "{error}");
+        assert!(error.contains("TASKS_SESSION"), "{error}");
+    }
+
+    #[test]
+    fn a_handle_less_agent_for_another_session_is_not_named() {
+        let mut headless = agent("claude-code", "other", "linux", 42, 900, BOOT);
+        headless.process = None;
+        let error = go(
+            ancestor("claude", 42, 900),
+            vec![headless],
+            &env(&[("CLAUDE_CODE_SESSION_ID", "c1")]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("no relay agent matches"), "{error}");
     }
 
     #[test]
