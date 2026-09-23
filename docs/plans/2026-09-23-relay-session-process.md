@@ -1331,12 +1331,12 @@ RELAY=$(tasks root relay-cb616b | jq -r .root)
 mkdir -p "$S/config/tasks" "$S/proj" && chmod 700 "$S"
 printf '[identity]\nrelay = true\n' > "$S/config/tasks/config.toml"
 (cd "$S/proj" && git init -q && $T init --prefix live >/dev/null)
-A=$(cd "$S/proj" && $T add "Outer" -p 2 | jq -r .task.id)
-B=$(cd "$S/proj" && $T add "Nested" -p 2 | jq -r .task.id)
+A=$(cd "$S/proj" && $T add "Outer" -p 2 | jq -r .id)
+B=$(cd "$S/proj" && $T add "Nested" -p 2 | jq -r .id)
 echo "$S $A $B"
 ```
 
-(If `add`'s JSON shape differs, read the id from its output by hand.)
+(Under zsh, `$T` does not word-split; use `${=T}` or a wrapper script.)
 
 - [ ] **Step 2: Write the scratch hook settings**
 
@@ -1360,7 +1360,7 @@ WAIT="i=0; until [ -e $S/release ] || [ \$i -ge 480 ]; do sleep 1; i=\$((i+1)); 
 tmux new-session -d -s live-2dd094 -c "$S/proj" \
   "claude --settings '$S/settings.json' --allowedTools Bash"
 sleep 5
-tmux send-keys -t live-2dd094 "Run these two commands with Bash, in order, each with a 10-minute Bash timeout, and show their full output: (1) $T start $A  (2) claude -p --settings $S/settings.json --allowedTools Bash 'With Bash, run $T start $B and print its full output; then run this with a 10-minute Bash timeout: $WAIT'" Enter
+tmux send-keys -t live-2dd094 "Run these two commands with Bash, in order, each with a 10-minute Bash timeout, and show their full output: (1) $T start $A  (2) claude -p --settings $S/settings.json --allowedTools Bash -- 'With Bash, run $T start $B and print its full output; then run this with a 10-minute Bash timeout: $WAIT'" Enter
 ```
 
 The wait gives up after eight minutes, so a failed run never leaves the nested session behind. Check the prompt reached the session with `tmux capture-pane -p -t live-2dd094`.
