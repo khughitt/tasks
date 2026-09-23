@@ -193,9 +193,9 @@ That proof is also what the session's own commands read back: the owner can `par
 `done` a claim it already holds even when the registry has gone away, because ownership is
 re-derived from what the claim itself recorded. Two limits follow from the same rule.
 Parking *releases* the claim, so resuming a parked task is a fresh acquisition and needs
-either the registry back or `TASKS_SESSION`. And a session nested inside another harness
-session is a different session: its nearest boundary is its own harness process, so it
-cannot act on the outer session's claims.
+either the registry back or `TASKS_SESSION`. And from 0.2.0, a session nested inside
+another harness session is a different session: its nearest boundary is its own harness
+process, so it cannot act on the outer session's claims.
 
 **Upgrading.** tasks 0.2.0 reads relay's registry schema 2 and no other; against an older
 registry it refuses and asks you to run `relay reap`. On a host with this switch on, every

@@ -144,7 +144,9 @@ that fails validation as unavailable (§5). Tasks never writes to it and never s
 Node.
 
 *Amended by `2026-09-23-relay-session-process-design.md`:* the reader validates schema 2
-and refuses schema 1 as superseded.
+and refuses schema 1 as superseded, and the harness-agreement predicate now compares the
+boundary's harness (a versioned `claude/versions/` binary is `claude-code`), not the
+ancestor's `comm`.
 
 A candidate agent matches the nearest harness ancestor when **all** hold:
 

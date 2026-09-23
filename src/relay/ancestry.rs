@@ -423,6 +423,7 @@ mod tests {
         let codex = Tree::default().row(9, "codex", 8).row(8, "claude", 1);
         assert_eq!(describe(&walk(9, &codex)), "harness 9 codex");
         assert!(codex.cmdline_reads.borrow().is_empty());
+        assert!(codex.exe_reads.borrow().is_empty());
 
         let claude = Tree::default()
             .row(9, "claude", 8)
@@ -430,6 +431,7 @@ mod tests {
             .row(8, "claude", 1);
         assert_eq!(describe(&walk(9, &claude)), "harness 9 claude-code");
         assert_eq!(*claude.cmdline_reads.borrow(), vec![9]);
+        assert!(claude.exe_reads.borrow().is_empty());
     }
 
     #[test]

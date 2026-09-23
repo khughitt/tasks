@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn a_match_requires_the_harness_to_agree_with_the_ancestor_comm() {
+    fn a_match_requires_the_harness_to_agree_with_the_boundary_harness() {
         // Satisfies host, pid, start and boot for a codex ancestor, but is a claude-code
         // row. Without the harness comparison this would be adopted and key the claim to
         // the wrong session.

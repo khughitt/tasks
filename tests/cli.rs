@@ -15898,15 +15898,21 @@ fn an_acceptance_version_session_under_claude_never_claims_as_the_outer_session(
     // The review chain: tasks -> 2.1.280 -> claude, with a correct row for the outer claude
     // and no hint. The nearest harness is the version process, which has no row.
     let script = format!(
-        "{}\nwrite_registry\n\"{}\" -c '\"$TASKS_BIN\" start {id}; exit $?'\n",
+        "{}\nwrite_registry\n\"{}\" -c 'echo \"VERSION=$$\"; \"$TASKS_BIN\" start {id}; exit $?'\n",
         shim_env(&state, "claude-code", "outer"),
         bin.display()
     );
     let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
     assert_ne!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let pid = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("VERSION="))
+        .unwrap_or_else(|| panic!("no VERSION= line in stdout: {stdout}"));
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(text.contains("2.1.280"), "{text}");
     assert!(text.contains("TASKS_SESSION"), "{text}");
+    assert!(text.contains(&format!("pid {pid}")), "{text}");
     let store = env.claim_store("sci");
     assert!(
         !store.exists()
