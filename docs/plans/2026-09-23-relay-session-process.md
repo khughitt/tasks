@@ -778,7 +778,7 @@ In `no_match`, replace the `nearest: &ProcEntry, harness: &str` parameters with 
 
 Leave the handle-less message alone in this task; Task 2 rewrites it.
 
-In `resolve`, replace the opening down to `let boot_id = …` with:
+In `resolve`, replace everything from `let nearest: ProcEntry = match scope {` through `let hint = hint_for(&nearest.comm, get)?;` inclusive (the `harness_for` call, the `boot_id` line and the hint comment go with it) with:
 
 ```rust
     let boundary: Boundary = match scope {
@@ -800,10 +800,12 @@ In `resolve`, replace the opening down to `let boot_id = …` with:
     let nearest = &boundary.entry;
     let harness = boundary.harness;
     let boot_id = boot_id.ok_or_else(|| refuse("the host boot id is unreadable".into()))?;
+    // The hint is read before the registry so a self-contradicting pair is reported as
+    // itself rather than as a match failure.
     let hint = hint_for(harness, get)?;
 ```
 
-and pass `&boundary` in place of `&nearest, harness` in the `no_match` call. The remaining uses of `nearest.pid` and `nearest.start` read the same fields through the reference.
+Afterwards `grep -n 'nearest.comm, get\|harness_for' src/relay/resolve.rs` prints nothing: no comm-keyed hint lookup is left to shadow this one. Then pass `&boundary` in place of `&nearest, harness` in the `no_match` call. The remaining uses of `nearest.pid` and `nearest.start` read the same fields through the reference.
 
 In `src/claims.rs` `proves_ownership`:
 
@@ -1321,9 +1323,10 @@ The spec requires: with the opt-in on against a private relay registry, an outer
 ```bash
 S=$(mktemp -d -p "${TMPDIR:-/tmp}" tasks-live-2dd094.XXXX)
 BIN=$PWD/target/debug/tasks          # run from the worktree root
-# Scratch config *and* state: the project registry and the claim store must not touch the
-# host's. Every tasks invocation in this task goes through $T.
-T="env XDG_CONFIG_HOME=$S/config XDG_STATE_HOME=$S/state $BIN"
+# Scratch config, state and relay registry: the project registry, the claim store and the
+# agent registry must not touch the host's, and tasks must read the very registry the
+# scratch hooks write. Every tasks invocation in this task goes through $T.
+T="env XDG_CONFIG_HOME=$S/config XDG_STATE_HOME=$S/state RELAY_STATE_DIR=$S/relay $BIN"
 RELAY=$(tasks root relay-cb616b | jq -r .root)
 mkdir -p "$S/config/tasks" "$S/proj" && chmod 700 "$S"
 printf '[identity]\nrelay = true\n' > "$S/config/tasks/config.toml"
@@ -1347,33 +1350,46 @@ Read relay's `docs/runbooks/hook-install-rollback.md` and `node "$RELAY/bin/rela
 
 with `<S>` and `<RELAY>` substituted and the other events alike, plus whatever flags the runbook requires. An empty subscriber file (`{}` or the runbook's empty form, mode 0600 in a 0700 directory under `$S`) is enough.
 
-- [ ] **Step 3: Run the outer and nested sessions**
+- [ ] **Step 3: Run the outer and nested sessions, held open**
 
-Run the outer session interactively in a detached tmux session that this step owns and kills:
+A session's `SessionEnd` hook deletes its registry row, so the evidence has to be captured while both sessions are alive. The nested session therefore claims its task, then waits for a release file that Step 4 creates only after the capture. Run the outer session interactively in a detached tmux session that this task owns and kills:
 
 ```bash
-trap 'tmux kill-session -t live-2dd094 2>/dev/null' EXIT INT TERM
+trap 'touch "$S/release"; tmux kill-session -t live-2dd094 2>/dev/null' EXIT INT TERM
+WAIT="i=0; until [ -e $S/release ] || [ \$i -ge 480 ]; do sleep 1; i=\$((i+1)); done"
 tmux new-session -d -s live-2dd094 -c "$S/proj" \
   "claude --settings '$S/settings.json' --allowedTools Bash"
 sleep 5
-tmux send-keys -t live-2dd094 "Run exactly these two commands with Bash and show their full output: (1) $T start $A  (2) claude -p --settings $S/settings.json --allowedTools Bash 'Run $T start $B with Bash and print its full output'" Enter
+tmux send-keys -t live-2dd094 "Run these two commands with Bash, in order, each with a 10-minute Bash timeout, and show their full output: (1) $T start $A  (2) claude -p --settings $S/settings.json --allowedTools Bash 'With Bash, run $T start $B and print its full output; then run this with a 10-minute Bash timeout: $WAIT'" Enter
 ```
 
-Wait for the outer session to finish (poll `tmux capture-pane -p -t live-2dd094` until both outputs appear; allow a few minutes), then capture the pane to `$S/outer.txt`.
+The wait gives up after eight minutes, so a failed run never leaves the nested session behind. Check the prompt reached the session with `tmux capture-pane -p -t live-2dd094`.
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 4: Capture while both are alive, then release**
+
+Poll until both claims exist, then snapshot the registry and the claims before releasing the nested session:
 
 ```bash
-RELAY_STATE_DIR="$S/relay" node "$RELAY/bin/relay.js" list
-cat "$S/state/tasks/claims/live.toml"
+mkdir -p "$S/evidence"
+for i in $(seq 1 150); do
+  [ "$(grep -c '^session = ' "$S/state/tasks/claims/live.toml" 2>/dev/null)" = 2 ] && break
+  sleep 2
+done
+RELAY_STATE_DIR="$S/relay" node "$RELAY/bin/relay.js" list > "$S/evidence/relay-list.json"
+cp "$S/state/tasks/claims/live.toml" "$S/evidence/claims.toml"
+pgrep -a -f 'claude' > "$S/evidence/processes.txt"
+touch "$S/release"
 (cd "$S/proj" && $T show "$A" | jq '.task.status')
 (cd "$S/proj" && $T show "$B" | jq '.task.status')
+cat "$S/evidence/relay-list.json" "$S/evidence/claims.toml"
 ```
 
-Pass when:
-- `relay list` shows two `claude-code` agents with different session ids and different `process.pid`s: the outer interactive `claude` and the nested `claude` process;
+(If the claim store's layout differs from one `session = ` line per claim, read `$S/state/tasks/claims/live.toml` once by hand and adjust the poll.) Then wait for the outer pane to show the nested command returning and capture it to `$S/outer.txt`.
+
+Pass when, in the evidence taken **before** the release:
+- `relay-list.json` shows two `claude-code` agents with different session ids and different `process.pid`s: the outer interactive `claude` and the nested `claude` process (cross-check both pids in `processes.txt`);
 - both tasks are `doing`;
-- the claim store holds two claims whose `session`s are those two agent ids and whose `pid`s are those two pids.
+- `claims.toml` holds two claims whose `session`s are those two agent ids and whose `pid`s are those two pids.
 
 Record the result with `tasks note tasks-2dd094 "live: outer claude-code:<id> pid <n>, nested claude-code:<id> pid <m>; both claimed"`.
 
@@ -1382,7 +1398,7 @@ If relay's hooks cannot be attached to a scratch session without changing host c
 - [ ] **Step 5: Clean up**
 
 ```bash
-tmux kill-session -t live-2dd094 2>/dev/null; trap - EXIT INT TERM
+touch "$S/release"; tmux kill-session -t live-2dd094 2>/dev/null; trap - EXIT INT TERM
 rm -rf "$S"
 host-load --section session
 ```
