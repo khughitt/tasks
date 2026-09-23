@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-23T12:26:23Z
-updated: 2026-09-23T17:59:02Z
+updated: 2026-09-23T17:59:23Z
 started: 2026-09-23T17:57:12Z
 depends: []
 tags: [cli]
@@ -33,3 +33,5 @@ Ordering: this lands before relay's resolver is released (relay-c19c0a depends o
 - 2026-09-23T17:57:12Z (main): started
   provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-23T17:57:12Z (main): Process planned (recorded at filing): new design spec amending the 2026-09-22 relay identity design, then a plan, in worktree .worktrees/relay-schema2
+- 2026-09-23T17:59:23Z (feat/relay-schema2): parked (waiting on user, review): User reviews the design spec docs/specs/2026-09-23-relay-session-process-design.md (branch feat/relay-schema2); then write the implementation plan
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
