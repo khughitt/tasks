@@ -8,11 +8,12 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-23T12:26:23Z
-updated: 2026-09-23T17:57:12Z
+updated: 2026-09-23T17:59:02Z
 started: 2026-09-23T17:57:12Z
 depends: []
 tags: [cli]
 agent: "claude-code/claude-opus-5-5[1m]"
+spec: docs/specs/2026-09-23-relay-session-process-design.md
 ---
 
 Relay spec docs/specs/2026-09-23-session-process-handle.md (relay repo, relay-cb616b; approved after two reviews) changes what Agent.process names: the session's own process, found as the nearest harness process with no terminal requirement. Claude Code is recognized by comm 'claude' or by a version-shaped comm (^[0-9]+(\.[0-9]+)+$) whose executable ends in /claude/versions/<comm>; the nearest Claude process with argv[1] daemon or bg-pty-host yields no identity. The registry moves to schema 2; a schema-1 file is superseded.
