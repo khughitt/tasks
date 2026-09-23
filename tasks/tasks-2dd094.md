@@ -1,18 +1,21 @@
 ---
 id: tasks-2dd094
 title: Adopt relay's session-process walk and registry schema 2 in relay identity
-status: doing
+status: done
 priority: 1
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: feat/relay-schema2
 created: 2026-09-23T12:26:23Z
-updated: 2026-09-23T17:57:12Z
+updated: 2026-09-23T20:49:05Z
 started: 2026-09-23T17:57:12Z
+completed: 2026-09-23T20:49:05Z
 depends: []
 tags: [cli]
 agent: "claude-code/claude-opus-5-5[1m]"
+spec: docs/specs/2026-09-23-relay-session-process-design.md
+plan: docs/plans/2026-09-23-relay-session-process.md
 ---
 
 Relay spec docs/specs/2026-09-23-session-process-handle.md (relay repo, relay-cb616b; approved after two reviews) changes what Agent.process names: the session's own process, found as the nearest harness process with no terminal requirement. Claude Code is recognized by comm 'claude' or by a version-shaped comm (^[0-9]+(\.[0-9]+)+$) whose executable ends in /claude/versions/<comm>; the nearest Claude process with argv[1] daemon or bg-pty-host yields no identity. The registry moves to schema 2; a schema-1 file is superseded.
@@ -32,3 +35,14 @@ Ordering: this lands before relay's resolver is released (relay-c19c0a depends o
 - 2026-09-23T17:57:12Z (main): started
   provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-23T17:57:12Z (main): Process planned (recorded at filing): new design spec amending the 2026-09-22 relay identity design, then a plan, in worktree .worktrees/relay-schema2
+- 2026-09-23T17:59:23Z (feat/relay-schema2): parked (waiting on user, review): User reviews the design spec docs/specs/2026-09-23-relay-session-process-design.md (branch feat/relay-schema2); then write the implementation plan
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-23T19:48:45Z (feat/relay-schema2): Spec P2 fixed (null-session corpus chains get an explicit tasks-side table; readable cross-harness case added locally); plan written with five step children
+- 2026-09-23T19:48:45Z (feat/relay-schema2): parked (waiting on user, review): User reviews the plan docs/plans/2026-09-23-relay-session-process.md and picks an execution method; then start tasks-8f28ce
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-23T20:04:50Z (feat/relay-schema2): resumed
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-23T20:49:05Z (feat/relay-schema2): done
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-23T20:49:05Z (feat/relay-schema2): tasks 0.2.0 adopts relay's session-process walk (versioned Claude Code binaries, daemon/pty host refused, unreadable exe/cmdline unknown) and registry schema 2 only; vendored relay ancestry corpus at 45f4c47; nested-session held-claim hazard closed and verified live
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

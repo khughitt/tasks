@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "chains": [
+    { "name": "interactive-claude", "source": "familiar spike 2026-07-11, finding C, interactive shape", "harness": "claude-code",
+      "rows": [
+        { "pid": 500, "ppid": 450, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 450, "ppid": 200, "comm": "claude", "tty": true, "exe": null, "argv": ["claude", "--dangerously-skip-permissions"] },
+        { "pid": 200, "ppid": 100, "comm": "zsh", "tty": true, "exe": null, "argv": null },
+        { "pid": 100, "ppid": 1, "comm": "kitty", "tty": null, "exe": null, "argv": null } ],
+      "session": 450, "terminal": 450 },
+    { "name": "background-daemon-under-interactive", "source": "familiar spike 2026-07-11, finding C, background shape; exe reconstructed from the recorded command line", "harness": "claude-code",
+      "rows": [
+        { "pid": 500, "ppid": 450, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 450, "ppid": 400, "comm": "2.1.207", "tty": null, "exe": "/home/user/.local/share/claude/versions/2.1.207", "argv": ["/home/user/.local/share/claude/versions/2.1.207", "--session-id", "b1"] },
+        { "pid": 400, "ppid": 300, "comm": "2.1.207", "tty": null, "exe": null, "argv": null },
+        { "pid": 300, "ppid": 200, "comm": "claude", "tty": null, "exe": null, "argv": null },
+        { "pid": 200, "ppid": 100, "comm": "claude", "tty": true, "exe": null, "argv": null },
+        { "pid": 100, "ppid": 1, "comm": "zsh", "tty": true, "exe": null, "argv": null } ],
+      "session": 450, "terminal": 200 },
+    { "name": "background-under-systemd", "source": "measured 2026-09-23, Claude Code 2.1.280 claude --bg", "harness": "claude-code",
+      "rows": [
+        { "pid": 900, "ppid": 800, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 800, "ppid": 790, "comm": "2.1.280", "tty": true, "exe": "/home/user/.local/share/claude/versions/2.1.280", "argv": ["/home/user/.local/share/claude/versions/2.1.280", "--session-id", "9a2732d5-47a7-432b-a3c7-3f7bc08ac4f1"] },
+        { "pid": 790, "ppid": 780, "comm": "2.1.280", "tty": null, "exe": null, "argv": null },
+        { "pid": 780, "ppid": 700, "comm": "claude", "tty": null, "exe": null, "argv": null },
+        { "pid": 700, "ppid": 1, "comm": "systemd", "tty": null, "exe": null, "argv": null } ],
+      "session": 800, "terminal": null },
+    { "name": "version-session-under-interactive", "source": "review reproduction 2026-09-23: tasks -> 2.1.280 -> claude", "harness": "claude-code",
+      "rows": [
+        { "pid": 610, "ppid": 600, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 600, "ppid": 500, "comm": "2.1.280", "tty": null, "exe": "/home/user/.local/share/claude/versions/2.1.280", "argv": ["/home/user/.local/share/claude/versions/2.1.280", "-p", "task"] },
+        { "pid": 500, "ppid": 400, "comm": "claude", "tty": true, "exe": null, "argv": null },
+        { "pid": 400, "ppid": 1, "comm": "zsh", "tty": true, "exe": null, "argv": null } ],
+      "session": 600, "terminal": 500 },
+    { "name": "nested-headless-claude", "source": "measured 2026-09-23, claude -p inside an interactive session", "harness": "claude-code",
+      "rows": [
+        { "pid": 700, "ppid": 690, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 690, "ppid": 680, "comm": "sh", "tty": null, "exe": null, "argv": null },
+        { "pid": 680, "ppid": 670, "comm": "claude", "tty": null, "exe": null, "argv": ["claude", "-p", "Run this probe"] },
+        { "pid": 670, "ppid": 600, "comm": "zsh", "tty": null, "exe": null, "argv": null },
+        { "pid": 600, "ppid": 590, "comm": "claude", "tty": true, "exe": null, "argv": null },
+        { "pid": 590, "ppid": 1, "comm": "zsh", "tty": true, "exe": null, "argv": null } ],
+      "session": 680, "terminal": 600 },
+    { "name": "daemon-nearest", "source": "spec, Non-session roles", "harness": "claude-code",
+      "rows": [
+        { "pid": 500, "ppid": 300, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 300, "ppid": 200, "comm": "claude", "tty": null, "exe": null, "argv": ["/home/user/.local/bin/claude", "daemon", "run", "--origin", "transient"] },
+        { "pid": 200, "ppid": 1, "comm": "claude", "tty": true, "exe": null, "argv": null } ],
+      "session": null, "terminal": 200 },
+    { "name": "pty-host-nearest", "source": "spec, Non-session roles", "harness": "claude-code",
+      "rows": [
+        { "pid": 500, "ppid": 400, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 400, "ppid": 300, "comm": "2.1.280", "tty": null, "exe": "/home/user/.local/share/claude/versions/2.1.280", "argv": ["claude", "bg-pty-host", "--bg-pty-host", "/tmp/cc/pty/s.sock"] },
+        { "pid": 300, "ppid": 200, "comm": "claude", "tty": null, "exe": null, "argv": null },
+        { "pid": 200, "ppid": 1, "comm": "claude", "tty": true, "exe": null, "argv": null } ],
+      "session": null, "terminal": 200 },
+    { "name": "foreign-version-comm", "source": "plan Review Focus 2", "harness": "claude-code",
+      "rows": [
+        { "pid": 500, "ppid": 450, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 450, "ppid": 400, "comm": "1.2.3", "tty": null, "exe": "/opt/tool/1.2.3", "argv": null },
+        { "pid": 400, "ppid": 1, "comm": "claude", "tty": true, "exe": null, "argv": ["claude"] } ],
+      "session": 400, "terminal": 400 },
+    { "name": "headless-codex-exec", "source": "measured 2026-09-23, codex-cli 0.156.1 codex exec without a terminal", "harness": "codex",
+      "rows": [
+        { "pid": 900, "ppid": 890, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 890, "ppid": 880, "comm": "codex", "tty": null, "exe": null, "argv": null },
+        { "pid": 880, "ppid": 1, "comm": "timeout", "tty": null, "exe": null, "argv": null } ],
+      "session": 890, "terminal": null },
+    { "name": "interactive-codex", "source": "earlier hand-written codex test chain (terminal shape), not re-measured", "harness": "codex",
+      "rows": [
+        { "pid": 10, "ppid": 9, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 9, "ppid": 7, "comm": "sh", "tty": null, "exe": null, "argv": null },
+        { "pid": 7, "ppid": 6, "comm": "codex", "tty": true, "exe": null, "argv": null },
+        { "pid": 6, "ppid": 1, "comm": "zsh", "tty": true, "exe": null, "argv": null } ],
+      "session": 7, "terminal": 7 },
+    { "name": "claude-ancestor-under-codex", "source": "replaces the codex test 'a claude ancestor is not a codex session'", "harness": "codex",
+      "rows": [
+        { "pid": 30, "ppid": 20, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 20, "ppid": 10, "comm": "claude", "tty": true, "exe": null, "argv": null },
+        { "pid": 10, "ppid": 1, "comm": "zsh", "tty": true, "exe": null, "argv": null } ],
+      "session": null, "terminal": null },
+    { "name": "darwin-claude", "source": "measured on a Mac, existing claude-code fixture", "harness": "claude-code",
+      "rows": [
+        { "pid": 37708, "ppid": 37707, "comm": "node", "tty": null, "exe": null, "argv": null },
+        { "pid": 37707, "ppid": 37609, "comm": "sh", "tty": null, "exe": null, "argv": null },
+        { "pid": 37609, "ppid": 35113, "comm": "claude", "tty": "ttys000", "exe": null, "argv": ["claude"] },
+        { "pid": 35113, "ppid": 35112, "comm": "-zsh", "tty": "ttys000", "exe": null, "argv": null } ],
+      "session": 37609, "terminal": 37609 },
+    { "name": "darwin-codex", "source": "measured on a Mac, existing codex fixture", "harness": "codex",
+      "rows": [
+        { "pid": 38843, "ppid": 38829, "comm": "node", "tty": "ttys000", "exe": null, "argv": null },
+        { "pid": 38829, "ppid": 38609, "comm": "zsh", "tty": "ttys000", "exe": null, "argv": null },
+        { "pid": 38609, "ppid": 38608, "comm": "codex", "tty": "ttys000", "exe": null, "argv": null },
+        { "pid": 38608, "ppid": 35113, "comm": "node", "tty": "ttys000", "exe": null, "argv": null } ],
+      "session": 38609, "terminal": 38609 },
+    { "name": "darwin-opencode", "source": "measured on a Mac, existing opencode fixture", "harness": "opencode",
+      "rows": [
+        { "pid": 42885, "ppid": 42878, "comm": "node", "tty": "ttys000", "exe": null, "argv": null },
+        { "pid": 42878, "ppid": 35113, "comm": "opencode", "tty": "ttys000", "exe": null, "argv": null },
+        { "pid": 35113, "ppid": 35112, "comm": "-zsh", "tty": "ttys000", "exe": null, "argv": null } ],
+      "session": 42878, "terminal": 42878 }
+  ]
+}
