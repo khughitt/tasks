@@ -130,6 +130,10 @@ The nearest harness ancestor is the one matched. An unmatched inner harness is a
 error; the walk does not continue outward past it to find an outer harness that does
 match.
 
+*Amended by `2026-09-23-relay-session-process-design.md`:* a Claude Code process is also
+a version-named binary under `claude/versions/`, and a nearest Claude Code process that
+is its daemon or pty host ends the walk as a refusal.
+
 ### 4.3 The registry match
 
 The snapshot is read from `$RELAY_STATE_DIR/agents.json`, else
@@ -138,6 +142,9 @@ Relay writes it atomically with mode 0600 in a 0700 directory and refuses a
 non-private path; tasks reads it, validates schema 1 in Rust, and treats a snapshot
 that fails validation as unavailable (§5). Tasks never writes to it and never spawns
 Node.
+
+*Amended by `2026-09-23-relay-session-process-design.md`:* the reader validates schema 2
+and refuses schema 1 as superseded.
 
 A candidate agent matches the nearest harness ancestor when **all** hold:
 

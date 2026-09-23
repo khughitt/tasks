@@ -175,17 +175,19 @@ per-project `tasks/.config.toml` syncs between hosts, so the switch does not bel
 
 Turn it on only where relay's hooks actually publish its agent registry. Every `tasks` command
 run under a harness is in scope once the switch is on, and without the registry every
-claim acquisition there refuses. Relay records a process handle only for a harness with a
-controlling terminal, so a headless session (`claude -p`, `codex exec`) is published
-without one and must name itself with `TASKS_SESSION`.
+claim acquisition there refuses. Relay records the handle of the process that is the
+session, so headless, nested and background sessions (`claude -p`, `claude --bg`,
+`codex exec`) each claim as themselves.
 
-With it on, `tasks` walks its own process ancestry to the nearest harness process and looks
-that process up in relay's agent registry, matching on host, boot id, pid and process start
-time, and requiring the registry's harness to agree with the ancestor it found. On a match
-the claim is keyed by the relay agent id — `<harness>:<sessionId>`, such as
-`codex:01J…` — and records that agent's process handle as the claim's proof. Because the id
-belongs to the session rather than to the terminal, a claim survives the command that made
-it and is recognized again by the same session later.
+With it on, `tasks` walks its own process ancestry to the nearest harness process —
+`claude`, `codex` or `opencode`, or a versioned Claude Code binary under claude/versions/,
+which is how a background session runs; Claude Code's own daemon and pty host are not
+sessions and are refused — and looks that process up in relay's agent registry, matching on
+host, boot id, pid and process start time, and requiring the registry's harness to agree
+with the process it found. On a match the claim is keyed by the relay agent id —
+`<harness>:<sessionId>`, such as `codex:01J…` — and records that agent's process handle as
+the claim's proof. Because the id belongs to the session rather than to the terminal, a
+claim survives the command that made it and is recognized again by the same session later.
 
 That proof is also what the session's own commands read back: the owner can `park` or
 `done` a claim it already holds even when the registry has gone away, because ownership is
@@ -194,6 +196,13 @@ Parking *releases* the claim, so resuming a parked task is a fresh acquisition a
 either the registry back or `TASKS_SESSION`. And a session nested inside another harness
 session is a different session: its nearest boundary is its own harness process, so it
 cannot act on the outer session's claims.
+
+**Upgrading.** tasks 0.2.0 reads relay's registry schema 2 and no other; against an older
+registry it refuses and asks you to run `relay reap`. On a host with this switch on, every
+`tasks` that can run there must be 0.2.0 or later before relay publishes schema 2: check
+`tasks --version` for each `tasks` on `PATH` in each harness's environment. An older `tasks`
+refuses fresh claims against the new registry, but it can still let a session nested inside
+another continue the outer session's claims, which no registry format can prevent.
 
 Enabling relay never rewrites a claim already held: a claim keeps the identity it was
 created with. The level is Linux-only — it needs `/proc` — and it sits *below*

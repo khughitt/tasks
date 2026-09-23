@@ -7,7 +7,7 @@ after two reviews, implemented at relay `45f4c47`). That spec fixes the recognit
 the non-session roles, the schema bump and the verification it assigns to tasks. This
 document settles only how tasks adopts them.
 
-Status: draft, for review.
+Status: approved 2026-09-23; implemented on feat/relay-schema2, live check pending (Task 5).
 
 ## 1. Decision and scope
 
