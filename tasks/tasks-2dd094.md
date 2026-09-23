@@ -1,15 +1,16 @@
 ---
 id: tasks-2dd094
 title: Adopt relay's session-process walk and registry schema 2 in relay identity
-status: doing
+status: done
 priority: 1
 size: m
 complexity: mid
 process: planned
 owner: feat/relay-schema2
 created: 2026-09-23T12:26:23Z
-updated: 2026-09-23T20:04:50Z
+updated: 2026-09-23T20:49:05Z
 started: 2026-09-23T17:57:12Z
+completed: 2026-09-23T20:49:05Z
 depends: []
 tags: [cli]
 agent: "claude-code/claude-opus-5-5[1m]"
@@ -40,4 +41,8 @@ Ordering: this lands before relay's resolver is released (relay-c19c0a depends o
 - 2026-09-23T19:48:45Z (feat/relay-schema2): parked (waiting on user, review): User reviews the plan docs/plans/2026-09-23-relay-session-process.md and picks an execution method; then start tasks-8f28ce
   provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-23T20:04:50Z (feat/relay-schema2): resumed
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-23T20:49:05Z (feat/relay-schema2): done
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-23T20:49:05Z (feat/relay-schema2): tasks 0.2.0 adopts relay's session-process walk (versioned Claude Code binaries, daemon/pty host refused, unreadable exe/cmdline unknown) and registry schema 2 only; vendored relay ancestry corpus at 45f4c47; nested-session held-claim hazard closed and verified live
   provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
