@@ -1,13 +1,15 @@
 ---
 id: tasks-1cfbad
 title: Verify relay identity against a real agents.json before recommending the opt-in
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-22T16:41:10Z
-updated: 2026-09-22T16:41:10Z
+updated: 2026-09-23T11:22:14Z
+started: 2026-09-23T11:22:14Z
 depends: []
 tags: []
 agent: "claude-code/claude-opus-5[1m]"
@@ -24,3 +26,8 @@ What to establish, on a host where relay is running:
 Note for the write-up: on a host where the shell itself runs under an agent session, every tasks command is in scope once the opt-in is on, so the switch should only go on where relay actually publishes agents.json. Turning it on without relay running refuses every acquisition, by design (spec section 6.5).
 
 Design: docs/specs/2026-09-22-relay-ancestry-identity-design.md
+
+## Notes
+
+- 2026-09-23T11:22:14Z (main): started
+  provenance: {"harness_session":"claude-code:22eb583d-5fc2-4364-a75c-e302907e2e4f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
