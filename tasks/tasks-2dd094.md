@@ -1,13 +1,15 @@
 ---
 id: tasks-2dd094
 title: Adopt relay's session-process walk and registry schema 2 in relay identity
-status: todo
+status: doing
 priority: 1
 size: m
 complexity: mid
 process: planned
+owner: main
 created: 2026-09-23T12:26:23Z
-updated: 2026-09-23T12:26:23Z
+updated: 2026-09-23T17:57:12Z
+started: 2026-09-23T17:57:12Z
 depends: []
 tags: [cli]
 agent: "claude-code/claude-opus-5-5[1m]"
@@ -24,3 +26,9 @@ tasks must, in its relay identity (src/relay/ancestry.rs, resolve.rs, snapshot.r
 Verification the relay spec assigns here: fresh acquisition fails closed in both version pairings; the held-claim case (outer session holds a claim; a nested 2.1.280 process under it, with no hint or an inherited outer one) refuses start, park and done; the review chain tasks -> 2.1.280 -> claude with a correct outer row and no hint refuses; live, with the opt-in on against a private relay registry, the outer and a nested session each acquire their own claim.
 
 Ordering: this lands before relay's resolver is released (relay-c19c0a depends on it). An older tasks can continue a held claim by process proof alone and misprove a nested session as its parent, which the schema cannot stop.
+
+## Notes
+
+- 2026-09-23T17:57:12Z (main): started
+  provenance: {"harness_session":"claude-code:dd052fc4-8f7c-4dfb-b5cd-c0e19fb82d56","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-23T17:57:12Z (main): Process planned (recorded at filing): new design spec amending the 2026-09-22 relay identity design, then a plan, in worktree .worktrees/relay-schema2
