@@ -1,13 +1,15 @@
 ---
 id: tasks-980a39
 title: "check skips spec, plan, and step validation on done and dropped records"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-09-13T15:32:44Z
-updated: 2026-09-24T12:24:41Z
+updated: 2026-09-24T12:26:01Z
+started: 2026-09-24T12:26:01Z
 depends: []
 tags: [feedback, gap, "from:tasks", cli]
 ---
@@ -23,3 +25,5 @@ Original report: Merged two plan headings into their neighbours and dropped the 
 ## Notes
 
 - 2026-09-24T12:24:41Z (main): scope: scoped; todo P2 s low direct, check exempts done/dropped from doc_missing/step_missing (rejected: warning); the edit-flag half moved to tasks-136399
+- 2026-09-24T12:26:01Z (main): started
+  provenance: {"harness_session":"claude-code:14066760-8259-4a7a-ba17-31c6767931cc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
