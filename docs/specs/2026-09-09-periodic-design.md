@@ -319,6 +319,15 @@ for every row.
 candidates as today. `show --pretty` renders `every`, `last_done`, and the derived due
 date for any record carrying a cadence.
 
+Summary rows in `list`, `ready`, `sample`, `tree`, and `prime` carry a one-letter type
+column between the status and the date: `p` for a record with a cadence, blank otherwise.
+It reads the row's existing `periodic` object, so the JSON shape is unchanged -- no `type`
+field is added. The column is reserved once per command output, like the parallel marker,
+so siblings stay aligned when only one row recurs. The letter is painted in the emphasis
+role when color is on, but the letter alone carries the meaning, so redirected and ASCII
+output stay honest. A future type is another arm in the same slot and another letter,
+never a reshuffle of the columns.
+
 ### 5.2 `list --periodic`
 
 Every record carrying `every`, at any status. `--periodic` bypasses the default

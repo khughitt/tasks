@@ -9869,6 +9869,108 @@ fn pretty_rows_show_the_parallel_marker_only_when_something_is_marked() {
 }
 
 #[test]
+fn pretty_rows_show_the_type_letter_only_when_something_recurs() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let plain = id_of(env.json(&dir, &["add", "Plain", "-p", "1"]));
+
+    let out = env.cmd(&dir).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        !text.contains(" p "),
+        "no column when nothing recurs:\n{text}"
+    );
+
+    let sweep = id_of(env.json(&dir, &["add", "Sweep", "-p", "0", "--every", "30d"]));
+    let out = env.cmd(&dir).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    let lines: Vec<&str> = text.trim_end().lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    let sweep_line = lines
+        .iter()
+        .find(|line| line.contains("Sweep"))
+        .unwrap_or_else(|| panic!("recurring task missing:\n{text}"));
+    let plain_line = lines
+        .iter()
+        .find(|line| line.contains("Plain"))
+        .unwrap_or_else(|| panic!("plain task missing:\n{text}"));
+    assert!(sweep_line.contains(" p "), "{sweep_line}");
+    assert!(!plain_line.contains(" p "), "{plain_line}");
+    assert_eq!(
+        sweep_line.find("Sweep"),
+        plain_line.find("Plain"),
+        "titles must start in the same column:\n{text}"
+    );
+
+    // The letter reads the existing `periodic` object; no `type` key reaches JSON.
+    let v = env.json(&dir, &["list"]);
+    let sweeps: Vec<&serde_json::Value> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|task| task["id"].as_str() == Some(sweep.as_str()))
+        .collect();
+    assert_eq!(sweeps.len(), 1, "{v}");
+    assert!(sweeps[0].get("type").is_none(), "{:?}", sweeps[0]);
+    assert_eq!(sweeps[0]["periodic"]["every"], "30d");
+    assert!(
+        v["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| task["id"].as_str() == Some(plain.as_str())),
+        "{v}"
+    );
+}
+
+#[test]
+fn prime_aligns_the_type_column_across_all_its_blocks() {
+    // Like the `||` column, the decision to reserve the type column is made once for all
+    // of prime's blocks, so a recurrence in `ready` does not shift dates in `doing`.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let sweep = id_of(env.json(&dir, &["add", "Sweep", "--every", "30d"]));
+    let plain = id_of(env.json(&dir, &["add", "Plain"]));
+    env.json(&dir, &["start", &plain]);
+
+    let out = env.cmd(&dir).args(["--pretty", "prime"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+
+    let ready_block = text
+        .split("\nready:\n")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no ready section:\n{text}"))
+        .split("\ndoing:\n")
+        .next()
+        .unwrap();
+    let doing_block = text
+        .split("\ndoing:\n")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no doing section:\n{text}"));
+
+    let ready_line = ready_block
+        .lines()
+        .find(|line| line.contains(&sweep))
+        .unwrap_or_else(|| panic!("recurring task missing from ready:\n{text}"));
+    let doing_line = doing_block
+        .lines()
+        .find(|line| line.contains(&plain))
+        .unwrap_or_else(|| panic!("plain task missing from doing:\n{text}"));
+
+    assert!(ready_line.contains(" p "), "{ready_line}");
+    assert!(!doing_line.contains(" p "), "{doing_line}");
+
+    let v = env.json(&dir, &["prime"]);
+    let ready_date = &v["ready"][0]["updated"].as_str().unwrap()[..10];
+    let doing_date = &v["doing"][0]["updated"].as_str().unwrap()[..10];
+    assert_eq!(
+        ready_line.find(ready_date),
+        doing_line.find(doing_date),
+        "dates must start in the same column across prime's blocks:\n{text}"
+    );
+}
+
+#[test]
 fn prime_aligns_the_parallel_column_across_all_its_blocks() {
     // prime's ready and doing blocks are rendered by separate `table` calls, but the
     // decision to reserve the `||` column is made once for all of prime's blocks together

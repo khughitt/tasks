@@ -837,7 +837,13 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             Some(fields) => show_text(fields, painter),
             None => "nothing ready".into(),
         },
-        Output::List(o) => table(&o.tasks, o.date, painter, any_parallel(&o.tasks)),
+        Output::List(o) => table(
+            &o.tasks,
+            o.date,
+            painter,
+            any_parallel(&o.tasks),
+            any_type(&o.tasks),
+        ),
         Output::Parked(o) => parked_table(&o.tasks, painter),
         Output::Quiet(o) => quiet_briefs(&o.tasks, painter),
         Output::Prime(o) => {
@@ -847,6 +853,10 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 || any_parallel_tree(&o.roadmap)
                 || any_parallel(&o.ready)
                 || any_parallel(&o.doing);
+            let type_column = any_type(&o.closeout)
+                || any_type_tree(&o.roadmap)
+                || any_type(&o.ready)
+                || any_type(&o.doing);
             let header = match &o.prefix {
                 Some(prefix) => format!("project {prefix}"),
                 None => format!("projects {}", o.projects.join(", ")),
@@ -907,6 +917,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 DateColumn::Updated,
                 painter,
                 parallel_column,
+                type_column,
             ));
             rendered.push_str(&format!(
                 "\n{}\n",
@@ -922,6 +933,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                         0,
                         painter,
                         parallel_column,
+                        type_column,
                     ));
                 } else if ready_ids.contains(node.summary.id.as_str()) {
                     listed_under_ready += 1;
@@ -931,6 +943,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                         DateColumn::Updated,
                         painter,
                         parallel_column,
+                        type_column,
                     ));
                 }
             }
@@ -948,6 +961,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 DateColumn::Updated,
                 painter,
                 parallel_column,
+                type_column,
             ));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "doing:")));
             rendered.push_str(&table(
@@ -955,6 +969,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 DateColumn::Updated,
                 painter,
                 parallel_column,
+                type_column,
             ));
             rendered
         }
@@ -975,7 +990,13 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             }
             rendered
         }
-        Output::Tree(o) => tree_text(&o.nodes, 0, painter, any_parallel_tree(&o.nodes)),
+        Output::Tree(o) => tree_text(
+            &o.nodes,
+            0,
+            painter,
+            any_parallel_tree(&o.nodes),
+            any_type_tree(&o.nodes),
+        ),
         Output::Tags(o) => {
             let mut rendered = String::new();
             for row in &o.tags {
@@ -1126,7 +1147,13 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
     rendered
 }
 
-fn tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter, parallel_column: bool) -> String {
+fn tree_text(
+    nodes: &[TreeNode],
+    depth: usize,
+    painter: &Painter,
+    parallel_column: bool,
+    type_column: bool,
+) -> String {
     let mut rendered = String::new();
     for node in nodes {
         let row = table(
@@ -1134,6 +1161,7 @@ fn tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter, parallel_colum
             DateColumn::Updated,
             painter,
             parallel_column,
+            type_column,
         );
         rendered.push_str(&"  ".repeat(depth));
         rendered.push_str(&row);
@@ -1142,6 +1170,7 @@ fn tree_text(nodes: &[TreeNode], depth: usize, painter: &Painter, parallel_colum
             depth + 1,
             painter,
             parallel_column,
+            type_column,
         ));
     }
     rendered
@@ -1160,6 +1189,26 @@ pub fn any_parallel_tree(nodes: &[TreeNode]) -> bool {
         .any(|node| node.summary.parallel || any_parallel_tree(&node.children))
 }
 
+/// The one-letter type marker for a summary row: `p` for a record carrying a cadence, and
+/// nothing otherwise. A future type is another arm here, another letter in the same slot;
+/// the column is reserved once per output (see `any_type`), so it is never a layout change.
+fn type_letter(row: &TaskSummary) -> Option<char> {
+    row.periodic.as_ref().map(|_| 'p')
+}
+
+/// Whether a pretty rendering must reserve the type column. Same once-per-output rule as
+/// `any_parallel`: `tree_text` and `prime`'s roadmap call `table` one row at a time, so a
+/// per-call decision would shift dates between adjacent siblings.
+pub fn any_type(rows: &[TaskSummary]) -> bool {
+    rows.iter().any(|row| type_letter(row).is_some())
+}
+
+pub fn any_type_tree(nodes: &[TreeNode]) -> bool {
+    nodes
+        .iter()
+        .any(|node| type_letter(&node.summary).is_some() || any_type_tree(&node.children))
+}
+
 /// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every width-sensitive
 /// field is formatted to its final visible width before the painter wraps it.
 pub fn table(
@@ -1167,6 +1216,7 @@ pub fn table(
     date: DateColumn,
     painter: &Painter,
     parallel_column: bool,
+    type_column: bool,
 ) -> String {
     let mut rendered = String::new();
     for row in rows {
@@ -1246,8 +1296,18 @@ pub fn table(
             (true, true) => "|| ",
             (true, false) => "   ",
         };
+        // A blank row still reserves the column's width so siblings stay aligned. The
+        // blank is unpainted, like the parallel spacer: the letter carries the meaning,
+        // and color is only styling, so redirected and ASCII output stay honest.
+        let kind = match (type_column, type_letter(row)) {
+            (false, _) => String::new(),
+            (true, Some(letter)) => {
+                format!("{} ", painter.paint(Style::Emphasis, &letter.to_string()))
+            }
+            (true, None) => "  ".into(),
+        };
         rendered.push_str(&format!(
-            "{id}  {priority} {size:<2} {complexity:<4} {process:<7} {status} {mark}{date}  {}{tags}{cadence}{deferral}{owner}\n",
+            "{id}  {priority} {size:<2} {complexity:<4} {process:<7} {status} {mark}{kind}{date}  {}{tags}{cadence}{deferral}{owner}\n",
             row.title
         ));
     }
@@ -1391,6 +1451,17 @@ mod tests {
         }
     }
 
+    fn recurring(id: &str) -> TaskSummary {
+        let mut row = row(id, false);
+        row.periodic = Some(PeriodicInfo {
+            every: "30d".into(),
+            last_done: None,
+            due: None,
+            due_now: true,
+        });
+        row
+    }
+
     fn plain() -> Painter {
         Painter::new(ColorMode::Never, Format::Pretty, false)
     }
@@ -1429,9 +1500,54 @@ mod tests {
     fn the_marker_column_is_absent_when_nothing_is_marked() {
         let rows = [row("xx-000001", false), row("xx-000002", false)];
         assert!(!any_parallel(&rows));
-        let text = table(&rows, DateColumn::Updated, &plain(), false);
+        let text = table(&rows, DateColumn::Updated, &plain(), false, false);
         assert!(!text.contains("||"), "{text}");
         assert!(text.contains("todo    2026-09-06"), "{text}");
+    }
+
+    #[test]
+    fn the_type_column_is_absent_when_nothing_recurs() {
+        let rows = [row("xx-000001", false), row("xx-000002", false)];
+        assert!(!any_type(&rows));
+        let text = table(&rows, DateColumn::Updated, &plain(), false, false);
+        assert!(!text.contains(" p "), "{text}");
+        assert!(text.contains("todo    2026-09-06"), "{text}");
+    }
+
+    #[test]
+    fn a_recurring_row_carries_the_type_letter_and_keeps_its_neighbour_aligned() {
+        let rows = [recurring("xx-000001"), row("xx-000002", false)];
+        assert!(any_type(&rows));
+        let text = table(&rows, DateColumn::Updated, &plain(), false, true);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "{text}");
+        assert!(lines[0].contains("todo    p 2026-09-06"), "{}", lines[0]);
+        assert!(lines[1].contains("todo      2026-09-06"), "{}", lines[1]);
+        assert_eq!(
+            lines[0].find("2026-09-06"),
+            lines[1].find("2026-09-06"),
+            "dates must land in the same column:\n{text}"
+        );
+    }
+
+    #[test]
+    fn the_type_letter_is_painted_but_still_ascii() {
+        let rows = [recurring("xx-000001")];
+        let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
+        let text = table(&rows, DateColumn::Updated, &colored, false, true);
+        assert!(text.contains("\x1b[1mp\x1b[0m "), "{text:?}");
+    }
+
+    #[test]
+    fn any_type_tree_finds_a_recurring_descendant() {
+        let nodes = vec![TreeNode {
+            summary: row("xx-000001", false),
+            children: vec![TreeNode {
+                summary: recurring("xx-000002"),
+                children: vec![],
+            }],
+        }];
+        assert!(any_type_tree(&nodes));
     }
 
     #[test]
@@ -1450,7 +1566,7 @@ mod tests {
             },
         ];
         assert!(any_parallel_tree(&nodes));
-        let text = tree_text(&nodes, 0, &plain(), true);
+        let text = tree_text(&nodes, 0, &plain(), true, false);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
         assert!(lines[0].contains("todo    || 2026-09-06"), "{}", lines[0]);

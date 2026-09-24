@@ -1,15 +1,16 @@
 ---
 id: tasks-7a0437
 title: A task-type column in pretty rows
-status: doing
+status: done
 priority: 3
 size: s
 complexity: low
 process: direct
 owner: main
 created: 2026-09-12T19:15:37Z
-updated: 2026-09-24T15:04:10Z
+updated: 2026-09-24T15:10:12Z
 started: 2026-09-24T15:04:10Z
+completed: 2026-09-24T15:10:12Z
 depends: []
 tags: [quick-add, cli]
 source: "mindful:thought:6983d7366cc9441fbb72661bd9cc09fe"
@@ -27,3 +28,5 @@ Source: mindful:thought:6983d7366cc9441fbb72661bd9cc09fe
 - 2026-09-24T13:07:13Z (main): curate: decision; body names the parallel-marker precedent and two open questions; proposal: drop the JSON type field (periodic already carries it) and decide always-present vs reserved-when-needed for the column
 - 2026-09-24T13:35:22Z (main): Decided: the column reads periodic and the JSON shape stays unchanged (user); reserved only when a row needs it, following the parallel marker (agent, user delegated).
 - 2026-09-24T15:04:10Z (main): started
+- 2026-09-24T15:10:12Z (tasks-7a0437): done
+- 2026-09-24T15:10:12Z (tasks-7a0437): Pretty rows show a one-letter type column: p for a recurring record, blank otherwise, reserved once per output like the parallel marker and colored only as styling.
