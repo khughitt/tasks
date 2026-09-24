@@ -1,13 +1,22 @@
 ---
 id: tasks-2f3482
-title: "sample --older-than rejects a bare 0, though zero needs no unit"
-status: idea
-priority: 2
+title: sample --older-than 0 and 0w point to 0d in their rejection
+status: todo
+priority: 3
+size: xs
+complexity: low
+process: direct
 created: 2026-09-24T13:35:30Z
-updated: 2026-09-24T13:35:30Z
+updated: 2026-09-24T13:38:23Z
 depends: []
-tags: [feedback, friction, "from:tasks"]
+tags: [feedback, friction, "from:tasks", cli]
 agent: claude-code/claude-opus-5-5
 ---
 
-tasks sample --older-than 0 fails with bad interval "0": expected a count followed by d or w; --older-than 0d works. Turning the age window off is the natural use of 0, and the unit carries no meaning there. Expected 0 to be accepted, or the error to suggest 0d.
+tasks sample --older-than 0 fails with `bad interval "0": expected a count followed by d or w`; the reporter expected 0 to turn the age window off. By design it does not: every age shares the `<n>d`/`<n>w` grammar, and `0d` is its one spelling of zero (task-curation design §2, `parse_age` in src/defer.rs); tests/cli.rs rejects `7` and `0w` on purpose.
+
+Done when `parse_age` rejects `0` and `0w` with a usage error that names `0d` as the way to skip the age check, the bad-age test in tests/cli.rs asserts that hint for both, and every other rejection is unchanged. Rejected: accepting a bare 0, which would special-case the shared grammar.
+
+## Notes
+
+- 2026-09-24T13:38:23Z (main): scope: scoped; kept the shared age grammar (0d is its only zero, by design) and turned the report into a rejection that names 0d; P3 xs low direct
