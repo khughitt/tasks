@@ -1,13 +1,15 @@
 ---
 id: tasks-2f3482
 title: sample --older-than 0 and 0w point to 0d in their rejection
-status: todo
+status: doing
 priority: 3
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-09-24T13:35:30Z
-updated: 2026-09-24T13:38:23Z
+updated: 2026-09-24T13:43:25Z
+started: 2026-09-24T13:43:25Z
 depends: []
 tags: [feedback, friction, "from:tasks", cli]
 agent: claude-code/claude-opus-5-5
@@ -20,3 +22,5 @@ Done when `parse_age` rejects `0` and `0w` with a usage error that names `0d` as
 ## Notes
 
 - 2026-09-24T13:38:23Z (main): scope: scoped; kept the shared age grammar (0d is its only zero, by design) and turned the report into a rejection that names 0d; P3 xs low direct
+- 2026-09-24T13:43:25Z (main): started
+  provenance: {"harness_session":"claude-code:c3b66540-0acc-4861-917d-8c10dfaea3bd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

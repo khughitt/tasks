@@ -1,13 +1,15 @@
 ---
 id: tasks-f17488
 title: Doc-root rejections name spec_dirs and plan_dirs in tasks/.config.toml
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-09-11T12:17:29Z
-updated: 2026-09-24T13:37:46Z
+updated: 2026-09-24T13:43:25Z
+started: 2026-09-24T13:43:25Z
 depends: []
 tags: [feedback, friction, "from:atoms", cli]
 ---
@@ -22,3 +24,5 @@ Original report: both a document stem and an explicit relative path passed to ed
 
 - 2026-09-24T13:07:13Z (main): curate: stale; body records that spec_dirs (0f7d904) already attaches a design under docs/plans; proposal: drop citing 0f7d904, or retitle to "the must-be-under rejection names spec_dirs/plan_dirs in tasks/.config.toml" and keep as a small error-message fix
 - 2026-09-24T13:37:46Z (main): Decided (user): keep as the smaller fix — rejections name spec_dirs/plan_dirs; scoped todo, xs, low, direct.
+- 2026-09-24T13:43:25Z (main): started
+  provenance: {"harness_session":"claude-code:c3b66540-0acc-4861-917d-8c10dfaea3bd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
