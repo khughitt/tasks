@@ -1,17 +1,19 @@
 ---
 id: tasks-980a39
 title: "check skips spec, plan, and step validation on done and dropped records"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: main
 created: 2026-09-13T15:32:44Z
-updated: 2026-09-24T12:26:01Z
+updated: 2026-09-24T12:27:58Z
 started: 2026-09-24T12:26:01Z
+completed: 2026-09-24T12:27:58Z
 depends: []
 tags: [feedback, gap, "from:tasks", cli]
+model: "claude-opus-5-5[1m]"
 ---
 
 Why: `check` validates `doc_missing` and `step_missing` on every record regardless of status (`src/commands/check.rs`, the link loop at the end of the per-task pass). When a plan revision merges or removes headings, the step tasks dropped with it fail the gate forever, and the workaround (repointing a dropped task at a surviving heading) falsifies its history. Reported twice: this one (from tasks) and tasks-0f8043 (from mind6, three dropped records).
@@ -26,4 +28,8 @@ Original report: Merged two plan headings into their neighbours and dropped the 
 
 - 2026-09-24T12:24:41Z (main): scope: scoped; todo P2 s low direct, check exempts done/dropped from doc_missing/step_missing (rejected: warning); the edit-flag half moved to tasks-136399
 - 2026-09-24T12:26:01Z (main): started
+  provenance: {"harness_session":"claude-code:14066760-8259-4a7a-ba17-31c6767931cc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T12:27:58Z (fix/closed-doc-links): done
+  provenance: {"harness_session":"claude-code:14066760-8259-4a7a-ba17-31c6767931cc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T12:27:58Z (fix/closed-doc-links): check skips doc_missing and step_missing on done and dropped records; spec §7 says so; test covers dropped, done, and shelved
   provenance: {"harness_session":"claude-code:14066760-8259-4a7a-ba17-31c6767931cc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

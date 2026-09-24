@@ -684,6 +684,9 @@ If any id reached during traversal is unreachable, `dep --on` and `add --depends
 - `check` fails when: a linked file is missing; a path lies outside the project's
   configured spec or plan roots (§2), including after the roots are narrowed; a `step`
   heading no longer appears verbatim in its plan; `step` is set without `plan`.
+  The missing-file and missing-heading failures hold only for open records (any status
+  but `done` and `dropped`). A closed record's links are history: a later plan revision
+  that merges its heading away, or a retired spec, is not drift.
 - `check` warns `unlinked_step` for a `Task N:` heading in a linked plan that no task
   references.
 - Once automation has a pinned Tasks install, running `check` in a project's test or

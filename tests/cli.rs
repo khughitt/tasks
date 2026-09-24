@@ -4460,6 +4460,64 @@ fn check_passes_clean_repo_and_reports_drift() {
 }
 
 #[test]
+fn check_holds_only_open_records_to_their_doc_links() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    write_doc(&dir, "docs/specs/2026-08-29-s.md", "# S\n");
+    write_doc(
+        &dir,
+        "docs/plans/2026-08-29-p.md",
+        "### Task 1: one\n### Task 2: two\n### Task 3: three\n",
+    );
+    let linked = |env: &TestEnv, title: &str, step: &str| {
+        id_of(env.json(
+            &dir,
+            &[
+                "add",
+                title,
+                "--spec",
+                "s",
+                "--plan",
+                "p",
+                "--step",
+                step,
+                "--complexity",
+                "low",
+            ],
+        ))
+    };
+    let dropped = linked(&env, "Dropped", "Task 1: one");
+    let done = linked(&env, "Done", "Task 2: two");
+    let shelved = linked(&env, "Shelved", "Task 3: three");
+    env.json(&dir, &["drop", &dropped, "merged away"]);
+    env.json(&dir, &["done", &done, "landed"]);
+    env.json(&dir, &["shelve", &shelved, "later"]);
+
+    // The plan revision merges every heading away and the spec is retired.
+    write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: all\n");
+    std::fs::remove_file(dir.join("docs/specs/2026-08-29-s.md")).unwrap();
+
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let flagged: Vec<(&str, &str)> = v["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["id"].as_str().unwrap(), e["kind"].as_str().unwrap()))
+        .collect();
+    // Closed records are history; the shelved one is still open work.
+    assert_eq!(
+        flagged,
+        vec![
+            (shelved.as_str(), "doc_missing"),
+            (shelved.as_str(), "step_missing"),
+        ],
+        "{flagged:?}"
+    );
+}
+
+#[test]
 fn check_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

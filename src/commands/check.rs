@@ -246,27 +246,31 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ));
             }
         }
-        for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
-            let Some(path) = path else { continue };
-            if !ctx.project.root.join(path).is_file() {
+        // Spec §7: link drift is held against open work only. A closed record's links are
+        // history, and a later plan revision that merges its heading away is not an error.
+        if task.status.is_open() {
+            for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
+                let Some(path) = path else { continue };
+                if !ctx.project.root.join(path).is_file() {
+                    errors.push(finding(
+                        Some(task),
+                        file.clone(),
+                        "doc_missing",
+                        format!("{} {path} does not exist", kind.name()),
+                    ));
+                }
+            }
+            if let (Some(plan), Some(step)) = (&task.plan, &task.step)
+                && ctx.project.root.join(plan).is_file()
+                && !resolver.step_exists(plan, step)?
+            {
                 errors.push(finding(
                     Some(task),
                     file.clone(),
-                    "doc_missing",
-                    format!("{} {path} does not exist", kind.name()),
+                    "step_missing",
+                    format!("heading {step:?} not found in {plan}"),
                 ));
             }
-        }
-        if let (Some(plan), Some(step)) = (&task.plan, &task.step)
-            && ctx.project.root.join(plan).is_file()
-            && !resolver.step_exists(plan, step)?
-        {
-            errors.push(finding(
-                Some(task),
-                file.clone(),
-                "step_missing",
-                format!("heading {step:?} not found in {plan}"),
-            ));
         }
     }
 
