@@ -1,10 +1,10 @@
 ---
 id: tasks-0f8043
 title: "check reports step_missing on dropped tasks whose plan heading was removed; a dropped record should not fail the drift check, or edit needs --no-step/--no-plan"
-status: idea
+status: dropped
 priority: 2
 created: 2026-09-20T23:58:58Z
-updated: 2026-09-24T12:24:41Z
+updated: 2026-09-24T12:37:08Z
 depends: []
 tags: [feedback, friction, "from:mind6"]
 agent: claude-code/claude-fable-5-1
@@ -15,3 +15,7 @@ tasks check → error step_missing for three status: dropped records after a pla
 ## Notes
 
 - 2026-09-24T12:24:41Z (main): scope: drop; both requested fixes are now scoped tasks; proposal: drop as covered by tasks-980a39 (closed records skip the drift check) and tasks-136399 (--no-step/--no-plan)
+- 2026-09-24T12:37:08Z (main): dropped
+  provenance: {"harness_session":"claude-code:14066760-8259-4a7a-ba17-31c6767931cc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T12:37:08Z (main): covered by tasks-980a39 (closed records skip the doc-link check) and tasks-136399 (edit --no-step/--no-plan), both landed
+  provenance: {"harness_session":"claude-code:14066760-8259-4a7a-ba17-31c6767931cc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
