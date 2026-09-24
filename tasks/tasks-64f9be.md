@@ -1,18 +1,20 @@
 ---
 id: tasks-64f9be
 title: "Quiet-park guidance: estimates name phases and refusal risk; runs end with a run: note"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: main
 created: 2026-09-24T10:01:10Z
-updated: 2026-09-24T10:23:58Z
+updated: 2026-09-24T10:25:24Z
 started: 2026-09-24T10:23:58Z
+completed: 2026-09-24T10:25:24Z
 depends: []
 tags: [skills]
 source: ops-2da76d
+model: "claude-opus-5-5[1m]"
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -30,4 +32,8 @@ Where to look: skills/tasks/SKILL.md step 5, README park section, docs/specs/202
 ## Notes
 
 - 2026-09-24T10:23:58Z (main): started
+  provenance: {"harness_session":"claude-code:82bb7a6c-8663-4cef-a2a1-625d17bfb588","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T10:25:24Z (main): done
+  provenance: {"harness_session":"claude-code:82bb7a6c-8663-4cef-a2a1-625d17bfb588","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T10:25:24Z (main): Skill step 5 and README: quiet estimates list phases and past refusal or hang risk; every attempt ends with one run: <actual> min (est <n>, <needs>); <phase> <m>, …; <outcome>[: <cause>] note (outcome passed|failed|refused|hung|aborted); quiet queue spec §6 notes the addition
   provenance: {"harness_session":"claude-code:82bb7a6c-8663-4cef-a2a1-625d17bfb588","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
