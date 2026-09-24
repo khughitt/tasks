@@ -289,11 +289,21 @@ pub fn validate_doc_path(kind: &str, dirs: &[String], rel: &str) -> Result<()> {
     });
     if !under_root {
         return Err(Error::Validation(format!(
-            "{kind} {rel:?} must be under {}/",
-            dirs.join("/ or ")
+            "{kind} {rel:?} must be under {}/{}",
+            dirs.join("/ or "),
+            roots_hint(kind)
         )));
     }
     Ok(())
+}
+
+/// Appended to a rejection that lists a kind's roots: where those roots come from, so a
+/// project keeping documents elsewhere learns it can say so instead of moving them.
+pub fn roots_hint(kind: &str) -> String {
+    format!(
+        " ({kind}_dirs in {} sets these roots)",
+        crate::repo::CONFIG_REL
+    )
 }
 
 pub fn validate_task(t: &Task) -> Result<()> {

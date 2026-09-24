@@ -2319,6 +2319,60 @@ fn configured_doc_roots_replace_the_defaults() {
 }
 
 #[test]
+fn doc_root_rejections_name_the_config_key_that_sets_the_roots() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    write_doc(&dir, "docs/plans/2026-09-24-ledger-design.md", "# Design\n");
+    write_doc(&dir, "docs/specs/2026-09-24-ledger-plan.md", "# Plan\n");
+    let id = env.json(&dir, &["add", "Ledger"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for (args, kind, key) in [
+        (
+            ["--spec", "docs/plans/2026-09-24-ledger-design.md"],
+            "validation",
+            "spec_dirs",
+        ),
+        (["--spec", "missing"], "doc_not_found", "spec_dirs"),
+        (
+            ["--plan", "docs/specs/2026-09-24-ledger-plan.md"],
+            "validation",
+            "plan_dirs",
+        ),
+        (["--plan", "missing"], "doc_not_found", "plan_dirs"),
+    ] {
+        let error = error_of(&env, &dir, &[&["edit", &id][..], &args[..]].concat());
+        assert_eq!(error["error"]["kind"], kind, "{error}");
+        let detail = error["error"]["detail"].as_str().unwrap();
+        assert!(
+            detail.contains(key) && detail.contains("tasks/.config.toml"),
+            "{args:?}: {detail}"
+        );
+    }
+
+    // Following the hint attaches the document the rejection refused.
+    std::fs::write(
+        dir.join("tasks/.config.toml"),
+        "prefix = \"sci\"\nspec_dirs = [\"docs/specs\", \"docs/plans\"]\n",
+    )
+    .unwrap();
+    env.json(
+        &dir,
+        &[
+            "edit",
+            &id,
+            "--spec",
+            "docs/plans/2026-09-24-ledger-design.md",
+        ],
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["spec"],
+        "docs/plans/2026-09-24-ledger-design.md"
+    );
+}
+
+#[test]
 fn check_reports_links_outside_the_configured_roots() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

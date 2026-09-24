@@ -81,9 +81,10 @@ impl<'a> Resolver<'a> {
         matches.sort();
         match matches.len() {
             0 => Err(Error::DocNotFound(format!(
-                "no {} matching {name_or_path:?} under {}/",
+                "no {} matching {name_or_path:?} under {}/{}",
                 kind.name(),
-                dirs.join("/ or ")
+                dirs.join("/ or "),
+                crate::format::roots_hint(kind.name())
             ))),
             1 => Ok(matches.remove(0)),
             _ => Err(Error::Ambiguous(format!(
