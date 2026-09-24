@@ -153,7 +153,14 @@ stamps written only by status changes: `started`, the first time work began, and
 `completed`, the latest completion (cleared by a reopen). Design:
 `docs/specs/2026-09-11-park-reason-and-stamps-design.md`.
 `tasks quiet` lists quiet parks across every registered project as resume briefs (design:
-`docs/specs/2026-09-13-quiet-queue-design.md`).
+`docs/specs/2026-09-13-quiet-queue-design.md`). A quiet park's next step lists the run's
+phases and any refusal or hang an earlier attempt of the recipe hit. Every attempt then ends
+with one note in a fixed form, so the estimate can be compared with what happened:
+
+    run: <actual> min (est <n>, <needs>); <phase> <m>, …; <outcome>[: <cause>]
+
+`<outcome>` is `passed`, `failed`, `refused`, `hung`, or `aborted`. A refused attempt is
+timed up to the refusal and gets its note too.
 
 Statuses are `idea`, `todo`, `doing`, `blocked`, `shelved`, `done`, and `dropped`.
 `shelved` is open but hidden; use `tasks shelve <id> "<wake condition>"` and

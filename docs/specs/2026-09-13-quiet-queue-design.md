@@ -186,6 +186,10 @@ Lists quiet parks as resume briefs. Rules:
   flags, and adds `tasks quiet` to the command summary with its all-projects default.
 - `AGENTS.md` session protocol gains nothing; the queue is read by the person, not by the
   session protocol.
+- Added 2026-09-24 (tasks-64f9be): the skill and README now say what an estimate names
+  (phases, and any refusal or hang seen before). They also ask for one
+  `run: <actual> min (est <n>, <needs>); …; <outcome>` note per attempt. The note is
+  guidance only; the CLI does not parse or require it.
 
 ## 7. Testing
 

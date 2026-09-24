@@ -94,8 +94,20 @@ nothing is eligible.
    adding `--needs headless` when the desktop session itself is the load and must be
    stopped first (`idle`, the default, means the desktop may stay up but nothing else
    runs). `--minutes` is the expected wall-clock length once started and is required;
-   the queue is read before bed. `quiet` is not `environment` (a missing tool or a
-   restart) and not `decision` (a session the person must attend).
+   the queue is read before bed. The next step lists the run's phases and their minutes
+   (for example build, run, analysis), plus any refusal or hang an earlier attempt of the
+   same recipe hit. The person then knows what can go wrong before they give up the
+   machine. `quiet` is not `environment` (a missing tool or a restart) and not
+   `decision` (a session the person must attend).
+   Every attempt at a quiet run ends with one note, refused attempts included:
+   `tasks note <id> "run: <actual> min (est <n>, <needs>); <phase> <m>, …; <outcome>[: <cause>]"`.
+   `<outcome>` is one of `passed`, `failed` (a check failed), `refused` (a preflight or
+   settle gate stopped it; time the attempt up to the refusal), `hung` (killed after it
+   stopped making progress), or `aborted` (stopped for any other reason). The agent that
+   resumes the task writes it. For a run the person started from a TTY, or one launched
+   detached, take the times from the run's own output. Example:
+   `run: 69 min (est 40, idle); preflight 1, build 4, smoke 64; hung: trace export`.
+   Tools that compare estimates with actuals parse this form, so keep it exact.
    `prime` lists parked work first with where it was left; `ready` omits work waiting on
    the user; `list --parked` is the picker's feed.
 6. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are
