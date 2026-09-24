@@ -160,6 +160,15 @@ pub struct EditArgs {
     /// Clear the agent stamp.
     #[arg(long, conflicts_with = "agent")]
     pub no_agent: bool,
+    /// Clear the spec link.
+    #[arg(long, conflicts_with = "spec")]
+    pub no_spec: bool,
+    /// Clear the plan link. A step needs a plan, so a linked step goes with `--no-step`.
+    #[arg(long, conflicts_with = "plan")]
+    pub no_plan: bool,
+    /// Clear the plan-step link.
+    #[arg(long, conflicts_with = "step")]
+    pub no_step: bool,
     /// Clear the complexity rating (back to unassessed).
     #[arg(long, conflicts_with = "complexity")]
     pub no_complexity: bool,

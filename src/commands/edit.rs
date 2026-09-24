@@ -68,6 +68,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || fields.spec.is_some()
         || fields.plan.is_some()
         || fields.step.is_some()
+        || args.no_spec
+        || args.no_plan
+        || args.no_step
         || fields.parent.is_some()
         || args.no_parent
         || fields.source.is_some()
@@ -109,6 +112,21 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     if args.no_agent {
         task.agent = None;
+    }
+    if args.no_spec {
+        task.spec = None;
+    }
+    if args.no_step {
+        task.step = None;
+    }
+    if args.no_plan {
+        if let Some(step) = &task.step {
+            return Err(Error::Validation(format!(
+                "{} links step {step:?} in its plan; clear it too with --no-step",
+                task.id
+            )));
+        }
+        task.plan = None;
     }
     if args.no_complexity {
         task.complexity = None;

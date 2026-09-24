@@ -4518,6 +4518,69 @@ fn check_holds_only_open_records_to_their_doc_links() {
 }
 
 #[test]
+fn edit_clears_spec_plan_and_step_links() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    write_doc(&dir, "docs/specs/2026-08-29-s.md", "# S\n");
+    write_doc(
+        &dir,
+        "docs/plans/2026-08-29-p.md",
+        "### Task 1: one\n### Task 2: two\n",
+    );
+    let linked = |env: &TestEnv, title: &str, step: &str| {
+        id_of(env.json(
+            &dir,
+            &["add", title, "--spec", "s", "--plan", "p", "--step", step],
+        ))
+    };
+    let id = linked(&env, "Goal", "Task 1: one");
+    let task = |env: &TestEnv, id: &str| env.json(&dir, &["show", id])["task"].clone();
+
+    // A plan cannot go while a step still points into it; nothing is written.
+    let before = env.read(&dir, &format!("tasks/{id}.md"));
+    assert_eq!(env.fail(&dir, &["edit", &id, "--no-plan"]), "validation");
+    assert_eq!(env.read(&dir, &format!("tasks/{id}.md")), before);
+
+    env.json(&dir, &["edit", &id, "--no-step"]);
+    let shown = task(&env, &id);
+    assert!(shown.get("step").is_none(), "{shown}");
+    assert_eq!(shown["plan"], "docs/plans/2026-08-29-p.md");
+
+    env.json(&dir, &["edit", &id, "--no-plan", "--no-spec"]);
+    let shown = task(&env, &id);
+    assert!(shown.get("plan").is_none(), "{shown}");
+    assert!(shown.get("spec").is_none(), "{shown}");
+    let raw = env.read(&dir, &format!("tasks/{id}.md"));
+    for key in ["spec:", "plan:", "step:"] {
+        assert!(!raw.contains(key), "{raw}");
+    }
+
+    // The escape hatch for a link whose heading is already gone, open or closed.
+    let open = linked(&env, "Open", "Task 1: one");
+    let dropped = linked(&env, "Dropped", "Task 2: two");
+    env.json(&dir, &["drop", &dropped, "merged away"]);
+    write_doc(&dir, "docs/plans/2026-08-29-p.md", "### Task 1: all\n");
+    env.json(&dir, &["edit", &open, "--no-step"]);
+    env.json(&dir, &["edit", &dropped, "--no-plan", "--no-step"]);
+    assert!(task(&env, &open).get("step").is_none());
+    assert!(task(&env, &dropped).get("plan").is_none());
+    let check = env.check(&dir);
+    assert_eq!(check["errors"], serde_json::json!([]), "{check}");
+
+    // clap rejects each setter beside its clearer before any command runs
+    for pair in [
+        ["--spec", "s", "--no-spec"],
+        ["--plan", "p", "--no-plan"],
+        ["--step", "Task 1: all", "--no-step"],
+    ] {
+        env.cmd(&dir)
+            .args(["edit", &open].iter().copied().chain(pair))
+            .assert()
+            .code(2);
+    }
+}
+
+#[test]
 fn check_prints_nothing_on_a_clean_repo_and_everything_otherwise() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -9047,7 +9110,7 @@ fn source_is_set_by_add_replaced_and_cleared_by_edit() {
     // the flag completes; nothing in complete.rs mentions it
     let flags = env.complete(&dir, "bash", 3, &["tasks", "add", "T", "--sou"]);
     assert_eq!(flags, ["--source"]);
-    let flags = env.complete(&dir, "bash", 3, &["tasks", "edit", &plain, "--no-s"]);
+    let flags = env.complete(&dir, "bash", 3, &["tasks", "edit", &plain, "--no-so"]);
     assert_eq!(flags, ["--no-source"]);
 
     // summary rows carry it too, so `list` can answer "what came from this reference"
