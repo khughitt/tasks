@@ -81,10 +81,7 @@ pub fn run(
                 .claims_mut()?
                 .escalation(&task.id)
                 .map(|escalation| escalation.level);
-            let current = match (task.complexity, escalated) {
-                (Some(record), Some(escalated)) => Some(record.max(escalated)),
-                (record, escalated) => record.or(escalated),
-            };
+            let current = crate::complexity::higher(task.complexity, escalated);
             if let (Some(level), Some(current)) = (level, current)
                 && level < current
             {

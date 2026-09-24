@@ -38,15 +38,21 @@ pub fn cutoff_with(
     }
 }
 
+/// The higher of a rating and an escalation, or whichever is set (spec §4.1). The one
+/// place the rule lives; `park` checks the same thing over its own store view.
+pub fn higher(record: Option<Complexity>, escalated: Option<Complexity>) -> Option<Complexity> {
+    match (record, escalated) {
+        (Some(record), Some(escalated)) => Some(record.max(escalated)),
+        (record, escalated) => record.or(escalated),
+    }
+}
+
 /// The record's rating or the shared escalation, whichever is higher (spec §4.1).
 pub fn effective(task: &Task, claims: &ClaimSnapshot) -> Option<Complexity> {
     let escalated = claims
         .escalation(&task.id)
         .map(|escalation| escalation.level);
-    match (task.complexity, escalated) {
-        (Some(record), Some(escalation)) => Some(record.max(escalation)),
-        (record, escalation) => record.or(escalation),
-    }
+    higher(task.complexity, escalated)
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
