@@ -1,13 +1,15 @@
 ---
 id: tasks-64f9be
 title: "Quiet-park guidance: estimates name phases and refusal risk; runs end with a run: note"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-09-24T10:01:10Z
-updated: 2026-09-24T10:01:10Z
+updated: 2026-09-24T10:23:58Z
+started: 2026-09-24T10:23:58Z
 depends: []
 tags: [skills]
 source: ops-2da76d
@@ -24,3 +26,8 @@ Done when skills/tasks/SKILL.md step 5 (the quiet paragraph) and the README's pa
 Keep it tool-generic: no project names or paths in the upstream text. The form is the contract obs parses; change it only together with the obs piece.
 
 Where to look: skills/tasks/SKILL.md step 5, README park section, docs/specs/2026-09-13-quiet-queue-design.md. Origin: the ops scoping of ops-2da76d.
+
+## Notes
+
+- 2026-09-24T10:23:58Z (main): started
+  provenance: {"harness_session":"claude-code:82bb7a6c-8663-4cef-a2a1-625d17bfb588","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
