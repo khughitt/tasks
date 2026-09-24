@@ -3218,12 +3218,13 @@ fn prime_shows_roadmap_and_closeout() {
     );
 }
 
+/// An EDITOR value that has sh read the script rather than exec it: executing a file this
+/// process just wrote races sibling test threads, whose forks can still hold the write
+/// descriptor, into ETXTBSY.
 fn editor_script(dir: &std::path::Path, body: &str) -> String {
     let p = dir.join("editor.sh");
-    std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-    p.display().to_string()
+    std::fs::write(&p, format!("{body}\n")).unwrap();
+    format!("sh '{}'", p.display())
 }
 
 /// Writes `last_done: <stamp>` into a task record, inserting the line if it is absent and
