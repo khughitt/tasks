@@ -10341,26 +10341,36 @@ fn an_add_waiting_through_a_rename_never_writes_the_old_prefix() {
         .args(["add", "Late", "-p", "2"])
         .spawn()
         .unwrap();
-    // Seeing its lock descriptor proves the child constructed its old-prefix context
-    // and reached lock acquisition. A sleep alone could leave it not yet started.
+    // The kernel listing the child as a waiter on this lock proves it constructed its
+    // old-prefix context and reached lock acquisition. A sleep alone could leave it not
+    // yet started. Its descriptor table cannot prove it: spawn() can return while the
+    // child is still inside execve, before our own close-on-exec lock descriptor leaves it.
+    let inode = std::os::unix::fs::MetadataExt::ino(&held.metadata().unwrap()).to_string();
+    let pid = adder.id().to_string();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         assert!(
             adder.try_wait().unwrap().is_none(),
             "the add exited before acquiring its lock"
         );
-        let opened = std::fs::read_dir(format!("/proc/{}/fd", adder.id()))
+        // A blocked waiter: `N: -> FLOCK  ADVISORY  WRITE <pid> <major:minor:inode> 0 EOF`.
+        let waiting = std::fs::read_to_string("/proc/locks")
             .unwrap()
-            .any(|entry| {
-                // Other descriptors can close while /proc is being inspected.
-                std::fs::read_link(entry.unwrap().path()).is_ok_and(|path| path == lock_path)
+            .lines()
+            .any(|line| {
+                let fields: Vec<_> = line.split_whitespace().collect();
+                fields.len() > 6
+                    && fields[1] == "->"
+                    && fields[2] == "FLOCK"
+                    && fields[5] == pid
+                    && fields[6].rsplit(':').next() == Some(inode.as_str())
             });
-        if opened {
+        if waiting {
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "the add never opened its lock"
+            "the add never waited on its lock"
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
