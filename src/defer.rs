@@ -85,10 +85,17 @@ impl serde::Serialize for Defer {
 /// An age: the `<n>d`/`<n>w` half of the deferral grammar read as a count of days. `0d`
 /// is the one spelling of zero, which the deferral grammar has no use for but an age
 /// bound reads as "no age check" (`sample --older-than 0d`). A clap value parser, so a
-/// malformed age is a usage error naming the option.
+/// malformed age is a usage error naming the option. Any other zero (`0`, `0w`) is
+/// refused with that spelling, since zero is the one age a reader reaches for bare.
 pub fn parse_age(value: &str) -> Result<i64> {
     if value == "0d" {
         return Ok(0);
+    }
+    let count = value.strip_suffix(['d', 'w']).unwrap_or(value);
+    if !count.is_empty() && count.bytes().all(|b| b == b'0') {
+        return Err(Error::Validation(format!(
+            "bad age {value:?}: zero is spelled 0d, and 0d skips the age check"
+        )));
     }
     Ok(crate::periodic::Interval::parse(value)?.days())
 }

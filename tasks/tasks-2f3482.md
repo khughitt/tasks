@@ -1,15 +1,16 @@
 ---
 id: tasks-2f3482
 title: sample --older-than 0 and 0w point to 0d in their rejection
-status: doing
+status: done
 priority: 3
 size: xs
 complexity: low
 process: direct
 owner: main
 created: 2026-09-24T13:35:30Z
-updated: 2026-09-24T13:43:25Z
+updated: 2026-09-24T13:46:49Z
 started: 2026-09-24T13:43:25Z
+completed: 2026-09-24T13:46:49Z
 depends: []
 tags: [feedback, friction, "from:tasks", cli]
 agent: claude-code/claude-opus-5-5
@@ -23,4 +24,8 @@ Done when `parse_age` rejects `0` and `0w` with a usage error that names `0d` as
 
 - 2026-09-24T13:38:23Z (main): scope: scoped; kept the shared age grammar (0d is its only zero, by design) and turned the report into a rejection that names 0d; P3 xs low direct
 - 2026-09-24T13:43:25Z (main): started
+  provenance: {"harness_session":"claude-code:c3b66540-0acc-4861-917d-8c10dfaea3bd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T13:46:49Z (fix/rejection-hints): done
+  provenance: {"harness_session":"claude-code:c3b66540-0acc-4861-917d-8c10dfaea3bd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T13:46:49Z (fix/rejection-hints): sample --older-than 0, 0w, and any other zero are refused with 'zero is spelled 0d, and 0d skips the age check'; the bare-age test asserts the hint for both and its absence on '7'.
   provenance: {"harness_session":"claude-code:c3b66540-0acc-4861-917d-8c10dfaea3bd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

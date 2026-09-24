@@ -12233,6 +12233,13 @@ fn sample_bounds_older_than_at_the_cli() {
         let err = env.usage(&dir, &["sample", "--older-than", bad]);
         assert!(err.contains("--older-than") && err.contains(bad), "{err}");
     }
+    // Zero has one spelling; the other zeros name it, and no other rejection does.
+    for zero in ["0", "0w"] {
+        let err = env.usage(&dir, &["sample", "--older-than", zero]);
+        assert!(err.contains("0d skips the age check"), "{err}");
+    }
+    let err = env.usage(&dir, &["sample", "--older-than", "7"]);
+    assert!(!err.contains("0d skips the age check"), "{err}");
     // a leading minus reads as a flag unless attached to the option
     let err = env.usage(&dir, &["sample", "--older-than=-1d"]);
     assert!(err.contains("--older-than") && err.contains("-1d"), "{err}");
