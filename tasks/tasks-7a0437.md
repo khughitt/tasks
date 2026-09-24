@@ -1,13 +1,15 @@
 ---
 id: tasks-7a0437
 title: A task-type column in pretty rows
-status: todo
+status: doing
 priority: 3
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-09-12T19:15:37Z
-updated: 2026-09-24T13:35:22Z
+updated: 2026-09-24T15:04:10Z
+started: 2026-09-24T15:04:10Z
 depends: []
 tags: [quick-add, cli]
 source: "mindful:thought:6983d7366cc9441fbb72661bd9cc09fe"
@@ -24,3 +26,4 @@ Source: mindful:thought:6983d7366cc9441fbb72661bd9cc09fe
 - 2026-09-14T11:46:16Z (main): Process direct: the body settles the letter, the blank, the always-present column, coloring, and the JSON field, and records the rejected color-only alternative; only bounded placement choices remain.
 - 2026-09-24T13:07:13Z (main): curate: decision; body names the parallel-marker precedent and two open questions; proposal: drop the JSON type field (periodic already carries it) and decide always-present vs reserved-when-needed for the column
 - 2026-09-24T13:35:22Z (main): Decided: the column reads periodic and the JSON shape stays unchanged (user); reserved only when a row needs it, following the parallel marker (agent, user delegated).
+- 2026-09-24T15:04:10Z (main): started
