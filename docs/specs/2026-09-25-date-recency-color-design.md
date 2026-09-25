@@ -107,6 +107,13 @@ that restores it on drop, and reads and writes there. (`xterm-query` was conside
 rejected because it writes its query to stdout, which would put query bytes into
 redirected output.)
 
+Raw mode leaves ISIG set, so a Ctrl-C during the query window would kill the process
+before any guard drops and leave echo and canonical mode off in shells that do not reset
+their modes. The exchange therefore clears ISIG behind its own guard (declared after the
+raw-mode guard, so it drops first and the saved termios, ISIG included, has the final
+word), and the byte arrives as ordinary input the reply reader skips. (Added from the
+final branch review.)
+
 Replies are parsed with `xterm-color`, which parses the `rgb:rrrr/gggg/bbbb` X11 color
 strings terminals send back.
 
@@ -170,7 +177,8 @@ All three keys are required, each a `#rrggbb` value, separated by spaces, in any
 Like `TASKS_COLOR`, it is validated whenever it is set, even when color ends up off, and a
 malformed value is a `config` error before any work is done.
 
-Both subprocess helpers in `tests/common/mod.rs`, `TestEnv::cmd` and `TestEnv::raw`, set
+Every subprocess helper in `tests/common/mod.rs` — `TestEnv::cmd`, `TestEnv::raw`, and
+`shim_command` — sets
 a fixed, valid `TASKS_PALETTE` for every child, beside removing `TASKS_COLOR` and
 `NO_COLOR` as they do today. Each builds its own command, so setting it in one leaves the
 other's tests inheriting the developer's value: since the variable is validated whenever
@@ -234,6 +242,8 @@ End to end (`tests/cli.rs`):
 
 - with `--pretty --color always` and a fixed `TASKS_PALETTE`, `list` paints today's date
   with the cyan's exact SGR and a date three years old with the old end's;
+- `quiet` paints a park minutes old with the same cyan (added from the final branch
+  review);
 - the same command without `--color` has no escape sequences;
 - a colored table keeps the same visible column layout as an uncolored one;
 - a malformed `TASKS_PALETTE` is a `config` error even without `--color`;

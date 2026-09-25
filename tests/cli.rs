@@ -16610,6 +16610,46 @@ fn colored_list_paints_dates_by_recency() {
 }
 
 #[test]
+fn colored_quiet_paints_the_park_date_by_recency() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Sweep"]));
+    as_agent(&env, &dir, "agent-a")
+        .args([
+            "park",
+            &id,
+            "run the sweep",
+            "--waiting-on",
+            "user",
+            "--reason",
+            "quiet",
+            "--minutes",
+            "40",
+        ])
+        .assert()
+        .success();
+    let today = env.json(&dir, &["show", &id])["park"]["at"]
+        .as_str()
+        .unwrap()[..10]
+        .to_string();
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "quiet"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains(&format!("\x1b[38;2;0;215;255m{today}\x1b[0m")),
+        "a park minutes old is full cyan: {text:?}"
+    );
+    assert!(
+        String::from_utf8(out.stderr).unwrap().is_empty(),
+        "a palette from the environment needs no warning"
+    );
+}
+
+#[test]
 fn a_palette_without_color_changes_nothing() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

@@ -184,7 +184,9 @@ impl fmt::Display for QueryError {
 ///
 /// Every reply is read through the fence before any is parsed: a malformed reply must not
 /// leave the replies after it unread, or they reach the shell as input once raw mode ends.
-/// A timeout is the one exit that can leave bytes behind, and the deadline bounds it.
+/// A timeout and an I/O error are the exits that can leave bytes behind: the deadline
+/// bounds the timeout, and an I/O error ends the exchange with the rest of the reply
+/// unread.
 pub fn exchange<T: Read + Write>(tty: &mut T, timeout: Duration) -> Result<Palette, QueryError> {
     tty.write_all(QUERY).map_err(QueryError::Io)?;
     tty.flush().map_err(QueryError::Io)?;
@@ -302,10 +304,13 @@ impl Palette {
     /// by `timeout`. The raw-mode guard restores the terminal when it drops, on every path.
     pub fn query(timeout: Duration) -> Result<Palette, QueryError> {
         use std::os::fd::AsRawFd as _;
-        let mut terminal = terminal_trx::terminal().map_err(|_| QueryError::NoTerminal)?;
-        if !terminal.has_connected_stdio_stream() {
-            return Err(QueryError::NoTerminal);
-        }
+        let mut terminal = terminal_trx::terminal().map_err(|error| match error.kind() {
+            // No controlling terminal: /dev/tty does not exist, or it reports no session
+            // for this process (ENXIO). Anything else is a real error worth reporting.
+            io::ErrorKind::NotFound => QueryError::NoTerminal,
+            _ if error.raw_os_error() == Some(libc::ENXIO) => QueryError::NoTerminal,
+            _ => QueryError::Io(error),
+        })?;
         let mut lock = terminal.lock();
         let raw = lock.enable_raw_mode().map_err(QueryError::Io)?;
         // Raw mode makes type-ahead readable, and the reply reader would take it for
@@ -315,11 +320,61 @@ impl Palette {
         if pending_input(raw.as_raw_fd()).map_err(QueryError::Io)? > 0 {
             return Err(QueryError::TypeAhead);
         }
+        // Ctrl-C must not end the exchange: raw mode leaves ISIG set, so a SIGINT would
+        // kill the process before any guard drops and leave echo and canonical mode off.
+        // Clearing ISIG turns the byte into ordinary input the reply reader skips.
+        // Declared after `raw` so it drops first and `raw`'s saved termios, ISIG
+        // included, has the final word.
+        let _isig = IsigOff::clear(raw.as_raw_fd()).map_err(QueryError::Io)?;
         let mut timed = Timed {
             inner: raw,
             deadline: Instant::now() + timeout,
         };
         exchange(&mut timed, timeout)
+    }
+}
+
+/// ISIG cleared on `fd`, restored on drop. See `Palette::query` for why. `saved` is `None`
+/// when ISIG was already off, so a drop then leaves the terminal as it was found.
+struct IsigOff {
+    fd: std::os::fd::RawFd,
+    saved: Option<libc::termios>,
+}
+
+impl IsigOff {
+    fn clear(fd: std::os::fd::RawFd) -> io::Result<IsigOff> {
+        // SAFETY: `fd` is a valid descriptor for the duration of the calls.
+        let mut current: libc::termios = unsafe { std::mem::zeroed() };
+        // SAFETY: `current` is one valid termios pointer for the call.
+        if unsafe { libc::tcgetattr(fd, &mut current) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if current.c_lflag & libc::ISIG == 0 {
+            return Ok(IsigOff { fd, saved: None });
+        }
+        let saved = current;
+        current.c_lflag &= !libc::ISIG;
+        // SAFETY: `current` is one valid termios pointer for the call.
+        if unsafe { libc::tcsetattr(fd, libc::TCSADRAIN, &current) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(IsigOff {
+            fd,
+            saved: Some(saved),
+        })
+    }
+}
+
+impl Drop for IsigOff {
+    fn drop(&mut self) {
+        let Some(saved) = &self.saved else {
+            return;
+        };
+        // Best effort: the exchange is over and the raw-mode guard restores the saved
+        // termios right after, so a failure here has nowhere to report and nothing
+        // left to protect.
+        // SAFETY: `saved` is one valid termios pointer for the call.
+        unsafe { libc::tcsetattr(self.fd, libc::TCSADRAIN, saved) };
     }
 }
 
@@ -663,6 +718,80 @@ mod tests {
         assert_eq!(pending_input(ours.as_raw_fd()).unwrap(), 0);
         terminal.write_all(b"ls\r").unwrap();
         assert_eq!(pending_input(ours.as_raw_fd()).unwrap(), 3);
+    }
+
+    fn lflag(fd: libc::c_int) -> libc::tcflag_t {
+        // SAFETY: `termios` is zeroed first and one valid pointer for the call.
+        let mut termios: libc::termios = unsafe { std::mem::zeroed() };
+        // SAFETY: `termios` is one valid pointer for the call.
+        assert_eq!(unsafe { libc::tcgetattr(fd, &mut termios) }, 0);
+        termios.c_lflag
+    }
+
+    #[test]
+    fn isig_off_clears_isig_and_restores_it_on_drop() {
+        let mut master: libc::c_int = 0;
+        let mut slave: libc::c_int = 0;
+        // SAFETY: four valid pointers for the call; the attributes are left default.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        assert_ne!(lflag(slave) & libc::ISIG, 0, "a pty starts with ISIG on");
+        let guard = IsigOff::clear(slave).unwrap();
+        assert_eq!(lflag(slave) & libc::ISIG, 0, "ISIG off for the exchange");
+        drop(guard);
+        assert_ne!(lflag(slave) & libc::ISIG, 0, "ISIG back on after the drop");
+        // SAFETY: both descriptors are ours to close.
+        unsafe {
+            libc::close(master);
+            libc::close(slave);
+        }
+    }
+
+    #[test]
+    fn isig_off_leaves_an_already_clear_isig_alone() {
+        let mut master: libc::c_int = 0;
+        let mut slave: libc::c_int = 0;
+        // SAFETY: four valid pointers for the call; the attributes are left default.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        let mut termios: libc::termios = unsafe { std::mem::zeroed() };
+        // SAFETY: `termios` is one valid pointer for the call.
+        assert_eq!(unsafe { libc::tcgetattr(slave, &mut termios) }, 0);
+        termios.c_lflag &= !libc::ISIG;
+        // SAFETY: `termios` is one valid pointer for the call.
+        assert_eq!(
+            unsafe { libc::tcsetattr(slave, libc::TCSADRAIN, &termios) },
+            0
+        );
+        let guard = IsigOff::clear(slave).unwrap();
+        assert!(guard.saved.is_none(), "nothing to save when ISIG is off");
+        drop(guard);
+        assert_eq!(lflag(slave) & libc::ISIG, 0, "the drop is a no-op");
+        // SAFETY: both descriptors are ours to close.
+        unsafe {
+            libc::close(master);
+            libc::close(slave);
+        }
     }
 
     #[test]

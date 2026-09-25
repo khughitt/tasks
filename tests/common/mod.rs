@@ -345,6 +345,9 @@ fn shim_command(program: &Path, dir: &Path, home: &Path) -> std::process::Comman
         .env_remove("CLAUDE_PID")
         .env_remove("CODEX_SESSION_ID")
         .env_remove("CODEX_THREAD_ID")
+        // The shim's own invocations never query the terminal of whoever runs the suite,
+        // and never inherit a malformed value: TASKS_PALETTE is validated whenever set.
+        .env("TASKS_PALETTE", TEST_PALETTE)
         .env("USER", "tester")
         .env("TASKS_BIN", assert_cmd::cargo::cargo_bin("tasks"));
     command
