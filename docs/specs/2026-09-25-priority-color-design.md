@@ -1,6 +1,6 @@
 # Magenta scale for the pretty priority column — design
 
-**Status:** approved (2026-09-25), tasks-92757e. Amends docs/specs/2026-09-03-color-output-design.md
+**Status:** implemented (2026-09-25), tasks-92757e; see docs/plans/2026-09-25-priority-color.md. Amends docs/specs/2026-09-03-color-output-design.md
 §6 (P0 and P1 bold) and docs/specs/2026-09-25-date-recency-color-design.md §3.1 (the
 query) and §3.3 (`TASKS_PALETTE`).
 

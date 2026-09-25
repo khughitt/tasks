@@ -2,6 +2,8 @@
 
 **Status:** implemented (2026-09-25), tasks-142d2f; see docs/plans/2026-09-25-date-recency-color.md. Amends docs/specs/2026-09-03-color-output-design.md
 §2 ("no 256-color or truecolor values") and §6 for date columns only.
+§3.1's query and §3.3's TASKS_PALETTE are extended by docs/specs/2026-09-25-priority-color-design.md
+(slot 5, optional magenta), and its warning is reworded there.
 
 ## 1. Problem
 
