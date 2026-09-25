@@ -6,9 +6,9 @@ priority: 2
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: feat/date-colors
 created: 2026-09-25T10:47:15Z
-updated: 2026-09-25T11:40:52Z
+updated: 2026-09-25T11:43:35Z
 started: 2026-09-25T10:47:20Z
 depends: []
 tags: [cli]
@@ -34,3 +34,5 @@ In --pretty, color each date column on a continuous scale by age: today is fully
   provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-25T11:32:58Z (feat/date-colors): Plan revised per review: exchange reads through the fence before parsing (malformed replies never leak to the shell); Timed fails at an expired deadline even with input waiting; std Result for query fns; list test reads show; 91-day fade 0.686. Palette code probed in a scratch crate: 11 tests pass.
 - 2026-09-25T11:40:52Z (feat/date-colors): Plan revised per review: the fence is DA1's full grammar (ESC [ ? digits/; c) with reset on any other byte, so typed arrows or hex c cannot end the read; osc_bodies skips non-OSC bytes. Probe: 12 palette tests pass, clippy clean.
+- 2026-09-25T11:43:35Z (feat/date-colors): resumed
+  provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

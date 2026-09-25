@@ -3,6 +3,9 @@ use assert_cmd::Command;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
+/// The palette every test child sees; its cyan paints today as `38;2;0;215;255`.
+pub const TEST_PALETTE: &str = "fg=#e5e3d7 bg=#13140d cyan=#00d7ff";
+
 pub struct TestEnv {
     pub home: TempDir,
     dirs: Vec<TempDir>,
@@ -36,6 +39,9 @@ impl TestEnv {
             .env_remove("CODEX_THREAD_ID")
             .env_remove("TASKS_COLOR")
             .env_remove("NO_COLOR")
+            // Never query the terminal of whoever runs the suite, and never inherit a
+            // malformed value: TASKS_PALETTE is validated whenever it is set.
+            .env("TASKS_PALETTE", TEST_PALETTE)
             .env("USER", "tester")
             .current_dir(dir);
         c
@@ -63,6 +69,9 @@ impl TestEnv {
             .env_remove("CODEX_THREAD_ID")
             .env_remove("TASKS_COLOR")
             .env_remove("NO_COLOR")
+            // Never query the terminal of whoever runs the suite, and never inherit a
+            // malformed value: TASKS_PALETTE is validated whenever it is set.
+            .env("TASKS_PALETTE", TEST_PALETTE)
             .env("USER", "tester")
             .current_dir(dir);
         c

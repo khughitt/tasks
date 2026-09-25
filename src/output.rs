@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::model::{Complexity, Process, Size, Status, Task};
 use crate::registry::Registry;
-use crate::style::{Painter, Style};
+use crate::style::{Painter, Style, When};
 use serde::Serialize;
 use time::OffsetDateTime;
 
@@ -1284,6 +1284,27 @@ fn id_width_tree(nodes: &[TreeNode]) -> usize {
         .unwrap_or(0)
 }
 
+/// The date role for a validated timestamp or `YYYY-MM-DD` day.
+fn date_role(timestamp: &str) -> Style {
+    let day = crate::time::calendar_day(crate::time::day(timestamp))
+        .expect("records and park entries carry validated dates");
+    Style::Date(When::On(day))
+}
+
+/// Whether a pretty rendering of `out` has a date column, and so whether the stdout
+/// painter needs the terminal's colors (spec §2.3, §3.1).
+pub fn has_date_column(out: &Output) -> bool {
+    matches!(
+        out,
+        Output::List(_)
+            | Output::Prime(_)
+            | Output::Tree(_)
+            | Output::Parked(_)
+            | Output::Quiet(_)
+            | Output::Projects(_)
+    )
+}
+
 /// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every width-sensitive
 /// field is formatted to its final visible width before the painter wraps it.
 pub fn table(
@@ -1296,18 +1317,30 @@ pub fn table(
 ) -> String {
     let mut rendered = String::new();
     for row in rows {
-        let date = match date {
-            DateColumn::Updated => crate::time::day(&row.updated).to_string(),
-            DateColumn::Created => crate::time::day(&row.created).to_string(),
+        let (date, role) = match date {
+            DateColumn::Updated => (
+                crate::time::day(&row.updated).to_string(),
+                Some(date_role(&row.updated)),
+            ),
+            DateColumn::Created => (
+                crate::time::day(&row.created).to_string(),
+                Some(date_role(&row.created)),
+            ),
             DateColumn::Due => match (&row.periodic, &row.deferred) {
                 (Some(periodic), _) => match (&periodic.due, periodic.due_now) {
-                    (Some(due), _) => crate::time::day(due).to_string(),
-                    (None, true) => "now".into(),
-                    (None, false) => "-".into(),
+                    (Some(due), _) => (crate::time::day(due).to_string(), Some(date_role(due))),
+                    (None, true) => ("now".into(), Some(Style::Date(When::Today))),
+                    (None, false) => ("-".into(), None),
                 },
-                (None, Some(deferred)) => deferred.until.clone(),
-                (None, None) => "-".into(),
+                (None, Some(deferred)) => {
+                    (deferred.until.clone(), Some(date_role(&deferred.until)))
+                }
+                (None, None) => ("-".into(), None),
             },
+        };
+        let date = match role {
+            Some(role) => painter.paint(role, &date),
+            None => date,
         };
         let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
         let priority = format!("P{}", row.priority);
@@ -1685,5 +1718,60 @@ mod tests {
             }],
         }];
         assert!(any_parallel_tree(&nodes));
+    }
+
+    fn dated() -> Painter {
+        let today = ::time::Date::from_calendar_date(2026, ::time::Month::September, 6).unwrap();
+        let palette = crate::palette::Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff").unwrap();
+        Painter::new(ColorMode::Always, Format::Pretty, false)
+            .with_recency(crate::style::Recency::new(today, &palette))
+    }
+
+    #[test]
+    fn the_date_column_carries_the_recency_role() {
+        // row() is updated 2026-09-06, the painter's today: full cyan.
+        let rows = [row("xx-000001", false)];
+        let text = table(&rows, DateColumn::Updated, &dated(), 0, false, false);
+        assert!(
+            text.contains("\x1b[38;2;0;215;255m2026-09-06\x1b[0m"),
+            "{text:?}"
+        );
+    }
+
+    #[test]
+    fn a_due_column_paints_now_as_today_and_leaves_a_dash_plain() {
+        let due_now = recurring("xx-000001");
+        let undated = row("xx-000002", false);
+        let text = table(
+            &[due_now, undated],
+            DateColumn::Due,
+            &dated(),
+            0,
+            false,
+            false,
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(
+            lines[0].contains("\x1b[38;2;0;215;255mnow\x1b[0m"),
+            "{:?}",
+            lines[0]
+        );
+        assert!(lines[1].contains("todo    -  "), "{:?}", lines[1]);
+        assert!(!lines[1].contains("38;2"), "{:?}", lines[1]);
+    }
+
+    #[test]
+    fn date_columns_are_the_outputs_that_query() {
+        let list = Output::List(ListOut {
+            tasks: vec![],
+            warnings: vec![],
+            date: DateColumn::Updated,
+        });
+        assert!(has_date_column(&list));
+        let id = Output::Id(IdOut {
+            id: "xx-000001".into(),
+            warnings: vec![],
+        });
+        assert!(!has_date_column(&id));
     }
 }

@@ -11,6 +11,12 @@ pub fn day(timestamp: &str) -> &str {
     &timestamp[..10]
 }
 
+/// The calendar date of a `YYYY-MM-DD` day, as `day` returns it.
+pub fn calendar_day(day: &str) -> Result<time::Date> {
+    time::Date::parse(day, &time::format_description::well_known::Iso8601::DATE)
+        .map_err(|e| Error::Validation(format!("bad date {day:?}: {e}")))
+}
+
 pub fn parse(s: &str) -> Result<OffsetDateTime> {
     if !s.ends_with('Z') {
         return Err(Error::Validation(format!(

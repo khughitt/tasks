@@ -11,6 +11,7 @@ mod frontmatter;
 mod hierarchy;
 mod model;
 mod output;
+mod palette;
 mod periodic;
 mod provenance;
 mod query;
@@ -139,6 +140,25 @@ fn main() {
                 std::process::exit(1);
             }
         };
+    let palette = match std::env::var("TASKS_PALETTE") {
+        Ok(value) => match palette::Palette::parse(&value) {
+            Ok(palette) => Some(palette),
+            Err(error) => {
+                to_stderr(&format!("{}\n", output::render_error(&error)));
+                std::process::exit(1);
+            }
+        },
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(value)) => {
+            to_stderr(&format!(
+                "{}\n",
+                output::render_error(&error::Error::Config(format!(
+                    "TASKS_PALETTE must be valid UTF-8, got {value:?}"
+                )))
+            ));
+            std::process::exit(1);
+        }
+    };
     let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
     match commands::run(cli) {
@@ -149,6 +169,15 @@ fn main() {
             let silent = format == Format::Json
                 && matches!(&out, output::Output::Check(check)
                     if check.errors.is_empty() && check.warnings.is_empty());
+            let stdout_painter = match palette {
+                Some(palette) if stdout_painter.enabled() && output::has_date_column(&out) => {
+                    stdout_painter.with_recency(style::Recency::new(
+                        ::time::OffsetDateTime::now_utc().date(),
+                        &palette,
+                    ))
+                }
+                _ => stdout_painter,
+            };
             if format == Format::Pretty {
                 to_stderr(&output::pretty_warnings(
                     &output::warnings_of(&out),

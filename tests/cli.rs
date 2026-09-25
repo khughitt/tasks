@@ -5885,19 +5885,16 @@ fn tasks_color_is_always_validated_and_warnings_use_the_stderr_painter() {
 }
 
 fn strip_ansi(text: &str) -> String {
-    [
-        "\x1b[0m",
-        "\x1b[1m",
-        "\x1b[2m",
-        "\x1b[31m",
-        "\x1b[32m",
-        "\x1b[33m",
-        "\x1b[34m",
-        "\x1b[2;31m",
-        "\x1b[2;32m",
-    ]
-    .into_iter()
-    .fold(text.to_string(), |text, code| text.replace(code, ""))
+    let mut plain = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("\x1b[") {
+        plain.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let end = after.find('m').expect("an SGR sequence ends in m");
+        rest = &after[end + 1..];
+    }
+    plain.push_str(rest);
+    plain
 }
 
 #[test]
@@ -16574,4 +16571,77 @@ fn claims_agrees_with_prime_on_a_live_claim() {
         prime["doing"][0]["claim"]["session"],
         claims["claims"][0]["session"]
     );
+}
+
+#[test]
+fn colored_list_paints_dates_by_recency() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    // `add` answers {id, action, warnings}; the timestamp is on the record.
+    let fresh = id_of(env.json(&dir, &["add", "Fresh"]));
+    let today = env.json(&dir, &["show", &fresh])["task"]["updated"]
+        .as_str()
+        .unwrap()[..10]
+        .to_string();
+    write_doc(
+        &dir,
+        "tasks/sci-a00001.md",
+        "---\nid: sci-a00001\ntitle: Ancient\nstatus: todo\npriority: 2\ncreated: 2020-01-01T00:00:00Z\nupdated: 2020-01-01T00:00:00Z\ndepends: []\ntags: []\n---\n",
+    );
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "list"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains(&format!("\x1b[38;2;0;215;255m{today}\x1b[0m")),
+        "today is full cyan: {text:?}"
+    );
+    assert!(
+        text.contains("\x1b[38;2;125;125;115m2020-01-01\x1b[0m"),
+        "past the horizon is the old end: {text:?}"
+    );
+    assert!(
+        String::from_utf8(out.stderr).unwrap().is_empty(),
+        "a palette from the environment needs no warning"
+    );
+}
+
+#[test]
+fn a_palette_without_color_changes_nothing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(&dir, &["add", "Fresh"]);
+    let pretty = env.cmd(&dir).args(["--pretty", "list"]).output().unwrap();
+    assert!(!String::from_utf8(pretty.stdout).unwrap().contains('\x1b'));
+    let json = env
+        .cmd(&dir)
+        .args(["--color", "always", "list"])
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8(json.stdout).unwrap().contains('\x1b'));
+}
+
+#[test]
+fn a_malformed_palette_is_a_config_error_whenever_set() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for args in [&["list"][..], &["--pretty", "--color", "never", "list"][..]] {
+        let out = env
+            .cmd(&dir)
+            .env("TASKS_PALETTE", "fg=#e5e3d7 bg=#13140d")
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "config", "{args:?}");
+        let detail = error["error"]["detail"].as_str().unwrap();
+        assert!(
+            detail.contains("TASKS_PALETTE") && detail.contains("missing cyan"),
+            "{args:?}: {detail}"
+        );
+    }
 }
