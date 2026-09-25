@@ -198,18 +198,19 @@ The PTY test observes the query on the child's own terminal, which piped stdout 
 /// `TASKS_PALETTE` is always removed. Nothing answers the query from the master side,
 /// so the control case exercises the query's timeout path.
 fn list_on_pty(env: &TestEnv, dir: &std::path::Path, theme: Option<&str>) -> String {
-    use std::os::fd::FromRawFd;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
 
-    let mut master: libc::c_int = 0;
-    let mut slave: libc::c_int = 0;
+    let mut master_fd: libc::c_int = 0;
+    let mut slave_fd: libc::c_int = 0;
     // SAFETY: two valid out-pointers; default attributes.
     assert_eq!(
         unsafe {
             libc::openpty(
-                &mut master,
-                &mut slave,
+                &mut master_fd,
+                &mut slave_fd,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
@@ -217,36 +218,57 @@ fn list_on_pty(env: &TestEnv, dir: &std::path::Path, theme: Option<&str>) -> Str
         },
         0
     );
-    // SAFETY: `slave` is ours; CLOEXEC affects only the child's post-exec image, and
-    // the pre-exec closure below runs before it.
+    // Both descriptors are owned from here on, so every path below — panics
+    // included — closes them.
+    let slave = unsafe { OwnedFd::from_raw_fd(slave_fd) };
+    // SAFETY: `slave` is ours; CLOEXEC affects only the child's post-exec image,
+    // and the pre-exec closure below runs before it.
     unsafe {
         libc::fcntl(
-            slave,
+            slave.as_raw_fd(),
             libc::F_SETFD,
-            libc::fcntl(slave, libc::F_GETFD) | libc::FD_CLOEXEC,
+            libc::fcntl(slave.as_raw_fd(), libc::F_GETFD) | libc::FD_CLOEXEC,
         )
     };
-    let out = unsafe { libc::dup(slave) };
-    let err = unsafe { libc::dup(slave) };
+    let out = unsafe { libc::dup(slave.as_raw_fd()) };
+    let err = unsafe { libc::dup(slave.as_raw_fd()) };
+    let master = unsafe { OwnedFd::from_raw_fd(master_fd) };
+    // Non-blocking before spawn: a failure here involves no child to clean up, and
+    // an undetected failure would leave the first read blocking past the deadline.
+    // SAFETY: `master` is ours.
+    assert_ne!(
+        unsafe {
+            libc::fcntl(
+                master.as_raw_fd(),
+                libc::F_SETFL,
+                libc::fcntl(master.as_raw_fd(), libc::F_GETFL) | libc::O_NONBLOCK,
+            )
+        },
+        -1,
+        "making the master non-blocking failed"
+    );
     let mut command = env.raw(dir);
     command
-        .stdout(unsafe { std::process::Stdio::from_raw_fd(out) })
-        .stderr(unsafe { std::process::Stdio::from_raw_fd(err) })
+        .stdout(unsafe { Stdio::from_raw_fd(out) })
+        .stderr(unsafe { Stdio::from_raw_fd(err) })
         .env_remove("TASKS_PALETTE")
         .env_remove("TASKS_THEME");
     if let Some(theme) = theme {
         command.env("TASKS_THEME", theme);
     }
-    // SAFETY: runs once in the forked child before exec; `slave` is still open there
-    // (CLOEXEC takes effect only at exec, after this closure).
+    // The closure takes the fd number, not the `OwnedFd`: the descriptor must stay
+    // open in the parent until after `spawn`, and the child needs it during
+    // pre-exec, before CLOEXEC takes effect.
+    let child_slave = slave.as_raw_fd();
+    // SAFETY: runs once in the forked child before exec.
     unsafe {
         command.pre_exec(move || {
             // SAFETY: libc calls in the forked child, before exec.
             if libc::setsid() < 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            // SAFETY: `slave` is a valid descriptor in the child.
-            if libc::ioctl(slave, libc::TIOCSCTTY, 0) < 0 {
+            // SAFETY: `child_slave` is a valid descriptor in the child.
+            if libc::ioctl(child_slave, libc::TIOCSCTTY, 0) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(())
@@ -254,70 +276,69 @@ fn list_on_pty(env: &TestEnv, dir: &std::path::Path, theme: Option<&str>) -> Str
     }
     command.args(["--pretty", "--color", "always", "list"]);
     let mut child = command.spawn().unwrap();
-    // SAFETY: the child has inherited what it needs; the parent's own copy of
-    // `slave` must go now.
-    unsafe {
-        libc::close(slave);
-    }
-    // `command` still owns the dup'd slave descriptors; dropping it releases them,
-    // or the master never sees EOF and the loop only ends at the deadline.
+    // The child has inherited what it needs; the parent's copy of `slave` must go,
+    // and `command` still owns the dup'd slave descriptors, so it goes too —
+    // otherwise the master never sees EOF and the loop only ends at the deadline.
+    drop(slave);
     drop(command);
 
-    // SAFETY: `master` is ours; non-blocking so the read loop stays bounded. An
-    // undetected failure here would leave the first read blocking past the deadline.
-    assert_ne!(
-        unsafe {
-            libc::fcntl(
-                master,
-                libc::F_SETFL,
-                libc::fcntl(master, libc::F_GETFL) | libc::O_NONBLOCK,
-            )
-        },
-        -1,
-        "making the master non-blocking failed"
-    );
-
-    /// Closes the master whenever the helper returns, panics included.
-    struct Master(libc::c_int);
-    impl Drop for Master {
-        fn drop(&mut self) {
-            // SAFETY: one valid descriptor, ours.
-            unsafe {
-                libc::close(self.0);
-            }
-        }
-    }
-    let master = Master(master);
-
     let deadline = Instant::now() + Duration::from_secs(10);
-    let mut bytes = Vec::new();
-    loop {
-        let mut buf = [0u8; 4096];
-        // SAFETY: `master` is ours and `buf` outlives the call.
-        let n = unsafe { libc::read(master.0, buf.as_mut_ptr().cast(), buf.len()) };
-        if n > 0 {
-            bytes.extend_from_slice(&buf[..usize::try_from(n).unwrap()]);
-        } else if n == 0 {
-            break;
-        } else {
-            let error = std::io::Error::last_os_error();
-            match error.raw_os_error() {
-                // The slave side is gone, which is how Linux says EOF on a master.
-                Some(libc::EIO) => break,
-                Some(libc::EAGAIN) => {
-                    if Instant::now() >= deadline {
-                        // Reap before reporting: a deadline must not leak a child.
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        panic!("the pty child did not finish; wrote {bytes:?}");
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
+    // The deadline is checked every iteration, and the loop ends only when both the
+    // output is done (EOF or EIO on the master) and the child has been seen to
+    // exit, because either alone can lie: a child can close its stdio and live on,
+    // and Linux reads EIO on a master whose slave side is gone.
+    type Outcome = Result<(Vec<u8>, Option<std::process::ExitStatus>), String>;
+    let outcome =
+        (|child: &mut std::process::Child, master: &OwnedFd| -> Outcome {
+            let mut bytes = Vec::new();
+            let mut output_done = false;
+            let mut status = None;
+            loop {
+                if Instant::now() >= deadline {
+                    return Err(format!("the pty child did not finish; wrote {bytes:?}"));
                 }
-                _ => panic!("reading the master failed: {error}"),
+                if !output_done {
+                    let mut buf = [0u8; 4096];
+                    // SAFETY: `master` is ours and `buf` outlives the call.
+                    let n = unsafe {
+                        libc::read(master.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len())
+                    };
+                    if n > 0 {
+                        bytes.extend_from_slice(&buf[..usize::try_from(n).unwrap()]);
+                        continue;
+                    } else if n == 0 {
+                        output_done = true;
+                    } else {
+                        let error = std::io::Error::last_os_error();
+                        match error.raw_os_error() {
+                            Some(libc::EIO) => output_done = true,
+                            Some(libc::EAGAIN) => {
+                                std::thread::sleep(Duration::from_millis(20))
+                            }
+                            _ => return Err(format!("reading the master failed: {error}")),
+                        }
+                    }
+                }
+                if status.is_none() {
+                    status = child.try_wait().map_err(|error| error.to_string())?;
+                }
+                if output_done && status.is_some() {
+                    return Ok((bytes, status));
+                }
+                std::thread::sleep(Duration::from_millis(20));
             }
+        })(&mut child, &master);
+    let (bytes, status) = match outcome {
+        Ok(pair) => pair,
+        Err(message) => {
+            // Every post-spawn failure terminates and reaps the child before
+            // reporting; `master` and `slave` close through their own drops.
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{message}");
         }
-    }
-    let status = child.wait().unwrap();
+    };
+    let status = status.unwrap();
     assert!(status.success(), "the pty child failed");
     String::from_utf8(bytes).unwrap()
 }
@@ -348,6 +369,11 @@ fn theme_default_sends_no_osc_query_on_a_terminal() {
     assert!(terminal.contains("theme colors off"), "{terminal:?}");
 }
 ```
+
+(The helper was compiled and run as a standalone probe before this plan was finalized,
+and its failure paths were probe-tested: a child writing continuously and a child that
+closes its stdio and lives on both end at the deadline with the child killed and reaped,
+while a normal child returns promptly with its output.)
 
 - [ ] **Step 2: Run the tests to verify the state of the world**
 
