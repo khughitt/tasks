@@ -159,6 +159,25 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let theme = match std::env::var("TASKS_THEME") {
+        Ok(value) => match palette::ThemeSource::parse(&value) {
+            Ok(source) => Some(source),
+            Err(error) => {
+                to_stderr(&format!("{}\n", output::render_error(&error)));
+                std::process::exit(1);
+            }
+        },
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(value)) => {
+            to_stderr(&format!(
+                "{}\n",
+                output::render_error(&error::Error::Config(format!(
+                    "TASKS_THEME must be valid UTF-8, got {value:?}"
+                )))
+            ));
+            std::process::exit(1);
+        }
+    };
     let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
     match commands::run(cli) {
@@ -175,8 +194,11 @@ fn main() {
                 // terminal (date spec §3.2).
                 let resolved = match palette {
                     Some(palette) => Ok(palette),
-                    None if !std::io::stdout().is_terminal() => Err(palette::QueryError::NotAsked),
-                    None => palette::Palette::query(palette::QUERY_TIMEOUT),
+                    None => match theme {
+                        Some(palette::ThemeSource::BuiltIn) => Ok(palette::Palette::BUILTIN),
+                        _ if !std::io::stdout().is_terminal() => Err(palette::QueryError::NotAsked),
+                        _ => palette::Palette::query(palette::QUERY_TIMEOUT),
+                    },
                 };
                 match resolved {
                     Ok(palette) => {

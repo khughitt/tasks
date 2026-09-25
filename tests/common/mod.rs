@@ -39,6 +39,7 @@ impl TestEnv {
             .env_remove("CODEX_SESSION_ID")
             .env_remove("CODEX_THREAD_ID")
             .env_remove("TASKS_COLOR")
+            .env_remove("TASKS_THEME")
             .env_remove("NO_COLOR")
             // Never query the terminal of whoever runs the suite, and never inherit a
             // malformed value: TASKS_PALETTE is validated whenever it is set.
@@ -69,6 +70,7 @@ impl TestEnv {
             .env_remove("CODEX_SESSION_ID")
             .env_remove("CODEX_THREAD_ID")
             .env_remove("TASKS_COLOR")
+            .env_remove("TASKS_THEME")
             .env_remove("NO_COLOR")
             // Never query the terminal of whoever runs the suite, and never inherit a
             // malformed value: TASKS_PALETTE is validated whenever it is set.
@@ -346,6 +348,7 @@ fn shim_command(program: &Path, dir: &Path, home: &Path) -> std::process::Comman
         .env_remove("CLAUDE_PID")
         .env_remove("CODEX_SESSION_ID")
         .env_remove("CODEX_THREAD_ID")
+        .env_remove("TASKS_THEME")
         // The shim's own invocations never query the terminal of whoever runs the suite,
         // and never inherit a malformed value: TASKS_PALETTE is validated whenever set.
         .env("TASKS_PALETTE", TEST_PALETTE)
