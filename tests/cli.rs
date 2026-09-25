@@ -5941,7 +5941,10 @@ fn colored_tables_use_semantic_roles_without_changing_layout() {
     ] {
         assert!(colored.contains(code), "missing {code:?}: {colored:?}");
     }
-    assert!(colored.contains("\x1b[1mP0\x1b[0m"));
+    assert!(
+        colored.contains("\x1b[1;38;2;215;95;215mP0\x1b[0m"),
+        "{colored:?}"
+    );
     assert!(colored.contains("\x1b[2m [now]\x1b[0m"));
 
     let plain_ready = env.cmd(&dir).args(["--pretty", "ready"]).output().unwrap();
@@ -5953,6 +5956,120 @@ fn colored_tables_use_semantic_roles_without_changing_layout() {
     assert_eq!(
         strip_ansi(&String::from_utf8(colored_ready.stdout).unwrap()),
         String::from_utf8(plain_ready.stdout).unwrap()
+    );
+}
+
+#[test]
+fn colored_show_keeps_bold_priority_without_a_warning() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Urgent", "-p", "1"]));
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "show", &id])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("priority: \x1b[1m1\x1b[0m\n"), "{text:?}");
+    assert!(String::from_utf8(out.stderr).unwrap().is_empty());
+}
+
+#[test]
+fn colored_list_paints_priorities_on_the_magenta_scale() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for (title, priority) in [("One", "1"), ("Two", "2"), ("Three", "3"), ("Four", "4")] {
+        env.json(&dir, &["add", title, "-p", priority]);
+    }
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "list"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    for code in [
+        "\x1b[38;2;215;95;215mP1\x1b[0m",
+        "\x1b[38;2;171;115;165mP2\x1b[0m",
+        "\x1b[38;2;144;122;135mP3\x1b[0m",
+        "\x1b[38;2;125;125;115mP4\x1b[0m",
+    ] {
+        assert!(text.contains(code), "missing {code:?}: {text:?}");
+    }
+    assert!(String::from_utf8(out.stderr).unwrap().is_empty());
+}
+
+#[test]
+fn a_palette_without_magenta_warns_only_where_priorities_show() {
+    const THREE_KEYS: &str = "fg=#e5e3d7 bg=#13140d cyan=#00d7ff";
+    const WARNING: &str = "priority colors off: TASKS_PALETTE has no magenta; add magenta=#rrggbb";
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Urgent", "-p", "1"]));
+    env.json(&dir, &["start", &id]);
+    env.json(&dir, &["park", &id, "resume the thing"]);
+
+    let list = env
+        .cmd(&dir)
+        .env("TASKS_PALETTE", THREE_KEYS)
+        .args(["--pretty", "--color", "always", "list"])
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    let text = String::from_utf8(list.stdout).unwrap();
+    assert!(text.contains("\x1b[1mP1\x1b[0m"), "bold look: {text:?}");
+    assert!(
+        text.contains("\x1b[38;2;0;215;255m"),
+        "dates still paint: {text:?}"
+    );
+    let stderr = String::from_utf8(list.stderr).unwrap();
+    assert_eq!(stderr.matches(WARNING).count(), 1, "{stderr:?}");
+
+    for args in [&["projects"][..], &["list", "--parked"][..]] {
+        let out = env
+            .cmd(&dir)
+            .env("TASKS_PALETTE", THREE_KEYS)
+            .args(["--pretty", "--color", "always"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8(out.stdout)
+                .unwrap()
+                .contains("\x1b[38;2;0;215;255m"),
+            "{args:?}: dates paint"
+        );
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            !stderr.contains("priority colors off"),
+            "{args:?}: {stderr:?}"
+        );
+    }
+}
+
+#[test]
+fn a_malformed_magenta_is_a_config_error_whenever_set() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let out = env
+        .cmd(&dir)
+        .env(
+            "TASKS_PALETTE",
+            "fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=purple",
+        )
+        .args(["list"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "config");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("magenta: \"purple\" is not #rrggbb")
     );
 }
 
@@ -16644,6 +16761,10 @@ fn colored_quiet_paints_the_park_date_by_recency() {
         "a park minutes old is full cyan: {text:?}"
     );
     assert!(
+        text.contains("\x1b[38;2;171;115;165mP2\x1b[0m"),
+        "the brief's priority takes the scale: {text:?}"
+    );
+    assert!(
         String::from_utf8(out.stderr).unwrap().is_empty(),
         "a palette from the environment needs no warning"
     );
@@ -16713,7 +16834,7 @@ fn colored_parked_paints_the_park_date() {
 fn redirected_stdout_without_a_palette_skips_the_query_and_warns() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    env.json(&dir, &["add", "Fresh"]);
+    env.json(&dir, &["add", "Fresh", "-p", "1"]);
     // The harness pipes stdout, which is exactly the redirect the policy covers.
     let out = env
         .cmd(&dir)
@@ -16723,15 +16844,17 @@ fn redirected_stdout_without_a_palette_skips_the_query_and_warns() {
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(!text.contains("38;2"), "no date colors: {text:?}");
+    assert!(!text.contains("38;2"), "no truecolor: {text:?}");
+    assert!(text.contains("\x1b[1mP1\x1b[0m"), "P1 stays bold: {text:?}");
     for query in ["\x1b]10", "\x1b]11", "\x1b]4;", "\x1b[c"] {
         assert!(!text.contains(query), "no query bytes {query:?}: {text:?}");
     }
     let warning = String::from_utf8(out.stderr).unwrap();
     assert!(
         warning.contains(
-            "date colors off: the terminal did not report its colors (stdout is not a terminal); set TASKS_PALETTE to supply them"
+            "theme colors off: the terminal did not report its colors (stdout is not a terminal); set TASKS_PALETTE to supply them"
         ),
         "{warning:?}"
     );
+    assert!(!warning.contains("priority colors off"), "{warning:?}");
 }

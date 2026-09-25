@@ -3,8 +3,9 @@ use assert_cmd::Command;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-/// The palette every test child sees; its cyan paints today as `38;2;0;215;255`.
-pub const TEST_PALETTE: &str = "fg=#e5e3d7 bg=#13140d cyan=#00d7ff";
+/// The palette every test child sees; its cyan paints today as `38;2;0;215;255` and its
+/// magenta paints P1 as `38;2;215;95;215`.
+pub const TEST_PALETTE: &str = "fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7";
 
 pub struct TestEnv {
     pub home: TempDir,

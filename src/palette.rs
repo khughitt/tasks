@@ -49,6 +49,12 @@ impl Rgb {
             from[2] + (to[2] - from[2]) * t,
         ])
     }
+
+    /// OKLab lightness, for tests that check a scale's order.
+    #[cfg(test)]
+    pub fn lightness(self) -> f64 {
+        to_oklab(self)[0]
+    }
 }
 
 // OKLab, after Björn Ottosson, "A perceptual color space for image processing" (2020).

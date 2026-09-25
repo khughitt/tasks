@@ -61,6 +61,9 @@ pub enum Style {
     Warning,
     /// A date, painted by its distance from today (docs/specs/2026-09-25-date-recency-color-design.md).
     Date(When),
+    /// A priority, painted on the magenta scale when the painter has one
+    /// (docs/specs/2026-09-25-priority-color-design.md), else bold at P0 and P1.
+    Priority(u8),
 }
 
 /// Which day a date cell shows. `Today` is the due column's `now`, which names no date.
@@ -107,11 +110,36 @@ impl Recency {
     }
 }
 
+/// How far each priority, P0 to P4, sits from magenta toward the old end. P0 and P1 share
+/// a color; bold sets P0 apart. P2 is the default and the bulk, so it sits halfway.
+const PRIORITY_STEPS: [f64; 5] = [0.0, 0.0, 0.5, 0.8, 1.0];
+
+/// The five priority colors, fixed for one run.
+#[derive(Debug, Clone, Copy)]
+pub struct PriorityScale {
+    steps: [Rgb; 5],
+}
+
+impl PriorityScale {
+    pub fn new(magenta: Rgb, palette: &Palette) -> PriorityScale {
+        let old = palette.old();
+        PriorityScale {
+            steps: PRIORITY_STEPS.map(|t| magenta.mix(old, t)),
+        }
+    }
+
+    /// `priority` is validated 0-4 wherever a record is read.
+    pub fn color(&self, priority: u8) -> Rgb {
+        self.steps[usize::from(priority)]
+    }
+}
+
 /// Paints for one output stream. `main` builds one per stream, because stdout and stderr
 /// are redirected independently and only `Auto` can differ between them.
 pub struct Painter {
     enabled: bool,
     recency: Option<Recency>,
+    priority: Option<PriorityScale>,
 }
 
 impl Painter {
@@ -124,6 +152,7 @@ impl Painter {
                     ColorMode::Never => false,
                 },
             recency: None,
+            priority: None,
         }
     }
 
@@ -131,6 +160,14 @@ impl Painter {
     pub fn with_recency(self, recency: Recency) -> Painter {
         Painter {
             recency: Some(recency),
+            ..self
+        }
+    }
+
+    /// Priorities paint on the scale only with one; without it P0 and P1 are bold.
+    pub fn with_priority_scale(self, scale: PriorityScale) -> Painter {
+        Painter {
+            priority: Some(scale),
             ..self
         }
     }
@@ -152,6 +189,15 @@ impl Painter {
                     let color = recency.color(when);
                     format!("38;2;{};{};{}", color.r, color.g, color.b)
                 }
+                None => return text.into(),
+            },
+            Style::Priority(priority) => match &self.priority {
+                Some(scale) => {
+                    let color = scale.color(priority);
+                    let bold = if priority == 0 { "1;" } else { "" };
+                    format!("{bold}38;2;{};{};{}", color.r, color.g, color.b)
+                }
+                None if priority <= 1 => "1".into(),
                 None => return text.into(),
             },
             Style::Status(Status::Idea) => "34".into(),
@@ -299,6 +345,84 @@ mod tests {
         assert_eq!(past, future, "ten days either side is the same distance");
         assert_ne!(past, cyan);
         assert_ne!(past, old);
+    }
+
+    fn magenta() -> Rgb {
+        Rgb {
+            r: 0xd7,
+            g: 0x5f,
+            b: 0xd7,
+        }
+    }
+
+    #[test]
+    fn the_priority_scale_samples_the_mix_at_fixed_steps() {
+        let palette = palette();
+        let scale = PriorityScale::new(magenta(), &palette);
+        let old = palette.old();
+        assert_eq!(scale.color(0), magenta());
+        assert_eq!(scale.color(1), magenta());
+        assert_eq!(scale.color(2), magenta().mix(old, 0.5));
+        assert_eq!(scale.color(3), magenta().mix(old, 0.8));
+        assert_eq!(scale.color(4), old);
+        // The reference values the end-to-end tests pin.
+        assert_eq!(
+            scale.color(2),
+            Rgb {
+                r: 171,
+                g: 115,
+                b: 165
+            }
+        );
+        assert_eq!(
+            scale.color(3),
+            Rgb {
+                r: 144,
+                g: 122,
+                b: 135
+            }
+        );
+    }
+
+    #[test]
+    fn with_this_fixture_the_steps_fall_in_lightness() {
+        // A fixture property, not a guarantee: a theme whose magenta equals the old end
+        // collapses the scale (spec §2.3).
+        let scale = PriorityScale::new(magenta(), &palette());
+        let lightness: Vec<f64> = (1..=4).map(|p| scale.color(p).lightness()).collect();
+        assert!(
+            lightness.windows(2).all(|pair| pair[0] > pair[1]),
+            "{lightness:?}"
+        );
+    }
+
+    #[test]
+    fn the_priority_role_paints_the_scale_or_falls_back_to_bold() {
+        let bare = Painter::new(ColorMode::Always, Format::Pretty, false);
+        assert_eq!(bare.paint(Style::Priority(0), "P0"), "\x1b[1mP0\x1b[0m");
+        assert_eq!(bare.paint(Style::Priority(1), "P1"), "\x1b[1mP1\x1b[0m");
+        for p in 2..=4 {
+            assert_eq!(bare.paint(Style::Priority(p), "Px"), "Px");
+        }
+
+        let scaled = Painter::new(ColorMode::Always, Format::Pretty, false)
+            .with_priority_scale(PriorityScale::new(magenta(), &palette()));
+        assert_eq!(
+            scaled.paint(Style::Priority(0), "P0"),
+            "\x1b[1;38;2;215;95;215mP0\x1b[0m"
+        );
+        assert_eq!(
+            scaled.paint(Style::Priority(1), "P1"),
+            "\x1b[38;2;215;95;215mP1\x1b[0m"
+        );
+        assert_eq!(
+            scaled.paint(Style::Priority(4), "P4"),
+            "\x1b[38;2;125;125;115mP4\x1b[0m"
+        );
+
+        let off = Painter::new(ColorMode::Never, Format::Pretty, true)
+            .with_priority_scale(PriorityScale::new(magenta(), &palette()));
+        assert_eq!(off.paint(Style::Priority(0), "P0"), "P0");
     }
 
     #[test]

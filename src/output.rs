@@ -1118,7 +1118,7 @@ fn paint_field(line: &str, task: &Task, painter: &Painter) -> String {
         "id" | "parent" | "depends" => Style::Chrome,
         "owner" | "tags" => Style::Chrome,
         "status" => Style::Status(task.status),
-        "priority" if task.priority <= 1 => Style::Emphasis,
+        "priority" => Style::Priority(task.priority),
         _ => return line.into(),
     };
     format!("{key}: {}", painter.paint(style, value))
@@ -1293,9 +1293,10 @@ fn date_role(timestamp: &str) -> Style {
     Style::Date(When::On(day))
 }
 
-/// Whether a pretty rendering of `out` has a date column, and so whether the stdout
-/// painter needs the terminal's colors (spec §2.3, §3.1).
-pub fn has_date_column(out: &Output) -> bool {
+/// Whether a pretty rendering of `out` paints from the theme's colors, and so whether
+/// the stdout painter needs them (date spec §3.1; priority spec §3.1). Every output with
+/// a priority column also has a date column.
+pub fn needs_theme(out: &Output) -> bool {
     matches!(
         out,
         Output::List(_)
@@ -1304,6 +1305,15 @@ pub fn has_date_column(out: &Output) -> bool {
             | Output::Parked(_)
             | Output::Quiet(_)
             | Output::Projects(_)
+    )
+}
+
+/// Whether a pretty rendering of `out` shows priorities, and so whether a palette
+/// without magenta costs it anything (priority spec §3.3).
+pub fn shows_priority(out: &Output) -> bool {
+    matches!(
+        out,
+        Output::List(_) | Output::Prime(_) | Output::Tree(_) | Output::Quiet(_)
     )
 }
 
@@ -1345,12 +1355,7 @@ pub fn table(
             None => date,
         };
         let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
-        let priority = format!("P{}", row.priority);
-        let priority = if row.priority <= 1 {
-            painter.paint(Style::Emphasis, &priority)
-        } else {
-            priority
-        };
+        let priority = painter.paint(Style::Priority(row.priority), &format!("P{}", row.priority));
         let size = row.size.map(Size::as_str).unwrap_or("-");
         let complexity = row.complexity.map(Complexity::as_str).unwrap_or("-");
         let process = row.process.map(Process::as_str).unwrap_or("-");
@@ -1467,7 +1472,7 @@ pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> S
         }
         let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
         let priority = match row.priority {
-            Some(priority) => format!("P{priority}"),
+            Some(priority) => painter.paint(Style::Priority(priority), &format!("P{priority}")),
             None => "P-".into(),
         };
         let needs = park.needs.map(crate::claims::Needs::as_str).unwrap_or("-");
@@ -1729,6 +1734,34 @@ mod tests {
             .with_recency(crate::style::Recency::new(today, &palette))
     }
 
+    fn scaled() -> Painter {
+        let palette =
+            crate::palette::Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7")
+                .unwrap();
+        Painter::new(ColorMode::Always, Format::Pretty, false).with_priority_scale(
+            crate::style::PriorityScale::new(palette.magenta.unwrap(), &palette),
+        )
+    }
+
+    #[test]
+    fn the_priority_column_carries_the_priority_role() {
+        let mut urgent = row("xx-000001", false);
+        urgent.priority = 0;
+        let rows = [urgent, row("xx-000002", false)];
+        let text = table(&rows, DateColumn::Updated, &scaled(), 0, false, false);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(
+            lines[0].contains("\x1b[1;38;2;215;95;215mP0\x1b[0m"),
+            "{:?}",
+            lines[0]
+        );
+        assert!(
+            lines[1].contains("\x1b[38;2;171;115;165mP2\x1b[0m"),
+            "{:?}",
+            lines[1]
+        );
+    }
+
     #[test]
     fn the_date_column_carries_the_recency_role() {
         // row() is updated 2026-09-06, the painter's today: full cyan.
@@ -1763,17 +1796,25 @@ mod tests {
     }
 
     #[test]
-    fn date_columns_are_the_outputs_that_query() {
+    fn theme_gates_cover_dates_and_priorities() {
         let list = Output::List(ListOut {
             tasks: vec![],
             warnings: vec![],
             date: DateColumn::Updated,
         });
-        assert!(has_date_column(&list));
+        assert!(needs_theme(&list));
+        assert!(shows_priority(&list));
+        let parked = Output::Parked(ParkedOut {
+            tasks: vec![],
+            warnings: vec![],
+        });
+        assert!(needs_theme(&parked));
+        assert!(!shows_priority(&parked));
         let id = Output::Id(IdOut {
             id: "xx-000001".into(),
             warnings: vec![],
         });
-        assert!(!has_date_column(&id));
+        assert!(!needs_theme(&id));
+        assert!(!shows_priority(&id));
     }
 }

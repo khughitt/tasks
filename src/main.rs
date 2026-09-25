@@ -169,23 +169,38 @@ fn main() {
             let silent = format == Format::Json
                 && matches!(&out, output::Output::Check(check)
                     if check.errors.is_empty() && check.warnings.is_empty());
-            let mut date_warning = None;
-            let stdout_painter = if stdout_painter.enabled() && output::has_date_column(&out) {
+            let mut theme_warning = None;
+            let stdout_painter = if stdout_painter.enabled() && output::needs_theme(&out) {
                 // Redirected stdout is never queried: a pager may be reading the same
-                // terminal (spec §3.2).
+                // terminal (date spec §3.2).
                 let resolved = match palette {
                     Some(palette) => Ok(palette),
                     None if !std::io::stdout().is_terminal() => Err(palette::QueryError::NotAsked),
                     None => palette::Palette::query(palette::QUERY_TIMEOUT),
                 };
                 match resolved {
-                    Ok(palette) => stdout_painter.with_recency(style::Recency::new(
-                        ::time::OffsetDateTime::now_utc().date(),
-                        &palette,
-                    )),
+                    Ok(palette) => {
+                        let painter = stdout_painter.with_recency(style::Recency::new(
+                            ::time::OffsetDateTime::now_utc().date(),
+                            &palette,
+                        ));
+                        match palette.magenta {
+                            Some(magenta) => painter
+                                .with_priority_scale(style::PriorityScale::new(magenta, &palette)),
+                            None => {
+                                if output::shows_priority(&out) {
+                                    theme_warning = Some(
+                                        "priority colors off: TASKS_PALETTE has no magenta; add magenta=#rrggbb"
+                                            .to_string(),
+                                    );
+                                }
+                                painter
+                            }
+                        }
+                    }
                     Err(reason) => {
-                        date_warning = Some(format!(
-                            "date colors off: the terminal did not report its colors ({reason}); set TASKS_PALETTE to supply them"
+                        theme_warning = Some(format!(
+                            "theme colors off: the terminal did not report its colors ({reason}); set TASKS_PALETTE to supply them"
                         ));
                         stdout_painter
                     }
@@ -195,7 +210,7 @@ fn main() {
             };
             if format == Format::Pretty {
                 let mut warnings = output::warnings_of(&out);
-                warnings.extend(date_warning);
+                warnings.extend(theme_warning);
                 to_stderr(&output::pretty_warnings(&warnings, &stderr_painter));
             }
             let rendered = output::render(&out, format, &stdout_painter);
