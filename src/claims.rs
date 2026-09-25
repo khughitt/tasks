@@ -672,6 +672,11 @@ impl ClaimSnapshot {
         }
     }
 
+    /// Every claim with its liveness verdict, in id order.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &(Claim, Liveness))> {
+        self.by_id.iter()
+    }
+
     pub fn stale(&self) -> impl Iterator<Item = (&String, &Claim, &String)> {
         self.by_id
             .iter()

@@ -244,6 +244,24 @@ impl ClaimInfo {
     }
 }
 
+/// One row of `tasks claims`: the claim as `prime` shows it, plus the id and the prefix
+/// whose store holds it.
+#[derive(Serialize)]
+pub struct ClaimRow {
+    pub id: String,
+    pub prefix: String,
+    #[serde(flatten)]
+    pub claim: ClaimInfo,
+}
+
+/// `tasks claims`. No `warnings`: every store is read or the command fails, so there is
+/// nothing partial to warn about (ai docs/specs/2026-09-24-turn-boundary-gate-design.md
+/// §3.1).
+#[derive(Serialize)]
+pub struct ClaimsOut {
+    pub claims: Vec<ClaimRow>,
+}
+
 /// The park entry as JSON: everything but the title snapshot, which is the row's own
 /// `title` (spec §5.4).
 #[derive(Debug, Clone, Serialize)]
@@ -769,6 +787,7 @@ pub enum Output {
     List(ListOut),
     Parked(ParkedOut),
     Quiet(QuietOut),
+    Claims(ClaimsOut),
     Prime(PrimeOut),
     Graph(GraphOut),
     Check(CheckOut),
@@ -846,6 +865,18 @@ fn pretty(out: &Output, painter: &Painter) -> String {
         ),
         Output::Parked(o) => parked_table(&o.tasks, painter),
         Output::Quiet(o) => quiet_briefs(&o.tasks, painter),
+        Output::Claims(o) => o
+            .claims
+            .iter()
+            .map(|row| {
+                let live = if row.claim.live { "live" } else { "stale" };
+                format!(
+                    "{}  {}  {}  {}",
+                    row.id, row.claim.session, live, row.claim.worktree
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         Output::Prime(o) => {
             // One decision for the whole output: prime's blocks align today only because
             // every width is fixed, and a per-section decision would break that.
@@ -1402,6 +1433,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::List(o) => o.warnings.clone(),
         Output::Parked(o) => o.warnings.clone(),
         Output::Quiet(o) => o.warnings.clone(),
+        Output::Claims(_) => Vec::new(),
         Output::Prime(o) => o.warnings.clone(),
         Output::Graph(o) => o.warnings.clone(),
         Output::Check(o) => o

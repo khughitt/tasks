@@ -16447,3 +16447,131 @@ fn an_unreadable_registry_fails_instead_of_reading_empty() {
     let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
     assert_eq!(error["error"]["kind"], "io");
 }
+
+fn start_as(env: &TestEnv, dir: &std::path::Path, id: &str, session: &str) {
+    env.cmd(dir)
+        .env("TASKS_SESSION", session)
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", id])
+        .assert()
+        .success();
+}
+
+#[test]
+fn claims_lists_a_claim_whose_task_file_the_registered_checkout_lacks() {
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let id = env.json(&root, &["add", "worktree only"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    start_as(&env, &root, &id, "probe-session");
+    // A task created on a worktree branch has no file in the registered checkout.
+    std::fs::remove_file(root.join(format!("tasks/{id}.md"))).unwrap();
+    let prime = env.json(&root, &["prime", "--all-projects"]);
+    assert!(prime["doing"].as_array().unwrap().is_empty());
+
+    let out = env.json(&root, &["claims"]);
+    let claims = out["claims"].as_array().unwrap();
+    assert_eq!(claims.len(), 1);
+    assert_eq!(claims[0]["id"], id.as_str());
+    assert_eq!(claims[0]["prefix"], "zz");
+    assert_eq!(claims[0]["session"], "probe-session");
+    assert_eq!(claims[0]["live"], true);
+    assert!(claims[0]["host"].is_string());
+    assert!(claims[0]["worktree"].is_string());
+    assert!(out.get("warnings").is_none());
+}
+
+#[test]
+fn claims_reads_the_store_of_a_project_whose_checkout_is_gone() {
+    let mut env = TestEnv::new();
+    let here = env.init("zz");
+    let gone = env.init("yy");
+    let id = env.json(&gone, &["add", "elsewhere"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    start_as(&env, &gone, &id, "probe-session");
+    std::fs::remove_dir_all(&gone).unwrap();
+
+    let out = env.json(&here, &["claims", "--all-projects"]);
+    let claims = out["claims"].as_array().unwrap();
+    assert_eq!(claims.len(), 1);
+    assert_eq!(claims[0]["id"], id.as_str());
+    assert_eq!(claims[0]["prefix"], "yy");
+}
+
+#[test]
+fn claims_fails_when_the_registry_is_unreadable() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let dir = env.home.path().join(".config/tasks");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let readable = std::fs::read_to_string(dir.join("projects.toml")).is_ok();
+    let out = env.cmd(&root).args(["claims"]).output().unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if readable {
+        return;
+    }
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn claims_is_empty_when_no_store_exists() {
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let out = env.json(&root, &["claims"]);
+    assert_eq!(out, serde_json::json!({ "claims": [] }));
+}
+
+#[test]
+fn claims_fails_on_a_corrupt_store() {
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let store = env.claim_store("zz");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "claims = [not toml").unwrap();
+    assert_eq!(env.fail(&root, &["claims"]), "config");
+}
+
+#[test]
+fn claims_reports_a_stale_claim_as_not_live() {
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let store = env.claim_store("zz");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    // No pid, seen long ago: the TTL path, stale.
+    std::fs::write(
+        &store,
+        "[claims.\"zz-000001\"]\nowner = \"tester\"\nsession = \"old\"\nhost = \"h\"\n\
+         worktree = \"/x\"\nstarted = \"2026-01-01T00:00:00Z\"\nseen = \"2026-01-01T00:00:00Z\"\n",
+    )
+    .unwrap();
+    let out = env.json(&root, &["claims"]);
+    assert_eq!(out["claims"][0]["id"], "zz-000001");
+    assert_eq!(out["claims"][0]["live"], false);
+}
+
+#[test]
+fn claims_agrees_with_prime_on_a_live_claim() {
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let id = env.json(&root, &["add", "both see it"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    start_as(&env, &root, &id, "probe-session");
+    let prime = env.json(&root, &["prime", "--all-projects"]);
+    let claims = env.json(&root, &["claims"]);
+    assert_eq!(
+        prime["doing"][0]["claim"]["live"],
+        claims["claims"][0]["live"]
+    );
+    assert_eq!(
+        prime["doing"][0]["claim"]["session"],
+        claims["claims"][0]["session"]
+    );
+}

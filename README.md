@@ -257,6 +257,7 @@ from a clone):
     tasks park <id> "next step" --reason review   # set it down; tasks list --parked to see what is parked
     tasks park <id> "rerun the preflight" --reason quiet --waiting-on user --minutes 50  # needs an idle host
     tasks quiet                      # what could run tonight, across every project; -n 1 for the top
+    tasks claims                     # every claim in every project's store, live or stale; what a Stop hook reads
     tasks shelve <id> "when the dependency lands" # keep open work out of active views
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project

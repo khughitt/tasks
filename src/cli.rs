@@ -613,4 +613,10 @@ pub enum Command {
         #[arg(long)]
         all_projects: bool,
     },
+    /// Every claim in the registry's claim stores, with liveness; opens no checkout.
+    Claims {
+        /// The default and only scope; accepted for consistency with other read commands.
+        #[arg(long)]
+        all_projects: bool,
+    },
 }

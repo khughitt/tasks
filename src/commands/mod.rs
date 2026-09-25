@@ -1,5 +1,6 @@
 pub mod add;
 pub mod check;
+pub mod claims;
 pub mod dep;
 pub mod edit;
 pub mod feedback;
@@ -1269,6 +1270,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             tree::run(open_id_read_ctx(dir, &scope, id.as_deref())?, id, all)
         }
         Command::Tags { statuses, scope } => tags::run(open_read_ctx(dir, &scope)?, statuses),
+        Command::Claims { all_projects: _ } => claims::run(),
         Command::Quiet {
             limit,
             project,
