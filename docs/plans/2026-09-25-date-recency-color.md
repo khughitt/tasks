@@ -1053,6 +1053,20 @@ Append to `src/palette.rs`'s `tests` module:
     }
 
     #[test]
+    fn typed_keys_neither_end_the_read_nor_outlast_the_fence() {
+        // An Up arrow typed as the query goes out, then valid replies whose cyan hex
+        // holds `c`, then the fence, then more typing that belongs to the shell.
+        let mut bytes = b"\x1b[A".to_vec();
+        bytes.extend(replies("rgb:e5/e3/d7", "rgb:13/14/0d", "rgb:cc/cc/cc", "\x1b\\"));
+        let through_fence = bytes.len();
+        bytes.extend_from_slice(b"ls\r");
+        let mut tty = Fake::new(&bytes, 1);
+        let palette = exchange(&mut tty, T).unwrap();
+        assert_eq!(palette.cyan, Rgb { r: 0xcc, g: 0xcc, b: 0xcc });
+        assert_eq!(tty.at, through_fence, "reading stops exactly after the real fence");
+    }
+
+    #[test]
     fn an_expired_deadline_stops_reading_even_with_input_waiting() {
         use std::os::unix::net::UnixStream;
         use std::time::Instant;
@@ -1152,27 +1166,46 @@ fn read_byte(reader: &mut impl Read) -> io::Result<u8> {
     Ok(byte[0])
 }
 
-/// Everything the terminal sends up to and including the fence's reply, `ESC [ … c`.
-/// Color replies never contain `ESC [` (they end in BEL or `ESC \`), and the fence's
-/// parameters are digits and `;`, so its first `c` ends it.
+/// Where a scan for the fence's reply stands. DA1's reply is `ESC [ ?`, then digits and
+/// `;`, then `c`; any other byte resets the scan and an `ESC` restarts it. So a key typed
+/// while the query runs (an arrow is `ESC [ A`) cannot pass for the fence, and neither can
+/// the `c` in a color reply's hex.
+#[derive(Clone, Copy)]
+enum Fence {
+    Idle,
+    Esc,
+    Csi,
+    Params,
+}
+
+/// Reads through the fence's reply and returns what came before it: the color replies,
+/// plus any keys typed meanwhile.
 fn read_through_fence(reader: &mut impl Read) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    let mut in_fence = false;
+    let mut fence = Fence::Idle;
+    let mut fence_start = 0;
     loop {
         let byte = read_byte(reader)?;
         bytes.push(byte);
-        if in_fence {
-            if byte == b'c' {
+        fence = match (fence, byte) {
+            (_, ESC) => {
+                fence_start = bytes.len() - 1;
+                Fence::Esc
+            }
+            (Fence::Esc, b'[') => Fence::Csi,
+            (Fence::Csi, b'?') => Fence::Params,
+            (Fence::Params, b'0'..=b'9' | b';') => Fence::Params,
+            (Fence::Params, b'c') => {
+                bytes.truncate(fence_start);
                 return Ok(bytes);
             }
-        } else if bytes.ends_with(&[ESC, b'[']) {
-            in_fence = true;
-        }
+            _ => Fence::Idle,
+        };
     }
 }
 
-/// The three color replies in `bytes`, which end with the fence. Fewer than three
-/// replies before the fence means the terminal skipped a query it does not support.
+/// The three color replies among the bytes before the fence. Fewer than three means
+/// the terminal skipped a query it does not support.
 fn parse_replies(bytes: &[u8]) -> Result<Palette, QueryError> {
     let bodies = osc_bodies(bytes)?;
     match bodies.as_slice() {
@@ -1193,35 +1226,27 @@ fn lossy(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// The bodies of the `ESC ] <body> (BEL | ESC \)` replies before the fence, in order.
+/// The bodies of the `ESC ] <body> (BEL | ESC \)` replies in `bytes`, in order. Bytes
+/// outside a reply are keys typed while the query ran: they are skipped, not parsed.
 fn osc_bodies(bytes: &[u8]) -> Result<Vec<&[u8]>, QueryError> {
     let mut bodies = Vec::new();
     let mut rest = bytes;
-    loop {
-        let at = rest
+    while let Some(at) = rest.windows(2).position(|pair| pair == [ESC, b']']) {
+        let body = &rest[at + 2..];
+        let end = body
             .iter()
-            .position(|&byte| byte == ESC)
-            .ok_or_else(|| QueryError::Unparsable(lossy(rest)))?;
-        match rest.get(at + 1) {
-            Some(b'[') => return Ok(bodies),
-            Some(b']') => {
-                let body = &rest[at + 2..];
-                let end = body
-                    .iter()
-                    .position(|&byte| byte == BEL || byte == ESC)
-                    .ok_or_else(|| QueryError::Unparsable(lossy(body)))?;
-                let terminator = match (body[end], body.get(end + 1)) {
-                    (BEL, _) => 1,
-                    (ESC, Some(b'\\')) => 2,
-                    // An unterminated reply runs into the next escape.
-                    _ => return Err(QueryError::Unparsable(lossy(&body[..end]))),
-                };
-                bodies.push(&body[..end]);
-                rest = &body[end + terminator..];
-            }
-            _ => return Err(QueryError::Unparsable(lossy(&rest[at..]))),
-        }
+            .position(|&byte| byte == BEL || byte == ESC)
+            .ok_or_else(|| QueryError::Unparsable(lossy(body)))?;
+        let terminator = match (body[end], body.get(end + 1)) {
+            (BEL, _) => 1,
+            (ESC, Some(b'\\')) => 2,
+            // An unterminated reply runs into the next escape.
+            _ => return Err(QueryError::Unparsable(lossy(&body[..end]))),
+        };
+        bodies.push(&body[..end]);
+        rest = &body[end + terminator..];
     }
+    Ok(bodies)
 }
 
 fn reply_color(body: &[u8], prefix: &[u8]) -> Result<Rgb, QueryError> {
