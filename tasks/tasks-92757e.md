@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/priority-color
 created: 2026-09-25T12:27:49Z
-updated: 2026-09-25T13:16:07Z
+updated: 2026-09-25T13:28:13Z
 started: 2026-09-25T12:56:52Z
 depends: []
 tags: [cli]
@@ -32,3 +32,4 @@ Paint P1-P3 in three steps of the terminal theme's magenta (palette slot 5), str
 - 2026-09-25T13:11:59Z (feat/priority-color): spec approved with review fixes: magenta warning only on views showing priorities; lightness separation is theme-dependent. Color-source choice filed as tasks-ee6ca2
 - 2026-09-25T13:16:07Z (feat/priority-color): parked (waiting on user, review): user reviews docs/plans/2026-09-25-priority-color.md and picks execution (recommended: native); then implement Task 1 (tasks-ab49dc) in .worktrees/priority-color
   provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T13:28:13Z (feat/priority-color): plan review fixes: Tasks 2-3 merged (dead-code lint), lightness moved to Task 2, close Task 3 before parent, env -u TASKS_PALETTE in kitty check

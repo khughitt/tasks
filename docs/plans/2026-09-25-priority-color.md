@@ -27,11 +27,11 @@
 
 ## Review Focus
 
-1. **A three-key `TASKS_PALETTE` on `projects` or `parked`** — every color those views display works, so no warning may appear. Test: Task 3, `a_palette_without_magenta_warns_only_where_priorities_show`.
+1. **A three-key `TASKS_PALETTE` on `projects` or `parked`** — every color those views display works, so no warning may appear. Test: Task 2, `a_palette_without_magenta_warns_only_where_priorities_show`.
 2. **A terminal that answers fg, bg and cyan but not slot 5** — the whole theme is off (`Unsupported`), not a half-painted table. Test: Task 1, `three_replies_are_no_longer_enough`.
-3. **Redirected output with no `TASKS_PALETTE`** — P0/P1 stay bold, dates plain, one reworded warning, and no magenta warning beside it. Test: Task 3, the extended `redirected_stdout_without_a_palette_skips_the_query_and_warns`.
-4. **Column alignment with truecolor on P0** — `1;38;2;…` must not change visible widths. Test: Task 3, the existing layout check in the colored `list` test, now asserting the new P0 code.
-5. **`show` with color on** — `priority:` keeps bold at P0/P1 and prints no warning, because `show` never queries. Test: Task 3, `colored_show_keeps_bold_priority_without_a_warning`.
+3. **Redirected output with no `TASKS_PALETTE`** — P0/P1 stay bold, dates plain, one reworded warning, and no magenta warning beside it. Test: Task 2, the extended `redirected_stdout_without_a_palette_skips_the_query_and_warns`.
+4. **Column alignment with truecolor on P0** — `1;38;2;…` must not change visible widths. Test: Task 2, the existing layout check in the colored `list` test, now asserting the new P0 code.
+5. **`show` with color on** — `priority:` keeps bold at P0/P1 and prints no warning, because `show` never queries. Test: Task 2, `colored_show_keeps_bold_priority_without_a_warning`.
 
 ---
 
@@ -46,7 +46,6 @@
   - `pub struct Palette { pub fg: Rgb, pub bg: Rgb, pub cyan: Rgb, pub magenta: Option<Rgb> }` (derives unchanged)
   - `Palette::old(&self) -> Rgb` — `self.fg.mix(self.bg, 0.45)`
   - `Palette::parse` accepts an optional `magenta` key; `Palette::query` / `exchange` always return `magenta: Some(_)`.
-  - `#[cfg(test)] pub fn Rgb::lightness(self) -> f64` — OKLab `L`, for Task 2's tests.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -267,16 +266,6 @@ fn parse_replies(bytes: &[u8]) -> Result<Palette, QueryError> {
 }
 ```
 
-Add beside `Rgb::mix`:
-
-```rust
-    /// OKLab lightness, for tests that check a scale's order.
-    #[cfg(test)]
-    pub fn lightness(self) -> f64 {
-        to_oklab(self)[0]
-    }
-```
-
 Replace the module doc comment:
 
 ```rust
@@ -313,20 +302,29 @@ git commit -m "feat(palette): read magenta from TASKS_PALETTE and the terminal q
 
 ---
 
-### Task 2: The priority role
+### Task 2: The priority role, attached from the theme
+
+One commit: `PriorityScale::new` and `Painter::with_priority_scale` have their only
+production caller in `main.rs`, so committing the role before the wiring would fail
+`just check`'s `-D warnings` on dead code.
 
 **Files:**
+- Modify: `src/palette.rs` (`#[cfg(test)] Rgb::lightness`)
 - Modify: `src/style.rs` (`Style::Priority`, `PriorityScale`, `Painter::with_priority_scale`, unit tests)
-- Modify: `src/output.rs` (`table`, `quiet_briefs`, `paint_field` use the role; unit test)
+- Modify: `src/output.rs` (`table`, `quiet_briefs`, `paint_field` use the role; `has_date_column` → `needs_theme`; add `shows_priority`; unit tests)
+- Modify: `src/main.rs` (scale attachment, both warnings)
+- Modify: `tests/common/mod.rs` (`TEST_PALETTE` gains magenta)
+- Modify: `tests/cli.rs` (updated and new end-to-end tests)
 
 **Interfaces:**
-- Consumes: `Palette { magenta: Option<Rgb>, .. }`, `Palette::old`, `Rgb::mix`, `#[cfg(test)] Rgb::lightness` (Task 1).
+- Consumes: `Palette { magenta: Option<Rgb>, .. }`, `Palette::old`, `Rgb::mix` (Task 1).
 - Produces:
   - `Style::Priority(u8)` (priority is validated 0–4 on every read path)
   - `#[derive(Debug, Clone, Copy)] pub struct PriorityScale { steps: [Rgb; 5] }`
   - `PriorityScale::new(magenta: Rgb, palette: &Palette) -> PriorityScale`
   - `PriorityScale::color(&self, priority: u8) -> Rgb`
   - `Painter::with_priority_scale(self, scale: PriorityScale) -> Painter`
+  - `output::needs_theme(out: &Output) -> bool` (renamed from `has_date_column`, same outputs), `output::shows_priority(out: &Output) -> bool`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -438,6 +436,16 @@ Expected: compile errors (`PriorityScale`, `Style::Priority`, `with_priority_sca
 
 - [ ] **Step 3: Implement the role**
 
+In `src/palette.rs`, beside `Rgb::mix`:
+
+```rust
+    /// OKLab lightness, for tests that check a scale's order.
+    #[cfg(test)]
+    pub fn lightness(self) -> f64 {
+        to_oklab(self)[0]
+    }
+```
+
 In `src/style.rs`, add the variant to `Style`:
 
 ```rust
@@ -535,34 +543,12 @@ In `paint_field`:
 
 replacing `"priority" if task.priority <= 1 => Style::Emphasis,`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 5: Run the unit tests to verify they pass**
 
 Run: `just test-fast priority` then `just test-fast`
-Expected: PASS, the existing `\x1b[1mP0\x1b[0m` list assertion and `show`'s `priority: \x1b[1m0\x1b[0m` included: `main` attaches no scale yet, so every view still renders the bold look. If the reference-value assertions in `the_priority_scale_samples_the_mix_at_fixed_steps` fail by one on a channel, see Global Constraints.
+Expected: PASS, the existing `\x1b[1mP0\x1b[0m` list assertion and `show`'s `priority: \x1b[1m0\x1b[0m` included: `main` attaches no scale yet, so every view still renders the bold look. If the reference-value assertions in `the_priority_scale_samples_the_mix_at_fixed_steps` fail by one on a channel, see Global Constraints. Do not commit yet (see the note under the task heading).
 
-- [ ] **Step 6: Commit**
-
-```bash
-cargo fmt && just check
-git add src/style.rs src/output.rs
-git commit -m "feat(style): paint priorities through a priority role with a magenta scale"
-```
-
----
-
-### Task 3: Attach the scale and warn where it is missing
-
-**Files:**
-- Modify: `src/main.rs` (scale attachment, both warnings)
-- Modify: `src/output.rs` (`has_date_column` → `needs_theme`; add `shows_priority`; unit test)
-- Modify: `tests/common/mod.rs` (`TEST_PALETTE` gains magenta)
-- Modify: `tests/cli.rs` (updated and new end-to-end tests)
-
-**Interfaces:**
-- Consumes: `Palette::magenta`, `PriorityScale::new`, `Painter::with_priority_scale` (Tasks 1–2).
-- Produces: `output::needs_theme(out: &Output) -> bool` (renamed, same outputs), `output::shows_priority(out: &Output) -> bool`.
-
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 6: Write the failing end-to-end and gate tests**
 
 In `tests/common/mod.rs`:
 
@@ -747,12 +733,12 @@ In `src/output.rs`, rename the unit test `date_columns_are_the_outputs_that_quer
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 7: Run the tests to verify they fail**
 
 Run: `just test-fast palette` then `just test-fast priorit` then `just test-fast theme`
 Expected: the scale and warning tests fail (bold P0/P1, `date colors off` wording, no magenta warning); `theme_gates_cover_dates_and_priorities` fails to compile.
 
-- [ ] **Step 3: Implement the gates**
+- [ ] **Step 8: Implement the gates**
 
 In `src/output.rs`, rename `has_date_column` to `needs_theme` (updating its one caller in `main.rs`) and document it:
 
@@ -776,7 +762,7 @@ pub fn shows_priority(out: &Output) -> bool {
 }
 ```
 
-- [ ] **Step 4: Attach the scale and warn**
+- [ ] **Step 9: Attach the scale and warn**
 
 In `src/main.rs`, replace the `date_warning` block:
 
@@ -824,29 +810,29 @@ In `src/main.rs`, replace the `date_warning` block:
 
 and change `warnings.extend(date_warning);` to `warnings.extend(theme_warning);`.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 10: Run the tests to verify they pass**
 
 Run: `just test-fast`
 Expected: PASS. Any other test still asserting `\x1b[1mP0\x1b[0m` or `\x1b[1mP1\x1b[0m` in a table or quiet brief under the default test palette now sees the scale's code: update it to `\x1b[1;38;2;215;95;215mP0\x1b[0m` / `\x1b[38;2;215;95;215mP1\x1b[0m`. Find them with `grep -n '1mP[01]' tests/cli.rs`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 cargo fmt && just check
-git add src/main.rs src/output.rs tests/common/mod.rs tests/cli.rs
-git commit -m "feat(output): paint priorities from the theme's magenta"
+git add src/palette.rs src/style.rs src/main.rs src/output.rs tests/common/mod.rs tests/cli.rs
+git commit -m "feat(output): paint priorities on the theme's magenta scale"
 ```
 
 ---
 
-### Task 4: Docs, gate, verify in kitty, close
+### Task 3: Docs, gate, verify in kitty, close
 
 **Files:**
 - Modify: `README.md` (color paragraph)
 - Modify: `docs/specs/2026-09-25-priority-color-design.md` (status line)
 - Modify: `docs/specs/2026-09-25-date-recency-color-design.md` (status line notes the amendment)
 - Modify: `docs/specs/2026-09-03-color-output-design.md` (one-line amendment note under its status)
-- Modify: `tasks/tasks-92757e.md` (through the binary only)
+- Modify: `tasks/tasks-006dfe.md`, `tasks/tasks-92757e.md` (through the binary only)
 
 - [ ] **Step 1: README**
 
@@ -887,18 +873,22 @@ git commit -m "docs: priority magenta scale in the README and spec status lines"
 Hand these to the user to run in their own terminal from the main checkout (an agent has no terminal):
 
 ```bash
-.worktrees/priority-color/target/debug/tasks --pretty --color always list
-.worktrees/priority-color/target/debug/tasks --pretty --color always list | less -R
+env -u TASKS_PALETTE .worktrees/priority-color/target/debug/tasks --pretty --color always list
+env -u TASKS_PALETTE .worktrees/priority-color/target/debug/tasks --pretty --color always list | less -R
 TASKS_PALETTE="fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7" .worktrees/priority-color/target/debug/tasks --pretty --color always list | head -8
 ```
+
+`env -u` matters: an exported `TASKS_PALETTE` would skip the query in the first and paint the pipe in the second.
 
 Expected: the first paints priorities from the live theme's slot 5 (the olive `#c8cb88` today, so the steps show as lightness); the second queries nothing, keeps P0/P1 bold and warns `theme colors off`; the third paints a true magenta ramp. Park the task `--waiting-on user --reason review` while waiting.
 
 - [ ] **Step 6: Close**
 
-After the user confirms:
+After the user confirms, close this step first: the tracker refuses to close a parent while a descendant is open.
 
 ```bash
+tasks start tasks-006dfe
+tasks done tasks-006dfe "README, spec status lines, gate and kitty check"
 tasks done tasks-92757e "priority column paints on the theme's magenta scale (P0 bold … P4 dimmed fg); slot 5 in the query, optional magenta in TASKS_PALETTE, bold P0/P1 without the theme"
 tasks check
 git add tasks && git commit -m "chore(tasks): close priority magenta scale"
