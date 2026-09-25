@@ -8,12 +8,13 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-25T10:47:15Z
-updated: 2026-09-25T11:08:52Z
+updated: 2026-09-25T11:17:49Z
 started: 2026-09-25T10:47:20Z
 depends: []
 tags: [cli]
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-09-25-date-recency-color-design.md
+plan: docs/plans/2026-09-25-date-recency-color.md
 ---
 
 In --pretty, color each date column on a continuous scale by age: today is fully saturated (cyan), older dates fade toward the terminal foreground or a dim grey. Map age through a log scale and/or clip it so outliers do not squash the range: the past ~2-4 weeks should change color visibly, while anything 2+ years old looks about the same. Reverses the color-output spec's no-256-color/truecolor decision (docs/specs/2026-09-03-color-output-design.md §2, §6), so it needs a design spec.
@@ -28,3 +29,4 @@ In --pretty, color each date column on a continuous scale by age: today is fully
 - 2026-09-25T11:02:17Z (feat/date-colors): parked (waiting on user, review): User reviews docs/specs/2026-09-25-date-recency-color-design.md on branch feat/date-colors; on approval the agent writes the implementation plan in docs/plans/ from .worktrees/date-colors
   provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-25T11:08:52Z (feat/date-colors): Spec revised per review: query only when stdout is a terminal (pager race, per colorsaurus caveats); TASKS_PALETTE set in both TestEnv::cmd and ::raw; libc a direct dep; manual pipe check forbids query bytes, not SGR.
+- 2026-09-25T11:17:49Z (feat/date-colors): Plan drafted: 4 tasks (TASKS_PALETTE list slice; remaining date columns; terminal query + redirect warning; gate, manual kitty check, close).
