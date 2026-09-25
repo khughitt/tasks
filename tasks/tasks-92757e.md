@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/priority-color
 created: 2026-09-25T12:27:49Z
-updated: 2026-09-25T13:39:39Z
+updated: 2026-09-25T14:15:21Z
 started: 2026-09-25T12:56:52Z
 depends: []
 tags: [cli]
@@ -39,4 +39,7 @@ Paint P1-P3 in three steps of the terminal theme's magenta (palette slot 5), str
   provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-25T13:39:39Z (feat/priority-color): final review: 0 Critical/Important; 3 minors deferred (README omits the magenta-less warning; shows_priority⊆needs_theme unenforced; warning on empty output)
 - 2026-09-25T13:39:39Z (feat/priority-color): parked (waiting on user, review): after the user's kitty check on tasks-006dfe: agent closes tasks-006dfe then this task, deletes the sdd workspace, and runs finishing-a-development-branch for feat/priority-color
+  provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T14:15:21Z (feat/priority-color): user: P1-P3 look too similar in both palettes. Measured: current P2-P3 dE 0.07, P3-P4 0.05 (OKLab), lightness span only 0.68->0.59. Candidates B (mix to fg 75% toward bg, even steps) and D (magenta shades, same end) give ~0.11-0.15 per step
+- 2026-09-25T14:15:21Z (feat/priority-color): parked (waiting on user, decision): user picks a ramp from the scratchpad swatch (recommended B: mix to fg 75% toward bg, even steps); agent then amends spec §2, updates PRIORITY_STEPS/end and the pinned SGRs, reruns just gate, and hands back the kitty check
   provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
