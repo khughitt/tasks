@@ -1,6 +1,6 @@
 # Magenta scale for the pretty priority column — design
 
-**Status:** draft (2026-09-25), tasks-92757e. Amends docs/specs/2026-09-03-color-output-design.md
+**Status:** approved (2026-09-25), tasks-92757e. Amends docs/specs/2026-09-03-color-output-design.md
 §6 (P0 and P1 bold) and docs/specs/2026-09-25-date-recency-color-design.md §3.1 (the
 query) and §3.3 (`TASKS_PALETTE`).
 
@@ -65,9 +65,14 @@ Generated themes do not promise that slot 5 is a magenta, or that it differs fro
 slot 6. The Noctalia theme on the author's machine today has color5 `#c8cb88` (an olive)
 and color6 `#c9c8a9`, so the priority and date columns would share a hue there. The scale
 follows the theme anyway: "the palette is the terminal's" is the principle both designs
-rest on. The lightness steps still carry the order, and the columns sit apart in the
-table. A user who wants a different hue sets all four colors in `TASKS_PALETTE`, and that
-turns the query off.
+rest on. A user who wants a different hue sets all four colors in `TASKS_PALETTE`, and
+that turns the query off.
+
+How far apart the steps sit depends on the theme too. The scale runs between two colors
+the theme supplies, and nothing keeps them apart: `fg=#e5e3d7 bg=#13140d magenta=#7d7d73`
+is a valid palette whose magenta equals the computed old end, so all five priorities
+paint the same color and only P0's bold remains. tasks prescribes the mixes, not how
+distinct they look. It does not detect or correct a collapsed scale.
 
 ## 3. Reading the theme
 
@@ -107,14 +112,18 @@ warning: theme colors off: the terminal did not report its colors (timed out aft
 ```
 
 A `TASKS_PALETTE` without `magenta` paints dates and leaves priorities in the §2.1 look.
-It adds one line whenever the output needs the theme (§3.1):
+It adds one line whenever the output displays priorities: `list`, `prime`, `tree` and
+`quiet`. `parked` and `projects` need the theme for their dates but show no priority, so
+every color they display works and they print nothing. The query gate (§3.1) stays shared;
+this warning has its own, `shows_priority`.
 
 ```
 warning: priority colors off: TASKS_PALETTE has no magenta; add magenta=#rrggbb
 ```
 
 Both warnings go through the stderr painter, like the date warning today. Neither fires
-when color is off or the output needs no theme.
+when color is off or the output needs no theme, and the magenta warning never fires
+alongside the query failure warning, which already covers it.
 
 ## 4. Shape
 
@@ -143,10 +152,10 @@ when color is off or the output needs no theme.
   its old end from `Palette::old`.
 - **`src/main.rs`**: with a palette resolved, the stdout painter gets its `Recency` as
   today. When `palette.magenta` is `Some`, it also gets a `PriorityScale`. When it is
-  `None`, the §3.3 warning is queued. The query failure warning is reworded.
+  `None` and `output::shows_priority` holds, the §3.3 warning is queued. The query failure warning is reworded.
 - **`src/output.rs`**: the `table` and `quiet_briefs` priority cells and `show`'s
   `priority:` field paint with `Style::Priority`. Pad first, paint last, as before.
-  `has_date_column` becomes `needs_theme`.
+  `has_date_column` becomes `needs_theme`, and `shows_priority` is added beside it.
 - **`tests/common/mod.rs`**: `TEST_PALETTE` gains `magenta=#d75fd7`, so the whole suite
   runs with both scales on. Tests of the three-key case set their own value.
 
@@ -157,7 +166,10 @@ The JSON contract is untouched.
 Unit (`src/style.rs`):
 
 - `PriorityScale` returns magenta exactly at P0 and P1, the old end exactly at P4, and
-  P2 and P3 strictly between them in OKLab lightness, in order;
+  exactly `magenta.mix(old, 0.5)` and `magenta.mix(old, 0.8)` at P2 and P3;
+- with the test palette, whose magenta is lighter and more saturated than the old
+  end, P1 through P4 fall strictly in OKLab lightness. This asserts the fixture, not a
+  guarantee for every theme (§2.3);
 - `Style::Priority` with a scale: P0 is `1;38;2;…`, P1 through P4 are `38;2;…`, and
   visible width is preserved;
 - without a scale: P0 and P1 bold, P2 through P4 unchanged; a disabled painter changes
@@ -176,6 +188,8 @@ End to end (`tests/cli.rs`):
   exact SGR, P0 with the same color bold, and P2 with the 0.5 mix's;
 - the same with a three-key palette paints P0 and P1 bold, colors dates, and prints the
   §3.3 magenta warning;
+- `projects` and `parked` with a three-key palette print no magenta warning, and color
+  their dates;
 - `quiet` paints a brief's priority;
 - a colored table keeps the visible layout of an uncolored one (the existing check,
   whose rows now span several priorities);
