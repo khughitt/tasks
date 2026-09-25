@@ -24,7 +24,7 @@ A new environment variable, `TASKS_THEME`, selects the color source:
 |-------------|-------------------------------------------------------------------------|
 | unset       | `terminal` (today's behavior, unchanged)                                |
 | `terminal`  | the terminal theme: `TASKS_PALETTE` if set, else the OSC query          |
-| `default`   | the built-in palette; no query is sent and `TASKS_PALETTE` is ignored   |
+| `default`   | the built-in palette; no query is sent. `TASKS_PALETTE`, when also set, wins (§2.2) |
 
 Anything else is a config error naming `TASKS_THEME`, the way `TASKS_COLOR` rejects an
 unknown mode. `TASKS_THEME` does not interact with `TASKS_COLOR` or `NO_COLOR`: those
@@ -40,21 +40,29 @@ decide whether color is on at all; `TASKS_THEME` decides which colors it uses.
 | magenta | `#d75fd7`  |
 
 These are the four colors the designs and tests have used as the representative palette
-all along. `magenta` is always present, so the priority scale is always on under
-`default` and the "no magenta" warning never fires.
+all along. `magenta` is always present, so the built-in palette never produces the "no
+magenta" warning. (An overriding `TASKS_PALETTE` with only its three required keys still
+does, exactly as today.)
 
-`default` is a complete palette: it ships `fg` and `bg` too, so no query is sent. The
-theme colors are only ever consumed through `Palette::old()` and the two mixes toward
-`fg`/`bg` — nothing paints `fg` or `bg` directly — so a built-in pair that does not match
-the user's actual background is still safe: it only fixes where the scale's dim ends sit.
+`default` is a complete palette: it ships `fg` and `bg` too, so no query is sent. Nothing
+paints `fg` or `bg` directly — they are only consumed through `Palette::old()` and the two
+mixes toward them — but the mixed results become text foregrounds, and they inherit the
+pair's lightness. The old-date endpoint is `#7d7d73` and the priority endpoint `#404038`,
+both designed to recede on a dark background; on a light terminal they sit near it in
+lightness and lose contrast. `default` is a fixed palette intended for dark backgrounds,
+not a scheme that adapts to any theme. The user confirms it looks right in their terminal
+(a visual check; §4's tests only verify the arithmetic), and a user on a light theme
+keeps `terminal` or supplies a `TASKS_PALETTE`.
 
 ### 2.2 Precedence: `TASKS_PALETTE` wins
 
 When both are set, `TASKS_PALETTE` wins and `TASKS_THEME=default` has no effect.
 `TASKS_PALETTE` names exact colors — the most explicit statement of intent — and the
-existing pattern is that the most explicit setting wins (`--color` over `TASKS_COLOR`
-over `NO_COLOR`). A user who writes both is overriding `default` per color, not asking
-to be ignored. With `TASKS_THEME=terminal` (or unset) behavior is exactly today's.
+existing pattern is that the most explicit setting wins (for color mode: `--color`, then
+a non-empty `NO_COLOR`, then `TASKS_COLOR`). A user who sets both is replacing the
+built-in palette wholesale with their own — partial overrides do not exist, the parser
+requires `fg`, `bg` and `cyan` — not asking to be ignored. With `TASKS_THEME=terminal`
+(or unset) behavior is exactly today's.
 
 This is the one question where the alternative was genuinely close: `default` could have
 suppressed `TASKS_PALETTE`, on the theory that choosing built-ins means "stop reading my
@@ -67,9 +75,7 @@ line a user needs (`unset TASKS_PALETTE`).
 One setting governs both scales. Per-scale variables (`TASKS_THEME_DATE`,
 `TASKS_THEME_PRIORITY`) multiply the surface for a need nothing has shown: the motivation
 is a single generated theme whose slot 5 is olive, and both columns live in the same
-window. If a user ever wants one scale themed and the other built-in, `TASKS_PALETTE` can
-already express it per color (set only `magenta=...` and the date scale keeps the
-terminal's cyan).
+window.
 
 ## 3. Mechanics
 
@@ -102,4 +108,8 @@ variable gives, without hand-writing hex values.
   expectations for that palette (the date and priority scale tests already run on these
   exact colors, so their expectations transfer directly).
 - CLI tests: `TASKS_THEME=default` paints with the built-ins and sends no query;
-  an invalid value exits 1 naming `TASKS_THEME`.
+  an invalid value exits 1 naming `TASKS_THEME`. The test helpers inject exactly the
+  proposed colors as `TASKS_PALETTE` (src/style.rs, src/output.rs, tests/common), so a
+  built-in test that leaves them set can pass with `default` unimplemented: every test of
+  the built-in path removes `TASKS_PALETTE` and clears an inherited `TASKS_THEME` first,
+  in the helpers themselves.
