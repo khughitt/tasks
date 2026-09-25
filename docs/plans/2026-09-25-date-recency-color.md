@@ -23,6 +23,7 @@
 - Reasons: `stdout is not a terminal`, `timed out after 300 ms`, `answered without the colors`, `unparsable reply …`, `no terminal to ask`.
 - `TERM` is never consulted.
 - Commands: `just test-fast [<name>]` while working, `just check` before each commit (the pre-commit hook runs it), `just gate` before finishing. Never run `cargo test` directly.
+- Snippets here are not guaranteed rustfmt-exact: run `cargo fmt` before `just check`, whose `cargo fmt --check` otherwise fails.
 - Commits: conventional, no AI attribution. Never edit `tasks/*.md` by hand.
 
 ## Review Focus
@@ -52,7 +53,7 @@
   - `Rgb::parse_hex(hex: &str) -> Option<Rgb>` (exactly `#rrggbb`)
   - `Rgb::mix(self, other: Rgb, t: f64) -> Rgb` (OKLab; exact ends at `t <= 0` and `t >= 1`)
   - `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub struct Palette { pub fg: Rgb, pub bg: Rgb, pub cyan: Rgb }`
-  - `Palette::parse(value: &str) -> crate::error::Result<Palette>` (errors are `Error::Config`)
+  - `Palette::parse(value: &str) -> crate::error::Result<Palette>` (errors are `Error::Config`). `palette.rs` imports only `Error` from `crate::error`, so a bare `Result` in this file is `std::result::Result`: Task 3's query functions return `Result<_, QueryError>`.
 - Produces (`src/style.rs`):
   - `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum When { Today, On(time::Date) }`
   - `Style::Date(When)`
@@ -71,7 +72,7 @@ Create `src/palette.rs` with only the tests module and the type skeleton the tes
 //! (`TASKS_PALETTE`, or a query to the terminal). Design:
 //! docs/specs/2026-09-25-date-recency-color-design.md.
 
-use crate::error::{Error, Result};
+use crate::error::Error;
 
 #[cfg(test)]
 mod tests {
@@ -243,7 +244,7 @@ pub struct Palette {
 
 impl Palette {
     /// Parses `TASKS_PALETTE`: `fg=#rrggbb bg=#rrggbb cyan=#rrggbb`, any order.
-    pub fn parse(value: &str) -> Result<Palette> {
+    pub fn parse(value: &str) -> crate::error::Result<Palette> {
         let bad = |detail: String| {
             Error::Config(format!(
                 "TASKS_PALETTE must be \"fg=#rrggbb bg=#rrggbb cyan=#rrggbb\": {detail}"
@@ -312,7 +313,7 @@ Append to `src/style.rs`'s `tests` module:
             (1, 0.105),
             (7, 0.315),
             (28, 0.511),
-            (91, 0.684),
+            (91, 0.686),
             (365, 0.895),
             (730, 1.0),
             (5000, 1.0),
@@ -707,8 +708,12 @@ Append to `tests/cli.rs`:
 fn colored_list_paints_dates_by_recency() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    let fresh = env.json(&dir, &["add", "Fresh"]);
-    let today = fresh["updated"].as_str().unwrap()[..10].to_string();
+    // `add` answers {id, action, warnings}; the timestamp is on the record.
+    let fresh = id_of(env.json(&dir, &["add", "Fresh"]));
+    let today = env.json(&dir, &["show", &fresh])["task"]["updated"]
+        .as_str()
+        .unwrap()[..10]
+        .to_string();
     write_doc(
         &dir,
         "tasks/sci-a00001.md",
@@ -1029,6 +1034,45 @@ Append to `src/palette.rs`'s `tests` module:
     }
 
     #[test]
+    fn a_malformed_reply_still_reads_through_the_fence() {
+        // One byte per read: the fence must be consumed even though the first reply
+        // fails to parse, or its bytes reach the shell after raw mode ends. The `c` in
+        // the cyan reply's hex must not be taken for the fence's end.
+        let bytes = replies("rgb:zz/e3/d7", "rgb:13/14/0d", "rgb:cc/cc/cc", "\x07");
+        let mut tty = Fake::new(&bytes, 1);
+        let err = exchange(&mut tty, T).unwrap_err();
+        assert!(matches!(err, QueryError::Unparsable(_)), "{err:?}");
+        assert_eq!(tty.at, tty.replies.len(), "every reply and the fence were read");
+
+        let mut unterminated = b"\x1b]10;rgb:e5/e3/d7".to_vec();
+        unterminated.extend_from_slice(DA1);
+        let mut tty = Fake::new(&unterminated, 1);
+        let err = exchange(&mut tty, T).unwrap_err();
+        assert!(matches!(err, QueryError::Unparsable(_)), "{err:?}");
+        assert_eq!(tty.at, tty.replies.len(), "the fence was read");
+    }
+
+    #[test]
+    fn an_expired_deadline_stops_reading_even_with_input_waiting() {
+        use std::os::unix::net::UnixStream;
+        use std::time::Instant;
+        let (mut terminal, ours) = UnixStream::pair().unwrap();
+        terminal.write_all(b"\x1b]10;").unwrap();
+        let mut timed = Timed {
+            inner: ours,
+            deadline: Instant::now(),
+        };
+        let mut buf = [0u8; 8];
+        let err = timed.read(&mut buf).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        let mut open = Timed {
+            inner: timed.inner,
+            deadline: Instant::now() + Duration::from_secs(1),
+        };
+        assert_eq!(open.read(&mut buf).unwrap(), 5, "the input was there all along");
+    }
+
+    #[test]
     fn the_reasons_read_as_the_spec_words_them() {
         assert_eq!(QueryError::NotAsked.to_string(), "stdout is not a terminal");
         assert_eq!(QueryError::NoTerminal.to_string(), "no terminal to ask");
@@ -1046,7 +1090,7 @@ Add to `src/palette.rs` (below `Palette`'s `impl`; put the `use` lines at the to
 
 ```rust
 use std::fmt;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
 /// How long the whole exchange may take before the terminal counts as silent.
@@ -1085,62 +1129,103 @@ impl fmt::Display for QueryError {
     }
 }
 
-/// Runs the query over `tty` (a raw-mode terminal in production, a fake in tests). A
-/// read that fails with `TimedOut` becomes `QueryError::TimedOut(timeout)`.
+/// Runs the query over `tty` (a raw-mode terminal in production, a fake in tests).
+///
+/// Every reply is read through the fence before any is parsed: a malformed reply must not
+/// leave the replies after it unread, or they reach the shell as input once raw mode ends.
+/// A timeout is the one exit that can leave bytes behind, and the deadline bounds it.
 pub fn exchange<T: Read + Write>(tty: &mut T, timeout: Duration) -> Result<Palette, QueryError> {
-    let timed_out = |error: io::Error| match error.kind() {
-        io::ErrorKind::TimedOut => QueryError::TimedOut(timeout),
-        _ => QueryError::Io(error),
-    };
     tty.write_all(QUERY).map_err(QueryError::Io)?;
     tty.flush().map_err(QueryError::Io)?;
-    let mut reader = BufReader::with_capacity(64, tty);
-    let mut reply = |prefix: &[u8]| -> Result<Rgb, QueryError> {
-        read_reply(&mut reader, prefix).map_err(|error| match error {
-            QueryError::Io(io) => timed_out(io),
-            other => other,
-        })
-    };
-    let fg = reply(b"10;")?;
-    let bg = reply(b"11;")?;
-    let cyan = reply(b"4;6;")?;
-    // The fence's reply is still in flight; read it so it never reaches the shell.
-    skip_fence(&mut reader, true).map_err(timed_out)?;
-    Ok(Palette { fg, bg, cyan })
+    let bytes = read_through_fence(tty).map_err(|error| match error.kind() {
+        io::ErrorKind::TimedOut => QueryError::TimedOut(timeout),
+        _ => QueryError::Io(error),
+    })?;
+    parse_replies(&bytes)
 }
 
-fn read_byte(reader: &mut impl BufRead) -> io::Result<u8> {
+/// One byte per read, so nothing past the fence's final `c` is consumed: whatever the
+/// user types after it stays theirs.
+fn read_byte(reader: &mut impl Read) -> io::Result<u8> {
     let mut byte = [0u8];
     reader.read_exact(&mut byte)?;
     Ok(byte[0])
 }
 
-/// One `ESC ] <prefix><color> (BEL | ESC \)` reply, or `Unsupported` if the fence
-/// (`ESC [ … c`) comes first.
-fn read_reply(reader: &mut impl BufRead, prefix: &[u8]) -> Result<Rgb, QueryError> {
-    while read_byte(reader).map_err(QueryError::Io)? != ESC {}
-    match read_byte(reader).map_err(QueryError::Io)? {
-        b']' => {}
-        b'[' => {
-            skip_fence(reader, false).map_err(QueryError::Io)?;
-            return Err(QueryError::Unsupported);
-        }
-        other => return Err(QueryError::Unparsable(format!("ESC {:?}", other as char))),
-    }
-    let mut body = Vec::new();
+/// Everything the terminal sends up to and including the fence's reply, `ESC [ … c`.
+/// Color replies never contain `ESC [` (they end in BEL or `ESC \`), and the fence's
+/// parameters are digits and `;`, so its first `c` ends it.
+fn read_through_fence(reader: &mut impl Read) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let mut in_fence = false;
     loop {
-        match read_byte(reader).map_err(QueryError::Io)? {
-            BEL => break,
-            ESC => {
-                if read_byte(reader).map_err(QueryError::Io)? != b'\\' {
-                    return Err(QueryError::Unparsable(String::from_utf8_lossy(&body).into()));
-                }
-                break;
+        let byte = read_byte(reader)?;
+        bytes.push(byte);
+        if in_fence {
+            if byte == b'c' {
+                return Ok(bytes);
             }
-            byte => body.push(byte),
+        } else if bytes.ends_with(&[ESC, b'[']) {
+            in_fence = true;
         }
     }
-    let unparsable = || QueryError::Unparsable(String::from_utf8_lossy(&body).into_owned());
+}
+
+/// The three color replies in `bytes`, which end with the fence. Fewer than three
+/// replies before the fence means the terminal skipped a query it does not support.
+fn parse_replies(bytes: &[u8]) -> Result<Palette, QueryError> {
+    let bodies = osc_bodies(bytes)?;
+    match bodies.as_slice() {
+        [fg, bg, cyan] => Ok(Palette {
+            fg: reply_color(fg, b"10;")?,
+            bg: reply_color(bg, b"11;")?,
+            cyan: reply_color(cyan, b"4;6;")?,
+        }),
+        fewer if fewer.len() < 3 => Err(QueryError::Unsupported),
+        _ => Err(QueryError::Unparsable(format!(
+            "{} replies to three queries",
+            bodies.len()
+        ))),
+    }
+}
+
+fn lossy(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// The bodies of the `ESC ] <body> (BEL | ESC \)` replies before the fence, in order.
+fn osc_bodies(bytes: &[u8]) -> Result<Vec<&[u8]>, QueryError> {
+    let mut bodies = Vec::new();
+    let mut rest = bytes;
+    loop {
+        let at = rest
+            .iter()
+            .position(|&byte| byte == ESC)
+            .ok_or_else(|| QueryError::Unparsable(lossy(rest)))?;
+        match rest.get(at + 1) {
+            Some(b'[') => return Ok(bodies),
+            Some(b']') => {
+                let body = &rest[at + 2..];
+                let end = body
+                    .iter()
+                    .position(|&byte| byte == BEL || byte == ESC)
+                    .ok_or_else(|| QueryError::Unparsable(lossy(body)))?;
+                let terminator = match (body[end], body.get(end + 1)) {
+                    (BEL, _) => 1,
+                    (ESC, Some(b'\\')) => 2,
+                    // An unterminated reply runs into the next escape.
+                    _ => return Err(QueryError::Unparsable(lossy(&body[..end]))),
+                };
+                bodies.push(&body[..end]);
+                rest = &body[end + terminator..];
+            }
+            _ => return Err(QueryError::Unparsable(lossy(&rest[at..]))),
+        }
+    }
+}
+
+fn reply_color(body: &[u8], prefix: &[u8]) -> Result<Rgb, QueryError> {
+    let unparsable = || QueryError::Unparsable(lossy(body));
     let color = body.strip_prefix(prefix).ok_or_else(unparsable)?;
     let color = xterm_color::Color::parse(color).map_err(|_| unparsable())?;
     Ok(Rgb {
@@ -1148,15 +1233,6 @@ fn read_reply(reader: &mut impl BufRead, prefix: &[u8]) -> Result<Rgb, QueryErro
         g: (color.green >> 8) as u8,
         b: (color.blue >> 8) as u8,
     })
-}
-
-/// Reads through the DA1 reply's final `c`; `from_start` also skips to its `ESC [`.
-fn skip_fence(reader: &mut impl BufRead, from_start: bool) -> io::Result<()> {
-    if from_start {
-        while read_byte(reader)? != ESC {}
-    }
-    while read_byte(reader)? != b'c' {}
-    Ok(())
 }
 
 impl Palette {
@@ -1187,6 +1263,11 @@ struct Timed<T> {
 impl<T: Read + std::os::fd::AsRawFd> Read for Timed<T> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let left = self.deadline.saturating_duration_since(Instant::now());
+        // `poll` with a zero timeout still reports ready input, so a terminal streaming
+        // garbage would outlast the deadline unless it is checked here.
+        if left.is_zero() {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "terminal did not answer"));
+        }
         let millis = left.as_millis().min(i32::MAX as u128) as libc::c_int;
         let mut fd = libc::pollfd {
             fd: self.inner.as_raw_fd(),
