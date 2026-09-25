@@ -1,17 +1,19 @@
 ---
 id: tasks-142d2f
 title: Pretty date columns carry a continuous recency colorscale
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: planned
 owner: feat/date-colors
 created: 2026-09-25T10:47:15Z
-updated: 2026-09-25T11:56:19Z
+updated: 2026-09-25T12:25:52Z
 started: 2026-09-25T10:47:20Z
+completed: 2026-09-25T12:25:52Z
 depends: []
 tags: [cli]
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-09-25-date-recency-color-design.md
 plan: docs/plans/2026-09-25-date-recency-color.md
@@ -37,4 +39,10 @@ In --pretty, color each date column on a continuous scale by age: today is fully
 - 2026-09-25T11:43:35Z (feat/date-colors): resumed
   provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-25T11:56:19Z (feat/date-colors): parked (waiting on user, review): User runs the Task 4 kitty check (see tasks-5a2551); then the agent closes the plan and merges feat/date-colors
+  provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T12:25:52Z (feat/date-colors): resumed
+  provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T12:25:52Z (feat/date-colors): done
+  provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T12:25:52Z (feat/date-colors): Pretty date columns fade by age from the terminal's cyan to a dimmed foreground, read by OSC query when stdout is a terminal (type-ahead left queued) or from TASKS_PALETTE
   provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

@@ -1,6 +1,6 @@
 # Recency color for pretty date columns — design
 
-**Status:** draft (2026-09-25), tasks-142d2f. Amends docs/specs/2026-09-03-color-output-design.md
+**Status:** implemented (2026-09-25), tasks-142d2f; see docs/plans/2026-09-25-date-recency-color.md. Amends docs/specs/2026-09-03-color-output-design.md
 §2 ("no 256-color or truecolor values") and §6 for date columns only.
 
 ## 1. Problem
