@@ -1,15 +1,16 @@
 ---
 id: tasks-92757e
 title: Pretty priority column carries a three-level magenta scale
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: planned
 owner: feat/priority-color
 created: 2026-09-25T12:27:49Z
-updated: 2026-09-25T14:23:09Z
+updated: 2026-09-25T14:24:41Z
 started: 2026-09-25T12:56:52Z
+completed: 2026-09-25T14:24:41Z
 depends: []
 tags: [cli]
 source: tasks-142d2f follow-up
@@ -48,4 +49,10 @@ Paint P1-P3 in three steps of the terminal theme's magenta (palette slot 5), str
 - 2026-09-25T14:21:22Z (feat/priority-color): user chose ramp B: priority end = fg mixed 0.75 toward bg (own end, no longer the date old end), steps P1 0, P2 1/3, P3 2/3, P4 1
 - 2026-09-25T14:23:08Z (feat/priority-color): ramp B landed: PRIORITY_TOWARD_BACKGROUND 0.75, steps 0/0/1/3/2/3/1; just gate green (286 + 369)
 - 2026-09-25T14:23:09Z (feat/priority-color): parked (waiting on user, review): after the user's second kitty check (ramp B): agent closes tasks-006dfe then this task, deletes the sdd workspace, runs finishing-a-development-branch for feat/priority-color
+  provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T14:24:41Z (feat/priority-color): resumed
+  provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T14:24:41Z (feat/priority-color): done
+  provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T14:24:41Z (feat/priority-color): priority column paints on the theme's magenta scale: P0 bold, P1 magenta, even steps to fg mixed 0.75 toward bg at P4; slot 5 in the query, optional magenta in TASKS_PALETTE, bold P0/P1 without the theme
   provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
