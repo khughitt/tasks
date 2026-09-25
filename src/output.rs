@@ -860,23 +860,34 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             &o.tasks,
             o.date,
             painter,
+            id_width(o.tasks.iter().map(|row| row.id.as_str())),
             any_parallel(&o.tasks),
             any_type(&o.tasks),
         ),
-        Output::Parked(o) => parked_table(&o.tasks, painter),
-        Output::Quiet(o) => quiet_briefs(&o.tasks, painter),
-        Output::Claims(o) => o
-            .claims
-            .iter()
-            .map(|row| {
-                let live = if row.claim.live { "live" } else { "stale" };
-                format!(
-                    "{}  {}  {}  {}",
-                    row.id, row.claim.session, live, row.claim.worktree
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
+        Output::Parked(o) => parked_table(
+            &o.tasks,
+            painter,
+            id_width(o.tasks.iter().map(|row| row.id.as_str())),
+        ),
+        Output::Quiet(o) => quiet_briefs(
+            &o.tasks,
+            painter,
+            id_width(o.tasks.iter().map(|row| row.id.as_str())),
+        ),
+        Output::Claims(o) => {
+            let width = id_width(o.claims.iter().map(|row| row.id.as_str()));
+            o.claims
+                .iter()
+                .map(|row| {
+                    let live = if row.claim.live { "live" } else { "stale" };
+                    format!(
+                        "{:<width$}  {}  {}  {}",
+                        row.id, row.claim.session, live, row.claim.worktree
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
         Output::Prime(o) => {
             // One decision for the whole output: prime's blocks align today only because
             // every width is fixed, and a per-section decision would break that.
@@ -888,6 +899,15 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 || any_type_tree(&o.roadmap)
                 || any_type(&o.ready)
                 || any_type(&o.doing);
+            let id_width = id_width(
+                o.closeout
+                    .iter()
+                    .chain(&o.ready)
+                    .chain(&o.doing)
+                    .map(|row| row.id.as_str())
+                    .chain(o.parked.iter().map(|row| row.id.as_str())),
+            )
+            .max(id_width_tree(&o.roadmap));
             let header = match &o.prefix {
                 Some(prefix) => format!("project {prefix}"),
                 None => format!("projects {}", o.projects.join(", ")),
@@ -947,6 +967,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 &o.closeout,
                 DateColumn::Updated,
                 painter,
+                id_width,
                 parallel_column,
                 type_column,
             ));
@@ -963,6 +984,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                         std::slice::from_ref(node),
                         0,
                         painter,
+                        id_width,
                         parallel_column,
                         type_column,
                     ));
@@ -973,6 +995,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                         std::slice::from_ref(&node.summary),
                         DateColumn::Updated,
                         painter,
+                        id_width,
                         parallel_column,
                         type_column,
                     ));
@@ -985,12 +1008,13 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "parked:")
             ));
-            rendered.push_str(&parked_table(&o.parked, painter));
+            rendered.push_str(&parked_table(&o.parked, painter, id_width));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "ready:")));
             rendered.push_str(&table(
                 &o.ready,
                 DateColumn::Updated,
                 painter,
+                id_width,
                 parallel_column,
                 type_column,
             ));
@@ -999,6 +1023,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 &o.doing,
                 DateColumn::Updated,
                 painter,
+                id_width,
                 parallel_column,
                 type_column,
             ));
@@ -1025,6 +1050,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             &o.nodes,
             0,
             painter,
+            id_width_tree(&o.nodes),
             any_parallel_tree(&o.nodes),
             any_type_tree(&o.nodes),
         ),
@@ -1182,6 +1208,7 @@ fn tree_text(
     nodes: &[TreeNode],
     depth: usize,
     painter: &Painter,
+    id_width: usize,
     parallel_column: bool,
     type_column: bool,
 ) -> String {
@@ -1191,6 +1218,7 @@ fn tree_text(
             std::slice::from_ref(&node.summary),
             DateColumn::Updated,
             painter,
+            id_width,
             parallel_column,
             type_column,
         );
@@ -1200,6 +1228,7 @@ fn tree_text(
             &node.children,
             depth + 1,
             painter,
+            id_width,
             parallel_column,
             type_column,
         ));
@@ -1240,12 +1269,28 @@ pub fn any_type_tree(nodes: &[TreeNode]) -> bool {
         .any(|node| type_letter(&node.summary).is_some() || any_type_tree(&node.children))
 }
 
+/// The id column's width: the longest id in the output. Same once-per-output rule as
+/// `any_parallel`. One project's ids share a length, but `--all-projects` mixes prefixes,
+/// and an unpadded id shifts every later column of its row.
+fn id_width<'a>(ids: impl IntoIterator<Item = &'a str>) -> usize {
+    ids.into_iter().map(str::len).max().unwrap_or(0)
+}
+
+fn id_width_tree(nodes: &[TreeNode]) -> usize {
+    nodes
+        .iter()
+        .map(|node| node.summary.id.len().max(id_width_tree(&node.children)))
+        .max()
+        .unwrap_or(0)
+}
+
 /// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every width-sensitive
 /// field is formatted to its final visible width before the painter wraps it.
 pub fn table(
     rows: &[TaskSummary],
     date: DateColumn,
     painter: &Painter,
+    id_width: usize,
     parallel_column: bool,
     type_column: bool,
 ) -> String {
@@ -1264,7 +1309,7 @@ pub fn table(
                 (None, None) => "-".into(),
             },
         };
-        let id = painter.paint(Style::Chrome, &row.id);
+        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
         let priority = format!("P{}", row.priority);
         let priority = if row.priority <= 1 {
             painter.paint(Style::Emphasis, &priority)
@@ -1345,13 +1390,13 @@ pub fn table(
     rendered
 }
 
-pub fn parked_table(rows: &[ParkedRow], painter: &Painter) -> String {
+pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> String {
     let mut rendered = String::new();
     for row in rows {
         let Some(park) = &row.park else {
             continue;
         };
-        let id = painter.paint(Style::Chrome, &row.id);
+        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
         let status = match row.status {
             Some(status) => {
                 painter.paint(Style::Status(status), &format!("{:<7}", status.as_str()))
@@ -1376,7 +1421,7 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter) -> String {
     rendered
 }
 
-pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter) -> String {
+pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> String {
     let mut rendered = String::new();
     for (index, row) in rows.iter().enumerate() {
         let Some(park) = &row.park else {
@@ -1385,7 +1430,7 @@ pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter) -> String {
         if index > 0 {
             rendered.push('\n');
         }
-        let id = painter.paint(Style::Chrome, &row.id);
+        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
         let priority = match row.priority {
             Some(priority) => format!("P{priority}"),
             None => "P-".into(),
@@ -1532,7 +1577,7 @@ mod tests {
     fn the_marker_column_is_absent_when_nothing_is_marked() {
         let rows = [row("xx-000001", false), row("xx-000002", false)];
         assert!(!any_parallel(&rows));
-        let text = table(&rows, DateColumn::Updated, &plain(), false, false);
+        let text = table(&rows, DateColumn::Updated, &plain(), 0, false, false);
         assert!(!text.contains("||"), "{text}");
         assert!(text.contains("todo    2026-09-06"), "{text}");
     }
@@ -1541,7 +1586,7 @@ mod tests {
     fn the_type_column_is_absent_when_nothing_recurs() {
         let rows = [row("xx-000001", false), row("xx-000002", false)];
         assert!(!any_type(&rows));
-        let text = table(&rows, DateColumn::Updated, &plain(), false, false);
+        let text = table(&rows, DateColumn::Updated, &plain(), 0, false, false);
         assert!(!text.contains(" p "), "{text}");
         assert!(text.contains("todo    2026-09-06"), "{text}");
     }
@@ -1550,7 +1595,7 @@ mod tests {
     fn a_recurring_row_carries_the_type_letter_and_keeps_its_neighbour_aligned() {
         let rows = [recurring("xx-000001"), row("xx-000002", false)];
         assert!(any_type(&rows));
-        let text = table(&rows, DateColumn::Updated, &plain(), false, true);
+        let text = table(&rows, DateColumn::Updated, &plain(), 0, false, true);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
         assert!(lines[0].contains("todo    p 2026-09-06"), "{}", lines[0]);
@@ -1566,7 +1611,7 @@ mod tests {
     fn the_type_letter_is_painted_but_still_ascii() {
         let rows = [recurring("xx-000001")];
         let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
-        let text = table(&rows, DateColumn::Updated, &colored, false, true);
+        let text = table(&rows, DateColumn::Updated, &colored, 0, false, true);
         assert!(text.contains("\x1b[1mp\x1b[0m "), "{text:?}");
     }
 
@@ -1598,11 +1643,31 @@ mod tests {
             },
         ];
         assert!(any_parallel_tree(&nodes));
-        let text = tree_text(&nodes, 0, &plain(), true, false);
+        let text = tree_text(&nodes, 0, &plain(), 0, true, false);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
         assert!(lines[0].contains("todo    || 2026-09-06"), "{}", lines[0]);
         assert!(lines[1].contains("todo       2026-09-06"), "{}", lines[1]);
+        assert_eq!(
+            lines[0].find("2026-09-06"),
+            lines[1].find("2026-09-06"),
+            "dates must land in the same column:\n{text}"
+        );
+    }
+
+    #[test]
+    fn ids_of_different_lengths_share_one_column() {
+        // `--all-projects` mixes prefixes, so ids differ in length; the id column must
+        // be as wide as the longest one, or every later column shifts per row.
+        let out = Output::List(ListOut {
+            tasks: vec![row("forge-0e720e", false), row("nrp-8e8fde", false)],
+            warnings: vec![],
+            date: DateColumn::Updated,
+        });
+        let text = pretty(&out, &plain());
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2, "{text}");
+        assert!(lines[1].starts_with("nrp-8e8fde    P2"), "{}", lines[1]);
         assert_eq!(
             lines[0].find("2026-09-06"),
             lines[1].find("2026-09-06"),
