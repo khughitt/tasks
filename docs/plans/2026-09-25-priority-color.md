@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Amended after the kitty check (2026-09-25):** the steps and end below were replaced by
+> spec §2 / §2.4: P2 1/3, P3 2/3, P4 1, toward the foreground mixed 0.75 toward the
+> background (not `Palette::old`). Test palette SGRs are now P2 `38;2;163;88;159`,
+> P3 `38;2;112;78;106`, P4 `38;2;64;64;56`. The rest of the plan stands as executed.
+
 **Goal:** In colored `--pretty` output, paint each priority on a scale from the terminal theme's magenta (P0 bold, P1) to the date scale's dimmed foreground (P4), keeping today's bold P0/P1 wherever the theme's colors are unknown.
 
 **Architecture:** `src/palette.rs` gains an optional `magenta` (from `TASKS_PALETTE`, or always from the terminal query, which now asks for slot 5) and owns the shared old end as `Palette::old`. `src/style.rs` gains a `Style::Priority(u8)` role and a `PriorityScale` the painter may carry; without one the role renders today's bold P0/P1. `src/output.rs` paints every priority through the role, and `src/main.rs` attaches the scale when the palette has a magenta, warning when a view that shows priorities cannot have it.

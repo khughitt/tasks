@@ -1756,7 +1756,7 @@ mod tests {
             lines[0]
         );
         assert!(
-            lines[1].contains("\x1b[38;2;171;115;165mP2\x1b[0m"),
+            lines[1].contains("\x1b[38;2;163;88;159mP2\x1b[0m"),
             "{:?}",
             lines[1]
         );

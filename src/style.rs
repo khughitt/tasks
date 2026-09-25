@@ -110,9 +110,14 @@ impl Recency {
     }
 }
 
-/// How far each priority, P0 to P4, sits from magenta toward the old end. P0 and P1 share
-/// a color; bold sets P0 apart. P2 is the default and the bulk, so it sits halfway.
-const PRIORITY_STEPS: [f64; 5] = [0.0, 0.0, 0.5, 0.8, 1.0];
+/// How far each priority, P0 to P4, sits from magenta toward the scale's end, in even
+/// steps. P0 and P1 share a color; bold sets P0 apart.
+const PRIORITY_STEPS: [f64; 5] = [0.0, 0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
+
+/// How far the priority scale's end sits from the foreground toward the background.
+/// Dimmer than the date scale's old end: magenta and that end are close in lightness,
+/// which left P1 to P3 hard to tell apart.
+const PRIORITY_TOWARD_BACKGROUND: f64 = 0.75;
 
 /// The five priority colors, fixed for one run.
 #[derive(Debug, Clone, Copy)]
@@ -122,9 +127,9 @@ pub struct PriorityScale {
 
 impl PriorityScale {
     pub fn new(magenta: Rgb, palette: &Palette) -> PriorityScale {
-        let old = palette.old();
+        let end = palette.fg.mix(palette.bg, PRIORITY_TOWARD_BACKGROUND);
         PriorityScale {
-            steps: PRIORITY_STEPS.map(|t| magenta.mix(old, t)),
+            steps: PRIORITY_STEPS.map(|t| magenta.mix(end, t)),
         }
     }
 
@@ -359,27 +364,28 @@ mod tests {
     fn the_priority_scale_samples_the_mix_at_fixed_steps() {
         let palette = palette();
         let scale = PriorityScale::new(magenta(), &palette);
-        let old = palette.old();
+        // Its own end, dimmer than the date scale's, so the steps sit apart.
+        let end = palette.fg.mix(palette.bg, 0.75);
         assert_eq!(scale.color(0), magenta());
         assert_eq!(scale.color(1), magenta());
-        assert_eq!(scale.color(2), magenta().mix(old, 0.5));
-        assert_eq!(scale.color(3), magenta().mix(old, 0.8));
-        assert_eq!(scale.color(4), old);
+        assert_eq!(scale.color(2), magenta().mix(end, 1.0 / 3.0));
+        assert_eq!(scale.color(3), magenta().mix(end, 2.0 / 3.0));
+        assert_eq!(scale.color(4), end);
         // The reference values the end-to-end tests pin.
         assert_eq!(
             scale.color(2),
             Rgb {
-                r: 171,
-                g: 115,
-                b: 165
+                r: 163,
+                g: 88,
+                b: 159
             }
         );
         assert_eq!(
             scale.color(3),
             Rgb {
-                r: 144,
-                g: 122,
-                b: 135
+                r: 112,
+                g: 78,
+                b: 106
             }
         );
     }
@@ -417,7 +423,7 @@ mod tests {
         );
         assert_eq!(
             scaled.paint(Style::Priority(4), "P4"),
-            "\x1b[38;2;125;125;115mP4\x1b[0m"
+            "\x1b[38;2;64;64;56mP4\x1b[0m"
         );
 
         let off = Painter::new(ColorMode::Never, Format::Pretty, true)

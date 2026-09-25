@@ -100,7 +100,7 @@ fn from_oklab([l, a, b]: [f64; 3]) -> Rgb {
     }
 }
 
-/// How far the old end of both scales sits from the foreground toward the background.
+/// How far the date scale's old end sits from the foreground toward the background.
 const OLD_TOWARD_BACKGROUND: f64 = 0.45;
 
 /// The theme colors the date and priority scales need. `magenta` is `None` only from a
@@ -160,7 +160,8 @@ impl Palette {
         }
     }
 
-    /// The faded end both scales run toward: the foreground dimmed toward the background.
+    /// The faded end the date scale runs toward: the foreground dimmed toward the
+    /// background.
     pub fn old(&self) -> Rgb {
         self.fg.mix(self.bg, OLD_TOWARD_BACKGROUND)
     }

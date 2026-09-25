@@ -5991,9 +5991,9 @@ fn colored_list_paints_priorities_on_the_magenta_scale() {
     let text = String::from_utf8(out.stdout).unwrap();
     for code in [
         "\x1b[38;2;215;95;215mP1\x1b[0m",
-        "\x1b[38;2;171;115;165mP2\x1b[0m",
-        "\x1b[38;2;144;122;135mP3\x1b[0m",
-        "\x1b[38;2;125;125;115mP4\x1b[0m",
+        "\x1b[38;2;163;88;159mP2\x1b[0m",
+        "\x1b[38;2;112;78;106mP3\x1b[0m",
+        "\x1b[38;2;64;64;56mP4\x1b[0m",
     ] {
         assert!(text.contains(code), "missing {code:?}: {text:?}");
     }
@@ -16761,7 +16761,7 @@ fn colored_quiet_paints_the_park_date_by_recency() {
         "a park minutes old is full cyan: {text:?}"
     );
     assert!(
-        text.contains("\x1b[38;2;171;115;165mP2\x1b[0m"),
+        text.contains("\x1b[38;2;163;88;159mP2\x1b[0m"),
         "the brief's priority takes the scale: {text:?}"
     );
     assert!(

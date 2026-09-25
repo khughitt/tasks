@@ -367,10 +367,10 @@ color selected through the environment, and an explicit `--color` overrides it.
 
 With color on, date columns fade by age: today in the terminal theme's cyan, older dates
 toward a dimmed foreground, anything two years or more away the same. Priorities take the
-theme's magenta: P0 bold, P1 full, P2 and P3 fading, P4 at the same dimmed foreground. The
-colors are read from the terminal itself (foreground, background and palette slots 5 and
-6), and only when stdout is a terminal, since a pager reading the same terminal would race
-the query. For piped output, a terminal that does not answer, or ends of your own, set
+theme's magenta: P0 bold, P1 full, then even steps down to a deeply dimmed foreground at
+P4. The colors are read from the terminal itself (foreground, background and palette
+slots 5 and 6), and only when stdout is a terminal, since a pager reading the same
+terminal would race the query. For piped output, a terminal that does not answer, or ends of your own, set
 `TASKS_PALETTE="fg=#rrggbb bg=#rrggbb cyan=#rrggbb magenta=#rrggbb"` (`magenta` may be
 left out, which keeps priorities bold at P0 and P1); otherwise dates print plain,
 priorities bold at P0 and P1, with one warning saying why.
