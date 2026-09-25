@@ -158,6 +158,8 @@ pub enum QueryError {
     /// stdout is redirected, so the terminal is not asked (spec §3.2).
     NotAsked,
     NoTerminal,
+    /// Keys typed ahead were waiting; querying would consume them (see `query`).
+    TypeAhead,
     TimedOut(Duration),
     Unsupported,
     Unparsable(String),
@@ -169,6 +171,7 @@ impl fmt::Display for QueryError {
         match self {
             QueryError::NotAsked => f.write_str("stdout is not a terminal"),
             QueryError::NoTerminal => f.write_str("no terminal to ask"),
+            QueryError::TypeAhead => f.write_str("keys were waiting in the terminal's input"),
             QueryError::TimedOut(after) => write!(f, "timed out after {} ms", after.as_millis()),
             QueryError::Unsupported => f.write_str("answered without the colors"),
             QueryError::Unparsable(reply) => write!(f, "unparsable reply {reply:?}"),
@@ -298,18 +301,36 @@ impl Palette {
     /// Asks the controlling terminal (never stdout) for its colors, in raw mode, bounded
     /// by `timeout`. The raw-mode guard restores the terminal when it drops, on every path.
     pub fn query(timeout: Duration) -> Result<Palette, QueryError> {
+        use std::os::fd::AsRawFd as _;
         let mut terminal = terminal_trx::terminal().map_err(|_| QueryError::NoTerminal)?;
         if !terminal.has_connected_stdio_stream() {
             return Err(QueryError::NoTerminal);
         }
         let mut lock = terminal.lock();
         let raw = lock.enable_raw_mode().map_err(QueryError::Io)?;
+        // Raw mode makes type-ahead readable, and the reply reader would take it for
+        // stray bytes and drop it: a user typing the next command while this one ran
+        // would lose those keys. Nothing can push them back, so when any are waiting
+        // the query is not sent, and they stay queued for the shell when raw mode ends.
+        if pending_input(raw.as_raw_fd()).map_err(QueryError::Io)? > 0 {
+            return Err(QueryError::TypeAhead);
+        }
         let mut timed = Timed {
             inner: raw,
             deadline: Instant::now() + timeout,
         };
         exchange(&mut timed, timeout)
     }
+}
+
+/// How many bytes are waiting to be read on `fd`.
+fn pending_input(fd: std::os::fd::RawFd) -> io::Result<usize> {
+    let mut waiting: libc::c_int = 0;
+    // SAFETY: FIONREAD writes one c_int through the pointer, which is valid for the call.
+    if unsafe { libc::ioctl(fd, libc::FIONREAD, &mut waiting) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(waiting as usize)
 }
 
 /// A terminal whose reads fail with `TimedOut` once the deadline passes, so a silent
@@ -635,8 +656,22 @@ mod tests {
     }
 
     #[test]
+    fn pending_input_counts_bytes_waiting_to_be_read() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+        let (mut terminal, ours) = UnixStream::pair().unwrap();
+        assert_eq!(pending_input(ours.as_raw_fd()).unwrap(), 0);
+        terminal.write_all(b"ls\r").unwrap();
+        assert_eq!(pending_input(ours.as_raw_fd()).unwrap(), 3);
+    }
+
+    #[test]
     fn the_reasons_read_as_the_spec_words_them() {
         assert_eq!(QueryError::NotAsked.to_string(), "stdout is not a terminal");
         assert_eq!(QueryError::NoTerminal.to_string(), "no terminal to ask");
+        assert_eq!(
+            QueryError::TypeAhead.to_string(),
+            "keys were waiting in the terminal's input"
+        );
     }
 }

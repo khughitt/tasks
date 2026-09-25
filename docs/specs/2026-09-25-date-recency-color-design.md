@@ -144,8 +144,16 @@ dates without color, exactly as today, and one line goes to stderr:
 warning: date colors off: the terminal did not report its colors (timed out after 300 ms); set TASKS_PALETTE to supply them
 ```
 
-The parenthesis names what happened: stdout is not a terminal, timed out, answered without
-the colors, unparsable reply, or no terminal to ask. Everything else in the output keeps
+The parenthesis names what happened: stdout is not a terminal, keys were waiting in the
+terminal's input, timed out, answered without the colors, unparsable reply, or no terminal
+to ask.
+
+**Type-ahead is never consumed.** Raw mode makes keys typed while the command ran readable,
+and the reply reader would take them for stray bytes and drop them; nothing can push them
+back. So after entering raw mode and before writing the query, the terminal's input queue
+is checked (`FIONREAD`): if anything is waiting, the query is not sent and the keys stay
+queued for the shell. Keys typed during the few milliseconds the exchange itself takes are
+still read and dropped. (Added from the final branch review.) Everything else in the output keeps
 its color. Nothing falls back silently to other colors.
 
 ### 3.3 `TASKS_PALETTE`
