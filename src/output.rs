@@ -841,7 +841,9 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 // why instead of printing a dash the eye would skip.
                 cells.push(match (&row.counts, &row.last_activity) {
                     (None, _) => cell("unreachable", Align::Left, Some(Style::Error)),
-                    (Some(_), Some(at)) => cell(crate::time::day(at), Align::Left, None),
+                    (Some(_), Some(at)) => {
+                        cell(crate::time::day(at), Align::Left, Some(date_role(at)))
+                    }
                     (Some(_), None) => cell("-", Align::Left, Some(Style::Chrome)),
                 });
                 if o.paths {
@@ -1441,10 +1443,10 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> S
             row.phase.map(crate::model::Phase::as_str).unwrap_or("-")
         );
         let process = row.process.map(Process::as_str).unwrap_or("-");
+        let parked = painter.paint(date_role(&park.at), crate::time::day(&park.at));
         rendered.push_str(&format!(
-            "{id}  {status} {process:<7} {phase} waits on {:<18} {}  {}\n",
+            "{id}  {status} {process:<7} {phase} waits on {:<18} {parked}  {}\n",
             crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes),
-            crate::time::day(&park.at),
             row.title
         ));
         rendered
@@ -1473,9 +1475,9 @@ pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> S
             Some(minutes) => format!("{minutes} min"),
             None => "-".into(),
         };
+        let parked = painter.paint(date_role(&park.at), crate::time::day(&park.at));
         rendered.push_str(&format!(
-            "{id}  {priority}  {needs:<8}  {minutes:>8}  parked {}  {}\n",
-            crate::time::day(&park.at),
+            "{id}  {priority}  {needs:<8}  {minutes:>8}  parked {parked}  {}\n",
             row.title
         ));
         rendered

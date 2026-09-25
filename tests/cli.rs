@@ -6544,9 +6544,9 @@ fn projects_pretty_paints_counts_by_status_and_dims_zeros() {
     assert!(row.contains("\u{1b}[34m   1\u{1b}[0m"), "{row:?}");
     // blocked is 0: dimmed whatever the column, so a red 0 does not read as an alarm
     assert!(row.contains("\u{1b}[2m      0\u{1b}[0m"), "{row:?}");
-    // total and activity carry no status, so nothing after the last reset is painted
-    let tail = row.rsplit("\u{1b}[0m").next().unwrap();
-    assert!(tail.starts_with("      1  2"), "{row:?}");
+    // total carries no status; activity is a date and takes the recency role
+    assert!(row.contains("      1  \x1b[38;2;0;215;255m"), "{row:?}");
+    assert!(row.ends_with("\x1b[0m"), "{row:?}");
 }
 
 #[test]
@@ -16644,4 +16644,27 @@ fn a_malformed_palette_is_a_config_error_whenever_set() {
             "{args:?}: {detail}"
         );
     }
+}
+
+#[test]
+fn colored_parked_paints_the_park_date() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Paused"]));
+    env.json(&dir, &["start", &id]);
+    env.json(&dir, &["park", &id, "resume the thing"]);
+    let out = env
+        .cmd(&dir)
+        .args(["--pretty", "--color", "always", "list", "--parked"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    let today = env.json(&dir, &["show", &id])["task"]["updated"]
+        .as_str()
+        .unwrap()[..10]
+        .to_string();
+    assert!(
+        text.contains(&format!("\x1b[38;2;0;215;255m{today}\x1b[0m")),
+        "{text:?}"
+    );
 }
