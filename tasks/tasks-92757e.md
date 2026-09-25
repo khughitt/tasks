@@ -8,12 +8,13 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-25T12:27:49Z
-updated: 2026-09-25T12:56:52Z
+updated: 2026-09-25T12:59:58Z
 started: 2026-09-25T12:56:52Z
 depends: []
 tags: [cli]
 source: tasks-142d2f follow-up
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-09-25-priority-color-design.md
 ---
 
 Paint P1-P3 in three steps of the terminal theme's magenta (palette slot 5), strongest at P1 and fading toward the dimmed foreground, reusing the date scale's Recency/OKLab machinery (docs/specs/2026-09-25-date-recency-color-design.md). Replaces today's bold on P0/P1. Design questions: what P0 and P4 get (P0 full magenta + bold? P4 plain?); the query gains OSC 4;5, and TASKS_PALETTE gains a magenta key, which must not turn existing three-key values into config errors; whether the ramp is three fixed mixes or the same continuous function sampled at three points.
@@ -22,3 +23,4 @@ Paint P1-P3 in three steps of the terminal theme's magenta (palette slot 5), str
 
 - 2026-09-25T12:56:52Z (main): started
   provenance: {"harness_session":"claude-code:b8004ec1-87da-42d9-a0c8-3e5a4376d3be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-25T12:59:58Z (feat/priority-color): spec drafted: P0 magenta+bold, P1 magenta, P2 0.5, P3 0.8, P4 dimmed fg; magenta optional in TASKS_PALETTE with a warning when absent; no-scale look keeps P0/P1 bold
