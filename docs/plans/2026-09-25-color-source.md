@@ -230,8 +230,6 @@ fn list_on_pty(env: &TestEnv, dir: &std::path::Path, theme: Option<&str>) -> Str
             libc::fcntl(slave.as_raw_fd(), libc::F_GETFD) | libc::FD_CLOEXEC,
         )
     };
-    let out = unsafe { libc::dup(slave.as_raw_fd()) };
-    let err = unsafe { libc::dup(slave.as_raw_fd()) };
     let master = unsafe { OwnedFd::from_raw_fd(master_fd) };
     // Non-blocking before spawn: a failure here involves no child to clean up, and
     // an undetected failure would leave the first read blocking past the deadline.
@@ -248,9 +246,11 @@ fn list_on_pty(env: &TestEnv, dir: &std::path::Path, theme: Option<&str>) -> Str
         "making the master non-blocking failed"
     );
     let mut command = env.raw(dir);
+    // `try_clone` checks the duplication and owns each descriptor immediately; no
+    // unchecked raw duplicate can slip a `-1` into `from_raw_fd`.
     command
-        .stdout(unsafe { Stdio::from_raw_fd(out) })
-        .stderr(unsafe { Stdio::from_raw_fd(err) })
+        .stdout(Stdio::from(slave.try_clone().unwrap()))
+        .stderr(Stdio::from(slave.try_clone().unwrap()))
         .env_remove("TASKS_PALETTE")
         .env_remove("TASKS_THEME");
     if let Some(theme) = theme {
@@ -277,7 +277,7 @@ fn list_on_pty(env: &TestEnv, dir: &std::path::Path, theme: Option<&str>) -> Str
     command.args(["--pretty", "--color", "always", "list"]);
     let mut child = command.spawn().unwrap();
     // The child has inherited what it needs; the parent's copy of `slave` must go,
-    // and `command` still owns the dup'd slave descriptors, so it goes too —
+    // and `command` still owns the cloned slave descriptors, so it goes too —
     // otherwise the master never sees EOF and the loop only ends at the deadline.
     drop(slave);
     drop(command);
