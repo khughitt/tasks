@@ -100,6 +100,28 @@ fn from_oklab([l, a, b]: [f64; 3]) -> Rgb {
     }
 }
 
+/// Where the pretty scales' colors come from, chosen by `TASKS_THEME`
+/// (docs/specs/2026-09-25-color-source-design.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeSource {
+    /// The terminal theme: `TASKS_PALETTE` if set, else the OSC query.
+    Terminal,
+    /// The palette tasks ships; no query, and `TASKS_PALETTE` still wins over it.
+    BuiltIn,
+}
+
+impl ThemeSource {
+    pub fn parse(value: &str) -> crate::error::Result<ThemeSource> {
+        match value {
+            "terminal" => Ok(ThemeSource::Terminal),
+            "default" => Ok(ThemeSource::BuiltIn),
+            other => Err(Error::Config(format!(
+                "TASKS_THEME must be terminal or default, got {other:?}"
+            ))),
+        }
+    }
+}
+
 /// How far the date scale's old end sits from the foreground toward the background.
 const OLD_TOWARD_BACKGROUND: f64 = 0.45;
 
@@ -114,6 +136,33 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// The palette tasks ships for `TASKS_THEME=default`: the representative palette of
+    /// the color designs and tests. Fixed colors intended for dark backgrounds; a fixed
+    /// palette cannot guarantee contrast against an arbitrary background (spec §2.1),
+    /// so the look is confirmed visually, not by the suite.
+    pub const BUILTIN: Palette = Palette {
+        fg: Rgb {
+            r: 0xe5,
+            g: 0xe3,
+            b: 0xd7,
+        },
+        bg: Rgb {
+            r: 0x13,
+            g: 0x14,
+            b: 0x0d,
+        },
+        cyan: Rgb {
+            r: 0x00,
+            g: 0xd7,
+            b: 0xff,
+        },
+        magenta: Some(Rgb {
+            r: 0xd7,
+            g: 0x5f,
+            b: 0xd7,
+        }),
+    };
+
     /// Parses `TASKS_PALETTE`: `fg=#rrggbb bg=#rrggbb cyan=#rrggbb [magenta=#rrggbb]`,
     /// any order.
     pub fn parse(value: &str) -> crate::error::Result<Palette> {
@@ -469,6 +518,8 @@ mod tests {
         Rgb::parse_hex(value).unwrap()
     }
 
+    const TEST_PALETTE_EQUIVALENT: &str = "fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7";
+
     #[test]
     fn hex_parses_exactly_rrggbb() {
         assert_eq!(
@@ -510,6 +561,38 @@ mod tests {
                 g: 125,
                 b: 115
             }
+        );
+    }
+
+    #[test]
+    fn theme_source_parses_terminal_and_default() {
+        assert!(matches!(
+            ThemeSource::parse("terminal").unwrap(),
+            ThemeSource::Terminal
+        ));
+        assert!(matches!(
+            ThemeSource::parse("default").unwrap(),
+            ThemeSource::BuiltIn
+        ));
+    }
+
+    #[test]
+    fn theme_source_rejects_anything_else() {
+        let error = ThemeSource::parse("chartreuse").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("TASKS_THEME must be terminal or default"),
+            "{error}"
+        );
+        assert!(ThemeSource::parse("").is_err());
+    }
+
+    #[test]
+    fn the_builtin_palette_is_the_representative_test_palette() {
+        assert_eq!(
+            Palette::BUILTIN,
+            Palette::parse(TEST_PALETTE_EQUIVALENT).unwrap()
         );
     }
 

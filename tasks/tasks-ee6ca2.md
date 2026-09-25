@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-25T13:11:50Z
-updated: 2026-09-25T15:56:17Z
+updated: 2026-09-25T15:56:18Z
 started: 2026-09-25T14:31:14Z
 depends: []
 tags: [cli]
@@ -34,3 +34,4 @@ Let users choose where pretty output's truecolor scales (date recency, priority)
 - 2026-09-25T15:35:00Z (color-source): plan review round 4: helper deadline made global (checked every iteration; output-done and child-exit both required, try_wait under the deadline), OwnedFd on both descriptors with nonblocking set before spawn, every post-spawn failure kills and reaps before reporting, control cannot inherit TASKS_THEME; helper compiled and run verbatim, failure paths probe-tested
 - 2026-09-25T15:35:01Z (color-source): parked (waiting on agent, review): Review the final PTY helper in .worktrees/color-source/docs/plans/2026-09-25-color-source.md (compiled and run verbatim, failure paths probe-tested); on approval, execute tasks-017e6d.
 - 2026-09-25T15:56:17Z (color-source): plan review round 5: stdio duplication via Stdio::from(slave.try_clone()) — checked and owned immediately, no unchecked libc::dup; helper compiled and run verbatim
+- 2026-09-25T15:56:18Z (color-source): parked (waiting on agent): Design review is complete per the reviewer; execute tasks-017e6d (implementation) in .worktrees/color-source, then tasks-2ea977 (final verification).

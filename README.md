@@ -373,7 +373,11 @@ slots 5 and 6), and only when stdout is a terminal, since a pager reading the sa
 terminal would race the query. For piped output, a terminal that does not answer, or ends of your own, set
 `TASKS_PALETTE="fg=#rrggbb bg=#rrggbb cyan=#rrggbb magenta=#rrggbb"` (`magenta` may be
 left out, which keeps priorities bold at P0 and P1); otherwise dates print plain,
-priorities bold at P0 and P1, with one warning saying why.
+priorities bold at P0 and P1, with one warning saying why. By default the colors come
+from the terminal itself. `TASKS_THEME=default` instead uses the palette tasks ships
+(`fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7`), which sends no query and is
+meant for dark backgrounds; a set `TASKS_PALETTE` still wins over it.
+`TASKS_THEME=terminal` is the default behavior, spelled out.
 
 ## Agent skill
 
