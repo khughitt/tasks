@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-25T10:47:15Z
-updated: 2026-09-25T11:17:49Z
+updated: 2026-09-25T11:18:10Z
 started: 2026-09-25T10:47:20Z
 depends: []
 tags: [cli]
@@ -30,3 +30,5 @@ In --pretty, color each date column on a continuous scale by age: today is fully
   provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-25T11:08:52Z (feat/date-colors): Spec revised per review: query only when stdout is a terminal (pager race, per colorsaurus caveats); TASKS_PALETTE set in both TestEnv::cmd and ::raw; libc a direct dep; manual pipe check forbids query bytes, not SGR.
 - 2026-09-25T11:17:49Z (feat/date-colors): Plan drafted: 4 tasks (TASKS_PALETTE list slice; remaining date columns; terminal query + redirect warning; gate, manual kitty check, close).
+- 2026-09-25T11:18:10Z (feat/date-colors): parked (waiting on user, review): User reviews docs/plans/2026-09-25-date-recency-color.md on feat/date-colors and picks an execution method (native recommended); then the agent starts tasks-e934f7 (Task 1) in .worktrees/date-colors
+  provenance: {"harness_session":"claude-code:ce1d647a-9a21-48b4-9a7c-e8f25a23b2f9","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
