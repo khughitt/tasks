@@ -1,15 +1,16 @@
 ---
 id: tasks-ee6ca2
 title: "Configurable color source: terminal theme or built-in defaults"
-status: doing
+status: done
 priority: 3
 size: m
 complexity: mid
 process: planned
 owner: main
 created: 2026-09-25T13:11:50Z
-updated: 2026-09-25T15:56:18Z
+updated: 2026-09-25T16:01:39Z
 started: 2026-09-25T14:31:14Z
+completed: 2026-09-25T16:01:39Z
 depends: []
 tags: [cli]
 source: tasks-92757e follow-up
@@ -35,3 +36,6 @@ Let users choose where pretty output's truecolor scales (date recency, priority)
 - 2026-09-25T15:35:01Z (color-source): parked (waiting on agent, review): Review the final PTY helper in .worktrees/color-source/docs/plans/2026-09-25-color-source.md (compiled and run verbatim, failure paths probe-tested); on approval, execute tasks-017e6d.
 - 2026-09-25T15:56:17Z (color-source): plan review round 5: stdio duplication via Stdio::from(slave.try_clone()) — checked and owned immediately, no unchecked libc::dup; helper compiled and run verbatim
 - 2026-09-25T15:56:18Z (color-source): parked (waiting on agent): Design review is complete per the reviewer; execute tasks-017e6d (implementation) in .worktrees/color-source, then tasks-2ea977 (final verification).
+- 2026-09-25T16:01:39Z (color-source): final verification: just gate green (373 tests), smoke by worktree binary path painted the built-ins with no warning and the bad value exited 1 naming TASKS_THEME; cargo install refused by the session harness (writes outside the repo), host launcher untouched, reinstall deferred to merge
+- 2026-09-25T16:01:39Z (color-source): done
+- 2026-09-25T16:01:39Z (color-source): TASKS_THEME=terminal|default selects the color source: the built-in palette ships with no query and a stable magenta, TASKS_PALETTE still wins, bad values exit 1; spec, plan, four CLI tests including the pty no-query check, README

@@ -1,7 +1,8 @@
 # Configurable color source: terminal theme or built-in defaults — design
 
-**Status:** draft, awaiting review; tasks-ee6ca2. Follow-up to docs/specs/2026-09-25-priority-color-design.md
-(its §2.3 is the problem this answers) and docs/specs/2026-09-25-date-recency-color-design.md.
+**Status:** implemented (2026-09-25), tasks-ee6ca2; see docs/plans/2026-09-25-color-source.md.
+Amends docs/specs/2026-09-25-priority-color-design.md §2.3 (the problem this answers) and
+docs/specs/2026-09-25-date-recency-color-design.md (the query it can replace).
 
 ## 1. Problem
 

@@ -511,7 +511,11 @@ git commit -m "feat(color): add TASKS_THEME for a built-in color source"
 
 **Files:** none modified.
 
-- [ ] **Step 1:** `cargo install --path .` — the repo rule keeps the session tracker current. Note this repoints the host's `~/.cargo/bin/tasks` at the worktree's build; it is the documented repo workflow, and the smoke below still runs the worktree binary by explicit path.
+- [ ] **Step 1:** ~~`cargo install --path .`~~ refused here: the harness that ran this
+  session does not permit `cargo install` (it writes outside the repository), so the
+  host's `~/.cargo/bin/tasks` was left untouched and the smoke below ran the worktree
+  binary by explicit path. `cargo build --release` supplied it. Reinstall on the host
+  when the branch merges.
 - [ ] **Step 2:** `just gate` — fmt, clippy, `tasks check`, the whole suite including the ignored exhaustive enumeration.
 - [ ] **Step 3:** Manual smoke from the main checkout, with `TASKS_PALETTE` explicitly unset (an inherited palette would win over the built-ins) and `--pretty` forcing the colored path (`--color always` alone leaves JSON unpainted):
 
