@@ -37,10 +37,15 @@ impl Registry {
     }
 
     pub fn load_from(path: &Path) -> Result<Registry> {
-        if !path.exists() {
-            return Ok(Registry::default());
-        }
-        let text = std::fs::read_to_string(path)?;
+        // Only an absent registry is empty. `exists()` is false when an ancestor is
+        // unreadable too, which would read a permission error as "no projects".
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Registry::default());
+            }
+            Err(error) => return Err(error.into()),
+        };
         let mut registry: Registry = toml::from_str(&text)
             .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
         for (prefix, root) in &mut registry.projects {

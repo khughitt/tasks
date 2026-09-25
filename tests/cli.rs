@@ -16419,3 +16419,31 @@ fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
         "relay off must key the claim by the native raw id: {store}"
     );
 }
+
+#[test]
+fn an_unreadable_registry_fails_instead_of_reading_empty() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let root = env.init("zz");
+    let dir = env.home.path().join(".config/tasks");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root reads through any mode; the case cannot be staged there.
+    let readable = std::fs::read_to_string(dir.join("projects.toml")).is_ok();
+    let out = env
+        .cmd(&root)
+        .args(["prime", "--all-projects"])
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if readable {
+        return;
+    }
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "io");
+}
