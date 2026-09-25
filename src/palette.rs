@@ -1,6 +1,7 @@
 //! The terminal theme's colors: RGB values, OKLab mixing, and where they come from
 //! (`TASKS_PALETTE`, or a query to the terminal). Design:
-//! docs/specs/2026-09-25-date-recency-color-design.md.
+//! docs/specs/2026-09-25-date-recency-color-design.md and
+//! docs/specs/2026-09-25-priority-color-design.md.
 
 use crate::error::Error;
 use std::fmt;
@@ -93,23 +94,29 @@ fn from_oklab([l, a, b]: [f64; 3]) -> Rgb {
     }
 }
 
-/// The three theme colors the date scale needs.
+/// How far the old end of both scales sits from the foreground toward the background.
+const OLD_TOWARD_BACKGROUND: f64 = 0.45;
+
+/// The theme colors the date and priority scales need. `magenta` is `None` only from a
+/// `TASKS_PALETTE` that leaves it out; the terminal query always supplies it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     pub fg: Rgb,
     pub bg: Rgb,
     pub cyan: Rgb,
+    pub magenta: Option<Rgb>,
 }
 
 impl Palette {
-    /// Parses `TASKS_PALETTE`: `fg=#rrggbb bg=#rrggbb cyan=#rrggbb`, any order.
+    /// Parses `TASKS_PALETTE`: `fg=#rrggbb bg=#rrggbb cyan=#rrggbb [magenta=#rrggbb]`,
+    /// any order.
     pub fn parse(value: &str) -> crate::error::Result<Palette> {
         let bad = |detail: String| {
             Error::Config(format!(
-                "TASKS_PALETTE must be \"fg=#rrggbb bg=#rrggbb cyan=#rrggbb\": {detail}"
+                "TASKS_PALETTE must be \"fg=#rrggbb bg=#rrggbb cyan=#rrggbb [magenta=#rrggbb]\": {detail}"
             ))
         };
-        let (mut fg, mut bg, mut cyan) = (None, None, None);
+        let (mut fg, mut bg, mut cyan, mut magenta) = (None, None, None, None);
         for entry in value.split_whitespace() {
             let (key, hex) = entry
                 .split_once('=')
@@ -118,6 +125,7 @@ impl Palette {
                 "fg" => &mut fg,
                 "bg" => &mut bg,
                 "cyan" => &mut cyan,
+                "magenta" => &mut magenta,
                 other => return Err(bad(format!("unknown key {other:?}"))),
             };
             if slot.is_some() {
@@ -128,8 +136,14 @@ impl Palette {
             );
         }
         match (fg, bg, cyan) {
-            (Some(fg), Some(bg), Some(cyan)) => Ok(Palette { fg, bg, cyan }),
+            (Some(fg), Some(bg), Some(cyan)) => Ok(Palette {
+                fg,
+                bg,
+                cyan,
+                magenta,
+            }),
             _ => {
+                // Only the required keys can be missing.
                 let missing: Vec<&str> = [("fg", fg), ("bg", bg), ("cyan", cyan)]
                     .into_iter()
                     .filter(|(_, color)| color.is_none())
@@ -139,6 +153,11 @@ impl Palette {
             }
         }
     }
+
+    /// The faded end both scales run toward: the foreground dimmed toward the background.
+    pub fn old(&self) -> Rgb {
+        self.fg.mix(self.bg, OLD_TOWARD_BACKGROUND)
+    }
 }
 
 /// How long the whole exchange may take before the terminal counts as silent.
@@ -147,10 +166,10 @@ pub const QUERY_TIMEOUT: Duration = Duration::from_millis(300);
 const ESC: u8 = 0x1b;
 const BEL: u8 = 0x07;
 
-/// Foreground, background and palette slot 6, each ST-terminated, then primary device
-/// attributes (DA1) as a fence: terminals answer in order, so the fence arriving before
-/// a color reply means the terminal does not answer color queries.
-const QUERY: &[u8] = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b]4;6;?\x1b\\\x1b[c";
+/// Foreground, background and palette slots 5 and 6, each ST-terminated, then primary
+/// device attributes (DA1) as a fence: terminals answer in order, so the fence arriving
+/// before a color reply means the terminal does not answer color queries.
+const QUERY: &[u8] = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b]4;5;?\x1b\\\x1b]4;6;?\x1b\\\x1b[c";
 
 /// Why the terminal's colors are unavailable. `Display` is the reason the warning names.
 #[derive(Debug)]
@@ -243,19 +262,20 @@ fn read_through_fence(reader: &mut impl Read) -> io::Result<Vec<u8>> {
     }
 }
 
-/// The three color replies among the bytes before the fence. Fewer than three means
+/// The four color replies among the bytes before the fence. Fewer than four means
 /// the terminal skipped a query it does not support.
 fn parse_replies(bytes: &[u8]) -> Result<Palette, QueryError> {
     let bodies = osc_bodies(bytes)?;
     match bodies.as_slice() {
-        [fg, bg, cyan] => Ok(Palette {
+        [fg, bg, magenta, cyan] => Ok(Palette {
             fg: reply_color(fg, b"10;")?,
             bg: reply_color(bg, b"11;")?,
             cyan: reply_color(cyan, b"4;6;")?,
+            magenta: Some(reply_color(magenta, b"4;5;")?),
         }),
-        fewer if fewer.len() < 3 => Err(QueryError::Unsupported),
+        fewer if fewer.len() < 4 => Err(QueryError::Unsupported),
         _ => Err(QueryError::Unparsable(format!(
-            "{} replies to three queries",
+            "{} replies to four queries",
             bodies.len()
         ))),
     }
@@ -487,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_parses_three_keys_in_any_order() {
+    fn palette_parses_three_or_four_keys_in_any_order() {
         let palette = Palette::parse("cyan=#00d7ff fg=#e5e3d7  bg=#13140d").unwrap();
         assert_eq!(
             palette,
@@ -495,6 +515,22 @@ mod tests {
                 fg: hex("#e5e3d7"),
                 bg: hex("#13140d"),
                 cyan: hex("#00d7ff"),
+                magenta: None,
+            }
+        );
+        let palette = Palette::parse("magenta=#d75fd7 cyan=#00d7ff fg=#e5e3d7 bg=#13140d").unwrap();
+        assert_eq!(palette.magenta, Some(hex("#d75fd7")));
+    }
+
+    #[test]
+    fn the_old_end_is_the_foreground_dimmed_toward_the_background() {
+        let palette = Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff").unwrap();
+        assert_eq!(
+            palette.old(),
+            Rgb {
+                r: 125,
+                g: 125,
+                b: 115
             }
         );
     }
@@ -517,6 +553,15 @@ mod tests {
                 "fg: \"e5e3d7\" is not #rrggbb",
             ),
             ("fg bg=#13140d cyan=#00d7ff", "\"fg\" is not key=#rrggbb"),
+            ("fg=#e5e3d7 bg=#13140d magenta=#d75fd7", "missing cyan"),
+            (
+                "fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7 magenta=#d75fd7",
+                "magenta is given twice",
+            ),
+            (
+                "fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=d75fd7",
+                "magenta: \"d75fd7\" is not #rrggbb",
+            ),
         ] {
             let error = Palette::parse(value).unwrap_err();
             assert_eq!(error.kind(), "config", "{value:?}");
@@ -524,6 +569,11 @@ mod tests {
             assert!(text.contains("TASKS_PALETTE"), "{value:?}: {text}");
             assert!(text.contains(needle), "{value:?}: {text}");
         }
+        let text = Palette::parse("").unwrap_err().to_string();
+        assert!(
+            text.contains("\"fg=#rrggbb bg=#rrggbb cyan=#rrggbb [magenta=#rrggbb]\""),
+            "{text}"
+        );
     }
 
     use std::io::{self, Read, Write};
@@ -573,9 +623,15 @@ mod tests {
     const DA1: &[u8] = b"\x1b[?62;22c";
     const T: Duration = Duration::from_millis(300);
 
+    /// Replies in query order, with slot 5 fixed at `#d75fd7`.
     fn replies(fg: &str, bg: &str, cyan: &str, end: &str) -> Vec<u8> {
         let mut bytes = Vec::new();
-        for (prefix, color) in [("10;", fg), ("11;", bg), ("4;6;", cyan)] {
+        for (prefix, color) in [
+            ("10;", fg),
+            ("11;", bg),
+            ("4;5;", "rgb:d7d7/5f5f/d7d7"),
+            ("4;6;", cyan),
+        ] {
             bytes.extend_from_slice(format!("\x1b]{prefix}{color}{end}").as_bytes());
         }
         bytes.extend_from_slice(DA1);
@@ -583,11 +639,11 @@ mod tests {
     }
 
     fn expected() -> Palette {
-        Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff").unwrap()
+        Palette::parse("fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7").unwrap()
     }
 
     #[test]
-    fn exchange_sends_the_three_queries_and_the_fence() {
+    fn exchange_sends_the_four_queries_and_the_fence() {
         let mut tty = Fake::new(
             &replies(
                 "rgb:e5e5/e3e3/d7d7",
@@ -600,7 +656,7 @@ mod tests {
         assert_eq!(exchange(&mut tty, T).unwrap(), expected());
         assert_eq!(
             tty.sent,
-            b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b]4;6;?\x1b\\\x1b[c".to_vec()
+            b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b]4;5;?\x1b\\\x1b]4;6;?\x1b\\\x1b[c".to_vec()
         );
         assert_eq!(tty.at, tty.replies.len(), "the fence reply is consumed too");
     }
@@ -620,6 +676,22 @@ mod tests {
         let err = exchange(&mut Fake::new(&partial, 64), T).unwrap_err();
         assert!(matches!(err, QueryError::Unsupported), "{err:?}");
         assert_eq!(err.to_string(), "answered without the colors");
+    }
+
+    #[test]
+    fn three_replies_are_no_longer_enough() {
+        // A terminal that answers fg, bg and slot 6 but skips slot 5.
+        let mut bytes = Vec::new();
+        for (prefix, color) in [
+            ("10;", "rgb:e5/e3/d7"),
+            ("11;", "rgb:13/14/0d"),
+            ("4;6;", "rgb:00/d7/ff"),
+        ] {
+            bytes.extend_from_slice(format!("\x1b]{prefix}{color}\x07").as_bytes());
+        }
+        bytes.extend_from_slice(DA1);
+        let err = exchange(&mut Fake::new(&bytes, 64), T).unwrap_err();
+        assert!(matches!(err, QueryError::Unsupported), "{err:?}");
     }
 
     #[test]

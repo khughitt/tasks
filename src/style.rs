@@ -79,9 +79,6 @@ pub fn fade(age_days: u64) -> f64 {
     ((1.0 + age_days as f64).ln() / (1.0 + HORIZON_DAYS).ln()).min(1.0)
 }
 
-/// How far the old end sits from the foreground toward the background.
-const OLD_TOWARD_BACKGROUND: f64 = 0.45;
-
 /// Today and the two ends of the date scale, fixed for one run.
 #[derive(Debug, Clone, Copy)]
 pub struct Recency {
@@ -95,7 +92,7 @@ impl Recency {
         Recency {
             today,
             recent: palette.cyan,
-            old: palette.fg.mix(palette.bg, OLD_TOWARD_BACKGROUND),
+            old: palette.old(),
         }
     }
 
