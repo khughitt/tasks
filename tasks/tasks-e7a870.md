@@ -4,8 +4,9 @@ title: Support screenshots and other attachments on tasks
 status: idea
 priority: 1
 created: 2026-09-09T01:31:26Z
-updated: 2026-09-25T15:54:08Z
+updated: 2026-09-25T16:12:10Z
 depends: []
+parent: tasks-ce2f58
 tags: [quick-add]
 source: "mindful:thought:a1a5726e2ff44a0586a4e56dea0e5d86"
 ---
@@ -17,3 +18,4 @@ Precedent: tasks-061851 made specs and plans optional attachments.
 ## Notes
 
 - 2026-09-25T15:54:08Z (main): Raised to P1 2026-09-25: asked for again. A phone screenshot was the evidence that settled a UI bug's cause (it ruled one hypothesis out on sight); with no place to attach it, the task holds a prose transcription and the image stays in a downloads folder. The attachment should travel with the record across checkouts and hosts.
+- 2026-09-25T16:12:10Z (main): scope: briefed; parented under goal tasks-ce2f58, design follow-up tasks-a2d903 (P1, planned, high) settles storage, size policy, public repos, and input sources; brief: docs/notes/2026-09-25-task-attachments-brief.md
