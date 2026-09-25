@@ -90,6 +90,7 @@ One exchange with the terminal, made only when all of these hold:
 
 - the output format is pretty and the stdout painter is enabled (so never for an agent:
   color is opt-in and `auto` needs a terminal);
+- stdout is a terminal (§3.2 explains why);
 - the output has a date column (§2.3), so `tasks add --pretty` never touches the terminal;
 - `TASKS_PALETTE` is unset (§3.3).
 
@@ -102,35 +103,50 @@ nothing at all.
 
 It goes through the controlling terminal, never stdout: `terminal-trx` opens the first of
 stderr, stdin, stdout and `/dev/tty` that is a terminal, puts it in raw mode behind a guard
-that restores it on drop, and reads and writes there. So `tasks --pretty --color always
-list | head` still queries the terminal, and the query bytes never land in the piped
-output. (`xterm-query` was considered and rejected on exactly this point: it writes its
-query to stdout.)
+that restores it on drop, and reads and writes there. (`xterm-query` was considered and
+rejected because it writes its query to stdout, which would put query bytes into
+redirected output.)
 
 Replies are parsed with `xterm-color`, which parses the `rgb:rrrr/gggg/bbbb` X11 color
 strings terminals send back.
 
-Dependencies added: `terminal-trx` (libc only on Unix) and `xterm-color`. Polling the
-tty descriptor for the timeout uses `libc::poll` (libc is already in the lock file).
+Dependencies added: `terminal-trx` (libc only on Unix), `xterm-color`, and `libc` as a
+direct dependency for `libc::poll`, which bounds each read of the tty descriptor by the
+timeout. `libc` is in the lock file already, but only through other crates, and a crate
+can call only what it declares.
 `terminal-colorsaurus` wraps the same two crates but reads only foreground and background,
 so it cannot supply cyan.
 
 `TERM` is still never consulted (color-output §2): `TERM=dumb` gets no special case.
 A terminal that cannot answer takes the no-answer path below.
 
-### 3.2 When the terminal does not answer
+### 3.2 Redirected output and a terminal that does not answer
 
-An unsupported terminal, a timeout, a multiplexer that swallows the query, or a pager
-reading the terminal at the same moment all end the same way: dates are printed without
-color, exactly as today, and one line goes to stderr:
+**Redirected stdout is never queried.** When stdout is a pipe or a file, another process is
+likely reading the same terminal: `tasks --pretty --color always list | less -R` starts
+`less` beside `tasks`, and both put the terminal into raw mode and read from it. The query
+can then lose its replies to the pager, deliver them to the pager as keystrokes, or
+restore a terminal mode the pager set. A timeout bounds the wait but prevents none of
+that. `terminal-colorsaurus` documents the same race (`doc/caveats.md`) and resolves it
+the same way in its `pager` example: query only when stdout is a terminal. So redirected
+output with color on uses `TASKS_PALETTE`, or gets no date colors.
+
+The heuristic is deliberately one-sided. `tasks … | cat` loses the query although nothing
+contends for the terminal; `TASKS_PALETTE` covers it. The opposite case, stdout on the
+terminal while stderr goes to a pager (`2>&1 >/dev/tty | less`), still queries; it is
+contrived enough to leave.
+
+**Every way of going without ends the same.** Redirected stdout without `TASKS_PALETTE`,
+an unsupported terminal, a timeout, and a multiplexer that swallows the query all print
+dates without color, exactly as today, and one line goes to stderr:
 
 ```
 warning: date colors off: the terminal did not report its colors (timed out after 300 ms); set TASKS_PALETTE to supply them
 ```
 
-The reason names what happened (timed out, answered without the colors, unparsable reply,
-no terminal). Everything else in the output keeps its color. Nothing falls back silently
-to other colors.
+The parenthesis names what happened: stdout is not a terminal, timed out, answered without
+the colors, unparsable reply, or no terminal to ask. Everything else in the output keeps
+its color. Nothing falls back silently to other colors.
 
 ### 3.3 `TASKS_PALETTE`
 
@@ -146,8 +162,12 @@ All three keys are required, each a `#rrggbb` value, separated by spaces, in any
 Like `TASKS_COLOR`, it is validated whenever it is set, even when color ends up off, and a
 malformed value is a `config` error before any work is done.
 
-`TestEnv::cmd` in `tests/cli.rs` sets a fixed `TASKS_PALETTE` for every child, so no test
-reaches the query, beside removing `TASKS_COLOR` and `NO_COLOR` as it does today.
+Both subprocess helpers in `tests/common/mod.rs`, `TestEnv::cmd` and `TestEnv::raw`, set
+a fixed, valid `TASKS_PALETTE` for every child, beside removing `TASKS_COLOR` and
+`NO_COLOR` as they do today. Each builds its own command, so setting it in one leaves the
+other's tests inheriting the developer's value: since the variable is validated whenever
+it is set, a malformed ambient value would then fail unrelated tests, JSON ones included.
+A test that exercises the unset case removes the variable itself.
 
 ## 4. Shape
 
@@ -173,8 +193,9 @@ reaches the query, beside removing `TASKS_COLOR` and `NO_COLOR` as it does today
   `Recency`, or a disabled one, returns the date text unchanged. Call sites still name a
   role, never a color, and still pad first and paint last.
 - **`src/main.rs`** — after the command runs, if the stdout painter is enabled and the
-  output has a date column, it resolves the palette (`TASKS_PALETTE`, else the query) and
-  attaches a `Recency` built with today's UTC date. A failed query becomes the stderr
+  output has a date column, it resolves the palette (`TASKS_PALETTE`; else the query when
+  stdout is a terminal; else the no-query reason of §3.2) and attaches a `Recency` built
+  with today's UTC date. A failed query becomes the stderr
   warning of §3.2 through the stderr painter, and the stdout painter stays without one.
 - **`src/output.rs`** — the §2.3 call sites paint their date cell with `Style::Date`.
   `pretty` stays a pure function of its inputs: today and the palette arrive inside the
@@ -207,11 +228,21 @@ End to end (`tests/cli.rs`):
   with the cyan's exact SGR and a date three years old with the old end's;
 - the same command without `--color` has no escape sequences;
 - a colored table keeps the same visible column layout as an uncolored one;
-- a malformed `TASKS_PALETTE` is a `config` error even without `--color`.
+- a malformed `TASKS_PALETTE` is a `config` error even without `--color`;
+- with `TASKS_PALETTE` removed and `--color always`, `list`'s stdout (piped, as it is under
+  the test harness) has no date colors and no query bytes, and stderr carries the §3.2
+  warning naming stdout as not a terminal. This pins the redirect policy without a
+  terminal.
 
-Manual: in kitty, `tasks --pretty --color always list` reads the live theme, and the same
-command piped through `head` does too without escape bytes in the piped text; in a terminal
-multiplexer, either the colors arrive or the §3.2 warning does.
+Manual, in kitty:
+
+- `tasks --pretty --color always list` reads the live theme and paints dates;
+- the same command piped through `head` or `less -R` does not query: the piped text holds
+  SGR color sequences, which `--color always` sends into a pipe on purpose, but no query
+  bytes (`OSC 10`, `OSC 11`, `OSC 4` or DA1), `less` receives no stray keystrokes, and
+  stderr carries the §3.2 warning;
+- with `TASKS_PALETTE` set, the piped dates are colored;
+- in a terminal multiplexer, either the colors arrive or the §3.2 warning does.
 
 ## 6. Out of scope
 
