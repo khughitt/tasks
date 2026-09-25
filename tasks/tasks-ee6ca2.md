@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-25T13:11:50Z
-updated: 2026-09-25T14:52:18Z
+updated: 2026-09-25T14:57:26Z
 started: 2026-09-25T14:31:14Z
 depends: []
 tags: [cli]
@@ -26,3 +26,5 @@ Let users choose where pretty output's truecolor scales (date recency, priority)
 - 2026-09-25T14:35:06Z (color-source): parked (waiting on agent, review): Review the draft design spec docs/specs/2026-09-25-color-source-design.md on branch color-source (.worktrees/color-source); on approval, write the implementation plan.
 - 2026-09-25T14:50:16Z (color-source): spec review: 3 substantive + 2 minor findings applied (precedence table, no partial overrides, dark-background framing with visual check, NO_COLOR order, test-helper env hygiene)
 - 2026-09-25T14:52:18Z (color-source): review accepted in full; spec revised; implementation plan drafted with three step children
+- 2026-09-25T14:52:19Z (color-source): parked (waiting on agent, review): Review the implementation plan .worktrees/color-source/docs/plans/2026-09-25-color-source.md (the revised spec is at docs/specs/2026-09-25-color-source-design.md); on approval, execute tasks-017e6d first.
+- 2026-09-25T14:57:26Z (color-source): plan review round 2: tasks merged into one commit (dead code at the gate), PTY no-query test added with a control, precedence test reclassified as regression, final smoke fixed (pretty, no palette, binary by path), spec §2.1 contrast wording corrected

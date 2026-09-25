@@ -46,10 +46,11 @@ does, exactly as today.)
 
 `default` is a complete palette: it ships `fg` and `bg` too, so no query is sent. Nothing
 paints `fg` or `bg` directly — they are only consumed through `Palette::old()` and the two
-mixes toward them — but the mixed results become text foregrounds, and they inherit the
-pair's lightness. The old-date endpoint is `#7d7d73` and the priority endpoint `#404038`,
-both designed to recede on a dark background; on a light terminal they sit near it in
-lightness and lose contrast. `default` is a fixed palette intended for dark backgrounds,
+mixes toward them — but the mixed results become text foregrounds, and they are fixed.
+The old-date endpoint is `#7d7d73` and the priority endpoint `#404038`: on a light
+terminal the light `#7d7d73` sits close to the background in lightness, while the dark
+`#404038` gains contrast there. No fixed palette can guarantee contrast against an
+arbitrary background, and `default` does not try: it is intended for dark backgrounds,
 not a scheme that adapts to any theme. The user confirms it looks right in their terminal
 (a visual check; §4's tests only verify the arithmetic), and a user on a light theme
 keeps `terminal` or supplies a `TASKS_PALETTE`.
@@ -107,9 +108,13 @@ variable gives, without hand-writing hex values.
   (`TASKS_PALETTE` over `default`); the built-in palette's mixes match the existing
   expectations for that palette (the date and priority scale tests already run on these
   exact colors, so their expectations transfer directly).
-- CLI tests: `TASKS_THEME=default` paints with the built-ins and sends no query;
-  an invalid value exits 1 naming `TASKS_THEME`. The test helpers inject exactly the
-  proposed colors as `TASKS_PALETTE` (src/style.rs, src/output.rs, tests/common), so a
-  built-in test that leaves them set can pass with `default` unimplemented: every test of
-  the built-in path removes `TASKS_PALETTE` and clears an inherited `TASKS_THEME` first,
-  in the helpers themselves.
+- CLI tests: `TASKS_THEME=default` paints with the built-ins; an invalid value exits 1
+  naming `TASKS_THEME`. That piped-stdout test cannot see the query, so a second test
+  runs the binary on a pty that is its controlling terminal and observes the stream
+  itself: under `default` no OSC query bytes appear and no warning is produced, and a
+  control without `TASKS_THEME` shows the query bytes and the timeout warning, proving
+  the observation can see a query. The test helpers inject exactly the proposed colors
+  as `TASKS_PALETTE` (src/style.rs, src/output.rs, tests/common), so a built-in test
+  that leaves them set can pass with `default` unimplemented: every test of the built-in
+  path removes `TASKS_PALETTE` and clears an inherited `TASKS_THEME` first, in the
+  helpers themselves.
