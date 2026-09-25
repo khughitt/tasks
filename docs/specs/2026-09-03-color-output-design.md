@@ -3,6 +3,8 @@
 **Status:** implemented (2026-09-03); see docs/plans/2026-09-03-color-output.md.
 §3 amended 2026-09-05 (tasks-9a001b): `show`'s frontmatter values are colored; the
 original decision to leave the whole task text plain is recorded there.
+§2 and §6 amended for date columns by docs/specs/2026-09-25-date-recency-color-design.md
+(tasks-142d2f): dates take a 24-bit recency scale between colors read from the terminal.
 
 ## 1. Problem
 
