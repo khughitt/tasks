@@ -13,6 +13,9 @@ toml = "1"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 fastrand = "2"
 thiserror = "2"
+libc = "0.2"
+terminal-trx = "0.2"
+xterm-color = "1"
 
 [dev-dependencies]
 assert_cmd = "2"

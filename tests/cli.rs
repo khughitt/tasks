@@ -16668,3 +16668,30 @@ fn colored_parked_paints_the_park_date() {
         "{text:?}"
     );
 }
+
+#[test]
+fn redirected_stdout_without_a_palette_skips_the_query_and_warns() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(&dir, &["add", "Fresh"]);
+    // The harness pipes stdout, which is exactly the redirect the policy covers.
+    let out = env
+        .cmd(&dir)
+        .env_remove("TASKS_PALETTE")
+        .args(["--pretty", "--color", "always", "list"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(!text.contains("38;2"), "no date colors: {text:?}");
+    for query in ["\x1b]10", "\x1b]11", "\x1b]4;", "\x1b[c"] {
+        assert!(!text.contains(query), "no query bytes {query:?}: {text:?}");
+    }
+    let warning = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        warning.contains(
+            "date colors off: the terminal did not report its colors (stdout is not a terminal); set TASKS_PALETTE to supply them"
+        ),
+        "{warning:?}"
+    );
+}

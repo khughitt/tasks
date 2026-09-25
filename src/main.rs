@@ -169,20 +169,34 @@ fn main() {
             let silent = format == Format::Json
                 && matches!(&out, output::Output::Check(check)
                     if check.errors.is_empty() && check.warnings.is_empty());
-            let stdout_painter = match palette {
-                Some(palette) if stdout_painter.enabled() && output::has_date_column(&out) => {
-                    stdout_painter.with_recency(style::Recency::new(
+            let mut date_warning = None;
+            let stdout_painter = if stdout_painter.enabled() && output::has_date_column(&out) {
+                // Redirected stdout is never queried: a pager may be reading the same
+                // terminal (spec §3.2).
+                let resolved = match palette {
+                    Some(palette) => Ok(palette),
+                    None if !std::io::stdout().is_terminal() => Err(palette::QueryError::NotAsked),
+                    None => palette::Palette::query(palette::QUERY_TIMEOUT),
+                };
+                match resolved {
+                    Ok(palette) => stdout_painter.with_recency(style::Recency::new(
                         ::time::OffsetDateTime::now_utc().date(),
                         &palette,
-                    ))
+                    )),
+                    Err(reason) => {
+                        date_warning = Some(format!(
+                            "date colors off: the terminal did not report its colors ({reason}); set TASKS_PALETTE to supply them"
+                        ));
+                        stdout_painter
+                    }
                 }
-                _ => stdout_painter,
+            } else {
+                stdout_painter
             };
             if format == Format::Pretty {
-                to_stderr(&output::pretty_warnings(
-                    &output::warnings_of(&out),
-                    &stderr_painter,
-                ));
+                let mut warnings = output::warnings_of(&out);
+                warnings.extend(date_warning);
+                to_stderr(&output::pretty_warnings(&warnings, &stderr_painter));
             }
             let rendered = output::render(&out, format, &stdout_painter);
             let written = if silent {
