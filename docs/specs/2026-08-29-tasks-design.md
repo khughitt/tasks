@@ -4,7 +4,10 @@
 configurable per project 2026-09-03; hierarchy 2026-09-03; feedback 2026-09-03;
 color 2026-09-03; source 2026-09-06; source dedup and filter 2026-09-07;
 shelved and explicit process 2026-09-13); see
-docs/plans/2026-08-29-tasks.md.
+docs/plans/2026-08-29-tasks.md. The feedback passages' fixed `tasks` target (§5's
+`tasks feedback` command and §8's "Feedback about the tool") is superseded by ops
+docs/specs/2026-09-26-ecosystem-feedback-design.md: `--project` names an owner that
+opts in with `[feedback]`.
 
 ## 1. Purpose
 
