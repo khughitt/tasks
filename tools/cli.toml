@@ -497,9 +497,10 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["feedback"]
-summary = "File feedback about the tasks tool itself into the upstream tasks project"
+summary = "File feedback about a project's tooling into that project"
 args = [{ name = "summary", value = "string", required = true }]
 options = [
+  { shared = "project", role = "select", value = "string", required = true, repeatable = false },
   { names = ["--category"], value = "enum", values = ["friction", "gap", "idea", "positive"], required = true },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--recur"], value = "ref" },

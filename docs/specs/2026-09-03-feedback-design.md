@@ -1,6 +1,6 @@
 # Upstream feedback as tasks — design
 
-**Status:** implemented (2026-09-03); see docs/plans/2026-09-03-feedback.md.
+**Status:** implemented (2026-09-03); see docs/plans/2026-09-03-feedback.md. The fixed target (§3 step 2) is superseded by ops docs/specs/2026-09-26-ecosystem-feedback-design.md: `--project` names an owner that opts in with `[feedback]`.
 
 ## 1. Problem
 

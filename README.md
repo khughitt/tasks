@@ -67,7 +67,7 @@ Each step is idempotent.
        tasks unshelve <id>              # bring it back as an idea
        tasks done <id> "<what landed>"  # in the same commit as the code
        tasks check                      # before every commit
-       tasks feedback "<about the tool>" --category friction   # file friction upstream
+       tasks feedback --project tasks "<about the tool>" --category friction   # file friction with this tool
 
 Never edit `tasks/*.md` by hand. `tasks --help` lists every command and `tasks help <command>`
 one command's; add `--pretty` to any command, before or after its name, for human-readable
@@ -404,16 +404,18 @@ refines them within fixed bounds.
 
 ## Feedback
 
-When the tool itself gets in the way, cannot do something needed, suggests an improvement,
-or works notably well, file it from wherever you are:
+A report about a project's tooling goes to the project that owns it:
 
-    tasks feedback "<one line about the tool>" --category <friction|gap|idea|positive> [-b "<detail>"]
+    tasks feedback --project <owner> "<one line about the tool>" --category <friction|gap|idea|positive> [-b "<detail>"]
 
-The entry lands as an `idea` in whichever checkout is registered under the `tasks` prefix,
-tagged `feedback`, the category, and `from:<your prefix>`. A repeat of the same one-liner
+The owner must be registered and opt in with a `[feedback]` table (`scope = "<what it
+owns>"`) in its `tasks/.config.toml`; any other is refused with the list of those that
+accept. The entry lands as an `idea` in the owner's registered checkout, tagged `feedback`,
+the category, and `from:<your prefix>`. A repeat of the same one-liner in the same owner
 appends a note to the open entry instead of creating a duplicate; `--recur <id>` and
-`--new` settle an `ambiguous` result. The command never commits: this repository is public,
-so a person here reviews each uncommitted file before it becomes public.
+`--new` settle an `ambiguous` result. The command never commits: a person in the owner's
+repository reviews each uncommitted file before it is committed, and this repository is
+public.
 
 ## Adopting in an existing project
 

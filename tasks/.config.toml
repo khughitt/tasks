@@ -1,1 +1,4 @@
 prefix = "tasks"
+
+[feedback]
+scope = "The tasks CLI and its tasks, curate, and scope skills."

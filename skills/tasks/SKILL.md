@@ -332,23 +332,33 @@ all moved aliases), and remove the inventory last.
 - **executing-plans / subagent-driven-development**: `tasks start` a step before implementing, `tasks done` when its commit lands.
 - Plan headings are the drift contract: renaming or removing a heading under an open task fails `tasks check`. Update the task in the same change.
 
-## Feedback about the tool
+## Feedback
 
-When `tasks` itself gets in the way (`friction`), cannot do something you needed (`gap`),
-gives you an idea (`idea`), or works notably well (`positive`), file it at that moment and
-carry on:
+A report about a project's tooling goes to the project that owns it, from any tracked
+checkout, in one command:
 
-    tasks feedback "<one line about the tool>" --category <friction|gap|idea|positive> [-b "<command, error kind, what you expected>"]
+    tasks feedback --project <owner> "<one line about the tool>" --category <friction|gap|idea|positive> [-b "<command, error kind, what you expected>"]
 
-Describe the tool, not the project: no repository names, file paths, people, or project
-content. The upstream repository is public. Do not commit there and do not triage your own
-report. If `ambiguous` comes back, rerun with `--recur <id>` to join the listed entry or
-`--new` to insist. Keep the returned id in a note if the outcome matters to your task;
-`tasks show <id>` works from any registered project.
+`--project` is required and names a registered project whose `tasks/.config.toml` has a
+`[feedback]` table; any other is refused with the list of projects that accept, each with
+its scope. The global instructions say when to report and list the owners. The report
+lands as an uncommitted `idea` in the owner's registered checkout, tagged `feedback`, the
+category, and `from:<your prefix>`. Describe the tool, not the project: no repository
+names, file paths, people, or project content. Do not commit in the owner's repository
+and do not triage your own report. If `ambiguous` comes back, rerun with `--recur <id>`
+to join the listed entry or `--new` to insist. Keep the returned id in a note if the
+outcome matters to your task; `tasks show <id>` works from any registered project.
 
-### In the tasks repository
+### In a project that accepts feedback
+
+A `[feedback]` table with a one-line `scope` opts the project in:
+
+    [feedback]
+    scope = "<what this project owns, for someone deciding where a report goes>"
 
 Uncommitted files under `tasks/` tagged `feedback` are unreviewed reports: read each,
 redact anything that describes a project rather than the tool, then commit. Ideas tagged
-`feedback` are the triage queue; scope, drop, or promote them like any other idea and record
-the outcome in a note.
+`feedback` are the triage queue; scope, drop, or promote them like any other idea and
+record the outcome in a note. Drop a misfiled report with a note naming the owner it
+belongs to. `check` holds `feedback`, the categories, and any `from:<prefix>` as defined
+on feedback records, whatever the tag dictionary says.

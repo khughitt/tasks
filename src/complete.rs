@@ -553,15 +553,27 @@ pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
         .collect()
 }
 
-/// `feedback --recur`: open, `feedback`-tagged tasks in the project registered as
-/// `tasks`, never the local directory — `feedback::locate_target` resolves the same way,
-/// so a worktree of the upstream must not suggest records it has not pushed.
-pub fn upstream_feedback(current: &OsStr) -> Vec<CompletionCandidate> {
+/// Registered projects that accept feedback, from their configs alone.
+pub fn feedback_owners() -> Vec<CompletionCandidate> {
+    let registry = Registry::load().unwrap_or_default();
+    plain(
+        crate::commands::feedback::owners(&registry)
+            .into_iter()
+            .filter_map(|(prefix, scope)| scope.ok().map(|_| prefix))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Open feedback in the owner the line's `--project` names; nothing without one.
+pub fn feedback_recur(current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();
     };
+    let Some(owner) = line().project else {
+        return Vec::new();
+    };
     let registry = Registry::load().unwrap_or_default();
-    let Some(project) = open_prefix(&registry, crate::commands::feedback::TARGET_PREFIX) else {
+    let Some(project) = open_prefix(&registry, &owner) else {
         return Vec::new();
     };
     let tasks = project

@@ -8,21 +8,60 @@ use crate::repo::Project;
 use crate::scope::Origin;
 use crate::similarity::Match;
 
-pub const TARGET_PREFIX: &str = "tasks";
 pub const CATEGORIES: [&str; 4] = ["friction", "gap", "idea", "positive"];
 
-/// The upstream project: the registry entry whose prefix is `tasks`. The unregistered
-/// case gets a hint the generic resolver cannot know: where the upstream lives.
-pub fn locate_target(registry: &Registry) -> Result<Project> {
-    if registry
-        .project_root(registry.canonical_prefix(TARGET_PREFIX))
-        .is_none()
-    {
-        return Err(Error::Config(format!(
-            "no project registered as {TARGET_PREFIX:?}; clone the upstream tasks repository and run `tasks init` there"
-        )));
+/// Every registered, reachable project that accepts feedback, with its scope, read from
+/// its config alone. Never a task file: a malformed task anywhere must not hide an owner.
+/// A config that cannot be read is listed with its error instead of failing the caller.
+pub fn owners(registry: &Registry) -> Vec<(String, std::result::Result<String, String>)> {
+    let mut found = Vec::new();
+    for (prefix, root) in &registry.projects {
+        if !crate::scope::is_reachable(root).unwrap_or(false) {
+            continue;
+        }
+        match Project::open(root) {
+            Ok(project) => {
+                if let Some(scope) = project.feedback {
+                    found.push((prefix.clone(), Ok(scope)));
+                }
+            }
+            Err(error) => found.push((prefix.clone(), Err(error.to_string()))),
+        }
     }
-    crate::scope::open_registered(registry, TARGET_PREFIX, Origin::Prefix)
+    found
+}
+
+/// The owner a report goes to: a registered project whose config has `[feedback]`.
+pub fn locate_target(registry: &Registry, prefix: &str) -> Result<Project> {
+    let target = crate::scope::open_registered(registry, prefix, Origin::Prefix)?;
+    require_acceptance(registry, prefix, &target)?;
+    Ok(target)
+}
+
+/// Refuses a target without `[feedback]`, listing the projects that accept so the
+/// reporter can reroute without a second lookup. Checked once to choose the target, and
+/// again on the project `lock_and_revalidate` hands back, since that reload may reflect
+/// an opt-out or a rename that happened while the command waited for the lock.
+fn require_acceptance(registry: &Registry, asked: &str, target: &Project) -> Result<()> {
+    if target.feedback.is_some() {
+        return Ok(());
+    }
+    let listed: Vec<String> = owners(registry)
+        .into_iter()
+        .map(|(owner, scope)| match scope {
+            Ok(scope) => format!("{owner} ({scope})"),
+            Err(error) => format!("{owner} (unreadable: {error})"),
+        })
+        .collect();
+    Err(Error::Validation(format!(
+        "{asked:?} does not accept feedback (no [feedback] in its {}); projects that do: {}",
+        crate::repo::CONFIG_REL,
+        if listed.is_empty() {
+            "none".to_string()
+        } else {
+            listed.join("; ")
+        }
+    )))
 }
 
 pub const NOTE_AUTHOR: &str = "feedback";
@@ -46,6 +85,7 @@ pub fn writes_tag(task: &Task, tag: &str) -> bool {
 
 pub fn run(
     mut ctx: Ctx,
+    project: String,
     summary: String,
     category: String,
     body: Option<String>,
@@ -68,9 +108,13 @@ pub fn run(
     validate_body(&body)?;
     let prefix = ctx.project.prefix.clone();
     let from = format!("from:{prefix}");
-    ctx.project = locate_target(&ctx.registry)?;
-    // Only the target is locked, even when the reporter shares its prefix.
-    super::lock_and_revalidate(&mut ctx, &super::Routing::Registered(TARGET_PREFIX.into()))?;
+    ctx.project = locate_target(&ctx.registry, &project)?;
+    // Only the target is locked, even when the reporter shares its prefix. Routing by the
+    // name asked for lets a rename during the wait resolve through its alias, as before.
+    super::lock_and_revalidate(&mut ctx, &super::Routing::Registered(project.clone()))?;
+    // The reload under the lock is what gets written; it must still accept.
+    require_acceptance(&ctx.registry, &project, &ctx.project)?;
+    let owner = ctx.project.prefix.clone();
     let target = &ctx.project;
 
     // (id, automatic): an automatic match must still carry the same title when written.
@@ -79,11 +123,8 @@ pub fn run(
     let existing: Option<(TaskId, bool)> = match (&recur, new) {
         (Some(id), _) => {
             let id = super::parse_id(&ctx.registry, id)?;
-            let not_feedback = || {
-                Error::Validation(format!(
-                    "{id} is not an open feedback task in {TARGET_PREFIX:?}"
-                ))
-            };
+            let not_feedback =
+                || Error::Validation(format!("{id} is not an open feedback task in {owner:?}"));
             let task = match target.read_task(&id) {
                 Ok(task) => task,
                 Err(Error::TaskNotFound(_)) => return Err(not_feedback()),
@@ -196,7 +237,7 @@ fn recur_into(
     };
     let mut claims = crate::claims::ClaimStore::load(&ctx.project.prefix)?;
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
-    // the public upstream file. The reporting project is already in the note text.
+    // the owner's public file. The reporting project is already in the note text.
     let task = guarded_update(&ctx.project, &ctx.registry, id, eligible, |task| {
         append_note(
             task,

@@ -1283,11 +1283,12 @@ pub fn run(cli: Cli) -> Result<Output> {
             quiet::run(open_read_ctx(dir, &scope)?, limit)
         }
         Command::Feedback {
+            project,
             summary,
             category,
             body,
             recur,
             new,
-        } => feedback::run(open_ctx(dir)?, summary, category, body, recur, new),
+        } => feedback::run(open_ctx(dir)?, project, summary, category, body, recur, new),
     }
 }

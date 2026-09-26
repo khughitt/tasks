@@ -5391,6 +5391,7 @@ fn show_warns_when_the_parent_is_missing_from_the_scan() {
 fn feedback_env() -> (TestEnv, std::path::PathBuf, std::path::PathBuf) {
     let mut env = TestEnv::new();
     let target = env.init("tasks");
+    accept_feedback(&target, "The tasks CLI.");
     let reporter = env.init("sci");
     (env, target, reporter)
 }
@@ -5402,6 +5403,8 @@ fn feedback_creates_an_idea_in_the_registered_tasks_project() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "check rejects a spec outside the roots",
             "--category",
             "friction",
@@ -5447,14 +5450,29 @@ fn feedback_creates_an_idea_in_the_registered_tasks_project() {
 
     let out = env.json(
         &target,
-        &["feedback", "prime is fast", "--category", "positive"],
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            "prime is fast",
+            "--category",
+            "positive",
+        ],
     );
     let shown = env.json(&target, &["show", out["id"].as_str().unwrap()]);
     assert_eq!(shown["task"]["tags"][2], "from:tasks");
 
     let out = env
         .cmd(&target)
-        .args(["--pretty", "feedback", "pretty check", "--category", "idea"])
+        .args([
+            "--pretty",
+            "feedback",
+            "--project",
+            "tasks",
+            "pretty check",
+            "--category",
+            "idea",
+        ])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -5473,7 +5491,14 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
     assert_eq!(
         env.fail(
             &reporter,
-            &["feedback", "probe summary", "--category", "gap"]
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "probe summary",
+                "--category",
+                "gap"
+            ]
         ),
         "config"
     );
@@ -5482,7 +5507,14 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
     assert_eq!(
         env.fail(
             &reporter,
-            &["feedback", "probe summary", "--category", "gap"]
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "probe summary",
+                "--category",
+                "gap"
+            ]
         ),
         "config"
     );
@@ -5496,7 +5528,14 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
     assert_eq!(
         env.fail(
             &reporter,
-            &["feedback", "probe summary", "--category", "gap"]
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "probe summary",
+                "--category",
+                "gap"
+            ]
         ),
         "config",
         "a registry entry pointing at a project with another prefix is refused"
@@ -5505,13 +5544,27 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
     assert_eq!(
         env.fail(
             nowhere.path(),
-            &["feedback", "probe summary", "--category", "gap"]
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "probe summary",
+                "--category",
+                "gap"
+            ]
         ),
         "no_project"
     );
     let err = env.usage(
         &reporter,
-        &["feedback", "probe summary", "--category", "rant"],
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            "probe summary",
+            "--category",
+            "rant",
+        ],
     );
     assert!(err.contains("--category") && err.contains("rant"), "{err}");
     assert_eq!(
@@ -5519,6 +5572,8 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
             &reporter,
             &[
                 "feedback",
+                "--project",
+                "tasks",
                 "probe summary",
                 "--category",
                 "gap",
@@ -5661,6 +5716,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "check rejects missing spec",
             "--category",
             "friction",
@@ -5672,6 +5729,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &other,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "Check rejects MISSING spec!",
             "--category",
             "gap",
@@ -5706,6 +5765,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "check rejects a missing plan file",
             "--category",
             "friction",
@@ -5719,6 +5780,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         .cmd(&reporter)
         .args([
             "feedback",
+            "--project",
+            "tasks",
             "check rejects missing plan",
             "--category",
             "friction",
@@ -5738,6 +5801,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "check rejects missing plan",
             "--category",
             "friction",
@@ -5753,6 +5818,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "check rejects missing plan",
             "--category",
             "friction",
@@ -5764,6 +5831,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "check rejects missing plan",
             "--category",
             "friction",
@@ -5775,6 +5844,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         .cmd(&reporter)
         .args([
             "feedback",
+            "--project",
+            "tasks",
             "check rejects missing plan",
             "--category",
             "friction",
@@ -5792,6 +5863,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "check rejects missing plan",
             "--category",
             "friction",
@@ -5809,6 +5882,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "check rejects missing plan",
             "--category",
             "friction",
@@ -5821,6 +5896,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "isolated new entry",
             "--category",
             "gap",
@@ -5831,7 +5908,14 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
     assert_eq!(
         env.fail(
             &reporter,
-            &["feedback", "another automatic report", "--category", "gap"]
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "another automatic report",
+                "--category",
+                "gap"
+            ]
         ),
         "parse"
     );
@@ -5841,6 +5925,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "prime output is delightful",
             "--category",
             "positive",
@@ -5855,6 +5941,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
         &reporter,
         &[
             "feedback",
+            "--project",
+            "tasks",
             "prime output is delightful",
             "--category",
             "positive",
@@ -5867,6 +5955,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
             &reporter,
             &[
                 "feedback",
+                "--project",
+                "tasks",
                 "probe summary",
                 "--category",
                 "gap",
@@ -5881,7 +5971,10 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
     // the target is even looked up; every other summary in these tests has tokens so that
     // the assertion it carries fails for its own reason and not for this one
     assert_eq!(
-        env.fail(&reporter, &["feedback", "a !", "--category", "gap"]),
+        env.fail(
+            &reporter,
+            &["feedback", "--project", "tasks", "a !", "--category", "gap"]
+        ),
         "validation"
     );
 
@@ -5890,6 +5983,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
             &reporter,
             &[
                 "feedback",
+                "--project",
+                "tasks",
                 "probe summary",
                 "--category",
                 "gap",
@@ -5905,6 +6000,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
             &reporter,
             &[
                 "feedback",
+                "--project",
+                "tasks",
                 "probe summary",
                 "--category",
                 "gap",
@@ -5919,6 +6016,8 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
             &reporter,
             &[
                 "feedback",
+                "--project",
+                "tasks",
                 "probe summary",
                 "--category",
                 "gap",
@@ -5937,7 +6036,14 @@ fn feedback_recurrence_serializes_against_concurrent_recurrences() {
     let (env, target, reporter) = feedback_env();
     let id = env.json(
         &reporter,
-        &["feedback", "the thing is slow", "--category", "friction"],
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            "the thing is slow",
+            "--category",
+            "friction",
+        ],
     )["id"]
         .as_str()
         .unwrap()
@@ -5951,6 +6057,8 @@ fn feedback_recurrence_serializes_against_concurrent_recurrences() {
         let mut cmd = env.raw(source);
         cmd.args([
             "feedback",
+            "--project",
+            "tasks",
             "the thing is slow",
             "--category",
             "friction",
@@ -5986,6 +6094,263 @@ fn feedback_recurrence_serializes_against_concurrent_recurrences() {
             "update {n} was lost: {raw}"
         );
     }
+}
+
+fn owners_env() -> (
+    TestEnv,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let mut env = TestEnv::new();
+    let ai = env.init("ai");
+    accept_feedback(&ai, "Agent instructions.");
+    let ops = env.init("ops");
+    accept_feedback(&ops, "Shared tooling and hooks.");
+    let sci = env.init("sci");
+    (env, ai, ops, sci)
+}
+
+#[test]
+fn feedback_lands_in_the_owner_named_by_project() {
+    let (env, ai, ops, sci) = owners_env();
+    let summary = "the guard blocks a clean commit";
+    for (owner, root) in [("ai", &ai), ("ops", &ops)] {
+        let out = env.json(
+            &sci,
+            &[
+                "feedback",
+                "--project",
+                owner,
+                summary,
+                "--category",
+                "friction",
+            ],
+        );
+        // the same summary in another owner is not a match: each owner triages its own
+        assert_eq!(out["action"], "created", "{out}");
+        let id = out["id"].as_str().unwrap();
+        assert!(id.starts_with(&format!("{owner}-")), "{id}");
+        assert!(
+            out["path"]
+                .as_str()
+                .unwrap()
+                .starts_with(root.to_str().unwrap()),
+            "{out}"
+        );
+        let shown = env.json(root, &["show", id]);
+        assert_eq!(
+            shown["task"]["tags"],
+            serde_json::json!(["feedback", "friction", "from:sci"])
+        );
+    }
+    let again = env.json(
+        &sci,
+        &[
+            "feedback",
+            "--project",
+            "ops",
+            summary,
+            "--category",
+            "friction",
+        ],
+    );
+    assert_eq!(again["action"], "recurred");
+    assert!(again["id"].as_str().unwrap().starts_with("ops-"), "{again}");
+}
+
+#[test]
+fn feedback_refuses_an_owner_that_does_not_accept_and_lists_those_that_do() {
+    let (mut env, _ai, _ops, sci) = owners_env();
+    let dots = env.init("dots");
+    // A malformed task file in an unrelated project must not hide the owners.
+    std::fs::write(dots.join("tasks/dots-000001.md"), "not a record\n").unwrap();
+    // Nor may another project's unparsable config; it is named, not fatal.
+    let bad = env.init("bad");
+    std::fs::write(bad.join("tasks/.config.toml"), "prefix = \n").unwrap();
+
+    let out = env
+        .cmd(&sci)
+        .args([
+            "feedback",
+            "--project",
+            "dots",
+            "x is slow",
+            "--category",
+            "friction",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("\"dots\" does not accept feedback"),
+        "{detail}"
+    );
+    assert!(detail.contains("ai (Agent instructions.)"), "{detail}");
+    assert!(
+        detail.contains("ops (Shared tooling and hooks.)"),
+        "{detail}"
+    );
+    assert!(detail.contains("bad (unreadable:"), "{detail}");
+    assert!(
+        std::fs::read_dir(dots.join("tasks")).unwrap().count() == 2,
+        "nothing written beside the config and the malformed file"
+    );
+
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "feedback",
+                "--project",
+                "zzz",
+                "x is slow",
+                "--category",
+                "gap"
+            ]
+        ),
+        "config"
+    );
+    let usage = env.usage(&sci, &["feedback", "x is slow", "--category", "gap"]);
+    assert!(usage.contains("--project"), "{usage}");
+}
+
+#[test]
+fn feedback_rechecks_acceptance_after_waiting_for_the_target_lock() {
+    for recur in [false, true] {
+        let (env, target, source) = feedback_env();
+        let original = env.json(
+            &source,
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "Original report",
+                "--category",
+                "gap",
+                "--new",
+            ],
+        );
+        let id = original["id"].as_str().unwrap().to_string();
+        let original_raw = env.read(&target, &format!("tasks/{id}.md"));
+        let listing = || {
+            let mut names: Vec<_> = std::fs::read_dir(target.join("tasks"))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect();
+            names.sort();
+            names
+        };
+        let before = listing();
+
+        let held = hold_project_lock(&env, "tasks");
+        let mut command = env.raw(&source);
+        command.args([
+            "feedback",
+            "--project",
+            "tasks",
+            "Another report",
+            "--category",
+            "gap",
+        ]);
+        if recur {
+            command.args(["--recur", &id]);
+        } else {
+            command.arg("--new");
+        }
+        let mut child = command.spawn().unwrap();
+        let blocked = !wait_bounded(&mut child, Duration::from_millis(300));
+        // The owner opts out while the report waits for its lock; same prefix, same root.
+        std::fs::write(target.join("tasks/.config.toml"), "prefix = \"tasks\"\n").unwrap();
+        drop(held);
+        let out = reap(child, REAP).unwrap();
+
+        assert!(blocked, "feedback ignored the target lock");
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "validation", "{error}");
+        assert!(
+            error["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("does not accept feedback"),
+            "{error}"
+        );
+        assert_eq!(listing(), before, "recur={recur}: no file created");
+        assert_eq!(
+            env.read(&target, &format!("tasks/{id}.md")),
+            original_raw,
+            "recur={recur}: no note appended"
+        );
+    }
+}
+
+#[test]
+fn feedback_recur_must_name_open_feedback_in_the_chosen_owner() {
+    let (env, _ai, _ops, sci) = owners_env();
+    let filed = env.json(
+        &sci,
+        &[
+            "feedback",
+            "--project",
+            "ai",
+            "skill says x",
+            "--category",
+            "gap",
+        ],
+    );
+    let id = filed["id"].as_str().unwrap();
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "feedback",
+                "--project",
+                "ops",
+                "skill says x",
+                "--category",
+                "gap",
+                "--recur",
+                id
+            ]
+        ),
+        "validation"
+    );
+    let joined = env.json(
+        &sci,
+        &[
+            "feedback",
+            "--project",
+            "ai",
+            "skill says x again",
+            "--category",
+            "gap",
+            "--recur",
+            id,
+        ],
+    );
+    assert_eq!(joined["action"], "recurred");
+}
+
+#[test]
+fn feedback_completion_offers_only_owners_and_their_open_reports() {
+    let (env, ai, _ops, sci) = owners_env();
+    let owners = env.complete(&sci, "bash", 3, &["tasks", "feedback", "--project", ""]);
+    assert_eq!(owners, ["ai", "ops"]);
+    let open = id_of(env.json(&ai, &["add", "Open report", "--tag", "feedback"]));
+    env.json(&ai, &["add", "Not feedback"]);
+    let ids = env.complete(
+        &sci,
+        "bash",
+        6,
+        &["tasks", "feedback", "--project", "ai", "S", "--recur", ""],
+    );
+    assert_eq!(ids, [open.as_str()]);
+    let none = env.complete(&sci, "bash", 4, &["tasks", "feedback", "S", "--recur", ""]);
+    assert!(none.is_empty(), "no --project, no candidates: {none:?}");
 }
 
 fn has_ansi(bytes: &[u8]) -> bool {
@@ -9338,7 +9703,14 @@ fn id_commands_route_from_outside_every_project() {
     assert_eq!(
         env.fail(
             nowhere.path(),
-            &["feedback", "Example", "--category", "gap"]
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "Example",
+                "--category",
+                "gap"
+            ]
         ),
         "no_project"
     );
@@ -9688,8 +10060,16 @@ fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
         env.complete(
             &sci,
             "bash",
-            4,
-            &["tasks", "feedback", "S", "--category", ""]
+            6,
+            &[
+                "tasks",
+                "feedback",
+                "--project",
+                "tasks",
+                "S",
+                "--category",
+                ""
+            ]
         ),
         ["friction", "gap", "idea", "positive"]
     );
@@ -10064,13 +10444,27 @@ fn dependencies_are_ordered_open_before_closed_or_unresolvable_each_by_id() {
 fn feedback_recur_offers_open_feedback_from_the_registered_tasks_root() {
     let mut env = TestEnv::new();
     let upstream = env.init("tasks");
+    accept_feedback(&upstream, "The tasks CLI.");
     let sci = env.init("sci");
     let open = id_of(env.json(&upstream, &["add", "Open report", "--tag", "feedback"]));
     let closed = id_of(env.json(&upstream, &["add", "Closed report", "--tag", "feedback"]));
     env.json(&upstream, &["done", &closed, "fixed"]);
     let untagged = id_of(env.json(&upstream, &["add", "Not feedback"]));
 
-    let ids = env.complete(&sci, "bash", 4, &["tasks", "feedback", "S", "--recur", ""]);
+    let ids = env.complete(
+        &sci,
+        "bash",
+        6,
+        &[
+            "tasks",
+            "feedback",
+            "--project",
+            "tasks",
+            "S",
+            "--recur",
+            "",
+        ],
+    );
     assert_eq!(ids, [open.as_str()]);
     assert!(
         !ids.contains(&closed) && !ids.contains(&untagged),
@@ -10084,8 +10478,16 @@ fn feedback_recur_offers_open_feedback_from_the_registered_tasks_root() {
     let ids = env.complete(
         &worktree,
         "bash",
-        4,
-        &["tasks", "feedback", "S", "--recur", ""],
+        6,
+        &[
+            "tasks",
+            "feedback",
+            "--project",
+            "tasks",
+            "S",
+            "--recur",
+            "",
+        ],
     );
     assert_eq!(ids, [open]);
     assert!(!ids.contains(&only_here), "{ids:?}");
@@ -10597,14 +10999,29 @@ fn feedback_create_and_recur_revalidate_only_the_registered_target() {
         let (env, target, source) = feedback_env();
         let original = env.json(
             &source,
-            &["feedback", "Original report", "--category", "gap", "--new"],
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "Original report",
+                "--category",
+                "gap",
+                "--new",
+            ],
         );
         let id = original["id"].as_str().unwrap();
         let original_raw = env.read(&target, &format!("tasks/{id}.md"));
         let source_held = hold_project_lock(&env, "sci");
         let held = hold_project_lock(&env, "tasks");
         let mut command = env.raw(&source);
-        command.args(["feedback", "Another report", "--category", "gap"]);
+        command.args([
+            "feedback",
+            "--project",
+            "tasks",
+            "Another report",
+            "--category",
+            "gap",
+        ]);
         if recur {
             command.args(["--recur", id]);
         } else {
@@ -10613,7 +11030,11 @@ fn feedback_create_and_recur_revalidate_only_the_registered_target() {
         let mut child = command.spawn().unwrap();
         let blocked = !wait_bounded(&mut child, Duration::from_millis(300));
         let new_id = id.replacen("tasks-", "tracker-", 1);
-        std::fs::write(target.join("tasks/.config.toml"), "prefix = \"tracker\"\n").unwrap();
+        std::fs::write(
+            target.join("tasks/.config.toml"),
+            "prefix = \"tracker\"\n\n[feedback]\nscope = \"The tasks CLI.\"\n",
+        )
+        .unwrap();
         std::fs::rename(
             target.join(format!("tasks/{id}.md")),
             target.join(format!("tasks/{new_id}.md")),
@@ -10647,7 +11068,15 @@ fn feedback_create_and_recur_revalidate_only_the_registered_target() {
         // Starting with the retired target name must also work.
         env.json(
             &source,
-            &["feedback", "Third report", "--category", "gap", "--new"],
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "Third report",
+                "--category",
+                "gap",
+                "--new",
+            ],
         );
     }
 }
@@ -12162,7 +12591,15 @@ fn rename_freeze_covers_all_writers_feedback_and_registry_names() {
         let (env, dir, reporter) = feedback_env();
         let id = id_of(env.json(
             &reporter,
-            &["feedback", "Original", "--category", "gap", "--new"],
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "Original",
+                "--category",
+                "gap",
+                "--new",
+            ],
         ));
         let editor_ran = dir.join("editor-ran");
         let editor = editor_script(&dir, &format!("touch '{}'; exit 99", editor_ran.display()));
@@ -12205,8 +12642,25 @@ fn rename_freeze_covers_all_writers_feedback_and_registry_names() {
             "a frozen edit must not launch the editor"
         );
         for args in [
-            vec!["feedback", "Late", "--category", "gap", "--new"],
-            vec!["feedback", "Late", "--category", "gap", "--recur", &current],
+            vec![
+                "feedback",
+                "--project",
+                "tasks",
+                "Late",
+                "--category",
+                "gap",
+                "--new",
+            ],
+            vec![
+                "feedback",
+                "--project",
+                "tasks",
+                "Late",
+                "--category",
+                "gap",
+                "--recur",
+                &current,
+            ],
         ] {
             let out = env.raw(&reporter).args(&args).output().unwrap();
             assert_eq!(out.status.code(), Some(1), "{stop}: {args:?}: {out:?}");
@@ -14949,6 +15403,8 @@ fn feedback_stamps_agent_from_the_variable_only() {
         &env.cmd(&reporter)
             .args([
                 "feedback",
+                "--project",
+                "tasks",
                 "the flag is hard to find",
                 "--category",
                 "friction",
@@ -14969,6 +15425,8 @@ fn feedback_stamps_agent_from_the_variable_only() {
     env.cmd(&reporter)
         .args([
             "feedback",
+            "--project",
+            "tasks",
             "x",
             "--category",
             "friction",
@@ -15638,7 +16096,9 @@ fn cli_vocabulary_help_version_usage() {
 fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    env.init("tasks"); // `feedback` files into the registered `tasks` project; here that is a fixture
+    // `feedback` files into the registered `tasks` project; here that is a fixture
+    let target = env.init("tasks");
+    accept_feedback(&target, "The tasks CLI.");
     let id = id_of(env.json(&dir, &["add", "Baseline"]));
     let i = id.as_str();
     // (path, binding) -> a real success; the value that must be replaced is the word after the binding, or the binding itself for a positional
@@ -15736,7 +16196,14 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
         ),
         (
             (vec!["feedback"], "--category"),
-            vec!["feedback", "the tool works", "--category", "positive"],
+            vec![
+                "feedback",
+                "--project",
+                "tasks",
+                "the tool works",
+                "--category",
+                "positive",
+            ],
         ),
     ];
     let table = tasks_surface_enum_rows(); // (path, binding) for every enum option/arg row of `tasks` in tools/cli.toml

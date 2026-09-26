@@ -546,8 +546,11 @@ pub enum Command {
         #[arg(long)]
         closed: bool,
     },
-    /// File feedback about the tasks tool itself into the upstream tasks project.
+    /// File feedback about a project's tooling into that project.
     Feedback {
+        /// The registered project that owns the tooling; its config must have [feedback].
+        #[arg(long, add = ArgValueCandidates::new(crate::complete::feedback_owners))]
+        project: String,
         summary: String,
         /// friction, gap, idea, or positive.
         #[arg(
@@ -564,7 +567,7 @@ pub enum Command {
             long,
             value_name = "REF",
             conflicts_with = "new",
-            add = ArgValueCompleter::new(crate::complete::upstream_feedback)
+            add = ArgValueCompleter::new(crate::complete::feedback_recur)
         )]
         recur: Option<String>,
         /// Create a new entry even if a similar one exists.
