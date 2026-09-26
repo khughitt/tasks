@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 use crate::error::{Error, Result};
 use crate::model::{Complexity, Process, Size, Status, Task};
 use crate::registry::Registry;
@@ -796,14 +798,14 @@ pub enum Output {
     Feedback(FeedbackOut),
 }
 
-pub fn render(out: &Output, format: Format, painter: &Painter) -> String {
+pub fn render(out: &Output, format: Format, painter: &Painter, wrap: Wrap) -> String {
     match format {
         Format::Json => serde_json::to_string(out).expect("output serializes"),
-        Format::Pretty => pretty(out, painter),
+        Format::Pretty => pretty(out, painter, wrap),
     }
 }
 
-fn pretty(out: &Output, painter: &Painter) -> String {
+fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
     match out {
         Output::Init(o) => o.prefix.clone(),
         Output::Rename(o) => o.prefix.clone(),
@@ -865,11 +867,13 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             id_width(o.tasks.iter().map(|row| row.id.as_str())),
             any_parallel(&o.tasks),
             any_type(&o.tasks),
+            wrap,
         ),
         Output::Parked(o) => parked_table(
             &o.tasks,
             painter,
             id_width(o.tasks.iter().map(|row| row.id.as_str())),
+            wrap,
         ),
         Output::Quiet(o) => quiet_briefs(
             &o.tasks,
@@ -972,6 +976,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 id_width,
                 parallel_column,
                 type_column,
+                wrap,
             ));
             rendered.push_str(&format!(
                 "\n{}\n",
@@ -989,6 +994,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                         id_width,
                         parallel_column,
                         type_column,
+                        wrap,
                     ));
                 } else if ready_ids.contains(node.summary.id.as_str()) {
                     listed_under_ready += 1;
@@ -1000,6 +1006,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                         id_width,
                         parallel_column,
                         type_column,
+                        wrap,
                     ));
                 }
             }
@@ -1010,7 +1017,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "parked:")
             ));
-            rendered.push_str(&parked_table(&o.parked, painter, id_width));
+            rendered.push_str(&parked_table(&o.parked, painter, id_width, wrap));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "ready:")));
             rendered.push_str(&table(
                 &o.ready,
@@ -1019,6 +1026,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 id_width,
                 parallel_column,
                 type_column,
+                wrap,
             ));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "doing:")));
             rendered.push_str(&table(
@@ -1028,6 +1036,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
                 id_width,
                 parallel_column,
                 type_column,
+                wrap,
             ));
             rendered
         }
@@ -1055,6 +1064,7 @@ fn pretty(out: &Output, painter: &Painter) -> String {
             id_width_tree(&o.nodes),
             any_parallel_tree(&o.nodes),
             any_type_tree(&o.nodes),
+            wrap,
         ),
         Output::Tags(o) => {
             let mut rendered = String::new();
@@ -1213,6 +1223,7 @@ fn tree_text(
     id_width: usize,
     parallel_column: bool,
     type_column: bool,
+    wrap: Wrap,
 ) -> String {
     let mut rendered = String::new();
     for node in nodes {
@@ -1223,6 +1234,7 @@ fn tree_text(
             id_width,
             parallel_column,
             type_column,
+            wrap.indented(depth * 2),
         );
         rendered.push_str(&"  ".repeat(depth));
         rendered.push_str(&row);
@@ -1233,6 +1245,7 @@ fn tree_text(
             id_width,
             parallel_column,
             type_column,
+            wrap,
         ));
     }
     rendered
@@ -1317,6 +1330,238 @@ pub fn shows_priority(out: &Output) -> bool {
     )
 }
 
+/// The width pretty tables wrap at: `COLUMNS` overrides the terminal attached to stdout
+/// (TIOCGWINSZ). With neither, rows keep one line each, so piped output stays
+/// line-oriented; a default width of 80 would break line-oriented pipes.
+pub fn terminal_width() -> Result<Option<usize>> {
+    let columns = match std::env::var("COLUMNS") {
+        Ok(text) => Some(text),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(value)) => {
+            return Err(Error::Config(format!(
+                "COLUMNS must be valid UTF-8, got {value:?}"
+            )));
+        }
+    };
+    wrap_width(columns.as_deref(), terminal_attached_width())
+}
+
+/// `COLUMNS` wins over the attached terminal whenever it is set.
+fn wrap_width(columns: Option<&str>, attached: Option<usize>) -> Result<Option<usize>> {
+    match columns {
+        Some(text) => {
+            let width: usize = text.parse().map_err(|_| {
+                Error::Config(format!("COLUMNS must be a positive integer, got {text:?}"))
+            })?;
+            if width == 0 {
+                return Err(Error::Config(
+                    "COLUMNS must be a positive integer, got 0".into(),
+                ));
+            }
+            Ok(Some(width))
+        }
+        None => Ok(attached),
+    }
+}
+
+fn terminal_attached_width() -> Option<usize> {
+    if !std::io::stdout().is_terminal() {
+        return None;
+    }
+    // SAFETY: `ioctl` with TIOCGWINSZ only writes through the pointed-to `winsize`.
+    let mut size = unsafe { std::mem::zeroed::<libc::winsize>() };
+    if unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) } == 0
+        && size.ws_col > 0
+    {
+        Some(size.ws_col as usize)
+    } else {
+        None
+    }
+}
+
+/// The visible length of text the painter has already wrapped in SGR sequences: padding
+/// lands before painting, so ANSI bytes must not count toward a wrap width.
+fn visible_len(text: &str) -> usize {
+    let mut count = 0;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for terminator in chars.by_ref() {
+                if terminator.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// Where pretty wrapping applies: the target width, and the indentation a tree node
+/// already occupies before its row. `Wrap::NONE` leaves every row on one line.
+#[derive(Clone, Copy, Default)]
+pub struct Wrap {
+    width: Option<usize>,
+    indent: usize,
+}
+
+impl Wrap {
+    /// Every row on one line, whatever its length.
+    pub const NONE: Wrap = Wrap {
+        width: None,
+        indent: 0,
+    };
+
+    /// Wrap at `width` with no tree indentation.
+    pub fn at(width: usize) -> Wrap {
+        Wrap {
+            width: Some(width),
+            indent: 0,
+        }
+    }
+
+    /// The same width under a tree node's existing indentation.
+    pub fn indented(self, indent: usize) -> Wrap {
+        Wrap {
+            indent: self.indent + indent,
+            ..self
+        }
+    }
+}
+
+/// Below this many columns for the title, a wrapped row renders one word per line, which
+/// reads worse than an overflowing row; the row stays unwrapped instead.
+const TITLE_FLOOR: usize = 20;
+
+/// One table row: the fixed prefix (already padded and painted), then the trailing
+/// title-and-suffix segment wrapped within the width left over. Continuation lines indent
+/// to the title's start, past the tree indentation in `wrap`. Styles sit on the pieces,
+/// so a suffix keeps its role across a break.
+fn render_row(
+    prefix: &str,
+    pieces: &[(&str, Option<Style>)],
+    painter: &Painter,
+    wrap: Wrap,
+) -> String {
+    let chars: Vec<(char, Option<Style>)> = pieces
+        .iter()
+        .flat_map(|(text, style)| text.chars().map(move |c| (c, *style)))
+        .collect();
+    let single = format!("{prefix}{}\n", paint_runs(&chars, painter));
+    let Some(width) = wrap.width else {
+        return single;
+    };
+    let fixed = wrap.indent + visible_len(prefix);
+    let available = width.saturating_sub(fixed);
+    if available < TITLE_FLOOR || chars.len() <= available {
+        return single;
+    }
+    let lines = wrap_lines(&chars, available);
+    let mut rendered = format!("{prefix}{}\n", paint_runs(&lines[0], painter));
+    let continuation = " ".repeat(fixed);
+    for line in &lines[1..] {
+        rendered.push_str(&continuation);
+        rendered.push_str(&paint_runs(line, painter));
+        rendered.push('\n');
+    }
+    rendered
+}
+
+/// Paint runs of one style each. Adjacent pieces sharing a style merge into one run; the
+/// visible text is unchanged, so `ColorMode::Never` output matches painting each piece
+/// whole.
+fn paint_runs(chars: &[(char, Option<Style>)], painter: &Painter) -> String {
+    let mut rendered = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let style = chars[index].1;
+        let end = chars[index..]
+            .iter()
+            .take_while(|(_, s)| *s == style)
+            .count()
+            + index;
+        let text: String = chars[index..end].iter().map(|(c, _)| c).collect();
+        rendered.push_str(&match style {
+            Some(style) => painter.paint(style, &text),
+            None => text,
+        });
+        index = end;
+    }
+    rendered
+}
+
+/// Greedy word wrap over already-styled characters: a break lands on a space run, which is
+/// dropped there, and a word longer than `available` is hard-split at the width. A word
+/// keeps its style across the split.
+fn wrap_lines(
+    chars: &[(char, Option<Style>)],
+    available: usize,
+) -> Vec<Vec<(char, Option<Style>)>> {
+    let mut lines: Vec<Vec<(char, Option<Style>)>> = Vec::new();
+    let mut line: Vec<(char, Option<Style>)> = Vec::new();
+    let mut pending: Option<&[(char, Option<Style>)]> = None;
+    let mut index = 0;
+    while index < chars.len() {
+        let spaces = chars[index].0 == ' ';
+        let end = chars[index..]
+            .iter()
+            .take_while(|(c, _)| (*c == ' ') == spaces)
+            .count()
+            + index;
+        let run = &chars[index..end];
+        index = end;
+        if spaces {
+            if !line.is_empty() {
+                pending = Some(run);
+            }
+            continue;
+        }
+        let sep = pending.take().unwrap_or(&[]);
+        if line.len() + sep.len() + run.len() <= available {
+            line.extend_from_slice(sep);
+            line.extend_from_slice(run);
+        } else if run.len() > available {
+            if !line.is_empty() {
+                if line.len() + sep.len() < available {
+                    line.extend_from_slice(sep);
+                }
+                let head = available - line.len();
+                let (chunk, rest) = run.split_at(head.min(run.len()));
+                line.extend_from_slice(chunk);
+                lines.push(std::mem::take(&mut line));
+                fill_hard_split(&mut lines, &mut line, rest, available);
+            } else {
+                fill_hard_split(&mut lines, &mut line, run, available);
+            }
+        } else {
+            lines.push(std::mem::take(&mut line));
+            line.extend_from_slice(run);
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// Chunk a word longer than the width into full-width lines, leaving the tail on the
+/// current line.
+fn fill_hard_split(
+    lines: &mut Vec<Vec<(char, Option<Style>)>>,
+    line: &mut Vec<(char, Option<Style>)>,
+    word: &[(char, Option<Style>)],
+    available: usize,
+) {
+    let mut word = word;
+    while word.len() > available {
+        let (chunk, rest) = word.split_at(available);
+        lines.push(chunk.to_vec());
+        word = rest;
+    }
+    line.extend_from_slice(word);
+}
+
 /// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every width-sensitive
 /// field is formatted to its final visible width before the painter wraps it.
 pub fn table(
@@ -1326,6 +1571,7 @@ pub fn table(
     id_width: usize,
     parallel_column: bool,
     type_column: bool,
+    wrap: Wrap,
 ) -> String {
     let mut rendered = String::new();
     for row in rows {
@@ -1366,7 +1612,7 @@ pub fn table(
         let tags = if row.tags.is_empty() {
             String::new()
         } else {
-            painter.paint(Style::Chrome, &format!(" [{}]", row.tags.join(", ")))
+            format!(" [{}]", row.tags.join(", "))
         };
         // A due row's status column reads `done`, which is true; the marker is what says why
         // it is here (spec §5.1). Not-yet-due rows never reach `ready`, and carry their date
@@ -1387,12 +1633,8 @@ pub fn table(
         };
         // A deferred row says why it is absent from `ready`; a due one says why it is back.
         let deferral = match &row.deferred {
-            Some(deferred) if deferred.due => {
-                painter.paint(Style::Emphasis, &format!("  due {}", deferred.until))
-            }
-            Some(deferred) => {
-                painter.paint(Style::Emphasis, &format!("  defer {}", deferred.until))
-            }
+            Some(deferred) if deferred.due => format!("  due {}", deferred.until),
+            Some(deferred) => format!("  defer {}", deferred.until),
             None => String::new(),
         };
         let owner = match &row.claim {
@@ -1404,7 +1646,6 @@ pub fn table(
                 .map(|owner| format!(" @{owner}"))
                 .unwrap_or_default(),
         };
-        let owner = painter.paint(Style::Chrome, &owner);
         // Unpainted: it is already distinct, and painting the blank spacer would wrap
         // whitespace in ANSI for no gain.
         let mark = match (parallel_column, row.parallel) {
@@ -1422,15 +1663,26 @@ pub fn table(
             }
             (true, None) => "  ".into(),
         };
-        rendered.push_str(&format!(
-            "{id}  {priority} {size:<2} {complexity:<4} {process:<7} {status} {mark}{kind}{date}  {}{tags}{cadence}{deferral}{owner}\n",
-            row.title
+        let prefix = format!(
+            "{id}  {priority} {size:<2} {complexity:<4} {process:<7} {status} {mark}{kind}{date}  "
+        );
+        rendered.push_str(&render_row(
+            &prefix,
+            &[
+                (row.title.as_str(), None),
+                (tags.as_str(), Some(Style::Chrome)),
+                (cadence.as_str(), Some(Style::Emphasis)),
+                (deferral.as_str(), Some(Style::Emphasis)),
+                (owner.as_str(), Some(Style::Chrome)),
+            ],
+            painter,
+            wrap,
         ));
     }
     rendered
 }
 
-pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> String {
+pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap: Wrap) -> String {
     let mut rendered = String::new();
     for row in rows {
         let Some(park) = &row.park else {
@@ -1449,10 +1701,15 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> S
         );
         let process = row.process.map(Process::as_str).unwrap_or("-");
         let parked = painter.paint(date_role(&park.at), crate::time::day(&park.at));
-        rendered.push_str(&format!(
-            "{id}  {status} {process:<7} {phase} waits on {:<18} {parked}  {}\n",
-            crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes),
-            row.title
+        let prefix = format!(
+            "{id}  {status} {process:<7} {phase} waits on {:<18} {parked}  ",
+            crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)
+        );
+        rendered.push_str(&render_row(
+            &prefix,
+            &[(row.title.as_str(), None)],
+            painter,
+            wrap,
         ));
         rendered
             .push_str(&painter.paint(Style::Chrome, &format!("        next: {}", park.next_step)));
@@ -1617,7 +1874,15 @@ mod tests {
     fn the_marker_column_is_absent_when_nothing_is_marked() {
         let rows = [row("xx-000001", false), row("xx-000002", false)];
         assert!(!any_parallel(&rows));
-        let text = table(&rows, DateColumn::Updated, &plain(), 0, false, false);
+        let text = table(
+            &rows,
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            false,
+            Wrap::NONE,
+        );
         assert!(!text.contains("||"), "{text}");
         assert!(text.contains("todo    2026-09-06"), "{text}");
     }
@@ -1626,7 +1891,15 @@ mod tests {
     fn the_type_column_is_absent_when_nothing_recurs() {
         let rows = [row("xx-000001", false), row("xx-000002", false)];
         assert!(!any_type(&rows));
-        let text = table(&rows, DateColumn::Updated, &plain(), 0, false, false);
+        let text = table(
+            &rows,
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            false,
+            Wrap::NONE,
+        );
         assert!(!text.contains(" p "), "{text}");
         assert!(text.contains("todo    2026-09-06"), "{text}");
     }
@@ -1635,7 +1908,15 @@ mod tests {
     fn a_recurring_row_carries_the_type_letter_and_keeps_its_neighbour_aligned() {
         let rows = [recurring("xx-000001"), row("xx-000002", false)];
         assert!(any_type(&rows));
-        let text = table(&rows, DateColumn::Updated, &plain(), 0, false, true);
+        let text = table(
+            &rows,
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            true,
+            Wrap::NONE,
+        );
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
         assert!(lines[0].contains("todo    p 2026-09-06"), "{}", lines[0]);
@@ -1651,7 +1932,15 @@ mod tests {
     fn the_type_letter_is_painted_but_still_ascii() {
         let rows = [recurring("xx-000001")];
         let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
-        let text = table(&rows, DateColumn::Updated, &colored, 0, false, true);
+        let text = table(
+            &rows,
+            DateColumn::Updated,
+            &colored,
+            0,
+            false,
+            true,
+            Wrap::NONE,
+        );
         assert!(text.contains("\x1b[1mp\x1b[0m "), "{text:?}");
     }
 
@@ -1683,7 +1972,7 @@ mod tests {
             },
         ];
         assert!(any_parallel_tree(&nodes));
-        let text = tree_text(&nodes, 0, &plain(), 0, true, false);
+        let text = tree_text(&nodes, 0, &plain(), 0, true, false, Wrap::NONE);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
         assert!(lines[0].contains("todo    || 2026-09-06"), "{}", lines[0]);
@@ -1704,7 +1993,7 @@ mod tests {
             warnings: vec![],
             date: DateColumn::Updated,
         });
-        let text = pretty(&out, &plain());
+        let text = pretty(&out, &plain(), Wrap::NONE);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
         assert!(lines[1].starts_with("nrp-8e8fde    P2"), "{}", lines[1]);
@@ -1748,7 +2037,15 @@ mod tests {
         let mut urgent = row("xx-000001", false);
         urgent.priority = 0;
         let rows = [urgent, row("xx-000002", false)];
-        let text = table(&rows, DateColumn::Updated, &scaled(), 0, false, false);
+        let text = table(
+            &rows,
+            DateColumn::Updated,
+            &scaled(),
+            0,
+            false,
+            false,
+            Wrap::NONE,
+        );
         let lines: Vec<&str> = text.lines().collect();
         assert!(
             lines[0].contains("\x1b[1;38;2;215;95;215mP0\x1b[0m"),
@@ -1766,7 +2063,15 @@ mod tests {
     fn the_date_column_carries_the_recency_role() {
         // row() is updated 2026-09-06, the painter's today: full cyan.
         let rows = [row("xx-000001", false)];
-        let text = table(&rows, DateColumn::Updated, &dated(), 0, false, false);
+        let text = table(
+            &rows,
+            DateColumn::Updated,
+            &dated(),
+            0,
+            false,
+            false,
+            Wrap::NONE,
+        );
         assert!(
             text.contains("\x1b[38;2;0;215;255m2026-09-06\x1b[0m"),
             "{text:?}"
@@ -1784,6 +2089,7 @@ mod tests {
             0,
             false,
             false,
+            Wrap::NONE,
         );
         let lines: Vec<&str> = text.lines().collect();
         assert!(
@@ -1816,5 +2122,177 @@ mod tests {
         });
         assert!(!needs_theme(&id));
         assert!(!shows_priority(&id));
+    }
+
+    fn long_row() -> TaskSummary {
+        let mut wrapped = row("xx-000001", false);
+        wrapped.title = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".into();
+        wrapped
+    }
+
+    #[test]
+    fn a_long_title_wraps_under_itself_at_the_terminal_width() {
+        let text = table(
+            &[long_row()],
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            false,
+            Wrap::at(80),
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines.len() > 1, "{text:?}");
+        let title_start = lines[0].find("alpha").expect("title on the first line");
+        for line in &lines[1..] {
+            let content = line.trim_start();
+            assert!(!content.is_empty(), "{text:?}");
+            assert_eq!(line.len() - content.len(), title_start, "{text:?}");
+        }
+        for line in &lines {
+            assert!(line.chars().count() <= 80, "{text:?}");
+        }
+        let mut words = vec![&lines[0][title_start..]];
+        words.extend(lines[1..].iter().map(|line| line.trim_start()));
+        assert_eq!(words.join(" "), long_row().title, "{text:?}");
+    }
+
+    #[test]
+    fn a_row_that_fits_the_width_stays_one_line_and_byte_identical() {
+        let rows = [row("xx-000001", false)];
+        let wrapped = table(
+            &rows,
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            false,
+            Wrap::at(80),
+        );
+        let unwrapped = table(
+            &rows,
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            false,
+            Wrap::NONE,
+        );
+        assert_eq!(wrapped.lines().count(), 1, "{wrapped:?}");
+        assert_eq!(wrapped, unwrapped);
+    }
+
+    #[test]
+    fn a_row_below_the_title_floor_stays_unwrapped() {
+        // The fixed columns alone take 41 columns with an empty id column, so at width 60
+        // only 19 remain for the title: below the floor, the row overflows unwrapped.
+        let text = table(
+            &[long_row()],
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            false,
+            Wrap::at(60),
+        );
+        assert_eq!(text.lines().count(), 1, "{text:?}");
+    }
+
+    #[test]
+    fn a_word_longer_than_the_available_width_is_hard_split() {
+        let chars: Vec<(char, Option<Style>)> = "abcdefghij".chars().map(|c| (c, None)).collect();
+        let lines = wrap_lines(&chars, 4);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.iter().map(|(c, _)| c).collect())
+            .collect();
+        assert_eq!(texts, ["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn a_break_drops_the_space_and_keeps_words_inline() {
+        let chars: Vec<(char, Option<Style>)> = "ab cd ef".chars().map(|c| (c, None)).collect();
+        let lines = wrap_lines(&chars, 6);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.iter().map(|(c, _)| c).collect())
+            .collect();
+        assert_eq!(texts, ["ab cd", "ef"]);
+    }
+
+    #[test]
+    fn a_suffix_keeps_its_style_on_the_continuation_line() {
+        let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
+        let chars: Vec<(char, Option<Style>)> = "hello "
+            .chars()
+            .map(|c| (c, Some(Style::Chrome)))
+            .chain("world".chars().map(|c| (c, Some(Style::Emphasis))))
+            .collect();
+        let lines = wrap_lines(&chars, 8);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(paint_runs(&lines[0], &colored), "\x1b[2mhello\x1b[0m");
+        assert_eq!(paint_runs(&lines[1], &colored), "\x1b[1mworld\x1b[0m");
+    }
+
+    #[test]
+    fn a_tree_node_wraps_under_its_own_indentation() {
+        let mut child = long_row();
+        child.id = "xx-000002".into();
+        let nodes = vec![TreeNode {
+            summary: long_row(),
+            children: vec![TreeNode {
+                summary: child,
+                children: vec![],
+            }],
+        }];
+        let text = tree_text(&nodes, 0, &plain(), 0, false, false, Wrap::at(80));
+        let lines: Vec<&str> = text.lines().collect();
+        let child_line = lines
+            .iter()
+            .position(|line| line.starts_with("  xx-000002"))
+            .expect("child row: {text:?}");
+        let title_start = lines[child_line].find("alpha").expect("child title");
+        let continuation = lines[child_line + 1];
+        assert_eq!(
+            continuation.len() - continuation.trim_start().len(),
+            title_start,
+            "{text:?}"
+        );
+    }
+
+    #[test]
+    fn a_parked_row_wraps_its_title() {
+        let mut parked = ParkedRow::resolved(long_row(), crate::model::Phase::Implementing);
+        parked.park = Some(ParkInfo {
+            at: "2026-09-06T00:00:00Z".into(),
+            next_step: "next step".into(),
+            waiting_on: crate::claims::WaitingOn::Agent,
+            reason: None,
+            needs: None,
+            minutes: None,
+            session: "s".into(),
+            owner: "o".into(),
+            host: "h".into(),
+            worktree: "w".into(),
+        });
+        let text = parked_table(&[parked], &plain(), 0, Wrap::at(140));
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines.len() > 1, "{text:?}");
+        let title_start = lines[0].find("alpha").expect("parked title");
+        let continuation = lines[1];
+        assert_eq!(
+            continuation.len() - continuation.trim_start().len(),
+            title_start,
+            "{text:?}"
+        );
+    }
+
+    #[test]
+    fn columns_overrides_the_terminal_and_validates_input() {
+        assert_eq!(wrap_width(Some("80"), Some(120)).unwrap(), Some(80));
+        assert_eq!(wrap_width(None, Some(120)).unwrap(), Some(120));
+        assert_eq!(wrap_width(None, None).unwrap(), None);
+        assert!(wrap_width(Some("wide"), None).is_err());
+        assert!(wrap_width(Some("0"), None).is_err());
     }
 }

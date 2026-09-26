@@ -51,7 +51,7 @@ impl ColorMode {
 
 /// A role, never a color. Call sites name what a span means; this module decides how that
 /// looks, so the same meaning renders identically in every view.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
     Status(Status),
     Chrome,

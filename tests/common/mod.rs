@@ -41,6 +41,7 @@ impl TestEnv {
             .env_remove("TASKS_COLOR")
             .env_remove("TASKS_THEME")
             .env_remove("NO_COLOR")
+            .env_remove("COLUMNS")
             // Never query the terminal of whoever runs the suite, and never inherit a
             // malformed value: TASKS_PALETTE is validated whenever it is set.
             .env("TASKS_PALETTE", TEST_PALETTE)
@@ -72,6 +73,7 @@ impl TestEnv {
             .env_remove("TASKS_COLOR")
             .env_remove("TASKS_THEME")
             .env_remove("NO_COLOR")
+            .env_remove("COLUMNS")
             // Never query the terminal of whoever runs the suite, and never inherit a
             // malformed value: TASKS_PALETTE is validated whenever it is set.
             .env("TASKS_PALETTE", TEST_PALETTE)

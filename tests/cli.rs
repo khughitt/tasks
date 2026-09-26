@@ -1635,6 +1635,75 @@ fn pretty_rows_name_the_claim_holder_not_the_local_owner() {
 }
 
 #[test]
+fn pretty_tables_wrap_at_columns_but_piped_output_stays_line_oriented() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let long_title = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu";
+    id_of(env.json(&sci, &["add", long_title, "-p", "2"]));
+
+    let wrapped = env
+        .cmd(&sci)
+        .env("COLUMNS", "80")
+        .args(["--pretty", "list"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&wrapped.stdout).to_string();
+    let lines: Vec<&str> = text.trim_end().lines().collect();
+    assert!(lines.len() > 1, "{text:?}");
+    let title_start = lines[0].find("alpha").expect("title on the first line");
+    for line in &lines[1..] {
+        let content = line.trim_start();
+        assert!(!content.is_empty(), "{text:?}");
+        assert_eq!(line.len() - content.len(), title_start, "{text:?}");
+    }
+    for line in &lines {
+        assert!(line.chars().count() <= 80, "{text:?}");
+    }
+
+    let piped = env.cmd(&sci).args(["--pretty", "list"]).output().unwrap();
+    let text = String::from_utf8_lossy(&piped.stdout).to_string();
+    assert_eq!(text.trim_end().lines().count(), 1, "{text:?}");
+
+    // 60 columns leave fewer than 20 for the title: the row overflows unwrapped rather
+    // than rendering one word per line.
+    let narrow = env
+        .cmd(&sci)
+        .env("COLUMNS", "60")
+        .args(["--pretty", "list"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&narrow.stdout).to_string();
+    assert_eq!(text.trim_end().lines().count(), 1, "{text:?}");
+
+    let json_with = env
+        .cmd(&sci)
+        .env("COLUMNS", "80")
+        .args(["--json", "list"])
+        .output()
+        .unwrap();
+    let json_without = env.cmd(&sci).args(["--json", "list"]).output().unwrap();
+    assert_eq!(json_with.stdout, json_without.stdout);
+}
+
+#[test]
+fn an_invalid_columns_value_fails_as_config() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let out = env
+        .cmd(&sci)
+        .env("COLUMNS", "wide")
+        .args(["--pretty", "list"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let text = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        text.contains("COLUMNS must be a positive integer"),
+        "{text}"
+    );
+}
+
+#[test]
 fn read_commands_do_not_take_the_mutation_lock() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
