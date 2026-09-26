@@ -1399,6 +1399,7 @@ fn visible_width(text: &str) -> usize {
     count
 }
 
+// ponytail: per-character widths can split joined emoji; use grapheme clusters if needed.
 fn columns(chars: &[(char, Option<Style>)]) -> usize {
     chars.iter().map(|(c, _)| c.width().unwrap_or(0)).sum()
 }
@@ -1463,6 +1464,9 @@ fn render_row(
         return single;
     }
     let lines = wrap_lines(&chars, available);
+    if lines.is_empty() {
+        return single;
+    }
     let mut rendered = format!("{prefix}{}\n", paint_runs(&lines[0], painter));
     let continuation = " ".repeat(fixed);
     for line in &lines[1..] {
@@ -1635,10 +1639,7 @@ pub fn table(
                     .as_deref()
                     .map(|due| crate::time::day(due).to_string())
                     .unwrap_or_else(|| "now".into());
-                painter.paint(
-                    Style::Emphasis,
-                    &format!("  every {}, due {when}", periodic.every),
-                )
+                format!("  every {}, due {when}", periodic.every)
             }
             _ => String::new(),
         };
@@ -2188,6 +2189,23 @@ mod tests {
     }
 
     #[test]
+    fn a_spaces_only_title_does_not_panic_or_disappear() {
+        let mut row = long_row();
+        row.title = " ".repeat(40);
+        let text = table(
+            &[row],
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            false,
+            Wrap::at(80),
+        );
+        assert_eq!(text.lines().count(), 1, "{text:?}");
+        assert!(text.contains(&" ".repeat(40)), "{text:?}");
+    }
+
+    #[test]
     fn a_row_that_fits_the_width_stays_one_line_and_byte_identical() {
         let rows = [row("xx-000001", false)];
         let wrapped = table(
@@ -2274,6 +2292,24 @@ mod tests {
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert_eq!(paint_runs(&lines[0], &colored), "\x1b[2mhello\x1b[0m");
         assert_eq!(paint_runs(&lines[1], &colored), "\x1b[1mworld\x1b[0m");
+    }
+
+    #[test]
+    fn a_due_cadence_is_painted_once_when_wrapped() {
+        let mut due = recurring("xx-000001");
+        due.title = long_row().title;
+        let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
+        let text = table(
+            &[due],
+            DateColumn::Due,
+            &colored,
+            0,
+            false,
+            true,
+            Wrap::at(80),
+        );
+        assert!(text.contains("\x1b[1m"), "{text:?}");
+        assert!(!text.contains("\x1b[1m\x1b[1m"), "{text:?}");
     }
 
     #[test]
