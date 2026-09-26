@@ -339,15 +339,18 @@ checkout, in one command:
 
     tasks feedback --project <owner> "<one line about the tool>" --category <friction|gap|idea|positive> [-b "<command, error kind, what you expected>"]
 
-`--project` is required and names a registered project whose `tasks/.config.toml` has a
-`[feedback]` table; any other is refused with the list of projects that accept, each with
-its scope. The global instructions say when to report and list the owners. The report
-lands as an uncommitted `idea` in the owner's registered checkout, tagged `feedback`, the
-category, and `from:<your prefix>`. Describe the tool, not the project: no repository
-names, file paths, people, or project content. Do not commit in the owner's repository
-and do not triage your own report. If `ambiguous` comes back, rerun with `--recur <id>`
-to join the listed entry or `--new` to insist. Keep the returned id in a note if the
-outcome matters to your task; `tasks show <id>` works from any registered project.
+File it at the moment it happens: the tool got in the way (`friction`), could not do
+something you needed (`gap`), gave you an idea (`idea`), or worked notably well
+(`positive`). `--project` is required and names a registered project whose
+`tasks/.config.toml` has a `[feedback]` table; any other is refused with the list of
+projects that accept, each with its scope. The global instructions say when to report and
+list the owners. The report lands as an uncommitted `idea` in the owner's registered
+checkout, tagged `feedback`, the category, and `from:<your prefix>`. Describe the tool,
+not the project: no repository names, file paths, people, or project content. Do not
+commit in the owner's repository and do not triage your own report. If `ambiguous` comes
+back, rerun with `--recur <id>` to join the listed entry or `--new` to insist. Keep the
+returned id in a note if the outcome matters to your task; `tasks show <id>` works from
+any registered project.
 
 ### In a project that accepts feedback
 

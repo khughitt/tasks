@@ -16,8 +16,15 @@ pub const CATEGORIES: [&str; 4] = ["friction", "gap", "idea", "positive"];
 pub fn owners(registry: &Registry) -> Vec<(String, std::result::Result<String, String>)> {
     let mut found = Vec::new();
     for (prefix, root) in &registry.projects {
-        if !crate::scope::is_reachable(root).unwrap_or(false) {
-            continue;
+        match crate::scope::is_reachable(root) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            // An I/O error (e.g. permissions) is not "unreachable": it is named, not
+            // silently dropped from the refusal's list of who does accept.
+            Err(error) => {
+                found.push((prefix.clone(), Err(error.to_string())));
+                continue;
+            }
         }
         match Project::open(root) {
             Ok(project) => {

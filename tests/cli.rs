@@ -6218,6 +6218,39 @@ fn feedback_refuses_an_owner_that_does_not_accept_and_lists_those_that_do() {
     assert!(usage.contains("--project"), "{usage}");
 }
 
+// A permission error reading a project's config (not a parse error) must not be read as
+// "unreachable" and silently dropped from the refusal's list of who does accept.
+#[test]
+fn feedback_lists_a_permission_denied_owner_as_unreadable_not_dropped() {
+    let (mut env, _ai, _ops, sci) = owners_env();
+    let locked = env.init("lck");
+    let mut perms = std::fs::metadata(locked.join("tasks"))
+        .unwrap()
+        .permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
+    std::fs::set_permissions(locked.join("tasks"), perms.clone()).unwrap();
+    let out = env
+        .cmd(&sci)
+        .args([
+            "feedback",
+            "--project",
+            "sci",
+            "permission denied owner",
+            "--category",
+            "friction",
+        ])
+        .output()
+        .unwrap();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(locked.join("tasks"), perms).unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains("lck (unreadable:"), "{detail}");
+    assert!(detail.contains("ai (Agent instructions.)"), "{detail}");
+}
+
 #[test]
 fn feedback_rechecks_acceptance_after_waiting_for_the_target_lock() {
     for recur in [false, true] {
