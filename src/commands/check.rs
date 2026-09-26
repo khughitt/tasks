@@ -70,11 +70,11 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         if let Some(dictionary) = &ctx.project.tags
             && task.status.is_open()
         {
-            for tag in task
-                .tags
-                .iter()
-                .filter(|tag| !dictionary.contains_key(*tag))
-            {
+            for tag in task.tags.iter().filter(|tag| {
+                !dictionary.contains_key(*tag)
+                    && !(ctx.project.feedback.is_some()
+                        && crate::commands::feedback::writes_tag(task, tag))
+            }) {
                 warnings.push(finding(
                     Some(task),
                     file.clone(),

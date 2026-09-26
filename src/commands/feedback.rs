@@ -31,6 +31,19 @@ pub fn is_open_feedback(task: &Task) -> bool {
     task.status.is_open() && task.tags.iter().any(|tag| tag == "feedback")
 }
 
+/// The tags this command writes, which a project that accepts feedback holds as defined
+/// on its feedback records whatever its dictionary says. `from:` is judged by syntax
+/// alone: the registry is per host, so the source may be absent, unregistered, or renamed
+/// where the record is checked.
+pub fn writes_tag(task: &Task, tag: &str) -> bool {
+    task.tags.iter().any(|existing| existing == "feedback")
+        && (tag == "feedback"
+            || CATEGORIES.contains(&tag)
+            || tag
+                .strip_prefix("from:")
+                .is_some_and(crate::model::is_valid_prefix))
+}
+
 pub fn run(
     mut ctx: Ctx,
     summary: String,

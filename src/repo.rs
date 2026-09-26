@@ -77,6 +77,9 @@ pub struct Project {
     /// `None` when the project keeps no dictionary; then `check` says nothing about
     /// tags. See docs/specs/2026-09-11-tag-dictionary-design.md.
     pub tags: Option<BTreeMap<String, String>>,
+    /// The `[feedback]` table's scope: `Some` means the project accepts feedback, and the
+    /// line says what it owns. See ops docs/specs/2026-09-26-ecosystem-feedback-design.md.
+    pub feedback: Option<String>,
 }
 
 /// One other checkout's copy of a record, as `sibling_task_copies` found it.
@@ -97,6 +100,14 @@ struct Config {
     plan_dirs: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tags: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    feedback: Option<FeedbackConfig>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeedbackConfig {
+    scope: String,
 }
 
 /// A dictionary entry is a valid tag with a one-line, non-empty meaning; anything else
@@ -113,6 +124,22 @@ fn tag_dictionary(
             .map_err(|error| Error::Config(format!("{CONFIG_REL}: [tags] {tag:?}: {error}")))?;
     }
     Ok(Some(entries))
+}
+
+/// The scope of a `[feedback]` table: no control character (Unicode `Cc`: line breaks,
+/// tabs, and the rest) and at least one non-whitespace character, since a blank owner
+/// line would route no one anywhere. ops's `ops-projects` applies the same rule to the
+/// same file (`feedback_scope_problem`); change both together.
+fn feedback_scope(raw: Option<FeedbackConfig>) -> Result<Option<String>> {
+    let Some(table) = raw else {
+        return Ok(None);
+    };
+    if table.scope.chars().any(char::is_control) || table.scope.chars().all(char::is_whitespace) {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: [feedback] scope must be one line of text with no control characters"
+        )));
+    }
+    Ok(Some(table.scope))
 }
 
 /// Normalizes a configured doc root: one trailing slash is dropped; anything that is not a
@@ -168,6 +195,7 @@ impl Project {
                 spec_dirs: None,
                 plan_dirs: None,
                 tags: None,
+                feedback: None,
             })
             .expect("config serializes");
             atomic_write(&config, text.as_bytes())?;
@@ -195,6 +223,7 @@ impl Project {
             spec_dirs: doc_roots("spec_dirs", config.spec_dirs, DEFAULT_SPEC_DIRS)?,
             plan_dirs: doc_roots("plan_dirs", config.plan_dirs, DEFAULT_PLAN_DIRS)?,
             tags: tag_dictionary(config.tags)?,
+            feedback: feedback_scope(config.feedback)?,
         })
     }
 

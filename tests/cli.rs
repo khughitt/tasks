@@ -474,6 +474,113 @@ fn write_dictionary(dir: &std::path::Path, prefix: &str, entries: &[(&str, &str)
     std::fs::write(dir.join("tasks/.config.toml"), text).unwrap();
 }
 
+/// Opt a test project into feedback by appending a `[feedback]` table to its config.
+fn accept_feedback(dir: &std::path::Path, scope: &str) {
+    let path = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(&format!("\n[feedback]\nscope = \"{scope}\"\n"));
+    std::fs::write(path, text).unwrap();
+}
+
+/// The invalid `[feedback]` tables, as TOML text after the `prefix` line. ops's
+/// `tests/test_ops_projects.py` (`INVALID_FEEDBACK`) carries the same list: the two
+/// readers must refuse exactly the same configs (Task 6).
+const INVALID_FEEDBACK: [(&str, &str); 11] = [
+    ("[feedback]\n", "missing scope"),
+    ("[feedback]\nscope = \"\"\n", "empty scope"),
+    ("[feedback]\nscope = \"   \"\n", "blank scope"),
+    ("[feedback]\nscope = \"a\\nb\"\n", "line feed"),
+    ("[feedback]\nscope = \"a\\rb\"\n", "carriage return"),
+    ("[feedback]\nscope = \"a\\tb\"\n", "tab"),
+    ("[feedback]\nscope = \"a\\u001fb\"\n", "unit separator"),
+    ("[feedback]\nscope = 3\n", "not a string"),
+    ("[feedback]\nscop = \"Owns x.\"\n", "misspelled key"),
+    (
+        "[feedback]\nscope = \"Owns x.\"\nextra = 1\n",
+        "unknown key",
+    ),
+    ("feedback = \"Owns x.\"\n", "not a table"),
+];
+
+#[test]
+fn a_feedback_table_needs_a_one_line_scope_and_no_other_keys() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let config = sci.join("tasks/.config.toml");
+    for (table, why) in INVALID_FEEDBACK {
+        std::fs::write(&config, format!("prefix = \"sci\"\n\n{table}")).unwrap();
+        assert_eq!(env.fail(&sci, &["list"]), "config", "{why}");
+    }
+    // Non-ASCII text and inner spaces are fine; only control characters and blankness are not.
+    std::fs::write(
+        &config,
+        "prefix = \"sci\"\n\n[feedback]\nscope = \"Owns x \u{2014} and y.\"\n",
+    )
+    .unwrap();
+    env.json(&sci, &["list"]);
+}
+
+#[test]
+fn check_holds_feedback_tags_defined_on_feedback_records_in_an_accepting_project() {
+    let mut env = TestEnv::new();
+    let ai = env.init("ai");
+    write_dictionary(&ai, "ai", &[("rules", "The instruction files.")]);
+    // A report synced from a host where its source is registered; here it is not.
+    let args = [
+        "add",
+        "Report",
+        "--status",
+        "idea",
+        "--tag",
+        "feedback",
+        "--tag",
+        "friction",
+        "--tag",
+        "from:gone",
+    ];
+    env.json(&ai, &args);
+    // Without [feedback] the dictionary binds everything: three findings.
+    assert_eq!(env.check(&ai)["warnings"].as_array().unwrap().len(), 3);
+
+    accept_feedback(&ai, "Agent instructions.");
+    let clean = env.check(&ai);
+    assert!(clean["warnings"].as_array().unwrap().is_empty(), "{clean}");
+
+    // Any other tag on a feedback record is still held to the dictionary ...
+    env.json(
+        &ai,
+        &[
+            "add",
+            "Report two",
+            "--status",
+            "idea",
+            "--tag",
+            "feedback",
+            "--tag",
+            "perf",
+        ],
+    );
+    // ... and so is the feedback vocabulary on a record that is not feedback.
+    env.json(
+        &ai,
+        &["add", "Plain", "--tag", "friction", "--tag", "from:ai"],
+    );
+    let warnings = env.check(&ai)["warnings"].clone();
+    let details: Vec<String> = warnings
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["detail"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(details.len(), 3, "{details:?}");
+    for tag in ["\"perf\"", "\"friction\"", "\"from:ai\""] {
+        assert!(
+            details.iter().any(|d| d.contains(tag)),
+            "{tag} in {details:?}"
+        );
+    }
+}
+
 #[test]
 fn tags_carry_the_dictionary_meaning_and_check_holds_open_work_to_it() {
     let mut env = TestEnv::new();
