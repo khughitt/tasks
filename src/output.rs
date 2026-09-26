@@ -1,4 +1,5 @@
 use std::io::IsTerminal;
+use unicode_width::UnicodeWidthChar;
 
 use crate::error::{Error, Result};
 use crate::model::{Complexity, Process, Size, Status, Task};
@@ -1381,7 +1382,7 @@ fn terminal_attached_width() -> Option<usize> {
 
 /// The visible length of text the painter has already wrapped in SGR sequences: padding
 /// lands before painting, so ANSI bytes must not count toward a wrap width.
-fn visible_len(text: &str) -> usize {
+fn visible_width(text: &str) -> usize {
     let mut count = 0;
     let mut chars = text.chars();
     while let Some(c) = chars.next() {
@@ -1392,10 +1393,14 @@ fn visible_len(text: &str) -> usize {
                 }
             }
         } else {
-            count += 1;
+            count += c.width().unwrap_or(0);
         }
     }
     count
+}
+
+fn columns(chars: &[(char, Option<Style>)]) -> usize {
+    chars.iter().map(|(c, _)| c.width().unwrap_or(0)).sum()
 }
 
 /// Where pretty wrapping applies: the target width, and the indentation a tree node
@@ -1452,9 +1457,9 @@ fn render_row(
     let Some(width) = wrap.width else {
         return single;
     };
-    let fixed = wrap.indent + visible_len(prefix);
+    let fixed = wrap.indent + visible_width(prefix);
     let available = width.saturating_sub(fixed);
-    if available < TITLE_FLOOR || chars.len() <= available {
+    if available < TITLE_FLOOR || columns(&chars) <= available {
         return single;
     }
     let lines = wrap_lines(&chars, available);
@@ -1518,22 +1523,14 @@ fn wrap_lines(
             continue;
         }
         let sep = pending.take().unwrap_or(&[]);
-        if line.len() + sep.len() + run.len() <= available {
+        if columns(&line) + columns(sep) + columns(run) <= available {
             line.extend_from_slice(sep);
             line.extend_from_slice(run);
-        } else if run.len() > available {
+        } else if columns(run) > available {
             if !line.is_empty() {
-                if line.len() + sep.len() < available {
-                    line.extend_from_slice(sep);
-                }
-                let head = available - line.len();
-                let (chunk, rest) = run.split_at(head.min(run.len()));
-                line.extend_from_slice(chunk);
                 lines.push(std::mem::take(&mut line));
-                fill_hard_split(&mut lines, &mut line, rest, available);
-            } else {
-                fill_hard_split(&mut lines, &mut line, run, available);
             }
+            fill_hard_split(&mut lines, &mut line, run, available);
         } else {
             lines.push(std::mem::take(&mut line));
             line.extend_from_slice(run);
@@ -1554,8 +1551,22 @@ fn fill_hard_split(
     available: usize,
 ) {
     let mut word = word;
-    while word.len() > available {
-        let (chunk, rest) = word.split_at(available);
+    while columns(word) > available {
+        let mut used = 0;
+        let split = word
+            .iter()
+            .take_while(|(c, _)| {
+                let next = used + c.width().unwrap_or(0);
+                if next > available {
+                    false
+                } else {
+                    used = next;
+                    true
+                }
+            })
+            .count()
+            .max(1);
+        let (chunk, rest) = word.split_at(split);
         lines.push(chunk.to_vec());
         word = rest;
     }
@@ -2158,6 +2169,25 @@ mod tests {
     }
 
     #[test]
+    fn wide_characters_fit_the_terminal_columns() {
+        let mut row = long_row();
+        row.title = "界".repeat(40);
+        let text = table(
+            &[row],
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            false,
+            Wrap::at(80),
+        );
+        for line in text.lines() {
+            let columns: usize = line.chars().map(|c| if c == '界' { 2 } else { 1 }).sum();
+            assert!(columns <= 80, "{columns} columns: {line:?}");
+        }
+    }
+
+    #[test]
     fn a_row_that_fits_the_width_stays_one_line_and_byte_identical() {
         let rows = [row("xx-000001", false)];
         let wrapped = table(
@@ -2207,6 +2237,18 @@ mod tests {
             .map(|line| line.iter().map(|(c, _)| c).collect())
             .collect();
         assert_eq!(texts, ["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn hard_split_does_not_join_the_previous_word() {
+        let chars: Vec<(char, Option<Style>)> =
+            "abcd bbbbbbbb".chars().map(|c| (c, None)).collect();
+        let lines = wrap_lines(&chars, 5);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.iter().map(|(c, _)| c).collect())
+            .collect();
+        assert_eq!(texts, ["abcd", "bbbbb", "bbb"]);
     }
 
     #[test]

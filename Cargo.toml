@@ -16,6 +16,7 @@ thiserror = "2"
 libc = "0.2"
 terminal-trx = "0.2"
 xterm-color = "1"
+unicode-width = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2"

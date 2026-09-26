@@ -180,14 +180,6 @@ fn main() {
     };
     let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
-    let wrap_width = match output::terminal_width() {
-        Ok(Some(width)) => output::Wrap::at(width),
-        Ok(None) => output::Wrap::NONE,
-        Err(error) => {
-            to_stderr(&format!("{}\n", output::render_error(&error)));
-            std::process::exit(1);
-        }
-    };
     match commands::run(cli) {
         Ok(out) => {
             // A clean `check` says nothing in JSON mode: it ends every project's pre-commit
@@ -243,6 +235,25 @@ fn main() {
                 warnings.extend(theme_warning);
                 to_stderr(&output::pretty_warnings(&warnings, &stderr_painter));
             }
+            let wrap_width = if format == Format::Pretty
+                && matches!(
+                    &out,
+                    output::Output::List(_)
+                        | output::Output::Prime(_)
+                        | output::Output::Parked(_)
+                        | output::Output::Tree(_)
+                ) {
+                match output::terminal_width() {
+                    Ok(Some(width)) => output::Wrap::at(width),
+                    Ok(None) => output::Wrap::NONE,
+                    Err(error) => {
+                        to_stderr(&format!("{}\n", output::render_error(&error)));
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                output::Wrap::NONE
+            };
             let rendered = output::render(&out, format, &stdout_painter, wrap_width);
             let written = if silent {
                 Ok(())

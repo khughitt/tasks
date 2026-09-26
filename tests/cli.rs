@@ -1704,6 +1704,26 @@ fn an_invalid_columns_value_fails_as_config() {
 }
 
 #[test]
+fn columns_only_applies_to_pretty_tables() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "A task"]));
+    for args in [vec!["--json", "list"], vec!["--pretty", "show", &id]] {
+        let out = env
+            .cmd(&sci)
+            .env("COLUMNS", "wide")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
 fn read_commands_do_not_take_the_mutation_lock() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
