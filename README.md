@@ -301,6 +301,13 @@ checking authorization. Outside git, rename warns that forward recovery is the o
 option after source removal. `git checkout .` alone does not undo a rename; see
 [manual recovery](docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery).
 
+If another host already renamed a synced checkout, run `tasks rename <old> <new> --adopt`
+from that checkout on this host **before starting work there**. It changes only this host's
+registry and claim state; old ids keep resolving. A live old or new claim blocks adoption:
+stop its owning session or wait for it to become stale, then retry. For a rehearsal, set
+both `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to scratch directories so no live registry or
+park is touched. `--explain --adopt` diagnoses the local state without writes.
+
 ## Choosing a process
 
 Set `--process direct|planned` on `add` or `edit`; `edit --no-process` clears it.

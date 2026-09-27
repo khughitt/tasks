@@ -114,7 +114,7 @@ Task record: `tasks-06abc9`, dependent on Task 1. Start it before code changes.
 
 Task record: `tasks-10afde`, dependent on Task 2. Start it before code changes.
 
-**Files:** Modify `tests/cli.rs`, `README.md`, `skills/tasks/SKILL.md`.
+**Files:** Modify `tests/cli.rs`, `README.md`, `skills/tasks/SKILL.md`, `tools/cli.toml`.
 
 **Interfaces:** Uses the finished `tasks rename old new --adopt` command; no new runtime interface.
 
@@ -137,9 +137,9 @@ Task record: `tasks-10afde`, dependent on Task 2. Start it before code changes.
   assert_eq!(host_b_json(&moved_root, &["show", &new_id])["claim"]["live"], true);
   ```
 - [ ] **Step 3: Run `just test-fast adopt` and read the results.** Fix only concrete failures. Add a short README example and the same operational instruction to `skills/tasks/SKILL.md`: run adoption from the renamed checkout before starting work there, use scratch config **and** state for rehearsal, and explain the live-claim refusal.
-- [ ] **Step 4: Run `just gate`, `tasks check`, and inspect `git diff --check`.** The gate includes the full test suite and clippy. Stop testing after it passes.
+- [ ] **Step 4: Add `rename --adopt` to `tools/cli.toml`, then run `just gate`, `tasks check`, and inspect `git diff --check`.** The gate includes the full test suite, command surface contract, and clippy. Stop testing after it passes.
 - [ ] **Step 5: Reinstall the changed CLI with `cargo install --path .`, then smoke-test `tasks rename --help` using the installed command.** Do not run adoption against a live project.
-- [ ] **Step 6: Complete Task 3 and its parent in the same commit as the code:** run `tasks done tasks-10afde 'Two-host recovery verified and documented'`, then `tasks done tasks-7f1596 'Second-host rename adoption landed'`. Run `tasks check`, then `git add tests/cli.rs README.md skills/tasks/SKILL.md tasks/tasks-10afde.md tasks/tasks-7f1596.md && git commit -m 'feat(tasks): verify and document second-host adoption'`.
+- [ ] **Step 6: Complete Task 3 and its parent in the same commit as the code:** run `tasks done tasks-10afde 'Two-host recovery verified and documented'`, then `tasks done tasks-7f1596 'Second-host rename adoption landed'`. Run `tasks check`, then `git add tests/cli.rs README.md skills/tasks/SKILL.md tools/cli.toml docs/plans/2026-09-27-second-host-rename-adoption.md tasks/tasks-10afde.md tasks/tasks-7f1596.md && git commit -m 'feat(tasks): verify and document second-host adoption'`.
 
 ## Finish
 

@@ -305,6 +305,14 @@ freezes every writer to that project, including `start`, feedback, `init --force
 observed recovery verdict without writes, locks, or authorization checks. Re-run the same
 command without `--explain` to resume; live claims and extra worktrees still block recovery.
 
+When another host has already renamed a synced checkout, run
+`tasks rename <old> <new> --adopt` from the renamed checkout before starting work there.
+It changes this host's registry and claim state, not the synced task files, and old ids
+continue to resolve. A live claim in either store blocks adoption until its owner stops
+or it becomes stale. Re-run after interruption; `--explain --adopt` diagnoses without
+writes. Rehearsals must set both `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to scratch
+directories; isolating only the registry can move live parks.
+
 Recovery covers process interruption, not power loss. Outside git, once a source was
 removed, only forward recovery is available. `git checkout .` alone is not an undo: new
 filenames and the registry survive it. Follow the

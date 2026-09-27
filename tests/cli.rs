@@ -12279,6 +12279,16 @@ fn adopt_refuses_a_live_old_claim_with_missing_registered_root() {
         .unwrap();
     assert_eq!(err_kind(&out), "claimed");
     assert!(String::from_utf8_lossy(&out.stderr).contains("old-session"));
+    let claims = adopt_json(&env, &dir, &["claims"]);
+    assert_eq!(claims["claims"][0]["id"], old_id);
+    let old_store = state.join("old.toml");
+    let text = std::fs::read_to_string(&old_store).unwrap();
+    std::fs::write(&old_store, text.replace("2099-", "2020-")).unwrap();
+    assert_eq!(
+        adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+        "fresh"
+    );
+    assert!(!old_store.exists());
 }
 
 #[test]
@@ -12313,6 +12323,148 @@ fn adopt_explain_refuses_pending_inventory_or_mismatched_task_file() {
         )["recovery"],
         "refuse"
     );
+}
+
+#[test]
+fn adopt_two_hosts_after_primary_rename_and_optional_partial_init() {
+    for partial_init in [false, true] {
+        let host_a = TestEnv::new();
+        let host_b = TestEnv::new();
+        let parent = tempfile::tempdir().unwrap();
+        let old_root = parent.path().join("old-root");
+        std::fs::create_dir(&old_root).unwrap();
+        adopt_json(&host_a, &old_root, &["init", "--prefix", "old"]);
+        let old_id = id_of(adopt_json(
+            &host_a,
+            &old_root,
+            &["add", "T", "--complexity", "mid"],
+        ));
+        adopt_json(&host_b, &old_root, &["init", "--prefix", "old"]);
+        adopt_json(&host_b, &old_root, &["park", &old_id, "continue here"]);
+        let b_store = host_b.home.path().join("state/tasks/claims/old.toml");
+        let mut text = std::fs::read_to_string(&b_store).unwrap();
+        text.push_str(&format!(
+            "\n[escalations.\"{old_id}\"]\nlevel = \"high\"\nat = \"2026-09-27T00:00:00Z\"\nsession = \"old-session\"\n"
+        ));
+        std::fs::write(&b_store, text).unwrap();
+
+        adopt_json(&host_a, &old_root, &["rename", "old", "new"]);
+        let new_root = parent.path().join("new-root");
+        std::fs::rename(&old_root, &new_root).unwrap();
+        adopt_json(&host_a, &new_root, &["init", "--prefix", "new", "--force"]);
+        if partial_init {
+            adopt_json(&host_b, &new_root, &["init", "--prefix", "new", "--force"]);
+        }
+        let new_id = old_id.replacen("old-", "new-", 1);
+        let config = new_root.join("tasks/.config.toml");
+        let task = new_root.join(format!("tasks/{new_id}.md"));
+        let config_before = std::fs::read(&config).unwrap();
+        let task_before = std::fs::read(&task).unwrap();
+        let adopted = adopt_json(&host_b, &new_root, &["rename", "old", "new", "--adopt"]);
+        assert_eq!(adopted["mode"], "adopt");
+        assert_eq!(std::fs::read(config).unwrap(), config_before);
+        assert_eq!(std::fs::read(task).unwrap(), task_before);
+        assert_eq!(
+            adopt_json(&host_b, &new_root, &["show", &old_id])["task"]["id"],
+            new_id
+        );
+        let registry: toml::Value = toml::from_str(
+            &std::fs::read_to_string(host_b.home.path().join("config/tasks/projects.toml"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            registry["projects"]
+                .as_table()
+                .unwrap()
+                .get("old")
+                .is_none()
+        );
+        assert_eq!(registry["aliases"]["old"].as_str(), Some("new"));
+        assert_eq!(registry["projects"]["new"].as_str(), new_root.to_str());
+        let b_new_store =
+            std::fs::read_to_string(host_b.home.path().join("state/tasks/claims/new.toml"))
+                .unwrap();
+        assert!(
+            b_new_store.contains(&format!("[parks.{new_id}]")),
+            "{b_new_store}"
+        );
+        assert!(
+            b_new_store.contains(&format!("[escalations.{new_id}]")),
+            "{b_new_store}"
+        );
+        assert!(!b_store.exists());
+    }
+}
+
+#[test]
+fn adopt_replays_each_state_boundary_and_skips_store_without_parks() {
+    for (boundary, expected) in [
+        ("store", "resume_registry"),
+        ("registry", "resume_cleanup"),
+        ("claims", "complete"),
+    ] {
+        let env = TestEnv::new();
+        let (dir, old_id) = adopt_fixture(&env);
+        adopt_old_park(&env, &old_id);
+        let stopped = adopt_cmd(&env, &dir)
+            .env("TASKS_RENAME_STOP_AFTER", boundary)
+            .args(["rename", "old", "new", "--adopt"])
+            .output()
+            .unwrap();
+        assert!(stopped.status.success(), "{boundary}: {stopped:?}");
+        let explained = adopt_json(
+            &env,
+            &dir,
+            &["rename", "old", "new", "--adopt", "--explain"],
+        );
+        assert_eq!(explained["recovery"], expected, "{boundary}: {explained}");
+        if boundary == "registry" {
+            let new_id = old_id.replacen("old-", "new-", 1);
+            let started = adopt_cmd(&env, &dir)
+                .env("CODEX_SESSION_ID", "post-registry")
+                .args(["start", &new_id])
+                .output()
+                .unwrap();
+            assert!(started.status.success(), "{started:?}");
+        }
+        assert_eq!(
+            adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+            expected
+        );
+        assert_eq!(
+            adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+            "complete"
+        );
+    }
+    let env = TestEnv::new();
+    let (dir, _) = adopt_fixture(&env);
+    let stopped = adopt_cmd(&env, &dir)
+        .env("TASKS_RENAME_STOP_AFTER", "store")
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+    assert_eq!(
+        adopt_json(
+            &env,
+            &dir,
+            &["rename", "old", "new", "--adopt", "--explain"]
+        )["recovery"],
+        "complete"
+    );
+}
+
+#[test]
+fn adopt_carries_an_orphaned_park_and_reports_it() {
+    let env = TestEnv::new();
+    let (dir, _) = adopt_fixture(&env);
+    adopt_old_park(&env, "old-ffffff");
+    let adopted = adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"]);
+    assert!(adopted["warnings"].to_string().contains("new-ffffff"));
+    let parked = adopt_json(&env, &dir, &["list", "--parked"]);
+    assert_eq!(parked["tasks"][0]["id"], "new-ffffff");
+    assert!(parked["tasks"][0]["status"].is_null());
 }
 
 fn rename_stop(env: &TestEnv, dir: &std::path::Path, old: &str, new: &str, stop: &str) {
