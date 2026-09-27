@@ -49,11 +49,12 @@ before a write:
   `tasks/.config.toml`; an empty directory left by a move does not block.
 - No unfinished ordinary rename inventory names this root or either prefix.
   Before the registry switches, no live claim exists in either prefix's
-  state store. An existing target store may be empty or exactly match the
-  carried state; other target parks or escalations are a conflict. After the
-  registry switches, the target store belongs to ordinary commands and may
-  change. Cleanup only requires it to exist and parse when there was carried
-  state; it never overwrites that store or bans its live claims.
+  state store. Target parks and escalations must be a subset of the carried
+  entries, with equal values; any other entry conflicts. Local commands can
+  already write the `new` store before the registry switches, because they
+  use the checkout's prefix. After the switch, cleanup only requires the
+  target store to exist and parse when there was carried state; it never
+  overwrites that store or bans its live claims.
 
 The command refuses with a typed error naming the conflict. A stale claim is
 discarded as ordinary `rename` does. A live old claim names its owner in the
@@ -71,8 +72,13 @@ park entry, so adoption does not make an orphan disappear.
 Preflight computes the carried target store before any write. Then, while all
 three locks remain held:
 
-1. Write and verify `claims/new.toml` if there are parks or escalations to
-   carry. An identical target file is accepted on retry.
+1. If there is state to carry and the target has none of its parks or
+   escalations, write the carried parks and escalations together with the
+   target's existing claims, then verify the file. A claim colliding with
+   a carried park is a conflict. If the target already has any carried
+   entry, skip the write: missing carried entries may already have been
+   consumed by a local command. With nothing to carry, skip this step and
+   leave the target store unchanged, including stale claims.
 2. Move the registry's live `old` key to `new`, repoint `new` to the current
    root, and save once. Reuse `Registry::rename` when `new` is free; when an
    earlier `init --force` already registered `new` here, remove only the
@@ -84,20 +90,22 @@ three locks remain held:
 | Observed state | `recovery` | Next action |
 | --- | --- | --- |
 | No adoption write | `fresh` | Write carried store, then registry. |
-| Carried store written, registry still has live `old` | `resume_registry` | Verify exact carried bytes, then save registry. |
+| Target has a matching subset of carried entries, registry still has live `old` | `resume_registry` | Keep target claims and entries; save registry. |
 | Registry settled, old store remains | `resume_cleanup` | Verify target file exists and parses if state was carried; remove old store. |
 | Registry settled, old store gone | `complete` | No write. |
 
 With nothing to carry, step 1 is skipped and `resume_registry` cannot occur.
 `TASKS_RENAME_STOP_AFTER=store`, `registry`, and `claims` inject stops after
 the target write, registry write, and old-store removal. Before step 2, retry
-recomputes and verifies carried bytes; a changed source or conflicting target
-refuses. After step 2, ordinary commands may legitimately replace a carried
-park with a claim or clear an escalation. Requiring the original keys here
-would strand cleanup, so the settled registry and a valid target store are
-sufficient. Ordinary rename has the same post-registry concurrency window;
-adoption leaves the now-live target store authoritative. This covers process
-interruption, not power failure, matching ordinary rename's existing limit.
+compares the target's remaining park and escalation entries with the carried
+set, refusing a foreign or changed entry, and refuses live claims. It does
+not require consumed entries to reappear. After step 2, ordinary commands
+may also replace a carried park with a claim or clear an escalation. The
+settled registry and a valid target store are sufficient for cleanup.
+Ordinary rename has the same post-registry concurrency window; adoption
+leaves the target store authoritative on both sides of the switch. This
+covers process interruption, not power failure, matching ordinary rename's
+existing limit.
 
 ## Checks
 
@@ -108,7 +116,8 @@ a parked task before adopting. Assert old IDs resolve, the park and escalation
 survive under new IDs, earlier aliases flatten, no checkout file changes, and
 a retry is a no-op. Repeat host B with the partial `init --force` workaround.
 Exercise the `store`, `registry`, and `claims` stop points, including a
-`start` that consumes a park after `registry` before retry. Check orphaned
+`start` that consumes a park after `store` and after `registry` before retry.
+Assert stale target claims survive the first write. Check orphaned
 parks, conflicting target state, a live old claim, mismatched checkout files,
 a foreign old root with a task config, an empty old directory, an older alias
 as the argument, and an unfinished rename inventory. Run `just gate` before
