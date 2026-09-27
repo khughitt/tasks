@@ -25,7 +25,7 @@
 3. An orphaned old park has no matching synced task: it survives with a warning and appears unresolved in `list --parked` (Task 3).
 4. A stale old root path remains as an empty directory: adoption succeeds; a different root with `tasks/.config.toml` refuses (Task 2).
 5. A live old claim cannot be released through the missing checkout: adoption names the owner and requires the claim to become stale before retry (Task 2 and Task 3).
-6. Local `start` consumes the only carried park after the `store` stop but before the registry switch: the persisted adoption marker lets retry keep the claim without resurrecting the park (Task 2 and Task 3).
+6. Local `start` consumes the only carried park after the `store` stop but before the registry switch: retry refuses its live claim; once stale, the persisted adoption marker lets retry keep the claim without resurrecting the park (Task 2 and Task 3).
 
 ---
 
@@ -129,7 +129,7 @@ Task record: `tasks-10afde`, dependent on Task 2. Start it before code changes.
   ```
 
   Define `host_b_cmd` as a local test closure wrapping `env_b.cmd` and setting both XDG variables; do the same for host A. Keep the parent temp directory alive while moving its nested checkout.
-- [ ] **Step 2: Test each stop boundary and local writes on both sides of the switch.** For `TASKS_RENAME_STOP_AFTER=store`, `registry`, and `claims`, assert the next `--explain` verdict is `resume_registry`, `resume_cleanup`, and `complete` respectively, then rerun adoption. After `store`, run `tasks start new-<hex>` from the synced checkout to consume the carried park, then retry: it must accept the target subset, preserve the new claim, and settle the registry. Repeat after `registry` before cleanup. With no carried state, assert `store` is skipped and `resume_registry` never appears. Test an orphaned park reaches `list --parked` as unresolved with the adoption warning. For a live old claim, assert `tasks claims` lists it despite the missing root, then rewrite its `seen` to more than four hours ago with no PID proof and retry; adoption must then discard it and succeed.
+- [ ] **Step 2: Test each stop boundary and local writes on both sides of the switch.** For `TASKS_RENAME_STOP_AFTER=store`, `registry`, and `claims`, assert the next `--explain` verdict is `resume_registry`, `resume_cleanup`, and `complete` respectively, then rerun adoption. After `store`, run `tasks start new-<hex>` from the synced checkout to consume the carried park; retry must refuse its live claim. Once that claim is stale, retry must accept the target subset, preserve the claim record, and settle the registry. Repeat after `registry` before cleanup, where a live target claim is allowed. With no carried state, assert `store` is skipped and `resume_registry` never appears. Test an orphaned park reaches `list --parked` as unresolved with the adoption warning. For a live old claim, assert `tasks claims` lists it despite the missing root, then rewrite its `seen` to more than four hours ago with no PID proof and retry; adoption must then discard it and succeed.
 
   ```rust
   assert_eq!(explained["recovery"], expected_stage);

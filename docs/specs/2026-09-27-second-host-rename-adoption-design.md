@@ -107,7 +107,8 @@ the target write, registry write, and old-store removal. Before step 2, retry
 compares an unmarked target's remaining park and escalation entries with the
 carried set, refusing a foreign or changed entry, and refuses live claims.
 A marked target has already received the carried state, so later local
-changes are authoritative. It does not require consumed entries to reappear.
+park and escalation changes are authoritative. It does not require consumed
+entries to reappear; the live-claim refusal still applies before step 2.
 After step 2, ordinary commands
 may also replace a carried park with a claim or clear an escalation. The
 settled registry and a valid target store are sufficient for cleanup.

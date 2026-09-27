@@ -12257,6 +12257,38 @@ fn adopt_explain_refuses_target_park_or_older_alias_before_registry_switch() {
 }
 
 #[test]
+fn adopt_retired_target_refuses_before_writing_target_store() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    adopt_old_park(&env, &old_id);
+    let registry_path = env.home.path().join("config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry["aliases"] = toml::toml! { new = "old" }.into();
+    std::fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    let registry_before = std::fs::read(&registry_path).unwrap();
+    let old_path = env.home.path().join("state/tasks/claims/old.toml");
+    let old_before = std::fs::read(&old_path).unwrap();
+    let target_path = env.home.path().join("state/tasks/claims/new.toml");
+    assert_eq!(
+        adopt_json(
+            &env,
+            &dir,
+            &["rename", "old", "new", "--adopt", "--explain"]
+        )["recovery"],
+        "refuse"
+    );
+    let refused = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(!target_path.exists());
+    assert_eq!(std::fs::read(old_path).unwrap(), old_before);
+    assert_eq!(std::fs::read(registry_path).unwrap(), registry_before);
+}
+
+#[test]
 fn adopt_refuses_a_live_old_claim_with_missing_registered_root() {
     let env = TestEnv::new();
     let (dir, old_id) = adopt_fixture(&env);

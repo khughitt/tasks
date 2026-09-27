@@ -199,6 +199,9 @@ fn classify_registry(
             "{old:?} is an alias of {live:?}; use the live key"
         )));
     }
+    if registry.aliases.contains_key(new) {
+        return Ok(Stage::Refuse(format!("target prefix {new:?} is retired")));
+    }
     let root = root_identity(&project.root)?;
     let source = registry.project_root(old);
     let target = registry.project_root(new);
