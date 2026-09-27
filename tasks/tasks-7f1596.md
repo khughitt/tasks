@@ -8,13 +8,14 @@ complexity: mid
 process: planned
 owner: feat/tasks-7f1596-adopt-rename
 created: 2026-09-27T13:48:27Z
-updated: 2026-09-27T16:37:29Z
+updated: 2026-09-27T16:43:22Z
 started: 2026-09-27T16:13:09Z
 depends: []
 tags: []
 source: "ai:docs/specs/2026-09-27-rename-to-tack-design.md"
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-09-27-second-host-rename-adoption-design.md
+plan: docs/plans/2026-09-27-second-host-rename-adoption.md
 ---
 
 Why: a checkout synced between hosts (e.g. Dropbox) can be renamed on one host with tasks rename old new. Every other host then holds a state no command handles: its synced tasks/.config.toml and task files already carry new, but its registry still maps old to the (possibly moved) root. Replaying tasks rename old new refuses this state, and repathing alone (tasks init --prefix new --force) leaves the registry's old key and this host's claims and parks keyed by old behind.
@@ -34,3 +35,5 @@ Requested by the rename in ai (spec docs/specs/2026-09-27-rename-to-tack-design.
 - 2026-09-27T16:35:39Z (feat/tasks-7f1596-adopt-rename): resumed
   provenance: {"harness_session":"codex:01a0e3a3-7f1c-7353-9e4b-461189bb69f1","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-27T16:37:29Z (feat/tasks-7f1596-adopt-rename): Spec review: support partial init --force, preserve orphaned state with warnings, and allow cleanup after normal commands change the new store; plan follows reviewed revision
+- 2026-09-27T16:43:22Z (feat/tasks-7f1596-adopt-rename): parked (waiting on user, review): User reviews docs/plans/2026-09-27-second-host-rename-adoption.md in .worktrees/tasks-7f1596; after approval, agent starts tasks-54df5e and executes the reviewed plan
+  provenance: {"harness_session":"codex:01a0e3a3-7f1c-7353-9e4b-461189bb69f1","harness_session_source":"CODEX_SESSION_ID"}
