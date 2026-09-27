@@ -78,6 +78,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
         (source_parks, source_escalations)
     };
     let mut out = RenameOut {
+        mode: None,
         prefix: invocation.target.clone(),
         previous: invocation.source.clone(),
         root: invocation.root.display().to_string(),

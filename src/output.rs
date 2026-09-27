@@ -47,6 +47,8 @@ pub struct InitOut {
 
 #[derive(Serialize)]
 pub struct RenameOut {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     pub prefix: String,
     pub previous: String,
     pub root: String,

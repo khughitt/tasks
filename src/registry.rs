@@ -171,6 +171,50 @@ impl Registry {
         Ok(())
     }
 
+    /// Adopt a checkout that already has `target` in its synced files.
+    #[allow(dead_code)] // Used by the adoption command in the next plan step.
+    pub fn adopt(&mut self, source: &str, target: &str, root: &Path) -> Result<()> {
+        if source == target || !crate::model::is_valid_prefix(target) {
+            return Err(Error::Config(format!("invalid adoption target {target:?}")));
+        }
+        if !self.projects.contains_key(source) {
+            return Err(Error::Config(format!(
+                "no project registered as {source:?}"
+            )));
+        }
+        if self.aliases.contains_key(target) {
+            return Err(Error::Config(format!(
+                "target prefix {target:?} is retired"
+            )));
+        }
+        let root = crate::rename::root_identity(root)?;
+        for (prefix, registered) in &self.projects {
+            if prefix == source {
+                continue;
+            }
+            let same_root = crate::rename::root_identity(registered)? == root;
+            if prefix == target && !same_root || prefix != target && same_root {
+                return Err(Error::Config(format!(
+                    "project {prefix:?} is registered at conflicting root {}",
+                    registered.display()
+                )));
+            }
+        }
+        if self.projects.contains_key(target) {
+            self.projects.remove(source);
+            for live in self.aliases.values_mut() {
+                if live == source {
+                    *live = target.into();
+                }
+            }
+            self.aliases.insert(source.into(), target.into());
+        } else {
+            self.rename(source, target)?;
+        }
+        self.repoint(target, &root)?;
+        Ok(())
+    }
+
     pub fn project_root(&self, prefix: &str) -> Option<&Path> {
         self.projects.get(prefix).map(PathBuf::as_path)
     }
@@ -204,6 +248,49 @@ impl Registry {
 mod tests {
     use super::*;
     use crate::model::TaskId;
+
+    #[test]
+    fn adopt_flattens_aliases_with_free_or_pre_registered_target() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("new");
+        std::fs::create_dir(&root).unwrap();
+        for partial_init in [false, true] {
+            let mut registry = Registry::default();
+            registry
+                .register("old", &home.path().join("missing"))
+                .unwrap();
+            registry.aliases.insert("older".into(), "old".into());
+            if partial_init {
+                registry.register("new", &root.join(".")).unwrap();
+            }
+            registry.adopt("old", "new", &root).unwrap();
+            assert_eq!(registry.projects.len(), 1);
+            assert_eq!(registry.project_root("new"), Some(root.as_path()));
+            assert!(registry.project_root("old").is_none());
+            assert_eq!(registry.canonical_prefix("older"), "new");
+            assert_eq!(registry.canonical_prefix("old"), "new");
+        }
+    }
+
+    #[test]
+    fn adopt_refuses_foreign_target_or_duplicate_live_root_without_mutation() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("new");
+        std::fs::create_dir(&root).unwrap();
+        for (key, path) in [
+            ("new", home.path().join("foreign")),
+            ("third", root.clone()),
+        ] {
+            let mut registry = Registry::default();
+            registry
+                .register("old", &home.path().join("missing"))
+                .unwrap();
+            registry.register(key, &path).unwrap();
+            assert!(registry.adopt("old", "new", &root).is_err());
+            assert!(registry.project_root("old").is_some());
+            assert!(registry.aliases.is_empty());
+        }
+    }
 
     #[test]
     fn roundtrip_and_conflict() {
