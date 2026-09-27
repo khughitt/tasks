@@ -6,9 +6,9 @@ priority: 2
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: feat/tasks-7f1596-adopt-rename
 created: 2026-09-27T13:48:27Z
-updated: 2026-09-27T16:15:48Z
+updated: 2026-09-27T16:37:29Z
 started: 2026-09-27T16:13:09Z
 depends: []
 tags: []
@@ -31,3 +31,6 @@ Requested by the rename in ai (spec docs/specs/2026-09-27-rename-to-tack-design.
   provenance: {"harness_session":"codex:01a0e3a3-7f1c-7353-9e4b-461189bb69f1","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-27T16:15:48Z (feat/tasks-7f1596-adopt-rename): parked (waiting on user, review): User reviews docs/specs/2026-09-27-second-host-rename-adoption-design.md in .worktrees/tasks-7f1596; after approval, write and review the implementation plan
   provenance: {"harness_session":"codex:01a0e3a3-7f1c-7353-9e4b-461189bb69f1","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-27T16:35:39Z (feat/tasks-7f1596-adopt-rename): resumed
+  provenance: {"harness_session":"codex:01a0e3a3-7f1c-7353-9e4b-461189bb69f1","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-27T16:37:29Z (feat/tasks-7f1596-adopt-rename): Spec review: support partial init --force, preserve orphaned state with warnings, and allow cleanup after normal commands change the new store; plan follows reviewed revision

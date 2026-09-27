@@ -1,6 +1,6 @@
 # Adopting a project rename on another host
 
-Status: proposed for review
+Status: reviewed 2026-09-27; corrections from review incorporated
 Task: tasks-7f1596
 
 ## Goal
@@ -17,12 +17,18 @@ anything. Ordinary `tasks rename old new` keeps its existing behavior.
 
 ## Command
 
-Run `tasks rename old new --adopt` from inside the renamed checkout. The command
-uses the local project root, not the old path in the registry. It requires the
-local config to name `new`; it never rewrites `tasks/.config.toml` or task files.
-`--explain` with `--adopt` reports the observed adoption stage or a refusal
-without writing. JSON keeps the existing rename shape: `tasks` is zero, and
-`recovery` is `fresh`, `resume_registry`, `resume_cleanup`, or `complete`.
+Run `tasks rename old new --adopt` from the renamed project found from the
+working directory or global `-C`. The command uses that project's root, not
+the old path in the registry. `old` must be the live registry key; passing an
+earlier alias refuses and names its live key. The local config must name `new`;
+the command never rewrites `tasks/.config.toml` or task files. `--explain`
+with `--adopt` classifies without locks or writes, as ordinary rename does;
+mutating preflight repeats the observation under locks.
+
+Adoption returns the existing rename JSON fields with `tasks: 0` and an
+additional `mode: "adopt"`. Ordinary rename omits `mode`, so consumers can
+distinguish the commands without interpreting recovery labels. Adoption's
+`recovery` values are defined below; `resume_files` never appears.
 
 `init --prefix new --force` only moves a live key's root and leaves the `old`
 key behind. Replaying ordinary `rename` expects old-prefix files. The explicit
@@ -35,21 +41,30 @@ before a write:
 
 - Both prefixes are valid and distinct. The checkout config names `new`, and
   every task filename and its `id` name `new`; no `old` task file remains.
-- The registry either has live `old` and no taken `new`, or has live `new` at
-  this root with `old -> new` for a retry. An earlier alias to `old` is allowed.
-  Any other live key at this root, or a live `old` root that still exists at a
-  different filesystem location, is a conflict.
+- The registry has live `old`. `new` is either untaken, or already live at
+  this root because `init --prefix new --force` ran first. On retry, `new` is
+  live at this root and `old -> new`. Earlier aliases to `old` are allowed
+  and will be flattened. Any other live key at this root is a conflict.
+  An `old` root elsewhere conflicts only if it still contains
+  `tasks/.config.toml`; an empty directory left by a move does not block.
 - No unfinished ordinary rename inventory names this root or either prefix.
-  No live claim exists in either prefix's state store. An existing target store
-  may be empty or exactly match the state this adoption would write; other
-  target parks or escalations are a conflict.
+  Before the registry switches, no live claim exists in either prefix's
+  state store. An existing target store may be empty or exactly match the
+  carried state; other target parks or escalations are a conflict. After the
+  registry switches, the target store belongs to ordinary commands and may
+  change. Cleanup only requires it to exist and parse when there was carried
+  state; it never overwrites that store or bans its live claims.
 
 The command refuses with a typed error naming the conflict. A stale claim is
-discarded as ordinary `rename` does; live claims block adoption. Parks and
-escalations are rekeyed from `old-<hex>` to `new-<hex>` using the existing
+discarded as ordinary `rename` does. A live old claim names its owner in the
+error; the owner must stop using the old checkout and release it, or the
+claim must become stale before retry. `tasks claims` can inspect it without
+opening the missing checkout. Parks and escalations are rekeyed from
+`old-<hex>` to `new-<hex>` using the existing
 `ClaimStore::carried_renamed_text` rule. The `old` store must contain only
-`old` IDs. The matching synced task must exist for each parked or escalated ID;
-otherwise adoption refuses rather than hiding orphaned state.
+`old` IDs. An entry whose synced task is absent is still carried, with a
+warning naming its ID. `tasks list --parked` already displays an unresolved
+park entry, so adoption does not make an orphan disappear.
 
 ## Mutation and recovery
 
@@ -58,17 +73,31 @@ three locks remain held:
 
 1. Write and verify `claims/new.toml` if there are parks or escalations to
    carry. An identical target file is accepted on retry.
-2. Change the registry in memory with `Registry::rename(old, new)`, repoint
-   `new` to the current root, and save once. This also flattens earlier aliases.
+2. Move the registry's live `old` key to `new`, repoint `new` to the current
+   root, and save once. Reuse `Registry::rename` when `new` is free; when an
+   earlier `init --force` already registered `new` here, remove only the
+   `old` project entry, flatten its earlier aliases, and add `old -> new`.
+   Both paths preserve the registry's invariants in memory before saving.
 3. Remove `claims/old.toml`, retaining its `.lock` inode. Do not touch the
    synced checkout.
 
-After step 1, retry recomputes the same target bytes from the old store and
-finishes. After step 2, retry verifies the settled registry and target store,
-then removes the old store. After step 3, retry reports `complete`. A changed
-source or conflicting target on retry causes refusal. This covers process
-interruption; it does not promise durability across power failure, matching
-ordinary rename's existing limit.
+| Observed state | `recovery` | Next action |
+| --- | --- | --- |
+| No adoption write | `fresh` | Write carried store, then registry. |
+| Carried store written, registry still has live `old` | `resume_registry` | Verify exact carried bytes, then save registry. |
+| Registry settled, old store remains | `resume_cleanup` | Verify target file exists and parses if state was carried; remove old store. |
+| Registry settled, old store gone | `complete` | No write. |
+
+With nothing to carry, step 1 is skipped and `resume_registry` cannot occur.
+`TASKS_RENAME_STOP_AFTER=store`, `registry`, and `claims` inject stops after
+the target write, registry write, and old-store removal. Before step 2, retry
+recomputes and verifies carried bytes; a changed source or conflicting target
+refuses. After step 2, ordinary commands may legitimately replace a carried
+park with a claim or clear an escalation. Requiring the original keys here
+would strand cleanup, so the settled registry and a valid target store are
+sufficient. Ordinary rename has the same post-registry concurrency window;
+adoption leaves the now-live target store authoritative. This covers process
+interruption, not power failure, matching ordinary rename's existing limit.
 
 ## Checks
 
@@ -77,9 +106,12 @@ End-to-end tests use one checkout copy and two isolated pairs of
 and uses `init --prefix new --force`; host B retains its old registration and
 a parked task before adopting. Assert old IDs resolve, the park and escalation
 survive under new IDs, earlier aliases flatten, no checkout file changes, and
-a retry is a no-op. Exercise interruption after each mutation boundary, plus
-conflicting target state, a live claim, mismatched checkout files, a foreign
-live old root, and an unfinished rename inventory. Run `just gate` before
+a retry is a no-op. Repeat host B with the partial `init --force` workaround.
+Exercise the `store`, `registry`, and `claims` stop points, including a
+`start` that consumes a park after `registry` before retry. Check orphaned
+parks, conflicting target state, a live old claim, mismatched checkout files,
+a foreign old root with a task config, an empty old directory, an older alias
+as the argument, and an unfinished rename inventory. Run `just gate` before
 completion.
 
 ## Alternatives
