@@ -1144,7 +1144,12 @@ pub fn run(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
         Command::Init { prefix, force } => init::run(dir, prefix, force),
-        Command::Rename { old, new, explain } => rename::run(old, new, explain),
+        Command::Rename {
+            old,
+            new,
+            explain,
+            adopt,
+        } => rename::run(dir, old, new, explain, adopt),
         Command::Unregister { prefix } => unregister::run(prefix),
         Command::Projects {
             sort,

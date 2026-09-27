@@ -5,6 +5,7 @@ use crate::output::Output;
 use crate::registry::Registry;
 use crate::rename::inventory::Inventory;
 use crate::rename::snapshot::Invocation;
+use std::path::Path;
 
 /// Keep the old spelling for recovery; an older alias may also start a new rename.
 fn invocation(registry: &Registry, old: &str, new: &str) -> Result<Invocation> {
@@ -53,13 +54,41 @@ fn invocation(registry: &Registry, old: &str, new: &str) -> Result<Invocation> {
     })
 }
 
-pub fn run(old: String, new: String, explain: bool) -> Result<Output> {
+pub fn run(
+    dir: Option<&Path>,
+    old: String,
+    new: String,
+    explain: bool,
+    adopt: bool,
+) -> Result<Output> {
     for prefix in [&old, &new] {
         if !is_valid_prefix(prefix) {
             return Err(Error::Config(format!(
                 "prefix {prefix:?} must match [a-z][a-z0-9]{{1,7}}"
             )));
         }
+    }
+    if adopt {
+        if old == new {
+            return Err(Error::Validation(format!(
+                "source and target prefixes are both {old:?}"
+            )));
+        }
+        let project = crate::repo::Project::locate(&super::start_dir(dir)?)?;
+        if explain {
+            let mut registry = Registry::load()?;
+            return crate::rename::adopt::run(&mut registry, &project, &old, &new, true)
+                .map(Output::Rename);
+        }
+        let mut prefixes = [&old, &new];
+        prefixes.sort();
+        let _first = MutationLock::acquire(prefixes[0])?;
+        let _second = MutationLock::acquire(prefixes[1])?;
+        let _registry_lock = Registry::lock()?;
+        let mut registry = Registry::load()?;
+        let project = crate::repo::Project::locate(&super::start_dir(dir)?)?;
+        return crate::rename::adopt::run(&mut registry, &project, &old, &new, false)
+            .map(Output::Rename);
     }
     let mut registry = Registry::load()?;
     let mut requested = invocation(&registry, &old, &new)?;

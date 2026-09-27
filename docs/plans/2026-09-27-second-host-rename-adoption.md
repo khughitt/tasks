@@ -25,7 +25,7 @@
 3. An orphaned old park has no matching synced task: it survives with a warning and appears unresolved in `list --parked` (Task 3).
 4. A stale old root path remains as an empty directory: adoption succeeds; a different root with `tasks/.config.toml` refuses (Task 2).
 5. A live old claim cannot be released through the missing checkout: adoption names the owner and requires the claim to become stale before retry (Task 2 and Task 3).
-6. Local `start` consumes a carried park after the `store` stop but before the registry switch: retry accepts the remaining subset and preserves target claims (Task 3).
+6. Local `start` consumes the only carried park after the `store` stop but before the registry switch: the persisted adoption marker lets retry keep the claim without resurrecting the park (Task 2 and Task 3).
 
 ---
 
@@ -94,7 +94,7 @@ Task record: `tasks-06abc9`, dependent on Task 1. Start it before code changes.
       if task.id.prefix != new { return Err(Error::Validation(format!("foreign task {}", task.id))); }
   }
   ```
-- [ ] **Step 4: Implement the three writes and stage classification.** If the target has none of the carried parks/escalations and there is state to carry, write their bytes merged with target claims, then verify. If the target already has a matching subset, skip the write and continue to `Registry::adopt` and `save`; missing entries may have been consumed by local commands. Add a small `ClaimStore` method that serializes carried parks/escalations with destination claims and refuses an ID collision. Then remove only `claims/old.toml`. Reuse `stop_after` for `store`, `registry`, and `claims`. Once the registry is settled, check only that target state exists and parses if the source carried parks or escalations; accept new claims or consumed parks. With no carried state, skip `store` and never emit `resume_registry`. `--explain` classifies but does not authorize or write. Return `tasks: 0` and `mode: "adopt"`.
+- [ ] **Step 4: Implement the three writes and stage classification.** If the unmarked target has none of the carried parks/escalations and there is state to carry, write their bytes merged with target claims and `adopted_from = "old"` in one atomic write, then verify. Normal `ClaimStore::save` preserves that marker. If the marker is present on retry, or an unmarked target already has a matching nonempty subset, skip the write and continue to `Registry::adopt` and `save`. Add a small `ClaimStore` method that serializes carried parks/escalations with destination claims and refuses an ID collision. Then remove only `claims/old.toml`. Reuse `stop_after` for `store`, `registry`, and `claims`. Once the registry is settled, check only that target state exists and parses if the source carried parks or escalations; accept new claims or consumed parks. With no carried state, skip `store` and never emit `resume_registry`. `--explain` classifies but does not authorize or write. Return `tasks: 0` and `mode: "adopt"`.
 
   ```rust
   atomic_write(&target_path, carried.as_bytes())?;

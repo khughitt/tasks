@@ -19,8 +19,10 @@ anything. Ordinary `tasks rename old new` keeps its existing behavior.
 
 Run `tasks rename old new --adopt` from the renamed project found from the
 working directory or global `-C`. The command uses that project's root, not
-the old path in the registry. `old` must be the live registry key; passing an
-earlier alias refuses and names its live key. The local config must name `new`;
+the old path in the registry. Before the registry switches, `old` must be the
+live registry key; passing an earlier alias refuses and names its live key.
+After completion, a flattened alias of `new` is accepted as a no-op replay.
+The local config must name `new`;
 the command never rewrites `tasks/.config.toml` or task files. `--explain`
 with `--adopt` classifies without locks or writes, as ordinary rename does;
 mutating preflight repeats the observation under locks.
@@ -49,8 +51,9 @@ before a write:
   `tasks/.config.toml`; an empty directory left by a move does not block.
 - No unfinished ordinary rename inventory names this root or either prefix.
   Before the registry switches, no live claim exists in either prefix's
-  state store. Target parks and escalations must be a subset of the carried
-  entries, with equal values; any other entry conflicts. Local commands can
+  state store. Before this adoption has written the target, its parks and
+  escalations must be a subset of the carried entries, with equal values;
+  any other entry conflicts. Local commands can
   already write the `new` store before the registry switches, because they
   use the checkout's prefix. After the switch, cleanup only requires the
   target store to exist and parse when there was carried state; it never
@@ -75,10 +78,14 @@ three locks remain held:
 1. If there is state to carry and the target has none of its parks or
    escalations, write the carried parks and escalations together with the
    target's existing claims, then verify the file. A claim colliding with
-   a carried park is a conflict. If the target already has any carried
-   entry, skip the write: missing carried entries may already have been
-   consumed by a local command. With nothing to carry, skip this step and
-   leave the target store unchanged, including stale claims.
+   a carried park is a conflict. The same atomic write records
+   `adopted_from = "old"` in the target store; ordinary claim-store saves
+   retain this field. If that marker is present on retry, skip the write
+   and treat the target as authoritative, even when every carried park was
+   consumed. Without the marker, a matching nonempty subset also skips the
+   write: missing carried entries may already have been consumed by a local
+   command. With nothing to carry, skip this step and leave the target
+   store unchanged, including stale claims.
 2. Move the registry's live `old` key to `new`, repoint `new` to the current
    root, and save once. Reuse `Registry::rename` when `new` is free; when an
    earlier `init --force` already registered `new` here, remove only the
@@ -90,16 +97,18 @@ three locks remain held:
 | Observed state | `recovery` | Next action |
 | --- | --- | --- |
 | No adoption write | `fresh` | Write carried store, then registry. |
-| Target has a matching subset of carried entries, registry still has live `old` | `resume_registry` | Keep target claims and entries; save registry. |
+| Target has the adoption marker or a matching nonempty subset, registry still has live `old` | `resume_registry` | Keep target claims and entries; save registry. |
 | Registry settled, old store remains | `resume_cleanup` | Verify target file exists and parses if state was carried; remove old store. |
 | Registry settled, old store gone | `complete` | No write. |
 
 With nothing to carry, step 1 is skipped and `resume_registry` cannot occur.
 `TASKS_RENAME_STOP_AFTER=store`, `registry`, and `claims` inject stops after
 the target write, registry write, and old-store removal. Before step 2, retry
-compares the target's remaining park and escalation entries with the carried
-set, refusing a foreign or changed entry, and refuses live claims. It does
-not require consumed entries to reappear. After step 2, ordinary commands
+compares an unmarked target's remaining park and escalation entries with the
+carried set, refusing a foreign or changed entry, and refuses live claims.
+A marked target has already received the carried state, so later local
+changes are authoritative. It does not require consumed entries to reappear.
+After step 2, ordinary commands
 may also replace a carried park with a claim or clear an escalation. The
 settled registry and a valid target store are sufficient for cleanup.
 Ordinary rename has the same post-registry concurrency window; adoption

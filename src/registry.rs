@@ -172,7 +172,6 @@ impl Registry {
     }
 
     /// Adopt a checkout that already has `target` in its synced files.
-    #[allow(dead_code)] // Used by the adoption command in the next plan step.
     pub fn adopt(&mut self, source: &str, target: &str, root: &Path) -> Result<()> {
         if source == target || !crate::model::is_valid_prefix(target) {
             return Err(Error::Config(format!("invalid adoption target {target:?}")));

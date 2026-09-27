@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/tasks-7f1596-adopt-rename
 created: 2026-09-27T13:48:27Z
-updated: 2026-09-27T16:56:28Z
+updated: 2026-09-27T17:28:37Z
 started: 2026-09-27T16:13:09Z
 depends: []
 tags: []
@@ -40,3 +40,4 @@ Requested by the rename in ai (spec docs/specs/2026-09-27-rename-to-tack-design.
 - 2026-09-27T16:56:16Z (feat/tasks-7f1596-adopt-rename): resumed
   provenance: {"harness_session":"codex:01a0e3a3-7f1c-7353-9e4b-461189bb69f1","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-27T16:56:28Z (feat/tasks-7f1596-adopt-rename): Review found pre-registry target-store writes by local new-prefix commands; adoption must merge or accept consumed carried state before registry save and preserve target claims
+- 2026-09-27T17:28:37Z (feat/tasks-7f1596-adopt-rename): Execution finding: consuming the only park leaves an empty subset; persist adopted_from marker in target store across local saves so pre-registry retry knows the write happened without resurrecting state

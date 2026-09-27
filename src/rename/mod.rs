@@ -1,3 +1,4 @@
+pub mod adopt;
 pub mod classify;
 pub mod inventory;
 pub mod rewrite;

@@ -323,6 +323,8 @@ pub struct Escalation {
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct StoreFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    adopted_from: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     claims: BTreeMap<String, Claim>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -334,6 +336,7 @@ struct StoreFile {
 #[derive(Debug)]
 pub struct ClaimStore {
     path: PathBuf,
+    adopted_from: Option<String>,
     claims: BTreeMap<String, Claim>,
     parks: BTreeMap<String, Park>,
     escalations: BTreeMap<String, Escalation>,
@@ -375,6 +378,7 @@ impl ClaimStore {
             Err(error) => return Err(error.into()),
         };
         let StoreFile {
+            adopted_from,
             claims,
             parks,
             escalations,
@@ -416,6 +420,7 @@ impl ClaimStore {
         }
         Ok(ClaimStore {
             path: path.to_path_buf(),
+            adopted_from,
             claims,
             parks,
             escalations,
@@ -427,6 +432,7 @@ impl ClaimStore {
             std::fs::create_dir_all(parent)?;
         }
         let file = StoreFile {
+            adopted_from: self.adopted_from.clone(),
             claims: self.claims.clone(),
             parks: self.parks.clone(),
             escalations: self.escalations.clone(),
@@ -525,11 +531,66 @@ impl ClaimStore {
             escalations.insert(rekey(key, "escalation")?, escalation.clone());
         }
         Ok(toml::to_string(&StoreFile {
+            adopted_from: None,
             claims: BTreeMap::new(),
             parks,
             escalations,
         })
         .expect("claim store serializes"))
+    }
+
+    /// A target store may already have consumed carried parks while the registry is old.
+    /// Keep its claims, and write only when no carried park or escalation is present yet.
+    pub fn adoption_target_text(
+        &self,
+        source: &str,
+        target: &str,
+        destination: &ClaimStore,
+    ) -> Result<Option<String>> {
+        if let Some(previous) = &destination.adopted_from {
+            if previous == source {
+                return Ok(None);
+            }
+            return Err(Error::Validation(format!(
+                "target store was adopted from {previous:?}, not {source:?}"
+            )));
+        }
+        let mut carried: StoreFile = toml::from_str(&self.carried_renamed_text(source, target)?)
+            .expect("carried store serializes");
+        for (id, park) in &destination.parks {
+            if carried.parks.get(id) != Some(park) {
+                return Err(Error::Validation(format!(
+                    "target park {id} conflicts with adoption"
+                )));
+            }
+        }
+        for (id, escalation) in &destination.escalations {
+            if carried.escalations.get(id) != Some(escalation) {
+                return Err(Error::Validation(format!(
+                    "target escalation {id} conflicts with adoption"
+                )));
+            }
+        }
+        if !destination.parks.is_empty() || !destination.escalations.is_empty() {
+            return Ok(None);
+        }
+        if carried.parks.is_empty() && carried.escalations.is_empty() {
+            return Ok(None);
+        }
+        if let Some(id) = carried
+            .parks
+            .keys()
+            .find(|id| destination.claims.contains_key(*id))
+        {
+            return Err(Error::Validation(format!(
+                "target claim {id} conflicts with carried park"
+            )));
+        }
+        carried.claims = destination.claims.clone();
+        carried.adopted_from = Some(source.into());
+        Ok(Some(
+            toml::to_string(&carried).expect("claim store serializes"),
+        ))
     }
 
     pub fn prune_dead(&mut self) {

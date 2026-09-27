@@ -212,6 +212,9 @@ pub enum Command {
         /// Explain recovery without locks or writes.
         #[arg(long)]
         explain: bool,
+        /// Adopt a rename already present in this checkout from another host.
+        #[arg(long)]
+        adopt: bool,
     },
     /// Remove a prefix from the registry. Project files are left untouched.
     Unregister {
