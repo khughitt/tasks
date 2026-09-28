@@ -5,7 +5,7 @@ status: todo
 priority: 1
 process: planned
 created: 2026-09-25T16:12:10Z
-updated: 2026-09-28T12:52:05Z
+updated: 2026-09-28T12:57:35Z
 depends: []
 tags: [design]
 source: docs/notes/2026-09-25-task-attachments-brief.md
@@ -19,3 +19,5 @@ Goal for tasks-e7a870. A task can link a spec and a plan but not an image; scree
 ## Notes
 
 - 2026-09-28T12:52:05Z (design/task-attachments): final-review fix wave: blank captions rejected, --name and caption checked before any read, empty clipboard image refused, file:0 resume and FIFO deadline tests, old-inventory and R9–R11 doc pointers
+- 2026-09-28T12:57:35Z (design/task-attachments): parked (waiting on user, decision): user: add the attach/detach rows to ops/cli.toml and re-vendor, then choose merge/PR/keep for design/task-attachments; then agent: merge to main, cargo install --path . from the main checkout, drop idea tasks-e7a870 as superseded, close tasks-ce2f58, remove the worktree after tt-report
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
