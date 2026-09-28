@@ -7,8 +7,8 @@ size: m
 complexity: high
 process: direct
 created: 2026-09-28T11:37:27Z
-updated: 2026-09-28T11:37:27Z
-depends: [tasks-483846]
+updated: 2026-09-28T11:47:33Z
+depends: [tasks-483846, tasks-53fa40]
 parent: tasks-ce2f58
 tags: [design]
 agent: claude-code/claude-opus-5-5

@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/task-attachments
 created: 2026-09-25T16:12:10Z
-updated: 2026-09-28T11:37:34Z
+updated: 2026-09-28T11:47:40Z
 started: 2026-09-28T10:36:18Z
 depends: []
 parent: tasks-ce2f58
@@ -47,4 +47,7 @@ Decisions the spec must settle (brief, Unanswered questions):
   provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-28T11:37:34Z (design/task-attachments): plan written: docs/plans/2026-09-28-task-attachments.md; children tasks-483846 (T1), tasks-53fa40 (T2), tasks-e38ccd (T3), tasks-061594 (T4) under tasks-ce2f58 with T2,T3 after T1 and T4 after both
 - 2026-09-28T11:37:34Z (design/task-attachments): parked (waiting on user, review): user: review .worktrees/task-attachments/docs/plans/2026-09-28-task-attachments.md and pick an execution method; then agent: close tasks-a2d903 and start tasks-483846 in .worktrees/task-attachments
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-28T11:47:33Z (design/task-attachments): plan revised after review of 30baefb: clipboard read streamed under the cap, fresh-rename strays refused as R5 before the inventory is saved, check_kinds asserts exit status; T3 now depends on T2 (shares check_kinds)
+- 2026-09-28T11:47:40Z (design/task-attachments): parked (waiting on user, review): user: review the plan corrections in the latest docs(plans) commit in .worktrees/task-attachments; then agent: close tasks-a2d903 and run subagent-driven execution (review after each task) starting tasks-483846
   provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

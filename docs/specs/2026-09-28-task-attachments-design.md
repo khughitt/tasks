@@ -1,7 +1,8 @@
 # Task attachments
 
 Status: reviewed 2026-09-28 (approved at e76dcc7) after two review rounds (collision ownership, storage symlinks,
-rename baseline, detach ordering; entry validation, clipboard retry, R9–R11, blob-verified collision split)
+rename baseline, detach ordering; entry validation, clipboard retry, R9–R11, blob-verified collision split);
+amended at plan review 2026-09-28 (a streamed clipboard read, fresh-rename strays)
 Task: tasks-a2d903 (goal tasks-ce2f58, idea tasks-e7a870)
 Brief: docs/notes/2026-09-25-task-attachments-brief.md
 
@@ -105,7 +106,8 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
   written.
 - **Clipboard:** runs `wl-paste --list-types`, then picks the first of `image/png`,
   `image/jpeg`, `image/webp`, `image/gif` on offer and reads it with
-  `wl-paste --type <mime>`. Two failures:
+  `wl-paste --type <mime>`, streamed: an image past the cap stops the read, and
+  `wl-paste` is killed and reaped rather than drained. Two failures:
   - `wl-paste` missing or exiting non-zero fails `clipboard_unavailable`, with its
     stderr;
   - no image type on offer fails `clipboard_no_image`, listing the offered types.
@@ -243,7 +245,9 @@ disappeared. The inventory therefore records a baseline:
   `files_done` requires every entry's directory verdict to be "moved" or
   "nothing to move".
 - **Strays:** a directory under `tasks/files/` whose id is not in the inventory joins
-  the existing R5 stray list, alongside uninventoried `.md` files.
+  the existing R5 stray list, alongside uninventoried `.md` files. A fresh rename
+  applies the same rule to the inventory it has just built, before saving it, so a
+  stray that predates the rename refuses as R5 before any write.
 - **Uncommitted attachments:** these already block a fresh rename, because
   `uncommitted_task_files` runs `git status` over all of `tasks/`.
 - **Adopt:** `rename --adopt` writes no synced files, so it needs no change. The

@@ -426,7 +426,7 @@ fn stub_wl_paste() -> tempfile::TempDir {
     let script = bin.path().join("wl-paste");
     std::fs::write(
         &script,
-        "#!/bin/sh\ncase \"$1\" in\n  --list-types) printf '%b' \"$STUB_TYPES\" ;;\n  *) cat \"$STUB_IMAGE\" ;;\nesac\n",
+        "#!/bin/sh\ncase \"$1\" in\n  --list-types) printf '%b' \"$STUB_TYPES\" ;;\n  *) exec cat \"$STUB_IMAGE\" ;;\nesac\n",
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -467,6 +467,47 @@ fn clipboard_attach_reads_the_preferred_image_type() {
     let out = run("image/png\\n", &["attach", &id, "--clipboard", "--name", "clipboard-retry.png"]);
     assert!(out.status.success(), "{out:?}");
     assert!(notes(&env, &dir, &id).contains(&"attached: clipboard-retry.png (13 bytes)".to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_endless_clipboard_stops_at_the_cap() {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    set_cap(&dir, 1024);
+    let bin = stub_wl_paste();
+    let path = format!("{}:{}", bin.path().display(), std::env::var("PATH").unwrap());
+    // /dev/zero never ends, so a read that buffers the whole image before checking the
+    // cap never returns; the deadline turns that hang into a failure.
+    let mut child = env
+        .raw(&dir)
+        .env("PATH", &path)
+        .env("STUB_TYPES", "image/png\\n")
+        .env("STUB_IMAGE", "/dev/zero")
+        .args(["attach", &id, "--clipboard"])
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("attach kept reading an endless clipboard past the cap");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let mut stderr = String::new();
+    child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("attachment_too_large"), "{stderr}");
+    assert!(!dir.join("tasks/files").join(&id).exists());
+    assert!(notes(&env, &dir, &id).is_empty());
 }
 
 #[test]
@@ -548,7 +589,7 @@ use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::repo::Project;
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const FILES_DIR: &str = "files";
@@ -667,6 +708,19 @@ pub fn ensure_task_dir(project: &Project, id: &TaskId) -> Result<bool> {
     Ok(created)
 }
 
+/// Reads at most `max + 1` bytes, so a source over the cap costs no more memory than the
+/// cap; one byte over is `attachment_too_large`.
+pub fn read_capped(reader: impl Read, max: u64, what: &str) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader.take(max + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
+        return Err(Error::AttachmentTooLarge(format!(
+            "{what} is more than {max} bytes, the cap ([attachments] max_bytes in tasks/.config.toml)"
+        )));
+    }
+    Ok(bytes)
+}
+
 /// Writes `bytes` to `path` through a `create_new` temp beside it, fsynced, then renamed.
 pub fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     let name = path
@@ -781,7 +835,8 @@ Create `src/clipboard.rs`:
 //! An image from the Wayland clipboard through `wl-paste`.
 
 use crate::error::{Error, Result};
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
 
 /// Preferred MIME types, first match wins, with the extension each is stored under.
 const PREFERRED: [(&str, &str); 4] = [
@@ -809,23 +864,67 @@ pub fn default_name(now: &str, extension: &str) -> String {
     format!("clipboard-{compact}.{extension}")
 }
 
-fn wl_paste(args: &[&str]) -> Result<Vec<u8>> {
+fn unavailable(args: &[&str], stderr: &[u8]) -> Error {
+    Error::ClipboardUnavailable(format!(
+        "wl-paste {}: {}",
+        args.join(" "),
+        String::from_utf8_lossy(stderr).trim()
+    ))
+}
+
+/// The offered types. A listing is a few lines, so it is read whole.
+fn list_types() -> Result<Vec<u8>> {
+    let args = ["--list-types"];
     let output = Command::new("wl-paste")
         .args(args)
+        .stdin(Stdio::null())
         .output()
         .map_err(|error| Error::ClipboardUnavailable(format!("wl-paste: {error}")))?;
     if !output.status.success() {
-        return Err(Error::ClipboardUnavailable(format!(
-            "wl-paste {}: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
+        return Err(unavailable(&args, &output.stderr));
     }
     Ok(output.stdout)
 }
 
-pub fn read() -> Result<Image> {
-    let listed = wl_paste(&["--list-types"])?;
+/// The image's bytes, streamed through `attachments::read_capped`: at most `max + 1`
+/// bytes are read, and a larger image kills and reaps `wl-paste` rather than draining it.
+fn paste(mime: &str, max: u64) -> Result<Vec<u8>> {
+    let args = ["--no-newline", "--type", mime];
+    let mut child = Command::new("wl-paste")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| Error::ClipboardUnavailable(format!("wl-paste: {error}")))?;
+    // stderr drains on its own thread, so a chatty child cannot block on a full pipe
+    // while this thread waits on stdout.
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    let drain = std::thread::spawn(move || {
+        let mut text = Vec::new();
+        stderr.read_to_end(&mut text).map(|_| text)
+    });
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let bytes = match crate::attachments::read_capped(stdout, max, "the clipboard image") {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            // Not yet waited on, so the child is running or a zombie and kill succeeds.
+            child.kill()?;
+            child.wait()?;
+            return Err(error);
+        }
+    };
+    let status = child.wait()?;
+    let stderr = drain.join().expect("the stderr reader does not panic")?;
+    if !status.success() {
+        return Err(unavailable(&args, &stderr));
+    }
+    Ok(bytes)
+}
+
+/// The preferred image on the clipboard, refused as `attachment_too_large` past `max`.
+pub fn read(max: u64) -> Result<Image> {
+    let listed = list_types()?;
     let offered: Vec<String> = String::from_utf8_lossy(&listed)
         .lines()
         .map(str::trim)
@@ -840,7 +939,7 @@ pub fn read() -> Result<Image> {
         })
     })?;
     Ok(Image {
-        bytes: wl_paste(&["--no-newline", "--type", mime])?,
+        bytes: paste(mime, max)?,
         extension,
     })
 }
@@ -963,7 +1062,6 @@ use super::{Ctx, append_note, load, owner_name, save};
 use crate::attachments::{self, EntryState, Ledger};
 use crate::error::{Error, Result};
 use crate::output::{AttachOut, DetachOut, FileInfo, Output};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub enum Source {
@@ -983,21 +1081,6 @@ impl Source {
             )),
         }
     }
-}
-
-fn too_large(what: &str, max: u64) -> Error {
-    Error::AttachmentTooLarge(format!(
-        "{what} is more than {max} bytes, the cap ([attachments] max_bytes in tasks/.config.toml)"
-    ))
-}
-
-fn read_capped(reader: impl Read, max: u64, what: &str) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    reader.take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > max {
-        return Err(too_large(what, max));
-    }
-    Ok(bytes)
 }
 
 fn basename(path: &Path) -> Result<String> {
@@ -1032,7 +1115,7 @@ pub fn attach(
             attachments::validate_name(&name)?;
             let file = std::fs::File::open(&path)
                 .map_err(|error| Error::Io(format!("{}: {error}", path.display())))?;
-            let bytes = read_capped(file, max, &path.display().to_string())
+            let bytes = attachments::read_capped(file, max, &path.display().to_string())
                 .map_err(|error| match error {
                     Error::Io(detail) => Error::Io(format!("{}: {detail}", path.display())),
                     other => other,
@@ -1044,17 +1127,14 @@ pub fn attach(
                 Error::InvalidAttachmentName("an attachment from stdin needs --name".into())
             })?;
             attachments::validate_name(&name)?;
-            (name, read_capped(std::io::stdin().lock(), max, "stdin")?)
+            (name, attachments::read_capped(std::io::stdin().lock(), max, "stdin")?)
         }
         Source::Clipboard => {
-            let image = crate::clipboard::read()?;
+            let image = crate::clipboard::read(max)?;
             let name = name.unwrap_or_else(|| {
                 crate::clipboard::default_name(&crate::time::now(), image.extension)
             });
             attachments::validate_name(&name)?;
-            if image.bytes.len() as u64 > max {
-                return Err(too_large("the clipboard image", max));
-            }
             (name, image.bytes)
         }
     };
@@ -1267,8 +1347,19 @@ git commit -m "feat(attach): store task files under tasks/files with a ledger"
 Append to `tests/attachments.rs`:
 
 ```rust
+/// The kinds `tasks check` reports at `level`. Errors exit 1 and warnings alone exit 0,
+/// so this asserts the exit status the parsed errors call for, where `TestEnv::check`
+/// would assert success and panic on the error cases these tests exist to see.
 fn check_kinds(env: &TestEnv, dir: &Path, level: &str) -> Vec<String> {
-    env.check(dir)[level]
+    let out = env.cmd(dir).args(["check"]).output().unwrap();
+    let findings: serde_json::Value = if out.stdout.is_empty() {
+        serde_json::json!({"errors": [], "warnings": []})
+    } else {
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|error| panic!("{error}: {out:?}"))
+    };
+    let errors = findings["errors"].as_array().unwrap().len();
+    assert_eq!(out.status.code(), Some(i32::from(errors > 0)), "{out:?}");
+    findings[level]
         .as_array()
         .unwrap()
         .iter()
@@ -1693,6 +1784,7 @@ git commit -m "feat(attach): list attachments in show and audit them in check"
 
 **Interfaces:**
 - Consumes (from Task 1): `attachments::{dir_state, DirState, files_root, task_dir, FILES_DIR}`, `Error::AttachmentUnsafe`
+- Consumes (from Task 2): the `check_kinds` test helper in `tests/attachments.rs`, and the attachment check kinds its rename test expects to be clean. Task 3 therefore runs after Task 2.
 - Produces:
   - `InventoryEntry.attachments: bool` (required in TOML)
   - `snapshot::AttachmentDirs { source: bool, dest: bool }` and `EntryState.dirs: AttachmentDirs`
@@ -1795,6 +1887,34 @@ fn rename_refuses_a_destination_orphan_up_front_as_r9() {
 }
 
 #[test]
+fn rename_refuses_a_stray_under_tasks_files_as_r5_before_a_fresh_inventory() {
+    // An empty directory for no record, then a regular file. Git does not see the empty
+    // directory and the file is committed, so neither trips the uncommitted-changes
+    // refusal first; each reaches the inventory build.
+    for stray in ["dir", "file"] {
+        let mut env = TestEnv::new();
+        let (dir, with, _) = committed_project(&mut env);
+        let path = dir.join("tasks/files/dot-ffffff");
+        match stray {
+            "dir" => std::fs::create_dir(&path).unwrap(),
+            _ => {
+                write(&path, b"x");
+                git(&dir, &["add", "-A"]);
+                git(&dir, &["commit", "-qm", "stray"]);
+            }
+        }
+        let out = env.cmd(&dir).args(["rename", "dot", "dots"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{stray}: {out:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("R5") && stderr.contains("dot-ffffff"), "{stray}: {stderr}");
+        assert!(!env.home.path().join(".local/state/tasks/rename/dot.toml").exists());
+        assert!(dir.join(format!("tasks/{with}.md")).is_file());
+        assert!(stored(&dir, &with, "a.png").is_file());
+        assert!(!dir.join(format!("tasks/{}.md", renamed(&with))).exists());
+    }
+}
+
+#[test]
 fn rename_refuses_r10_r11_and_an_r5_stray_directory_after_the_inventory() {
     // R10: the baseline had attachments, and they vanished from both sides.
     let mut env = TestEnv::new();
@@ -1840,8 +1960,8 @@ fn an_inventory_without_the_attachments_baseline_fails_to_load() {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `just test-fast rename_moves_attachment`, then `just test-fast rename_refuses_r10`.
-Expected: FAIL. The directory stays under the old id, and no R9–R11 exists.
+Run: `just test-fast rename_moves_attachment`, then `just test-fast rename_refuses_r10`, then `just test-fast rename_refuses_a_stray`.
+Expected: FAIL. The directory stays under the old id, no R9–R11 exists, and a fresh rename moves records past the stray.
 
 - [ ] **Step 3: Record the baseline in the inventory**
 
@@ -1878,6 +1998,40 @@ Inside the loop, before `entries.push`:
 ```
 
 Then change the push to `entries.push(InventoryEntry { hex: id.hex, from: .., to: .., attachments });`.
+
+After the loop, before `entries.sort_by(..)`, refuse anything under `tasks/files` that is not an inventoried task's directory. `observe` records these as R5 strays only once an inventory exists, so without this a fresh rename would save its inventory and move records past a stray the interrupted rename would refuse. It runs before `inventory.save()`, the first mutation, and uses the existing R5 wording:
+
+```rust
+        let files_root = crate::attachments::files_root(project);
+        if crate::attachments::dir_state(&files_root)? == crate::attachments::DirState::Directory {
+            let inventoried: BTreeSet<String> = entries
+                .iter()
+                .map(|entry| format!("{}-{}", project.prefix, entry.hex))
+                .collect();
+            let mut strays = Vec::new();
+            for entry in std::fs::read_dir(&files_root)? {
+                let entry = entry?;
+                // `DirEntry::file_type` does not follow a symlink; an inventoried name that
+                // is a symlink already failed the per-entry `dir_state` above.
+                let owned = entry.file_type()?.is_dir()
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| inventoried.contains(name));
+                if !owned {
+                    strays.push(entry.path());
+                }
+            }
+            if !strays.is_empty() {
+                strays.sort();
+                return Err(Error::Validation(format!(
+                    "R5: task files outside the inventory: {strays:?}"
+                )));
+            }
+        }
+```
+
+`BTreeSet` is already imported in `inventory.rs`. A destination-prefix directory never reaches this walk: `classify` refuses it as R9 before the build.
 
 - [ ] **Step 4: Observe the directories**
 
