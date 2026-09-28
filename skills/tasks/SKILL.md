@@ -261,6 +261,11 @@ contract.
   Choose process separately using **Process and workspace**: a small risky change
   can need planning; a large mechanical change can be direct. Record it at scoping
   alongside size and complexity, including on each child; it is never inherited.
+- A screenshot or file for a task: `tasks attach <id> <path>` (or `-` with `--name`, or
+  `--clipboard`), with `--caption "<what it shows>"`. `tasks show <id>` prints each
+  file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
+  removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
+  ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
   for ordering between the pieces. A goal that is committed work is a `todo` with a
   body, however large; `idea` is for uncommitted thoughts. `done` refuses while any
@@ -278,7 +283,22 @@ contract.
   `tasks add "<piece>" --project <prefix>` per affected project and one
   `tasks dep <goal> --on <piece>` each. The goal returns to `ready` when the last piece
   closes; verify and `tasks done` it then. `tasks root <id>` prints where a piece lives.
-- Id collision after a merge (git add/add conflict on the same `tasks/<id>.md`): keep one file, rename the other to a fresh id, fix its `id` field, then run `tasks check` and repair any `depends` it reports.
+- Id collision after a merge (git add/add conflict on the same `tasks/<id>.md`): keep one
+  file, rename the other to a fresh id, fix its `id` field, then run `tasks check` and
+  repair any `depends` it reports. If `tasks/files/<id>/` exists, split it by ledger
+  before `git add` resolves the conflict:
+  1. For each name live only in the loser's notes, move `tasks/files/<id>/<name>` to
+     `tasks/files/<new>/<name>`.
+  2. For a name both records attach, the record at `git show :2:tasks/<id>.md` came from
+     the `HEAD` side, and the one at `:3:` from the merged side. Write each side's
+     `git show :<stage>:tasks/files/<id>/<name>` into its own record's directory.
+  3. Before staging, confirm `git hash-object <file>` equals
+     `git rev-parse :<stage>:tasks/files/<id>/<name>`.
+  4. Identical bytes (stage 0 only) are copied to both directories. If the merge is
+     already committed, use `<merge>^1:` and `<merge>^2:` in place of `:2:` and `:3:`.
+
+  `check` catches a file left under the wrong id, but not swapped bytes under a shared
+  name.
 - `tasks tree [<id>]` shows the hierarchy; `tasks edit <id> --parent <goal>` / `--no-parent` moves a task.
 - Tab completion for ids and flags: `source <(TASKS_COMPLETE=bash tasks)` in `~/.bashrc`,
   or the same with `zsh` in `~/.zshrc` after `compinit`. See the README.

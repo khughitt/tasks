@@ -271,6 +271,9 @@ from a clone):
     tasks --pretty --color auto ready # color when stdout is a terminal
     tasks start sci-4f2a9c
     tasks note sci-4f2a9c "spec §4 no longer holds"
+    tasks attach sci-4f2a9c ~/Pictures/before.png --caption "the stale row"  # copy into tasks/files/<id>/
+    tasks attach sci-4f2a9c --clipboard       # an image from wl-paste; --name to choose the name
+    tasks detach sci-4f2a9c before.png "wrong screenshot"  # recorded; uncommitted bytes are gone
     tasks done sci-91be03 "rows emitted"
     tasks done sci-4f2a9c "landed in 1a2b3c"  # open-work rule: closes once its child is closed
     tasks check                      # validate files, links, plan steps, dependencies; silent when clean
@@ -284,6 +287,24 @@ A recurring task closes normally: `done` records the completion and anchors its 
 cycle. When due, it appears in `ready` with status `done`; use `start` before completing
 the next occurrence. Early runs are allowed. `--every` accepts positive whole days or
 weeks (for example, `30d` or `2w`), up to 36500 days; goals cannot recur.
+
+Attachments live in `tasks/files/<id>/`, one directory per task, committed with the
+record. Each file is capped at 2 MiB unless `tasks/.config.toml` sets
+`[attachments] max_bytes`. A task's own `attached: <name> (<n> bytes)` and
+`detached: <name>: <why>` notes are the ledger of which files it owns. `show` lists
+the files with absolute paths. `check` reports these kinds:
+
+- errors: `attachment_unsafe`, `attachment_orphan`, `attachment_unnoted`, and
+  `attachment_missing`;
+- warnings: `attachment_invalid` and `attachment_too_large`.
+
+tasks/files and `tasks/files/<id>` must be real directories, not symlinks.
+Binaries older than attachments ignore tasks/files/ entirely. `feedback` never
+carries attachments.
+
+An interrupted `attach` leaves a file that `check` reports as `attachment_unnoted`.
+Rerun it with the same bytes and `--name <name>` to finish, or `detach` the file. An
+interrupted `detach` finishes when rerun.
 
 Run `tasks --help` for the full command list.
 
@@ -300,6 +321,15 @@ resume, or use `--explain` to observe its recovery verdict without writing, lock
 checking authorization. Outside git, rename warns that forward recovery is the only
 option after source removal. `git checkout .` alone does not undo a rename; see
 [manual recovery](docs/specs/2026-09-08-prefix-rename-design.md#56-undo-and-manual-recovery).
+
+Attachment directories move with their records. The inventory records which tasks had
+attachments, and recovery refuses R9 (unexpected destination attachments), R10
+(attachments missing from both sides), or R11 (source attachments appeared after the
+inventory).
+
+An inventory written by a binary older than attachments fails to load. Finish that
+rename with the older binary, then `git mv tasks/files/<old>-<hex> tasks/files/<new>-<hex>`
+for each task directory.
 
 If another host already renamed a synced checkout, run `tasks rename <old> <new> --adopt`
 from that checkout on this host **before starting work there**. It changes only this host's
