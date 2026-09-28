@@ -199,9 +199,206 @@ pub fn ledger(task: &Task) -> BTreeMap<String, Ledger> {
     state
 }
 
+/// `812 B`, `1.4 KiB`, `1.9 MiB`.
+pub fn human_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    let value = bytes as f64;
+    if value < KIB {
+        format!("{bytes} B")
+    } else if value < KIB * KIB {
+        format!("{:.1} KiB", value / KIB)
+    } else {
+        format!("{:.1} MiB", value / (KIB * KIB))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+/// One `check` finding about attachments, also shown as a `show` warning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Problem {
+    pub severity: Severity,
+    pub kind: &'static str,
+    pub id: Option<TaskId>,
+    /// Repo-relative, like every other finding's `file`.
+    pub file: String,
+    pub detail: String,
+}
+
+impl Problem {
+    /// The form `show` warnings use: `file [kind] detail`, as `check --pretty` prints.
+    pub fn line(&self) -> String {
+        format!("{} [{}] {}", self.file, self.kind, self.detail)
+    }
+}
+
+/// A valid regular file in a task's directory, noted or not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attachment {
+    pub name: String,
+    pub path: PathBuf,
+    pub bytes: u64,
+}
+
+fn rel_root() -> String {
+    format!("tasks/{FILES_DIR}")
+}
+
+/// What `show` lists for `task`, and every problem `check` would report about it,
+/// including an unsafe `tasks/files`.
+pub fn audit_task(project: &Project, task: &Task) -> Result<(Vec<Attachment>, Vec<Problem>)> {
+    if let DirState::Unsafe(detail) = dir_state(&files_root(project))? {
+        let problem = Problem {
+            severity: Severity::Error,
+            kind: "attachment_unsafe",
+            id: None,
+            file: rel_root(),
+            detail,
+        };
+        return Ok((Vec::new(), vec![problem]));
+    }
+    audit_task_dir(project, task)
+}
+
+/// Every attachment problem in the project: each record's ledger against its directory,
+/// then orphans under `tasks/files`.
+pub fn audit(project: &Project, tasks: &[Task]) -> Result<Vec<Problem>> {
+    let root = files_root(project);
+    let root_state = dir_state(&root)?;
+    if let DirState::Unsafe(detail) = root_state {
+        return Ok(vec![Problem {
+            severity: Severity::Error,
+            kind: "attachment_unsafe",
+            id: None,
+            file: rel_root(),
+            detail,
+        }]);
+    }
+    let mut problems = Vec::new();
+    for task in tasks {
+        problems.extend(audit_task_dir(project, task)?.1);
+    }
+    if root_state == DirState::Directory {
+        let mut entries: Vec<_> = std::fs::read_dir(&root)?.collect::<std::io::Result<_>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let raw = entry.file_name();
+            let shown = format!("{}/{}", rel_root(), raw.to_string_lossy());
+            // An entry named after a live record is that record's to judge: `audit_task_dir`
+            // reports it as `attachment_unsafe` when it is not a real directory.
+            let owner = raw
+                .to_str()
+                .and_then(|name| TaskId::parse(name).ok())
+                .filter(|id| project.task_path(id).is_file());
+            if owner.is_none() {
+                problems.push(Problem {
+                    severity: Severity::Error,
+                    kind: "attachment_orphan",
+                    id: None,
+                    file: shown,
+                    detail: format!(
+                        "{} names no task record; attachments live in tasks/files/<id>/ beside tasks/<id>.md",
+                        raw.to_string_lossy()
+                    ),
+                });
+            }
+        }
+    }
+    Ok(problems)
+}
+
+/// `task`'s own directory against its ledger; assumes `tasks/files` itself is safe.
+fn audit_task_dir(project: &Project, task: &Task) -> Result<(Vec<Attachment>, Vec<Problem>)> {
+    let dir = task_dir(project, &task.id);
+    let rel = format!("{}/{}", rel_root(), task.id);
+    let ledger = ledger(task);
+    let mut files = Vec::new();
+    let mut problems = Vec::new();
+    let problem = |severity, kind, file: String, detail: String| Problem {
+        severity,
+        kind,
+        id: Some(task.id.clone()),
+        file,
+        detail,
+    };
+    match dir_state(&dir)? {
+        DirState::Unsafe(detail) => {
+            problems.push(problem(Severity::Error, "attachment_unsafe", rel, detail));
+            return Ok((files, problems));
+        }
+        DirState::Absent => {}
+        DirState::Directory => {
+            let mut entries: Vec<_> = std::fs::read_dir(&dir)?.collect::<std::io::Result<_>>()?;
+            entries.sort_by_key(|entry| entry.file_name());
+            for entry in entries {
+                let raw = entry.file_name();
+                let shown = format!("{rel}/{}", raw.to_string_lossy());
+                let meta = std::fs::symlink_metadata(entry.path())?;
+                let name = raw.to_str().filter(|name| validate_name(name).is_ok());
+                let Some(name) = name.filter(|_| meta.is_file()) else {
+                    problems.push(problem(
+                        Severity::Warning,
+                        "attachment_invalid",
+                        shown,
+                        format!("a {} that is not an attachment", kind_of(&meta)),
+                    ));
+                    continue;
+                };
+                if meta.len() > project.attachments_max_bytes {
+                    problems.push(problem(
+                        Severity::Warning,
+                        "attachment_too_large",
+                        shown.clone(),
+                        format!(
+                            "{} bytes is above the {}-byte cap",
+                            meta.len(),
+                            project.attachments_max_bytes
+                        ),
+                    ));
+                }
+                if ledger.get(name) != Some(&Ledger::Attached) {
+                    problems.push(problem(
+                        Severity::Error,
+                        "attachment_unnoted",
+                        shown,
+                        format!("{name} is not attached in {}'s notes; attach it again with the same bytes, or detach it", task.id),
+                    ));
+                }
+                files.push(Attachment {
+                    name: name.to_string(),
+                    path: entry.path(),
+                    bytes: meta.len(),
+                });
+            }
+        }
+    }
+    for (name, entry) in &ledger {
+        if *entry == Ledger::Attached && !files.iter().any(|file| &file.name == name) {
+            problems.push(problem(
+                Severity::Error,
+                "attachment_missing",
+                format!("{rel}/{name}"),
+                format!("{}'s notes attach {name} but no file is there", task.id),
+            ));
+        }
+    }
+    Ok((files, problems))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn human_sizes() {
+        assert_eq!(human_size(812), "812 B");
+        assert_eq!(human_size(1434), "1.4 KiB");
+        assert_eq!(human_size(2_000_000), "1.9 MiB");
+    }
 
     #[test]
     fn names_follow_the_storage_rule() {

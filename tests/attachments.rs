@@ -548,3 +548,160 @@ fn clipboard_without_wl_paste_is_unavailable() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("clipboard_unavailable"));
 }
+
+/// The kinds `tasks check` reports at `level`. Errors exit 1 and warnings alone exit 0,
+/// so this asserts the exit status the parsed errors call for, where `TestEnv::check`
+/// would assert success and panic on the error cases these tests exist to see.
+fn check_kinds(env: &TestEnv, dir: &Path, level: &str) -> Vec<String> {
+    let out = env.cmd(dir).args(["check"]).output().unwrap();
+    let findings: serde_json::Value = if out.stdout.is_empty() {
+        serde_json::json!({"errors": [], "warnings": []})
+    } else {
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|error| panic!("{error}: {out:?}"))
+    };
+    let errors = findings["errors"].as_array().unwrap().len();
+    assert_eq!(out.status.code(), Some(i32::from(errors > 0)), "{out:?}");
+    findings[level]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| finding["kind"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn show_and_next_list_files_with_absolute_paths() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    let source = write(&dir.join("scratch/b.png"), b"bb");
+    env.json(&dir, &["attach", &id, source.to_str().unwrap()]);
+    let source = write(&dir.join("scratch/a.png"), b"a");
+    env.json(&dir, &["attach", &id, source.to_str().unwrap()]);
+    let show = env.json(&dir, &["show", &id]);
+    assert_eq!(show["files"][0]["name"], "a.png");
+    assert_eq!(show["files"][1]["name"], "b.png");
+    assert_eq!(show["files"][1]["bytes"], 2);
+    assert_eq!(
+        show["files"][0]["path"],
+        stored(&dir, &id, "a.png").display().to_string()
+    );
+    assert_eq!(
+        env.json(&dir, &["next"])["next"]["files"][0]["name"],
+        "a.png"
+    );
+    let pretty = env.pretty(&dir, &["show", &id]);
+    assert!(pretty.contains("# files"), "{pretty}");
+    assert!(
+        pretty.contains(&format!("{} (2 B)", stored(&dir, &id, "b.png").display())),
+        "{pretty}"
+    );
+    // No files: the key is absent.
+    let bare = id_of(env.json(&dir, &["add", "U", "-p", "3"]));
+    assert!(env.json(&dir, &["show", &bare]).get("files").is_none());
+}
+
+#[test]
+fn show_warns_about_a_leftover_temp_file_and_does_not_list_it() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    write(&stored(&dir, &id, ".a.png.tmp-123"), b"partial");
+    let show = env.json(&dir, &["show", &id]);
+    assert!(show.get("files").is_none());
+    assert!(
+        show["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("attachment_invalid"),
+        "{show}"
+    );
+    assert_eq!(check_kinds(&env, &dir, "warnings"), ["attachment_invalid"]);
+}
+
+#[test]
+fn check_reports_each_attachment_drift_kind() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    set_cap(&dir, 4);
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    let source = write(&dir.join("scratch/a.png"), b"a");
+    env.json(&dir, &["attach", &id, source.to_str().unwrap()]);
+    assert!(check_kinds(&env, &dir, "errors").is_empty());
+
+    // Unnoted: a file no ledger entry covers.
+    write(&stored(&dir, &id, "b.png"), b"b");
+    // Missing: a live name with no file.
+    std::fs::remove_file(stored(&dir, &id, "a.png")).unwrap();
+    // Orphan: a directory for no record, and a stray file directly under tasks/files.
+    write(&dir.join("tasks/files/dot-ffffff/x.png"), b"x");
+    write(&dir.join("tasks/files/loose.png"), b"x");
+    // Too large: above the configured cap of 4 bytes.
+    write(&stored(&dir, &id, "big.png"), b"12345");
+    let mut errors = check_kinds(&env, &dir, "errors");
+    errors.sort();
+    assert_eq!(
+        errors,
+        [
+            "attachment_missing",
+            "attachment_orphan",
+            "attachment_orphan",
+            "attachment_unnoted",
+            "attachment_unnoted",
+        ]
+    );
+    assert!(check_kinds(&env, &dir, "warnings").contains(&"attachment_too_large".to_string()));
+    let out = env.cmd(&dir).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[cfg(unix)]
+#[test]
+fn check_and_show_report_an_unsafe_storage_directory_without_reading_through_it() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    let outside = tempfile::tempdir().unwrap();
+    write(&outside.path().join("a.png"), b"x");
+    std::fs::create_dir(dir.join("tasks/files")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.join("tasks/files").join(&id)).unwrap();
+    assert_eq!(check_kinds(&env, &dir, "errors"), ["attachment_unsafe"]);
+    let show = env.json(&dir, &["show", &id]);
+    assert!(show.get("files").is_none());
+    assert!(
+        show["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("attachment_unsafe")
+    );
+}
+
+#[test]
+fn check_catches_a_collision_split_by_name_before_and_after_recovery() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let winner = id_of(env.json(&dir, &["add", "Winner", "-p", "2"]));
+    let loser = id_of(env.json(&dir, &["add", "Loser", "-p", "2"]));
+    let a = write(&dir.join("scratch/a.png"), b"a");
+    let b = write(&dir.join("scratch/b.png"), b"b");
+    env.json(&dir, &["attach", &winner, a.to_str().unwrap()]);
+    env.json(&dir, &["attach", &loser, b.to_str().unwrap()]);
+    // A merged directory: the loser's file sits under the winner's id.
+    std::fs::rename(
+        stored(&dir, &loser, "b.png"),
+        stored(&dir, &winner, "b.png"),
+    )
+    .unwrap();
+    std::fs::remove_dir(dir.join("tasks/files").join(&loser)).unwrap();
+    let mut errors = check_kinds(&env, &dir, "errors");
+    errors.sort();
+    assert_eq!(errors, ["attachment_missing", "attachment_unnoted"]);
+    // Recovery step 1: move each name live only in the loser's ledger.
+    std::fs::create_dir(dir.join("tasks/files").join(&loser)).unwrap();
+    std::fs::rename(
+        stored(&dir, &winner, "b.png"),
+        stored(&dir, &loser, "b.png"),
+    )
+    .unwrap();
+    assert!(check_kinds(&env, &dir, "errors").is_empty());
+}

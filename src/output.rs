@@ -159,6 +159,8 @@ pub struct ShowFields {
     pub periodic: Option<PeriodicInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<DeferredInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<FileInfo>,
 }
 
 #[derive(Serialize)]
@@ -1222,6 +1224,16 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
         rendered.push_str("\n# children\n");
         for child in &o.children {
             rendered.push_str(&related_row(&child.id, Some(child.status), &child.title));
+        }
+    }
+    if !o.files.is_empty() {
+        rendered.push_str("\n# files\n");
+        for file in &o.files {
+            rendered.push_str(&format!(
+                "- {} ({})\n",
+                file.path,
+                crate::attachments::human_size(file.bytes)
+            ));
         }
     }
     if let Some(park) = &o.park {

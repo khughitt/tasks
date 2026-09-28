@@ -348,5 +348,18 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
     }
 
+    for problem in crate::attachments::audit(&ctx.project, &tasks)? {
+        let finding = Finding {
+            id: problem.id.map(|id| id.to_string()),
+            file: problem.file,
+            kind: problem.kind.into(),
+            detail: problem.detail,
+        };
+        match problem.severity {
+            crate::attachments::Severity::Error => errors.push(finding),
+            crate::attachments::Severity::Warning => warnings.push(finding),
+        }
+    }
+
     Ok(Output::Check(CheckOut { errors, warnings }))
 }

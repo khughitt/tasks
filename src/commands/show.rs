@@ -95,6 +95,16 @@ pub fn describe(
     let mut kids = crate::hierarchy::children(all, &task.id, registry);
     kids.sort_by(|a, b| crate::query::ready_order(a, b));
     let children = kids.into_iter().map(related).collect();
+    let (attached, problems) = crate::attachments::audit_task(project, &task)?;
+    warnings.extend(problems.iter().map(crate::attachments::Problem::line));
+    let files = attached
+        .into_iter()
+        .map(|file| crate::output::FileInfo {
+            name: file.name,
+            path: file.path.display().to_string(),
+            bytes: file.bytes,
+        })
+        .collect();
     Ok(ShowFields {
         spec_path: task.spec.as_deref().map(|path| resolver.abs(path)),
         plan_path: task.plan.as_deref().map(|path| resolver.abs(path)),
@@ -113,6 +123,7 @@ pub fn describe(
             .cloned(),
         periodic: crate::output::PeriodicInfo::of(&task, now),
         deferred: crate::output::DeferredInfo::of(&task, now),
+        files,
         task,
     })
 }
