@@ -1,18 +1,20 @@
 ---
 id: tasks-a2d903
 title: Design task attachments from the brief
-status: doing
+status: done
 priority: 1
 size: m
 complexity: high
 process: planned
 owner: design/task-attachments
 created: 2026-09-25T16:12:10Z
-updated: 2026-09-28T11:47:40Z
+updated: 2026-09-28T11:59:26Z
 started: 2026-09-28T10:36:18Z
+completed: 2026-09-28T11:59:26Z
 depends: []
 parent: tasks-ce2f58
 tags: [design]
+model: claude-opus-5-5
 agent: "claude-code/claude-opus-5-5[1m]"
 spec: docs/specs/2026-09-28-task-attachments-design.md
 ---
@@ -50,4 +52,10 @@ Decisions the spec must settle (brief, Unanswered questions):
   provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-28T11:47:33Z (design/task-attachments): plan revised after review of 30baefb: clipboard read streamed under the cap, fresh-rename strays refused as R5 before the inventory is saved, check_kinds asserts exit status; T3 now depends on T2 (shares check_kinds)
 - 2026-09-28T11:47:40Z (design/task-attachments): parked (waiting on user, review): user: review the plan corrections in the latest docs(plans) commit in .worktrees/task-attachments; then agent: close tasks-a2d903 and run subagent-driven execution (review after each task) starting tasks-483846
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-28T11:59:26Z (design/task-attachments): resumed
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-28T11:59:26Z (design/task-attachments): done
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-28T11:59:26Z (design/task-attachments): design and plan approved: spec docs/specs/2026-09-28-task-attachments-design.md, plan docs/plans/2026-09-28-task-attachments.md at 68f9fe5; implementation proceeds in tasks-483846..tasks-061594
   provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
