@@ -1,13 +1,15 @@
 ---
 id: tasks-a2d903
 title: Design task attachments from the brief
-status: todo
+status: doing
 priority: 1
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-09-25T16:12:10Z
-updated: 2026-09-25T16:12:10Z
+updated: 2026-09-28T10:36:18Z
+started: 2026-09-28T10:36:18Z
 depends: []
 parent: tasks-ce2f58
 tags: [design]
@@ -22,3 +24,8 @@ Decisions the spec must settle (brief, Unanswered questions):
 - public repositories and feedback: refuse, warn, or allow;
 - input sources: path, stdin, clipboard (wl-paste);
 - what show and show --pretty print so an agent can open the file from any checkout or worktree, and the contract a terminal front end can render from later.
+
+## Notes
+
+- 2026-09-28T10:36:18Z (main): started
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
