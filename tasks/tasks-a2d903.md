@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-09-25T16:12:10Z
-updated: 2026-09-28T10:36:18Z
+updated: 2026-09-28T10:39:21Z
 started: 2026-09-28T10:36:18Z
 depends: []
 parent: tasks-ce2f58
@@ -29,3 +29,4 @@ Decisions the spec must settle (brief, Unanswered questions):
 
 - 2026-09-28T10:36:18Z (main): started
   provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-28T10:39:21Z (main): design decisions (user, 2026-09-28): size policy = per-file cap, default 2 MiB, per-project override in tasks/.config.toml [attachments]; feedback takes no attachments and attach does no public-repo check. Proposed and unopposed: storage tasks/files/<id>/ by convention, inputs path/stdin/--clipboard (wl-paste), attached: note per file; worktree .worktrees/task-attachments
