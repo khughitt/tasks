@@ -23,6 +23,17 @@ impl Source {
     }
 }
 
+/// A blank caption would strip to a ledger note with a trailing colon and nothing
+/// after it, so it is rejected the way `detach`'s empty `why` already is.
+fn validate_caption(caption: &str) -> Result<()> {
+    if caption.trim().is_empty() {
+        return Err(Error::Validation(
+            "attachment caption must not be blank".into(),
+        ));
+    }
+    crate::format::validate_line("attachment caption", caption)
+}
+
 fn basename(path: &Path) -> Result<String> {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -49,6 +60,14 @@ pub fn attach(
     let max = ctx.project.attachments_max_bytes;
     // Storage safety comes before any read of the source.
     attachments::check_storage(&ctx.project, &task.id)?;
+    // A given --name and the caption are validated before any source read, so a bad
+    // one fails without running wl-paste or consuming stdin.
+    if let Some(name) = &name {
+        attachments::validate_name(name)?;
+    }
+    if let Some(caption) = &caption {
+        validate_caption(caption)?;
+    }
     let (name, bytes) = match source {
         Source::Path(path) => {
             let name = match name {

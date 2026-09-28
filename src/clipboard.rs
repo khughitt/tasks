@@ -104,10 +104,13 @@ pub fn read(max: u64) -> Result<Image> {
             format!("the clipboard offers no image: {}", offered.join(", "))
         })
     })?;
-    Ok(Image {
-        bytes: paste(mime, max)?,
-        extension,
-    })
+    let bytes = paste(mime, max)?;
+    if bytes.is_empty() {
+        return Err(Error::ClipboardNoImage(format!(
+            "the clipboard's {mime} image is empty"
+        )));
+    }
+    Ok(Image { bytes, extension })
 }
 
 #[cfg(test)]

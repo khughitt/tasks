@@ -105,6 +105,30 @@ fn attach_from_stdin_needs_a_name() {
 }
 
 #[test]
+fn attach_validates_the_caption_before_reading_stdin() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "attach",
+                &id,
+                "-",
+                "--name",
+                "a.png",
+                "--caption",
+                "two\nlines"
+            ]
+        ),
+        "validation"
+    );
+    assert!(!dir.join("tasks/files").exists());
+    assert!(notes(&env, &dir, &id).is_empty());
+}
+
+#[test]
 fn attach_rejects_invalid_names() {
     let mut env = TestEnv::new();
     let dir = env.init("dot");
@@ -122,6 +146,32 @@ fn attach_rejects_invalid_names() {
         );
     }
     assert!(!dir.join("tasks/files").exists());
+}
+
+#[test]
+fn attach_rejects_a_blank_caption() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    let source = write(&dir.join("scratch/a.png"), b"x");
+    for caption in ["", "  "] {
+        assert_eq!(
+            env.fail(
+                &dir,
+                &[
+                    "attach",
+                    &id,
+                    source.to_str().unwrap(),
+                    "--caption",
+                    caption
+                ]
+            ),
+            "validation",
+            "{caption:?}"
+        );
+    }
+    assert!(!dir.join("tasks/files").exists());
+    assert!(notes(&env, &dir, &id).is_empty());
 }
 
 #[test]
@@ -329,11 +379,37 @@ fn attach_refuses_an_existing_symlink_or_fifo_without_reading_it() {
         .unwrap();
     assert!(status.success());
     let other = write(&dir.join("scratch/b.png"), b"same");
-    // A FIFO would block a read forever; the refusal must come from its metadata.
-    assert_eq!(
-        env.fail(&dir, &["attach", &id, other.to_str().unwrap()]),
-        "attachment_unsafe"
-    );
+    // A FIFO would block a read forever; the refusal must come from its metadata. Run
+    // it with a deadline so a regression that reads the FIFO fails the test rather than
+    // hanging the suite, the same way `an_endless_clipboard_stops_at_the_cap` does.
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    let mut child = env
+        .raw(&dir)
+        .args(["attach", &id, other.to_str().unwrap()])
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("attach read the FIFO instead of refusing it from its metadata");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert_eq!(status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("attachment_unsafe"), "{stderr}");
     assert!(notes(&env, &dir, &id).is_empty());
     assert_eq!(
         env.fail(&dir, &["detach", &id, "a.png", "why"]),
@@ -481,6 +557,65 @@ fn clipboard_attach_reads_the_preferred_image_type() {
     assert!(
         notes(&env, &dir, &id).contains(&"attached: clipboard-retry.png (13 bytes)".to_string())
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn clipboard_attach_validates_name_before_reading_the_image() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    let bin = stub_wl_paste();
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    // A read would fail differently (no such file), so success here would mean the
+    // stub's image was never read.
+    let out = env
+        .cmd(&dir)
+        .env("PATH", &path)
+        .env("STUB_TYPES", "image/png\\n")
+        .env("STUB_IMAGE", dir.join("scratch/does-not-exist"))
+        .args(["attach", &id, "--clipboard", "--name", ".bad"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(out.stdout.is_empty());
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["error"]["kind"], "invalid_attachment_name");
+    assert!(!dir.join("tasks/files").exists());
+    assert!(notes(&env, &dir, &id).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn clipboard_attach_refuses_an_empty_image() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    let bin = stub_wl_paste();
+    let empty = write(&dir.join("scratch/empty-clip"), b"");
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    let out = env
+        .cmd(&dir)
+        .env("PATH", &path)
+        .env("STUB_TYPES", "image/png\\n")
+        .env("STUB_IMAGE", &empty)
+        .args(["attach", &id, "--clipboard"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(out.stdout.is_empty());
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["error"]["kind"], "clipboard_no_image");
+    assert!(!dir.join("tasks/files").exists());
+    assert!(notes(&env, &dir, &id).is_empty());
 }
 
 #[cfg(unix)]
@@ -790,6 +925,37 @@ fn rename_resumes_between_the_directory_move_and_the_source_removal() {
     assert_eq!(out["recovery"], "resume_files");
     assert!(!dir.join(format!("tasks/{with}.md")).exists());
     assert!(stored(&dir, &renamed(&with), "a.png").is_file());
+}
+
+#[test]
+fn rename_resumes_between_the_file_write_and_the_directory_move() {
+    let mut env = TestEnv::new();
+    let (dir, with, without) = committed_project(&mut env);
+    // Entries are processed sorted by hex; find `with`'s index so `file:<index>`
+    // stops right after its destination .md is written.
+    let index = if hex(&with) < hex(&without) { 0 } else { 1 };
+    stop_after(&env, &dir, &format!("file:{index}"));
+    assert!(
+        dir.join(format!("tasks/{with}.md")).is_file(),
+        "source record still present"
+    );
+    assert!(
+        dir.join(format!("tasks/{}.md", renamed(&with))).is_file(),
+        "destination record already written"
+    );
+    assert!(
+        stored(&dir, &with, "a.png").is_file(),
+        "source directory still present"
+    );
+    assert!(
+        !dir.join("tasks/files").join(renamed(&with)).exists(),
+        "destination directory not yet moved"
+    );
+    let out = env.json(&dir, &["rename", "dot", "dots"]);
+    assert_eq!(out["recovery"], "resume_files");
+    assert!(stored(&dir, &renamed(&with), "a.png").is_file());
+    assert!(!dir.join("tasks/files").join(&with).exists());
+    assert!(!dir.join(format!("tasks/{with}.md")).exists());
 }
 
 #[test]
