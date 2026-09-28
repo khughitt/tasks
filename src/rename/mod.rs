@@ -11,7 +11,7 @@ use crate::output::RenameOut;
 use crate::registry::Registry;
 use crate::repo::{CONFIG_REL, Project, atomic_write};
 use classify::{Recovery, classify};
-use inventory::{Inventory, digest, rewrite_config_prefix};
+use inventory::{Inventory, InventoryEntry, digest, rewrite_config_prefix};
 use snapshot::{Invocation, observe};
 
 /// Existing roots compare by filesystem identity. An absent root keeps its spelling so
@@ -179,6 +179,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                 Ok(text) => text,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     verify_bytes(&dest, &entry.to)?;
+                    finish_attachment_move(&project, invocation, entry)?;
                     continue;
                 }
                 Err(error) => return Err(error.into()),
@@ -213,6 +214,10 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                     }
                 }
                 Err(error) => return Err(error.into()),
+            }
+            finish_attachment_move(&project, invocation, entry)?;
+            if stop_after(&format!("attachments:{}", entry.hex)) {
+                return Ok(out);
             }
             // A digest never authorizes deleting the only surviving unverified copy.
             verify_bytes(&source, &entry.from)?;
@@ -311,6 +316,34 @@ fn verify_bytes(path: &std::path::Path, expected: &str) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// Moves `tasks/files/<source>-<hex>` to the target name when the baseline says it
+/// exists and the move is pending; a settled pair is left alone. Any other state
+/// disagrees with the inventory, which classification already refused.
+fn finish_attachment_move(
+    project: &Project,
+    invocation: &Invocation,
+    entry: &InventoryEntry,
+) -> Result<()> {
+    let root = crate::attachments::files_root(project);
+    let source = root.join(format!("{}-{}", invocation.source, entry.hex));
+    let dest = root.join(format!("{}-{}", invocation.target, entry.hex));
+    let present = |path: &std::path::Path| -> Result<bool> {
+        match crate::attachments::dir_state(path)? {
+            crate::attachments::DirState::Absent => Ok(false),
+            crate::attachments::DirState::Directory => Ok(true),
+            crate::attachments::DirState::Unsafe(detail) => Err(Error::AttachmentUnsafe(detail)),
+        }
+    };
+    match (entry.attachments, present(&source)?, present(&dest)?) {
+        (false, false, false) | (true, false, true) => Ok(()),
+        (true, true, false) => Ok(std::fs::rename(&source, &dest)?),
+        (baseline, source, dest) => Err(Error::Validation(format!(
+            "attachment directories for {} disagree with the inventory: baseline {baseline}, source {source}, destination {dest}",
+            entry.hex
+        ))),
+    }
 }
 
 fn stop_after(boundary: &str) -> bool {

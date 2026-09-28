@@ -12,6 +12,10 @@ pub struct InventoryEntry {
     pub hex: String,
     pub from: String,
     pub to: String,
+    /// Whether `tasks/files/<source>-<hex>/` existed when the inventory was built. No serde
+    /// default: an inventory from a binary that predates attachments fails to load rather
+    /// than guessing (spec, "Rename").
+    pub attachments: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +71,11 @@ impl Inventory {
             .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
         let config_to = rewrite_config_prefix(config_text, target)?;
         let mut entries = Vec::new();
+        if let crate::attachments::DirState::Unsafe(detail) =
+            crate::attachments::dir_state(&crate::attachments::files_root(project))?
+        {
+            return Err(Error::AttachmentUnsafe(detail));
+        }
         for path in task_paths(&project.tasks_dir())? {
             let name = path
                 .file_name()
@@ -94,11 +103,47 @@ impl Inventory {
             validate_task_file(&path, &source)?;
             let rewritten = super::rewrite::rewrite_prefix(&source, &project.prefix, target)
                 .map_err(|error| error.with_suffix(&format!(" in tasks/{name}")))?;
+            let attachments =
+                match crate::attachments::dir_state(&crate::attachments::task_dir(project, &id))? {
+                    crate::attachments::DirState::Absent => false,
+                    crate::attachments::DirState::Directory => true,
+                    crate::attachments::DirState::Unsafe(detail) => {
+                        return Err(Error::AttachmentUnsafe(detail));
+                    }
+                };
             entries.push(InventoryEntry {
                 hex: id.hex,
                 from: digest(source.as_bytes()),
                 to: digest(rewritten.as_bytes()),
+                attachments,
             });
+        }
+        let files_root = crate::attachments::files_root(project);
+        if crate::attachments::dir_state(&files_root)? == crate::attachments::DirState::Directory {
+            let inventoried: BTreeSet<String> = entries
+                .iter()
+                .map(|entry| format!("{}-{}", project.prefix, entry.hex))
+                .collect();
+            let mut strays = Vec::new();
+            for entry in std::fs::read_dir(&files_root)? {
+                let entry = entry?;
+                // `DirEntry::file_type` does not follow a symlink; an inventoried name that
+                // is a symlink already failed the per-entry `dir_state` above.
+                let owned = entry.file_type()?.is_dir()
+                    && entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| inventoried.contains(name));
+                if !owned {
+                    strays.push(entry.path());
+                }
+            }
+            if !strays.is_empty() {
+                strays.sort();
+                return Err(Error::Validation(format!(
+                    "R5: task files outside the inventory: {strays:?}"
+                )));
+            }
         }
         entries.sort_by(|left, right| left.hex.cmp(&right.hex));
         let store = crate::claims::ClaimStore::load(&project.prefix)?;

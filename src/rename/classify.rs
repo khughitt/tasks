@@ -41,6 +41,12 @@ pub fn classify(snap: &Snapshot) -> Recovery {
                         snap.named.target, invocation.target
                     ));
                 }
+                if snap.named.target_dirs != 0 {
+                    return Recovery::Refuse(format!(
+                        "R9: {} destination attachment directories with prefix {:?} already exist",
+                        snap.named.target_dirs, invocation.target
+                    ));
+                }
                 Recovery::Fresh
             } else if snap.named.source == 0 && prefix == Some(&invocation.target) && registry_new {
                 Recovery::Complete
@@ -56,6 +62,7 @@ pub fn classify(snap: &Snapshot) -> Recovery {
             let files_done = snap.entries.iter().all(|entry| {
                 matches!(entry.source, FileState::Absent)
                     && matches!(entry.dest, FileState::Present(_))
+                    && !entry.dirs.source
             });
             if config.digest == inventory.config_from && registry_old {
                 Recovery::ResumeFiles
@@ -146,6 +153,28 @@ fn refusal(snap: &Snapshot) -> Option<String> {
                 ));
             }
         }
+        for entry in &snap.entries {
+            let had = baseline[&entry.hex].attachments;
+            let source = format!("tasks/files/{}-{}", inventory.source, entry.hex);
+            let dest = format!("tasks/files/{}-{}", inventory.target, entry.hex);
+            match (had, entry.dirs.source, entry.dirs.dest) {
+                (true, true, true) | (false, _, true) => {
+                    return Some(format!("R9: unexpected destination attachments {dest}"));
+                }
+                (true, false, false) => {
+                    return Some(format!(
+                        "R10: attachments of {}-{} are missing from both {source} and {dest}",
+                        inventory.source, entry.hex
+                    ));
+                }
+                (false, true, false) => {
+                    return Some(format!(
+                        "R11: source attachments {source} appeared after the inventory"
+                    ));
+                }
+                _ => {}
+            }
+        }
         if !snap.strays.is_empty() {
             return Some(format!(
                 "R5: task files outside the inventory: {:?}",
@@ -186,7 +215,8 @@ mod tests {
     use super::*;
     use crate::rename::inventory::{Inventory, InventoryEntry};
     use crate::rename::snapshot::{
-        ConfigState, EntryState, FileState, Invocation, Named, RegistryState, Snapshot,
+        AttachmentDirs, ConfigState, EntryState, FileState, Invocation, Named, RegistryState,
+        Snapshot,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
@@ -227,6 +257,7 @@ mod tests {
                     hex: format!("{index:06x}"),
                     from: format!("before {index}"),
                     to: format!("after {index}"),
+                    attachments: false,
                 })
                 .collect(),
             parks_store: None,
@@ -258,12 +289,14 @@ mod tests {
                     hex: entry.hex.clone(),
                     source: FileState::Present(entry.from.clone()),
                     dest: FileState::Absent,
+                    dirs: AttachmentDirs::default(),
                 })
                 .collect(),
             inventory: Some(inventory),
             named: Named {
                 source: 2,
                 target: 0,
+                target_dirs: 0,
             },
             strays: Vec::new(),
         }
@@ -303,6 +336,7 @@ mod tests {
         snap.named = Named {
             source: 0,
             target: 2,
+            target_dirs: 0,
         };
         assert_eq!(classify(&snap), Recovery::Complete, "after P6");
         let mut empty = inventory_only();
@@ -324,7 +358,7 @@ mod tests {
 
     #[test]
     fn each_refusal_fires_on_its_own_before_the_table() {
-        for rule in 1..=8 {
+        for rule in 1..=11 {
             let mut snap = inventory_only();
             match rule {
                 1 => snap.inventory.as_mut().unwrap().source = "other".into(),
@@ -341,13 +375,16 @@ mod tests {
                     snap.registry.old_key = None;
                     snap.registry.new_key = Some("/foreign".into());
                 }
+                9 => snap.entries[0].dirs.dest = true,
+                10 => snap.inventory.as_mut().unwrap().entries[0].attachments = true,
+                11 => snap.entries[0].dirs.source = true,
                 _ => unreachable!(),
             }
             let Recovery::Refuse(reason) = classify(&snap) else {
                 panic!("R{rule} did not refuse: {snap:?}");
             };
             assert!(reason.starts_with(&format!("R{rule}:")), "{reason}");
-            if rule >= 7 {
+            if (7..=8).contains(&rule) {
                 snap.inventory = None;
                 let Recovery::Refuse(reason) = classify(&snap) else {
                     panic!("R{rule} needs no inventory");
@@ -426,6 +463,12 @@ mod tests {
                     };
                     excluded |= !matches!((source, dest), (1, 0) | (1, 1) | (0, 1));
                     done &= (source, dest) == (0, 1);
+                    let dirs = (record.attachments, entry.dirs.source, entry.dirs.dest);
+                    excluded |= !matches!(
+                        dirs,
+                        (true, true, false) | (true, false, true) | (false, false, false)
+                    );
+                    done &= !entry.dirs.source;
                 }
                 let column = match &snap.config {
                     Some(config) if config.digest == inv.config_from => 1,
@@ -448,7 +491,9 @@ mod tests {
             return Verdict::Refuse;
         }
         match (has_inventory, config_column, registry_column) {
-            (false, 1, 1) if snap.named.target == 0 => Verdict::Fresh,
+            (false, 1, 1) if snap.named.target == 0 && snap.named.target_dirs == 0 => {
+                Verdict::Fresh
+            }
             (true, 1, 1) => Verdict::ResumeFiles,
             (true, 2, 1) if done => Verdict::ResumeRegistry,
             (true, 2, 2) if done => Verdict::ResumeCleanup,
@@ -501,6 +546,7 @@ mod tests {
                             hex: record.hex.clone(),
                             source,
                             dest,
+                            dirs: AttachmentDirs::default(),
                         }
                     })
                     .collect();
@@ -520,6 +566,7 @@ mod tests {
                                     hex: "ffffff".into(),
                                     from: "missing before".into(),
                                     to: "missing after".into(),
+                                    attachments: false,
                                 }),
                                 7 => {
                                     if let Some(entry) = inv.entries.first_mut() {
@@ -543,7 +590,11 @@ mod tests {
                                     snap.config = config.clone();
                                     for source in 0..=1 {
                                         for target in 0..=1 {
-                                            snap.named = Named { source, target };
+                                            snap.named = Named {
+                                                source,
+                                                target,
+                                                target_dirs: 0,
+                                            };
                                             for stray in [false, true] {
                                                 snap.strays.clear();
                                                 if stray {
@@ -560,6 +611,69 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn every_attachment_directory_state_gets_the_verdict_the_spec_names() {
+        let mut counts = BTreeMap::new();
+        for files in 0..81usize {
+            for dirs in 0..64usize {
+                for stage in 0..2 {
+                    let mut snap = inventory_only();
+                    let (mut file_digits, mut dir_digits) = (files, dirs);
+                    for index in 0..2 {
+                        let record = snap.inventory.as_ref().unwrap().entries[index].clone();
+                        let pair = file_digits % 9;
+                        file_digits /= 9;
+                        snap.entries[index].source = match pair % 3 {
+                            0 => FileState::Absent,
+                            1 => FileState::Present(record.from.clone()),
+                            _ => FileState::Present("edited".into()),
+                        };
+                        snap.entries[index].dest = match pair / 3 {
+                            0 => FileState::Absent,
+                            1 => FileState::Present(record.to.clone()),
+                            _ => FileState::Present("conflict".into()),
+                        };
+                        let bits = dir_digits % 8;
+                        dir_digits /= 8;
+                        snap.inventory.as_mut().unwrap().entries[index].attachments = bits & 1 != 0;
+                        snap.entries[index].dirs = AttachmentDirs {
+                            source: bits & 2 != 0,
+                            dest: bits & 4 != 0,
+                        };
+                    }
+                    if stage == 1 {
+                        snap.config = Some(ConfigState {
+                            prefix: "new".into(),
+                            digest: "config after".into(),
+                        });
+                    }
+                    let got = verdict(classify(&snap));
+                    assert_eq!(got, expected(&snap), "snapshot {snap:?}");
+                    *counts.entry(got).or_insert(0usize) += 1;
+                }
+            }
+        }
+        for verdict in [
+            Verdict::ResumeFiles,
+            Verdict::ResumeRegistry,
+            Verdict::Refuse,
+        ] {
+            assert!(
+                counts.contains_key(&verdict),
+                "{verdict:?} unreached: {counts:?}"
+            );
+        }
+        let mut fresh = inventory_only();
+        fresh.inventory = None;
+        fresh.entries.clear();
+        assert_eq!(classify(&fresh), Recovery::Fresh);
+        fresh.named.target_dirs = 1;
+        let Recovery::Refuse(reason) = classify(&fresh) else {
+            panic!("a destination attachment directory must refuse a fresh rename");
+        };
+        assert!(reason.starts_with("R9:"), "{reason}");
     }
 
     // 1,572,480 snapshots take ~7 s in a debug build and floor every `cargo test` that

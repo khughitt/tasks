@@ -25,6 +25,15 @@ pub struct EntryState {
     pub hex: String,
     pub source: FileState,
     pub dest: FileState,
+    pub dirs: AttachmentDirs,
+}
+
+/// Which of `tasks/files/<source>-<hex>` and `tasks/files/<target>-<hex>` are directories,
+/// read without following a symlink.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AttachmentDirs {
+    pub source: bool,
+    pub dest: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +53,7 @@ pub struct ConfigState {
 pub struct Named {
     pub source: usize,
     pub target: usize,
+    pub target_dirs: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +98,7 @@ pub fn observe(
                     hex: entry.hex.clone(),
                     source: FileState::Absent,
                     dest: FileState::Absent,
+                    dirs: AttachmentDirs::default(),
                 })
                 .collect()
         })
@@ -136,6 +147,45 @@ pub fn observe(
             entries[index].source = state;
         } else {
             entries[index].dest = state;
+        }
+    }
+    let files_root = invocation
+        .root
+        .join("tasks")
+        .join(crate::attachments::FILES_DIR);
+    match crate::attachments::dir_state(&files_root)? {
+        crate::attachments::DirState::Absent => {}
+        crate::attachments::DirState::Unsafe(detail) => {
+            return Err(Error::AttachmentUnsafe(detail));
+        }
+        crate::attachments::DirState::Directory => {
+            for entry in std::fs::read_dir(&files_root)? {
+                let entry = entry?;
+                // `DirEntry::file_type` does not follow a symlink.
+                let is_dir = entry.file_type()?.is_dir();
+                let id = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| TaskId::parse(name).ok())
+                    .filter(|_| is_dir);
+                if let Some(id) = &id
+                    && id.prefix == invocation.target
+                {
+                    named.target_dirs += 1;
+                }
+                let index = id
+                    .as_ref()
+                    .filter(|id| id.prefix == invocation.source || id.prefix == invocation.target)
+                    .and_then(|id| by_hex.get(id.hex.as_str()).copied());
+                match (index, id) {
+                    (Some(index), Some(id)) if id.prefix == invocation.source => {
+                        entries[index].dirs.source = true;
+                    }
+                    (Some(index), Some(_)) => entries[index].dirs.dest = true,
+                    _ if inventory.is_some() => strays.push(entry.path()),
+                    _ => {}
+                }
+            }
         }
     }
     strays.sort();

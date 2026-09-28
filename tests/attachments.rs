@@ -705,3 +705,201 @@ fn check_catches_a_collision_split_by_name_before_and_after_recovery() {
     .unwrap();
     assert!(check_kinds(&env, &dir, "errors").is_empty());
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+}
+
+/// A committed project `dot` with one task carrying `a.png` and one without files.
+fn committed_project(env: &mut TestEnv) -> (PathBuf, String, String) {
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let with = id_of(env.json(&dir, &["add", "With", "-p", "2"]));
+    let without = id_of(env.json(&dir, &["add", "Without", "-p", "2"]));
+    let source = write(&dir.join("scratch/a.png"), b"a");
+    env.json(&dir, &["attach", &with, source.to_str().unwrap()]);
+    std::fs::remove_dir_all(dir.join("scratch")).unwrap();
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    (dir, with, without)
+}
+
+fn renamed(id: &str) -> String {
+    format!("dots-{}", id.split_once('-').unwrap().1)
+}
+
+fn hex(id: &str) -> &str {
+    id.split_once('-').unwrap().1
+}
+
+fn explain_warning(env: &TestEnv, dir: &Path) -> String {
+    let out = env.json(dir, &["rename", "dot", "dots", "--explain"]);
+    assert_eq!(out["recovery"], "refuse", "{out}");
+    out["warnings"][0].as_str().unwrap().to_string()
+}
+
+fn stop_after(env: &TestEnv, dir: &Path, boundary: &str) {
+    let out = env
+        .raw(dir)
+        .env("TASKS_RENAME_STOP_AFTER", boundary)
+        .args(["rename", "dot", "dots"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
+#[test]
+fn rename_moves_attachment_directories_with_their_records() {
+    let mut env = TestEnv::new();
+    let (dir, with, without) = committed_project(&mut env);
+    env.json(&dir, &["rename", "dot", "dots"]);
+    assert!(!dir.join("tasks/files").join(&with).exists());
+    assert!(stored(&dir, &renamed(&with), "a.png").is_file());
+    assert!(!dir.join("tasks/files").join(renamed(&without)).exists());
+    assert_eq!(
+        env.json(&dir, &["show", &renamed(&with)])["files"][0]["name"],
+        "a.png"
+    );
+    assert!(check_kinds(&env, &dir, "errors").is_empty());
+}
+
+#[test]
+fn rename_resumes_between_the_directory_move_and_the_source_removal() {
+    let mut env = TestEnv::new();
+    let (dir, with, _) = committed_project(&mut env);
+    stop_after(&env, &dir, &format!("attachments:{}", hex(&with)));
+    assert!(
+        dir.join(format!("tasks/{with}.md")).is_file(),
+        "source record not yet removed"
+    );
+    assert!(
+        stored(&dir, &renamed(&with), "a.png").is_file(),
+        "directory already moved"
+    );
+    assert!(!dir.join("tasks/files").join(&with).exists());
+    let out = env.json(&dir, &["rename", "dot", "dots"]);
+    assert_eq!(out["recovery"], "resume_files");
+    assert!(!dir.join(format!("tasks/{with}.md")).exists());
+    assert!(stored(&dir, &renamed(&with), "a.png").is_file());
+}
+
+#[test]
+fn rename_refuses_a_destination_orphan_up_front_as_r9() {
+    let mut env = TestEnv::new();
+    let (dir, _, without) = committed_project(&mut env);
+    // Git does not track an empty directory, so the tree stays clean.
+    std::fs::create_dir(dir.join("tasks/files").join(renamed(&without))).unwrap();
+    assert!(explain_warning(&env, &dir).starts_with("R9:"));
+    let out = env
+        .cmd(&dir)
+        .args(["rename", "dot", "dots"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("R9"));
+    assert!(
+        !env.home
+            .path()
+            .join(".local/state/tasks/rename/dot.toml")
+            .exists()
+    );
+}
+
+#[test]
+fn rename_refuses_a_stray_under_tasks_files_as_r5_before_a_fresh_inventory() {
+    // An empty directory for no record, then a regular file. Git does not see the empty
+    // directory and the file is committed, so neither trips the uncommitted-changes
+    // refusal first; each reaches the inventory build.
+    for stray in ["dir", "file"] {
+        let mut env = TestEnv::new();
+        let (dir, with, _) = committed_project(&mut env);
+        let path = dir.join("tasks/files/dot-ffffff");
+        match stray {
+            "dir" => std::fs::create_dir(&path).unwrap(),
+            _ => {
+                write(&path, b"x");
+                git(&dir, &["add", "-A"]);
+                git(&dir, &["commit", "-qm", "stray"]);
+            }
+        }
+        let out = env
+            .cmd(&dir)
+            .args(["rename", "dot", "dots"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{stray}: {out:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("R5") && stderr.contains("dot-ffffff"),
+            "{stray}: {stderr}"
+        );
+        assert!(
+            !env.home
+                .path()
+                .join(".local/state/tasks/rename/dot.toml")
+                .exists()
+        );
+        assert!(dir.join(format!("tasks/{with}.md")).is_file());
+        assert!(stored(&dir, &with, "a.png").is_file());
+        assert!(!dir.join(format!("tasks/{}.md", renamed(&with))).exists());
+    }
+}
+
+#[test]
+fn rename_refuses_r10_r11_and_an_r5_stray_directory_after_the_inventory() {
+    // R10: the baseline had attachments, and they vanished from both sides.
+    let mut env = TestEnv::new();
+    let (dir, with, _) = committed_project(&mut env);
+    stop_after(&env, &dir, "inventory");
+    std::fs::remove_dir_all(dir.join("tasks/files").join(&with)).unwrap();
+    assert!(explain_warning(&env, &dir).starts_with("R10:"));
+
+    // R11: attachments appeared for a task whose baseline had none.
+    let mut env = TestEnv::new();
+    let (dir, _, without) = committed_project(&mut env);
+    stop_after(&env, &dir, "inventory");
+    std::fs::create_dir(dir.join("tasks/files").join(&without)).unwrap();
+    assert!(explain_warning(&env, &dir).starts_with("R11:"));
+
+    // R5: a directory under tasks/files for no inventoried task.
+    let mut env = TestEnv::new();
+    let (dir, _, _) = committed_project(&mut env);
+    stop_after(&env, &dir, "inventory");
+    std::fs::create_dir(dir.join("tasks/files/dot-ffffff")).unwrap();
+    assert!(explain_warning(&env, &dir).starts_with("R5:"));
+}
+
+#[test]
+fn an_inventory_without_the_attachments_baseline_fails_to_load() {
+    let mut env = TestEnv::new();
+    let (dir, _, _) = committed_project(&mut env);
+    stop_after(&env, &dir, "inventory");
+    let path = env.home.path().join(".local/state/tasks/rename/dot.toml");
+    let text: String = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with("attachments"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    std::fs::write(&path, text).unwrap();
+    let out = env
+        .cmd(&dir)
+        .args(["rename", "dot", "dots"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("\"config\"") && stderr.contains("attachments"),
+        "{stderr}"
+    );
+}
