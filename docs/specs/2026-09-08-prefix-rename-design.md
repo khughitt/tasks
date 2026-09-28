@@ -327,6 +327,9 @@ nothing to compare against otherwise. **R7–R8 always apply**: they read the re
 | R7 | always | `old_key` and `new_key` are both present and name different roots |
 | R8 | always | `new_key` is present and does not name this project's root |
 
+R9–R11 (attachment directories) are defined in
+docs/specs/2026-09-28-task-attachments-design.md, "Rename".
+
 R2, R5, and R6 are what an earlier draft's `rename_only` predicate was reaching for and
 could not express: it compared against git's idea of dirt, which accepted *any* modified
 `.config.toml` and could not see a stray file at all outside a repository.

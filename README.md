@@ -298,7 +298,7 @@ the files with absolute paths. `check` reports these kinds:
   `attachment_missing`;
 - warnings: `attachment_invalid` and `attachment_too_large`.
 
-tasks/files and `tasks/files/<id>` must be real directories, not symlinks.
+`tasks/files/<id>` and its parent must be real directories, not symlinks.
 Binaries older than attachments ignore tasks/files/ entirely. `feedback` never
 carries attachments.
 
@@ -327,9 +327,11 @@ attachments, and recovery refuses R9 (unexpected destination attachments), R10
 (attachments missing from both sides), or R11 (source attachments appeared after the
 inventory).
 
-An inventory written by a binary older than attachments fails to load. Finish that
-rename with the older binary, then `git mv tasks/files/<old>-<hex> tasks/files/<new>-<hex>`
-for each task directory.
+An inventory written by a binary older than attachments fails to load, and since every
+mutating command checks the host's pending renames, that blocks mutating commands in
+every project on the host, not only the one being renamed. Finish that rename with the
+older binary, then `git mv tasks/files/<old>-<hex> tasks/files/<new>-<hex>` for each
+task directory.
 
 If another host already renamed a synced checkout, run `tasks rename <old> <new> --adopt`
 from that checkout on this host **before starting work there**. It changes only this host's

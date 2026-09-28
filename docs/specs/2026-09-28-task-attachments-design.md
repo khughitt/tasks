@@ -217,10 +217,13 @@ disappeared. The inventory therefore records a baseline:
   whether `tasks/files/<src-id>` existed when the inventory was built. `build` refuses
   an unsafe source directory (see **Storage safety**).
 - **Old inventories:** the field has no serde default. An inventory written by an
-  older binary fails to load, with a typed error naming the inventory file. That
-  binary never moves directories, so finishing with it and then renaming the
-  directories by hand is the documented recovery. Renames are rare and host-local, so
-  guessing the baseline would be the silent fallback this project refuses.
+  older binary fails to load, with a typed error naming the inventory file. Every
+  mutating command checks the host's pending renames (`reject_pending_rename`), so
+  that failure blocks mutating commands in every project on the host, not only the
+  one being renamed. That binary never moves directories, so finishing with it and
+  then renaming the directories by hand is the documented recovery. Renames are rare
+  and host-local, so guessing the baseline would be the silent fallback this project
+  refuses.
 - **Observation:** `snapshot::observe` records each entry's directory state,
   `(source, destination)`, each present or absent, read with `symlink_metadata`.
   `classify::refusal` keeps R1–R8 unchanged and adds three codes:
