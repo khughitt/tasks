@@ -107,10 +107,11 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
 - **Clipboard:** runs `wl-paste --list-types`, then picks the first of `image/png`,
   `image/jpeg`, `image/webp`, `image/gif` on offer and reads it with
   `wl-paste --type <mime>`, streamed: an image past the cap stops the read, and
-  `wl-paste` is killed and reaped rather than drained. Two failures:
+  `wl-paste` is killed and reaped rather than drained. Three failures:
   - `wl-paste` missing or exiting non-zero fails `clipboard_unavailable`, with its
     stderr;
-  - no image type on offer fails `clipboard_no_image`, listing the offered types.
+  - no image type on offer fails `clipboard_no_image`, listing the offered types;
+  - an empty image (`wl-paste` exits 0 with zero bytes) fails `clipboard_no_image`.
 - **Write order:** the file is written before the ledger, so a failure never leaves a
   ledger entry with no file.
   1. Check storage safety and read the source into memory, up to the cap.
