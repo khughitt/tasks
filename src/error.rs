@@ -34,6 +34,20 @@ pub enum Error {
     Claimed(String, String),
     #[error("{0}")]
     Editor(String),
+    #[error("{0}")]
+    InvalidAttachmentName(String),
+    #[error("{0}")]
+    AttachmentExists(String),
+    #[error("{0}")]
+    AttachmentMissing(String),
+    #[error("{0}")]
+    AttachmentUnsafe(String),
+    #[error("{0}")]
+    AttachmentTooLarge(String),
+    #[error("{0}")]
+    ClipboardUnavailable(String),
+    #[error("{0}")]
+    ClipboardNoImage(String),
     #[error("io: {0}")]
     Io(String),
 }
@@ -68,6 +82,13 @@ impl Error {
             }
             Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
             Error::Editor(detail) => Error::Editor(detail + suffix),
+            Error::InvalidAttachmentName(detail) => Error::InvalidAttachmentName(detail + suffix),
+            Error::AttachmentExists(detail) => Error::AttachmentExists(detail + suffix),
+            Error::AttachmentMissing(detail) => Error::AttachmentMissing(detail + suffix),
+            Error::AttachmentUnsafe(detail) => Error::AttachmentUnsafe(detail + suffix),
+            Error::AttachmentTooLarge(detail) => Error::AttachmentTooLarge(detail + suffix),
+            Error::ClipboardUnavailable(detail) => Error::ClipboardUnavailable(detail + suffix),
+            Error::ClipboardNoImage(detail) => Error::ClipboardNoImage(detail + suffix),
             Error::Io(detail) => Error::Io(detail + suffix),
             error @ Error::NoProject(_) => error,
         }
@@ -91,6 +112,13 @@ impl Error {
             Error::ConcurrentModification(..) => "concurrent_modification",
             Error::Claimed(..) => "claimed",
             Error::Editor(_) => "editor",
+            Error::InvalidAttachmentName(_) => "invalid_attachment_name",
+            Error::AttachmentExists(_) => "attachment_exists",
+            Error::AttachmentMissing(_) => "attachment_missing",
+            Error::AttachmentUnsafe(_) => "attachment_unsafe",
+            Error::AttachmentTooLarge(_) => "attachment_too_large",
+            Error::ClipboardUnavailable(_) => "clipboard_unavailable",
+            Error::ClipboardNoImage(_) => "clipboard_no_image",
             Error::Io(_) => "io",
         }
     }

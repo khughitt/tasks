@@ -1,4 +1,5 @@
 pub mod add;
+pub mod attach;
 pub mod check;
 pub mod claims;
 pub mod dep;
@@ -1231,6 +1232,22 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
         Command::Prime { scope, closed } => list::prime(open_read_ctx(dir, &scope)?, closed),
         Command::Note { id, text } => status::note(open_id_write_ctx(dir, &id)?, id, text),
+        Command::Attach {
+            id,
+            source,
+            clipboard,
+            name,
+            caption,
+        } => attach::attach(
+            open_id_write_ctx(dir, &id)?,
+            id,
+            attach::Source::from_args(source, clipboard)?,
+            name,
+            caption,
+        ),
+        Command::Detach { id, name, why } => {
+            attach::detach(open_id_write_ctx(dir, &id)?, id, name, why)
+        }
         Command::Start { id, force } => status::start(open_id_write_ctx(dir, &id)?, id, force),
         Command::Park {
             id,

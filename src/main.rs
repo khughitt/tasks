@@ -1,5 +1,7 @@
+mod attachments;
 mod claims;
 mod cli;
+mod clipboard;
 mod commands;
 mod complete;
 mod complexity;

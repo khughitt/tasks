@@ -80,6 +80,8 @@ pub struct Project {
     /// The `[feedback]` table's scope: `Some` means the project accepts feedback, and the
     /// line says what it owns. See ops docs/specs/2026-09-26-ecosystem-feedback-design.md.
     pub feedback: Option<String>,
+    /// The per-file cap from `[attachments] max_bytes`; `attachments::DEFAULT_MAX_BYTES` when unset.
+    pub attachments_max_bytes: u64,
 }
 
 /// One other checkout's copy of a record, as `sibling_task_copies` found it.
@@ -102,12 +104,33 @@ struct Config {
     tags: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     feedback: Option<FeedbackConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attachments: Option<AttachmentsConfig>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeedbackConfig {
     scope: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AttachmentsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_bytes: Option<u64>,
+}
+
+/// The per-file attachment cap: positive, or the default when the table or key is absent.
+/// A negative value fails in the TOML parse; zero fails here.
+fn attachments_max_bytes(raw: Option<AttachmentsConfig>) -> Result<u64> {
+    match raw.and_then(|table| table.max_bytes) {
+        None => Ok(crate::attachments::DEFAULT_MAX_BYTES),
+        Some(0) => Err(Error::Config(format!(
+            "{CONFIG_REL}: [attachments] max_bytes must be a positive integer"
+        ))),
+        Some(bytes) => Ok(bytes),
+    }
 }
 
 /// A dictionary entry is a valid tag with a one-line, non-empty meaning; anything else
@@ -196,6 +219,7 @@ impl Project {
                 plan_dirs: None,
                 tags: None,
                 feedback: None,
+                attachments: None,
             })
             .expect("config serializes");
             atomic_write(&config, text.as_bytes())?;
@@ -224,6 +248,7 @@ impl Project {
             plan_dirs: doc_roots("plan_dirs", config.plan_dirs, DEFAULT_PLAN_DIRS)?,
             tags: tag_dictionary(config.tags)?,
             feedback: feedback_scope(config.feedback)?,
+            attachments_max_bytes: attachments_max_bytes(config.attachments)?,
         })
     }
 

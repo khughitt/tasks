@@ -403,6 +403,34 @@ pub enum Command {
         id: String,
         text: String,
     },
+    /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note.
+    #[command(
+        after_help = "Examples:\n  tasks attach sci-4f2a9c ~/Pictures/before.png --caption \"the stale row\"\n  grim - | tasks attach sci-4f2a9c - --name after.png\n  tasks attach sci-4f2a9c --clipboard"
+    )]
+    Attach {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        /// The file to copy, or `-` for stdin (which needs --name).
+        #[arg(required_unless_present = "clipboard", conflicts_with = "clipboard")]
+        source: Option<String>,
+        /// Read an image from the Wayland clipboard through wl-paste.
+        #[arg(long)]
+        clipboard: bool,
+        /// The stored name: [A-Za-z0-9._-], at most 128 bytes, not starting with '.'.
+        #[arg(long)]
+        name: Option<String>,
+        /// One line saying what the file shows, kept in the ledger note.
+        #[arg(long)]
+        caption: Option<String>,
+    },
+    /// Remove one attachment and record why. Git history keeps committed bytes; an
+    /// uncommitted file is gone for good.
+    Detach {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        name: String,
+        why: String,
+    },
     /// Claim a task: status=doing, owner=you.
     Start {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]

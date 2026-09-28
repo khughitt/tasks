@@ -328,6 +328,31 @@ impl PeriodicInfo {
     }
 }
 
+/// One attachment as `show`, `next`, and `attach` report it. `path` is absolute.
+#[derive(Serialize)]
+pub struct FileInfo {
+    pub name: String,
+    pub path: String,
+    pub bytes: u64,
+}
+
+#[derive(Serialize)]
+pub struct AttachOut {
+    pub id: String,
+    pub file: FileInfo,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct DetachOut {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    /// False when the ledger alone recorded the detach: no file was present.
+    pub removed: bool,
+    pub warnings: Vec<String>,
+}
+
 /// A record's deferral and whether the clock has spent it (spec §5.4). Named apart from
 /// the raw `Task.defer` string so the two shapes never collide.
 #[derive(Debug, Clone, Serialize)]
@@ -799,6 +824,8 @@ pub enum Output {
     Tree(TreeOut),
     Tags(TagsOut),
     Feedback(FeedbackOut),
+    Attach(AttachOut),
+    Detach(DetachOut),
 }
 
 pub fn render(out: &Output, format: Format, painter: &Painter, wrap: Wrap) -> String {
@@ -1091,6 +1118,12 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             rendered
         }
         Output::Feedback(o) => format!("{} {}", o.action, o.id),
+        Output::Attach(o) => o.file.path.clone(),
+        Output::Detach(o) if o.removed => format!(
+            "removed {}; git history keeps committed bytes, uncommitted ones are gone",
+            o.path
+        ),
+        Output::Detach(o) => format!("recorded {} as detached; no file was present", o.name),
     }
 }
 
@@ -1800,6 +1833,8 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Tree(o) => o.warnings.clone(),
         Output::Tags(o) => o.warnings.clone(),
         Output::Feedback(o) => o.warnings.clone(),
+        Output::Attach(o) => o.warnings.clone(),
+        Output::Detach(o) => o.warnings.clone(),
     }
 }
 
