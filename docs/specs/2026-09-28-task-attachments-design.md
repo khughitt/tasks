@@ -112,10 +112,15 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
 - **Write order:** the file is written before the ledger, so a failure never leaves a
   ledger entry with no file.
   1. Check storage safety and read the source into memory, up to the cap.
-  2. If `<name>` exists and is live in the ledger, fail `attachment_exists`. If it
-     exists, is not live, and holds identical bytes, skip to step 4: an earlier attach
-     was interrupted, and this run finishes it. If it exists with different bytes, fail
-     `attachment_exists`; the detail names the unrecorded file.
+  2. If `<name>` exists and is live in the ledger, fail `attachment_exists`. Otherwise,
+     if it exists:
+     - Inspect it with `symlink_metadata` before opening it. Anything but a regular
+       file (a symlink, a FIFO, a directory) fails `attachment_unsafe` and is never
+       read.
+     - A regular file of a different size, or with different bytes, fails
+       `attachment_exists`; the detail names the unrecorded file.
+     - A regular file with identical bytes skips to step 4: an earlier attach was
+       interrupted, and this run finishes it.
   3. Write the file atomically: a `create_new` temp file `.<name>.tmp-<pid>` in the
      same directory, fsync, then rename.
   4. Append the `attached:` ledger note and `save`.
@@ -123,8 +128,13 @@ config rewrite goes through `toml::Value`, so the table survives a rename.
 - **Failures:** if the save fails, the file this run wrote is removed and the error
   returned; a file written by an earlier run stays, since this run cannot tell it
   apart. A crash between steps 3 and 4 leaves a file with no ledger entry.
-  `check` reports it as `attachment_unnoted`, and rerunning the same attach finishes
-  it.
+  `check` reports it as `attachment_unnoted`, naming the file. Rerunning with the same
+  bytes under the same name finishes it. For a path or stdin with `--name`, that is
+  the same command. An automatically named clipboard attach picks a new timestamped
+  name each run, so rerunning it unchanged adds a second file instead. Recover with
+  `tasks attach <id> --clipboard --name <name from check>` while the clipboard still
+  holds the image, or with `<path> --name <name>` from the original file. Otherwise,
+  `detach` the unrecorded file.
 - **Output:** `{"id", "file": {"name", "path", "bytes"}, "warnings"}`, where `path` is
   absolute. `--pretty` prints the path.
 
@@ -211,20 +221,20 @@ disappeared. The inventory therefore records a baseline:
   guessing the baseline would be the silent fallback this project refuses.
 - **Observation:** `snapshot::observe` records each entry's directory state,
   `(source, destination)`, each present or absent, read with `symlink_metadata`.
-  `classify::refusal` adds three codes:
+  `classify::refusal` keeps R1–R8 unchanged and adds three codes:
 
   | Baseline | Source dir | Dest dir | Verdict |
   |---|---|---|---|
   | `true` | present | absent | move pending |
   | `true` | absent | present | moved |
-  | `true` | present | present | R5: unexpected destination attachments |
-  | `true` | absent | absent | R6: attachments missing from both sides |
+  | `true` | present | present | R9: unexpected destination attachments |
+  | `true` | absent | absent | R10: attachments missing from both sides |
   | `false` | absent | absent | nothing to move |
-  | `false` | any | present | R5: unexpected destination attachments |
-  | `false` | present | absent | R7: source attachments appeared after the inventory |
+  | `false` | any | present | R9: unexpected destination attachments |
+  | `false` | present | absent | R11: source attachments appeared after the inventory |
 
   A fresh rename runs the same table before its first write, so a destination orphan
-  that was already there refuses as R5 up front.
+  that was already there refuses as R9 up front.
 - **Move order, per entry:** write and verify the destination `.md`, then move
   `tasks/files/<src-id>` to `tasks/files/<dst-id>` with `std::fs::rename` (same
   filesystem, atomic), then remove the source `.md`. The loop's existing
@@ -232,8 +242,8 @@ disappeared. The inventory therefore records a baseline:
   pending directory move. A crash between the two steps therefore resumes correctly.
   `files_done` requires every entry's directory verdict to be "moved" or
   "nothing to move".
-- **Strays:** a directory under `tasks/files/` whose id is not in the inventory is a
-  stray, as an uninventoried `.md` is now.
+- **Strays:** a directory under `tasks/files/` whose id is not in the inventory joins
+  the existing R5 stray list, alongside uninventoried `.md` files.
 - **Uncommitted attachments:** these already block a fresh rename, because
   `uncommitted_task_files` runs `git status` over all of `tasks/`.
 - **Adopt:** `rename --adopt` writes no synced files, so it needs no change. The
@@ -253,18 +263,28 @@ fresh `<new>` with its `id` fixed. Then:
 
 1. **Move the loser's files.** For each name live in the loser's ledger and not in the
    winner's, move `tasks/files/<id>/<name>` to `tasks/files/<new>/<name>`.
-2. **Split names both ledgers hold.** Resolve the file's add/add conflict by side,
-   using the side the loser's record came from:
-   - `git show :2:tasks/files/<id>/<name>` is the `HEAD` side, and `:3:` the merged
-     side.
-   - The winner's side stays at `tasks/files/<id>/<name>`, and the loser's side is
-     written to `tasks/files/<new>/<name>`.
-   - Identical bytes produce no conflict; copy the file to both directories.
+2. **Split names both ledgers hold, by blob.** Do this before `git add` resolves the
+   conflict, while the index still holds both sides.
+   - **Find each record's side:** the record at `git show :2:tasks/<id>.md` came from
+     the `HEAD` side (stage 2), and the one at `:3:` from the merged side (stage 3).
+   - **Write each side's version:** for each shared name, write stage *w* (the
+     winner's side) to `tasks/files/<id>/<name>`, and stage *l* (the loser's side) to
+     `tasks/files/<new>/<name>`.
+   - **Confirm before staging:** for each written file, `git hash-object <file>` must
+     equal `git rev-parse :<stage>:tasks/files/<id>/<name>` for its own side's stage.
+   - **Identical bytes:** there is no conflict and only stage 0 exists. Copy the file
+     to both directories.
+   - **Merge already committed:** the sides are the merge commit's parents, so use
+     `<merge>^1:` and `<merge>^2:` in place of `:2:` and `:3:`, for both the records
+     and the files.
 3. **Verify.** Run `tasks check`. `attachment_unnoted` and `attachment_missing` must
    be clear for both ids.
 
-`check` detects a skipped or misapplied step: a loser's file left under `<id>` is
-`attachment_unnoted` against the winner and `attachment_missing` against `<new>`.
+`check` catches a file in the wrong directory by name. A loser's file left under
+`<id>` is `attachment_unnoted` against the winner and `attachment_missing` against
+`<new>`. It cannot catch wrong bytes under a name both records list: two versions
+swapped, or one side's version copied into both directories, both pass. The ledger
+records no hash; the blob comparison in step 2 is the only guard for shared names.
 
 ## Errors
 
@@ -301,6 +321,7 @@ End-to-end tests in `tests/cli.rs`:
     the note;
   - the cap at `max_bytes` and at `max_bytes + 1`, with a small configured cap;
   - the ledger note text;
+  - a clipboard retry with `--name` naming the unrecorded file finishes it;
   - cross-project routing by prefix;
   - a failing save: make `tasks/` read-only after `tasks/files/<id>` exists; the new
     file is removed, and a pre-existing file is kept.
@@ -310,6 +331,9 @@ End-to-end tests in `tests/cli.rs`:
   - `detach` fails `attachment_unsafe` and nothing is deleted outside.
   - `show` lists nothing and warns.
   - `check` reports `attachment_unsafe`.
+  - An existing entry under the attach name that is a symlink to a file with matching
+    bytes, or a FIFO: `attach` fails `attachment_unsafe` without reading it and writes
+    no note.
   - An attachment that is itself a symlink: `detach` refuses it.
 - **detach:**
   - the ledger note, and removal of the empty directory;
@@ -327,7 +351,9 @@ End-to-end tests in `tests/cli.rs`:
   - a record with attachments and one without;
   - a crash-injected resume between the directory move and the source removal
     (`TASKS_RENAME_STOP_AFTER`);
-  - each of R5, R6 and R7, including R5 on a fresh rename with a destination orphan;
+  - each of R9, R10 and R11, including R9 on a fresh rename with a destination
+    orphan, and R5 naming a stray attachment directory;
+  - the existing R1–R8 tests unchanged;
   - an inventory missing the `attachments` field failing with the typed error.
 
 The clipboard path gets a unit test of MIME selection and extension mapping, plus an
@@ -347,7 +373,7 @@ end-to-end test with a stub `wl-paste` on `PATH`.
 1. **Storage, config, and `attach`/`detach`:** the storage-safety checks, the ledger
    parser, clipboard input, and the errors.
 2. **`show`/`next` `files` field and the `check` pass.**
-3. **`rename`:** the inventory baseline, the directory observation, R5–R7, the move
+3. **`rename`:** the inventory baseline, the directory observation, R9–R11, the move
    order, and the resume test.
 4. **README and skill:** the command reference, collision recovery with ledger-based
    splitting, and the size policy.

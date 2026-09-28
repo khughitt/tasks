@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/task-attachments
 created: 2026-09-25T16:12:10Z
-updated: 2026-09-28T11:10:24Z
+updated: 2026-09-28T11:15:58Z
 started: 2026-09-28T10:36:18Z
 depends: []
 parent: tasks-ce2f58
@@ -37,4 +37,9 @@ Decisions the spec must settle (brief, Unanswered questions):
   provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-28T11:10:24Z (design/task-attachments): spec revised after review: ownership ledger (attached:/detached: notes by name) with check drift errors; branch-aware collision split; storage symlink refusal (attachment_unsafe); rename inventory baseline with R5-R7; ledger-first detach and file-first attach with idempotent retry
 - 2026-09-28T11:10:24Z (design/task-attachments): parked (waiting on user, review): user: review the revised .worktrees/task-attachments/docs/specs/2026-09-28-task-attachments-design.md; then agent: apply corrections, run writing-plans, and file the four children under tasks-ce2f58
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-28T11:15:58Z (design/task-attachments): resumed
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-28T11:15:58Z (design/task-attachments): spec second review applied: attach recovery lstat-validates the existing entry (attachment_unsafe), clipboard retry needs --name, rename codes R9-R11 (R1-R8 taken; stray dirs join R5), collision split verified by blob before staging and check's limit stated
+- 2026-09-28T11:15:58Z (design/task-attachments): parked (waiting on user, review): user: review the revised .worktrees/task-attachments/docs/specs/2026-09-28-task-attachments-design.md; then agent: run writing-plans and file the four children under tasks-ce2f58
   provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
