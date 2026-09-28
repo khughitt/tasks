@@ -1,10 +1,10 @@
 ---
 id: tasks-e7a870
 title: Support screenshots and other attachments on tasks
-status: idea
+status: dropped
 priority: 1
 created: 2026-09-09T01:31:26Z
-updated: 2026-09-25T16:12:10Z
+updated: 2026-09-28T14:13:01Z
 depends: []
 parent: tasks-ce2f58
 tags: [quick-add]
@@ -19,3 +19,7 @@ Precedent: tasks-061851 made specs and plans optional attachments.
 
 - 2026-09-25T15:54:08Z (main): Raised to P1 2026-09-25: asked for again. A phone screenshot was the evidence that settled a UI bug's cause (it ruled one hypothesis out on sight); with no place to attach it, the task holds a prose transcription and the image stays in a downloads folder. The attachment should travel with the record across checkouts and hosts.
 - 2026-09-25T16:12:10Z (main): scope: briefed; parented under goal tasks-ce2f58, design follow-up tasks-a2d903 (P1, planned, high) settles storage, size policy, public repos, and input sources; brief: docs/notes/2026-09-25-task-attachments-brief.md
+- 2026-09-28T14:13:01Z (main): dropped
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-28T14:13:01Z (main): superseded by tasks-ce2f58: task attachments shipped (attach/detach, show/check, rename)
+  provenance: {"harness_session":"claude-code:aa2a7d96-c0fb-4863-8009-2bfa035e9a14","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
