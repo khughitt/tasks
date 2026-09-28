@@ -8,12 +8,13 @@ complexity: high
 process: planned
 owner: main
 created: 2026-09-25T16:12:10Z
-updated: 2026-09-28T10:39:21Z
+updated: 2026-09-28T10:43:02Z
 started: 2026-09-28T10:36:18Z
 depends: []
 parent: tasks-ce2f58
 tags: [design]
 agent: "claude-code/claude-opus-5-5[1m]"
+spec: docs/specs/2026-09-28-task-attachments-design.md
 ---
 
 Write docs/specs/<date>-task-attachments-design.md from docs/notes/2026-09-25-task-attachments-brief.md and review it with the user, then split the implementation into children of tasks-ce2f58 (storage and the attach command, show/check, rename and id-collision recovery, README and skill).
