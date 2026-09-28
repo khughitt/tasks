@@ -1,7 +1,7 @@
 # Task attachments
 
-Status: draft 2026-09-28, revised after review (collision ownership, storage symlinks,
-rename baseline, detach ordering); awaiting user review
+Status: reviewed 2026-09-28 (approved at e76dcc7) after two review rounds (collision ownership, storage symlinks,
+rename baseline, detach ordering; entry validation, clipboard retry, R9–R11, blob-verified collision split)
 Task: tasks-a2d903 (goal tasks-ce2f58, idea tasks-e7a870)
 Brief: docs/notes/2026-09-25-task-attachments-brief.md
 
