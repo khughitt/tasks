@@ -6,10 +6,10 @@ priority: 2
 process: planned
 owner: main
 created: 2026-09-13T18:19:44Z
-updated: 2026-09-13T21:12:22Z
+updated: 2026-09-29T20:35:43Z
 started: 2026-09-13T19:46:03Z
 completed: 2026-09-13T21:12:22Z
-depends: [ops-a405cc, ai-d5a56c]
+depends: [ops-a405cc, tack-d5a56c]
 tags: []
 spec: docs/specs/2026-09-13-creation-provenance-design.md
 plan: docs/plans/2026-09-13-creation-provenance.md
