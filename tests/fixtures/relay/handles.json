@@ -1,0 +1,133 @@
+{
+  "schema": 1,
+  "starts": [
+    {
+      "name": "canonical 0",
+      "input": "0",
+      "expected": "0"
+    },
+    {
+      "name": "canonical 987654",
+      "input": "987654",
+      "expected": "987654"
+    },
+    {
+      "name": "synthetic format/precision 9007199254740993",
+      "input": "9007199254740993",
+      "expected": "9007199254740993"
+    },
+    {
+      "name": "synthetic format/precision 18446744073709551615",
+      "input": "18446744073709551615",
+      "expected": "18446744073709551615"
+    },
+    {
+      "name": "reject '01'",
+      "input": "01",
+      "errorCode": "INVALID_SCHEMA"
+    },
+    {
+      "name": "reject '+1'",
+      "input": "+1",
+      "errorCode": "INVALID_SCHEMA"
+    },
+    {
+      "name": "reject '1e3'",
+      "input": "1e3",
+      "errorCode": "INVALID_SCHEMA"
+    },
+    {
+      "name": "reject '1.0'",
+      "input": "1.0",
+      "errorCode": "INVALID_SCHEMA"
+    },
+    {
+      "name": "reject ' 1'",
+      "input": " 1",
+      "errorCode": "INVALID_SCHEMA"
+    },
+    {
+      "name": "reject '18446744073709551616'",
+      "input": "18446744073709551616",
+      "errorCode": "INVALID_SCHEMA"
+    },
+    {
+      "name": "reject 987654",
+      "input": 987654,
+      "errorCode": "INVALID_SCHEMA"
+    },
+    {
+      "name": "reject ''",
+      "input": "",
+      "errorCode": "INVALID_SCHEMA"
+    },
+    {
+      "name": "reject '-1'",
+      "input": "-1",
+      "errorCode": "INVALID_SCHEMA"
+    }
+  ],
+  "handles": [
+    {
+      "name": "Linux boot present",
+      "input": {
+        "platform": "linux",
+        "host": "fixture-host",
+        "bootId": "12345678-1234-4234-8234-123456789abc",
+        "pid": 42,
+        "start": "987654"
+      },
+      "expected": {
+        "platform": "linux",
+        "host": "fixture-host",
+        "bootId": "12345678-1234-4234-8234-123456789abc",
+        "pid": 42,
+        "start": "987654"
+      }
+    },
+    {
+      "name": "Linux boot absent",
+      "input": {
+        "platform": "linux",
+        "host": "fixture-host",
+        "bootId": null,
+        "pid": 42,
+        "start": "987654"
+      },
+      "expected": {
+        "platform": "linux",
+        "host": "fixture-host",
+        "bootId": null,
+        "pid": 42,
+        "start": "987654"
+      }
+    },
+    {
+      "name": "Darwin seconds",
+      "input": {
+        "platform": "darwin",
+        "host": "fixture-host",
+        "bootId": null,
+        "pid": 42,
+        "start": "1704164645"
+      },
+      "expected": {
+        "platform": "darwin",
+        "host": "fixture-host",
+        "bootId": null,
+        "pid": 42,
+        "start": "1704164645"
+      }
+    }
+  ],
+  "darwin": [
+    {
+      "name": "UTC calendar epoch",
+      "input": {
+        "row": "42 1 ttys000 Tue Jan 02 03:04:05 2024 /usr/bin/codex",
+        "timezone": "UTC"
+      },
+      "expected": "1704164645"
+    }
+  ]
+}

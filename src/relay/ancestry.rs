@@ -350,6 +350,24 @@ mod tests {
     }
 
     #[test]
+    fn every_null_session_expectation_names_a_chain_in_the_corpus() {
+        let corpus: serde_json::Value = serde_json::from_str(CORPUS).unwrap();
+        let names: Vec<&str> = corpus["chains"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|chain| chain["session"].is_null())
+            .map(|chain| chain["name"].as_str().unwrap())
+            .collect();
+        for (chain, _) in NULL_SESSION_EXPECTED {
+            assert!(
+                names.contains(&chain),
+                "{chain}: expected a null-session chain in the corpus, found none"
+            );
+        }
+    }
+
+    #[test]
     fn a_readable_claude_under_codex_is_the_claude_boundary() {
         // The corpus cannot express this: relay never reads the claude row's arguments.
         let tree = Tree::default()

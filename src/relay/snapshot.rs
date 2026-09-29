@@ -389,6 +389,81 @@ mod tests {
         assert_eq!(process.boot_id.as_deref(), Some(BOOT));
     }
 
+    const HANDLES: &str = include_str!("../../tests/fixtures/relay/handles.json");
+
+    fn corpus() -> serde_json::Value {
+        let corpus: serde_json::Value = serde_json::from_str(HANDLES).unwrap();
+        assert_eq!(corpus["schema"], 1, "handles fixture format changed");
+        corpus
+    }
+
+    /// The fixture's `process` input, carried through the whole snapshot reader.
+    fn parse_process(input: &serde_json::Value) -> Result<Handle> {
+        let agent = agent_json(&[("process", &input.to_string())]);
+        let snapshot = parse(&snapshot_json("codex:s1", &agent))?;
+        Ok(snapshot.agents[0].process.clone().unwrap())
+    }
+
+    #[test]
+    fn every_relay_start_case_reads_as_relay_expects() {
+        let corpus = corpus();
+        let cases = corpus["starts"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let input = serde_json::json!({
+                "platform": "linux", "host": "h", "bootId": null, "pid": 42,
+                "start": case["input"],
+            });
+            match case["expected"].as_str() {
+                Some(expected) => {
+                    let handle = parse_process(&input).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+                    assert_eq!(handle.start.to_string(), expected, "{name}");
+                }
+                None => {
+                    assert_eq!(
+                        case["errorCode"], "INVALID_SCHEMA",
+                        "{name}: unknown outcome"
+                    );
+                    assert!(parse_process(&input).is_err(), "{name} must be refused");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_relay_handle_case_reads_as_relay_expects() {
+        let corpus = corpus();
+        let cases = corpus["handles"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let handle = parse_process(&case["input"]).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            let expected = &case["expected"];
+            assert_eq!(
+                handle.platform,
+                expected["platform"].as_str().unwrap(),
+                "{name}"
+            );
+            assert_eq!(handle.host, expected["host"].as_str().unwrap(), "{name}");
+            assert_eq!(
+                handle.boot_id.as_deref(),
+                expected["bootId"].as_str(),
+                "{name}"
+            );
+            assert_eq!(
+                u64::from(handle.pid),
+                expected["pid"].as_u64().unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                handle.start.to_string(),
+                expected["start"].as_str().unwrap(),
+                "{name}"
+            );
+        }
+    }
+
     #[test]
     fn a_snapshot_accepts_a_darwin_handle_for_parsing_only() {
         // Refusing it as an identity candidate is Task 4's job; it must not be refused
