@@ -46,15 +46,21 @@ worktree. An explicit user instruction to work in place wins.
 
     just gate
 
-Tests: `just test-fast [<name>]` while working; the pre-push hook runs `just gate`. Run
-`just test` yourself only if hooks are not installed. `test-fast` is `cargo test` with an
-optional name filter and skips the `#[ignore]`d exhaustive enumeration; `just test` is the
-whole suite, ignored tests included. Never run `cargo test` directly: the recipe runs the
-same command and records it. `just check` is the seconds-long part (`cargo fmt --check`,
-`cargo clippy --all-targets -- -D warnings`, `tasks check`). Every recipe runs through
+Tests: `just test-one <name>` for a test-name filter, or `just test-one --test cli <name>`
+for one integration test; runner arguments are forwarded intact and at least one is
+required. Run `just test-fast` before committing; it accepts no arguments and runs the
+non-ignored suite. `just test` includes the slow `#[ignore]`d exhaustive enumeration.
+No CI workflow runs the full suite on push (`ci_suite_refs` is empty), so the pre-push
+hook carries it. Run `just test` yourself only if hooks are not installed or the fast
+set does not cover affected behavior. Never run `cargo test` directly: the recipe runs
+the same command and records it. `just check` runs hygiene, `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, and `tasks check`. Every recipe runs through
 the vendored timing wrapper `tools/tt`, which records the run for the cross-project test
 and CI audit (ops `docs/specs/2026-09-04-test-ci-audit-design.md`). The git hooks in
-`.githooks/` run `check` at pre-commit and `gate` at pre-push; on a fresh clone, run
+`.githooks/` run the check at pre-commit, or hygiene and `tasks check` alone when every
+staged path matches `AGENTS.md` or `tasks/*.md` (renames count on both sides and failed
+classification runs the full check). Pre-push runs the full gate unless every pushed
+ref is covered by full-suite CI on `ci_remote`; on a fresh clone, run
 `git config core.hooksPath .githooks` once.
 
 Rebuild and reinstall after CLI changes so the tracker used above is the code under test:
