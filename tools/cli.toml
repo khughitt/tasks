@@ -793,6 +793,35 @@ options = [
   { names = ["--out"], value = "path" },
 ]
 
+[[cli.obs.commands]]
+path = ["outcomes"]
+summary = "report outcome measures and manage follow-up judgments"
+
+[[cli.obs.commands]]
+path = ["outcomes", "report"]
+output = "json"
+summary = "print review-round and after-close measures with their coverage"
+options = [
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "since", role = "bound", value = "when", repeatable = false },
+]
+
+[[cli.obs.commands]]
+path = ["outcomes", "candidates"]
+output = "json"
+summary = "write follow-up link candidates with their task text for a judge"
+options = [
+  { names = ["--out"], value = "path", required = true },
+]
+
+[[cli.obs.commands]]
+path = ["outcomes", "judge"]
+output = "json"
+summary = "record follow-up link judgments from a JSONL file"
+options = [
+  { names = ["--input"], value = "path", required = true },
+]
+
 # ---- lit
 
 [[cli.lit.commands]]
