@@ -1233,7 +1233,8 @@ git commit -m "feat(feedback): refuse a recurrence onto a copy behind another ch
 **Files:**
 - Modify: `src/commands/mod.rs` (new `follow_holder`), `src/commands/status.rs` (`note`:
   replace the heartbeat block), `src/commands/edit.rs` (both save paths),
-  `src/commands/dep.rs`, and `src/commands/attach.rs` (`attach` and `detach`)
+  `src/commands/dep.rs`, `src/commands/attach.rs` (`attach` and `detach`), and
+  `src/commands/feedback.rs` (`run`, after a recurrence)
 - Test: `tests/cli.rs`
 
 **Interfaces:**
@@ -1302,6 +1303,39 @@ fn a_restart_in_the_new_worktree_makes_a_later_write_in_main_refuse() {
 }
 
 #[test]
+fn a_holders_feedback_recurrence_moves_the_claim_to_the_owners_checkout() {
+    let mut env = TestEnv::new();
+    let owner = env.init("own");
+    accept_feedback(&owner, "the own tool");
+    git(&owner, &["init", "-q", "-b", "main"]);
+    let reporter = env.init("rep");
+    let report = ["feedback", "--project", "own", "slow startup", "--category", "friction"];
+    let id = env.json(&reporter, &report)["id"].as_str().unwrap().to_string();
+    git(&owner, &["add", "-A"]);
+    git(&owner, &["commit", "-qm", "seed"]);
+    let side = owner.join("wt");
+    git(
+        &owner,
+        &["worktree", "add", "-q", "-b", "side", side.to_str().unwrap()],
+    );
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(claim_worktree(&env, &side, &id), side.display().to_string());
+    // The owner's main checkout holds the newer copy, so the recurrence may land there.
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&owner, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let mut explicit = report.to_vec();
+    explicit.extend(["--recur", id.as_str()]);
+    as_agent(&env, &reporter, "agent-a")
+        .args(&explicit)
+        .assert()
+        .success();
+    assert_eq!(claim_worktree(&env, &owner, &id), owner.display().to_string());
+}
+
+#[test]
 fn a_claim_held_by_proof_moves_with_its_holder() {
     let mut env = TestEnv::new();
     let main = env.init("sci");
@@ -1331,9 +1365,10 @@ fn a_claim_held_by_proof_moves_with_its_holder() {
 
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `just test-one --test cli claim_to_the_checkout` and
-`just test-one --test cli held_by_proof_moves`
-Expected: FAIL, because the claim still names `main`. `another_sessions_write_leaves` and
+Run: `just test-one --test cli claim_to_the_checkout`,
+`just test-one --test cli held_by_proof_moves` and
+`just test-one --test cli feedback_recurrence_moves_the_claim`
+Expected: FAIL, because the claim still names the checkout `start` ran in. `another_sessions_write_leaves` and
 `a_restart_in_the_new_worktree` pass already, since `start` sets the worktree today.
 
 - [ ] **Step 3: Add `follow_holder` to `src/commands/mod.rs`**
@@ -1440,21 +1475,39 @@ before `Ok(Output::Attach(…))`. In `detach`, make the same `let me` change. In
 `if recorded != Some(Ledger::Detached) { … }`, after `save(…)?;`, add
 `super::follow_holder(&mut ctx, &task.id, Some(&me), "the detach landed");`.
 
+In `src/commands/feedback.rs` `run`, where a match recurs, call it after the recurrence
+lands. `recur_into` has already saved its own pruned claim store by then, so this load
+starts fresh and clobbers nothing:
+
+```rust
+    let (task, action) = match existing {
+        Some((id, automatic)) => {
+            let task = recur_into(
+                &mut ctx, &id, automatic, &summary, &body, &category, &from, &prefix,
+            )?;
+            // Record-home spec §4: a holder's recurrence moves its claim to the owner's
+            // registered root, where it landed.
+            super::follow_holder(&mut ctx, &task.id, None, "the recurrence landed");
+            (task, "recurred")
+        }
+```
+
 A status change that releases the claim leaves nothing for `follow_holder` to find, so the
 edit path's call is harmless after `--status done`.
 
 - [ ] **Step 5: Run the tests to see them pass, then the fast suite**
 
 Run: `just test-one --test cli claim_to_the_checkout`,
-`just test-one --test cli held_by_proof_moves`, `just test-one --test cli heartbeat`, then
-`just test-fast`
+`just test-one --test cli held_by_proof_moves`,
+`just test-one --test cli feedback_recurrence_moves_the_claim`,
+`just test-one --test cli heartbeat`, then `just test-fast`
 Expected: PASS. The existing heartbeat tests keep their exact warning text,
 `the note landed, but the claim heartbeat on … was not refreshed`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-tasks done tasks-e24e39 "a holder's note, edit, dep, attach, and detach move its claim to the checkout they land in"
+tasks done tasks-e24e39 "a holder's note, edit, dep, attach, detach, and feedback recurrence move its claim to the checkout they land in"
 tasks check
 git add src/commands tests/cli.rs tasks/
 git commit -m "feat(claims): move a claim to the checkout its holder writes in"
@@ -1795,8 +1848,12 @@ and says whether to rerun there, merge, or leave it to the session working there
 
 - [ ] **Step 4: Report the protocol step to the global instructions' owner**
 
+Supply `TASKS_AGENT=<harness>/<model>` on this invocation with the harness and model that
+run this step, or the harness alone if that is all you know. When unsure, leave the
+variable off; a wrong attribution is worse than none.
+
 ```bash
-TASKS_AGENT=claude-code/claude-opus-5-5 tasks feedback --project tack \
+tasks feedback --project tack \
   "The global worktree rule should tell agents to run 'tasks start <id>' in a new worktree before any other tasks command for that task, now that tasks refuses writes from a copy behind another checkout" \
   --category idea
 tasks note tasks-3b5e4c "filed the global-instructions step as tack feedback <returned id>"

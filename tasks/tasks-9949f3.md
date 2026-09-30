@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: ab8d2d-record-home
 created: 2026-09-30T10:28:06Z
-updated: 2026-09-30T11:06:47Z
+updated: 2026-09-30T11:22:20Z
 started: 2026-09-30T10:28:52Z
 depends: []
 parent: tasks-c4ad8e
@@ -38,4 +38,8 @@ Implements docs/specs/2026-09-30-record-home-design.md (accepted 2026-09-30, tas
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T11:06:45Z (ab8d2d-record-home): Plan written against the round-5 spec: docs/plans/2026-09-30-record-home.md, 7 steps (tasks-2cbfad, 608fdb, dc5d46, e5c16d, e24e39, fea247, 3b5e4c). Spec phrase fixed: an unreadable claim store is reported in the refusal detail, since a refused command prints no warnings.
 - 2026-09-30T11:06:47Z (ab8d2d-record-home): parked (waiting on user, review): User reviews docs/plans/2026-09-30-record-home.md in .worktrees/ab8d2d-record-home and picks subagent-driven or native execution; then the agent starts tasks-2cbfad in that worktree
+  provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T11:22:15Z (ab8d2d-record-home): Correction to the spec round 5 note: the reviewer was codex (per the user).
+- 2026-09-30T11:22:15Z (ab8d2d-record-home): review: plan round 1 — verdict: revise; findings: P1 1, P2 1; reviewer: unrecorded (pasted by the user)
+- 2026-09-30T11:22:20Z (ab8d2d-record-home): resumed
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

@@ -191,7 +191,9 @@ as the heartbeat does. When ownership cannot be established, the claim is left a
 `note` keeps its existing warning for that case.
 
 - `note` already refreshes `seen` on the holder's claim, and now also sets `worktree`.
-- Field edits, `dep`, `attach` and `detach` by the holder gain the same refresh. The store
+- Field edits, `dep`, `attach`, `detach` and a feedback recurrence (explicit or automatic)
+  by the holder gain the same refresh. A recurrence lands in the owner's registered root, so
+  that is where the claim moves. The store
   write comes after the record write, as `note`'s does. A failed store write is a warning
   naming what landed and what did not, in the form `note` uses today.
 - `start` already acquires with this checkout's root and needs no change.
