@@ -1,13 +1,15 @@
 ---
 id: tasks-479a6f
 title: Show quiet-host waits in ordinary pretty task tables
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-09-23T17:07:01Z
-updated: 2026-09-30T10:23:47Z
+updated: 2026-09-30T14:36:22Z
+started: 2026-09-30T14:36:22Z
 depends: []
 parent: tasks-46d207
 tags: [feedback, idea, "from:material"]
@@ -29,3 +31,5 @@ Parked-quiet work (park --reason quiet, with --needs and --minutes) shows up onl
 
 - 2026-09-30T10:05:33Z (main): scope: scoped; existing park fields and shared table formatter support a display-only fix; priority 2, small/low/direct; optional discovery hint deferred; brief: docs/notes/2026-09-30-work-selection-brief.md
 - 2026-09-30T10:23:47Z (main): scope: corrected the table function name: task_table does not exist; the shared pretty table is src/output.rs::table
+- 2026-09-30T14:36:22Z (main): started
+  provenance: {"harness_session":"claude-code:4471e860-d17f-47d3-a634-479664d60702","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
