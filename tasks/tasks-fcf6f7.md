@@ -1,13 +1,15 @@
 ---
 id: tasks-fcf6f7
 title: Explain the single-line --body requirement when feedback recurs
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-09-29T10:44:11Z
-updated: 2026-09-30T09:54:00Z
+updated: 2026-09-30T10:23:58Z
+started: 2026-09-30T10:23:58Z
 depends: []
 parent: tasks-ea2a79
 tags: [feedback, friction, "from:tack"]
@@ -27,3 +29,4 @@ Original report: tasks feedback --recur refuses a multi-line --body with 'note t
 ## Notes
 
 - 2026-09-30T09:54:00Z (main): scope: scoped; retained the documented single-line recurrence contract; clarified that --body is supported; xs/low/direct; brief: docs/notes/2026-09-30-note-integrity-brief.md
+- 2026-09-30T10:23:58Z (main): started
