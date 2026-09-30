@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: ab8d2d-record-home
 created: 2026-09-30T10:28:06Z
-updated: 2026-09-30T10:51:44Z
+updated: 2026-09-30T10:51:51Z
 started: 2026-09-30T10:28:52Z
 depends: []
 parent: tasks-c4ad8e
@@ -29,3 +29,5 @@ Implements docs/specs/2026-09-30-record-home-design.md (accepted 2026-09-30, tas
 - 2026-09-30T10:40:27Z (ab8d2d-record-home): parked (waiting on user, review): User re-reviews the round-3 spec docs/specs/2026-09-30-record-home-design.md in .worktrees/ab8d2d-record-home (commit 324adaf); after approval the agent updates the untracked draft plan docs/plans/2026-09-30-record-home.md to the revised §3.2 and §3.1, links it, and asks for the plan review
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T10:51:44Z (ab8d2d-record-home): review: spec round 4 — verdict: revise; findings: P1 1, P2 1; reviewer: unrecorded (pasted by the user)
+- 2026-09-30T10:51:51Z (ab8d2d-record-home): parked (waiting on user, review): User re-reviews the round-4 spec docs/specs/2026-09-30-record-home-design.md in .worktrees/ab8d2d-record-home (commit ef5a792); after approval the agent updates the untracked draft plan docs/plans/2026-09-30-record-home.md to the revised spec, links it, and asks for the plan review
+  provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
