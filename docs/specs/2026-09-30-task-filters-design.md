@@ -1,6 +1,6 @@
 # One task filter for list and ready — design
 
-**Status:** approved after review round 2, 2026-09-30. Task: tasks-964c95.
+**Status:** implemented, 2026-09-30. Task: tasks-964c95.
 
 ## Outcome
 

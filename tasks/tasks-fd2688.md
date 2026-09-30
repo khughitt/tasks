@@ -1,14 +1,15 @@
 ---
 id: tasks-fd2688
 title: Document and roll out task filters
-status: doing
+status: done
 priority: 2
 complexity: high
 process: direct
 owner: feat/task-filters
 created: 2026-09-30T18:11:19Z
-updated: 2026-09-30T18:32:35Z
+updated: 2026-09-30T18:37:38Z
 started: 2026-09-30T18:31:50Z
+completed: 2026-09-30T18:37:38Z
 depends: []
 parent: tasks-964c95
 tags: [cli]
@@ -21,3 +22,6 @@ step: "Task 3: Documentation, review, and rollout"
 
 - 2026-09-30T18:31:50Z (feat/task-filters): started
 - 2026-09-30T18:32:35Z (feat/task-filters): Phase A documents filters and files tasks-ead38f; spec remains approved until integration, and rollout stays open pending whole-branch review.
+- 2026-09-30T18:36:45Z (feat/task-filters): resumed
+- 2026-09-30T18:37:38Z (feat/task-filters): done
+- 2026-09-30T18:37:38Z (feat/task-filters): Documented and reviewed list/ready filter semantics; rollout follows in the same coordinated integration.

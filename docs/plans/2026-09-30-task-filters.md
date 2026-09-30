@@ -1,6 +1,6 @@
 # Task filters implementation plan
 
-**Status:** approved for execution, 2026-09-30.
+**Status:** executed, 2026-09-30. Task: tasks-964c95.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
