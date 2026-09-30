@@ -377,7 +377,9 @@ uncommitted `idea` in the owner's registered checkout, tagged `feedback`, the ca
 and `from:<your prefix>`. Describe the tool, not the project: no repository names, file
 paths, people, or project content. Do not
 commit in the owner's repository and do not triage your own report. If `ambiguous` comes
-back, rerun with `--recur <id>` to join the listed entry or `--new` to insist. Keep the
+back, rerun with `--recur <id>` to join the listed entry or `--new` to insist. `--body`
+detail is kept verbatim on a new entry; recurrence appends it as a single-line note, so
+on recurrence it must be one line. Keep the
 returned id in a note if the outcome matters to your task; `tasks show <id>` works from
 any registered project.
 

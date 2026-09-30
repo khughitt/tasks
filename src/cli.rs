@@ -591,6 +591,8 @@ pub enum Command {
             value_parser = ValueSet
         )]
         category: String,
+        /// Extra detail, kept verbatim on a new entry; recurrence appends it as a
+        /// single-line note, so it must be one line.
         #[arg(short = 'b', long)]
         body: Option<String>,
         /// Append to this open feedback task instead of matching titles.

@@ -1,6 +1,6 @@
 use super::{Ctx, append_note};
 use crate::error::{Error, Result};
-use crate::format::{validate_body, validate_line, validate_note_text, validate_task};
+use crate::format::{validate_body, validate_line, validate_task};
 use crate::model::{Status, Task, TaskId};
 use crate::output::{FeedbackOut, Output};
 use crate::registry::Registry;
@@ -218,8 +218,11 @@ fn recur_into(
     from: &str,
     prefix: &str,
 ) -> Result<Task> {
-    if !body.is_empty() {
-        validate_note_text(body)?;
+    if !body.is_empty() && body.contains(['\n', '\r']) {
+        return Err(Error::Validation(
+            "--body must be a single line: recurring feedback appends the body as a single-line detail note; provide one line"
+                .into(),
+        ));
     }
     // The match was made against a snapshot. Every guarded read re-checks that the task
     // is still open feedback and, for an automatic match, still has the same title, so a
