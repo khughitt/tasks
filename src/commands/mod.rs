@@ -725,13 +725,9 @@ pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer) 
     } else {
         crate::stale::Remedy::Rerun(&args)
     };
-    let mut detail = crate::stale::refusal(&task.id, &newer, &task.updated, remedy);
-    if let Some(error) = unknown {
-        // A refusal prints only its error object, so this cannot be a warning (spec §3.2).
-        detail.push_str(&format!(
-            " (whether another session works there is unknown: {error})"
-        ));
-    }
+    // A refusal prints only its error object, so unknown ownership must travel in its
+    // detail, before the remedy so the shell retry remains the final command.
+    let detail = crate::stale::refusal(&task.id, &newer, &task.updated, remedy, unknown.as_ref());
     Err(Error::StaleCopy(detail))
 }
 

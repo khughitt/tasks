@@ -99,7 +99,13 @@ pub fn compare(
 }
 
 /// The `stale_copy` detail (§3.2).
-pub fn refusal(id: &TaskId, newer: &Newer, ours: &str, remedy: Remedy) -> String {
+pub fn refusal(
+    id: &TaskId,
+    newer: &Newer,
+    ours: &str,
+    remedy: Remedy,
+    unknown: Option<&crate::error::Error>,
+) -> String {
     let root = newer.root.display();
     let head = if newer.same_stamp {
         format!(
@@ -151,7 +157,11 @@ pub fn refusal(id: &TaskId, newer: &Newer, ours: &str, remedy: Remedy) -> String
         ),
         Remedy::New => "Rerun with --new to file a separate entry".to_string(),
     };
-    format!("{head}{also}; nothing was written. {next}")
+    let unknown = match unknown {
+        Some(error) => format!(" (whether another session works there is unknown: {error})"),
+        None => String::new(),
+    };
+    format!("{head}{also}; nothing was written.{unknown} {next}")
 }
 
 /// `-` is how every command here names stdin, which a printed line cannot carry.
@@ -271,7 +281,8 @@ mod tests {
                 &id(),
                 &newer(false, &["/b"]),
                 "2026-09-05T09:00:00Z",
-                Remedy::Rerun(&given)
+                Remedy::Rerun(&given),
+                None
             ),
             "tasks/sci-1a2b3c.md in /wt is newer than this copy (2026-09-07T10:00:00Z there, \
              2026-09-05T09:00:00Z here) (also newer in: /b); nothing was written. Run it \
@@ -287,7 +298,8 @@ mod tests {
                 &id(),
                 &newer(false, &[]),
                 "2026-09-05T09:00:00Z",
-                Remedy::Handoff(&given)
+                Remedy::Handoff(&given),
+                None
             ),
             "tasks/sci-1a2b3c.md in /wt is newer than this copy (2026-09-07T10:00:00Z there, \
              2026-09-05T09:00:00Z here); nothing was written. Commit tasks/sci-1a2b3c.md in \
@@ -304,6 +316,7 @@ mod tests {
             &newer(false, &[]),
             "2026-09-05T09:00:00Z",
             Remedy::Occupied(vec![("sci-999999".into(), "agent-b".into())]),
+            None,
         );
         assert!(
             text.ends_with(
@@ -323,7 +336,8 @@ mod tests {
                 &id(),
                 &newer(true, &[]),
                 "2026-09-05T09:00:00Z",
-                Remedy::Merge
+                Remedy::Merge,
+                None
             ),
             "tasks/sci-1a2b3c.md in /wt has the same stamp as this copy \
              (2026-09-05T09:00:00Z) but different content, so both were written in the same \
@@ -339,7 +353,8 @@ mod tests {
                 &id(),
                 &newer(false, &[]),
                 "2026-09-05T09:00:00Z",
-                Remedy::New
+                Remedy::New,
+                None
             )
             .ends_with("nothing was written. Rerun with --new to file a separate entry")
         );

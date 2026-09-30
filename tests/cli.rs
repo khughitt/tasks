@@ -9707,6 +9707,31 @@ fn a_stale_refusal_reports_an_identity_resolution_failure() {
         "{detail}"
     );
     assert!(detail.contains("Run it there: tasks -C"), "{detail}");
+    assert_eq!(
+        retry_words(detail),
+        ["-C", side.to_str().unwrap(), "note", &id, "x"]
+    );
+}
+
+#[test]
+fn a_stale_refusal_reports_a_claim_store_failure_and_keeps_the_retry_valid() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let store = env.claim_store("sci");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "not a claim store").unwrap();
+    let detail = stale_detail(&env, &main, &["note", &id, "it's naïve"]);
+    assert!(
+        detail.contains("whether another session works there is unknown:")
+            && detail.contains("claim store"),
+        "{detail}"
+    );
+    assert_eq!(
+        retry_words(&detail),
+        ["-C", side.to_str().unwrap(), "note", &id, "it's naïve"]
+    );
 }
 
 #[test]
