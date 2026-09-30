@@ -202,6 +202,14 @@ the shared chokepoint covers all four paths at once.
   omission is always explainable. `start` remains the authoritative check.
 - **`prime`**'s `doing` section is *local status is `doing`* **or** *a live claim exists*, so
   a claim made in another worktree appears even where the local file still says `todo`.
+  A live claim on a task this checkout has no file for (it exists only on the claiming
+  worktree's branch) is read from the claim's `worktree`, with that checkout's scan, the
+  way the park design (§5.3) resolves a store-only park. The row appears in `doing` with
+  the warning `<id> is claimed in <worktree>; resume it from that checkout`. When that
+  checkout is gone, belongs to another prefix, or lacks the record, the claim gets
+  `<id> is claimed in <worktree>, which is unavailable` and no row, because a claim has no
+  payload to render one from. It is never a `ready` or `next` candidate: those read the
+  local scan, and `start` reads the local file (tasks-476c6b).
 
 ### Write ordering
 

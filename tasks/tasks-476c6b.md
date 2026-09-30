@@ -1,13 +1,16 @@
 ---
 id: tasks-476c6b
 title: prime shows live claims on tasks that exist only in a worktree
-status: todo
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: feat/cross-checkout
 created: 2026-09-25T02:36:08Z
-updated: 2026-09-29T20:50:25Z
+updated: 2026-09-30T09:40:09Z
+started: 2026-09-30T09:37:28Z
+completed: 2026-09-30T09:40:09Z
 depends: []
 parent: tasks-c4ad8e
 tags: []
@@ -24,3 +27,9 @@ Check: an integration test in tests/cli.rs mirroring park's 'park a task that ex
 ## Notes
 
 - 2026-09-29T20:50:25Z (main): scope: scoped; todo P2 s/mid/direct, body rewritten with the §5.3 resolution approach and test, parented to tasks-c4ad8e; brief: docs/notes/2026-09-29-cross-checkout-records-brief.md
+- 2026-09-30T09:37:28Z (feat/cross-checkout): started
+  provenance: {"harness_session":"claude-code:6cd5b571-f527-4c6a-a3d0-bc87777c0b2c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T09:40:09Z (feat/cross-checkout): done
+  provenance: {"harness_session":"claude-code:6cd5b571-f527-4c6a-a3d0-bc87777c0b2c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T09:40:09Z (feat/cross-checkout): prime resolves a live claim on a task absent from the local scan from the claim's worktree (scan_recorded, shared with park §5.3), lists it under doing with a resume-from-that-checkout warning, and warns 'which is unavailable' when that checkout cannot supply it; never a ready/next candidate; work-claims design updated
+  provenance: {"harness_session":"claude-code:6cd5b571-f527-4c6a-a3d0-bc87777c0b2c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

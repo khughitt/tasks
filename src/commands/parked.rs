@@ -139,22 +139,31 @@ fn resolve_recorded(
     registry: &Registry,
     now: OffsetDateTime,
 ) -> Result<Option<ParkedRow>> {
-    let root = Path::new(&park.worktree);
-    if !crate::scope::has_config(root)? {
+    let Some((task, scan)) = scan_recorded(id, Path::new(&park.worktree))? else {
+        return Ok(None);
+    };
+    Ok(Some(ParkedRow::resolved(
+        TaskSummary::of(&task, &scan, Some(claims), registry, now),
+        Phase::of(&task),
+    )))
+}
+
+/// Reads `id` from the checkout a store entry recorded, with that checkout's whole scan so
+/// the task's children, dependencies, and documents resolve there too (park design §5.3).
+/// `None` when the checkout is gone, belongs to another prefix, or lacks the record.
+pub fn scan_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Task, Vec<Task>)>> {
+    if !crate::scope::has_config(worktree)? {
         return Ok(None);
     }
-    let project = Project::open(root)?;
+    let project = Project::open(worktree)?;
     if project.prefix != id.prefix {
         return Ok(None);
     }
     let scan = project.scan()?;
-    let Some(task) = scan.iter().find(|task| task.id == *id) else {
+    let Some(task) = scan.iter().find(|task| task.id == *id).cloned() else {
         return Ok(None);
     };
-    Ok(Some(ParkedRow::resolved(
-        TaskSummary::of(task, &scan, Some(claims), registry, now),
-        Phase::of(task),
-    )))
+    Ok(Some((task, scan)))
 }
 
 pub fn candidates(

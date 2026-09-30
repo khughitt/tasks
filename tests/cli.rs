@@ -7833,6 +7833,45 @@ fn a_task_parked_only_in_another_checkout_is_listed_from_there_and_never_next() 
     );
 }
 
+#[test]
+fn a_task_claimed_only_in_another_checkout_is_doing_in_prime_and_never_ready() {
+    let mut env = TestEnv::new();
+    let (main, wt) = two_roots(&mut env);
+    // The registry names the main checkout, as it does for a real worktree.
+    env.json(&main, &["init", "--prefix", "sci", "--force"]);
+    let id = id_of(env.json(&wt, &["add", "Worktree only", "-p", "2"]));
+    as_agent(&env, &wt, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    for args in [&["prime"][..], &["prime", "--all-projects"][..]] {
+        let prime = env.json(&main, args);
+        let doing = prime["doing"].as_array().unwrap();
+        assert_eq!(doing.len(), 1, "{args:?}: {prime}");
+        assert_eq!(doing[0]["id"], id);
+        assert_eq!(doing[0]["title"], "Worktree only");
+        assert_eq!(doing[0]["status"], "doing");
+        assert_eq!(doing[0]["claim"]["worktree"], wt.to_str().unwrap());
+        let expected = format!(
+            "{id} is claimed in {}; resume it from that checkout",
+            wt.display()
+        );
+        assert!(
+            prime["warnings"].to_string().contains(&expected),
+            "{args:?}: {prime}"
+        );
+    }
+    let ready = env.json(&main, &["ready"]);
+    assert!(ready["tasks"].as_array().unwrap().is_empty(), "{ready}");
+    assert!(env.json(&main, &["next"])["next"].is_null());
+
+    std::fs::remove_dir_all(wt.join("tasks")).unwrap();
+    let prime = env.json(&main, &["prime"]);
+    assert!(prime["doing"].as_array().unwrap().is_empty(), "{prime}");
+    let expected = format!("{id} is claimed in {}, which is unavailable", wt.display());
+    assert!(prime["warnings"].to_string().contains(&expected), "{prime}");
+}
+
 fn unregistered_checkout(prefix: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().canonicalize().unwrap();

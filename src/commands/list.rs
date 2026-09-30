@@ -367,6 +367,55 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
     })))
 }
 
+/// Live claims on tasks this scan does not hold: work started in a checkout whose branch
+/// has not merged. Each is read from the claim's recorded worktree, with that checkout's
+/// scan, the way park design §5.3 resolves a store-only park, so `doing` never drops a
+/// live claim without a word. None is a `ready` or `next` candidate: `start` reads the
+/// local file, so the warning names where to resume instead.
+fn claimed_elsewhere(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &crate::claims::ClaimSnapshot,
+) -> Vec<(Task, Vec<Task>)> {
+    let mut found = Vec::new();
+    for (key, (claim, liveness)) in claims.iter() {
+        if *liveness != crate::claims::Liveness::Live {
+            continue;
+        }
+        let id = match TaskId::parse(key) {
+            Ok(id) => ctx.registry.canonical_id(&id),
+            Err(error) => {
+                ctx.warnings.push(format!(
+                    "claim entry {key:?} is not a task id ({error}); skipped"
+                ));
+                continue;
+            }
+        };
+        if all.iter().any(|task| task.id == id) {
+            continue;
+        }
+        let worktree = std::path::Path::new(&claim.worktree);
+        match super::parked::scan_recorded(&id, worktree) {
+            Ok(Some(resolved)) => {
+                ctx.warnings.push(format!(
+                    "{id} is claimed in {}; resume it from that checkout",
+                    claim.worktree
+                ));
+                found.push(resolved);
+            }
+            Ok(None) => ctx.warnings.push(format!(
+                "{id} is claimed in {}, which is unavailable",
+                claim.worktree
+            )),
+            Err(error) => ctx.warnings.push(format!(
+                "{id} is claimed in {}, which is unavailable ({error})",
+                claim.worktree
+            )),
+        }
+    }
+    found
+}
+
 pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(None)?;
     let (all, claims) = ctx.scan_with_claims()?;
@@ -405,6 +454,8 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
         .cloned()
         .collect();
+    let elsewhere = claimed_elsewhere(&mut ctx, &all, &claims);
+    doing.extend(elsewhere.iter().map(|(task, _)| task.clone()));
     sort_list(&mut doing);
     let roadmap = crate::hierarchy::forest(
         &all,
@@ -507,7 +558,13 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         parked,
         doing: doing
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
+            .map(|task| {
+                let scan = elsewhere
+                    .iter()
+                    .find(|(found, _)| found.id == task.id)
+                    .map_or(all.as_slice(), |(_, scan)| scan.as_slice());
+                TaskSummary::of(task, scan, Some(&claims), &ctx.registry, now)
+            })
             .collect(),
         roadmap,
         closeout: closeout
