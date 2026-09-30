@@ -1,13 +1,16 @@
 ---
 id: tasks-2325a1
 title: check finds uncommitted plan/spec docs in the main checkout instead of failing a fresh worktree
-status: todo
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: feat/cross-checkout
 created: 2026-09-20T10:08:20Z
-updated: 2026-09-29T20:56:10Z
+updated: 2026-09-30T09:44:06Z
+started: 2026-09-30T09:40:14Z
+completed: 2026-09-30T09:44:06Z
 depends: []
 parent: tasks-c4ad8e
 tags: [feedback, friction, "from:mind6"]
@@ -26,3 +29,10 @@ Check: integration tests in tests/cli.rs against real git worktrees (the sibling
 
 - 2026-09-29T20:50:25Z (main): scope: briefed; open question for the user/mind6: hydrate uncommitted specs into worktrees via just setup, or have check look in the main checkout and downgrade doc_missing to a warning naming it (current lean); parented to tasks-c4ad8e; brief: docs/notes/2026-09-29-cross-checkout-records-brief.md
 - 2026-09-29T20:56:10Z (main): scope: scoped; user chose 'look in the main checkout' (2026-09-29); todo P2 s/mid/direct with approach and tests in the body; brief: docs/notes/2026-09-29-cross-checkout-records-brief.md
+- 2026-09-30T09:40:14Z (feat/cross-checkout): started
+  provenance: {"harness_session":"claude-code:6cd5b571-f527-4c6a-a3d0-bc87777c0b2c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T09:44:00Z (feat/cross-checkout): Found while implementing: show (io error) and add/edit step validation still read the plan from the local root in a worktree; reproduced on a scratch repo and filed as tasks-ace27b rather than widening this task.
+- 2026-09-30T09:44:06Z (feat/cross-checkout): done
+  provenance: {"harness_session":"claude-code:6cd5b571-f527-4c6a-a3d0-bc87777c0b2c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T09:44:06Z (feat/cross-checkout): check looks for a spec or plan missing from a linked worktree in the main worktree (Project::main_checkout_root, sharing worktree_roots with sibling_task_copies); found there it is the warning doc_in_main_checkout naming that checkout and step checks read that copy; absent from both is still doc_missing; design §7 updated; show/add/edit follow-up tasks-ace27b
+  provenance: {"harness_session":"claude-code:6cd5b571-f527-4c6a-a3d0-bc87777c0b2c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

@@ -463,14 +463,10 @@ impl Project {
         ))
     }
 
-    /// This record as it stands in every *other* worktree of the repository. `None` in the
-    /// two cases `git_toplevel` documents.
-    ///
-    /// A worktree holding no copy of the record is absent from the result: it branched
-    /// before the task existed and has nothing to say. A worktree whose copy cannot be read
-    /// or parsed is reported rather than dropped, because a copy we cannot compare is not a
-    /// copy we know to agree.
-    pub fn sibling_task_copies(&self, id: &TaskId) -> Result<Option<Vec<SiblingCopy>>> {
+    /// This project's root in every worktree of the repository, in git's order, so the
+    /// main worktree comes first; this checkout is included. `None` in the two cases
+    /// `git_toplevel` documents.
+    fn worktree_roots(&self) -> Result<Option<Vec<PathBuf>>> {
         let Some(toplevel) = self.git_toplevel()? else {
             return Ok(None);
         };
@@ -495,26 +491,53 @@ impl Project {
         // non-ASCII). Every record opens with a `worktree <path>` field; the rest describe
         // the checkout's head and are not ours to read.
         let stdout = String::from_utf8_lossy(&listed.stdout);
+        let roots = stdout
+            .split('\0')
+            .filter_map(|field| field.strip_prefix("worktree "))
+            .map(|listed| {
+                let listed = PathBuf::from(listed);
+                // A worktree git still lists but that is no longer on disk canonicalizes
+                // to nothing; leave the path as given and let a read below it find nothing.
+                let worktree = listed.canonicalize().unwrap_or(listed);
+                // `join` on an empty offset would leave a trailing separator on the path
+                // that goes into every warning.
+                if offset.as_os_str().is_empty() {
+                    worktree
+                } else {
+                    worktree.join(offset)
+                }
+            })
+            .collect();
+        Ok(Some(roots))
+    }
+
+    /// This project's root in the repository's main worktree, when this checkout is a
+    /// linked worktree of it. `None` in the main worktree itself and in the two cases
+    /// `git_toplevel` documents.
+    pub fn main_checkout_root(&self) -> Result<Option<PathBuf>> {
+        let Some(roots) = self.worktree_roots()? else {
+            return Ok(None);
+        };
+        Ok(roots.into_iter().next().filter(|main| *main != self.root))
+    }
+
+    /// This record as it stands in every *other* worktree of the repository. `None` in the
+    /// two cases `git_toplevel` documents.
+    ///
+    /// A worktree holding no copy of the record is absent from the result: it branched
+    /// before the task existed and has nothing to say. A worktree whose copy cannot be read
+    /// or parsed is reported rather than dropped, because a copy we cannot compare is not a
+    /// copy we know to agree.
+    pub fn sibling_task_copies(&self, id: &TaskId) -> Result<Option<Vec<SiblingCopy>>> {
+        let Some(roots) = self.worktree_roots()? else {
+            return Ok(None);
+        };
         let file = format!("tasks/{id}.md");
         let mut copies = Vec::new();
-        for field in stdout.split('\0') {
-            let Some(listed) = field.strip_prefix("worktree ") else {
-                continue;
-            };
-            let listed = PathBuf::from(listed);
-            // A worktree git still lists but that is no longer on disk canonicalizes to
-            // nothing; leave the path as given and let the read below skip it.
-            let worktree = listed.canonicalize().unwrap_or(listed);
-            if worktree == toplevel {
+        for root in roots {
+            if root == self.root {
                 continue;
             }
-            // `join` on an empty offset would leave a trailing separator on the path
-            // that goes into every warning.
-            let root = if offset.as_os_str().is_empty() {
-                worktree
-            } else {
-                worktree.join(offset)
-            };
             let raw = match std::fs::read_to_string(root.join(&file)) {
                 Ok(raw) => raw,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,

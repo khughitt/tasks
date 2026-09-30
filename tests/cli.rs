@@ -18319,3 +18319,115 @@ fn theme_default_sends_no_osc_query_on_a_terminal() {
     );
     assert!(terminal.contains("theme colors off"), "{terminal:?}");
 }
+
+/// Runs `check` in `dir` and returns its exit code and parsed findings (`null` when clean).
+fn check_findings(env: &TestEnv, dir: &std::path::Path) -> (i32, serde_json::Value) {
+    let out = env.cmd(dir).args(["check"]).output().unwrap();
+    let findings = if out.stdout.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    (out.status.code().unwrap(), findings)
+}
+
+fn findings_of<'a>(v: &'a serde_json::Value, key: &str, kind: &str) -> Vec<&'a serde_json::Value> {
+    v[key]
+        .as_array()
+        .map(|all| all.iter().filter(|f| f["kind"] == kind).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn check_in_a_worktree_reads_git_excluded_docs_from_the_main_checkout() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    // Kept out of git, as a project whose profile does not commit its specs does.
+    std::fs::write(main.join(".git/info/exclude"), "docs/\n").unwrap();
+    write_doc(&main, "docs/specs/x-design.md", "# X\n");
+    write_doc(
+        &main,
+        "docs/plans/x.md",
+        "# X plan\n\n### Task 1: A\n\n### Task 2: B\n",
+    );
+    let id = id_of(env.json(
+        &main,
+        &[
+            "add",
+            "T",
+            "-p",
+            "2",
+            "--spec",
+            "x",
+            "--plan",
+            "x",
+            "--step",
+            "Task 1: A",
+        ],
+    ));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    assert!(!side.join("docs").exists(), "git carried the excluded docs");
+
+    // Found in main: a warning naming it, never an error, and the plan's steps are read
+    // from main's copy, so an unlinked heading there is still reported.
+    let (code, v) = check_findings(&env, &side);
+    assert_eq!(code, 0, "{v}");
+    assert!(findings_of(&v, "errors", "doc_missing").is_empty(), "{v}");
+    let found = findings_of(&v, "warnings", "doc_in_main_checkout");
+    assert_eq!(found.len(), 2, "{v}");
+    for finding in &found {
+        assert_eq!(finding["id"], id.as_str());
+        let detail = finding["detail"].as_str().unwrap();
+        assert!(detail.contains(main.to_str().unwrap()), "{detail}");
+    }
+    let unlinked = findings_of(&v, "warnings", "unlinked_step");
+    assert_eq!(unlinked.len(), 1, "{v}");
+    assert!(
+        unlinked[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Task 2: B")
+    );
+
+    // The main checkout itself behaves as before: no finding about a checkout it is.
+    let (code, v) = check_findings(&env, &main);
+    assert_eq!(code, 0, "{v}");
+    assert!(
+        findings_of(&v, "warnings", "doc_in_main_checkout").is_empty(),
+        "{v}"
+    );
+
+    // A step that main's plan no longer has is still an error from the worktree.
+    write_doc(&main, "docs/plans/x.md", "# X plan\n\n### Task 2: B\n");
+    let (code, v) = check_findings(&env, &side);
+    assert_eq!(code, 1, "{v}");
+    assert_eq!(findings_of(&v, "errors", "step_missing").len(), 1, "{v}");
+
+    // Absent from both checkouts: the error it always was.
+    std::fs::remove_file(main.join("docs/specs/x-design.md")).unwrap();
+    let (code, v) = check_findings(&env, &side);
+    assert_eq!(code, 1, "{v}");
+    let missing = findings_of(&v, "errors", "doc_missing");
+    assert_eq!(missing.len(), 1, "{v}");
+    assert!(
+        missing[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("docs/specs/x-design.md"),
+        "{v}"
+    );
+}

@@ -692,6 +692,13 @@ If any id reached during traversal is unreachable, `dep --on` and `add --depends
   that merges its heading away, or a retired spec, is not drift.
 - `check` warns `unlinked_step` for a `Task N:` heading in a linked plan that no task
   references.
+- In a linked git worktree, a spec or plan missing from the worktree is looked for at the
+  same path in the main worktree (the first entry of `git worktree list`, at the
+  project's offset below the repository top level) before it counts as missing. A
+  project whose profile keeps specs out of git has them in the main checkout only, and
+  without this every fresh worktree would fail its own gate. A document found there is
+  the warning `doc_in_main_checkout`, which names that checkout, and the step checks read
+  that copy. A document absent from both is still `doc_missing` (tasks-2325a1).
 - Once automation has a pinned Tasks install, running `check` in a project's test or
   pre-commit path turns doc drift under open tasks into a build failure, which is the
   intended coupling: when a plan step is renamed or removed, the task must be updated in

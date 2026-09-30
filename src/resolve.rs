@@ -97,7 +97,7 @@ impl<'a> Resolver<'a> {
 
     pub fn step_exists(&self, plan_rel: &str, step: &str) -> Result<bool> {
         let text = std::fs::read_to_string(self.project.root.join(plan_rel))?;
-        Ok(text.lines().any(|line| heading_text(line) == Some(step)))
+        Ok(has_heading(&text, step))
     }
 
     pub fn abs(&self, rel: &str) -> String {
@@ -144,6 +144,11 @@ pub fn heading_text(line: &str) -> Option<&str> {
         return None;
     }
     trimmed.strip_prefix(' ').map(str::trim_end)
+}
+
+/// Whether `text` has a markdown heading reading exactly `step`.
+pub fn has_heading(text: &str, step: &str) -> bool {
+    text.lines().any(|line| heading_text(line) == Some(step))
 }
 
 /// Heading texts of the form `Task <digits>: …`, in file order.
