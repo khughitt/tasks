@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/task-filters
 created: 2026-09-30T16:40:28Z
-updated: 2026-09-30T16:56:53Z
+updated: 2026-09-30T17:02:28Z
 started: 2026-09-30T16:40:36Z
 depends: []
 tags: [cli]
@@ -39,3 +39,4 @@ Goal: one TaskFilter in query.rs (or its own module) with matches(&Task, &ClaimS
 - 2026-09-30T16:55:17Z (feat/task-filters): Round 2: all three P2 findings resolved; accepted for implementation planning. Nonblocking P3: spec line 79 says invalid parent parsing occurs before scanning today, but list.rs scans at line 48 before parse_id at line 53 (list_parked does likewise). Keep pre-scan validation as the intended new behavior and remove the historical claim.
 - 2026-09-30T16:56:53Z (feat/task-filters): resumed
   provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T17:02:28Z (feat/task-filters): plan drafted: docs/plans/2026-09-30-task-filters.md, 3 tasks (filter module + list; ready at candidacy + complexity §4.1 amendment; docs, review, ops rollout). Plan link and step children wait for plan approval so pickers do not offer unapproved steps
