@@ -1,13 +1,15 @@
 ---
 id: tasks-7c6fcd
 title: Normalize trailing note whitespace and allow whitespace-only repairs
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-18T15:31:41Z
-updated: 2026-09-30T09:53:58Z
+updated: 2026-09-30T14:40:30Z
+started: 2026-09-30T14:40:30Z
 depends: []
 parent: tasks-ea2a79
 tags: [feedback, friction, "from:obs"]
@@ -27,3 +29,5 @@ Original report: The note command accepts a single-line value ending in a space.
 ## Notes
 
 - 2026-09-30T09:53:58Z (main): scope: scoped; shared insertion normalization plus a narrowly defined explicit whitespace-only repair; s/mid/direct; brief: docs/notes/2026-09-30-note-integrity-brief.md
+- 2026-09-30T14:40:30Z (main): started
+  provenance: {"harness_session":"claude-code:d94a2e3c-5d2c-4340-8f21-b32c0525bded","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
