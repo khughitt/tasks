@@ -175,6 +175,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         ctx.reassess(&task.id, task.complexity)?;
     }
     save(&mut ctx, &mut task)?;
+    super::follow_holder(&mut ctx, &task.id, None, "the edit landed");
     Ok(id_out(ctx, &task))
 }
 
@@ -306,6 +307,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         Err(error) => return Err(keep(error)),
     }
     save(&mut ctx, &mut edited).map_err(keep)?;
+    super::follow_holder(&mut ctx, &edited.id, None, "the edit landed");
     if let Err(error) = std::fs::remove_file(&tmp) {
         ctx.warnings.push(format!(
             "edit saved, but could not remove {tmp_display}: {error}"

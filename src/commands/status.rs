@@ -1,4 +1,7 @@
-use super::{Ctx, append_lifecycle_note, append_note, id_out, load, owner_name, save, transition};
+use super::{
+    Ctx, append_lifecycle_note, append_note, follow_holder, id_out, load, owner_name, save,
+    transition,
+};
 use crate::error::{Error, Result};
 use crate::model::{Status, Task};
 use crate::output::Output;
@@ -116,30 +119,8 @@ pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
             task.id, claim.session
         ));
     }
-    let mine = existing.filter(|_| mine);
-
-    // The heartbeat, and only on our own claim: `note` never touches a foreign one and is
-    // never refused. It is still serialized under the mutation lock, because a note rewrites
-    // the whole markdown file however append-only it is in meaning.
-    if let Some(claim) = mine {
-        let store = ctx.claims_mut()?;
-        store.insert(
-            &task.id,
-            crate::claims::Claim {
-                seen: crate::time::now(),
-                ..claim
-            },
-        );
-        if let Err(error) = store.save() {
-            // The note is on disk, so this cannot be an error — say plainly what did and
-            // did not happen, as the release-failure path does.
-            ctx.warnings.push(format!(
-                "the note landed, but the claim heartbeat on {} was not refreshed \
-                 ({error}); the claim may look stale to other sessions",
-                task.id
-            ));
-        }
-    }
+    // Refresh only our live claim, and move it to this checkout (record-home spec §4).
+    follow_holder(&mut ctx, &task.id, Some(&me), "the note landed");
     Ok(id_out(ctx, &task))
 }
 

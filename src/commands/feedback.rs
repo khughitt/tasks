@@ -166,12 +166,15 @@ pub fn run(
         }
     };
     let (task, action) = match existing {
-        Some((id, automatic)) => (
-            recur_into(
+        Some((id, automatic)) => {
+            let task = recur_into(
                 &mut ctx, &id, automatic, &summary, &body, &category, &from, &prefix,
-            )?,
-            "recurred",
-        ),
+            )?;
+            // Record-home spec §4: a holder's recurrence follows the owner's registered
+            // root, where it landed. `recur_into` saved its own pruned store first.
+            super::follow_holder(&mut ctx, &task.id, None, "the recurrence landed");
+            (task, "recurred")
+        }
         None => (
             create(&ctx.project, &ctx.registry, summary, body, &category, &from)?,
             "created",

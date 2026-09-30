@@ -131,7 +131,7 @@ pub fn attach(
     };
 
     // Identity and the claim store resolve before any write, as for `note`.
-    ctx.resolve_for_guard()?;
+    let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
     let created_dir = if write {
         let created = attachments::ensure_task_dir(&ctx.project, &task.id)?;
@@ -157,6 +157,7 @@ pub fn attach(
             )),
         });
     }
+    super::follow_holder(&mut ctx, &task.id, Some(&me), "the attachment landed");
     Ok(Output::Attach(AttachOut {
         id: task.id.to_string(),
         file: FileInfo {
@@ -194,11 +195,12 @@ pub fn detach(mut ctx: Ctx, id: String, name: String, why: String) -> Result<Out
             task.id
         )));
     }
-    ctx.resolve_for_guard()?;
+    let me = ctx.resolve_for_guard()?;
     ctx.claims_mut()?;
     if recorded != Some(Ledger::Detached) {
         append_note(&mut task, &owner, &note)?;
         save(&mut ctx, &mut task)?;
+        super::follow_holder(&mut ctx, &task.id, Some(&me), "the detach landed");
     }
     if present {
         std::fs::remove_file(&target)?;

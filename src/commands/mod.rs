@@ -765,6 +765,69 @@ fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
     Ok(Occupants { work, unknown })
 }
 
+/// Record-home spec §4: a write by the holder of a live claim moves the claim to this
+/// checkout and refreshes its heartbeat. Holder means `Ctx::ownership` is not `Foreign`,
+/// by identity or by proof. It runs after the record is saved and never fails the command.
+/// `me` is the caller's identity when the command already resolved it; otherwise it is
+/// resolved here, and only when a claim exists to follow.
+pub(crate) fn follow_holder(
+    ctx: &mut Ctx,
+    id: &TaskId,
+    me: Option<&crate::claims::Resolution>,
+    landed: &str,
+) {
+    let claim = match ctx.claims_mut() {
+        Ok(store) => {
+            // A write must not revive a stale claim.
+            store.prune_dead();
+            match store.get(id) {
+                Some(claim) => claim.clone(),
+                None => return,
+            }
+        }
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "{landed}, but the claim on {id} could not be read ({error})"
+            ));
+            return;
+        }
+    };
+    let resolved;
+    let me = match me {
+        Some(me) => me,
+        None => {
+            resolved = crate::claims::resolve_identity(&mut ctx.warnings);
+            &resolved
+        }
+    };
+    match ctx.ownership(&claim, me) {
+        Ok(Ownership::Foreign) => return,
+        Ok(Ownership::ByIdentity | Ownership::ByProof) => {}
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "{landed}, but whether this session holds the claim on {id} could not be \
+                 established ({error})"
+            ));
+            return;
+        }
+    }
+    let moved = crate::claims::Claim {
+        worktree: ctx.project.root.display().to_string(),
+        seen: crate::time::now(),
+        ..claim
+    };
+    let saved = ctx.claims_mut().and_then(|store| {
+        store.insert(id, moved);
+        store.save()
+    });
+    if let Err(error) = saved {
+        ctx.warnings.push(format!(
+            "{landed}, but the claim heartbeat on {id} was not refreshed ({error}); the \
+             claim may look stale to other sessions"
+        ));
+    }
+}
+
 pub fn id_out(ctx: Ctx, task: &Task) -> Output {
     Output::Id(crate::output::IdOut {
         id: task.id.to_string(),

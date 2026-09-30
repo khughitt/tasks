@@ -19155,3 +19155,179 @@ fn a_feedback_recurrence_onto_a_copy_behind_the_owners_worktree_refuses_both_way
         assert_eq!(env.read(&owner, &file), before);
     }
 }
+
+fn claim_worktree(env: &TestEnv, dir: &std::path::Path, id: &str) -> String {
+    env.json(dir, &["show", id])["claim"]["worktree"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn the_holders_writes_move_its_claim_to_the_checkout_they_land_in() {
+    let mut failures = Vec::new();
+    for command in ["note", "edit", "editor", "dep", "attach", "detach"] {
+        let mut env = TestEnv::new();
+        let (main, side, id) = started_then_branched(&mut env);
+        let before = env.json(&main, &["show", &id])["claim"].clone();
+        assert_eq!(claim_worktree(&env, &main, &id), main.display().to_string());
+        let mut cmd = as_agent(&env, &side, "agent-a");
+        match command {
+            "note" => {
+                cmd.args(["note", &id, "working here"]);
+            }
+            "edit" => {
+                cmd.args(["edit", &id, "-p", "1"]);
+            }
+            "editor" => {
+                let editor = editor_script(&side, "sed -i 's/^priority: 2$/priority: 1/' \"$1\"");
+                cmd.env("EDITOR", editor).args(["edit", &id]);
+            }
+            "dep" => {
+                let dependency = id_of(env.json(&side, &["add", "Dependency"]));
+                cmd.args(["dep", &id, "--on", &dependency]);
+            }
+            "attach" => {
+                cmd.args(["attach", &id, "-", "--name", "shot.png"])
+                    .write_stdin("image");
+            }
+            "detach" => {
+                as_agent(&env, &side, "agent-b")
+                    .args(["attach", &id, "-", "--name", "shot.png"])
+                    .write_stdin("image")
+                    .assert()
+                    .success();
+                cmd.args(["detach", &id, "shot.png", "finished"]);
+            }
+            _ => unreachable!(),
+        }
+        cmd.assert().success();
+        let after = env.json(&main, &["show", &id])["claim"].clone();
+
+        let mut expected = before;
+        expected["worktree"] = side.display().to_string().into();
+        expected["seen"] = after["seen"].clone();
+        if after != expected {
+            failures.push(format!("{command}: expected {expected}, got {after}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn another_sessions_write_leaves_the_claim_where_it_is() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = started_then_branched(&mut env);
+    as_agent(&env, &side, "agent-b")
+        .args(["note", &id, "passing through"])
+        .assert()
+        .success();
+    assert_eq!(claim_worktree(&env, &main, &id), main.display().to_string());
+}
+
+#[test]
+fn a_restart_in_the_new_worktree_makes_a_later_write_in_main_refuse() {
+    // tasks-142d2f with the protocol step: the note in main now refuses.
+    let mut env = TestEnv::new();
+    let (main, side, id) = started_then_branched(&mut env);
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(claim_worktree(&env, &side, &id), side.display().to_string());
+    // Another session writing from main is told who works there, with no retry.
+    let detail = stale_detail(&env, &main, &["note", &id, "from main"]);
+    assert!(
+        detail.starts_with(&format!("tasks/{id}.md in {} is newer", side.display())),
+        "{detail}"
+    );
+    assert!(
+        detail.contains("agent-a") && !detail.contains("tasks -C"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_holders_feedback_recurrence_moves_the_claim_to_the_owners_checkout() {
+    let mut env = TestEnv::new();
+    let owner = env.init("own");
+    accept_feedback(&owner, "the own tool");
+    git(&owner, &["init", "-q", "-b", "main"]);
+    let reporter = env.init("rep");
+    let report = [
+        "feedback",
+        "--project",
+        "own",
+        "slow startup",
+        "--category",
+        "friction",
+    ];
+    let id = env.json(&reporter, &report)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    git(&owner, &["add", "-A"]);
+    git(&owner, &["commit", "-qm", "seed"]);
+    let side = owner.join("wt");
+    git(
+        &owner,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(claim_worktree(&env, &side, &id), side.display().to_string());
+    // The owner's main checkout holds the newer copy, so the recurrence may land there.
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&owner, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let mut explicit = report.to_vec();
+    explicit.extend(["--recur", id.as_str()]);
+    as_agent(&env, &reporter, "agent-a")
+        .args(&explicit)
+        .assert()
+        .success();
+    assert_eq!(
+        claim_worktree(&env, &owner, &id),
+        owner.display().to_string()
+    );
+}
+
+#[test]
+fn a_claim_held_by_proof_moves_with_its_holder() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "Thing", "-p", "2"]));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    let state = relay_on(&env);
+    // Start under relay identity, commit, branch, then lose the registry: ownership can
+    // only come from the claim's recorded proof.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         git add -A && git -c user.name=t -c user.email=t@e commit -qm start\n\
+         git worktree add -q -b side '{}'\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" -C '{}' note {id} 'by proof'\n",
+        shim_env(&state, "codex", "s1"),
+        side.display(),
+        side.display()
+    );
+    let out = common::harness_shim(&main, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(claim_worktree(&env, &main, &id), side.display().to_string());
+}

@@ -74,5 +74,6 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
         }
     }
     save(&mut ctx, &mut task)?;
+    super::follow_holder(&mut ctx, &task.id, None, "the dependency change landed");
     Ok(id_out(ctx, &task))
 }
