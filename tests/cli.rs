@@ -6032,6 +6032,112 @@ fn feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones() {
 }
 
 #[test]
+fn feedback_refuses_a_multiline_body_on_recurrence_and_names_the_flag() {
+    let (mut env, target, reporter) = feedback_env();
+    let other = env.init("mnd");
+    let first = env.json(
+        &reporter,
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            "check rejects missing spec",
+            "--category",
+            "friction",
+        ],
+    );
+    let id = first["id"].as_str().unwrap().to_string();
+    let path = first["path"].as_str().unwrap().to_string();
+
+    // An automatic exact-title match refuses the multiline body with a message that
+    // names --body and explains the single-line note, and writes nothing.
+    let before = std::fs::read(&path).unwrap();
+    let out = env
+        .cmd(&other)
+        .args([
+            "feedback",
+            "--project",
+            "tasks",
+            "Check rejects MISSING spec!",
+            "--category",
+            "gap",
+            "-b",
+            "line one\nline two",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "validation", "{err}");
+    let detail = err["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains("--body"), "{detail}");
+    assert!(detail.contains("single line"), "{detail}");
+    assert_eq!(std::fs::read(&path).unwrap(), before, "target unchanged");
+
+    // An explicit --recur refuses with the same actionable message.
+    let out = env
+        .cmd(&other)
+        .args([
+            "feedback",
+            "--project",
+            "tasks",
+            "a different summary entirely",
+            "--category",
+            "gap",
+            "--recur",
+            &id,
+            "-b",
+            "line one\nline two",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "validation", "{err}");
+    assert!(err["error"]["detail"].as_str().unwrap().contains("--body"));
+    assert_eq!(std::fs::read(&path).unwrap(), before, "target unchanged");
+
+    // A single-line body still recurs; a multiline body still creates.
+    let recurred = env.json(
+        &other,
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            "Check rejects MISSING spec!",
+            "--category",
+            "gap",
+            "-b",
+            "one line here",
+        ],
+    );
+    assert_eq!(recurred["action"], "recurred");
+    let shown = env.json(&target, &["show", &id]);
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(
+        notes.last().unwrap()["text"],
+        "detail from mnd: one line here"
+    );
+
+    let multiline = env.json(
+        &other,
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            "multiline bodies still create",
+            "--category",
+            "gap",
+            "-b",
+            "line one\nline two",
+        ],
+    );
+    assert_eq!(multiline["action"], "created");
+    let shown = env.json(&target, &["show", multiline["id"].as_str().unwrap()]);
+    assert_eq!(shown["task"]["body"], "line one\nline two");
+}
+
+#[test]
 fn feedback_recurrence_serializes_against_concurrent_recurrences() {
     let (env, target, reporter) = feedback_env();
     let id = env.json(
