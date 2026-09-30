@@ -225,11 +225,12 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     // Spec record-home §3.1: the lock was released while the editor was open, so another
     // checkout may have written since the first check.
     super::refuse_stale_copy(&mut ctx, &original, &original_raw, super::Writer::Command).map_err(
-        |error| {
-            keep(error.with_suffix(
-                "; a rerun opens a fresh editor on the newer copy, so copy your changes over \
-                 from the kept file",
-            ))
+        |error| match error {
+            Error::StaleCopy(detail) => Error::StaleCopy(format!(
+                "A rerun opens a fresh editor on the newer copy, so copy your changes over \
+                 from the kept file{suffix}. {detail}"
+            )),
+            error => keep(error),
         },
     )?;
 

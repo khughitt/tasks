@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: ab8d2d-record-home
 created: 2026-09-30T10:28:06Z
-updated: 2026-09-30T12:41:55Z
+updated: 2026-09-30T12:47:06Z
 started: 2026-09-30T10:28:52Z
 completed: 2026-09-30T12:41:55Z
 depends: []
@@ -59,3 +59,4 @@ Implements docs/specs/2026-09-30-record-home-design.md (accepted 2026-09-30, tas
   provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-30T12:41:55Z (ab8d2d-record-home): record-home implementation landed in c30bec2..323b1ed: stale-copy refusal, holder claim moves, show fallback, docs and rollout
   provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T12:47:06Z (ab8d2d-record-home): review: impl round 2 — verdict: revise; findings: P1 1, P3 2; reviewer: codex/gpt-6-astra

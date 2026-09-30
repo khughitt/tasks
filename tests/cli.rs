@@ -19019,32 +19019,39 @@ fn attach_from_a_copy_that_is_behind_reads_nothing_and_creates_nothing() {
 
 #[test]
 fn edit_body_from_stdin_on_a_copy_that_is_behind_asks_for_the_same_input() {
-    let mut env = TestEnv::new();
-    let (main, side, id) = repo_with_worktree(&mut env);
-    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
-    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
-    let out = env
-        .cmd(&side)
-        .args(["edit", &id, "--body", "-"])
-        .write_stdin("new body\n")
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1), "{out:?}");
-    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    let detail = error["error"]["detail"].as_str().unwrap();
+    let mut missing_hints = Vec::new();
+    for body_args in [&["--body", "-"][..], &["--body=-"], &["-b-"]] {
+        let mut env = TestEnv::new();
+        let (main, side, id) = repo_with_worktree(&mut env);
+        stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+        stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+        let out = env
+            .cmd(&side)
+            .args(["edit", &id])
+            .args(body_args)
+            .write_stdin("new body\n")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        let detail = error["error"]["detail"].as_str().unwrap();
+        if !detail.ends_with("; supply the same input on stdin") {
+            missing_hints.push(body_args);
+        }
+        env.cmd(&side)
+            .args(retry_words(detail))
+            .write_stdin("new body\n")
+            .assert()
+            .success();
+        let shown = env.json(&main, &["show", &id]);
+        assert!(
+            shown["task"]["body"].as_str().unwrap().contains("new body"),
+            "{shown}"
+        );
+    }
     assert!(
-        detail.ends_with("; supply the same input on stdin"),
-        "{detail}"
-    );
-    env.cmd(&side)
-        .args(retry_words(detail))
-        .write_stdin("new body\n")
-        .assert()
-        .success();
-    let shown = env.json(&main, &["show", &id]);
-    assert!(
-        shown["task"]["body"].as_str().unwrap().contains("new body"),
-        "{shown}"
+        missing_hints.is_empty(),
+        "missing stdin hints: {missing_hints:?}"
     );
 }
 
@@ -19099,10 +19106,12 @@ fn a_sibling_that_moves_ahead_while_the_editor_is_open_refuses_and_keeps_the_edi
     assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
     let detail = error["error"]["detail"].as_str().unwrap();
     assert!(detail.contains("fresh editor"), "{detail}");
+    let retry = retry_words(detail);
+    assert_eq!(retry, ["-C", side.to_str().unwrap(), "edit", &id]);
     let kept = detail
         .split("edit kept at ")
         .nth(1)
-        .and_then(|rest| rest.strip_suffix(')'))
+        .and_then(|rest| rest.split(')').next())
         .expect("the kept file is named");
     assert!(
         std::fs::read_to_string(kept)
@@ -19110,6 +19119,14 @@ fn a_sibling_that_moves_ahead_while_the_editor_is_open_refuses_and_keeps_the_edi
             .contains("title: Edited")
     );
     assert_eq!(env.json(&main, &["show", &id])["task"]["title"], "T");
+    let recovery = editor_script(&main, &format!("cp '{kept}' \"$1\""));
+    env.cmd(&main)
+        .env("EDITOR", recovery)
+        .args(retry)
+        .assert()
+        .success();
+    assert_eq!(env.json(&side, &["show", &id])["task"]["title"], "Edited");
+    assert!(std::path::Path::new(kept).is_file());
 }
 
 #[test]

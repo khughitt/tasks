@@ -166,7 +166,10 @@ pub fn refusal(
 
 /// `-` is how every command here names stdin, which a printed line cannot carry.
 fn stdin_hint(args: &[String]) -> &'static str {
-    if args.iter().any(|arg| arg == "-") {
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-" | "--body=-" | "-b-"))
+    {
         "; supply the same input on stdin"
     } else {
         ""
