@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-09-29T20:50:01Z
-updated: 2026-09-30T10:28:06Z
+updated: 2026-09-30T10:39:06Z
 started: 2026-09-30T09:54:52Z
 completed: 2026-09-30T10:28:06Z
 depends: []
@@ -38,3 +38,5 @@ Question: which checkout is a task record's home, and what do writes and reads f
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T10:28:06Z (ab8d2d-record-home): Design spec docs/specs/2026-09-30-record-home-design.md accepted after two review rounds; implementation filed as tasks-9949f3
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T10:39:06Z (ab8d2d-record-home): review: spec round 3 — verdict: revise; findings: major 2, minor 3; reviewer: claude-code/claude-opus-5-5 (endorsed by the user)
+- 2026-09-30T10:39:06Z (ab8d2d-record-home): Correction: the round-2 accept came from codex, not from the user; the closing note's 'accepted after two review rounds' overstates it. The user's review is round 3 (revise); the revision is carried under tasks-9949f3.

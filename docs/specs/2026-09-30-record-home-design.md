@@ -1,6 +1,7 @@
 # Which checkout owns a task record
 
-Status: draft for review (tasks-ab8d2d). Brief:
+Status: round 3 revision, for the user's re-review (drafted under tasks-ab8d2d, revised
+under tasks-9949f3). Round 2 was a Codex accept; the user returned round 3. Brief:
 `docs/notes/2026-09-29-cross-checkout-records-brief.md`. Goal: tasks-c4ad8e.
 
 ## 1. Problem
@@ -28,12 +29,16 @@ in the main checkout for a spec or plan the worktree lacks.
 
 1. **A write from a copy that is behind refuses** (user, 2026-09-30). For every task, claimed
    or not, a write whose loaded copy is older than another checkout's copy fails with a new
-   error kind, `stale_copy`, before anything is written. The error names the newer checkout
-   and gives the exact retry. There is no override flag. This reverses the work-claims rule
-   that the sibling check is "a signal, not a gate".
+   error kind, `stale_copy`, before anything is written. So does a sibling with the same
+   stamp but different bytes, which only a same-second fork produces. The error names the
+   newer checkout and says what to do: rerun there, merge that copy here, or leave it to the
+   session working there (§3.2). There is no override flag. This reverses the work-claims
+   rule that the sibling check is "a signal, not a gate".
 2. **The claim follows its holder.** Every successful write by the session holding a live
-   claim sets the claim's `worktree` to the checkout it wrote in. The claim names where the
-   work is, so no separate handoff command is needed.
+   claim that leaves the claim in place sets the claim's `worktree` to the checkout it wrote
+   in. That covers every write except those that release the claim: closing, parking, and
+   any other status change away from `doing`. The claim names where the work is, so no
+   separate handoff command is needed.
 3. **The first `tasks` command in a new worktree is `tasks start <id>`.** It is a protocol
    step, not a CLI rule. It moves the claim and makes the worktree's copy the newest, so any
    later write left behind in the main checkout refuses under decision 1.
@@ -50,6 +55,12 @@ lookup the warning uses today: `git worktree list --porcelain -z`, read at the p
 offset below the repository top level. If any sibling's stamp is newer, the write refuses
 with `stale_copy`. Nothing is written or created, and no input is read beyond the arguments:
 not stdin, not the clipboard, and not a file to attach.
+
+**Same stamp, different bytes.** A sibling whose stamp equals the loaded one but whose
+bytes differ from the bytes this command loaded also refuses. Only a same-second fork
+produces that: every write sets a new stamp, and a new worktree copies the bytes unchanged.
+The work-claims design rejected content comparison because copies that are *behind* would
+fire constantly. That still holds: a sibling that is behind is never compared by content.
 
 **When it runs.** The check runs as soon as a write command has loaded the record, under the
 mutation lock. That is before the command reads any other input or creates any file. The
@@ -69,7 +80,8 @@ calls it.
 Unchanged from the warning:
 
 - A sibling that is merely **behind** says nothing. A long-lived worktree that is behind is
-  the resting state, and writing ahead of it is what the merge will carry.
+  the resting state, and writing ahead of it is what the merge will carry. A sibling with
+  the same stamp and the same bytes is the same record, and says nothing either.
 - A sibling copy that cannot be read or parsed is a **warning**, not a refusal: the rule
   refuses only on proof that a newer copy exists. The same holds for a git failure while
   listing worktrees.
@@ -88,34 +100,68 @@ newer copy's changes out, so it refuses like any other write.
 ### 3.2 The error
 
     stale_copy: tasks/<id>.md in <root> is newer than this copy (<theirs> there, <ours>
-    here); nothing was written. Run it there: tasks -C <root> <args>
+    here); nothing was written. <remedy>
 
-- `<root>` is the sibling with the newest stamp. When several siblings are newer, the others
-  follow in a trailing `(also newer in: <root>, …)`.
+`<root>` is the sibling with the newest stamp. When several siblings are newer, the others
+follow in `(also newer in: <root>, …)` before `; nothing was written`. In the same-stamp
+case (§3.1) the head reads `tasks/<id>.md in <root> has the same stamp as this copy
+(<stamp>) but different content, so both were written in the same second`.
+
+The remedy depends on where the newer copy is and who works there. The first rule that
+applies decides it:
+
+1. **Another session works there.** A live claim held by a session other than the caller
+   (`Ctx::ownership` is `Foreign`), or a park recorded by another session, names `<root>`
+   as its worktree. For a park, "another session" means its recorded session differs from
+   the caller's resolved identity, or the caller's identity does not resolve. The claim or
+   park may be on any task, not only this one: a worktree's work touches other records too,
+   as §11's notes do. The remedy names each such task and its session, then says `wait for
+   that branch to merge, or merge its copy of tasks/<id>.md into this checkout, then rerun
+   here`. There is no `-C` retry, because a write there would leave an uncommitted edit on
+   someone else's branch.
+2. **Same stamp, different bytes.** The remedy is the merge alone: `merge that copy of
+   tasks/<id>.md into this checkout, then rerun here`. A write to either copy leaves the
+   other still forked.
+3. **A handoff from the main checkout.** This checkout is a linked worktree, and `<root>` is
+   the main checkout (the first entry of `git worktree list`). The remedy leads with `commit
+   tasks/<id>.md in <root> if it has changes, merge it into this branch, then rerun here;
+   the merge may conflict where both copies changed`. The retry follows as the alternative:
+   `or, to write in the main checkout instead: tasks -C <root> <args>`. With a bare retry,
+   `tasks start` in a new worktree would print `tasks -C <main> start <id>`, which moves the
+   claim back to main.
+4. **Otherwise**, including when the caller's own claim names `<root>` (a shell that reset to
+   the main checkout), the remedy is the retry: `Run it there: tasks -C <root> <args>`.
+
+The caller's identity is resolved only on this refusal path, never for a write that
+passes. When the claim store or identity cannot be read, the remedy is chosen as if no
+other session were named, and a warning says so.
+
+Wherever a `-C` retry appears:
+
 - `<args>` is this invocation's arguments after the program name, with any `-C <dir>`,
   `-C<dir>` or `-C=<dir>` removed. Each argument is single-quoted when it contains a
   character outside `[A-Za-z0-9_@%+=:,./-]`, so the line can be pasted into a POSIX shell.
-  `attach`'s file argument is made absolute, because `-C` changes the directory that a
-  relative path is read from.
+  `-C` only chooses the project; the process keeps its working directory. So a relative
+  path, such as `attach`'s file argument, resolves the same way in the retry.
 - **Input on stdin.** A command that takes input on stdin (`edit --body -`, `attach -`) has
   not read it when it refuses (§3.1). The detail adds `supply the same input on stdin`,
   because the printed line cannot carry the input itself. `attach --clipboard` has not read
   the clipboard either, and its retry reads it again.
 - **The `$EDITOR` path.** When the first check refuses, the editor never opens. When the
   second check refuses, the edit is kept and the detail appends the temp file's path, as
-  that path's other errors do. It also says that the retry opens a fresh editor on the newer
+  that path's other errors do. It also says that a rerun opens a fresh editor on the newer
   copy, so the kept file is where the changes are copied from.
-- `feedback --recur` is the exception. `-C` would change the project the report comes from,
-  so there is no `-C` retry. The detail names the owner's newer checkout and offers `--new`,
-  which files a separate entry.
+
+`feedback --recur` never offers `-C`, because `-C` would change the project the report
+comes from. Rules 1 and 2 apply as written. Where rule 4 would give a retry, the remedy is
+`Rerun with --new to file a separate entry`. Rule 3 cannot arise: feedback writes into the
+owner's registered root, which is its main checkout.
 
 `rename` rewrites every record under its own preconditions (clean `tasks/`, at most one
 worktree) and is not a save of one record, so it is outside this rule.
 
-The retry sends the write to the newer checkout. When that checkout is the wrong home (for
-example, a note landed in main before the worktree's first command), the fix is the same as
-today: merge the newer copy into the checkout that should own it. The CLI does not copy
-records between checkouts (fresh-worktree brief).
+The CLI never copies records between checkouts (fresh-worktree brief). Every remedy is a
+command or a merge that the person or agent runs.
 
 ### 3.3 Exit status and JSON
 
@@ -129,8 +175,9 @@ A claim records `worktree` when it is acquired. In the prescribed order (commit 
 then `git worktree add`), `start` runs in main, so the claim names main while the work
 happens in the worktree.
 
-Rule: **a successful save by the holder of a live claim on that task sets the claim's
-`worktree` to this checkout's root, and `seen` to now.** Holder means what `note`'s
+Rule: **a successful save by the holder of a live claim on that task, when the save leaves
+the claim in place, sets the claim's `worktree` to this checkout's root, and `seen` to
+now.** Holder means what `note`'s
 heartbeat already means: `Ctx::ownership` returns anything but `Foreign`. That includes
 `ByIdentity` (the resolved session matches) and `ByProof` (under relay identity, the claim's
 recorded process proof names this caller). The refresh keeps every other field of the claim,
@@ -162,7 +209,8 @@ with the worktree's root. The worktree's copy is then newer than main's, so a la
 from main refuses under §3 and names the worktree.
 
 Without the step, nothing is lost that §3 cannot catch. A write in main lands, since main's
-copy is still current, and the worktree's next write refuses and names main. The step only
+copy is still current. The worktree's next write refuses and leads with the merge remedy
+(§3.2 rule 3): commit main's copy, merge it into the branch, then rerun. The step only
 moves detection from the second write to the first.
 
 `skills/tasks/SKILL.md` (Process and workspace, and step 3 of the session protocol) and this
@@ -187,6 +235,10 @@ detail names it and says it was unavailable.
 A record present locally is always read locally (park §5.3), even when another checkout's
 copy is newer. Reading does not risk divergence, and the next write from here will refuse
 under §3.
+
+An id from another registered project already routes to that project's registered root.
+The fallback applies there the same way: it reads that prefix's claim store, and the named
+checkout must be a checkout of that prefix.
 
 `ShowFields` keeps its shape. The spec and plan paths resolve against the checkout the
 record was read from, with the main-checkout fallback of tasks-ace27b.
@@ -218,6 +270,10 @@ this design covers.
 - **Re-`start` as the only handoff** (the brief's lean). The holder's own writes already
   show where it works. Requiring a handoff command would make an ordinary `done` in the
   worktree refuse.
+- **A `-C` retry into another session's worktree.** A worktree's copy becomes the newest
+  whenever its work touches the record, including in passing. Until that branch merges,
+  such a retry would send writes from every other checkout into someone else's uncommitted
+  tree. §3.2 rule 1 names the session instead.
 - **An override flag.** `--force` already carries two meanings. The escape from a refusal is
   to write in the newer checkout, or to merge or remove it.
 - **Comparing content instead of stamps.** Rejected by the work-claims design as noise, and
@@ -225,14 +281,17 @@ this design covers.
 
 ## 8. Known gaps
 
-- **Same-second writes.** `updated` has second precision, so writes in two checkouts within
-  the same second compare equal and neither refuses.
+- **Worktrees holding a newer copy, abandoned or active.** A worktree with a newer copy
+  blocks writes to that record from every other checkout until its branch merges or the
+  worktree is removed. That includes an active worktree whose work touched the record only
+  in passing, such as a wake-note. When a session works there, the refusal names it and
+  gives no retry into its branch (§3.2 rule 1). This is the accepted cost of "refuse always".
+- **Same-second forks are caught by content, not stamps.** Equal stamps with different
+  bytes refuse (§3.1). What remains is a sibling copy that cannot be read: it is compared
+  by neither stamp nor content, and warns.
 - **A write in the wrong checkout.** A write that landed in the wrong checkout before
   anything was newer (no §5 step) still needs a manual merge. §3 makes the next write
-  report it; it does not undo it.
-- **Abandoned worktrees.** A worktree that is abandoned but not removed, holding a newer
-  copy, blocks writes to that task everywhere else until it is merged or removed. This is
-  the accepted cost of "refuse always", and the error names the worktree.
+  report it, leading with the merge remedy (§3.2 rule 3); it does not undo it.
 - **Invisible worktree-only tasks.** A task that exists only in a worktree, with no claim or
   park, is still invisible to `show` elsewhere. Nothing names its checkout.
 - **Checkouts outside git's worktree list.** A second project root under the same prefix
@@ -243,8 +302,9 @@ this design covers.
 ## 9. Documents that change
 
 - Work-claims design §Warnings, "A newer copy elsewhere": becomes the refusal, with this spec
-  cited. The two accepted limits stay. The "never refuses" sentence and its rationale in
-  `warn_on_newer_sibling_copies` go.
+  cited, and gains the same-stamp content rule (§3.1). Its "fires once per divergence"
+  limit goes, because the refusal leaves nothing written. The "never refuses" sentence and
+  its rationale in `warn_on_newer_sibling_copies` go.
 - Work-claims design, `note` under §Command behaviour: never refused by the claim guard, but
   subject to §3.
 - Park design §5.3: `show` resolves a record that exists only in another checkout the same
@@ -263,7 +323,7 @@ End-to-end tests in `tests/cli.rs`, on a scratch repository with a linked worktr
   produces no finding.
 - An unreadable sibling copy warns and writes.
 - The retry's quoting: a note with spaces and quotes, an invocation that already carried
-  `-C`, and `attach` with a relative path.
+  `-C`, and `attach` with a relative path, which the retry resolves unchanged.
 - `attach` from a path, from stdin, and from a stale copy refuses and leaves no file or
   directory under `tasks/files/<id>/`.
 - `edit --body -` and `attach -` from a stale copy refuse, and the detail asks for the same
@@ -271,6 +331,20 @@ End-to-end tests in `tests/cli.rs`, on a scratch repository with a linked worktr
 - The `$EDITOR` path, with a sibling that becomes newer while the editor is open, refuses
   after the editor closes, keeps the temp file, and names it.
 - `feedback --recur` onto a record whose copy is behind refuses.
+- Another session's live claim, on a different task, naming the worktree that holds the
+  newer copy: the refusal names that task and session and prints no `-C` retry. The
+  caller's own claim naming it keeps the retry.
+- A park by another session naming that worktree also suppresses the retry.
+- The tasks-142d2f sequence without the §5 step: `start` in main, commit, `git worktree
+  add`, a note in main, then a write in the worktree. The detail leads with the merge
+  remedy, and the `-C <main>` retry follows as the alternative.
+- A record left uncommitted before `git worktree add` (`start` in main, not committed, then
+  `tasks start` in the new worktree): the detail leads with the merge remedy, not
+  `tasks -C <main> start`.
+- Equal stamps with different bytes refuse, with the merge remedy only. Equal stamps with
+  equal bytes do not refuse.
+- `show` of another project's worktree-only task, from outside that project, falls back
+  through that project's claim store.
 - The tasks-142d2f sequence: `start` in main, `git worktree add`, `tasks start` in the
   worktree, then `note` in main. The note refuses and names the worktree, and the claim
   names the worktree.
