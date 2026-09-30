@@ -18962,3 +18962,144 @@ fn show_add_and_edit_in_a_worktree_read_git_excluded_docs_from_the_main_checkout
     let v = env.json(&main, &["show", &id]);
     assert!(main_checkout_warnings(&v, &main).is_empty(), "{v}");
 }
+
+#[test]
+fn attach_from_a_copy_that_is_behind_reads_nothing_and_creates_nothing() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    std::fs::write(side.join("shot.png"), b"png").unwrap();
+
+    let by_path = stale_detail(&env, &side, &["attach", &id, "shot.png"]);
+    assert_eq!(
+        retry_words(&by_path),
+        ["-C", main.to_str().unwrap(), "attach", &id, "shot.png"]
+    );
+
+    let out = env
+        .cmd(&side)
+        .args(["attach", &id, "-", "--name", "in.txt"])
+        .write_stdin("hello")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy");
+    let by_stdin = error["error"]["detail"].as_str().unwrap().to_string();
+    assert!(
+        by_stdin.ends_with("; supply the same input on stdin"),
+        "{by_stdin}"
+    );
+    assert!(!side.join(format!("tasks/files/{id}")).exists());
+
+    // Both retries, run verbatim from the same directory, land in the newer checkout: the
+    // relative path still resolves, and stdin is supplied again.
+    env.cmd(&side)
+        .args(retry_words(&by_path))
+        .assert()
+        .success();
+    env.cmd(&side)
+        .args(retry_words(&by_stdin))
+        .write_stdin("hello")
+        .assert()
+        .success();
+    let files = main.join(format!("tasks/files/{id}"));
+    assert_eq!(std::fs::read(files.join("shot.png")).unwrap(), b"png");
+    assert_eq!(std::fs::read(files.join("in.txt")).unwrap(), b"hello");
+}
+
+#[test]
+fn edit_body_from_stdin_on_a_copy_that_is_behind_asks_for_the_same_input() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    let out = env
+        .cmd(&side)
+        .args(["edit", &id, "--body", "-"])
+        .write_stdin("new body\n")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.ends_with("; supply the same input on stdin"),
+        "{detail}"
+    );
+    env.cmd(&side)
+        .args(retry_words(detail))
+        .write_stdin("new body\n")
+        .assert()
+        .success();
+    let shown = env.json(&main, &["show", &id]);
+    assert!(
+        shown["task"]["body"].as_str().unwrap().contains("new body"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn detach_of_a_leftover_file_from_a_copy_that_is_behind_keeps_the_file() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    std::fs::write(main.join("shot.png"), b"png").unwrap();
+    env.json(&main, &["attach", &id, "shot.png"]);
+    env.json(&main, &["detach", &id, "shot.png", "wrong file"]);
+    // An interrupted detach leaves the ledger saying "detached" with the file still there;
+    // a rerun only removes the file and never saves the record.
+    let leftover = main.join(format!("tasks/files/{id}/shot.png"));
+    std::fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+    std::fs::write(&leftover, b"png").unwrap();
+    let created = "2026-09-01T00:00:00Z";
+    stamp(&main, &id, created, "2026-09-05T09:00:00Z");
+    stamp(&side, &id, created, "2026-09-07T10:00:00Z");
+    stale_detail(&env, &main, &["detach", &id, "shot.png", "wrong file"]);
+    assert!(leftover.exists(), "the refusal removed the file");
+}
+
+#[test]
+fn a_sibling_that_moves_ahead_while_the_editor_is_open_refuses_and_keeps_the_edit() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    // While the editor is open, the worktree writes. The edit also forges a far-future
+    // stamp in its own copy, which must not count: the baseline is what was loaded.
+    let sibling = side.join(format!("tasks/{id}.md"));
+    let editor = editor_script(
+        &main,
+        &format!(
+            "sed -i 's/^updated: .*/updated: 2030-01-01T00:00:00Z/' '{}' && \
+             sed -i 's/^updated: .*/updated: 2031-01-01T00:00:00Z/; s/^title: T$/title: Edited/' \"$1\"",
+            sibling.display()
+        ),
+    );
+    let out = env
+        .cmd(&main)
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains("fresh editor"), "{detail}");
+    let kept = detail
+        .split("edit kept at ")
+        .nth(1)
+        .and_then(|rest| rest.strip_suffix(')'))
+        .expect("the kept file is named");
+    assert!(
+        std::fs::read_to_string(kept)
+            .unwrap()
+            .contains("title: Edited")
+    );
+    assert_eq!(env.json(&main, &["show", &id])["task"]["title"], "T");
+}
