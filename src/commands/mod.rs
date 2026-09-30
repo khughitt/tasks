@@ -24,7 +24,7 @@ pub mod unregister;
 use crate::claims::{ClaimStore, Liveness, MutationLock};
 use crate::cli::{Cli, Command, FieldArgs, ScopeArgs};
 use crate::error::{Error, Result};
-use crate::format::{validate_body, validate_line, validate_note_text, validate_task};
+use crate::format::{normalize_note_text, validate_body, validate_line, validate_task};
 use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
 use crate::output::Output;
 use crate::registry::Registry;
@@ -836,7 +836,7 @@ pub fn id_out(ctx: Ctx, task: &Task) -> Output {
 }
 
 pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
-    validate_note_text(text)?;
+    let text = normalize_note_text(text)?;
     task.notes.push(Note {
         at: crate::time::now(),
         by: by.to_string(),

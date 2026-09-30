@@ -146,7 +146,10 @@ serialization whitespace are not body content; all other leading whitespace and 
 The section after the delimiter is owned by the tool and holds only bullets of the form
 `- <timestamp> (<owner>): <text>`, appended by `note` and by the messages of
 `start`/`done`/`drop`/`block`. Note text is a single line; `note` rejects text containing
-newlines. Any other content after the delimiter is a `check` error. The section is created
+newlines. Every writer of a new note checks the text it was given for CR and LF, then stores
+it without trailing spaces and tabs; leading and inner whitespace are kept, and text that is
+only whitespace is rejected. Existing notes are never rewritten by other commands: a note
+that already ends in whitespace keeps it until an editor repair removes it (§5.3). Any other content after the delimiter is a `check` error. The section is created
 on the first note.
 
 ### 3.3 Lifecycle
@@ -601,7 +604,10 @@ Validation of an edited task (flags or editor) compares against the original:
   open-work rule (`--force` applies to the flag path; the editor path has no force and
   fails with `open_dependencies` or `open_descendants`).
 - `updated` in the edited content is ignored and replaced.
-- The notes section must be unchanged (notes are append-only via `note`).
+- The notes section must be unchanged (notes are append-only via `note`), with one
+  exception: the editor may remove trailing spaces and tabs from existing note texts.
+  Note count, order, timestamps, authors, provenance, and every other character stay,
+  and a trim must not change whether the text is an attachment-ledger entry or which one.
 - Everything else is validated as on `add`.
 
 ## 6. Configuration and registry

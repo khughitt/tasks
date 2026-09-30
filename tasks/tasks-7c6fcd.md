@@ -1,15 +1,16 @@
 ---
 id: tasks-7c6fcd
 title: Normalize trailing note whitespace and allow whitespace-only repairs
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: fix/note-whitespace
 created: 2026-09-18T15:31:41Z
-updated: 2026-09-30T14:40:30Z
+updated: 2026-09-30T14:44:36Z
 started: 2026-09-30T14:40:30Z
+completed: 2026-09-30T14:44:36Z
 depends: []
 parent: tasks-ea2a79
 tags: [feedback, friction, "from:obs"]
@@ -30,4 +31,10 @@ Original report: The note command accepts a single-line value ending in a space.
 
 - 2026-09-30T09:53:58Z (main): scope: scoped; shared insertion normalization plus a narrowly defined explicit whitespace-only repair; s/mid/direct; brief: docs/notes/2026-09-30-note-integrity-brief.md
 - 2026-09-30T14:40:30Z (main): started
+  provenance: {"harness_session":"claude-code:d94a2e3c-5d2c-4340-8f21-b32c0525bded","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T14:40:31Z (fix/note-whitespace): resumed
+  provenance: {"harness_session":"claude-code:d94a2e3c-5d2c-4340-8f21-b32c0525bded","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T14:44:36Z (fix/note-whitespace): done
+  provenance: {"harness_session":"claude-code:d94a2e3c-5d2c-4340-8f21-b32c0525bded","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T14:44:36Z (fix/note-whitespace): every new note is stored without trailing spaces/tabs (CR/LF checked first, whitespace-only rejected); the editor accepts removing trailing whitespace from existing notes with count, order, stamps, authors, provenance and ledger entries unchanged; spec §3.2/§5.3 and the tasks skill updated
   provenance: {"harness_session":"claude-code:d94a2e3c-5d2c-4340-8f21-b32c0525bded","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
