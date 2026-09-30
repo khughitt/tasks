@@ -4,7 +4,7 @@ title: "note on a task whose newer copy lives in another worktree writes to the 
 status: idea
 priority: 2
 created: 2026-09-29T11:36:20Z
-updated: 2026-09-29T20:50:25Z
+updated: 2026-09-30T10:28:06Z
 depends: []
 parent: tasks-c4ad8e
 tags: [feedback, friction, "from:ns"]
@@ -16,3 +16,4 @@ Command: tasks note <id> "..." run from the main checkout while the record had b
 ## Notes
 
 - 2026-09-29T20:50:25Z (main): scope: briefed; refusing a write on a newer sibling reverses the work-claims 'signal, not a gate' rule, so it waits on design tasks-ab8d2d; parented to tasks-c4ad8e; brief: docs/notes/2026-09-29-cross-checkout-records-brief.md
+- 2026-09-30T10:28:06Z (ab8d2d-record-home): Decided in tasks-ab8d2d (spec record-home §3): a write from a copy behind a sibling refuses as stale_copy, naming the newer checkout and a tasks -C retry. Implemented by tasks-9949f3.
