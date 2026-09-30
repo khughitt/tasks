@@ -1,13 +1,15 @@
 ---
 id: tasks-9949f3
 title: "Implement the record-home design: stale-copy refusal, claim follows holder, show fallback"
-status: todo
+status: doing
 priority: 2
 size: l
 complexity: high
 process: planned
+owner: ab8d2d-record-home
 created: 2026-09-30T10:28:06Z
-updated: 2026-09-30T10:28:41Z
+updated: 2026-09-30T10:28:52Z
+started: 2026-09-30T10:28:52Z
 depends: []
 parent: tasks-c4ad8e
 tags: [worktree]
@@ -20,3 +22,5 @@ Implements docs/specs/2026-09-30-record-home-design.md (accepted 2026-09-30, tas
 ## Notes
 
 - 2026-09-30T10:28:41Z (ab8d2d-record-home): Evidence 2026-09-30: closing tasks-ab8d2d, a note on tasks-bb53e5 from this worktree forked the record against a newer committed note in main (the warning fired after writing); resolved by merging main and keeping both notes. Under the spec it would have refused as stale_copy.
+- 2026-09-30T10:28:52Z (ab8d2d-record-home): started
+  provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
