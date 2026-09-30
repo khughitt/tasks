@@ -52,6 +52,67 @@ pub struct ScopeArgs {
     pub all_projects: bool,
 }
 
+/// Selection over record fields, shared by `list` and `ready`. Repeats of one flag widen
+/// (any of them); different flags narrow (all of them); `--tag` is all-of.
+#[derive(Args, Debug, Default, Clone)]
+pub struct FilterArgs {
+    /// Only tasks of this priority (repeatable). Repeats of one filter widen; different
+    /// filters narrow.
+    #[arg(
+        short = 'p',
+        long = "priority",
+        value_name = "N",
+        value_parser = clap::value_parser!(u8).range(0..=4),
+        add = ArgValueCandidates::new(crate::complete::priorities),
+        add = ValueSet
+    )]
+    pub priorities: Vec<u8>,
+    /// Only tasks of this size (repeatable); `none` selects unsized tasks.
+    #[arg(
+        long = "size",
+        value_name = "SIZE",
+        add = ArgValueCandidates::new(crate::complete::filter_sizes),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub sizes: Vec<String>,
+    /// Only tasks at this effective complexity (repeatable); `none` selects unassessed
+    /// tasks. A selection, not the session cutoff.
+    #[arg(
+        long = "complexity",
+        value_name = "LEVEL",
+        add = ArgValueCandidates::new(crate::complete::filter_complexities),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub complexities: Vec<String>,
+    /// Only tasks with this process (repeatable); `none` selects unassessed tasks.
+    #[arg(
+        long = "process",
+        value_name = "PROCESS",
+        add = ArgValueCandidates::new(crate::complete::filter_processes),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub processes: Vec<String>,
+    /// Filter by tag (repeatable); a task must carry every one.
+    #[arg(long = "tag", value_name = "TAG")]
+    pub tags: Vec<String>,
+    /// Only tasks owned by this value.
+    #[arg(long)]
+    pub owner: Option<String>,
+    /// Only tasks whose source is exactly this reference; matched byte for byte,
+    /// never interpreted, so it answers "what came from here" for any origin.
+    #[arg(long)]
+    pub source: Option<String>,
+    /// Only direct children of this task.
+    #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
+    pub parent: Option<String>,
+    /// Only tasks marked safe to run beside each other.
+    #[arg(long)]
+    pub parallel: bool,
+}
+
 #[derive(Args, Debug, Default, Clone)]
 pub struct FieldArgs {
     #[arg(short = 'b', long)]
@@ -274,7 +335,7 @@ pub enum Command {
     },
     /// List tasks (open by default).
     #[command(
-        after_help = "Examples:\n  tasks list --sort updated\n  tasks list --status todo --tag cli"
+        after_help = "Examples:\n  tasks list --sort updated\n  tasks list --status todo --tag cli\n  tasks list -p 0 -p 1 --size s --size xs"
     )]
     List {
         /// Filter by status (repeatable): idea, todo, doing, blocked, shelved, done, or dropped.
@@ -286,19 +347,8 @@ pub enum Command {
             value_parser = ValueSet
         )]
         statuses: Vec<String>,
-        /// Filter by tag (repeatable).
-        #[arg(long = "tag", value_name = "TAG")]
-        tags: Vec<String>,
-        /// Only tasks owned by this value.
-        #[arg(long)]
-        owner: Option<String>,
-        /// Only tasks whose source is exactly this reference; matched byte for byte,
-        /// never interpreted, so it answers "what came from here" for any origin.
-        #[arg(long)]
-        source: Option<String>,
-        /// Only direct children of this task.
-        #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
-        parent: Option<String>,
+        #[command(flatten)]
+        filter: FilterArgs,
         /// Order: priority (then last activity), updated, or created (most recent
         /// first). Pretty rows show the date sorted on, else last activity.
         #[arg(

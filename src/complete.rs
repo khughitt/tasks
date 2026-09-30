@@ -112,6 +112,36 @@ pub fn processes() -> Vec<CompletionCandidate> {
     plain(Process::ALL.iter().map(|process| process.as_str()))
 }
 
+/// `--size` as a filter: the sizes, then `none` for unsized.
+pub fn filter_sizes() -> Vec<CompletionCandidate> {
+    plain(
+        Size::ALL
+            .iter()
+            .map(|size| size.as_str())
+            .chain([crate::filter::NONE]),
+    )
+}
+
+/// `--complexity` as a filter: the levels, then `none` for unassessed.
+pub fn filter_complexities() -> Vec<CompletionCandidate> {
+    plain(
+        Complexity::ALL
+            .iter()
+            .map(|level| level.as_str())
+            .chain([crate::filter::NONE]),
+    )
+}
+
+/// `--process` as a filter: the processes, then `none` for unassessed.
+pub fn filter_processes() -> Vec<CompletionCandidate> {
+    plain(
+        Process::ALL
+            .iter()
+            .map(|process| process.as_str())
+            .chain([crate::filter::NONE]),
+    )
+}
+
 /// The two `park --waiting-on` accepts.
 pub fn waiting_on() -> Vec<CompletionCandidate> {
     plain(crate::claims::WaitingOn::ALL.iter().map(|who| who.as_str()))

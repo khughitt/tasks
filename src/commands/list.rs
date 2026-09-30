@@ -1,10 +1,12 @@
 use super::ReadCtx;
 use crate::claims::WaitingOn;
-use crate::error::{Error, Result};
+use crate::cli::FilterArgs;
+use crate::error::Result;
+use crate::filter::{Fields, TaskFilter, check_parent};
 use crate::halt::{self, HaltSnapshot};
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{
-    Counts, DateColumn, DeferredSummary, HaltRow, ListOut, NextOut, Output, ParkedOut, ParkedRow,
+    Counts, DateColumn, DeferredSummary, HaltRow, ListOut, NextOut, Output, ParkedOut,
     PeriodicSummary, PrimeOut, TaskSummary,
 };
 use crate::query::{
@@ -27,10 +29,7 @@ pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Re
 pub fn list(
     mut ctx: ReadCtx,
     statuses: Vec<String>,
-    tags: Vec<String>,
-    owner: Option<String>,
-    source: Option<String>,
-    parent: Option<String>,
+    filter: FilterArgs,
     sort: String,
     reverse: bool,
     parked: bool,
@@ -38,49 +37,26 @@ pub fn list(
     deferred: bool,
 ) -> Result<Output> {
     let sort = SortKey::parse(&sort)?;
-    let statuses = statuses
-        .iter()
-        .map(|status| Status::parse(status))
-        .collect::<Result<Vec<_>>>()?;
+    let filter = TaskFilter::parse(&filter, &statuses, &ctx.registry)?;
     if parked {
-        return list_parked(ctx, statuses, tags, owner, source, parent);
+        return list_parked(ctx, filter);
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    check_parent(&filter, &all, |_| false)?;
     let mut tasks = all.clone();
-    let parent = parent
-        .as_deref()
-        .map(|id| super::parse_id(&ctx.registry, id))
-        .transpose()?;
-    if let Some(parent) = &parent
-        && !all.iter().any(|task| task.id == *parent)
-    {
-        return Err(Error::TaskNotFound(parent.to_string()));
-    }
     tasks.retain(|task| {
         let periodic_ok = !periodic || task.every.is_some();
         let deferred_ok = !deferred || task.defer.is_some();
-        let status_ok = if !statuses.is_empty() {
-            statuses.contains(&task.status)
-        } else if periodic {
-            // Most of a healthy series is closed at any moment (spec §5.2).
-            true
-        } else {
-            task.status.is_open() && task.status != Status::Shelved
-        };
-        let tags_ok = tags.iter().all(|tag| task.tags.contains(tag));
-        let owner_ok = owner
-            .as_ref()
-            .is_none_or(|value| task.owner.as_ref() == Some(value));
-        let source_ok = source
-            .as_ref()
-            .is_none_or(|value| task.source.as_ref() == Some(value));
-        let parent_ok = parent.as_ref().is_none_or(|p| {
-            task.parent
-                .as_ref()
-                .is_some_and(|parent| ctx.registry.canonical_id(parent) == *p)
-        });
-        periodic_ok && deferred_ok && status_ok && tags_ok && owner_ok && source_ok && parent_ok
+        // The default pool when --status is absent: open minus shelved, or every status
+        // for --periodic, since most of a healthy series is closed (spec §5.2).
+        let pool_ok = !filter.statuses().is_empty()
+            || periodic
+            || (task.status.is_open() && task.status != Status::Shelved);
+        periodic_ok
+            && deferred_ok
+            && pool_ok
+            && filter.matches(&Fields::of_task(task, &claims, &ctx.registry))
     });
     for task in &tasks {
         for dependency in &task.depends {
@@ -118,63 +94,28 @@ pub fn list(
     }))
 }
 
-fn list_parked(
-    mut ctx: ReadCtx,
-    statuses: Vec<Status>,
-    tags: Vec<String>,
-    owner: Option<String>,
-    source: Option<String>,
-    parent: Option<String>,
-) -> Result<Output> {
+fn list_parked(mut ctx: ReadCtx, filter: TaskFilter) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let parent = parent
-        .as_deref()
-        .map(|id| super::parse_id(&ctx.registry, id))
-        .transpose()?;
     let rows = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let warnings = std::mem::take(&mut ctx.warnings);
-    let row_parent = |row: &ParkedRow| {
-        row.parent
-            .as_deref()
-            .and_then(|parent| TaskId::parse(parent).ok())
-            .map(|id| ctx.registry.canonical_id(&id))
-    };
-    if let Some(parent) = &parent
-        && !all.iter().any(|task| task.id == *parent)
-        && !rows
-            .iter()
-            .any(|row| row_parent(row).as_ref() == Some(parent))
-    {
-        return Err(Error::TaskNotFound(parent.to_string()));
-    }
-    let filtered = !statuses.is_empty()
-        || !tags.is_empty()
-        || owner.is_some()
-        || source.is_some()
-        || parent.is_some();
+    check_parent(&filter, &all, |parent| {
+        rows.iter().any(|row| {
+            Fields::of_row(row, &ctx.registry)
+                .is_some_and(|fields| fields.parent.as_ref() == Some(parent))
+        })
+    })?;
     let tasks = rows
         .into_iter()
-        .filter(|row| {
-            let Some(status) = row.status else {
-                return !filtered;
-            };
-            let status_ok = if statuses.is_empty() {
-                status.is_open()
-            } else {
-                statuses.contains(&status)
-            };
-            let tags_ok = tags.iter().all(|tag| row.tags.contains(tag));
-            let owner_ok = owner
-                .as_ref()
-                .is_none_or(|value| row.owner.as_ref() == Some(value));
-            let source_ok = source
-                .as_ref()
-                .is_none_or(|value| row.source.as_ref() == Some(value));
-            let parent_ok = parent
-                .as_ref()
-                .is_none_or(|p| row_parent(row).as_ref() == Some(p));
-            status_ok && tags_ok && owner_ok && source_ok && parent_ok
+        .filter(|row| match Fields::of_row(row, &ctx.registry) {
+            // An unresolved park has no record to match: shown only when nothing filters.
+            None => filter.is_empty(),
+            // The parked pool is every open status, shelved included, so a surviving
+            // shelved park stays visible for cleanup.
+            Some(fields) => {
+                (!filter.statuses().is_empty() || fields.status.is_open())
+                    && filter.matches(&fields)
+            }
         })
         .collect();
     Ok(Output::Parked(ParkedOut { tasks, warnings }))

@@ -1309,10 +1309,7 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Show { id } => show::run(open_id_ctx(dir, &id)?, id),
         Command::List {
             statuses,
-            tags,
-            owner,
-            source,
-            parent,
+            filter,
             sort,
             reverse,
             parked,
@@ -1322,10 +1319,7 @@ pub fn run(cli: Cli) -> Result<Output> {
         } => list::list(
             open_read_ctx(dir, &scope)?,
             statuses,
-            tags,
-            owner,
-            source,
-            parent,
+            filter,
             sort,
             reverse,
             parked,

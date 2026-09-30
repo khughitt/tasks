@@ -18111,6 +18111,19 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
         ),
         ((vec!["list"], "--status"), vec!["list", "--status", "todo"]),
         ((vec!["list"], "--sort"), vec!["list", "--sort", "updated"]),
+        (
+            (vec!["list"], "--priority"),
+            vec!["list", "--priority", "1"],
+        ),
+        ((vec!["list"], "--size"), vec!["list", "--size", "s"]),
+        (
+            (vec!["list"], "--complexity"),
+            vec!["list", "--complexity", "mid"],
+        ),
+        (
+            (vec!["list"], "--process"),
+            vec!["list", "--process", "direct"],
+        ),
         ((vec!["tags"], "--status"), vec!["tags", "--status", "todo"]),
         (
             (vec!["projects"], "--sort"),
@@ -20441,5 +20454,238 @@ fn show_reads_the_local_copy_even_when_the_claimed_one_is_newer() {
     assert!(
         !warnings_of(&v).iter().any(|w| w.contains("exists only in")),
         "{v}"
+    );
+}
+
+fn list_ids(value: &serde_json::Value) -> Vec<String> {
+    value["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn list_filters_by_priority_size_complexity_and_process() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let a = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "A",
+            "-p",
+            "0",
+            "--size",
+            "s",
+            "--complexity",
+            "low",
+            "--process",
+            "direct",
+        ],
+    ));
+    let b = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "B",
+            "-p",
+            "1",
+            "--size",
+            "m",
+            "--complexity",
+            "mid",
+            "--process",
+            "planned",
+        ],
+    ));
+    let c = id_of(env.json(&sci, &["add", "C", "-p", "2"]));
+
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "-p", "0"])),
+        std::slice::from_ref(&a)
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "-p", "0", "--priority", "1"])),
+        [a.clone(), b.clone()],
+        "repeats widen"
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--size", "m"])),
+        std::slice::from_ref(&b)
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--size", "none"])),
+        std::slice::from_ref(&c)
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--size", "s", "--size", "none"])),
+        [a.clone(), c.clone()]
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--complexity", "mid"])),
+        std::slice::from_ref(&b)
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--complexity", "none"])),
+        std::slice::from_ref(&c)
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--process", "direct"])),
+        std::slice::from_ref(&a)
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--process", "none"])),
+        std::slice::from_ref(&c)
+    );
+    assert!(
+        list_ids(&env.json(&sci, &["list", "-p", "0", "--size", "m"])).is_empty(),
+        "different flags narrow"
+    );
+}
+
+#[test]
+fn list_complexity_filter_reads_the_escalated_rating() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let mid = id_of(env.json(&sci, &["add", "Mid", "--complexity", "mid"]));
+    let bare = id_of(env.json(&sci, &["add", "Bare"]));
+    let path = env.claim_store("sci");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "[escalations.\"{mid}\"]\nlevel = \"high\"\nat = \"2026-09-30T00:00:00Z\"\nsession = \"s:a\"\n\
+             [escalations.\"{bare}\"]\nlevel = \"high\"\nat = \"2026-09-30T00:00:00Z\"\nsession = \"s:a\"\n"
+        ),
+    )
+    .unwrap();
+
+    // Equal priorities: list order falls to last activity, then id, so compare as sets.
+    let mut high = list_ids(&env.json(&sci, &["list", "--complexity", "high"]));
+    high.sort();
+    let mut expected = vec![mid.clone(), bare.clone()];
+    expected.sort();
+    assert_eq!(high, expected);
+    assert!(list_ids(&env.json(&sci, &["list", "--complexity", "mid"])).is_empty());
+    assert!(
+        list_ids(&env.json(&sci, &["list", "--complexity", "none"])).is_empty(),
+        "an escalated record is not unassessed"
+    );
+}
+
+#[test]
+fn list_parked_applies_the_filter_and_keeps_shelved_in_its_pool() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let small = id_of(env.json(&sci, &["add", "Small", "--size", "s"]));
+    let shelved = id_of(env.json(&sci, &["add", "Shelved", "--size", "s"]));
+    env.json(&sci, &["shelve", &shelved, "later"]);
+    let large = id_of(env.json(&sci, &["add", "Large", "--size", "l"]));
+    let root = sci.display().to_string();
+    for id in [&small, &shelved, &large] {
+        write_park(&env, "sci", id, "agent-a", "agent", &root);
+    }
+    // A park whose task no scan holds: an unresolved row.
+    write_park(&env, "sci", "sci-ffffff", "agent-a", "agent", &root);
+
+    let all = list_ids(&env.json(&sci, &["list", "--parked"]));
+    assert_eq!(all.len(), 4, "{all:?}");
+    assert!(all.contains(&shelved), "shelved stays in the parked pool");
+    assert!(all.contains(&"sci-ffffff".to_string()));
+
+    let mut small_rows = list_ids(&env.json(&sci, &["list", "--parked", "--size", "s"]));
+    small_rows.sort();
+    let mut expected = vec![small.clone(), shelved.clone()];
+    expected.sort();
+    assert_eq!(
+        small_rows, expected,
+        "the unresolved row drops once a filter is given"
+    );
+
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--parked", "-p", "2", "--size", "l"])),
+        std::slice::from_ref(&large)
+    );
+}
+
+#[test]
+fn list_parent_filter_keeps_its_errors() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    assert_eq!(
+        env.fail(&sci, &["list", "--parent", "not-an-id"]),
+        "invalid_id"
+    );
+    assert_eq!(
+        env.fail(&sci, &["list", "--parent", "sci-abcdef"]),
+        "task_not_found"
+    );
+    assert_eq!(
+        env.fail(&sci, &["list", "--parked", "--parent", "sci-abcdef"]),
+        "task_not_found"
+    );
+}
+
+#[test]
+fn list_parent_filter_resolves_a_retired_prefix() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal"]));
+    let child = id_of(env.json(&sci, &["add", "Child", "--parent", &goal]));
+    alias_registry(&env, "old", "sci");
+    let retired = format!("old-{}", &goal["sci-".len()..]);
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--parent", &retired])),
+        [child]
+    );
+}
+
+#[test]
+fn list_periodic_keeps_its_pool_under_a_filter() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let sweep = id_of(env.json(&sci, &["add", "Sweep", "--size", "s", "--every", "30d"]));
+    env.json(&sci, &["start", &sweep]);
+    env.json(&sci, &["done", &sweep, "swept"]);
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--periodic", "--size", "s"])),
+        [sweep]
+    );
+    assert!(list_ids(&env.json(&sci, &["list", "--periodic", "--size", "m"])).is_empty());
+}
+
+#[test]
+fn list_filters_refuse_unknown_values() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let err = env.usage(&sci, &["list", "-p", "5"]);
+    assert!(err.contains("--priority") && err.contains("5"), "{err}");
+    let err = env.usage(&sci, &["list", "--size", "huge"]);
+    assert!(err.contains("--size") && err.contains("huge"), "{err}");
+    let err = env.usage(&sci, &["list", "--process", "maybe"]);
+    assert!(err.contains("--process") && err.contains("maybe"), "{err}");
+}
+
+#[test]
+fn list_filter_flags_complete_with_none() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    assert_eq!(
+        env.complete_values(&sci, "bash", 3, &["tasks", "list", "--size", ""]),
+        vec!["xs", "s", "m", "l", "xl", "none"]
+    );
+    assert_eq!(
+        env.complete_values(&sci, "bash", 3, &["tasks", "list", "--complexity", ""]),
+        vec!["low", "mid", "high", "none"]
+    );
+    assert_eq!(
+        env.complete_values(&sci, "bash", 3, &["tasks", "list", "--process", ""]),
+        vec!["direct", "planned", "none"]
+    );
+    assert_eq!(
+        env.complete_values(&sci, "bash", 3, &["tasks", "list", "-p", ""]),
+        vec!["0", "1", "2", "3", "4"]
     );
 }

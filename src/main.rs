@@ -8,6 +8,7 @@ mod complexity;
 mod config;
 mod defer;
 mod error;
+mod filter;
 mod format;
 mod frontmatter;
 mod halt;
