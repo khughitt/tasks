@@ -1,15 +1,16 @@
 ---
 id: tasks-9949f3
 title: "Implement the record-home design: stale-copy refusal, claim follows holder, show fallback"
-status: doing
+status: done
 priority: 2
 size: l
 complexity: high
 process: planned
 owner: ab8d2d-record-home
 created: 2026-09-30T10:28:06Z
-updated: 2026-09-30T11:39:19Z
+updated: 2026-09-30T12:41:55Z
 started: 2026-09-30T10:28:52Z
+completed: 2026-09-30T12:41:55Z
 depends: []
 parent: tasks-c4ad8e
 tags: [worktree]
@@ -54,3 +55,7 @@ Implements docs/specs/2026-09-30-record-home-design.md (accepted 2026-09-30, tas
 - 2026-09-30T11:29:48Z (ab8d2d-record-home): resumed
   provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-30T11:39:19Z (ab8d2d-record-home): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-09-30T12:41:55Z (ab8d2d-record-home): done
+  provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T12:41:55Z (ab8d2d-record-home): record-home implementation landed in c30bec2..323b1ed: stale-copy refusal, holder claim moves, show fallback, docs and rollout
+  provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}

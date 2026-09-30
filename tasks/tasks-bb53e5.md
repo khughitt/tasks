@@ -1,10 +1,11 @@
 ---
 id: tasks-bb53e5
 title: A note written to a task from the main checkout while a worktree holds a modified copy of the same record diverges silently
-status: idea
+status: done
 priority: 2
 created: 2026-09-24T14:50:14Z
-updated: 2026-09-30T10:28:06Z
+updated: 2026-09-30T12:41:55Z
+completed: 2026-09-30T12:41:55Z
 depends: []
 parent: tasks-c4ad8e
 tags: [feedback, gap, "from:ai"]
@@ -19,3 +20,7 @@ tasks note <id> run in the main checkout after git worktree add: the write lands
 - 2026-09-29T20:50:25Z (main): scope: briefed; the equal-stamp case needs a home checkout (claim names main when start precedes worktree add, per tasks-142d2f), which design tasks-ab8d2d settles; parented to tasks-c4ad8e; brief: docs/notes/2026-09-29-cross-checkout-records-brief.md
 - 2026-09-30T10:23:47Z (main): recurrence: tasks-94b9c7 (feedback from:material, 2026-09-30) reported the same flow — a note from main after git worktree add landed in main's copy with no warning, found when a merge was blocked by the dirty record; folded here and dropped as a duplicate
 - 2026-09-30T10:28:06Z (ab8d2d-record-home): Decided in tasks-ab8d2d (spec record-home §3, §5): stale_copy refusal plus the protocol step 'tasks start <id> first in a new worktree'; without the step, the fork in main is caught at the worktree's next write. Implemented by tasks-9949f3.
+- 2026-09-30T12:41:55Z (ab8d2d-record-home): done
+  provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T12:41:55Z (ab8d2d-record-home): stale_copy refusal and new-worktree start protocol landed in c30bec2..323b1ed
+  provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}
