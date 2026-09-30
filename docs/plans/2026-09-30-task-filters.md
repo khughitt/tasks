@@ -1235,15 +1235,19 @@ difference.
 - [ ] **Step 6: Preflight every destination by content, then publish**
 
 `vendor-cli` writes `tools/cli.toml` and `tools/cli_surface.py` into every registered
-project that has either file. `vendored check` compares contents but not git state, and a
+project, but only for each file that already exists there. `vendored check` compares contents but not git state, and a
 clean `git status` does not prove the committed files equal the source. So check both
 before publishing. Take the roots from `tasks projects --paths`. For each root that has
 `tools/cli.toml` or `tools/cli_surface.py`, all of the following must hold:
 
 ```bash
 git -C <root> status --porcelain -- tools/cli.toml tools/cli_surface.py   # empty
-cmp <root>/tools/cli_surface.py <ops worktree>/bin/cli_surface.py         # equal
-git -C <ops worktree> show main:cli.toml | cmp - <root>/tools/cli.toml    # equal
+if test -f <root>/tools/cli_surface.py; then
+    cmp <root>/tools/cli_surface.py <ops worktree>/bin/cli_surface.py     # equal
+fi
+if test -f <root>/tools/cli.toml; then
+    git -C <ops worktree> show main:cli.toml | cmp - <root>/tools/cli.toml # equal
+fi
 ```
 
 The last check says the destination holds exactly ops `main`'s inventory. Step 4 proved
@@ -1252,6 +1256,7 @@ two rows. The one exception is the tasks main checkout: it must equal the new so
 instead (checked in Step 5). If any root fails any check, stop and report the root, the
 file, and the difference to the user. Never publish over it.
 
+Record which vendor files are absent and confirm they stay absent after publishing.
 Then, from the ops worktree, run `just vendor-cli --force`. Afterwards, for every
 destination except tasks:
 

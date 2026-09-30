@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/task-filters
 created: 2026-09-30T16:40:28Z
-updated: 2026-09-30T18:37:56Z
+updated: 2026-09-30T18:41:20Z
 started: 2026-09-30T16:40:36Z
 completed: 2026-09-30T18:37:56Z
 depends: []
@@ -67,3 +67,4 @@ Goal: one TaskFilter in query.rs (or its own module) with matches(&Task, &ClaimS
   provenance: {"harness_session":"codex:01a0f380-ddb1-71c3-a720-bc7a2dc7b70e","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-30T18:37:56Z (feat/task-filters): Shared filters for list and ready, documented and reviewed; task branch ready for integration and CLI inventory rollout
   provenance: {"harness_session":"codex:01a0f380-ddb1-71c3-a720-bc7a2dc7b70e","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T18:41:20Z (feat/task-filters): Step 6 correction: vendored publish checks copy.is_file per destination file; preflight only existing files, require tasks inventory equal new source, and confirm absent vendor files stay absent after publication.
