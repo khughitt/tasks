@@ -77,7 +77,7 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
             halt.updated = crate::time::after(&halt.updated)?;
             crate::format::validate_task(&halt)?;
             snapshot.authority().validate_docs(&halt)?;
-            // Append-only audit note: this direct authority write skips save's newer-sibling warning.
+            // Append-only audit note: this authority write skips load's sibling stale-copy guard.
             snapshot.authority().write_task(&ctx.registry, &halt)?;
         }
         append_note(&mut task, &owner, &target_note)?;

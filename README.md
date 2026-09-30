@@ -81,6 +81,10 @@ its liveness. `ready` and `next` omit live claims with an explanatory warning. S
 `tasks start --force <id>` for an explicit, recorded takeover. A write refuses with
 `stale_copy` when another worktree holds a newer copy of the record, and says whether to
 rerun there, merge, or leave it to the session working there.
+An open `halt` task in the registered checkout blocks new lower-priority starts across
+worktrees. `prime`, `ready`, and `next` show the halt and eligible work. An audited
+override is `tasks start <id> --force --reason "<one-line explanation>"`; its free-text
+reason is recorded on the halt and target, unlike park's fixed-list `--reason`.
 
 Lifecycle notes automatically record native harness provenance, independently of
 claim identity and liveness. A stamped note has one indented JSON continuation:
@@ -274,6 +278,7 @@ from a clone):
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
     tasks --pretty --color auto ready # color when stdout is a terminal
     tasks start sci-4f2a9c
+    tasks start sci-4f2a9c --force --reason "restore the service"  # audited halt override
     tasks note sci-4f2a9c "spec §4 no longer holds"
     tasks attach sci-4f2a9c ~/Pictures/before.png --caption "the stale row"  # copy into tasks/files/<id>/
     tasks attach sci-4f2a9c --clipboard       # an image from wl-paste; --name to choose the name

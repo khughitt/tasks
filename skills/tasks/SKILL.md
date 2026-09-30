@@ -60,6 +60,12 @@ nothing is eligible.
    checkout its claim or park names.
    `ready` and `next` omit live claims and explain each omission in warnings,
    and `ready` omits tasks parked waiting on the user.
+   An open task tagged `halt` in the registered checkout stops new lower-priority starts
+   in that project, including from older worktrees. `prime`, `ready`, and `next` name
+   the halt and show eligible work; an already doing task may resume. To override a
+   halt, use `tasks start <id> --force --reason "<one-line explanation>"`. The reason
+   is recorded on both the halt and the started task. Start's reason is free text;
+   park's `--reason` below is a fixed choice from its own vocabulary.
    Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, when a long-lived process id is available)
    when several agents share one terminal or harness process; otherwise agents that resolve
    to the same session id are indistinguishable to the claim store.

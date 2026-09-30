@@ -9941,11 +9941,19 @@ fn halt_start_side_closure_does_not_lift_until_registered_record_closes() {
             .unwrap()
             .contains(&target)
     );
+    // The record-home guard now refuses to close an older sibling copy. Remove the
+    // side fixture after proving its closure did not lift the registered halt.
+    std::fs::remove_file(side.join(format!("tasks/{halt}.md"))).unwrap();
     env.json(&main, &["done", &halt, "registered resolution"]);
     env.json(&side, &["start", &target]);
     assert_eq!(
         env.json(&side, &["show", &target])["task"]["status"],
         "doing"
+    );
+    assert!(
+        std::fs::read_to_string(env.claim_store("sci"))
+            .unwrap()
+            .contains(&target)
     );
 }
 

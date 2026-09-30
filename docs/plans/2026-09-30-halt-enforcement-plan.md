@@ -1,6 +1,6 @@
 # Halt enforcement implementation plan
 
-**Status:** revised for plan review round 2, 2026-09-30.
+**Status:** approved after plan review round 2, 2026-09-30.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task by task. Track the checkboxes below. Read the spec before editing code.
 
@@ -108,10 +108,10 @@
       append_note(&mut halt, &owner, &format!(
           "halt override: attempted {} by {session}: {reason}", task.id
       ))?;
-      halt.updated = crate::time::now();
+      halt.updated = crate::time::after(&halt.updated)?;
       crate::format::validate_task(&halt)?;
       snapshot.authority().validate_docs(&halt)?;
-      // Append-only audit note: this direct authority write skips save's newer-sibling warning.
+      // Append-only audit note: this authority write skips load's sibling stale-copy guard.
       snapshot.authority().write_task(&ctx.registry, &halt)?;
   }
   append_note(&mut task, &owner, &format!(
