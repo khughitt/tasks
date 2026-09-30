@@ -189,11 +189,25 @@ pub fn claim_omission(id: &TaskId, claim: &crate::claims::Claim) -> String {
     )
 }
 
+fn force_hint(id: &str, snapshots: &HashMap<String, HaltSnapshot>) -> String {
+    let reason = if TaskId::parse(id)
+        .ok()
+        .and_then(|task| snapshots.get(&task.prefix))
+        .is_some_and(|snapshot| !snapshot.halts().is_empty())
+    {
+        " --reason \"...\""
+    } else {
+        ""
+    };
+    format!("`tasks start --force {id}{reason}`")
+}
+
 /// Ready tasks in ready order; pushes a warning per unreachable dependency.
 pub fn ready_tasks(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
+    snapshots: &HashMap<String, HaltSnapshot>,
     now: OffsetDateTime,
 ) -> Result<Picked> {
     let mut warnings = Vec::new();
@@ -234,9 +248,9 @@ pub fn ready_tasks(
     ready.retain(|task| match claims.live(&task.id) {
         Some(claim) => {
             warnings.push(format!(
-                "{} — `tasks start --force {}` to take it over",
+                "{} — {} to take it over",
                 claim_omission(&task.id, claim),
-                task.id
+                force_hint(&task.id.to_string(), snapshots)
             ));
             false
         }
@@ -341,8 +355,8 @@ pub fn ready(
     let size = size.map(|size| Size::parse(&size)).transpose()?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let mut picked = ready_tasks(&mut ctx, &all, &claims, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
+    let mut picked = ready_tasks(&mut ctx, &all, &claims, &snapshots, now)?;
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut picked.tasks, &snapshots);
     warn_hidden(&mut ctx, hidden);
@@ -386,7 +400,8 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
     let now = crate::time::parse(&crate::time::now())?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let candidates = super::parked::candidates(&mut ctx, &all, &claims, now)?;
-    let ready = ready_tasks(&mut ctx, &all, &claims, now)?;
+    let snapshots = halt_snapshots(&mut ctx, &all);
+    let ready = ready_tasks(&mut ctx, &all, &claims, &snapshots, now)?;
     // One pool in pick order — parked candidates first, then the ready list — with each
     // task once, so a parked todo that is also ready is hidden and counted once.
     let mut pool = candidates.tasks;
@@ -395,7 +410,6 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
             pool.push(task);
         }
     }
-    let snapshots = halt_snapshots(&mut ctx, &all);
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut pool, &snapshots);
     warn_hidden(&mut ctx, hidden);
@@ -525,8 +539,8 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     };
     let counts = Counts::of(&all);
     let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let mut ready = ready_tasks(&mut ctx, &all, &claims, now)?.tasks;
     let snapshots = halt_snapshots(&mut ctx, &all);
+    let mut ready = ready_tasks(&mut ctx, &all, &claims, &snapshots, now)?.tasks;
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut ready, &snapshots);
     warn_hidden(&mut ctx, hidden);
@@ -618,8 +632,9 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     }
     for (id, claim, why) in claims.stale() {
         ctx.warnings.push(format!(
-            "{id} has a stale claim from session {} ({why}); `tasks start --force {id}` to take it over",
-            claim.session
+            "{id} has a stale claim from session {} ({why}); {} to take it over",
+            claim.session,
+            force_hint(id, &snapshots)
         ));
     }
     Ok(Output::Prime(PrimeOut {

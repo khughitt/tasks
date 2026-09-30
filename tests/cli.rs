@@ -9921,6 +9921,44 @@ fn halt_start_uncommitted_registered_incident_blocks_existing_worktree_immediate
 }
 
 #[test]
+fn halt_takeover_hints_include_reason_in_ready_and_prime() {
+    let mut env = TestEnv::new();
+    let (main, side, live) = repo_with_worktree(&mut env);
+    let stale = id_of(env.json(&side, &["add", "Stale", "-p", "2"]));
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    write_claim(&env, "sci", &live, "live-agent", true);
+    write_claim(&env, "sci", &stale, "dead-agent", false);
+
+    let ready = warnings_of(&env.json(&side, &["ready"])).join("\n");
+    let live_hint = format!("`tasks start --force {live} --reason \"...\"`");
+    assert!(ready.contains(&live_hint), "{ready}");
+    let next = warnings_of(&env.json(&side, &["next"])).join("\n");
+    assert!(next.contains(&live_hint), "{next}");
+    let prime = warnings_of(&env.json(&side, &["prime"])).join("\n");
+    assert!(
+        prime.contains(&format!("`tasks start --force {stale} --reason \"...\"`")),
+        "{prime}"
+    );
+
+    std::fs::remove_file(main.join(format!("tasks/{halt}.md"))).unwrap();
+    let ready = warnings_of(&env.json(&side, &["ready"])).join("\n");
+    assert!(
+        ready.contains(&format!("`tasks start --force {live}`")),
+        "{ready}"
+    );
+    let next = warnings_of(&env.json(&side, &["next"])).join("\n");
+    assert!(
+        next.contains(&format!("`tasks start --force {live}`")),
+        "{next}"
+    );
+    let prime = warnings_of(&env.json(&side, &["prime"])).join("\n");
+    assert!(
+        prime.contains(&format!("`tasks start --force {stale}`")),
+        "{prime}"
+    );
+}
+
+#[test]
 fn halt_edit_status_doing_cannot_bypass_registered_halt_even_with_force() {
     let mut env = TestEnv::new();
     let (main, side, target) = repo_with_worktree(&mut env);
