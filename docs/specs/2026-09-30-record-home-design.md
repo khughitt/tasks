@@ -48,12 +48,23 @@ Every write to an existing record compares the `updated` stamp it loaded with th
 record in every other worktree of the repository. It uses the same `sibling_task_copies`
 lookup the warning uses today: `git worktree list --porcelain -z`, read at the project's
 offset below the repository top level. If any sibling's stamp is newer, the write refuses
-with `stale_copy`, and neither the record nor the claim store changes.
+with `stale_copy`. Nothing is written or created, and no input is read beyond the arguments:
+not stdin, not the clipboard, and not a file to attach.
 
-The rule replaces `warn_on_newer_sibling_copies` at the same point in `save`, before the
-claim store or the file is touched. It also covers the one writer that bypasses `save`:
-`feedback --recur` appending to an existing record in the owner project. A single shared
-function serves both.
+**When it runs.** The check runs as soon as a write command has loaded the record, under the
+mutation lock. That is before the command reads any other input or creates any file. The
+lock is per prefix and shared by every checkout on the host, so no sibling can write between
+the check and the save. `save` itself does not check. Checking there is too late: `attach`
+copies its payload into `tasks/files/<id>/` before calling `save`, and `edit --body -` and
+`attach -` have consumed stdin by then.
+
+- **The `$EDITOR` path** releases the lock while the editor is open, so it runs the check a
+  second time after `lock_and_revalidate` takes the lock back.
+- **`feedback --recur`** writes to an existing record without going through `save`, and runs
+  the same check after it reads the owner's record.
+
+One shared function replaces `warn_on_newer_sibling_copies`, and every one of these points
+calls it.
 
 Unchanged from the warning:
 
@@ -86,8 +97,14 @@ newer copy's changes out, so it refuses like any other write.
   character outside `[A-Za-z0-9_@%+=:,./-]`, so the line can be pasted into a POSIX shell.
   `attach`'s file argument is made absolute, because `-C` changes the directory that a
   relative path is read from.
-- On the `$EDITOR` path the edit is kept, and the detail appends the temp file's path as that
-  path's other errors do.
+- **Input on stdin.** A command that takes input on stdin (`edit --body -`, `attach -`) has
+  not read it when it refuses (§3.1). The detail adds `supply the same input on stdin`,
+  because the printed line cannot carry the input itself. `attach --clipboard` has not read
+  the clipboard either, and its retry reads it again.
+- **The `$EDITOR` path.** When the first check refuses, the editor never opens. When the
+  second check refuses, the edit is kept and the detail appends the temp file's path, as
+  that path's other errors do. It also says that the retry opens a fresh editor on the newer
+  copy, so the kept file is where the changes are copied from.
 - `feedback --recur` is the exception. `-C` would change the project the report comes from,
   so there is no `-C` retry. The detail names the owner's newer checkout and offers `--new`,
   which files a separate entry.
@@ -113,8 +130,12 @@ then `git worktree add`), `start` runs in main, so the claim names main while th
 happens in the worktree.
 
 Rule: **a successful save by the holder of a live claim on that task sets the claim's
-`worktree` to this checkout's root, and `seen` to now.** Holder means what the claim guard
-and `note`'s heartbeat already mean: the same resolved session identity.
+`worktree` to this checkout's root, and `seen` to now.** Holder means what `note`'s
+heartbeat already means: `Ctx::ownership` returns anything but `Foreign`. That includes
+`ByIdentity` (the resolved session matches) and `ByProof` (under relay identity, the claim's
+recorded process proof names this caller). The refresh keeps every other field of the claim,
+as the heartbeat does. When ownership cannot be established, the claim is left alone, and
+`note` keeps its existing warning for that case.
 
 - `note` already refreshes `seen` on the holder's claim, and now also sets `worktree`.
 - Field edits, `dep`, `attach` and `detach` by the holder gain the same refresh. The store
@@ -243,12 +264,19 @@ End-to-end tests in `tests/cli.rs`, on a scratch repository with a linked worktr
 - An unreadable sibling copy warns and writes.
 - The retry's quoting: a note with spaces and quotes, an invocation that already carried
   `-C`, and `attach` with a relative path.
+- `attach` from a path, from stdin, and from a stale copy refuses and leaves no file or
+  directory under `tasks/files/<id>/`.
+- `edit --body -` and `attach -` from a stale copy refuse, and the detail asks for the same
+  stdin. Running the printed retry with that input succeeds.
+- The `$EDITOR` path, with a sibling that becomes newer while the editor is open, refuses
+  after the editor closes, keeps the temp file, and names it.
 - `feedback --recur` onto a record whose copy is behind refuses.
 - The tasks-142d2f sequence: `start` in main, `git worktree add`, `tasks start` in the
   worktree, then `note` in main. The note refuses and names the worktree, and the claim
   names the worktree.
 - A holder's `note` and `edit` in a worktree move `claim.worktree` there. Another session's
-  `note` leaves it alone.
+  `note` leaves it alone. A claim held `ByProof` (relay identity, with the explicit
+  `TASKS_SESSION` pair unset) moves the same way.
 - `show` in main for a task added and started in a worktree renders it with the warning. A
   parked worktree-only task also renders. A claim naming a removed worktree gives
   `task_not_found` with the checkout named.

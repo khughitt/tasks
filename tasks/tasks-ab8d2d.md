@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-09-29T20:50:01Z
-updated: 2026-09-30T10:03:54Z
+updated: 2026-09-30T10:13:10Z
 started: 2026-09-30T09:54:52Z
 depends: []
 parent: tasks-c4ad8e
@@ -25,4 +25,9 @@ Question: which checkout is a task record's home, and what do writes and reads f
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T10:01:51Z (ab8d2d-record-home): User decided 2026-09-30: a write whose copy is behind another checkout's refuses, for every task, with the checkout named and a tasks -C retry; no override flag. Reverses the work-claims 'signal, not a gate' rule.
 - 2026-09-30T10:03:54Z (ab8d2d-record-home): parked (waiting on user, review): User reviews docs/specs/2026-09-30-record-home-design.md in .worktrees/ab8d2d-record-home; on approval the agent records the review note, closes tasks-ab8d2d with notes on tasks-2c0a1d/bb53e5/fbc32b, then runs writing-plans for the implementation
+  provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T10:11:26Z (ab8d2d-record-home): review: spec round 1 — verdict: revise; findings: P2 3; reviewer: codex
+- 2026-09-30T10:11:34Z (ab8d2d-record-home): Spec review details: §3.1 needs a preflight before attach reads stdin/clipboard or writes payloads; save runs only after payload creation and rollback can fail. §3.2 cannot promise an exact argv-only retry for edit --body - or attach - after stdin was consumed; define replay/recovery guidance and test it. §4 must reuse Ctx::ownership (ByIdentity and ByProof), not require matching resolved session identity; current note heartbeat already accepts proof-based ownership. Design and implementation unchanged.
+- 2026-09-30T10:13:10Z (ab8d2d-record-home): Spec revised for round 1: the stale-copy check runs at load under the mutation lock (before input or files), again after the editor re-locks; stdin retries ask for the same input; holder = Ctx::ownership non-Foreign, ByProof included.
+- 2026-09-30T10:13:10Z (ab8d2d-record-home): parked (waiting on user, review): User re-reviews docs/specs/2026-09-30-record-home-design.md (round 2) in .worktrees/ab8d2d-record-home; on approval the agent records the review note, closes tasks-ab8d2d with notes on tasks-2c0a1d/bb53e5/fbc32b, then runs writing-plans
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
