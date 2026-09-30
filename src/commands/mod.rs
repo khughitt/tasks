@@ -69,6 +69,10 @@ pub struct Ctx {
     /// was requested. Taken once by `save`, which performs the actual removal and, only
     /// once it knows whether that reached disk, reports success or names the retry.
     clear_escalation: Option<Option<Complexity>>,
+    /// Set by the claim guard when this command displaces a foreign claim: the summary a
+    /// task record may keep. Host, pid, and worktree stay in the warning and the claim
+    /// store, which never reach git.
+    pub takeover: Option<String>,
 }
 
 /// How this caller's right to act on an existing claim was established.
@@ -96,6 +100,7 @@ impl Ctx {
             pending_claim: None,
             recovered: false,
             clear_escalation: None,
+            takeover: None,
         }
     }
 
@@ -111,6 +116,20 @@ impl Ctx {
             self.claims = Some(ClaimStore::load(&self.project.prefix)?);
         }
         Ok(self.claims.as_mut().expect("just loaded"))
+    }
+
+    /// What a task record keeps of a takeover: the displaced session and owner and why it
+    /// could be taken, never `describe_claim`'s machine details (work-claims design,
+    /// "Command behaviour").
+    pub fn takeover_summary(claim: &crate::claims::Claim, live: &Liveness) -> String {
+        let how = match live {
+            Liveness::Live => "live, forced",
+            Liveness::Stale(_) => "stale",
+        };
+        format!(
+            "took over session {} (owner {}, {how})",
+            claim.session, claim.owner
+        )
     }
 
     pub fn describe_claim(claim: &crate::claims::Claim, live: &Liveness) -> String {
@@ -285,12 +304,14 @@ impl Ctx {
                         "took over a live claim held by {}",
                         Ctx::describe_claim(existing, &live)
                     ));
+                    self.takeover = Some(Ctx::takeover_summary(existing, &live));
                 }
                 (Liveness::Stale(_), false) => {
                     warning = Some(format!(
                         "took over {}",
                         Ctx::describe_claim(existing, &live)
                     ));
+                    self.takeover = Some(Ctx::takeover_summary(existing, &live));
                 }
                 _ => {}
             }

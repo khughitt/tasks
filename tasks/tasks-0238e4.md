@@ -1,15 +1,16 @@
 ---
 id: tasks-0238e4
 title: Keep hostnames and absolute worktree paths out of generated takeover notes
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: fix/takeover-notes
 created: 2026-09-19T13:13:54Z
-updated: 2026-09-30T14:45:49Z
+updated: 2026-09-30T14:49:13Z
 started: 2026-09-30T14:45:49Z
+completed: 2026-09-30T14:49:13Z
 depends: []
 parent: tasks-ea2a79
 tags: [feedback, idea, "from:tui"]
@@ -30,4 +31,10 @@ Original report: tasks start --force writes 'took over session … host <name>, 
 
 - 2026-09-30T09:53:59Z (main): scope: scoped; narrowed to the observed takeover leak; park already persists machine details only outside git; s/mid/direct; brief: docs/notes/2026-09-30-note-integrity-brief.md
 - 2026-09-30T14:45:49Z (main): started
+  provenance: {"harness_session":"claude-code:30d2809d-2d77-4c34-b242-55903be96b97","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T14:45:50Z (fix/takeover-notes): resumed
+  provenance: {"harness_session":"claude-code:30d2809d-2d77-4c34-b242-55903be96b97","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T14:49:13Z (fix/takeover-notes): done
+  provenance: {"harness_session":"claude-code:30d2809d-2d77-4c34-b242-55903be96b97","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T14:49:13Z (fix/takeover-notes): start's takeover note is now a summary (displaced session, owner, live-forced or stale); host, pid, worktree, and the staleness diagnostic stay in the warning, claimed error, and claim store; park unchanged and now covered; work-claims spec updated
   provenance: {"harness_session":"claude-code:30d2809d-2d77-4c34-b242-55903be96b97","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

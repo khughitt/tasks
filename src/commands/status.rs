@@ -14,17 +14,14 @@ pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
             format!("doing (`tasks unshelve {id}` first)"),
         ));
     }
-    let before = ctx.warnings.len();
     transition(&mut ctx, &mut task, Status::Doing, force)?;
     let owner = owner_name(&ctx.project)?;
     task.owner = Some(owner.clone());
     // A takeover displaces someone; the task's own record should say so, not just the
-    // ephemeral warning stream.
-    for takeover in ctx.warnings[before..]
-        .iter()
-        .filter(|w| w.starts_with("took over "))
-    {
-        append_note(&mut task, &owner, takeover)?;
+    // ephemeral warning stream. It keeps the summary: the warning's host, pid, and
+    // worktree would publish machine details with the record.
+    if let Some(takeover) = ctx.takeover.take() {
+        append_note(&mut task, &owner, &takeover)?;
     }
     save(&mut ctx, &mut task)?;
     warn_if_uncommitted_with_worktrees(&mut ctx, &task);

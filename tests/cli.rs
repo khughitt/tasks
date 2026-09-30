@@ -8822,6 +8822,148 @@ fn force_takeover_records_a_note_naming_the_displaced_session() {
     );
 }
 
+/// Machine details no task record may carry: a claim naming them, whose pid is either this
+/// test process (live) or one no process holds on this boot (stale, "pid … is gone").
+const LEAK_HOST: &str = "leakhost-q7z";
+const LEAK_WORKTREE: &str = "/sync-root-x9k/proj/.worktrees/leak";
+const GONE_PID: u32 = 4_194_303;
+
+fn write_detailed_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
+    let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+    let (pid, pid_start) = if live {
+        let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+        let rest = stat.rsplit_once(") ").unwrap().1.to_string();
+        let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
+        (std::process::id(), start)
+    } else {
+        (GONE_PID, 1)
+    };
+    let path = env.claim_store(prefix);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&format!(
+        "[claims.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\npid = {pid}\n\
+         pid_start = {pid_start}\nboot_id = \"{}\"\nhost = \"{LEAK_HOST}\"\n\
+         worktree = \"{LEAK_WORKTREE}\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
+         seen = \"2026-01-01T00:00:00Z\"\n",
+        boot.trim()
+    ));
+    std::fs::write(&path, text).unwrap();
+}
+
+fn warnings_text(out: &std::process::Output) -> String {
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    warnings_of(&v).join("\n")
+}
+
+fn assert_no_machine_details(raw: &str, pid: u32) {
+    for leak in [
+        LEAK_HOST,
+        LEAK_WORKTREE,
+        &format!("pid {pid}"),
+        "host ",
+        "worktree ",
+    ] {
+        assert!(!raw.contains(leak), "the record carries {leak:?}: {raw}");
+    }
+}
+
+#[test]
+fn a_forced_takeover_note_names_the_session_without_machine_details() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_detailed_claim(&env, "sci", &id, "agent-a", true);
+
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["start", "--force", &id])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let warnings = warnings_text(&out);
+    let pid = std::process::id();
+    for detail in [LEAK_HOST, LEAK_WORKTREE, &format!("pid {pid}")] {
+        assert!(
+            warnings.contains(detail),
+            "the warning keeps {detail:?}: {warnings}"
+        );
+    }
+
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        raw.contains("took over session agent-a (owner someone, live, forced)"),
+        "{raw}"
+    );
+    assert_no_machine_details(&raw, pid);
+    let claim = &env.json(&sci, &["show", &id])["claim"];
+    assert_eq!(claim["session"], "agent-b");
+    assert!(!claim["host"].as_str().unwrap().is_empty(), "{claim}");
+    assert!(!claim["worktree"].as_str().unwrap().is_empty(), "{claim}");
+}
+
+#[test]
+fn a_stale_takeover_note_names_the_session_without_machine_details() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_detailed_claim(&env, "sci", &id, "agent-a", false);
+
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let warnings = warnings_text(&out);
+    let gone = format!("pid {GONE_PID} is gone");
+    for detail in [LEAK_HOST, LEAK_WORKTREE, gone.as_str()] {
+        assert!(
+            warnings.contains(detail),
+            "the warning keeps {detail:?}: {warnings}"
+        );
+    }
+
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(
+        raw.contains("took over session agent-a (owner someone, stale)"),
+        "{raw}"
+    );
+    assert_no_machine_details(&raw, GONE_PID);
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "agent-b"
+    );
+}
+
+#[test]
+fn a_park_over_a_stale_claim_keeps_machine_details_out_of_its_note() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    write_detailed_claim(&env, "sci", &id, "agent-a", false);
+
+    let out = as_agent(&env, &sci, "agent-b")
+        .args(["park", &id, "carry on"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let warnings = warnings_text(&out);
+    for detail in [LEAK_HOST, LEAK_WORKTREE] {
+        assert!(
+            warnings.contains(detail),
+            "the warning keeps {detail:?}: {warnings}"
+        );
+    }
+
+    let raw = env.read(&sci, &format!("tasks/{id}.md"));
+    assert!(raw.contains("parked (waiting on agent): carry on"), "{raw}");
+    assert!(!raw.contains("took over"), "{raw}");
+    assert_no_machine_details(&raw, GONE_PID);
+    let park = &env.json(&sci, &["show", &id])["park"];
+    assert_eq!(park["session"], "agent-b");
+    assert!(!park["host"].as_str().unwrap().is_empty(), "{park}");
+    assert!(!park["worktree"].as_str().unwrap().is_empty(), "{park}");
+}
+
 #[test]
 fn a_displaced_session_cannot_close_the_task_it_lost() {
     let mut env = TestEnv::new();
