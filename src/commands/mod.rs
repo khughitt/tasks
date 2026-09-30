@@ -1029,7 +1029,7 @@ fn escalation_retry_hint(id: &TaskId, given: Option<Complexity>) -> String {
 /// claim with no file update makes an idle task look busy and self-heals when the session
 /// dies, while a file update with no claim is the invisibility bug this exists to remove.
 pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
-    task.updated = crate::time::now();
+    task.updated = crate::time::after(&task.updated)?;
     validate_task(task)?;
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
