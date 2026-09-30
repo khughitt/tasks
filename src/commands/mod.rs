@@ -1327,18 +1327,11 @@ pub fn run(cli: Cli) -> Result<Output> {
             deferred,
         ),
         Command::Ready {
-            size,
-            parallel,
+            filter,
             limit,
             max_complexity,
             scope,
-        } => list::ready(
-            open_read_ctx(dir, &scope)?,
-            size,
-            parallel,
-            limit,
-            max_complexity,
-        ),
+        } => list::ready(open_read_ctx(dir, &scope)?, filter, limit, max_complexity),
         Command::Next {
             max_complexity,
             scope,

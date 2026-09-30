@@ -11562,7 +11562,7 @@ fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
     );
     assert_eq!(
         env.complete(&sci, "bash", 3, &["tasks", "ready", "--size", ""]),
-        ["xs", "s", "m", "l", "xl"]
+        ["xs", "s", "m", "l", "xl", "none"]
     );
     assert_eq!(
         env.complete(&sci, "bash", 3, &["tasks", "list", "--sort", ""]),
@@ -15896,26 +15896,15 @@ fn ready_and_next_hide_above_cutoff_and_unassessed_with_counts() {
         .collect();
     assert_eq!(warnings, vec!["max-complexity high: 1 unassessed hidden"]);
 
-    // The cutoff composes with --size and --parallel, and its counts are the cutoff's
-    // alone: the size and parallel filters run after it and are not counted (spec §4.1).
+    // The selection runs before the cutoff, so the cutoff's counts cover only selected
+    // tasks (docs/specs/2026-09-30-task-filters-design.md, amending complexity §4.1):
+    // only Low is size s, and Low is within the cutoff.
     env.json(&sci, &["edit", &low, "--size", "s", "--parallel"]);
     env.json(&sci, &["edit", &mid, "--size", "m"]);
     let v = env.json(&sci, &["ready", "--max-complexity", "mid", "--size", "s"]);
     assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
     assert_eq!(v["tasks"][0]["id"], low);
-    let warnings: Vec<&str> = v["warnings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|w| w.as_str().unwrap())
-        .collect();
-    assert_eq!(
-        warnings,
-        vec![
-            "max-complexity mid: 1 above cutoff hidden",
-            "max-complexity mid: 1 unassessed hidden"
-        ]
-    );
+    assert!(v["warnings"].as_array().unwrap().is_empty(), "{v}");
     let v = env.json(&sci, &["ready", "--max-complexity", "mid", "--parallel"]);
     assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
     assert_eq!(v["tasks"][0]["id"], low);
@@ -18130,6 +18119,18 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
             vec!["projects", "--sort", "size"],
         ),
         ((vec!["ready"], "--size"), vec!["ready", "--size", "m"]),
+        (
+            (vec!["ready"], "--priority"),
+            vec!["ready", "--priority", "1"],
+        ),
+        (
+            (vec!["ready"], "--complexity"),
+            vec!["ready", "--complexity", "mid"],
+        ),
+        (
+            (vec!["ready"], "--process"),
+            vec!["ready", "--process", "direct"],
+        ),
         (
             (vec!["ready"], "--max-complexity"),
             vec!["ready", "--max-complexity", "low"],
@@ -20688,4 +20689,94 @@ fn list_filter_flags_complete_with_none() {
         env.complete_values(&sci, "bash", 3, &["tasks", "list", "-p", ""]),
         vec!["0", "1", "2", "3", "4"]
     );
+}
+
+#[test]
+fn ready_takes_the_list_filters() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal", "-p", "1"]));
+    let child = id_of(env.json(
+        &sci,
+        &[
+            "add", "Child", "-p", "0", "--size", "s", "--tag", "cli", "--parent", &goal,
+        ],
+    ));
+    let loose = id_of(env.json(&sci, &["add", "Loose", "-p", "2"]));
+    let medium = id_of(env.json(&sci, &["add", "Medium", "-p", "3", "--size", "m"]));
+
+    let ids = |args: &[&str]| list_ids(&env.json(&sci, args));
+    assert_eq!(ids(&["ready", "-p", "0"]), std::slice::from_ref(&child));
+    assert_eq!(
+        ids(&["ready", "--tag", "cli"]),
+        std::slice::from_ref(&child)
+    );
+    assert_eq!(
+        ids(&["ready", "--parent", &goal]),
+        std::slice::from_ref(&child)
+    );
+    assert_eq!(
+        ids(&["ready", "--size", "s", "--size", "none"]),
+        [child.clone(), loose.clone()]
+    );
+    assert_eq!(
+        ids(&["ready", "--size", "m"]),
+        [medium],
+        "one value, as before"
+    );
+    assert_eq!(
+        env.fail(&sci, &["ready", "--parent", "not-an-id"]),
+        "invalid_id"
+    );
+    assert_eq!(
+        env.fail(&sci, &["ready", "--parent", "sci-abcdef"]),
+        "task_not_found"
+    );
+}
+
+#[test]
+fn ready_warns_only_about_selected_tasks() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let small = id_of(env.json(&sci, &["add", "Small", "--size", "s"]));
+    let claimed = id_of(env.json(&sci, &["add", "Claimed", "--size", "m"]));
+    write_claim(&env, "sci", &claimed, "other-session", true);
+
+    let v = env.json(&sci, &["ready"]);
+    assert!(v["warnings"].to_string().contains(&claimed), "{v}");
+    let v = env.json(&sci, &["ready", "--size", "s"]);
+    assert_eq!(list_ids(&v), [small]);
+    assert!(
+        !v["warnings"].to_string().contains(&claimed),
+        "a claimed task outside the selection is not reported: {v}"
+    );
+}
+
+#[test]
+fn ready_selection_and_cutoff_intersect() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let mid = id_of(env.json(&sci, &["add", "Mid", "--complexity", "mid"]));
+    env.json(&sci, &["add", "High", "--complexity", "high"]);
+    env.json(&sci, &["add", "Unassessed"]);
+
+    let v = env.json(
+        &sci,
+        &["ready", "--complexity", "mid", "--max-complexity", "mid"],
+    );
+    assert_eq!(list_ids(&v), [mid]);
+    assert!(v["warnings"].as_array().unwrap().is_empty(), "{v}");
+
+    let v = env.json(
+        &sci,
+        &["ready", "--complexity", "high", "--max-complexity", "mid"],
+    );
+    assert!(list_ids(&v).is_empty());
+    let warnings: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap())
+        .collect();
+    assert_eq!(warnings, vec!["max-complexity mid: 1 above cutoff hidden"]);
 }

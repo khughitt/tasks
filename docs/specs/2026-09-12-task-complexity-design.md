@@ -87,8 +87,10 @@ Three levels, not five: three is what raters reproduce across weeks.
 
 The cutoff applies to every feed a session picks from:
 
-- `ready`: tasks above the level and unassessed tasks are removed before `--size`,
-  `--parallel`, and `-n`.
+- `ready`: the selection filters (`--priority`, `--size`, `--complexity`, `--process`,
+  `--tag`, `--owner`, `--source`, `--parent`, `--parallel`) run first, at candidacy
+  (amended by `2026-09-30-task-filters-design.md`); the cutoff then removes tasks above
+  the level and unassessed tasks, before `-n`. Its counts cover only selected tasks.
 - `next`: both candidate paths — the parked work waiting on the agent that `next` prefers,
   and the ready list behind it.
 - `prime`: the ready and closeout sections, each by the task's own rating; a goal whose
@@ -273,8 +275,8 @@ End-to-end in `tests/cli.rs` against the built binary:
 - Frontmatter round-trip; `add`/`edit --complexity`; `--no-complexity`; invalid value
   rejected on `add`, `edit`, the flag, and the variable.
 - `ready --max-complexity mid` hides `high` and unassessed, keeps `low` and `mid`, and
-  emits exactly the warnings whose counts are non-zero; composes with `--size`,
-  `--parallel`, `-n`.
+  emits exactly the warnings whose counts are non-zero; composes with the selection
+  filters and `-n`, counting only selected tasks.
 - `next` under a cutoff skips a parked-waiting-on-agent task rated above it and falls
   through to the ready list; with nothing eligible returns null with the warnings.
 - Two worktrees of one project, through the lifecycle: escalate in A with

@@ -4,7 +4,7 @@ use crate::cli::FilterArgs;
 use crate::error::Result;
 use crate::filter::{Fields, TaskFilter, check_parent};
 use crate::halt::{self, HaltSnapshot};
-use crate::model::{Size, Status, Task, TaskId};
+use crate::model::{Status, Task, TaskId};
 use crate::output::{
     Counts, DateColumn, DeferredSummary, HaltRow, ListOut, NextOut, Output, ParkedOut,
     PeriodicSummary, PrimeOut, TaskSummary,
@@ -149,11 +149,18 @@ pub fn ready_tasks(
     all: &[Task],
     claims: &crate::claims::ClaimSnapshot,
     snapshots: &HashMap<String, HaltSnapshot>,
+    filter: &TaskFilter,
     now: OffsetDateTime,
 ) -> Result<Picked> {
     let mut warnings = Vec::new();
     let mut closed: HashMap<TaskId, Option<bool>> = HashMap::new();
-    for task in all.iter().filter(|task| is_candidate(task, now)) {
+    let selected: Vec<&Task> = all
+        .iter()
+        .filter(|task| {
+            is_candidate(task, now) && filter.matches(&Fields::of_task(task, claims, &ctx.registry))
+        })
+        .collect();
+    for task in &selected {
         for dependency in &task.depends {
             if closed.contains_key(dependency) {
                 continue;
@@ -166,10 +173,7 @@ pub fn ready_tasks(
     let lookup = |id: &TaskId| -> Option<bool> { closed.get(id).copied().flatten() };
     let mut ready = Vec::new();
     let mut deferred = Vec::new();
-    for task in all {
-        if !is_candidate(task, now) {
-            continue;
-        }
+    for task in selected {
         for dependency in &task.depends {
             if lookup(dependency).is_none() {
                 warnings.push(format!(
@@ -287,17 +291,17 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
 
 pub fn ready(
     mut ctx: ReadCtx,
-    size: Option<String>,
-    parallel: bool,
+    filter: FilterArgs,
     limit: Option<usize>,
     max_complexity: Option<String>,
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
-    let size = size.map(|size| Size::parse(&size)).transpose()?;
+    let filter = TaskFilter::parse(&filter, &[], &ctx.registry)?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    check_parent(&filter, &all, |_| false)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let mut picked = ready_tasks(&mut ctx, &all, &claims, &snapshots, now)?;
+    let mut picked = ready_tasks(&mut ctx, &all, &claims, &snapshots, &filter, now)?;
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut picked.tasks, &snapshots);
     warn_hidden(&mut ctx, hidden);
@@ -306,14 +310,6 @@ pub fn ready(
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
         let _ = crate::complexity::apply(&mut picked.deferred, cutoff, &claims);
-    }
-    if let Some(size) = size {
-        picked.tasks.retain(|task| task.size == Some(size));
-        picked.deferred.retain(|task| task.size == Some(size));
-    }
-    if parallel {
-        picked.tasks.retain(|task| task.parallel);
-        picked.deferred.retain(|task| task.parallel);
     }
     if let Some(warning) = deferred_omission(&picked.deferred) {
         ctx.warnings.push(warning);
@@ -342,7 +338,14 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let candidates = super::parked::candidates(&mut ctx, &all, &claims, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let ready = ready_tasks(&mut ctx, &all, &claims, &snapshots, now)?;
+    let ready = ready_tasks(
+        &mut ctx,
+        &all,
+        &claims,
+        &snapshots,
+        &TaskFilter::default(),
+        now,
+    )?;
     // One pool in pick order — parked candidates first, then the ready list — with each
     // task once, so a parked todo that is also ready is hidden and counted once.
     let mut pool = candidates.tasks;
@@ -481,7 +484,15 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let counts = Counts::of(&all);
     let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let mut ready = ready_tasks(&mut ctx, &all, &claims, &snapshots, now)?.tasks;
+    let mut ready = ready_tasks(
+        &mut ctx,
+        &all,
+        &claims,
+        &snapshots,
+        &TaskFilter::default(),
+        now,
+    )?
+    .tasks;
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut ready, &snapshots);
     warn_hidden(&mut ctx, hidden);

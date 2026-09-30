@@ -377,17 +377,8 @@ pub enum Command {
     },
     /// Actionable tasks: todo or due recurrences with all dependencies closed.
     Ready {
-        /// Only tasks of this size.
-        #[arg(
-            long,
-            add = ArgValueCandidates::new(crate::complete::sizes),
-            add = ValueSet,
-            value_parser = ValueSet
-        )]
-        size: Option<String>,
-        /// Only tasks marked safe to run beside each other.
-        #[arg(long)]
-        parallel: bool,
+        #[command(flatten)]
+        filter: FilterArgs,
         /// At most this many.
         #[arg(short = 'n', long, value_name = "N")]
         limit: Option<usize>,
