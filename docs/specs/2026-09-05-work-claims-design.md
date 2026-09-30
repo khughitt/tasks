@@ -174,8 +174,15 @@ the shared chokepoint covers all four paths at once.
 
 - **Entering `doing`**: acquire. A live claim held by a different session refuses with a new
   `claimed` error kind naming owner, session, host, pid, worktree, and age. `--force` takes
-  it over and appends a note recording the takeover. A stale claim is taken over without
+  it over with a warning carrying the same details. A stale claim is taken over without
   `--force`, but with a warning naming the displaced holder and why it was judged stale.
+  Either takeover appends a note, and the note is a summary, not the warning:
+  `took over session <session> (owner <owner>, live, forced)` or `(…, stale)`. The task
+  record is tracked and may be published, so the host, pid, worktree path, and staleness
+  diagnostic (which can embed a pid) stay in the warning, the `claimed` error, and the
+  claim store, all of which remain on the machine. `park` taking over a stale claim warns
+  the same way and writes no takeover note; its own note carries only the waiting side
+  and the next step, with the host and worktree kept in the park entry.
 - **Any status change to a task under a live foreign claim** — `done`, `drop`, `block`,
   `edit --status`, an interactive edit — refuses with the same error. This is what stops a
   displaced session from closing work it no longer holds: after B takes A's claim, A's later
