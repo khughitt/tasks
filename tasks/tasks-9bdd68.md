@@ -3,9 +3,13 @@ id: tasks-9bdd68
 title: "Focus marker: prefer one goal's subtree in ready, next, and prime"
 status: idea
 priority: 2
+size: m
+complexity: high
+process: planned
 created: 2026-09-11T01:03:10Z
-updated: 2026-09-11T01:03:10Z
+updated: 2026-09-30T10:05:31Z
 depends: []
+parent: tasks-46d207
 tags: [picker, hierarchy]
 ---
 
@@ -22,3 +26,7 @@ Proposed shape:
 Deliberately not: a second hierarchy, dates or time boxes, capacity or velocity. If a time box is ever wanted, an optional `until` on goals with a `prime` warning when it passes is the smallest honest version; wait for that need to be real.
 
 Origin: a "dynamics sprint" filed as a goal in another project; the goal did everything a sprint would except tell the picker to prefer it.
+
+## Notes
+
+- 2026-09-30T10:05:31Z (main): scope: briefed; focus must settle ordering against parked-agent resumes and priority while preserving eligibility; waits on tasks-ece1e2; brief: docs/notes/2026-09-30-work-selection-brief.md

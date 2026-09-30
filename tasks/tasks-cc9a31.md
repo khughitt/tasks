@@ -4,10 +4,15 @@ title: "Notes are append-only with no redaction path: removing a name or path fr
 status: idea
 priority: 2
 created: 2026-09-28T09:46:15Z
-updated: 2026-09-28T09:46:15Z
+updated: 2026-09-30T09:54:01Z
 depends: []
+parent: tasks-ea2a79
 tags: [feedback, gap, "from:tack"]
 agent: claude-code/claude-opus-5-5
 ---
 
 tasks edit <id> via $EDITOR refused with 'notes are append-only; use tasks note' when an edit only rewrote text inside existing notes. Expected: a sanctioned redaction (e.g. tasks redact <id> --note <ts> or a check-validated edit mode) that records that a redaction happened.
+
+## Notes
+
+- 2026-09-30T09:54:01Z (main): scope: briefed; redaction needs an explicit exception to append-only history and safeguards for lifecycle/attachment notes; waits on tasks-1f6d08; brief: docs/notes/2026-09-30-note-integrity-brief.md

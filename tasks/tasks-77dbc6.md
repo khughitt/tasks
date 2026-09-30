@@ -3,9 +3,13 @@ id: tasks-77dbc6
 title: "Project groups: a named set of projects between one project and --all-projects"
 status: idea
 priority: 2
+size: m
+complexity: high
+process: planned
 created: 2026-09-07T21:48:27Z
-updated: 2026-09-07T21:48:27Z
+updated: 2026-09-30T10:04:57Z
 depends: []
+parent: tasks-46d207
 tags: [quick-add]
 source: "mindful:thought:5ccf9506e36842cf8e635e55248040a9"
 ---
@@ -28,3 +32,7 @@ Motivating example: verifiably = nodes, atoms, beliefs, ... (the projects under
 that GitHub org).
 
 Related: tasks-3029be (done) added the registry-wide views this would narrow.
+
+## Notes
+
+- 2026-09-30T10:04:57Z (main): scope: briefed; group membership, storage, and rename behavior need a design contract; captured source retained but mindful lookup is unavailable; waits on tasks-ece1e2; brief: docs/notes/2026-09-30-work-selection-brief.md

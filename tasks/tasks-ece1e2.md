@@ -1,0 +1,21 @@
+---
+id: tasks-ece1e2
+title: Design project groups and goal focus from the work-selection brief
+status: todo
+priority: 2
+size: m
+complexity: high
+process: planned
+created: 2026-09-30T10:04:57Z
+updated: 2026-09-30T10:04:57Z
+depends: []
+parent: tasks-46d207
+tags: []
+agent: codex
+---
+
+Why: tasks-77dbc6 and tasks-9bdd68 need a shared contract for narrowing the project pool and preferring a goal without overriding eligibility.
+Where to start: docs/notes/2026-09-30-work-selection-brief.md; src/scope.rs, src/registry.rs, src/query.rs, src/commands/list.rs::next and ready_tasks, src/commands/parked.rs::candidates; multi-project and park design specs.
+Bound: compare explicit registry groups with repeated project selection; compare opt-in goal preference with current priority ordering. Set membership, alias/rename/unregister behavior, state location, precedence against parked-agent resumes, and closed/missing focus behavior. The original mindful reference is unavailable; its captured task body is the available source. No implementation during design.
+Done: one reviewed design with concrete picker examples, preserved claim/dependency/complexity/deferral gates, command and JSON changes named, and independent implementation slices; obtain the implementation-plan review before code.
+Ideas it wakes: record the resulting decisions on tasks-77dbc6 and tasks-9bdd68 and update the brief in the same commit as the result.
