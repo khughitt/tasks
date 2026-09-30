@@ -24,6 +24,8 @@ mod repo;
 mod resolve;
 mod scope;
 mod similarity;
+#[allow(dead_code)]
+mod stale;
 mod style;
 #[cfg(test)]
 mod surface;

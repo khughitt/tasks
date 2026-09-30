@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: ab8d2d-record-home
 created: 2026-09-30T10:28:06Z
-updated: 2026-09-30T11:26:26Z
+updated: 2026-09-30T11:29:48Z
 started: 2026-09-30T10:28:52Z
 depends: []
 parent: tasks-c4ad8e
@@ -51,3 +51,5 @@ Implements docs/specs/2026-09-30-record-home-design.md (accepted 2026-09-30, tas
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T11:26:26Z (ab8d2d-record-home): parked (waiting on user, decision): Plan approved (round 2). User picks the execution method (subagent-driven recommended, or native); then the agent runs tasks start tasks-2cbfad in .worktrees/ab8d2d-record-home and executes docs/plans/2026-09-30-record-home.md from Task 1
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T11:29:48Z (ab8d2d-record-home): resumed
+  provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}

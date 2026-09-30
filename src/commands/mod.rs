@@ -895,7 +895,7 @@ fn warn_on_newer_sibling_copies(ctx: &mut Ctx, id: &TaskId, loaded: &str) {
     };
     for copy in copies {
         match copy {
-            SiblingCopy::Found { root, updated } if updated.as_str() > loaded => {
+            SiblingCopy::Found { root, updated, .. } if updated.as_str() > loaded => {
                 ctx.warnings.push(format!(
                     "tasks/{id}.md in {} is newer than this copy ({updated} there, {loaded} \
                      here); this write may omit changes from that copy; reconcile the copies \

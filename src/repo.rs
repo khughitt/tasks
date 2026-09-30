@@ -87,8 +87,14 @@ pub struct Project {
 /// One other checkout's copy of a record, as `sibling_task_copies` found it.
 #[derive(Debug)]
 pub enum SiblingCopy {
-    /// The project root the copy was found in, and the `updated` stamp it carries there.
-    Found { root: PathBuf, updated: String },
+    /// The project root the copy was found in, the `updated` stamp it carries there, and
+    /// its bytes, which a same-stamp comparison needs (record-home spec §3.1).
+    Found {
+        root: PathBuf,
+        updated: String,
+        #[allow(dead_code)]
+        raw: String,
+    },
     /// The copy is present but could not be read or parsed.
     Unreadable { root: PathBuf, detail: String },
 }
@@ -553,6 +559,7 @@ impl Project {
                 Ok(task) => copies.push(SiblingCopy::Found {
                     root,
                     updated: task.updated,
+                    raw,
                 }),
                 Err(error) => copies.push(SiblingCopy::Unreadable {
                     root,
