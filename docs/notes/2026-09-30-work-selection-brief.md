@@ -21,7 +21,8 @@ daily selection workflow; they need separate changes rather than a new schedulin
   parked-agent resumes ahead of ready tasks. The proposed goal preference therefore
   needs an explicit precedence rule, not just another sort key.
 - **Quiet visibility (tasks-479a6f):** `TaskSummary` already exposes park fields, but
-  `src/output.rs::task_table` renders no park suffix. `parked_table` already uses
+  the shared pretty table, `src/output.rs::table`, renders no park suffix; it already carries
+  defer, due, and claim-owner row markers to follow. `parked_table` already uses
   `claims::describe_stop` to show the reason and recipe. The quiet-queue design section 4
   and `a_quiet_park_records_its_recipe_in_the_entry_the_note_and_every_park_view` cover
   the existing contract. A shared-table display fix needs no JSON change.

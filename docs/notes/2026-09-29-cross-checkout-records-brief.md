@@ -1,5 +1,14 @@
 # Cross-checkout task records brief
 
+Scoping handoff, 2026-09-29. Goal: tasks-c4ad8e. This is not an approved design.
+
+**Status, 2026-09-30.** tasks-476c6b (b784901) and tasks-2325a1 (dca3e62) are done, and
+tasks-ace27b (ecceb96) extended the main-checkout document fallback from `check` to `show`,
+`add`, and `edit`. Design task tasks-ab8d2d has a draft spec under review,
+`docs/specs/2026-09-30-record-home-design.md` (on its branch until it merges). The user's
+2026-09-30 decision recorded there supersedes this brief's current lean for writes: see
+§Alternatives. The evidence below describes the code as it stood when this brief was written.
+
 ## Problem
 
 A task's record exists once per checkout: the main checkout and every worktree carry their
@@ -62,7 +71,10 @@ its own gate.
    rule of committing before branching and writing only in the worktree afterwards.
 
 Current lean: option 3 now (tasks-476c6b is scoped on its own), then options 2 and 1
-together as the durable fix. The live claim or park names the record's home. `start` is
+together as the durable fix. *Superseded on 2026-09-30: the user decided that a write from a
+copy that is behind refuses for every task, claimed or not, with no override; the record-home
+spec records this and rejects the claimed-or-parked-only scope below.* The lean was: the live
+claim or park names the record's home. `start` is
 the handoff: a re-`start` in a new worktree moves the claim there, and it refuses when a
 sibling copy is newer, so the handoff cannot drop writes made in main. Any other write
 from a checkout that is not home refuses with a typed error that names the home and gives
@@ -77,8 +89,8 @@ checkout, not a `doc_missing` error.
 
 ## Unanswered questions
 
-- Should a write from a non-home checkout refuse, or warn before writing? This is the
-  user's call, because it reverses the "signal, not a gate" decision. Design task
+- Should a write from a non-home checkout refuse, or warn before writing? Answered
+  2026-09-30: a write from a copy that is behind refuses (record-home spec §2). Design task
   tasks-ab8d2d resolves the rest.
 - How does home move to a worktree created after `start`? A re-`start`, a new command, or
   inference from the branch? This is for the design task.
@@ -89,9 +101,10 @@ checkout, not a `doc_missing` error.
 
 - Goal tasks-c4ad8e: keep a task record coherent across checkouts. It is the parent of
   all five ideas.
-- tasks-476c6b (scoped, direct): `prime` resolves live claims on worktree-only tasks from
+- tasks-476c6b (done, b784901): `prime` resolves live claims on worktree-only tasks from
   the claim's worktree.
-- Design task (tasks-ab8d2d): the home checkout for writes and reads. tasks-2c0a1d,
-  tasks-bb53e5 and tasks-fbc32b wait on it.
-- tasks-2325a1 (scoped, direct): `check` looks for missing docs in the main checkout, as
+- Design task (tasks-ab8d2d): the home checkout for writes and reads; spec drafted and under
+  review. tasks-2c0a1d, tasks-bb53e5 and tasks-fbc32b wait on it. tasks-94b9c7, a later
+  report of the tasks-bb53e5 flow, was dropped as its duplicate.
+- tasks-2325a1 (done, dca3e62): `check` looks for missing docs in the main checkout, as
   the user decided on 2026-09-29.
