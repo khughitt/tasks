@@ -148,10 +148,11 @@ fn resolve_recorded(
     )))
 }
 
-/// Reads `id` from the checkout a store entry recorded, with that checkout's whole scan so
-/// the task's children, dependencies, and documents resolve there too (park design §5.3).
-/// `None` when the checkout is gone, belongs to another prefix, or lacks the record.
-pub fn scan_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Task, Vec<Task>)>> {
+/// Opens the checkout a store entry recorded and reads `id` there, with that checkout's
+/// whole scan so the task's children, dependencies, and documents resolve there too (park
+/// design §5.3). `None` when the checkout is gone, belongs to another prefix, or lacks the
+/// record.
+pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Task, Vec<Task>)>> {
     if !crate::scope::has_config(worktree)? {
         return Ok(None);
     }
@@ -163,7 +164,12 @@ pub fn scan_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Task, Vec<T
     let Some(task) = scan.iter().find(|task| task.id == *id).cloned() else {
         return Ok(None);
     };
-    Ok(Some((task, scan)))
+    Ok(Some((project, task, scan)))
+}
+
+/// `open_recorded` without the project, for rows that need only the scan.
+pub fn scan_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Task, Vec<Task>)>> {
+    Ok(open_recorded(id, worktree)?.map(|(_, task, scan)| (task, scan)))
 }
 
 pub fn candidates(

@@ -1,18 +1,25 @@
 use super::Ctx;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::model::Task;
 use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
 use crate::resolve::{DocKind, Resolver};
+use std::path::Path;
 use time::OffsetDateTime;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &id)?;
-    let project = &ctx.project;
-    let task = project.read_task(&id)?;
-    let all = project.scan()?;
-    let claims = crate::claims::ClaimSnapshot::load(std::iter::once(project.prefix.as_str()))?;
+    let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
+    let (recorded, task, all) = match ctx.project.read_task(&id) {
+        Ok(task) => (None, task, ctx.project.scan()?),
+        Err(Error::TaskNotFound(_)) => {
+            let (project, task, all) = recorded_elsewhere(&id, &claims, &mut ctx.warnings)?;
+            (Some(project), task, all)
+        }
+        Err(error) => return Err(error),
+    };
+    let project = recorded.as_ref().unwrap_or(&ctx.project);
     let now = crate::time::parse(&crate::time::now())?;
     let fields = describe(
         project,
@@ -27,6 +34,41 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         fields,
         warnings: ctx.warnings,
     })))
+}
+
+/// Record-home spec §6.1: a record this checkout lacks is read from the checkout named by
+/// its live claim, or else by its park. A record present here is always read here.
+fn recorded_elsewhere(
+    id: &crate::model::TaskId,
+    claims: &crate::claims::ClaimSnapshot,
+    warnings: &mut Vec<String>,
+) -> Result<(Project, Task, Vec<Task>)> {
+    let named = claims
+        .live(id)
+        .map(|claim| ("claimed", claim.worktree.as_str()))
+        .or_else(|| {
+            claims
+                .park(id)
+                .map(|park| ("parked", park.worktree.as_str()))
+        });
+    let Some((how, worktree)) = named else {
+        return Err(Error::TaskNotFound(id.to_string()));
+    };
+    let unavailable = |why: String| {
+        Error::TaskNotFound(id.to_string()).with_suffix(&format!(
+            " ({how} in {worktree}, which is unavailable{why})"
+        ))
+    };
+    match super::parked::open_recorded(id, Path::new(worktree)) {
+        Ok(Some(found)) => {
+            warnings.push(format!(
+                "{id} exists only in {worktree}; shown from that checkout"
+            ));
+            Ok(found)
+        }
+        Ok(None) => Err(unavailable(String::new())),
+        Err(error) => Err(unavailable(format!(": {error}"))),
+    }
 }
 
 /// The `show` view of `task`, which lives in `project`. `all` is a scan containing that

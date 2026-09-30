@@ -9475,7 +9475,15 @@ fn git(dir: &std::path::Path, args: &[&str]) {
 /// A project that is its own git repository, with one task committed, plus a second
 /// worktree branched from that commit. Returns the two project roots and the task id.
 fn repo_with_worktree(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf, String) {
-    let main = env.init("sci");
+    repo_with_worktree_as(env, "sci")
+}
+
+/// `repo_with_worktree` for a project with the given prefix.
+fn repo_with_worktree_as(
+    env: &mut TestEnv,
+    prefix: &str,
+) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let main = env.init(prefix);
     git(&main, &["init", "-q", "-b", "main"]);
     let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
     git(&main, &["add", "-A"]);
@@ -19330,4 +19338,96 @@ fn a_claim_held_by_proof_moves_with_its_holder() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(claim_worktree(&env, &main, &id), side.display().to_string());
+}
+
+#[test]
+fn show_reads_a_worktree_only_task_from_the_checkout_its_claim_or_park_names() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let claimed = id_of(env.json(&side, &["add", "Claimed there", "-p", "2"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &claimed])
+        .assert()
+        .success();
+    let v = env.json(&main, &["show", &claimed]);
+    assert_eq!(v["task"]["title"], "Claimed there", "{v}");
+    assert!(
+        warnings_of(&v).contains(&format!(
+            "{claimed} exists only in {}; shown from that checkout",
+            side.display()
+        )),
+        "{v}"
+    );
+
+    let parked = id_of(env.json(&side, &["add", "Parked there", "-p", "2"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &parked])
+        .assert()
+        .success();
+    as_agent(&env, &side, "agent-a")
+        .args(["park", &parked, "pick it up"])
+        .assert()
+        .success();
+    let v = env.json(&main, &["show", &parked]);
+    assert_eq!(v["task"]["title"], "Parked there", "{v}");
+    assert_eq!(v["park"]["next_step"], "pick it up", "{v}");
+}
+
+#[test]
+fn show_of_another_projects_worktree_only_task_falls_back_through_its_claims() {
+    let mut env = TestEnv::new();
+    let here = env.init("sci");
+    let (_, side, _) = repo_with_worktree_as(&mut env, "oth");
+    let id = id_of(env.json(&side, &["add", "Over there", "-p", "2"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let v = env.json(&here, &["show", &id]);
+    assert_eq!(v["task"]["title"], "Over there", "{v}");
+    assert!(
+        warnings_of(&v).iter().any(|w| w.contains("exists only in")),
+        "{v}"
+    );
+}
+
+#[test]
+fn show_names_the_checkout_when_the_one_holding_the_task_is_gone() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let id = id_of(env.json(&side, &["add", "Lost", "-p", "2"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    git(
+        &main,
+        &["worktree", "remove", "--force", side.to_str().unwrap()],
+    );
+    let error = error_of(&env, &main, &["show", &id]);
+    assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!(
+            "claimed in {}, which is unavailable",
+            side.display()
+        )),
+        "{detail}"
+    );
+}
+
+#[test]
+fn show_reads_the_local_copy_even_when_the_claimed_one_is_newer() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let v = env.json(&main, &["show", &id]);
+    assert_eq!(v["task"]["status"], "todo", "{v}");
+    assert!(
+        !warnings_of(&v).iter().any(|w| w.contains("exists only in")),
+        "{v}"
+    );
 }
