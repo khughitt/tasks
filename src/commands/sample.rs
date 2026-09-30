@@ -95,6 +95,7 @@ pub fn sample(
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
+        halts: vec![],
         warnings: ctx.warnings,
         date: DateColumn::Updated,
     }))

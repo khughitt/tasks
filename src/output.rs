@@ -173,7 +173,19 @@ pub struct ShowOut {
 #[derive(Serialize)]
 pub struct NextOut {
     pub next: Option<ShowFields>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub halts: Vec<HaltRow>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct HaltRow {
+    pub id: String,
+    pub title: String,
+    pub owner: Option<String>,
+    pub priority: u8,
+    #[serde(skip)]
+    pub present_locally: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -559,6 +571,8 @@ pub enum DateColumn {
 #[derive(Serialize)]
 pub struct ListOut {
     pub tasks: Vec<TaskSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub halts: Vec<HaltRow>,
     pub warnings: Vec<String>,
     #[serde(skip)]
     pub date: DateColumn,
@@ -772,6 +786,8 @@ pub struct PrimeOut {
     pub doing: Vec<TaskSummary>,
     pub roadmap: Vec<TreeNode>,
     pub closeout: Vec<TaskSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub halts: Vec<HaltRow>,
     pub warnings: Vec<String>,
 }
 
@@ -837,6 +853,29 @@ pub fn render(out: &Output, format: Format, painter: &Painter, wrap: Wrap) -> St
     }
 }
 
+fn halt_line(halts: &[HaltRow]) -> String {
+    if halts.is_empty() {
+        return String::new();
+    }
+    let named = halts
+        .iter()
+        .map(|halt| {
+            let owner = halt
+                .owner
+                .as_ref()
+                .map_or(String::new(), |owner| format!(", owner {owner}"));
+            format!("{} (P{}, {}{})", halt.id, halt.priority, halt.title, owner)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let missing = if halts.iter().any(|halt| !halt.present_locally) {
+        "; start a halt absent here from its registered checkout"
+    } else {
+        ""
+    };
+    format!("halt: {named}; allowed: halt work, linked work, or equally urgent priority{missing}\n")
+}
+
 fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
     match out {
         Output::Init(o) => o.prefix.clone(),
@@ -888,18 +927,26 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             grid_text(&grid, painter)
         }
         Output::Show(o) => show_text(&o.fields, painter),
-        Output::Next(o) => match &o.next {
-            Some(fields) => show_text(fields, painter),
-            None => "nothing ready".into(),
-        },
-        Output::List(o) => table(
-            &o.tasks,
-            o.date,
-            painter,
-            id_width(o.tasks.iter().map(|row| row.id.as_str())),
-            any_parallel(&o.tasks),
-            any_type(&o.tasks),
-            wrap,
+        Output::Next(o) => format!(
+            "{}{}",
+            halt_line(&o.halts),
+            match &o.next {
+                Some(fields) => show_text(fields, painter),
+                None => "nothing ready".into(),
+            }
+        ),
+        Output::List(o) => format!(
+            "{}{}",
+            halt_line(&o.halts),
+            table(
+                &o.tasks,
+                o.date,
+                painter,
+                id_width(o.tasks.iter().map(|row| row.id.as_str())),
+                any_parallel(&o.tasks),
+                any_type(&o.tasks),
+                wrap,
+            )
         ),
         Output::Parked(o) => parked_table(
             &o.tasks,
@@ -963,7 +1010,7 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                     format!("{} {value}", column.label)
                 })
                 .collect();
-            let mut rendered = format!("{header}\n{}\n", counts.join("  "));
+            let mut rendered = format!("{}{header}\n{}\n", halt_line(&o.halts), counts.join("  "));
             if o.periodic.scheduled > 0 {
                 let next = o
                     .periodic
@@ -2066,6 +2113,7 @@ mod tests {
         // be as wide as the longest one, or every later column shifts per row.
         let out = Output::List(ListOut {
             tasks: vec![row("forge-0e720e", false), row("nrp-8e8fde", false)],
+            halts: vec![],
             warnings: vec![],
             date: DateColumn::Updated,
         });
@@ -2181,6 +2229,7 @@ mod tests {
     fn theme_gates_cover_dates_and_priorities() {
         let list = Output::List(ListOut {
             tasks: vec![],
+            halts: vec![],
             warnings: vec![],
             date: DateColumn::Updated,
         });

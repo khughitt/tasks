@@ -1,9 +1,10 @@
 use super::ReadCtx;
 use crate::claims::WaitingOn;
 use crate::error::{Error, Result};
+use crate::halt::{self, HaltSnapshot};
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::{
-    Counts, DateColumn, DeferredSummary, ListOut, NextOut, Output, ParkedOut, ParkedRow,
+    Counts, DateColumn, DeferredSummary, HaltRow, ListOut, NextOut, Output, ParkedOut, ParkedRow,
     PeriodicSummary, PrimeOut, TaskSummary,
 };
 use crate::query::{
@@ -107,6 +108,7 @@ pub fn list(
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
+        halts: vec![],
         warnings: ctx.warnings,
         date: if periodic || deferred {
             DateColumn::Due
@@ -263,6 +265,71 @@ pub fn ready_tasks(
     })
 }
 
+fn halt_snapshots(ctx: &mut ReadCtx, all: &[Task]) -> HashMap<String, HaltSnapshot> {
+    let mut snapshots = HashMap::new();
+    for project in ctx.scope.projects() {
+        let local: Vec<Task> = all
+            .iter()
+            .filter(|task| task.id.prefix == project.prefix)
+            .cloned()
+            .collect();
+        match halt::snapshot(project, &ctx.registry, &local) {
+            Ok(snapshot) => {
+                snapshots.insert(project.prefix.clone(), snapshot);
+            }
+            Err(error) => ctx.warnings.push(format!(
+                "{}: halt state unknown ({error}); start will check again",
+                project.prefix
+            )),
+        }
+    }
+    if matches!(ctx.scope, Scope::All(_)) {
+        let scoped = ctx.scope.prefixes();
+        for prefix in ctx.registry.projects.keys() {
+            if !scoped.contains(prefix) {
+                ctx.warnings.push(format!(
+                    "{prefix}: halt state unknown (registered checkout unreachable)"
+                ));
+            }
+        }
+    }
+    snapshots
+}
+
+fn halt_rows(snapshots: &HashMap<String, HaltSnapshot>, all: &[Task]) -> Vec<HaltRow> {
+    let mut rows: Vec<HaltRow> = snapshots
+        .values()
+        .flat_map(|snapshot| {
+            snapshot.halts().iter().map(|halt| HaltRow {
+                id: halt.id.to_string(),
+                title: halt.title.clone(),
+                owner: halt.owner.clone(),
+                priority: halt.priority,
+                present_locally: all.iter().any(|task| task.id == halt.id),
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| (a.priority, &a.id).cmp(&(b.priority, &b.id)));
+    rows
+}
+
+fn retain_allowed(tasks: &mut Vec<Task>, snapshots: &HashMap<String, HaltSnapshot>) -> usize {
+    let before = tasks.len();
+    tasks.retain(|task| {
+        snapshots
+            .get(&task.id.prefix)
+            .is_none_or(|halt| halt.allows(task))
+    });
+    before - tasks.len()
+}
+
+fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
+    if hidden > 0 {
+        ctx.warnings
+            .push(format!("{hidden} ready task(s) hidden by halt"));
+    }
+}
+
 pub fn ready(
     mut ctx: ReadCtx,
     size: Option<String>,
@@ -275,6 +342,10 @@ pub fn ready(
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let mut picked = ready_tasks(&mut ctx, &all, &claims, now)?;
+    let snapshots = halt_snapshots(&mut ctx, &all);
+    let halts = halt_rows(&snapshots, &all);
+    let hidden = retain_allowed(&mut picked.tasks, &snapshots);
+    warn_hidden(&mut ctx, hidden);
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut picked.tasks, cutoff, &claims);
         ctx.warnings
@@ -301,6 +372,7 @@ pub fn ready(
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
+        halts,
         warnings: ctx.warnings,
         date: DateColumn::Updated,
     }))
@@ -323,6 +395,10 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
             pool.push(task);
         }
     }
+    let snapshots = halt_snapshots(&mut ctx, &all);
+    let halts = halt_rows(&snapshots, &all);
+    let hidden = retain_allowed(&mut pool, &snapshots);
+    warn_hidden(&mut ctx, hidden);
     let mut omitted = candidates.deferred;
     for task in ready.deferred {
         if !omitted.iter().any(|held| held.id == task.id) {
@@ -363,6 +439,7 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
     };
     Ok(Output::Next(Box::new(NextOut {
         next,
+        halts,
         warnings: ctx.warnings,
     })))
 }
@@ -449,6 +526,10 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let counts = Counts::of(&all);
     let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
     let mut ready = ready_tasks(&mut ctx, &all, &claims, now)?.tasks;
+    let snapshots = halt_snapshots(&mut ctx, &all);
+    let halts = halt_rows(&snapshots, &all);
+    let hidden = retain_allowed(&mut ready, &snapshots);
+    warn_hidden(&mut ctx, hidden);
     let mut doing: Vec<Task> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
@@ -571,6 +652,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
+        halts,
         warnings: ctx.warnings,
     }))
 }

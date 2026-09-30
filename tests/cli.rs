@@ -10212,6 +10212,183 @@ fn halt_start_prepared_override_warns_when_authority_halt_lifts() {
 }
 
 #[test]
+fn halt_views_registered_incident_filters_entry_rows_and_names_missing_halt() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    for command in ["prime", "ready", "next"] {
+        let output = env.json(&side, &[command]);
+        assert_eq!(output["halts"][0]["id"], halt, "{command}: {output}");
+        let warnings = warnings_of(&output);
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|warning| warning.contains("hidden by halt"))
+                .count(),
+            1,
+            "{command}: {warnings:?}"
+        );
+        assert!(
+            env.pretty(&side, &[command]).starts_with("halt:"),
+            "{command}"
+        );
+        if command == "next" {
+            assert!(output["next"].is_null(), "{output}");
+        } else if command == "ready" {
+            assert!(
+                output["tasks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["id"] != target)
+            );
+        } else {
+            assert!(
+                output["ready"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["id"] != target)
+            );
+        }
+    }
+    assert!(env.pretty(&side, &["next"]).contains("registered checkout"));
+}
+
+#[test]
+fn halt_views_unhalted_json_omits_metadata() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(&dir, &["add", "Ordinary"]);
+    for command in ["prime", "ready", "next"] {
+        assert!(
+            env.json(&dir, &[command]).get("halts").is_none(),
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn halt_views_all_projects_filter_only_the_halted_project() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let sci_task = id_of(env.json(&sci, &["add", "Sci work", "-p", "2"]));
+    let fam_task = id_of(env.json(&fam, &["add", "Fam work", "-p", "2"]));
+    let halt = id_of(env.json(&sci, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    env.json(&sci, &["shelve", &halt, "pending"]);
+    for command in ["ready", "prime", "next"] {
+        let output = env.json(&fam, &[command, "--all-projects"]);
+        assert_eq!(output["halts"][0]["id"], halt, "{output}");
+        let rows = if command == "prime" {
+            &output["ready"]
+        } else if command == "ready" {
+            &output["tasks"]
+        } else {
+            &output["next"]
+        };
+        assert!(rows.to_string().contains(&fam_task), "{output}");
+        assert!(!rows.to_string().contains(&sci_task), "{output}");
+    }
+}
+
+#[test]
+fn halt_views_unreadable_authority_warns_and_keeps_local_rows() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    std::fs::remove_file(main.join("tasks/.config.toml")).unwrap();
+    for command in ["ready", "prime", "next"] {
+        let output = env.json(&side, &[command]);
+        assert!(output.get("halts").is_none());
+        assert!(output.to_string().contains(&target), "{output}");
+        assert!(
+            warnings_of(&output)
+                .iter()
+                .any(|warning| warning.contains("halt state unknown"))
+        );
+    }
+}
+
+#[test]
+fn halt_views_claimed_shelved_and_deferred_halts_stay_visible() {
+    let mut env = TestEnv::new();
+    let (main, side, _target) = repo_with_worktree(&mut env);
+    let claimed = id_of(env.json(&main, &["add", "Claimed", "-p", "0", "--tag", "halt"]));
+    let shelved = id_of(env.json(&main, &["add", "Shelved", "-p", "1", "--tag", "halt"]));
+    let deferred = id_of(env.json(
+        &main,
+        &[
+            "add",
+            "Deferred",
+            "-p",
+            "2",
+            "--tag",
+            "halt",
+            "--defer",
+            "2099-01-01",
+        ],
+    ));
+    env.json(&main, &["start", &claimed]);
+    env.json(&main, &["shelve", &shelved, "later"]);
+    let ids: Vec<String> = env.json(&side, &["prime"])["halts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, vec![claimed, shelved, deferred]);
+}
+
+#[test]
+fn halt_views_parked_todo_is_hidden_but_parked_doing_resumes() {
+    let mut env = TestEnv::new();
+    let (main, side, todo) = repo_with_worktree(&mut env);
+    env.json(&side, &["park", &todo, "continue"]);
+    env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]);
+    assert!(env.json(&side, &["next"])["next"].is_null());
+    let doing = id_of(env.json(&side, &["add", "Already doing", "-p", "2"]));
+    env.json(&side, &["start", &doing, "--force", "--reason", "initial"]);
+    env.json(&side, &["park", &doing, "resume"]);
+    assert_eq!(env.json(&side, &["next"])["next"]["task"]["id"], doing);
+}
+
+#[test]
+fn halt_views_ready_limit_applies_after_halt_filter() {
+    let mut env = TestEnv::new();
+    let (main, side, hidden) = repo_with_worktree(&mut env);
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    let local_halt = side.join(format!("tasks/{halt}.md"));
+    std::fs::copy(main.join(format!("tasks/{halt}.md")), &local_halt).unwrap();
+    let remedy = id_of(env.json(&side, &["add", "Remedy", "-p", "3", "--parent", &halt]));
+    std::fs::remove_file(local_halt).unwrap();
+    let output = env.json(&side, &["ready", "-n", "1"]);
+    assert_eq!(output["tasks"][0]["id"], remedy);
+    assert_eq!(output["tasks"].as_array().unwrap().len(), 1);
+    assert!(!output["tasks"].to_string().contains(&hidden));
+    assert!(
+        warnings_of(&output)
+            .iter()
+            .any(|warning| warning.starts_with("1 ready task(s) hidden by halt"))
+    );
+}
+
+#[test]
+fn halt_views_all_projects_unreachable_project_reports_unknown_state() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    let output = env.json(&sci, &["ready", "--all-projects"]);
+    assert!(output["tasks"].to_string().contains(&local));
+    assert!(
+        warnings_of(&output)
+            .iter()
+            .any(|warning| warning.contains("fam: halt state unknown"))
+    );
+}
+
+#[test]
 fn a_write_from_a_copy_behind_another_checkout_refuses_and_prints_the_retry() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);
