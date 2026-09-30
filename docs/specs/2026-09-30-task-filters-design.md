@@ -1,6 +1,6 @@
 # One task filter for list and ready — design
 
-**Status:** draft, awaiting review. Task: tasks-964c95.
+**Status:** draft, revised after review round 1, awaiting review. Task: tasks-964c95.
 
 ## Outcome
 
@@ -71,9 +71,12 @@ A new module, `src/filter.rs`:
   `priorities: Vec<u8>`; `sizes`, `complexities`, and `processes` as `Vec<Option<_>>`, where
   `None` means `none`; `tags`; `owner`, `source`, and `parent` as `Option<_>`, with `parent`
   as a canonical `TaskId`; and `parallel: bool`. An empty `Vec` or `None` means that field
-  is not constrained. `TaskFilter::parse(args, statuses, registry)` does the parsing. Parse
-  failures cannot happen at runtime, because clap's `ValueSet` has already rejected unknown
-  values.
+  is not constrained. `TaskFilter::parse(args, statuses, registry) -> Result<TaskFilter>`
+  does the parsing. It is fallible. The enum flags cannot fail there, because clap's
+  `ValueSet` or `u8` range parser has already refused an unknown value as a usage error.
+  `--parent` takes free text, though, and goes through `commands::parse_id`, so
+  `tasks list --parent not-an-id` still fails with the typed `invalid_id` error it gives
+  today. It fails before any scan, as it does now.
 - `Fields<'a>` is the view the filter reads: status, priority, size, effective complexity,
   process, tags, owner, source, canonical parent, and parallel. Two constructors build it:
   `Fields::of_task(&Task, &ClaimSnapshot, &Registry)` and
@@ -94,13 +97,18 @@ keeps today's rule: the parent is also accepted when only a parked row's parent 
 
 ## Command behaviour
 
-- **`list`:** each command still applies its default pool when `--status` is not given.
-  That pool is open tasks except shelved ones, or every status with `--periodic`, and after
-  it comes `TaskFilter::matches`. `--periodic` and `--deferred` stay list-mode flags,
-  because they also change the sort and the date column.
-- **`list --parked`:** rows go through `Fields::of_row`. An unresolved row is still shown
-  only when the filter is empty. This extends today's rule ("shown unless any filter is
-  given") to the new flags.
+When `--status` is not given, each list mode applies its own default status pool and then
+`TaskFilter::matches`. The two pools differ on purpose, and each stays with its caller,
+not in the filter:
+
+- **`list`:** the default pool is open tasks except shelved ones. With `--periodic` it is
+  every status. `--periodic` and `--deferred` stay list-mode flags, because they also change
+  the sort and the date column.
+- **`list --parked`:** the default pool is every open status, **shelved included**. A
+  surviving shelved park stays visible for cleanup, as today; the
+  `parked_shelved_task_is_visible_but_never_a_next_candidate` test covers this. Rows go
+  through `Fields::of_row`. An unresolved row is still shown only when the filter is empty.
+  This extends today's rule ("shown unless any filter is given") to the new flags.
 - **`ready`:** the filter moves to the start of `ready_tasks`, so a candidate that does not
   match is never considered. As a result, the claim-omission, parked-on-user, halt-hidden,
   complexity-cutoff, and deferred-count warnings describe only tasks the caller asked about.
@@ -108,6 +116,14 @@ keeps today's rule: the parent is also accepted when only a parked row's parent 
   `ready --size s` warns about claimed tasks of every size. That output changes to count
   matching tasks only. Dependency resolution still reads every scanned task. `next` and
   `prime` pass an empty filter and behave as before.
+
+  This reverses one rule in the complexity design. Its §4.1 says the cutoff runs "before
+  `--size`, `--parallel`, and `-n`", so the cutoff's hidden counts cover the whole ready
+  pool. Under this design the selection runs first and `-n` still runs last, so a cutoff
+  warning counts only hidden tasks the caller would otherwise have seen. That is what the
+  warning is for; a count that includes sizes the caller excluded overstates it. The same
+  change amends `2026-09-12-task-complexity-design.md` §4.1 and its verification bullet to
+  match, with a pointer to this design.
 
 ## Boundaries
 
@@ -161,7 +177,24 @@ End-to-end tests in `tests/cli.rs`:
   is given;
 - `ready --size s --size none`, `ready -p 0`, `ready --tag`, and `ready --parent`;
 - `ready --size s` with a claimed task of size `m`, which produces no claim-omission warning;
-- a single-value `ready --size` call that behaves as before.
+- a single-value `ready --size` call that selects the same tasks as before;
+- `ready --complexity mid --max-complexity mid` and `ready --complexity high
+  --max-complexity mid`: the selection and the cutoff intersect, and the cutoff's warning
+  counts only selected tasks (the second returns nothing and reports the hidden `high`);
+- `list --parent not-an-id` still fails with `invalid_id`, and `list --parked --parent`
+  on a missing task still fails with `task_not_found`;
+- `list --parked` with a new filter that a shelved parked task matches still shows it.
 
-The existing `list`, `ready`, and conformance tests pass unchanged, apart from the
-cli.toml rows.
+Existing assertions this design changes, updated in the same commit as the behaviour:
+
+- The cutoff composition test in `tests/cli.rs` ("The cutoff composes with --size and
+  --parallel, and its counts are the cutoff's alone") expects the cutoff counts over the
+  whole pool. It now expects counts over the size-`s` and parallel selection only, and its
+  comment cites this design instead of complexity §4.1.
+- The completion test that expects `ready --size` to offer `xs s m l xl` now expects
+  `none` last. The same test gains `list --complexity` and `list --process` cases.
+- The cli.toml rows for `list` and `ready`, through the ops edit and re-vendor described
+  above.
+
+Every other existing `list`, `ready`, `next`, `prime`, and parked test passes without
+edits. A failure there is a regression, not an assertion to update.
