@@ -59,9 +59,9 @@ configuration key is needed.
 Add optional `halts` metadata to `prime`, `ready`, and `next` JSON: each row
 has the halt task's id, title, owner, and priority. Pretty output prints a
 `halt:` line before other sections, naming every halt and the allowed work.
-An absent field means no halt, preserving unhalted output. `ready` filters
-lower-priority new starts and warns once with the number hidden; `next` uses
-the same filter. The halt metadata remains visible even when its task is
+An absent field means no halt, preserving unhalted output. The ready rows in
+`prime`, `ready`, and `next` use one filter for lower-priority new starts and
+warn once with the number hidden. The halt metadata remains visible even when its task is
 already claimed, shelved, deferred, or absent from the caller's worktree.
 Eligible halt tasks that are locally present retain their ordinary ready
 ordering. A worktree whose copy lacks the halt still sees it in metadata and

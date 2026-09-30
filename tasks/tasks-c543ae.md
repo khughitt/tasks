@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: main
 created: 2026-09-30T10:09:44Z
-updated: 2026-09-30T11:14:19Z
+updated: 2026-09-30T11:22:44Z
 started: 2026-09-30T10:58:24Z
 depends: []
 tags: [cross-project]
@@ -27,3 +27,4 @@ Contract in ops docs/specs/2026-09-29-test-latency-escalation-design.md section 
 - 2026-09-30T11:14:06Z (feat/halt-enforcement): Tasks-specific halt design drafted from the approved ops contract: registered checkout authority, start guard and override notes, plus prime/ready/next JSON metadata. User review precedes the implementation plan.
 - 2026-09-30T11:14:19Z (feat/halt-enforcement): parked (waiting on user, review): User reviews .worktrees/halt-enforcement/docs/specs/2026-09-30-halt-enforcement-design.md; after approval the agent writes and reviews the tasks implementation plan in this worktree.
   provenance: {"harness_session":"codex:01a0f1f2-8c7e-71c3-9d0e-3ec49cdcdfef","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T11:22:44Z (feat/halt-enforcement): Spec self-review clarified that prime's ready rows share the same halt filter as ready and next, so the entry view does not suggest starts that the guard will refuse.
