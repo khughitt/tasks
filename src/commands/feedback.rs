@@ -245,6 +245,9 @@ fn recur_into(
         }
         Ok(())
     };
+    // Record-home spec §3.1: under the target's lock, before anything is appended.
+    let (loaded, raw) = ctx.project.read_task_with_raw(id)?;
+    super::refuse_stale_copy(ctx, &loaded, &raw, super::Writer::Feedback)?;
     let mut claims = crate::claims::ClaimStore::load(&ctx.project.prefix)?;
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the owner's public file. The reporting project is already in the note text.

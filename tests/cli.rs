@@ -19103,3 +19103,55 @@ fn a_sibling_that_moves_ahead_while_the_editor_is_open_refuses_and_keeps_the_edi
     );
     assert_eq!(env.json(&main, &["show", &id])["task"]["title"], "T");
 }
+
+#[test]
+fn a_feedback_recurrence_onto_a_copy_behind_the_owners_worktree_refuses_both_ways() {
+    let mut env = TestEnv::new();
+    let owner = env.init("own");
+    accept_feedback(&owner, "the own tool");
+    git(&owner, &["init", "-q", "-b", "main"]);
+    let reporter = env.init("rep");
+    let report = [
+        "feedback",
+        "--project",
+        "own",
+        "slow startup",
+        "--category",
+        "friction",
+    ];
+    let id = env.json(&reporter, &report)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    git(&owner, &["add", "-A"]);
+    git(&owner, &["commit", "-qm", "seed"]);
+    let side = owner.join("wt");
+    git(
+        &owner,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    stamp(&owner, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let file = format!("tasks/{id}.md");
+    let before = env.read(&owner, &file);
+
+    let mut explicit = report.to_vec();
+    explicit.extend(["--recur", id.as_str()]);
+    // The same title again is the automatic match; --recur names it outright.
+    for args in [report.to_vec(), explicit] {
+        let detail = stale_detail(&env, &reporter, &args);
+        assert!(detail.contains(side.to_str().unwrap()), "{detail}");
+        assert!(
+            detail.ends_with("nothing was written. Rerun with --new to file a separate entry"),
+            "{detail}"
+        );
+        assert_eq!(env.read(&owner, &file), before);
+    }
+}
