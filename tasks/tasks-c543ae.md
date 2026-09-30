@@ -6,9 +6,9 @@ priority: 1
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: feat/halt-enforcement
 created: 2026-09-30T10:09:44Z
-updated: 2026-09-30T11:22:44Z
+updated: 2026-09-30T11:38:12Z
 started: 2026-09-30T10:58:24Z
 depends: []
 tags: [cross-project]
@@ -28,3 +28,9 @@ Contract in ops docs/specs/2026-09-29-test-latency-escalation-design.md section 
 - 2026-09-30T11:14:19Z (feat/halt-enforcement): parked (waiting on user, review): User reviews .worktrees/halt-enforcement/docs/specs/2026-09-30-halt-enforcement-design.md; after approval the agent writes and reviews the tasks implementation plan in this worktree.
   provenance: {"harness_session":"codex:01a0f1f2-8c7e-71c3-9d0e-3ec49cdcdfef","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-30T11:22:44Z (feat/halt-enforcement): Spec self-review clarified that prime's ready rows share the same halt filter as ready and next, so the entry view does not suggest starts that the guard will refuse.
+- 2026-09-30T11:31:01Z (feat/halt-enforcement): review: spec round 1 — verdict: revise; findings: P1 3, P2 4, P3 3; reviewer: human
+- 2026-09-30T11:31:10Z (feat/halt-enforcement): resumed
+  provenance: {"harness_session":"codex:01a0f1f2-8c7e-71c3-9d0e-3ec49cdcdfef","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T11:38:00Z (feat/halt-enforcement): Revised spec for human review round 1: unregistered local authority with registered-read failure handling; mixed transitive remedy graph and accepted edit bypasses; ops-first free-text start --reason vocabulary; no lifecycle fallback; multiple-halt and unused-reason rules; unknown-state read warnings, fixed override notes, and explicit cross-worktree and all-projects cases. No implementation or plan edits.
+- 2026-09-30T11:38:12Z (feat/halt-enforcement): parked (waiting on user, review): User re-reviews .worktrees/halt-enforcement/docs/specs/2026-09-30-halt-enforcement-design.md (round 2); after acceptance the agent writes the tasks implementation plan in this worktree.
+  provenance: {"harness_session":"codex:01a0f1f2-8c7e-71c3-9d0e-3ec49cdcdfef","harness_session_source":"CODEX_SESSION_ID"}
