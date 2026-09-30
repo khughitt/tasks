@@ -155,7 +155,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
             )));
         }
     }
-    apply_fields(&ctx, &mut task, &args.fields)?;
+    apply_fields(&mut ctx, &mut task, &args.fields)?;
     if let Some(status) = args.status {
         let to = Status::parse(&status)?;
         if to == task.status {
@@ -249,6 +249,8 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             ))));
         }
     }
+    let from_main = resolver.take_warnings();
+    ctx.warnings.extend(from_main);
     super::dep::ensure_acyclic(&ctx, &edited).map_err(keep)?;
     let status = edited.status;
     // spec §2.2: a save may change the status or the date, never both, since the

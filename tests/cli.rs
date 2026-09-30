@@ -18338,9 +18338,12 @@ fn findings_of<'a>(v: &'a serde_json::Value, key: &str, kind: &str) -> Vec<&'a s
         .unwrap_or_default()
 }
 
-#[test]
-fn check_in_a_worktree_reads_git_excluded_docs_from_the_main_checkout() {
-    let mut env = TestEnv::new();
+/// A project whose specs and plans are kept out of git, one task linked to a spec, a
+/// plan, and its `Task 1: A` step, and a linked worktree at `<main>/wt` that git therefore
+/// gave no docs: `(main, side, id)`.
+fn worktree_with_excluded_docs(
+    env: &mut TestEnv,
+) -> (std::path::PathBuf, std::path::PathBuf, String) {
     let main = env.init("sci");
     git(&main, &["init", "-q", "-b", "main"]);
     // Kept out of git, as a project whose profile does not commit its specs does.
@@ -18381,6 +18384,13 @@ fn check_in_a_worktree_reads_git_excluded_docs_from_the_main_checkout() {
         ],
     );
     assert!(!side.join("docs").exists(), "git carried the excluded docs");
+    (main, side, id)
+}
+
+#[test]
+fn check_in_a_worktree_reads_git_excluded_docs_from_the_main_checkout() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = worktree_with_excluded_docs(&mut env);
 
     // Found in main: a warning naming it, never an error, and the plan's steps are read
     // from main's copy, so an unlinked heading there is still reported.
@@ -18430,4 +18440,78 @@ fn check_in_a_worktree_reads_git_excluded_docs_from_the_main_checkout() {
             .contains("docs/specs/x-design.md"),
         "{v}"
     );
+}
+
+/// The warnings in `v` that say a document was read from the main checkout at `main`.
+fn main_checkout_warnings(v: &serde_json::Value, main: &std::path::Path) -> Vec<String> {
+    v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|w| w.as_str())
+        .filter(|w| w.contains("main checkout") && w.contains(main.to_str().unwrap()))
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn show_add_and_edit_in_a_worktree_read_git_excluded_docs_from_the_main_checkout() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = worktree_with_excluded_docs(&mut env);
+
+    // show reads the step from main's plan and points at main's copies.
+    let v = env.json(&side, &["show", &id]);
+    assert_eq!(v["step_found"], true, "{v}");
+    for key in ["spec_path", "plan_path"] {
+        let path = v[key].as_str().unwrap();
+        assert!(path.starts_with(main.to_str().unwrap()), "{key}: {path}");
+        assert!(std::path::Path::new(path).is_file(), "{key}: {path}");
+    }
+    assert_eq!(main_checkout_warnings(&v, &main).len(), 2, "{v}");
+
+    // An edit that revalidates the step, and one that moves it, both succeed.
+    let v = env.json(&side, &["edit", &id, "-p", "1"]);
+    assert_eq!(main_checkout_warnings(&v, &main).len(), 1, "{v}");
+    let v = env.json(&side, &["edit", &id, "--step", "Task 2: B"]);
+    assert_eq!(main_checkout_warnings(&v, &main).len(), 1, "{v}");
+    let v = env.json(&side, &["show", &id]);
+    assert_eq!(v["task"]["step"], "Task 2: B", "{v}");
+    assert_eq!(v["step_found"], true, "{v}");
+
+    // add links by bare name and by path, finding both only in main.
+    let v = env.json(
+        &side,
+        &[
+            "add",
+            "U",
+            "--spec",
+            "x",
+            "--plan",
+            "docs/plans/x.md",
+            "--step",
+            "Task 1: A",
+        ],
+    );
+    assert_eq!(main_checkout_warnings(&v, &main).len(), 2, "{v}");
+    let added = env.json(&side, &["show", &id_of(v)]);
+    assert_eq!(added["task"]["spec"], "docs/specs/x-design.md", "{added}");
+    assert_eq!(added["task"]["plan"], "docs/plans/x.md", "{added}");
+
+    // A step main's plan lacks is still refused, and so is a doc absent from both.
+    assert_eq!(
+        env.fail(&side, &["edit", &id, "--step", "Task 9: Z"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&side, &["edit", &id, "--plan", "nosuch"]),
+        "doc_not_found"
+    );
+    assert_eq!(
+        env.fail(&side, &["edit", &id, "--plan", "docs/plans/nosuch.md"]),
+        "doc_not_found"
+    );
+
+    // The main checkout itself warns about nothing.
+    let v = env.json(&main, &["show", &id]);
+    assert!(main_checkout_warnings(&v, &main).is_empty(), "{v}");
 }

@@ -4,7 +4,7 @@ use crate::model::Task;
 use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
-use crate::resolve::Resolver;
+use crate::resolve::{DocKind, Resolver};
 use time::OffsetDateTime;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
@@ -97,6 +97,15 @@ pub fn describe(
     let children = kids.into_iter().map(related).collect();
     let (attached, problems) = crate::attachments::audit_task(project, &task)?;
     warnings.extend(problems.iter().map(crate::attachments::Problem::line));
+    let spec_path = match &task.spec {
+        Some(path) => Some(resolver.abs(DocKind::Spec, path)?),
+        None => None,
+    };
+    let plan_path = match &task.plan {
+        Some(path) => Some(resolver.abs(DocKind::Plan, path)?),
+        None => None,
+    };
+    warnings.extend(resolver.take_warnings());
     let files = attached
         .into_iter()
         .map(|file| crate::output::FileInfo {
@@ -106,8 +115,8 @@ pub fn describe(
         })
         .collect();
     Ok(ShowFields {
-        spec_path: task.spec.as_deref().map(|path| resolver.abs(path)),
-        plan_path: task.plan.as_deref().map(|path| resolver.abs(path)),
+        spec_path,
+        plan_path,
         step_found,
         depends_on,
         parent,

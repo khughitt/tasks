@@ -3,11 +3,9 @@ use crate::error::{Error, Result};
 use crate::model::{Status, Task, TaskId};
 use crate::output::{CheckOut, Finding, Output};
 use crate::query::find_cycle;
-use crate::repo::Project;
-use crate::resolve::{DocKind, Resolver, has_heading, step_headings};
-use std::cell::{OnceCell, RefCell};
+use crate::resolve::{DocKind, Located, Resolver, has_heading, step_headings};
+use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::path::PathBuf;
 
 fn finding(task: Option<&Task>, file: String, kind: &str, detail: String) -> Finding {
     Finding {
@@ -15,54 +13,6 @@ fn finding(task: Option<&Task>, file: String, kind: &str, detail: String) -> Fin
         file,
         kind: kind.into(),
         detail,
-    }
-}
-
-/// Where a linked spec or plan is read from. A linked worktree lacks every document its
-/// project keeps out of git (`.git/info/exclude`, a gitignore) while the main checkout still
-/// holds it, so a document absent here is looked for in the main checkout before it counts
-/// as missing; otherwise every fresh worktree of such a project fails its own gate.
-struct Docs<'a> {
-    project: &'a Project,
-    /// Asked of git once, and only when some document is absent here.
-    main: OnceCell<Option<PathBuf>>,
-}
-
-enum Located {
-    Here(PathBuf),
-    Main { root: PathBuf, path: PathBuf },
-    Missing,
-}
-
-impl Located {
-    fn into_path(self) -> Option<PathBuf> {
-        match self {
-            Located::Here(path) | Located::Main { path, .. } => Some(path),
-            Located::Missing => None,
-        }
-    }
-}
-
-impl Docs<'_> {
-    fn locate(&self, rel: &str) -> Result<Located> {
-        let here = self.project.root.join(rel);
-        if here.is_file() {
-            return Ok(Located::Here(here));
-        }
-        let main = match self.main.get() {
-            Some(main) => main,
-            None => {
-                let main = self.project.main_checkout_root()?;
-                self.main.get_or_init(|| main)
-            }
-        };
-        Ok(match main {
-            Some(root) if root.join(rel).is_file() => Located::Main {
-                root: root.clone(),
-                path: root.join(rel),
-            },
-            _ => Located::Missing,
-        })
     }
 }
 
@@ -105,10 +55,6 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     }
 
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
-    let docs = Docs {
-        project: &ctx.project,
-        main: OnceCell::new(),
-    };
     let foreign = |id: &TaskId| -> std::result::Result<Option<Task>, String> {
         match resolver.resolve_task(id) {
             Ok(task) => Ok(task),
@@ -305,7 +251,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         if task.status.is_open() {
             for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
                 let Some(path) = path else { continue };
-                match docs.locate(path)? {
+                match resolver.locate(path)? {
                     Located::Here(_) => {}
                     Located::Main { root, .. } => warnings.push(finding(
                         Some(task),
@@ -326,7 +272,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 }
             }
             if let (Some(plan), Some(step)) = (&task.plan, &task.step)
-                && let Some(path) = docs.locate(plan)?.into_path()
+                && let Some(path) = resolver.locate(plan)?.into_path()
                 && !has_heading(&std::fs::read_to_string(path)?, step)
             {
                 errors.push(finding(
@@ -393,7 +339,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     linked_plans.sort();
     linked_plans.dedup();
     for plan in linked_plans {
-        let Some(path) = docs.locate(plan)?.into_path() else {
+        let Some(path) = resolver.locate(plan)?.into_path() else {
             continue; // already an error above
         };
         let text = std::fs::read_to_string(path)?;

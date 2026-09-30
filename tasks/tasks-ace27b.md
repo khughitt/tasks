@@ -1,15 +1,16 @@
 ---
 id: tasks-ace27b
 title: "show, add, and edit find git-excluded plans and specs in the main checkout from a worktree"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: main
 created: 2026-09-30T09:44:00Z
-updated: 2026-09-30T09:48:51Z
+updated: 2026-09-30T09:52:23Z
 started: 2026-09-30T09:48:51Z
+completed: 2026-09-30T09:52:23Z
 depends: []
 parent: tasks-c4ad8e
 tags: [worktree]
@@ -25,4 +26,8 @@ Check: extend the check_in_a_worktree_reads_git_excluded_docs_from_the_main_chec
 ## Notes
 
 - 2026-09-30T09:48:51Z (main): started
+  provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T09:52:23Z (ace27b-worktree-docs): done
+  provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T09:52:23Z (ace27b-worktree-docs): show, add, and edit read a spec/plan/step absent from a worktree from the main checkout, warning once per doc; the locator moved from check into Resolver
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

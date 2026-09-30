@@ -565,7 +565,7 @@ pub fn owner_name(project: &Project) -> Result<String> {
 }
 
 /// Applies the field flags present in `fields` to `task`, validating each against the repo.
-pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()> {
+pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
     if let Some(body) = &fields.body {
         validate_body(body)?;
@@ -658,7 +658,9 @@ pub fn apply_fields(ctx: &Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()
         _ => {}
     }
     validate_task(task)?;
-    resolver.project.validate_docs(task)
+    ctx.project.validate_docs(task)?;
+    ctx.warnings.extend(resolver.take_warnings());
+    Ok(())
 }
 
 /// `save` for a task that does not exist yet: validates, then creates exclusively. Takes

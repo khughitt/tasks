@@ -698,7 +698,12 @@ If any id reached during traversal is unreachable, `dep --on` and `add --depends
   project whose profile keeps specs out of git has them in the main checkout only, and
   without this every fresh worktree would fail its own gate. A document found there is
   the warning `doc_in_main_checkout`, which names that checkout, and the step checks read
-  that copy. A document absent from both is still `doc_missing` (tasks-2325a1).
+  that copy. A document absent from both is still `doc_missing` (tasks-2325a1). The
+  writers and `show` share that lookup (tasks-ace27b): `add` and `edit` accept a spec,
+  plan, or step found only in the main checkout, a bare name searched there only when
+  nothing here matches it; `show` reads `step_found` from that copy and its
+  `spec_path`/`plan_path` point at it. Each names the checkout in a warning, once per
+  document, and a document absent from both fails as before.
 - Once automation has a pinned Tasks install, running `check` in a project's test or
   pre-commit path turns doc drift under open tasks into a build failure, which is the
   intended coupling: when a plan step is renamed or removed, the task must be updated in
