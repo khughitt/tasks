@@ -9921,6 +9921,48 @@ fn halt_start_uncommitted_registered_incident_blocks_existing_worktree_immediate
 }
 
 #[test]
+fn halt_edit_status_doing_cannot_bypass_registered_halt_even_with_force() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]);
+    assert_eq!(
+        env.fail(&side, &["edit", &target, "--status", "doing"]),
+        "halted"
+    );
+    assert_eq!(
+        env.fail(&side, &["edit", &target, "--status", "doing", "--force"]),
+        "validation"
+    );
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "todo"
+    );
+    assert!(!env.claim_store("sci").exists());
+}
+
+#[test]
+fn halt_editor_status_doing_cannot_bypass_registered_halt() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]);
+    let editor = editor_script(&side, "sed -i 's/status: todo/status: doing/' \"$1\"");
+    let out = env
+        .cmd(&side)
+        .env("EDITOR", editor)
+        .args(["edit", &target])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "halted");
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "todo"
+    );
+    assert!(!env.claim_store("sci").exists());
+}
+
+#[test]
 fn halt_start_side_closure_does_not_lift_until_registered_record_closes() {
     let mut env = TestEnv::new();
     let (main, side, target) = repo_with_worktree(&mut env);
@@ -9971,6 +10013,41 @@ fn halt_start_unreadable_registered_checkout_refuses_force() {
         "todo"
     );
     assert!(!env.claim_store("sci").exists());
+}
+
+#[test]
+fn halt_start_malformed_registered_config_refuses_before_claim_or_task_write() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    std::fs::write(main.join("tasks/.config.toml"), "not toml = [").unwrap();
+    let before = env.read(&side, &format!("tasks/{target}.md"));
+    let kind = env.fail(&side, &["start", &target, "--force", "--reason", "urgent"]);
+    assert!(matches!(kind.as_str(), "config" | "parse"), "{kind}");
+    assert_eq!(env.read(&side, &format!("tasks/{target}.md")), before);
+    assert!(!env.claim_store("sci").exists());
+}
+
+#[test]
+fn halt_start_equal_priority_halts_sort_by_id_and_allow_equal_target() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    let first = id_of(env.json(&main, &["add", "First", "-p", "1", "--tag", "halt"]));
+    let second = id_of(env.json(&main, &["add", "Second", "-p", "1", "--tag", "halt"]));
+    let mut expected = vec![first, second];
+    expected.sort();
+    let ids: Vec<String> = env.json(&side, &["ready"])["halts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, expected);
+    env.json(&side, &["edit", &target, "-p", "1"]);
+    env.json(&side, &["start", &target]);
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "doing"
+    );
 }
 
 #[test]
@@ -10074,6 +10151,33 @@ fn halt_override_invalid_transition_leaves_no_attempted_note() {
         env.json(&side, &["show", &target])["task"]["status"],
         "dropped"
     );
+}
+
+#[test]
+fn halt_override_identity_failure_leaves_no_attempted_note() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    let state = relay_on(&env);
+    let script = format!(
+        "{}\nmkdir -p \"$RELAY_STATE_DIR\"\nchmod 700 \"$RELAY_STATE_DIR\"\n\
+         printf '%s' '{{\"schema\":2,\"generation\":\"11111111-2222-4333-8444-555555555555\",\"revision\":1,\"agents\":{{}}}}' > \"$RELAY_STATE_DIR/agents.json\"\n\
+         chmod 600 \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" start {target} --force --reason urgent\n",
+        shim_env(&state, "codex", "s1")
+    );
+    let out = common::harness_shim(&side, env.home.path(), "codex", &script);
+    assert_ne!(out.status.code(), Some(0), "{out:?}");
+    assert!(
+        !env.json(&main, &["show", &halt])
+            .to_string()
+            .contains("halt override:")
+    );
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "todo"
+    );
+    assert!(!env.claim_store("sci").exists());
 }
 
 #[test]

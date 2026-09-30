@@ -9,6 +9,24 @@ use crate::resolve::{DocKind, Resolver};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+fn guard_new_start(ctx: &Ctx, task: &Task) -> Result<()> {
+    let local = ctx.project.scan()?;
+    let snapshot = crate::halt::snapshot(&ctx.project, &ctx.registry, &local)?;
+    if snapshot.allows(task) {
+        return Ok(());
+    }
+    let ids = snapshot
+        .blocking(task)
+        .iter()
+        .map(|halt| halt.id.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(Error::Halted(format!(
+        "{} is stopped by halt {ids}; override with `tasks start {} --force --reason \"...\"`",
+        task.id, task.id
+    )))
+}
+
 pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
     if edited.id != original.id {
         return Err(Error::Validation("id is immutable".into()));
@@ -181,6 +199,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
             if to == Status::Shelved {
                 refuse_shelving(&task.id)?;
             }
+            if to == Status::Doing {
+                guard_new_start(&ctx, &task)?;
+            }
             transition(&mut ctx, &mut task, to, args.force)?;
         }
     }
@@ -309,6 +330,9 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     } else {
         if status == Status::Shelved {
             refuse_shelving(&original.id).map_err(keep)?;
+        }
+        if status == Status::Doing {
+            guard_new_start(&ctx, &edited).map_err(keep)?;
         }
         transition(&mut ctx, &mut edited, status, false).map_err(keep)?;
     }
