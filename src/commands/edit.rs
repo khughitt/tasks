@@ -1,8 +1,9 @@
 use super::{Ctx, apply_fields, id_out, load, save, transition};
+use crate::attachments::parse_ledger_note;
 use crate::cli::EditArgs;
 use crate::error::{Error, Result};
 use crate::format::parse_task;
-use crate::model::{Status, Task, TaskId};
+use crate::model::{Note, Status, Task, TaskId};
 use crate::output::Output;
 use crate::resolve::{DocKind, Resolver};
 use std::io::{Read, Write};
@@ -27,9 +28,10 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
             "completed is stamped by completing the task; it cannot be edited".into(),
         ));
     }
-    if edited.notes != original.notes {
+    if !notes_unchanged_or_trimmed(&original.notes, &edited.notes) {
         return Err(Error::Validation(
-            "notes are append-only; use `tasks note`".into(),
+            "notes are append-only; use `tasks note` (an edit may only remove a note's trailing spaces and tabs)"
+                .into(),
         ));
     }
     // The anchor is stamped by a completion and by nothing else. Clearing it is allowed,
@@ -41,6 +43,20 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Spec §5.3: the one change the editor may make to notes is removing trailing spaces and
+/// tabs from existing texts. Count, order, stamps, authors, and provenance stay, and so
+/// does every attachment-ledger entry a text records.
+fn notes_unchanged_or_trimmed(original: &[Note], edited: &[Note]) -> bool {
+    original.len() == edited.len()
+        && original.iter().zip(edited).all(|(old, new)| {
+            old.at == new.at
+                && old.by == new.by
+                && old.provenance == new.provenance
+                && (new.text == old.text || new.text == old.text.trim_end_matches([' ', '\t']))
+                && parse_ledger_note(&old.text) == parse_ledger_note(&new.text)
+        })
 }
 
 pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
@@ -353,6 +369,33 @@ fn create_edit_temp(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn note(text: &str) -> Note {
+        Note {
+            at: "2026-09-30T00:00:00Z".into(),
+            by: "tester".into(),
+            text: text.into(),
+            provenance: None,
+        }
+    }
+
+    #[test]
+    fn a_trim_that_changes_a_ledger_entry_is_refused() {
+        // Blank captions and reasons are refused at write time; a hand-written record can
+        // still hold one, and trimming it would turn a ledger note into plain text.
+        for text in ["attached: a.png (3 bytes): ", "detached: a.png:  "] {
+            let trimmed = text.trim_end();
+            assert!(parse_ledger_note(text).is_some(), "{text}");
+            assert!(
+                !notes_unchanged_or_trimmed(&[note(text)], &[note(trimmed)]),
+                "{text}"
+            );
+        }
+        assert!(notes_unchanged_or_trimmed(
+            &[note("attached: a.png (3 bytes): shot \t")],
+            &[note("attached: a.png (3 bytes): shot")],
+        ));
+    }
 
     #[test]
     fn edit_temp_retries_without_following_existing_symlink() {

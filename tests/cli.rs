@@ -3064,6 +3064,123 @@ fn note_appends_single_line_entries() {
 }
 
 #[test]
+fn new_notes_lose_trailing_spaces_and_tabs() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "A"]));
+    env.json(&dir, &["note", &id, "  keep  inner \t \t"]);
+    env.json(&dir, &["start", &id]);
+    env.json(&dir, &["done", &id, "landed \t"]);
+    let notes = env.json(&dir, &["show", &id])["task"]["notes"].clone();
+    let texts: Vec<&str> = notes
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|note| note["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(texts, ["  keep  inner", "started", "done", "landed"]);
+    let raw = env.read(&dir, &format!("tasks/{id}.md"));
+    assert!(
+        raw.lines().all(|line| !line.ends_with([' ', '\t'])),
+        "{raw:?}"
+    );
+    for blank in [" ", "\t", " \t "] {
+        assert_eq!(env.fail(&dir, &["note", &id, blank]), "validation");
+    }
+    assert_eq!(env.fail(&dir, &["note", &id, "a\n "]), "validation");
+    assert_eq!(env.fail(&dir, &["note", &id, "a \r"]), "validation");
+}
+
+#[test]
+fn the_editor_may_only_strip_trailing_whitespace_from_notes() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "A", "-b", "Body"]));
+    env.cmd(&dir)
+        .env("CLAUDE_CODE_SESSION_ID", "native-a")
+        .env("CLAUDE_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    env.json(&dir, &["note", &id, "  n1"]);
+    // Records written before insertion trimmed, or by hand, can still carry the whitespace.
+    let path = dir.join(format!("tasks/{id}.md"));
+    let seeded = env
+        .read(&dir, &format!("tasks/{id}.md"))
+        .replace("): started\n", "): started \t\n")
+        .replace("):   n1\n", "):   n1  \n");
+    std::fs::write(&path, &seeded).unwrap();
+    let before = env.json(&dir, &["show", &id])["task"]["notes"].clone();
+    assert_eq!(before[0]["text"], "started \t");
+    assert_eq!(before[1]["text"], "  n1  ");
+
+    let edit = |script: &str| {
+        let editor = editor_script(&dir, script);
+        env.cmd(&dir)
+            .env("CLAUDE_CODE_SESSION_ID", "native-a")
+            .env("CLAUDE_PID", std::process::id().to_string())
+            .env("EDITOR", &editor)
+            .args(["edit", &id])
+            .output()
+            .unwrap()
+    };
+    for (script, why) in [
+        (
+            "sed -i 's/): started[ \\t]*$/): starte/' \"$1\"",
+            "text beyond the whitespace",
+        ),
+        ("sed -i 's/):   n1  $/): n1/' \"$1\"", "leading whitespace"),
+        (
+            "sed -i 's/):   n1  $/):   n1   /' \"$1\"",
+            "added whitespace",
+        ),
+        (
+            "sed -i 's/[ \\t]*$//; /^  provenance: /d' \"$1\"",
+            "provenance",
+        ),
+        (
+            "sed -i 's/[ \\t]*$//; s/^- 20[^ ]* (tester): started/- 2000-01-01T00:00:00Z (tester): started/' \"$1\"",
+            "timestamp",
+        ),
+        (
+            "sed -i 's/[ \\t]*$//; /): started$/,+1d' \"$1\"",
+            "a removed note",
+        ),
+    ] {
+        let out = edit(script);
+        assert_eq!(out.status.code(), Some(1), "{why} must be refused");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("append-only"),
+            "{why}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    assert_eq!(env.read(&dir, &format!("tasks/{id}.md")), seeded);
+
+    let out = edit("sed -i 's/[ \\t]*$//' \"$1\"");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let after = env.json(&dir, &["show", &id])["task"]["notes"].clone();
+    assert_eq!(after.as_array().unwrap().len(), 2);
+    assert_eq!(after[0]["text"], "started");
+    assert_eq!(after[1]["text"], "  n1");
+    for (old, new) in before
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(after.as_array().unwrap())
+    {
+        for key in ["at", "by", "harness_session", "harness_session_source"] {
+            assert_eq!(old[key], new[key], "{key}");
+        }
+    }
+    assert_eq!(after[0]["harness_session"], "claude-code:native-a");
+}
+
+#[test]
 fn start_done_drop_block_unblock_transitions() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

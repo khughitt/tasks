@@ -245,6 +245,17 @@ pub fn validate_body(body: &str) -> Result<()> {
 pub fn validate_note_text(text: &str) -> Result<()> {
     validate_line("note text", text)
 }
+/// The text a new note stores: the input, checked whole for line breaks, without its
+/// trailing spaces and tabs. Leading and inner whitespace stay; text that is only
+/// whitespace is an error.
+pub fn normalize_note_text(text: &str) -> Result<&str> {
+    validate_note_text(text)?;
+    let trimmed = text.trim_end_matches([' ', '\t']);
+    if trimmed.is_empty() {
+        return Err(Error::Validation("note text must not be blank".into()));
+    }
+    Ok(trimmed)
+}
 pub fn validate_line(field: &str, s: &str) -> Result<()> {
     if s.is_empty() {
         return Err(Error::Validation(format!("{field} must not be empty")));

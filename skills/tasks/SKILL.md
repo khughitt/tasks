@@ -146,6 +146,8 @@ nothing is eligible.
 
 Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
+Notes stay append-only there: the one note change it accepts is removing trailing spaces
+and tabs, which every new note already has stripped.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
 `--rm-tag <tag>` removes one and `--no-tags` clears them all. When the project keeps a
 tag dictionary (`[tags]` in `tasks/.config.toml`), `tasks tags` shows each tag's meaning:
