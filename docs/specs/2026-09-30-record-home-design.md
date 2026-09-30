@@ -59,6 +59,10 @@ not stdin, not the clipboard, and not a file to attach.
 **Same stamp, different bytes.** A sibling whose stamp equals the loaded one but whose
 bytes differ from the bytes this command loaded also refuses. Only a same-second fork
 produces that: every write sets a new stamp, and a new worktree copies the bytes unchanged.
+A write stamps strictly after the stamp it loaded (now, or one second past the loaded stamp
+when the clock has not passed it), so a write that follows another checkout's within the
+same second still leaves its own copy the unique newest rather than an equal-stamp fork
+(tasks-cff04e).
 The work-claims design rejected content comparison because copies that are *behind* would
 fire constantly. That still holds: a sibling that is behind is never compared by content.
 

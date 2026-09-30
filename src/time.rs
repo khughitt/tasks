@@ -6,6 +6,15 @@ pub fn now() -> String {
     format(OffsetDateTime::now_utc())
 }
 
+/// The stamp a write to a record loaded at `loaded` sets: now, or one second past `loaded`
+/// when the clock has not passed it. Stamps have second precision, so a plain `now` in the
+/// same second as the loaded write would give two checkouts' different copies one stamp
+/// (record-home spec §3.1); strictly increasing stamps keep the written copy the newest.
+pub fn after(loaded: &str) -> Result<String> {
+    let floor = parse(loaded)? + time::Duration::SECOND;
+    Ok(format(OffsetDateTime::now_utc().max(floor)))
+}
+
 /// The calendar day of a validated RFC 3339 UTC timestamp, `YYYY-MM-DD`.
 pub fn day(timestamp: &str) -> &str {
     &timestamp[..10]
@@ -51,6 +60,17 @@ mod tests {
         assert!(parse("2026-08-29T14:02:11+02:00").is_err());
         assert!(parse("2026-08-29").is_err());
         assert!(now().ends_with('Z') && !now().contains('.'));
+    }
+
+    #[test]
+    fn after_is_now_unless_the_loaded_stamp_has_not_passed() {
+        let before = now();
+        assert!(after("2020-01-01T00:00:00Z").unwrap() >= before);
+        assert_eq!(
+            after("2099-12-31T23:59:59Z").unwrap(),
+            "2100-01-01T00:00:00Z"
+        );
+        assert!(after("2099-12-31T23:59:59.5Z").is_err());
     }
 
     #[test]

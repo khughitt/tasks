@@ -9767,6 +9767,37 @@ fn equal_stamps_with_different_bytes_refuse_with_the_merge_only() {
 }
 
 #[test]
+fn a_write_in_the_same_second_as_the_loaded_stamp_still_moves_the_stamp_forward() {
+    // tasks-cff04e: start in main, branch, and start again in the worktree within one
+    // second. A stamp ahead of the clock stands in for "the same second": the worktree's
+    // write must still land strictly after the copy it loaded, or both copies share a stamp
+    // with different bytes and every later write refuses as a same-second fork.
+    let mut env = TestEnv::new();
+    let (main, side, id) = started_then_branched(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2099-01-01T00:00:00Z");
+    }
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let v = env.json(&side, &["show", &id]);
+    assert_eq!(v["task"]["updated"], "2099-01-01T00:00:01Z", "{v}");
+    as_agent(&env, &side, "agent-a")
+        .args(["note", &id, "here"])
+        .assert()
+        .success();
+    let detail = stale_detail(&env, &main, &["note", &id, "from main"]);
+    assert!(
+        detail.starts_with(&format!(
+            "tasks/{id}.md in {} is newer than this copy",
+            side.display()
+        )),
+        "{detail}"
+    );
+}
+
+#[test]
 fn the_first_write_in_a_worktree_behind_main_leads_with_the_merge() {
     // tasks-142d2f without the protocol step: a note in main after branching, then a write
     // in the worktree by the claim's own holder.

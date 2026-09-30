@@ -297,7 +297,7 @@ pub fn guarded_update(
         let (mut task, raw) = target.read_task_with_raw(id)?;
         eligible(&task)?;
         mutate(&mut task)?;
-        task.updated = crate::time::now(); // second precision: a same-second repeat keeps it
+        task.updated = crate::time::after(&task.updated)?;
         validate_task(&task)?;
         target.validate_docs(&task)?;
         if target.read_raw(id)? != raw {
