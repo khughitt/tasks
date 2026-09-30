@@ -139,7 +139,8 @@ applies decides it:
 
 The caller's identity is resolved only on this refusal path, never for a write that
 passes. When the claim store or identity cannot be read, the remedy is chosen as if no
-other session were named, and a warning says so.
+other session were named, and the detail says so. A refused command prints only its error
+object, so a warning would never be seen.
 
 Wherever a `-C` retry appears:
 
