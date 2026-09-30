@@ -92,7 +92,6 @@ pub enum SiblingCopy {
     Found {
         root: PathBuf,
         updated: String,
-        #[allow(dead_code)]
         raw: String,
     },
     /// The copy is present but could not be read or parsed.

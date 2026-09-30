@@ -17,7 +17,7 @@ pub fn run(
     needs: Option<String>,
     minutes: Option<u32>,
 ) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if !task.status.is_open() {
         return Err(Error::InvalidTransition(
             task.status.as_str().into(),

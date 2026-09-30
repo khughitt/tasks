@@ -55,7 +55,7 @@ pub fn attach(
     name: Option<String>,
     caption: Option<String>,
 ) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
     let max = ctx.project.attachments_max_bytes;
     // Storage safety comes before any read of the source.
@@ -171,7 +171,7 @@ pub fn attach(
 /// Spec, "detach": the ledger is written before the file is deleted, and a rerun
 /// finishes an interrupted detach without a second note.
 pub fn detach(mut ctx: Ctx, id: String, name: String, why: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
     attachments::validate_name(&name)?;
     if why.trim().is_empty() {

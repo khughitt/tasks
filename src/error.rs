@@ -32,7 +32,6 @@ pub enum Error {
     ConcurrentModification(String, String),
     #[error("{0} is claimed by {1}")]
     Claimed(String, String),
-    #[allow(dead_code)]
     #[error("{0}")]
     StaleCopy(String),
     #[error("{0}")]

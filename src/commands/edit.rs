@@ -85,7 +85,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         return editor(ctx, id);
     }
 
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if args.fields.body.as_deref() == Some("-") {
         let mut body = String::new();
         std::io::stdin().read_to_string(&mut body)?;
@@ -181,6 +181,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
 fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &id)?;
     let (original, original_raw) = ctx.project.read_task_with_raw(&id)?;
+    super::refuse_stale_copy(&mut ctx, &original, &original_raw, super::Writer::Command)?;
     let editor = std::env::var("EDITOR")
         .ok()
         .filter(|editor| !editor.is_empty())

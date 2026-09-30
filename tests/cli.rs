@@ -9504,30 +9504,355 @@ fn warnings_of(v: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// The `detail` of a `stale_copy` refusal from running `args` in `dir`.
+fn stale_detail(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> String {
+    let error = error_of(env, dir, args);
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
+    error["error"]["detail"].as_str().unwrap().to_string()
+}
+
+/// The `tasks -C …` line printed in a refusal's detail, split into words the way a POSIX
+/// shell splits it, without the program name.
+fn retry_words(detail: &str) -> Vec<String> {
+    let at = detail.find("tasks -C ").expect("a retry");
+    let line = &detail[at..];
+    let line = line
+        .strip_suffix("; supply the same input on stdin")
+        .unwrap_or(line);
+    let rest = line.strip_prefix("tasks ").unwrap();
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "for word in {rest}; do printf '%s\\0' \"$word\"; done"
+        ))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .split_terminator('\0')
+        .map(str::to_string)
+        .collect()
+}
+
+/// A task started by `agent-a` in the main checkout, committed, and only then branched into
+/// a worktree (the prescribed order). Both copies are stamped equal and old, so the next
+/// write in either checkout is the newer one.
+fn started_then_branched(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    as_agent(env, &main, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "start"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z");
+    }
+    (main, side, id)
+}
+
 #[test]
-fn a_write_warns_when_another_checkout_holds_a_newer_copy() {
+fn a_write_from_a_copy_behind_another_checkout_refuses_and_prints_the_retry() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);
+    // Explicit stamps: `updated` has second precision, and a real-clock race would make
+    // the test flaky rather than wrong.
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let file = format!("tasks/{id}.md");
+    let (main_before, side_before) = (env.read(&main, &file), env.read(&side, &file));
 
-    // The reported sequence: the main checkout moved on after the worktree branched, so
-    // the worktree is about to close a record that is missing what main already wrote.
-    // Explicit stamps -- `updated` has second precision, and a real-clock race here would
-    // make the test flaky rather than wrong.
+    for args in [
+        vec!["note", id.as_str(), "it's naïve"],
+        vec!["edit", id.as_str(), "-p", "1"],
+        vec!["start", id.as_str()],
+        vec!["done", id.as_str(), "landed"],
+    ] {
+        let detail = stale_detail(&env, &main, &args);
+        let head = format!(
+            "tasks/{id}.md in {} is newer than this copy (2026-09-07T10:00:00Z there, \
+             2026-09-05T09:00:00Z here); nothing was written. Run it there: ",
+            side.display()
+        );
+        assert!(detail.starts_with(&head), "{detail}");
+        let mut expected = vec!["-C".to_string(), side.display().to_string()];
+        expected.extend(args.iter().map(|arg| arg.to_string()));
+        assert_eq!(retry_words(&detail), expected);
+    }
+    assert_eq!(env.read(&main, &file), main_before);
+    assert_eq!(env.read(&side, &file), side_before);
+    let store = env.claim_store("sci");
+    assert!(!store.exists() || !std::fs::read_to_string(&store).unwrap().contains(&id));
+
+    // An invocation that already named a checkout gets that `-C` replaced, not doubled.
+    let detail = stale_detail(
+        &env,
+        &side,
+        &["-C", main.to_str().unwrap(), "note", &id, "x"],
+    );
+    assert_eq!(
+        retry_words(&detail),
+        ["-C", side.to_str().unwrap(), "note", &id, "x"]
+    );
+
+    // The printed retry, run verbatim from where it was refused, lands in the newer copy.
+    let detail = stale_detail(&env, &main, &["note", &id, "it's naïve"]);
+    env.cmd(&main).args(retry_words(&detail)).assert().success();
+    assert!(env.read(&side, &file).contains("it's naïve"));
+}
+
+#[test]
+fn a_linked_worktree_behind_the_main_checkout_leads_with_the_merge() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
     stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
     stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
-
-    let v = env.json(&side, &["done", &id, "landed"]);
-    let expected = format!("tasks/{id}.md in {} is newer", main.display());
-    let warnings = warnings_of(&v);
-    assert!(
-        warnings.iter().any(|w| w.starts_with(&expected)
-            && w.contains("2026-09-07T10:00:00Z")
-            && w.contains("2026-09-05T09:00:00Z")
-            && w.contains("reconcile")),
-        "{warnings:?}"
+    let detail = stale_detail(&env, &side, &["note", &id, "x"]);
+    let remedy = format!(
+        "nothing was written. Commit tasks/{id}.md in {main} if it has changes, merge it into \
+         this branch, then rerun here; the merge may conflict where both copies changed. Or, \
+         to write in the main checkout instead: tasks -C {main} note {id} x",
+        main = main.display()
     );
-    // Advisory only: the write still lands.
-    assert_eq!(env.json(&side, &["show", &id])["task"]["status"], "done");
+    assert!(detail.ends_with(&remedy), "{detail}");
+}
+
+#[test]
+fn another_sessions_work_in_the_newer_checkout_withholds_the_retry() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let other = id_of(env.json(&side, &["add", "Other work", "-p", "2"]));
+    as_agent(&env, &side, "agent-b")
+        .args(["start", &other])
+        .assert()
+        .success();
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+
+    // Someone else's claim, on a different task, names the newer checkout.
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert!(
+        detail.contains(&other) && detail.contains("agent-b"),
+        "{detail}"
+    );
+    assert!(detail.contains("Wait for that branch to merge"), "{detail}");
+    assert!(!detail.contains("tasks -C"), "{detail}");
+
+    // The claim's own holder, whose shell reset to main, keeps the retry.
+    let out = as_agent(&env, &main, "agent-b")
+        .args(["note", &id, "x"])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Run it there: tasks -C"),
+        "{error}"
+    );
+
+    // A park by another session withholds it too.
+    as_agent(&env, &side, "agent-b")
+        .args(["park", &other, "later"])
+        .assert()
+        .success();
+    let out = as_agent(&env, &main, "agent-c")
+        .args(["note", &id, "x"])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&other) && !detail.contains("tasks -C"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_stale_refusal_reports_an_identity_resolution_failure() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let state = relay_on(&env);
+    // Under a real harness ancestor, relay identity cannot resolve without its registry.
+    let script = format!(
+        "RELAY_STATE_DIR={}\nexport RELAY_STATE_DIR\n\"$TASKS_BIN\" note {id} x\n",
+        state.display()
+    );
+    let out = common::harness_shim(&main, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("whether another session works there is unknown:")
+            && detail.contains("TASKS_SESSION"),
+        "{detail}"
+    );
+    assert!(detail.contains("Run it there: tasks -C"), "{detail}");
+}
+
+#[test]
+fn equal_stamps_with_different_bytes_refuse_with_the_merge_only() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    let sibling = side.join(format!("tasks/{id}.md"));
+    let forked = std::fs::read_to_string(&sibling)
+        .unwrap()
+        .replace("title: T\n", "title: Forked\n");
+    std::fs::write(&sibling, forked).unwrap();
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert_eq!(
+        detail,
+        format!(
+            "tasks/{id}.md in {} has the same stamp as this copy (2026-09-05T09:00:00Z) but \
+             different content, so both were written in the same second; nothing was \
+             written. Merge that copy of tasks/{id}.md into this checkout, then rerun here",
+            side.display()
+        )
+    );
+}
+
+#[test]
+fn the_first_write_in_a_worktree_behind_main_leads_with_the_merge() {
+    // tasks-142d2f without the protocol step: a note in main after branching, then a write
+    // in the worktree by the claim's own holder.
+    let mut env = TestEnv::new();
+    let (main, side, id) = started_then_branched(&mut env);
+    as_agent(&env, &main, "agent-a")
+        .args(["note", &id, "from main"])
+        .assert()
+        .success();
+    let out = as_agent(&env, &side, "agent-a")
+        .args(["note", &id, "here"])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!(
+            "nothing was written. Commit tasks/{id}.md in {}",
+            main.display()
+        )),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_start_left_uncommitted_before_branching_leads_with_the_merge() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    as_agent(&env, &main, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z");
+    let out = as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!(
+            "nothing was written. Commit tasks/{id}.md in {}",
+            main.display()
+        )),
+        "{detail}"
+    );
+    assert!(!detail.contains("Run it there"), "{detail}");
+}
+
+#[test]
+fn a_refusal_names_the_newest_sibling_and_lists_the_other_newer_ones() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let third = main.join("wt2");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "third",
+            third.to_str().unwrap(),
+        ],
+    );
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    stamp(&third, &id, "2026-09-01T00:00:00Z", "2026-09-06T10:00:00Z");
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert!(
+        detail.starts_with(&format!("tasks/{id}.md in {} is newer", side.display())),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("(also newer in: {})", third.display())),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_worktree_deleted_from_disk_does_not_block_a_write() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2030-01-01T00:00:00Z");
+    // Gone from disk but still listed by git: nothing there to be newer.
+    std::fs::remove_dir_all(&side).unwrap();
+    env.json(&main, &["note", &id, "still lands"]);
+    assert!(
+        env.read(&main, &format!("tasks/{id}.md"))
+            .contains("still lands")
+    );
+}
+
+#[test]
+fn equal_stamps_with_equal_bytes_do_not_refuse() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    let v = env.json(&main, &["note", &id, "same record"]);
+    assert!(!warnings_of(&v).iter().any(|w| w.contains("newer")), "{v}");
 }
 
 #[test]
@@ -9583,13 +9908,9 @@ fn a_project_below_the_repository_root_finds_its_sibling_copies() {
 
     // The sibling's project root is the worktree root plus the project's path below the
     // repository top level, not the worktree root itself.
-    let v = env.json(&side.join("sub"), &["note", &id, "in the worktree"]);
+    let detail = stale_detail(&env, &side.join("sub"), &["note", &id, "in the worktree"]);
     let expected = format!("tasks/{id}.md in {} is newer", sub.display());
-    let warnings = warnings_of(&v);
-    assert!(
-        warnings.iter().any(|w| w.starts_with(&expected)),
-        "{warnings:?}"
-    );
+    assert!(detail.starts_with(&expected), "{detail}");
 }
 
 #[test]
@@ -9621,34 +9942,23 @@ fn a_sibling_copy_that_cannot_be_read_is_a_warning_and_a_missing_one_is_silent()
 }
 
 #[test]
-fn a_hand_edited_updated_stamp_cannot_suppress_the_warning() {
+fn the_editor_does_not_open_on_a_copy_that_is_behind() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);
     stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
     stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
-
-    // The baseline is the stamp of the copy on disk, not whatever the editor left behind:
-    // a far-future `updated:` would otherwise make every sibling look stale.
-    let editor = editor_script(
-        &main,
-        "sed -i 's/^updated: .*/updated: 2030-01-01T00:00:00Z/; s/^title: T$/title: Edited/' \"$1\"",
-    );
+    let opened = main.join("editor-opened");
+    let editor = editor_script(&main, &format!("touch '{}'", opened.display()));
     let out = env
         .cmd(&main)
         .env("EDITOR", &editor)
         .args(["edit", &id])
         .output()
         .unwrap();
-    assert!(out.status.success(), "{out:?}");
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let warnings = warnings_of(&v);
-    assert!(
-        warnings.iter().any(|w| w.contains("is newer")),
-        "{warnings:?}"
-    );
-    let saved = env.json(&main, &["show", &id]);
-    assert_eq!(saved["task"]["title"], "Edited");
-    assert_ne!(saved["task"]["updated"], "2030-01-01T00:00:00Z");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
+    assert!(!opened.exists(), "the editor opened on a stale copy");
 }
 
 #[test]
@@ -18574,6 +18884,12 @@ fn show_add_and_edit_in_a_worktree_read_git_excluded_docs_from_the_main_checkout
         assert!(std::path::Path::new(path).is_file(), "{key}: {path}");
     }
     assert_eq!(main_checkout_warnings(&v, &main).len(), 2, "{v}");
+
+    // Keep the copies equal and older than the first write; real-clock stamps can otherwise
+    // make that write look like a same-second fork of main's unchanged record.
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
 
     // An edit that revalidates the step, and one that moves it, both succeed.
     let v = env.json(&side, &["edit", &id, "-p", "1"]);

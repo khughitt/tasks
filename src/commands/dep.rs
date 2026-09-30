@@ -39,7 +39,7 @@ pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
 }
 
 pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if !on.is_empty() {
         let resolver = Resolver::new(&ctx.project, &ctx.registry);
         for value in &on {

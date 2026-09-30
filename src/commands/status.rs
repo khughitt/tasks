@@ -4,7 +4,7 @@ use crate::model::{Status, Task};
 use crate::output::Output;
 
 pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if task.status == Status::Shelved {
         return Err(Error::InvalidTransition(
             "shelved".into(),
@@ -80,7 +80,7 @@ fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {
 }
 
 pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
     append_note(&mut task, &owner, &text)?;
     // Identity and the store are resolved *before* the file write. Doing it afterwards
@@ -150,7 +150,7 @@ pub fn close(
     message: Option<String>,
     force: bool,
 ) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     transition(&mut ctx, &mut task, to, force)?;
     if let Some(message) = message
         && !ctx.recovered
@@ -167,7 +167,7 @@ pub fn block(ctx: Ctx, id: String, message: Option<String>) -> Result<Output> {
 }
 
 pub fn unblock(mut ctx: Ctx, id: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if task.status != Status::Blocked {
         return Err(Error::InvalidTransition(
             task.status.as_str().into(),
@@ -182,7 +182,7 @@ pub fn unblock(mut ctx: Ctx, id: String) -> Result<Output> {
 /// A goal is shelved only after its open descendants are; `ready` reads each child's own
 /// status, so shelving the goal alone would hide it while its children stayed eligible.
 pub fn shelve(mut ctx: Ctx, id: String, wake: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     crate::format::validate_line("wake condition", &wake)?;
     let all = ctx.project.scan()?;
     let unshelved: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry)
@@ -204,7 +204,7 @@ pub fn shelve(mut ctx: Ctx, id: String, wake: String) -> Result<Output> {
 }
 
 pub fn unshelve(mut ctx: Ctx, id: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if task.status != Status::Shelved {
         return Err(Error::InvalidTransition(
             task.status.as_str().into(),
