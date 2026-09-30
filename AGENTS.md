@@ -36,7 +36,8 @@ scoping. Discovery beyond a direct task's scope requires a note and reassessment
 to planned before continuing implementation.
 
 For either code path, commit the task record before git worktree add, then reuse its
-isolated worktree or create one under .worktrees/; planned work does this before drafting
+isolated worktree or create one under .worktrees/; in a new worktree, run `tasks start <id>`
+before any other `tasks` command for it; planned work does this before drafting
 its spec. Run Just's setup recipe immediately after creation when the justfile defines it;
 otherwise run only the root guide's explicit setup command. Do not guess an
 installer. Read-only investigation and task-record maintenance alone need no new
