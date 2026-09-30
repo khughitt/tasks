@@ -1,6 +1,6 @@
 # Halt tasks at the task entry path — design
 
-**Status:** revised for review round 2, 2026-09-30. Task: tasks-c543ae. Contract: ops
+**Status:** approved after review round 2, 2026-09-30. Task: tasks-c543ae. Contract: ops
 `docs/specs/2026-09-29-test-latency-escalation-design.md` §6, approved for
 ops-5beefd. This document settles its implementation in tasks.
 
