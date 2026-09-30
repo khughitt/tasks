@@ -4,8 +4,13 @@ title: Task start reports conflicting Codex session variables and falls back to 
 status: idea
 priority: 2
 created: 2026-09-27T17:11:41Z
-updated: 2026-09-27T17:11:41Z
+updated: 2026-09-30T09:58:28Z
 depends: []
+parent: tasks-2fa8c6
 tags: [feedback, friction, "from:beliefs"]
 agent: codex
 ---
+
+## Notes
+
+- 2026-09-30T09:58:28Z (main): scope: briefed; overlaps the conflicting-ID report but lacks capture evidence; share one investigation rather than infer an identical cause; waits on tasks-1ece46; brief: docs/notes/2026-09-30-delegated-identity-brief.md
