@@ -1,13 +1,15 @@
 ---
 id: tasks-ace27b
 title: "show, add, and edit find git-excluded plans and specs in the main checkout from a worktree"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-30T09:44:00Z
-updated: 2026-09-30T09:44:00Z
+updated: 2026-09-30T09:48:51Z
+started: 2026-09-30T09:48:51Z
 depends: []
 parent: tasks-c4ad8e
 tags: [worktree]
@@ -19,3 +21,8 @@ Why: tasks-2325a1 taught check to look in the main checkout for a spec/plan abse
 Done: move the Docs/Located locator from src/commands/check.rs into src/resolve.rs (Resolver gains the lazily asked main_checkout_root) and route step_exists and resolve_doc's existence test through it, so show reports step_found from main's copy and add/edit accept a doc and step that exist only in the main checkout, each with a warning naming it, as check does. A doc absent from both still fails as today.
 
 Check: extend the check_in_a_worktree_reads_git_excluded_docs_from_the_main_checkout setup in tests/cli.rs: show succeeds with step_found true in the worktree; edit --priority and edit --step on the linked task succeed there; a missing-everywhere plan still fails. Update design §7's worktree paragraph.
+
+## Notes
+
+- 2026-09-30T09:48:51Z (main): started
+  provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
