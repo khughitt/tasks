@@ -35,6 +35,14 @@ nothing is eligible.
    which means resume its scoping, never implement it.
    `tasks list` is the wider view: open tasks by priority, or `--sort updated` /
    `--sort created` for the most recently touched or added first (`--reverse` flips it).
+   `list` and `ready` also take `-p/--priority`, `--size`, `--complexity`, and `--process`,
+   each repeatable: repeats of one of these widen (any of them), and different flags
+   narrow (all of them). `--size`, `--complexity`, and `--process` accept `none` for an
+   unset field; `--priority` does not, since every task has one. `--tag` stays all-of: a
+   task must carry every tag given. `--owner`, `--source`, and `--parent` take one value,
+   and `--parallel` is a switch. `--complexity` is a selection over the effective rating,
+   not the session cutoff: a session under a cutoff still picks only through `ready` and
+   `next`.
    Never pick a task with children; those are goals. `ready` already omits them.
    With nothing in hand, `tasks next` prints the most recently parked task waiting on the
    agent, else the first ready task, in full; `tasks next --all-projects` does the same

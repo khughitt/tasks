@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/task-filters
 created: 2026-09-30T16:40:28Z
-updated: 2026-09-30T18:10:52Z
+updated: 2026-09-30T18:32:35Z
 started: 2026-09-30T16:40:36Z
 depends: []
 tags: [cli]
@@ -60,3 +60,4 @@ Goal: one TaskFilter in query.rs (or its own module) with matches(&Task, &ClaimS
 - 2026-09-30T18:10:34Z (feat/task-filters): resumed
   provenance: {"harness_session":"codex:01a0f380-ddb1-71c3-a720-bc7a2dc7b70e","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-30T18:10:52Z (feat/task-filters): review: plan round 3 — verdict: accept; findings: none; reviewer: human
+- 2026-09-30T18:32:35Z (feat/task-filters): Filed tasks-ead38f to decide whether repeated --tag filters widen or the CLI inventory records an all-of exception.
