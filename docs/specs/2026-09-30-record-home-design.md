@@ -71,8 +71,10 @@ copies its payload into `tasks/files/<id>/` before calling `save`, and `edit --b
 
 - **The `$EDITOR` path** releases the lock while the editor is open, so it runs the check a
   second time after `lock_and_revalidate` takes the lock back.
-- **`feedback --recur`** writes to an existing record without going through `save`, and runs
-  the same check after it reads the owner's record.
+- **A feedback recurrence** writes to an existing record without going through `save`. It
+  happens two ways: `feedback --recur <id>`, and a report whose title matches an open
+  feedback entry. Both reach `recur_into`, which runs the same check after it reads the
+  owner's record and before anything is appended.
 
 One shared function replaces `warn_on_newer_sibling_copies`, and every one of these points
 calls it.
@@ -88,11 +90,14 @@ Unchanged from the warning:
 - A checkout with no siblings, or outside git, is never compared.
 - Creating a record (`add`, a new `feedback`) has nothing to compare and is never refused.
 
-The rule applies to every command that saves an existing record: `note`, `edit` (flags and
-`$EDITOR`), `start`, `done`, `drop`, `block`, `unblock`, `park`, `shelve`, `unshelve`, `dep`,
-`attach`, `detach`, and `feedback --recur`. `note` has always been "never refused" by the
-claim guard; that is still true of the claim guard, but `note` is not exempt from this rule.
-A note written to a stale copy is exactly the tasks-142d2f failure.
+The rule applies to every command that writes an existing record or its attachments:
+`note`, `edit` (flags and `$EDITOR`), `start`, `done`, `drop`, `block`, `unblock`, `park`,
+`shelve`, `unshelve`, `dep`, `attach`, `detach`, and both kinds of feedback recurrence. A
+write that never reaches `save` is still covered, because the check runs at load. `detach`
+has such a path: when the ledger already records the detach, it saves nothing and only
+removes a leftover file from `tasks/files/<id>/`. The load check refuses before that
+removal as well. `note` has always been "never refused" by the claim guard; that is still
+true of the claim guard, but `note` is not exempt from this rule. A note written to a stale copy is exactly the tasks-142d2f failure.
 
 `start` gets no exemption either. A handoff into a checkout that is behind would leave the
 newer copy's changes out, so it refuses like any other write.
@@ -152,8 +157,8 @@ Wherever a `-C` retry appears:
   that path's other errors do. It also says that a rerun opens a fresh editor on the newer
   copy, so the kept file is where the changes are copied from.
 
-`feedback --recur` never offers `-C`, because `-C` would change the project the report
-comes from. Rules 1 and 2 apply as written. Where rule 4 would give a retry, the remedy is
+A feedback recurrence, explicit or automatic, never offers `-C`, because `-C` would change
+the project the report comes from. Rules 1 and 2 apply as written. Where rule 4 would give a retry, the remedy is
 `Rerun with --new to file a separate entry`. Rule 3 cannot arise: feedback writes into the
 owner's registered root, which is its main checkout.
 
@@ -330,7 +335,10 @@ End-to-end tests in `tests/cli.rs`, on a scratch repository with a linked worktr
   stdin. Running the printed retry with that input succeeds.
 - The `$EDITOR` path, with a sibling that becomes newer while the editor is open, refuses
   after the editor closes, keeps the temp file, and names it.
-- `feedback --recur` onto a record whose copy is behind refuses.
+- A feedback recurrence onto a record whose copy is behind refuses, both through
+  `--recur <id>` and through an automatic title match, and neither appends anything.
+- `detach` of a name the ledger already records as detached, with the leftover file still
+  present, from a copy that is behind: it refuses and the file is still there.
 - Another session's live claim, on a different task, naming the worktree that holds the
   newer copy: the refusal names that task and session and prints no `-C` retry. The
   caller's own claim naming it keeps the retry.

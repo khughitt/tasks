@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: ab8d2d-record-home
 created: 2026-09-30T10:28:06Z
-updated: 2026-09-30T10:40:27Z
+updated: 2026-09-30T10:51:44Z
 started: 2026-09-30T10:28:52Z
 depends: []
 parent: tasks-c4ad8e
@@ -28,3 +28,4 @@ Implements docs/specs/2026-09-30-record-home-design.md (accepted 2026-09-30, tas
 - 2026-09-30T10:40:26Z (ab8d2d-record-home): Spec revised for round 3: remedy ladder in §3.2 (another session's claim or park names the newer worktree → no -C retry, name it; same stamp different bytes → refuse, merge only; linked worktree behind main → merge remedy first, -C as the alternative; otherwise -C), decision 2 wording, same-second content rule, cross-project show fallback, §8 widened, §10 tests.
 - 2026-09-30T10:40:27Z (ab8d2d-record-home): parked (waiting on user, review): User re-reviews the round-3 spec docs/specs/2026-09-30-record-home-design.md in .worktrees/ab8d2d-record-home (commit 324adaf); after approval the agent updates the untracked draft plan docs/plans/2026-09-30-record-home.md to the revised §3.2 and §3.1, links it, and asks for the plan review
   provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T10:51:44Z (ab8d2d-record-home): review: spec round 4 — verdict: revise; findings: P1 1, P2 1; reviewer: unrecorded (pasted by the user)
