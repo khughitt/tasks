@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/task-filters
 created: 2026-09-30T16:40:28Z
-updated: 2026-09-30T18:41:20Z
+updated: 2026-09-30T18:47:01Z
 started: 2026-09-30T16:40:36Z
 completed: 2026-09-30T18:37:56Z
 depends: []
@@ -68,3 +68,5 @@ Goal: one TaskFilter in query.rs (or its own module) with matches(&Task, &ClaimS
 - 2026-09-30T18:37:56Z (feat/task-filters): Shared filters for list and ready, documented and reviewed; task branch ready for integration and CLI inventory rollout
   provenance: {"harness_session":"codex:01a0f380-ddb1-71c3-a720-bc7a2dc7b70e","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-30T18:41:20Z (feat/task-filters): Step 6 correction: vendored publish checks copy.is_file per destination file; preflight only existing files, require tasks inventory equal new source, and confirm absent vendor files stay absent after publication.
+- 2026-09-30T18:47:00Z (feat/task-filters): Step 7 publication commits: ops 7253abe; fam e90391f, forge fc19bd0, lit 9f14005, mind6 e6123c3, ns 4405571, obs 8ea71e7, prism b7df18b, relay 23dea6c, sci ceba645, wali af70dea. All preflights and postpublication two-row checks passed; tasks vendor unchanged, missing helper stayed absent.
+- 2026-09-30T18:47:00Z (feat/task-filters): Ops test-fast had two pre-existing ops-profile errors reproduced by controller on unchanged main (57 focused tests, 2 errors); relevant CLI 4 tests and just check passed. Controller approved inventory commits; tooling feedback ops-be1bb7.
