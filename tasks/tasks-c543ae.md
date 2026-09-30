@@ -1,15 +1,16 @@
 ---
 id: tasks-c543ae
 title: "Enforce the halt tag: refuse new starts in a halted project, with a reasoned override"
-status: doing
+status: done
 priority: 1
 size: m
 complexity: mid
 process: planned
 owner: feat/halt-enforcement
 created: 2026-09-30T10:09:44Z
-updated: 2026-09-30T15:04:05Z
+updated: 2026-09-30T15:27:49Z
 started: 2026-09-30T10:58:24Z
+completed: 2026-09-30T15:27:48Z
 depends: []
 tags: [cross-project]
 source: ops-5beefd
@@ -49,3 +50,8 @@ Contract in ops docs/specs/2026-09-29-test-latency-escalation-design.md section 
 - 2026-09-30T14:15:00Z (feat/halt-enforcement): resumed
   provenance: {"harness_session":"codex:01a0f1f2-8c7e-71c3-9d0e-3ec49cdcdfef","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-09-30T15:04:05Z (feat/halt-enforcement): review: impl round 1 — verdict: revise; findings: P1 1, P3 2; reviewer: codex/gpt-6-astra
+- 2026-09-30T15:27:48Z (main): Halt enforcement merged and installed; ops CLI source 7bb5fd4 merged, vendor copies published and check-vendored passes. Review fix guards status edits to doing.
+- 2026-09-30T15:27:48Z (main): done
+  provenance: {"harness_session":"codex:01a0f1f2-8c7e-71c3-9d0e-3ec49cdcdfef","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T15:27:48Z (main): Authoritative halts now guard starts and status edits, expose filtered entry views, and audit reasoned overrides; ops CLI source and vendor copies landed.
+  provenance: {"harness_session":"codex:01a0f1f2-8c7e-71c3-9d0e-3ec49cdcdfef","harness_session_source":"CODEX_SESSION_ID"}
