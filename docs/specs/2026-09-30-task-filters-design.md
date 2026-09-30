@@ -1,6 +1,6 @@
 # One task filter for list and ready — design
 
-**Status:** draft, revised after review round 1, awaiting review. Task: tasks-964c95.
+**Status:** approved after review round 2, 2026-09-30. Task: tasks-964c95.
 
 ## Outcome
 
@@ -76,7 +76,8 @@ A new module, `src/filter.rs`:
   `ValueSet` or `u8` range parser has already refused an unknown value as a usage error.
   `--parent` takes free text, though, and goes through `commands::parse_id`, so
   `tasks list --parent not-an-id` still fails with the typed `invalid_id` error it gives
-  today. It fails before any scan, as it does now.
+  today. It fails before any scan: the parse now runs first, where today the scan
+  precedes it.
 - `Fields<'a>` is the view the filter reads: status, priority, size, effective complexity,
   process, tags, owner, source, canonical parent, and parallel. Two constructors build it:
   `Fields::of_task(&Task, &ClaimSnapshot, &Registry)` and
