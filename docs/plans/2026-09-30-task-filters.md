@@ -1,6 +1,6 @@
 # Task filters implementation plan
 
-**Status:** draft, revised after plan review round 1, awaiting review.
+**Status:** draft, revised after plan review round 2, awaiting review.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -1184,72 +1184,97 @@ the docs with `docs: describe the list and ready filters`. Then dispatch one imp
 review of the whole branch against the spec and this plan, and record it as
 `review: impl round <n> — …` on tasks-964c95 before acting on it.
 
-- [ ] **Step 4: Integrate tasks**
+- [ ] **Step 4: Reconcile the ops worktree with ops main, then refresh the task worktree**
 
-After the review accepts: mark the spec status "implemented", set the plan status, then
-`tasks done tasks-964c95 "<what landed>"` in the final commit. From the main checkout,
-fast-forward `main` to `feat/task-filters` (rebase the branch first if `main` has moved).
-Then run `cargo install --path .` from the main checkout and `tasks check`.
-
-- [ ] **Step 5: Reconcile the ops branch with ops main**
-
-`vendor-cli --force` publishes the worktree's files as they are, so the worktree must
-carry everything ops `main` has. The branch has no commits at this point: its `cli.toml`
-change is uncommitted, because it cannot be committed before publishing (Step 7). So
-reconcile the base under the uncommitted edit, not by rebasing:
+This happens after the review accepts and before tasks integrates, all in the two
+worktrees. `vendor-cli --force` publishes the ops worktree's files as they are, so that
+worktree must carry everything ops `main` has. The ops branch has no commits at this point.
+Its `cli.toml` change is uncommitted, because ops pre-commit refuses the source until the
+copies are published (Step 7). So reconcile the base under the uncommitted edit instead of
+rebasing:
 
 ```bash
-git -C <ops main checkout> log -1 --format=%H main        # the target
-git stash push -- cli.toml                               # in the ops worktree
+# in the ops worktree
+git stash push -- cli.toml
 git merge --ff-only main
 git stash pop
 ```
 
-If `stash pop` conflicts on `cli.toml`, main changed the same rows. Stop, resolve it by
+If `stash pop` conflicts on `cli.toml`, main has changed the same rows. Stop, resolve it by
 keeping main's content plus this plan's two row changes, and rerun ops
 `just test-one test_cli`. Do not pull from `origin` here: the local ops `main` is the
-branch this rollout merges into (Step 8). Then confirm that
-`git diff main -- cli.toml bin/cli_surface.py` shows only the `tasks list` and `tasks ready`
-rows, and that `bin/cli_surface.py` does not appear at all. Also confirm that
-`tools/cli.toml` in `.worktrees/task-filters`, now in tasks `main`, equals the reconciled
-source byte for byte (`cmp`). If it does not, copy the source over it, rerun
-`just test-one surface`, and commit that in tasks `main` before publishing.
-
-- [ ] **Step 6: Check every destination, then publish**
-
-`vendor-cli` writes two files, `tools/cli.toml` and `tools/cli_surface.py`, into every
-registered project that has a copy, and `vendored check` does not look at git state. List the
-destinations with
-`tasks projects --paths` and check each root that has `tools/cli.toml` or
-`tools/cli_surface.py`:
+branch this rollout merges into (Step 8). Then confirm, in the ops worktree:
 
 ```bash
-git -C <root> status --porcelain -- tools/cli.toml tools/cli_surface.py
-git -C <root> diff HEAD -- tools/cli.toml tools/cli_surface.py
+git diff main --stat                       # names cli.toml only
+git diff main -- cli.toml                  # only the tasks list and tasks ready rows
+git diff --quiet main -- bin/cli_surface.py && echo helper-unchanged
 ```
 
-Both must be empty in every destination. The only exception is the tasks main checkout,
-whose committed `tools/cli.toml` already equals the branch source after Step 4. If any
-destination shows an uncommitted or unrelated change to either file, stop and report it
-to the user. Never publish over it.
+Refresh the task worktree from the reconciled source and retest there:
+
+```bash
+cp <ops worktree>/cli.toml .worktrees/task-filters/tools/cli.toml
+cd .worktrees/task-filters && just test-one surface && just test-fast && just check
+```
+
+If `tools/cli.toml` changed, commit it in the task worktree with
+`chore(tools): take the reconciled CLI inventory`.
+
+- [ ] **Step 5: Integrate tasks**
+
+In the task worktree, mark the spec status "implemented" and the plan status "executed",
+then `tasks done tasks-964c95 "<what landed>"`, and commit them together. From the main
+checkout, fast-forward `main` to `feat/task-filters`. If `main` has moved, rebase the branch
+in the task worktree first, rerun `just test-fast` there, then fast-forward. Run
+`cargo install --path .` and `tasks check` from the main checkout. Then compare the
+registered copy with the source:
+`cmp <tasks main checkout>/tools/cli.toml <ops worktree>/cli.toml` must report no
+difference.
+
+- [ ] **Step 6: Preflight every destination by content, then publish**
+
+`vendor-cli` writes `tools/cli.toml` and `tools/cli_surface.py` into every registered
+project that has either file. `vendored check` compares contents but not git state, and a
+clean `git status` does not prove the committed files equal the source. So check both
+before publishing. Take the roots from `tasks projects --paths`. For each root that has
+`tools/cli.toml` or `tools/cli_surface.py`, all of the following must hold:
+
+```bash
+git -C <root> status --porcelain -- tools/cli.toml tools/cli_surface.py   # empty
+cmp <root>/tools/cli_surface.py <ops worktree>/bin/cli_surface.py         # equal
+git -C <ops worktree> show main:cli.toml | cmp - <root>/tools/cli.toml    # equal
+```
+
+The last check says the destination holds exactly ops `main`'s inventory. Step 4 proved
+that the source differs from `main` only by the two rows, so publishing changes only those
+two rows. The one exception is the tasks main checkout: it must equal the new source
+instead (checked in Step 5). If any root fails any check, stop and report the root, the
+file, and the difference to the user. Never publish over it.
 
 Then, from the ops worktree, run `just vendor-cli --force`. Afterwards, for every
-destination, `git -C <root> diff --stat` must name only `tools/cli.toml`, and its diff must
-be only the `tasks list` and `tasks ready` rows. `tools/cli_surface.py` must be unchanged,
-because Step 5 left it equal to main. Run ops `just test-one test_cli`, `just test-fast`,
-and `just check`.
+destination except tasks:
+
+```bash
+git -C <root> diff --stat -- tools/cli.toml tools/cli_surface.py   # names tools/cli.toml only
+git -C <root> diff -- tools/cli.toml                               # only the two tasks rows
+```
+
+For tasks, the same two commands print nothing. Run ops `just test-one test_cli`,
+`just test-fast`, and `just check`.
 
 - [ ] **Step 7: Commit ops and the copies**
 
-Commit ops `cli.toml` with `feat(cli): tasks list and ready filter flags`. Publish before
-committing: ops pre-commit refuses the source while the copies are stale. In each other
-project whose `tools/cli.toml` changed, commit only that file with
-`chore(tools): sync CLI vocabulary`. Record those commits in a note on tasks-964c95.
+Commit ops `cli.toml` with `feat(cli): tasks list and ready filter flags`. In each other
+project whose `tools/cli.toml` changed, stage only that path
+(`git -C <root> add -- tools/cli.toml`) and commit with `chore(tools): sync CLI vocabulary`.
+Record those commits in a note on tasks-964c95.
 
 - [ ] **Step 8: Merge ops and clean up**
 
-Fast-forward ops `main` to `feat/task-filters-cli` (rebase first if it moved). Run
-`just check-vendored` from ops main; expected: silent. In both worktrees run `tt-report`,
-check that no host pointer resolves into them
-(`readlink -f ~/bin/* ~/.local/bin/* | grep -F .worktrees/task-filters`), then
-`git worktree unlock` and `git worktree remove` each, and delete the merged branches.
+Fast-forward ops `main` to `feat/task-filters-cli`. If ops `main` moved after Step 4, stop
+and repeat Steps 4 and 6 for the new base before merging. Run `just check-vendored` from ops
+main; expected: silent. In both worktrees, run `tt-report`. Check that no host pointer
+resolves into them (`readlink -f ~/bin/* ~/.local/bin/* | grep -F .worktrees/task-filters`).
+Then run `git worktree unlock` and `git worktree remove` on each, and delete the merged
+branches.

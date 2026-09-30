@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/task-filters
 created: 2026-09-30T16:40:28Z
-updated: 2026-09-30T17:40:24Z
+updated: 2026-09-30T18:02:06Z
 started: 2026-09-30T16:40:36Z
 depends: []
 tags: [cli]
@@ -47,3 +47,10 @@ Goal: one TaskFilter in query.rs (or its own module) with matches(&Task, &ClaimS
 - 2026-09-30T17:40:23Z (feat/task-filters): resumed
   provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T17:40:23Z (feat/task-filters): plan round 1 findings verified and addressed: publish now reconciles the ops worktree with main under its uncommitted edit, checks git status and diff of tools/cli.toml and tools/cli_surface.py in every destination and stops on any change, and verifies only cli.toml rows changed after publishing; escalation test compares sorted ids; skill text excludes none from --priority and keeps --tag all-of
+- 2026-09-30T17:40:24Z (feat/task-filters): parked (waiting on user, review): plan round 2 review of docs/plans/2026-09-30-task-filters.md and an execution choice (native recommended); then link the plan, file step children, and execute in .worktrees/task-filters
+  provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T17:55:06Z (feat/task-filters): review: plan round 2 — verdict: revise; findings: P2 2; reviewer: codex
+- 2026-09-30T17:55:06Z (feat/task-filters): Plan round 2: previous test-order and skill-text findings resolved; dirty-destination checks now cover both published files. Remaining P2: lines 1236-1239 verify allowed content deltas only after force-publishing; clean git state does not prove destination helper equals the source or inventory differs only in the two intended rows. Check those byte/content comparisons before publishing and scope post-publish diffs to the two files. P2 lines 1214-1216 conflate the task worktree with main after integration; fast-forwarding main does not change the worktree branch. Reconcile ops and refresh/test the inventory in the task worktree before integrating tasks, then compare the registered main copy.
+- 2026-09-30T18:02:05Z (feat/task-filters): resumed
+  provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T18:02:05Z (feat/task-filters): plan round 2 findings verified and addressed: ops reconcile and inventory refresh happen in the task worktree before integration; the registered tasks copy is compared after the fast-forward; every destination is preflighted by content (helper equals the source, inventory equals ops main) before publishing; later diffs are scoped to the two vendor files
