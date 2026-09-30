@@ -1,13 +1,15 @@
 ---
 id: tasks-ab8d2d
 title: "Design which checkout owns a task record for writes and reads, from the brief"
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-09-29T20:50:01Z
-updated: 2026-09-29T20:56:10Z
+updated: 2026-09-30T09:54:52Z
+started: 2026-09-30T09:54:52Z
 depends: []
 parent: tasks-c4ad8e
 tags: [worktree]
@@ -18,3 +20,5 @@ Question: which checkout is a task record's home, and what do writes and reads f
 ## Notes
 
 - 2026-09-29T20:56:10Z (main): Current lean (agent, 2026-09-29; user undecided): a home checkout = the worktree named by the task's live claim or park; start is the handoff (re-start in the new worktree moves the claim) and refuses when a sibling copy is newer, so the handoff cannot drop main's writes; any other write from a non-home checkout refuses with a typed error naming the home and the exact 'tasks -C <home> ...' retry, never auto-routing; with no claim or park there is no home and the newer-sibling rule stays a warning. show falls back to the home copy with a warning; plain list stays local. See brief §Alternatives.
+- 2026-09-30T09:54:52Z (main): started
+  provenance: {"harness_session":"claude-code:2387b84d-f415-4946-9038-1bb62ec95101","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
