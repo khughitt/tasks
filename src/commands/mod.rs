@@ -1374,7 +1374,9 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Detach { id, name, why } => {
             attach::detach(open_id_write_ctx(dir, &id)?, id, name, why)
         }
-        Command::Start { id, force } => status::start(open_id_write_ctx(dir, &id)?, id, force),
+        Command::Start { id, force, reason } => {
+            status::start(open_id_write_ctx(dir, &id)?, id, force, reason)
+        }
         Command::Park {
             id,
             next_step,

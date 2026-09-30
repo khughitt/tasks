@@ -1,12 +1,12 @@
 use super::{
-    Ctx, append_lifecycle_note, append_note, follow_holder, id_out, load, owner_name, save,
-    transition,
+    ClaimIntent, Ctx, append_lifecycle_note, append_note, follow_holder, id_out, load, owner_name,
+    save, transition,
 };
 use crate::error::{Error, Result};
 use crate::model::{Status, Task};
 use crate::output::Output;
 
-pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
+pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
     if task.status == Status::Shelved {
         return Err(Error::InvalidTransition(
@@ -14,14 +14,88 @@ pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
             format!("doing (`tasks unshelve {id}` first)"),
         ));
     }
+    if reason.is_some() && !force {
+        return Err(Error::Validation("--reason requires --force".into()));
+    }
+    if let Some(reason) = reason.as_deref() {
+        crate::format::validate_line("reason", reason)?;
+    }
+    let local = ctx.project.scan()?;
+    let snapshot = crate::halt::snapshot(&ctx.project, &ctx.registry, &local)?;
+    if force
+        && !snapshot.halts().is_empty()
+        && reason
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        return Err(Error::Validation(
+            "--force under a halt requires --reason".into(),
+        ));
+    }
+    let blockers = snapshot.blocking(&task);
+    let overriding_halt = !blockers.is_empty();
+    if !force && !blockers.is_empty() {
+        let ids = blockers
+            .iter()
+            .map(|halt| halt.id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(Error::Halted(format!(
+            "{id} is stopped by halt {ids}; override with `tasks start {id} --force --reason \"...\"`"
+        )));
+    }
     transition(&mut ctx, &mut task, Status::Doing, force)?;
     let owner = owner_name(&ctx.project)?;
     task.owner = Some(owner.clone());
-    // A takeover displaces someone; the task's own record should say so, not just the
-    // ephemeral warning stream. It keeps the summary: the warning's host, pid, and
-    // worktree would publish machine details with the record.
+    crate::format::validate_task(&task)?;
+    ctx.project.validate_docs(&task)?;
+    crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, &task)?;
+    crate::hierarchy::validate_periodic(&ctx.project, &ctx.registry, &task)?;
+    crate::hierarchy::validate_defer(&ctx.project, &ctx.registry, &task)?;
+    let session = match &ctx.pending_claim {
+        Some((_, ClaimIntent::Acquire(claim))) => claim.session.clone(),
+        _ => unreachable!("start prepared an acquire claim"),
+    };
+    if !blockers.is_empty() {
+        let reason = reason.as_deref().expect("override reason was validated");
+        let ids = blockers
+            .iter()
+            .map(|halt| halt.id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let target_note = format!("halt override: started past {ids} by {session}: {reason}");
+        crate::format::validate_note_text(&target_note)?;
+        for mut halt in blockers.into_iter().cloned() {
+            append_note(
+                &mut halt,
+                &owner,
+                &format!(
+                    "halt override: attempted {} by {session}: {reason}",
+                    task.id
+                ),
+            )?;
+            halt.updated = crate::time::after(&halt.updated)?;
+            crate::format::validate_task(&halt)?;
+            snapshot.authority().validate_docs(&halt)?;
+            // Append-only audit note: this direct authority write skips save's newer-sibling warning.
+            snapshot.authority().write_task(&ctx.registry, &halt)?;
+        }
+        append_note(&mut task, &owner, &target_note)?;
+    }
+    // Persist the redacted takeover summary, adding the reason when supplied.
+    let mut reason_used = false;
     if let Some(takeover) = ctx.takeover.take() {
-        append_note(&mut task, &owner, &takeover)?;
+        let note = if let Some(reason) = reason.as_deref() {
+            reason_used = true;
+            format!("{takeover}; reason: {reason}")
+        } else {
+            takeover
+        };
+        append_note(&mut task, &owner, &note)?;
+    }
+    if reason.is_some() && !reason_used && !overriding_halt {
+        ctx.warnings
+            .push("--reason was unused because no override or takeover was needed".into());
     }
     save(&mut ctx, &mut task)?;
     warn_if_uncommitted_with_worktrees(&mut ctx, &task);

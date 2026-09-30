@@ -438,6 +438,9 @@ pub enum Command {
         /// Take over a claim another live session holds.
         #[arg(long)]
         force: bool,
+        /// Explain an audited halt override or forced takeover.
+        #[arg(long)]
+        reason: Option<String>,
     },
     /// Set a task down: record the next step, who it waits on, and this session in the
     /// shared store. Status is untouched; `start` resumes it.

@@ -10,6 +10,7 @@ mod defer;
 mod error;
 mod format;
 mod frontmatter;
+mod halt;
 mod hierarchy;
 mod model;
 mod output;

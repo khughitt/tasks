@@ -9907,6 +9907,311 @@ fn started_then_branched(env: &mut TestEnv) -> (std::path::PathBuf, std::path::P
 }
 
 #[test]
+fn halt_start_uncommitted_registered_incident_blocks_existing_worktree_immediately() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    assert!(main.join(format!("tasks/{halt}.md")).exists());
+    assert_eq!(env.fail(&side, &["start", &target]), "halted");
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "todo"
+    );
+    assert!(!env.claim_store("sci").exists());
+}
+
+#[test]
+fn halt_start_side_closure_does_not_lift_until_registered_record_closes() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    std::fs::copy(
+        main.join(format!("tasks/{halt}.md")),
+        side.join(format!("tasks/{halt}.md")),
+    )
+    .unwrap();
+    env.json(&side, &["done", &halt, "local resolution"]);
+    assert_eq!(env.fail(&side, &["start", &target]), "halted");
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "todo"
+    );
+    assert!(
+        !std::fs::read_to_string(env.claim_store("sci"))
+            .unwrap()
+            .contains(&target)
+    );
+    env.json(&main, &["done", &halt, "registered resolution"]);
+    env.json(&side, &["start", &target]);
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "doing"
+    );
+}
+
+#[test]
+fn halt_start_unreadable_registered_checkout_refuses_force() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    std::fs::remove_file(main.join("tasks/.config.toml")).unwrap();
+    assert_eq!(
+        env.fail(&side, &["start", &target, "--force", "--reason", "urgent"]),
+        "config"
+    );
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "todo"
+    );
+    assert!(!env.claim_store("sci").exists());
+}
+
+#[test]
+fn halt_start_unregistered_checkout_uses_local_authority() {
+    let mut env = TestEnv::new();
+    let project = env.init("sci");
+    let target = id_of(env.json(&project, &["add", "Ordinary", "-p", "2"]));
+    std::fs::remove_file(env.home.path().join(".config/tasks/projects.toml")).unwrap();
+    env.json(&project, &["start", &target]);
+    assert_eq!(
+        env.json(&project, &["show", &target])["task"]["status"],
+        "doing"
+    );
+}
+
+#[test]
+fn halt_override_records_authority_and_target_before_claimed_start() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    env.json(
+        &side,
+        &["start", &target, "--force", "--reason", "emergency"],
+    );
+    let authority = env.json(&main, &["show", &halt]);
+    let local = env.json(&side, &["show", &target]);
+    assert_eq!(local["task"]["status"], "doing");
+    assert!(
+        authority
+            .to_string()
+            .contains(&format!("halt override: attempted {target}"))
+    );
+    assert!(
+        local
+            .to_string()
+            .contains(&format!("halt override: started past {halt}"))
+    );
+    assert!(env.claim_store("sci").exists());
+}
+
+#[test]
+fn halt_start_equal_priority_is_allowed_and_force_reason_is_validated() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(&dir, &["add", "Incident", "-p", "1", "--tag", "halt"]);
+    let equal = id_of(env.json(&dir, &["add", "Equal", "-p", "1"]));
+    let lower = id_of(env.json(&dir, &["add", "Lower", "-p", "3"]));
+    env.json(&dir, &["start", &equal]);
+    assert_eq!(env.fail(&dir, &["start", &lower]), "halted");
+    assert_eq!(env.fail(&dir, &["start", &lower, "--force"]), "validation");
+    assert_eq!(
+        env.fail(&dir, &["start", &lower, "--reason", "urgent"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&dir, &["start", &lower, "--force", "--reason", "  "]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&dir, &["start", &lower, "--force", "--reason", "line\ntwo"]),
+        "validation"
+    );
+    assert_eq!(env.json(&dir, &["show", &lower])["task"]["status"], "todo");
+    env.json(&dir, &["start", &lower, "--force", "--reason", "urgent"]);
+    assert_eq!(env.json(&dir, &["show", &lower])["task"]["status"], "doing");
+}
+
+#[test]
+fn halt_start_multihalt_error_names_urgent_blockers_in_order() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let p2 = id_of(env.json(&dir, &["add", "P2", "-p", "2", "--tag", "halt"]));
+    let p0 = id_of(env.json(&dir, &["add", "P0", "-p", "0", "--tag", "halt"]));
+    let target = id_of(env.json(&dir, &["add", "P3", "-p", "3"]));
+    let error = error_of(&env, &dir, &["start", &target]);
+    assert_eq!(error["error"]["kind"], "halted");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.find(&p0).unwrap() < detail.find(&p2).unwrap(),
+        "{detail}"
+    );
+    assert!(detail.contains("--force --reason"));
+}
+
+#[test]
+fn halt_override_invalid_transition_leaves_no_attempted_note() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    env.json(&side, &["drop", &target, "no longer wanted"]);
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    assert_eq!(
+        env.fail(&side, &["start", &target, "--force", "--reason", "urgent"]),
+        "invalid_transition"
+    );
+    assert!(
+        !env.json(&main, &["show", &halt])
+            .to_string()
+            .contains("halt override:")
+    );
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "dropped"
+    );
+}
+
+#[test]
+fn halt_override_failed_target_write_keeps_attempted_note_and_previous_claim() {
+    use std::os::unix::fs::PermissionsExt;
+    struct Restore(std::path::PathBuf, std::fs::Permissions);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    env.json(&side, &["start", &target]);
+    let task_path = side.join(format!("tasks/{target}.md"));
+    let raw = std::fs::read_to_string(&task_path)
+        .unwrap()
+        .replace("status: doing", "status: todo");
+    std::fs::write(&task_path, raw).unwrap();
+    let previous_claim = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    let tasks_dir = side.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let restore = Restore(tasks_dir, original);
+    let kind = env.fail(&side, &["start", &target, "--force", "--reason", "urgent"]);
+    drop(restore);
+    assert_eq!(kind, "io");
+    assert!(
+        env.json(&main, &["show", &halt])
+            .to_string()
+            .contains(&format!("halt override: attempted {target}"))
+    );
+    assert_eq!(
+        env.json(&side, &["show", &target])["task"]["status"],
+        "todo"
+    );
+    assert_eq!(
+        std::fs::read_to_string(env.claim_store("sci")).unwrap(),
+        previous_claim
+    );
+}
+
+#[test]
+fn halt_start_unused_reason_warns_and_multiline_reason_is_refused_without_halt() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let target = id_of(env.json(&dir, &["add", "Ordinary"]));
+    assert_eq!(
+        env.fail(
+            &dir,
+            &["start", &target, "--force", "--reason", "two\nlines"]
+        ),
+        "validation"
+    );
+    let started = env.json(
+        &dir,
+        &["start", &target, "--force", "--reason", "prepared override"],
+    );
+    assert!(
+        warnings_of(&started)
+            .iter()
+            .any(|warning| warning.contains("--reason was unused"))
+    );
+}
+
+#[test]
+fn halt_start_force_resume_requires_reason_even_when_allowed() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let target = id_of(env.json(&dir, &["add", "Ordinary"]));
+    env.json(&dir, &["start", &target]);
+    env.json(&dir, &["add", "Incident", "-p", "0", "--tag", "halt"]);
+    assert_eq!(env.fail(&dir, &["start", &target, "--force"]), "validation");
+    let resumed = env.json(&dir, &["start", &target, "--force", "--reason", "resuming"]);
+    assert!(
+        warnings_of(&resumed)
+            .iter()
+            .any(|warning| warning.contains("--reason was unused"))
+    );
+}
+
+#[test]
+fn halt_start_blocks_blocked_and_recurring_done_new_starts() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let blocked = id_of(env.json(&dir, &["add", "Blocked", "-p", "3"]));
+    env.json(&dir, &["block", &blocked, "waiting"]);
+    let recurring = id_of(env.json(&dir, &["add", "Sweep", "-p", "3", "--every", "1d"]));
+    env.json(&dir, &["start", &recurring]);
+    env.json(&dir, &["done", &recurring, "first pass"]);
+    env.json(&dir, &["add", "Incident", "-p", "0", "--tag", "halt"]);
+    assert_eq!(env.fail(&dir, &["start", &blocked]), "halted");
+    assert_eq!(env.fail(&dir, &["start", &recurring]), "halted");
+    assert_eq!(
+        env.json(&dir, &["show", &blocked])["task"]["status"],
+        "blocked"
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &recurring])["task"]["status"],
+        "done"
+    );
+}
+
+#[test]
+fn halt_start_work_for_less_urgent_halt_is_allowed() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    env.json(
+        &dir,
+        &["add", "Urgent incident", "-p", "0", "--tag", "halt"],
+    );
+    let p2 = id_of(env.json(&dir, &["add", "Other incident", "-p", "2", "--tag", "halt"]));
+    let remedy = id_of(env.json(&dir, &["add", "Remedy", "-p", "3", "--parent", &p2]));
+    env.json(&dir, &["start", &remedy]);
+    assert_eq!(
+        env.json(&dir, &["show", &remedy])["task"]["status"],
+        "doing"
+    );
+}
+
+#[test]
+fn halt_start_prepared_override_warns_when_authority_halt_lifts() {
+    let mut env = TestEnv::new();
+    let (main, side, target) = repo_with_worktree(&mut env);
+    let halt = id_of(env.json(&main, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    assert_eq!(env.fail(&side, &["start", &target]), "halted");
+    env.json(&main, &["done", &halt, "fixed"]);
+    let started = env.json(
+        &side,
+        &["start", &target, "--force", "--reason", "prepared"],
+    );
+    assert!(
+        warnings_of(&started)
+            .iter()
+            .any(|warning| warning.contains("--reason was unused"))
+    );
+    assert!(
+        !env.json(&main, &["show", &halt])
+            .to_string()
+            .contains("halt override:")
+    );
+}
+
+#[test]
 fn a_write_from_a_copy_behind_another_checkout_refuses_and_prints_the_retry() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);
