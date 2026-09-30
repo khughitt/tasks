@@ -1480,6 +1480,79 @@ fn park_without_a_reason_records_none_and_re_parking_drops_a_previous_one() {
 }
 
 #[test]
+fn ordinary_pretty_tables_mark_a_quiet_park_until_it_is_resumed_or_reparked() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let idle = "waits on user, quiet; idle, 40 min";
+    let park = |args: &[&str]| {
+        as_agent(&env, &sci, "agent-a")
+            .args(["park", &id, "rerun the preflight"])
+            .args(args)
+            .assert()
+            .success();
+    };
+    let row = |text: String| -> String {
+        text.lines()
+            .find(|line| line.starts_with(&id))
+            .unwrap_or_else(|| panic!("no row for {id} in {text}"))
+            .to_string()
+    };
+
+    park(&[
+        "--waiting-on",
+        "user",
+        "--reason",
+        "quiet",
+        "--minutes",
+        "40",
+    ]);
+    assert!(row(env.pretty(&sci, &["list"])).contains(idle));
+    let prime = env.pretty(&sci, &["prime"]);
+    let roadmap = &prime[prime.find("roadmap:").unwrap()..prime.find("parked:").unwrap()];
+    assert!(row(roadmap.to_string()).contains(idle), "{prime}");
+    // JSON keeps its shape: the park object carries the recipe, and nothing else is added.
+    let listed = &env.json(&sci, &["list"])["tasks"][0];
+    assert_eq!(listed["park"]["needs"], "idle", "{listed}");
+    assert_eq!(listed["park"]["minutes"], 40, "{listed}");
+    // A user-waiting park stays out of ready.
+    assert!(!env.pretty(&sci, &["ready"]).contains(&id));
+
+    // Waiting on the agent, the quiet park stays eligible and carries the marker there too.
+    park(&[
+        "--reason",
+        "quiet",
+        "--needs",
+        "headless",
+        "--minutes",
+        "50",
+    ]);
+    assert!(row(env.pretty(&sci, &["ready"])).contains("waits on agent, quiet; headless, 50 min"));
+
+    // A park for another reason, and a resume, both drop the marker.
+    park(&["--waiting-on", "user", "--reason", "review"]);
+    let listed = row(env.pretty(&sci, &["list"]));
+    assert!(
+        !listed.contains("quiet") && !listed.contains("waits on"),
+        "{listed}"
+    );
+    park(&[
+        "--waiting-on",
+        "user",
+        "--reason",
+        "quiet",
+        "--minutes",
+        "40",
+    ]);
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let listed = row(env.pretty(&sci, &["list"]));
+    assert!(!listed.contains("waits on"), "{listed}");
+}
+
+#[test]
 fn a_quiet_park_records_its_recipe_in_the_entry_the_note_and_every_park_view() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

@@ -155,7 +155,9 @@ stamps written only by status changes: `started`, the first time work began, and
 `completed`, the latest completion (cleared by a reopen). Design:
 `docs/specs/2026-09-11-park-reason-and-stamps-design.md`.
 `tasks quiet` lists quiet parks across every registered project as resume briefs (design:
-`docs/specs/2026-09-13-quiet-queue-design.md`). A quiet park's next step lists the run's
+`docs/specs/2026-09-13-quiet-queue-design.md`); the ordinary pretty tables (`list`,
+`prime`, `ready`) mark a quiet park's row with its recipe, such as
+`waits on user, quiet; idle, 40 min`. A quiet park's next step lists the run's
 phases and any refusal or hang an earlier attempt of the recipe hit. Every attempt then ends
 with one note in a fixed form, so the estimate can be compared with what happened:
 
