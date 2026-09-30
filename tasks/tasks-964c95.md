@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/task-filters
 created: 2026-09-30T16:40:28Z
-updated: 2026-09-30T17:02:28Z
+updated: 2026-09-30T17:40:24Z
 started: 2026-09-30T16:40:36Z
 depends: []
 tags: [cli]
@@ -40,3 +40,10 @@ Goal: one TaskFilter in query.rs (or its own module) with matches(&Task, &ClaimS
 - 2026-09-30T16:56:53Z (feat/task-filters): resumed
   provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T17:02:28Z (feat/task-filters): plan drafted: docs/plans/2026-09-30-task-filters.md, 3 tasks (filter module + list; ready at candidacy + complexity §4.1 amendment; docs, review, ops rollout). Plan link and step children wait for plan approval so pickers do not offer unapproved steps
+- 2026-09-30T17:02:30Z (feat/task-filters): parked (waiting on user, review): user reviews docs/plans/2026-09-30-task-filters.md and picks subagent-driven or native execution; then link the plan, file step children, and execute in .worktrees/task-filters
+  provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T17:04:37Z (feat/task-filters): review: plan round 1 — verdict: revise; findings: P1 1, P2 2; reviewer: codex
+- 2026-09-30T17:04:38Z (feat/task-filters): Plan review findings: P1 lines 1191-1197 use vendored check as a dirty-file check, then force-publish both cli.toml and cli_surface.py across registered checkouts; inspect destination git status/diffs for both files, stop on unrelated changes, and reconcile the ops branch before publishing. P2 lines 165-167 assume insertion order for equal-priority tasks, but list sorts by updated descending then random id; compare sorted ids. P2 lines 1160-1162 document none for priority and OR for repeated tag; state the priority and all-of tag exceptions.
+- 2026-09-30T17:40:23Z (feat/task-filters): resumed
+  provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T17:40:23Z (feat/task-filters): plan round 1 findings verified and addressed: publish now reconciles the ops worktree with main under its uncommitted edit, checks git status and diff of tools/cli.toml and tools/cli_surface.py in every destination and stops on any change, and verifies only cli.toml rows changed after publishing; escalation test compares sorted ids; skill text excludes none from --priority and keeps --tag all-of

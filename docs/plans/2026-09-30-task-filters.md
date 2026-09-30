@@ -1,6 +1,6 @@
 # Task filters implementation plan
 
-**Status:** draft, awaiting review.
+**Status:** draft, revised after plan review round 1, awaiting review.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -162,10 +162,12 @@ fn list_complexity_filter_reads_the_escalated_rating() {
     )
     .unwrap();
 
-    assert_eq!(
-        list_ids(&env.json(&sci, &["list", "--complexity", "high"])),
-        [mid.clone(), bare.clone()]
-    );
+    // Equal priorities: list order falls to last activity, then id, so compare as sets.
+    let mut high = list_ids(&env.json(&sci, &["list", "--complexity", "high"]));
+    high.sort();
+    let mut expected = vec![mid.clone(), bare.clone()];
+    expected.sort();
+    assert_eq!(high, expected);
     assert!(list_ids(&env.json(&sci, &["list", "--complexity", "mid"])).is_empty());
     assert!(
         list_ids(&env.json(&sci, &["list", "--complexity", "none"])).is_empty(),
@@ -1157,11 +1159,14 @@ In `skills/tasks/SKILL.md`, after the sentence ending "`--sort created` for the 
 recently touched or added first (`--reverse` flips it).", add:
 
 ```markdown
-   `list` and `ready` also take `-p/--priority`, `--size`, `--complexity`, and `--process`
-   (each repeatable, `none` for unset), with `--tag`, `--owner`, `--source`, `--parent`, and
-   `--parallel`; repeats of one flag widen, different flags narrow. `--complexity` is a
-   selection over the effective rating, not the session cutoff: a session under a cutoff
-   still picks only through `ready` and `next`.
+   `list` and `ready` also take `-p/--priority`, `--size`, `--complexity`, and `--process`,
+   each repeatable: repeats of one of these widen (any of them), and different flags
+   narrow (all of them). `--size`, `--complexity`, and `--process` accept `none` for an
+   unset field; `--priority` does not, since every task has one. `--tag` stays all-of: a
+   task must carry every tag given. `--owner`, `--source`, and `--parent` take one value,
+   and `--parallel` is a switch. `--complexity` is a selection over the effective rating,
+   not the session cutoff: a session under a cutoff still picks only through `ready` and
+   `next`.
 ```
 
 - [ ] **Step 2: File the `--tag` follow-up**
@@ -1186,19 +1191,62 @@ After the review accepts: mark the spec status "implemented", set the plan statu
 fast-forward `main` to `feat/task-filters` (rebase the branch first if `main` has moved).
 Then run `cargo install --path .` from the main checkout and `tasks check`.
 
-- [ ] **Step 5: Publish the inventory, then commit ops**
+- [ ] **Step 5: Reconcile the ops branch with ops main**
 
-Look at every registered vendor destination for unrelated edits (`python3 bin/vendored check`
-from the ops worktree lists them). Then, from the ops worktree, run `just vendor-cli --force`.
-It publishes `cli.toml` from the unmerged branch; tasks main already carries the identical
-copy. Run ops `just test-one test_cli`, `just test-fast`, and `just check`. Commit ops
-`cli.toml` with `feat(cli): tasks list and ready filter flags`. Publish before committing:
-ops pre-commit refuses the source while copies are stale. In each other project whose
-`tools/cli.toml` changed, commit only that file with
-`chore(tools): sync CLI vocabulary`. Record the list of those commits in a note on
-tasks-964c95.
+`vendor-cli --force` publishes the worktree's files as they are, so the worktree must
+carry everything ops `main` has. The branch has no commits at this point: its `cli.toml`
+change is uncommitted, because it cannot be committed before publishing (Step 7). So
+reconcile the base under the uncommitted edit, not by rebasing:
 
-- [ ] **Step 6: Merge ops and clean up**
+```bash
+git -C <ops main checkout> log -1 --format=%H main        # the target
+git stash push -- cli.toml                               # in the ops worktree
+git merge --ff-only main
+git stash pop
+```
+
+If `stash pop` conflicts on `cli.toml`, main changed the same rows. Stop, resolve it by
+keeping main's content plus this plan's two row changes, and rerun ops
+`just test-one test_cli`. Do not pull from `origin` here: the local ops `main` is the
+branch this rollout merges into (Step 8). Then confirm that
+`git diff main -- cli.toml bin/cli_surface.py` shows only the `tasks list` and `tasks ready`
+rows, and that `bin/cli_surface.py` does not appear at all. Also confirm that
+`tools/cli.toml` in `.worktrees/task-filters`, now in tasks `main`, equals the reconciled
+source byte for byte (`cmp`). If it does not, copy the source over it, rerun
+`just test-one surface`, and commit that in tasks `main` before publishing.
+
+- [ ] **Step 6: Check every destination, then publish**
+
+`vendor-cli` writes two files, `tools/cli.toml` and `tools/cli_surface.py`, into every
+registered project that has a copy, and `vendored check` does not look at git state. List the
+destinations with
+`tasks projects --paths` and check each root that has `tools/cli.toml` or
+`tools/cli_surface.py`:
+
+```bash
+git -C <root> status --porcelain -- tools/cli.toml tools/cli_surface.py
+git -C <root> diff HEAD -- tools/cli.toml tools/cli_surface.py
+```
+
+Both must be empty in every destination. The only exception is the tasks main checkout,
+whose committed `tools/cli.toml` already equals the branch source after Step 4. If any
+destination shows an uncommitted or unrelated change to either file, stop and report it
+to the user. Never publish over it.
+
+Then, from the ops worktree, run `just vendor-cli --force`. Afterwards, for every
+destination, `git -C <root> diff --stat` must name only `tools/cli.toml`, and its diff must
+be only the `tasks list` and `tasks ready` rows. `tools/cli_surface.py` must be unchanged,
+because Step 5 left it equal to main. Run ops `just test-one test_cli`, `just test-fast`,
+and `just check`.
+
+- [ ] **Step 7: Commit ops and the copies**
+
+Commit ops `cli.toml` with `feat(cli): tasks list and ready filter flags`. Publish before
+committing: ops pre-commit refuses the source while the copies are stale. In each other
+project whose `tools/cli.toml` changed, commit only that file with
+`chore(tools): sync CLI vocabulary`. Record those commits in a note on tasks-964c95.
+
+- [ ] **Step 8: Merge ops and clean up**
 
 Fast-forward ops `main` to `feat/task-filters-cli` (rebase first if it moved). Run
 `just check-vendored` from ops main; expected: silent. In both worktrees run `tt-report`,
