@@ -1696,6 +1696,20 @@ pub fn table(
             Some(deferred) => format!("  defer {}", deferred.until),
             None => String::new(),
         };
+        // A quiet park is waiting for an idle host, which the status column cannot say; the
+        // recipe reads as it does in `list --parked` (quiet-queue spec §4).
+        let quiet = match &row.park {
+            Some(park) if park.reason == Some(crate::claims::Reason::Quiet) => format!(
+                "  waits on {}",
+                crate::claims::describe_stop(
+                    park.waiting_on,
+                    park.reason,
+                    park.needs,
+                    park.minutes
+                )
+            ),
+            _ => String::new(),
+        };
         let owner = match &row.claim {
             Some(claim) if claim.live => format!(" @{} [{}]", claim.owner, claim.session),
             Some(claim) => format!(" @{} [{} stale]", claim.owner, claim.session),
@@ -1732,6 +1746,7 @@ pub fn table(
                 (tags.as_str(), Some(Style::Chrome)),
                 (cadence.as_str(), Some(Style::Emphasis)),
                 (deferral.as_str(), Some(Style::Emphasis)),
+                (quiet.as_str(), Some(Style::Emphasis)),
                 (owner.as_str(), Some(Style::Chrome)),
             ],
             painter,
@@ -2357,6 +2372,44 @@ mod tests {
             true,
             Wrap::at(80),
         );
+        assert!(text.contains("\x1b[1m"), "{text:?}");
+        assert!(!text.contains("\x1b[1m\x1b[1m"), "{text:?}");
+    }
+
+    #[test]
+    fn a_quiet_park_marker_wraps_with_the_row_and_is_painted_once() {
+        let mut quiet = long_row();
+        quiet.park = Some(ParkInfo {
+            at: "2026-09-06T00:00:00Z".into(),
+            next_step: "rerun the preflight".into(),
+            waiting_on: crate::claims::WaitingOn::User,
+            reason: Some(crate::claims::Reason::Quiet),
+            needs: Some(crate::claims::Needs::Idle),
+            minutes: Some(40),
+            session: "s".into(),
+            owner: "o".into(),
+            host: "h".into(),
+            worktree: "w".into(),
+        });
+        let marker = "waits on user, quiet; idle, 40 min";
+        let render = |painter: &Painter, wrap| {
+            table(
+                std::slice::from_ref(&quiet),
+                DateColumn::Updated,
+                painter,
+                0,
+                false,
+                false,
+                wrap,
+            )
+        };
+        assert!(render(&plain(), Wrap::NONE).contains(marker));
+        let wrapped = render(&plain(), Wrap::at(80));
+        assert!(wrapped.lines().count() > 1, "{wrapped:?}");
+        let joined: Vec<&str> = wrapped.lines().map(str::trim).collect();
+        assert!(joined.join(" ").contains(marker), "{wrapped:?}");
+        let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
+        let text = render(&colored, Wrap::at(80));
         assert!(text.contains("\x1b[1m"), "{text:?}");
         assert!(!text.contains("\x1b[1m\x1b[1m"), "{text:?}");
     }
