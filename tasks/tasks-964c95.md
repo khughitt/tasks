@@ -8,12 +8,13 @@ complexity: mid
 process: planned
 owner: feat/task-filters
 created: 2026-09-30T16:40:28Z
-updated: 2026-09-30T18:02:06Z
+updated: 2026-09-30T18:10:52Z
 started: 2026-09-30T16:40:36Z
 depends: []
 tags: [cli]
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-09-30-task-filters-design.md
+plan: docs/plans/2026-09-30-task-filters.md
 ---
 
 list filters only on status, tag, owner, source, and parent; ready has --size (exact) and --parallel; ready/next have --max-complexity (a ceiling on effective complexity that hides unassessed). Nothing filters on priority or process.
@@ -54,3 +55,8 @@ Goal: one TaskFilter in query.rs (or its own module) with matches(&Task, &ClaimS
 - 2026-09-30T18:02:05Z (feat/task-filters): resumed
   provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T18:02:05Z (feat/task-filters): plan round 2 findings verified and addressed: ops reconcile and inventory refresh happen in the task worktree before integration; the registered tasks copy is compared after the fast-forward; every destination is preflighted by content (helper equals the source, inventory equals ops main) before publishing; later diffs are scoped to the two vendor files
+- 2026-09-30T18:02:07Z (feat/task-filters): parked (waiting on user, review): plan round 3 review of docs/plans/2026-09-30-task-filters.md and an execution choice (native recommended); then link the plan, file step children, and execute in .worktrees/task-filters
+  provenance: {"harness_session":"claude-code:b8006f0d-3c43-4298-a25a-79f366ea400c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-30T18:10:34Z (feat/task-filters): resumed
+  provenance: {"harness_session":"codex:01a0f380-ddb1-71c3-a720-bc7a2dc7b70e","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T18:10:52Z (feat/task-filters): review: plan round 3 — verdict: accept; findings: none; reviewer: human
