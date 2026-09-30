@@ -78,7 +78,9 @@ line on stderr; a command that ran and failed exits 1 with one JSON error object
 `start` also writes a per-project claim outside git, so every worktree sees the session and
 its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
 `TASKS_SESSION` per agent when agents share a terminal or harness process; use
-`tasks start --force <id>` for an explicit, recorded takeover.
+`tasks start --force <id>` for an explicit, recorded takeover. A write refuses with
+`stale_copy` when another worktree holds a newer copy of the record, and says whether to
+rerun there, merge, or leave it to the session working there.
 
 Lifecycle notes automatically record native harness provenance, independently of
 claim identity and liveness. A stamped note has one indented JSON continuation:

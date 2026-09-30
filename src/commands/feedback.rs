@@ -166,12 +166,15 @@ pub fn run(
         }
     };
     let (task, action) = match existing {
-        Some((id, automatic)) => (
-            recur_into(
+        Some((id, automatic)) => {
+            let task = recur_into(
                 &mut ctx, &id, automatic, &summary, &body, &category, &from, &prefix,
-            )?,
-            "recurred",
-        ),
+            )?;
+            // Record-home spec §4: a holder's recurrence follows the owner's registered
+            // root, where it landed. `recur_into` saved its own pruned store first.
+            super::follow_holder(&mut ctx, &task.id, None, "the recurrence landed");
+            (task, "recurred")
+        }
         None => (
             create(&ctx.project, &ctx.registry, summary, body, &category, &from)?,
             "created",
@@ -245,6 +248,9 @@ fn recur_into(
         }
         Ok(())
     };
+    // Record-home spec §3.1: under the target's lock, before anything is appended.
+    let (loaded, raw) = ctx.project.read_task_with_raw(id)?;
+    super::refuse_stale_copy(ctx, &loaded, &raw, super::Writer::Feedback)?;
     let mut claims = crate::claims::ClaimStore::load(&ctx.project.prefix)?;
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the owner's public file. The reporting project is already in the note text.

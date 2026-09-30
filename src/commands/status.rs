@@ -1,10 +1,13 @@
-use super::{Ctx, append_lifecycle_note, append_note, id_out, load, owner_name, save, transition};
+use super::{
+    Ctx, append_lifecycle_note, append_note, follow_holder, id_out, load, owner_name, save,
+    transition,
+};
 use crate::error::{Error, Result};
 use crate::model::{Status, Task};
 use crate::output::Output;
 
 pub fn start(mut ctx: Ctx, id: String, force: bool) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if task.status == Status::Shelved {
         return Err(Error::InvalidTransition(
             "shelved".into(),
@@ -80,7 +83,7 @@ fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {
 }
 
 pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
     append_note(&mut task, &owner, &text)?;
     // Identity and the store are resolved *before* the file write. Doing it afterwards
@@ -116,30 +119,8 @@ pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
             task.id, claim.session
         ));
     }
-    let mine = existing.filter(|_| mine);
-
-    // The heartbeat, and only on our own claim: `note` never touches a foreign one and is
-    // never refused. It is still serialized under the mutation lock, because a note rewrites
-    // the whole markdown file however append-only it is in meaning.
-    if let Some(claim) = mine {
-        let store = ctx.claims_mut()?;
-        store.insert(
-            &task.id,
-            crate::claims::Claim {
-                seen: crate::time::now(),
-                ..claim
-            },
-        );
-        if let Err(error) = store.save() {
-            // The note is on disk, so this cannot be an error — say plainly what did and
-            // did not happen, as the release-failure path does.
-            ctx.warnings.push(format!(
-                "the note landed, but the claim heartbeat on {} was not refreshed \
-                 ({error}); the claim may look stale to other sessions",
-                task.id
-            ));
-        }
-    }
+    // Refresh only our live claim, and move it to this checkout (record-home spec §4).
+    follow_holder(&mut ctx, &task.id, Some(&me), "the note landed");
     Ok(id_out(ctx, &task))
 }
 
@@ -150,7 +131,7 @@ pub fn close(
     message: Option<String>,
     force: bool,
 ) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     transition(&mut ctx, &mut task, to, force)?;
     if let Some(message) = message
         && !ctx.recovered
@@ -167,7 +148,7 @@ pub fn block(ctx: Ctx, id: String, message: Option<String>) -> Result<Output> {
 }
 
 pub fn unblock(mut ctx: Ctx, id: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if task.status != Status::Blocked {
         return Err(Error::InvalidTransition(
             task.status.as_str().into(),
@@ -182,7 +163,7 @@ pub fn unblock(mut ctx: Ctx, id: String) -> Result<Output> {
 /// A goal is shelved only after its open descendants are; `ready` reads each child's own
 /// status, so shelving the goal alone would hide it while its children stayed eligible.
 pub fn shelve(mut ctx: Ctx, id: String, wake: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     crate::format::validate_line("wake condition", &wake)?;
     let all = ctx.project.scan()?;
     let unshelved: Vec<String> = crate::hierarchy::open_descendants(&all, &task.id, &ctx.registry)
@@ -204,7 +185,7 @@ pub fn shelve(mut ctx: Ctx, id: String, wake: String) -> Result<Output> {
 }
 
 pub fn unshelve(mut ctx: Ctx, id: String) -> Result<Output> {
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if task.status != Status::Shelved {
         return Err(Error::InvalidTransition(
             task.status.as_str().into(),

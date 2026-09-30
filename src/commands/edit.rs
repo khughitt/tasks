@@ -85,7 +85,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         return editor(ctx, id);
     }
 
-    let mut task = load(&ctx, &id)?;
+    let mut task = load(&mut ctx, &id)?;
     if args.fields.body.as_deref() == Some("-") {
         let mut body = String::new();
         std::io::stdin().read_to_string(&mut body)?;
@@ -175,12 +175,14 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         ctx.reassess(&task.id, task.complexity)?;
     }
     save(&mut ctx, &mut task)?;
+    super::follow_holder(&mut ctx, &task.id, None, "the edit landed");
     Ok(id_out(ctx, &task))
 }
 
 fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &id)?;
     let (original, original_raw) = ctx.project.read_task_with_raw(&id)?;
+    super::refuse_stale_copy(&mut ctx, &original, &original_raw, super::Writer::Command)?;
     let editor = std::env::var("EDITOR")
         .ok()
         .filter(|editor| !editor.is_empty())
@@ -219,6 +221,18 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             "the project's identity changed while editing; retry".into(),
         )));
     }
+
+    // Spec record-home §3.1: the lock was released while the editor was open, so another
+    // checkout may have written since the first check.
+    super::refuse_stale_copy(&mut ctx, &original, &original_raw, super::Writer::Command).map_err(
+        |error| match error {
+            Error::StaleCopy(detail) => Error::StaleCopy(format!(
+                "A rerun opens a fresh editor on the newer copy, so copy your changes over \
+                 from the kept file{suffix}. {detail}"
+            )),
+            error => keep(error),
+        },
+    )?;
 
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
     let mut edited = parse_task(&edited_raw, &tmp_display).map_err(keep)?;
@@ -294,6 +308,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         Err(error) => return Err(keep(error)),
     }
     save(&mut ctx, &mut edited).map_err(keep)?;
+    super::follow_holder(&mut ctx, &edited.id, None, "the edit landed");
     if let Err(error) = std::fs::remove_file(&tmp) {
         ctx.warnings.push(format!(
             "edit saved, but could not remove {tmp_display}: {error}"

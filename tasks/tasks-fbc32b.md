@@ -1,10 +1,11 @@
 ---
 id: tasks-fbc32b
 title: "show and list miss a task whose record exists only on a worktree branch, though the park store knows its checkout"
-status: idea
+status: done
 priority: 2
 created: 2026-09-23T17:07:01Z
-updated: 2026-09-29T20:50:25Z
+updated: 2026-09-30T12:41:55Z
+completed: 2026-09-30T12:41:55Z
 depends: []
 parent: tasks-c4ad8e
 tags: [feedback, friction, "from:material"]
@@ -16,3 +17,9 @@ A task added and parked inside a git worktree (its file committed only on the wo
 ## Notes
 
 - 2026-09-29T20:50:25Z (main): scope: briefed; show routing can reuse park §5.3 resolution but plain list inclusion changes the JSON contract, so it waits on design tasks-ab8d2d; parented to tasks-c4ad8e; brief: docs/notes/2026-09-29-cross-checkout-records-brief.md
+- 2026-09-30T10:28:06Z (ab8d2d-record-home): Decided in tasks-ab8d2d (spec record-home §6): show falls back to the claim's or park's checkout with a warning; plain list stays local (declined, JSON contract). Implemented by tasks-9949f3.
+- 2026-09-30T12:41:55Z (ab8d2d-record-home): show landed in bd7cb18; plain list was declined in record-home spec §6.2 because it changes the JSON contract
+- 2026-09-30T12:41:55Z (ab8d2d-record-home): done
+  provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-30T12:41:55Z (ab8d2d-record-home): show fallback landed in bd7cb18; list half declined by record-home design
+  provenance: {"harness_session":"codex:01a0f212-0be0-71a0-99f7-5f8efd04e3b6","harness_session_source":"CODEX_SESSION_ID"}

@@ -9475,7 +9475,15 @@ fn git(dir: &std::path::Path, args: &[&str]) {
 /// A project that is its own git repository, with one task committed, plus a second
 /// worktree branched from that commit. Returns the two project roots and the task id.
 fn repo_with_worktree(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf, String) {
-    let main = env.init("sci");
+    repo_with_worktree_as(env, "sci")
+}
+
+/// `repo_with_worktree` for a project with the given prefix.
+fn repo_with_worktree_as(
+    env: &mut TestEnv,
+    prefix: &str,
+) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let main = env.init(prefix);
     git(&main, &["init", "-q", "-b", "main"]);
     let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
     git(&main, &["add", "-A"]);
@@ -9504,30 +9512,380 @@ fn warnings_of(v: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// The `detail` of a `stale_copy` refusal from running `args` in `dir`.
+fn stale_detail(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> String {
+    let error = error_of(env, dir, args);
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
+    error["error"]["detail"].as_str().unwrap().to_string()
+}
+
+/// The `tasks -C …` line printed in a refusal's detail, split into words the way a POSIX
+/// shell splits it, without the program name.
+fn retry_words(detail: &str) -> Vec<String> {
+    let at = detail.find("tasks -C ").expect("a retry");
+    let line = &detail[at..];
+    let line = line
+        .strip_suffix("; supply the same input on stdin")
+        .unwrap_or(line);
+    let rest = line.strip_prefix("tasks ").unwrap();
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "for word in {rest}; do printf '%s\\0' \"$word\"; done"
+        ))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .split_terminator('\0')
+        .map(str::to_string)
+        .collect()
+}
+
+/// A task started by `agent-a` in the main checkout, committed, and only then branched into
+/// a worktree (the prescribed order). Both copies are stamped equal and old, so the next
+/// write in either checkout is the newer one.
+fn started_then_branched(env: &mut TestEnv) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    as_agent(env, &main, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "start"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z");
+    }
+    (main, side, id)
+}
+
 #[test]
-fn a_write_warns_when_another_checkout_holds_a_newer_copy() {
+fn a_write_from_a_copy_behind_another_checkout_refuses_and_prints_the_retry() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);
+    // Explicit stamps: `updated` has second precision, and a real-clock race would make
+    // the test flaky rather than wrong.
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let file = format!("tasks/{id}.md");
+    let (main_before, side_before) = (env.read(&main, &file), env.read(&side, &file));
 
-    // The reported sequence: the main checkout moved on after the worktree branched, so
-    // the worktree is about to close a record that is missing what main already wrote.
-    // Explicit stamps -- `updated` has second precision, and a real-clock race here would
-    // make the test flaky rather than wrong.
+    for args in [
+        vec!["note", id.as_str(), "it's naïve"],
+        vec!["edit", id.as_str(), "-p", "1"],
+        vec!["start", id.as_str()],
+        vec!["done", id.as_str(), "landed"],
+    ] {
+        let detail = stale_detail(&env, &main, &args);
+        let head = format!(
+            "tasks/{id}.md in {} is newer than this copy (2026-09-07T10:00:00Z there, \
+             2026-09-05T09:00:00Z here); nothing was written. Run it there: ",
+            side.display()
+        );
+        assert!(detail.starts_with(&head), "{detail}");
+        let mut expected = vec!["-C".to_string(), side.display().to_string()];
+        expected.extend(args.iter().map(|arg| arg.to_string()));
+        assert_eq!(retry_words(&detail), expected);
+    }
+    assert_eq!(env.read(&main, &file), main_before);
+    assert_eq!(env.read(&side, &file), side_before);
+    let store = env.claim_store("sci");
+    assert!(!store.exists() || !std::fs::read_to_string(&store).unwrap().contains(&id));
+
+    // An invocation that already named a checkout gets that `-C` replaced, not doubled.
+    let detail = stale_detail(
+        &env,
+        &side,
+        &["-C", main.to_str().unwrap(), "note", &id, "x"],
+    );
+    assert_eq!(
+        retry_words(&detail),
+        ["-C", side.to_str().unwrap(), "note", &id, "x"]
+    );
+
+    // The printed retry, run verbatim from where it was refused, lands in the newer copy.
+    let detail = stale_detail(&env, &main, &["note", &id, "it's naïve"]);
+    env.cmd(&main).args(retry_words(&detail)).assert().success();
+    assert!(env.read(&side, &file).contains("it's naïve"));
+}
+
+#[test]
+fn a_linked_worktree_behind_the_main_checkout_leads_with_the_merge() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
     stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
     stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
-
-    let v = env.json(&side, &["done", &id, "landed"]);
-    let expected = format!("tasks/{id}.md in {} is newer", main.display());
-    let warnings = warnings_of(&v);
-    assert!(
-        warnings.iter().any(|w| w.starts_with(&expected)
-            && w.contains("2026-09-07T10:00:00Z")
-            && w.contains("2026-09-05T09:00:00Z")
-            && w.contains("reconcile")),
-        "{warnings:?}"
+    let detail = stale_detail(&env, &side, &["note", &id, "x"]);
+    let remedy = format!(
+        "nothing was written. Commit tasks/{id}.md in {main} if it has changes, merge it into \
+         this branch, then rerun here; the merge may conflict where both copies changed. Or, \
+         to write in the main checkout instead: tasks -C {main} note {id} x",
+        main = main.display()
     );
-    // Advisory only: the write still lands.
-    assert_eq!(env.json(&side, &["show", &id])["task"]["status"], "done");
+    assert!(detail.ends_with(&remedy), "{detail}");
+}
+
+#[test]
+fn another_sessions_work_in_the_newer_checkout_withholds_the_retry() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let other = id_of(env.json(&side, &["add", "Other work", "-p", "2"]));
+    as_agent(&env, &side, "agent-b")
+        .args(["start", &other])
+        .assert()
+        .success();
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+
+    // Someone else's claim, on a different task, names the newer checkout.
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert!(
+        detail.contains(&other) && detail.contains("agent-b"),
+        "{detail}"
+    );
+    assert!(detail.contains("Wait for that branch to merge"), "{detail}");
+    assert!(!detail.contains("tasks -C"), "{detail}");
+
+    // The claim's own holder, whose shell reset to main, keeps the retry.
+    let out = as_agent(&env, &main, "agent-b")
+        .args(["note", &id, "x"])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("Run it there: tasks -C"),
+        "{error}"
+    );
+
+    // A park by another session withholds it too.
+    as_agent(&env, &side, "agent-b")
+        .args(["park", &other, "later"])
+        .assert()
+        .success();
+    let out = as_agent(&env, &main, "agent-c")
+        .args(["note", &id, "x"])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&other) && !detail.contains("tasks -C"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_stale_refusal_reports_an_identity_resolution_failure() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let state = relay_on(&env);
+    // Under a real harness ancestor, relay identity cannot resolve without its registry.
+    let script = format!(
+        "RELAY_STATE_DIR={}\nexport RELAY_STATE_DIR\n\"$TASKS_BIN\" note {id} x\n",
+        state.display()
+    );
+    let out = common::harness_shim(&main, env.home.path(), "codex", &script);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("whether another session works there is unknown:")
+            && detail.contains("TASKS_SESSION"),
+        "{detail}"
+    );
+    assert!(detail.contains("Run it there: tasks -C"), "{detail}");
+    assert_eq!(
+        retry_words(detail),
+        ["-C", side.to_str().unwrap(), "note", &id, "x"]
+    );
+}
+
+#[test]
+fn a_stale_refusal_reports_a_claim_store_failure_and_keeps_the_retry_valid() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let store = env.claim_store("sci");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "not a claim store").unwrap();
+    let detail = stale_detail(&env, &main, &["note", &id, "it's naïve"]);
+    assert!(
+        detail.contains("whether another session works there is unknown:")
+            && detail.contains("claim store"),
+        "{detail}"
+    );
+    assert_eq!(
+        retry_words(&detail),
+        ["-C", side.to_str().unwrap(), "note", &id, "it's naïve"]
+    );
+}
+
+#[test]
+fn equal_stamps_with_different_bytes_refuse_with_the_merge_only() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    let sibling = side.join(format!("tasks/{id}.md"));
+    let forked = std::fs::read_to_string(&sibling)
+        .unwrap()
+        .replace("title: T\n", "title: Forked\n");
+    std::fs::write(&sibling, forked).unwrap();
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert_eq!(
+        detail,
+        format!(
+            "tasks/{id}.md in {} has the same stamp as this copy (2026-09-05T09:00:00Z) but \
+             different content, so both were written in the same second; nothing was \
+             written. Merge that copy of tasks/{id}.md into this checkout, then rerun here",
+            side.display()
+        )
+    );
+}
+
+#[test]
+fn the_first_write_in_a_worktree_behind_main_leads_with_the_merge() {
+    // tasks-142d2f without the protocol step: a note in main after branching, then a write
+    // in the worktree by the claim's own holder.
+    let mut env = TestEnv::new();
+    let (main, side, id) = started_then_branched(&mut env);
+    as_agent(&env, &main, "agent-a")
+        .args(["note", &id, "from main"])
+        .assert()
+        .success();
+    let out = as_agent(&env, &side, "agent-a")
+        .args(["note", &id, "here"])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!(
+            "nothing was written. Commit tasks/{id}.md in {}",
+            main.display()
+        )),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_start_left_uncommitted_before_branching_leads_with_the_merge() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    as_agent(&env, &main, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z");
+    let out = as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!(
+            "nothing was written. Commit tasks/{id}.md in {}",
+            main.display()
+        )),
+        "{detail}"
+    );
+    assert!(!detail.contains("Run it there"), "{detail}");
+}
+
+#[test]
+fn a_refusal_names_the_newest_sibling_and_lists_the_other_newer_ones() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let third = main.join("wt2");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "third",
+            third.to_str().unwrap(),
+        ],
+    );
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    stamp(&third, &id, "2026-09-01T00:00:00Z", "2026-09-06T10:00:00Z");
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert!(
+        detail.starts_with(&format!("tasks/{id}.md in {} is newer", side.display())),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("(also newer in: {})", third.display())),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_worktree_deleted_from_disk_does_not_block_a_write() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2030-01-01T00:00:00Z");
+    // Gone from disk but still listed by git: nothing there to be newer.
+    std::fs::remove_dir_all(&side).unwrap();
+    env.json(&main, &["note", &id, "still lands"]);
+    assert!(
+        env.read(&main, &format!("tasks/{id}.md"))
+            .contains("still lands")
+    );
+}
+
+#[test]
+fn equal_stamps_with_equal_bytes_do_not_refuse() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    let v = env.json(&main, &["note", &id, "same record"]);
+    assert!(!warnings_of(&v).iter().any(|w| w.contains("newer")), "{v}");
 }
 
 #[test]
@@ -9583,13 +9941,9 @@ fn a_project_below_the_repository_root_finds_its_sibling_copies() {
 
     // The sibling's project root is the worktree root plus the project's path below the
     // repository top level, not the worktree root itself.
-    let v = env.json(&side.join("sub"), &["note", &id, "in the worktree"]);
+    let detail = stale_detail(&env, &side.join("sub"), &["note", &id, "in the worktree"]);
     let expected = format!("tasks/{id}.md in {} is newer", sub.display());
-    let warnings = warnings_of(&v);
-    assert!(
-        warnings.iter().any(|w| w.starts_with(&expected)),
-        "{warnings:?}"
-    );
+    assert!(detail.starts_with(&expected), "{detail}");
 }
 
 #[test]
@@ -9621,34 +9975,23 @@ fn a_sibling_copy_that_cannot_be_read_is_a_warning_and_a_missing_one_is_silent()
 }
 
 #[test]
-fn a_hand_edited_updated_stamp_cannot_suppress_the_warning() {
+fn the_editor_does_not_open_on_a_copy_that_is_behind() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);
     stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
     stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
-
-    // The baseline is the stamp of the copy on disk, not whatever the editor left behind:
-    // a far-future `updated:` would otherwise make every sibling look stale.
-    let editor = editor_script(
-        &main,
-        "sed -i 's/^updated: .*/updated: 2030-01-01T00:00:00Z/; s/^title: T$/title: Edited/' \"$1\"",
-    );
+    let opened = main.join("editor-opened");
+    let editor = editor_script(&main, &format!("touch '{}'", opened.display()));
     let out = env
         .cmd(&main)
         .env("EDITOR", &editor)
         .args(["edit", &id])
         .output()
         .unwrap();
-    assert!(out.status.success(), "{out:?}");
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let warnings = warnings_of(&v);
-    assert!(
-        warnings.iter().any(|w| w.contains("is newer")),
-        "{warnings:?}"
-    );
-    let saved = env.json(&main, &["show", &id]);
-    assert_eq!(saved["task"]["title"], "Edited");
-    assert_ne!(saved["task"]["updated"], "2030-01-01T00:00:00Z");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
+    assert!(!opened.exists(), "the editor opened on a stale copy");
 }
 
 #[test]
@@ -18575,6 +18918,12 @@ fn show_add_and_edit_in_a_worktree_read_git_excluded_docs_from_the_main_checkout
     }
     assert_eq!(main_checkout_warnings(&v, &main).len(), 2, "{v}");
 
+    // Keep the copies equal and older than the first write; real-clock stamps can otherwise
+    // make that write look like a same-second fork of main's unchanged record.
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+
     // An edit that revalidates the step, and one that moves it, both succeed.
     let v = env.json(&side, &["edit", &id, "-p", "1"]);
     assert_eq!(main_checkout_warnings(&v, &main).len(), 1, "{v}");
@@ -18620,4 +18969,482 @@ fn show_add_and_edit_in_a_worktree_read_git_excluded_docs_from_the_main_checkout
     // The main checkout itself warns about nothing.
     let v = env.json(&main, &["show", &id]);
     assert!(main_checkout_warnings(&v, &main).is_empty(), "{v}");
+}
+
+#[test]
+fn attach_from_a_copy_that_is_behind_reads_nothing_and_creates_nothing() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    std::fs::write(side.join("shot.png"), b"png").unwrap();
+
+    let by_path = stale_detail(&env, &side, &["attach", &id, "shot.png"]);
+    assert_eq!(
+        retry_words(&by_path),
+        ["-C", main.to_str().unwrap(), "attach", &id, "shot.png"]
+    );
+
+    let out = env
+        .cmd(&side)
+        .args(["attach", &id, "-", "--name", "in.txt"])
+        .write_stdin("hello")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy");
+    let by_stdin = error["error"]["detail"].as_str().unwrap().to_string();
+    assert!(
+        by_stdin.ends_with("; supply the same input on stdin"),
+        "{by_stdin}"
+    );
+    assert!(!side.join(format!("tasks/files/{id}")).exists());
+
+    // Both retries, run verbatim from the same directory, land in the newer checkout: the
+    // relative path still resolves, and stdin is supplied again.
+    env.cmd(&side)
+        .args(retry_words(&by_path))
+        .assert()
+        .success();
+    env.cmd(&side)
+        .args(retry_words(&by_stdin))
+        .write_stdin("hello")
+        .assert()
+        .success();
+    let files = main.join(format!("tasks/files/{id}"));
+    assert_eq!(std::fs::read(files.join("shot.png")).unwrap(), b"png");
+    assert_eq!(std::fs::read(files.join("in.txt")).unwrap(), b"hello");
+}
+
+#[test]
+fn edit_body_from_stdin_on_a_copy_that_is_behind_asks_for_the_same_input() {
+    let mut missing_hints = Vec::new();
+    for body_args in [&["--body", "-"][..], &["--body=-"], &["-b-"]] {
+        let mut env = TestEnv::new();
+        let (main, side, id) = repo_with_worktree(&mut env);
+        stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+        stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+        let out = env
+            .cmd(&side)
+            .args(["edit", &id])
+            .args(body_args)
+            .write_stdin("new body\n")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        let detail = error["error"]["detail"].as_str().unwrap();
+        if !detail.ends_with("; supply the same input on stdin") {
+            missing_hints.push(body_args);
+        }
+        env.cmd(&side)
+            .args(retry_words(detail))
+            .write_stdin("new body\n")
+            .assert()
+            .success();
+        let shown = env.json(&main, &["show", &id]);
+        assert!(
+            shown["task"]["body"].as_str().unwrap().contains("new body"),
+            "{shown}"
+        );
+    }
+    assert!(
+        missing_hints.is_empty(),
+        "missing stdin hints: {missing_hints:?}"
+    );
+}
+
+#[test]
+fn detach_of_a_leftover_file_from_a_copy_that_is_behind_keeps_the_file() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    std::fs::write(main.join("shot.png"), b"png").unwrap();
+    env.json(&main, &["attach", &id, "shot.png"]);
+    env.json(&main, &["detach", &id, "shot.png", "wrong file"]);
+    // An interrupted detach leaves the ledger saying "detached" with the file still there;
+    // a rerun only removes the file and never saves the record.
+    let leftover = main.join(format!("tasks/files/{id}/shot.png"));
+    std::fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+    std::fs::write(&leftover, b"png").unwrap();
+    let created = "2026-09-01T00:00:00Z";
+    stamp(&main, &id, created, "2026-09-05T09:00:00Z");
+    stamp(&side, &id, created, "2026-09-07T10:00:00Z");
+    stale_detail(&env, &main, &["detach", &id, "shot.png", "wrong file"]);
+    assert!(leftover.exists(), "the refusal removed the file");
+}
+
+#[test]
+fn a_sibling_that_moves_ahead_while_the_editor_is_open_refuses_and_keeps_the_edit() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    // While the editor is open, the worktree writes. The edit also forges a far-future
+    // stamp in its own copy, which must not count: the baseline is what was loaded.
+    let sibling = side.join(format!("tasks/{id}.md"));
+    let editor = editor_script(
+        &main,
+        &format!(
+            "sed -i 's/^updated: .*/updated: 2030-01-01T00:00:00Z/' '{}' && \
+             sed -i 's/^updated: .*/updated: 2031-01-01T00:00:00Z/; s/^title: T$/title: Edited/' \"$1\"",
+            sibling.display()
+        ),
+    );
+    let out = env
+        .cmd(&main)
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "stale_copy", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains("fresh editor"), "{detail}");
+    let retry = retry_words(detail);
+    assert_eq!(retry, ["-C", side.to_str().unwrap(), "edit", &id]);
+    let kept = detail
+        .split("edit kept at ")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .expect("the kept file is named");
+    assert!(
+        std::fs::read_to_string(kept)
+            .unwrap()
+            .contains("title: Edited")
+    );
+    assert_eq!(env.json(&main, &["show", &id])["task"]["title"], "T");
+    let recovery = editor_script(&main, &format!("cp '{kept}' \"$1\""));
+    env.cmd(&main)
+        .env("EDITOR", recovery)
+        .args(retry)
+        .assert()
+        .success();
+    assert_eq!(env.json(&side, &["show", &id])["task"]["title"], "Edited");
+    assert!(std::path::Path::new(kept).is_file());
+}
+
+#[test]
+fn a_feedback_recurrence_onto_a_copy_behind_the_owners_worktree_refuses_both_ways() {
+    let mut env = TestEnv::new();
+    let owner = env.init("own");
+    accept_feedback(&owner, "the own tool");
+    git(&owner, &["init", "-q", "-b", "main"]);
+    let reporter = env.init("rep");
+    let report = [
+        "feedback",
+        "--project",
+        "own",
+        "slow startup",
+        "--category",
+        "friction",
+    ];
+    let id = env.json(&reporter, &report)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    git(&owner, &["add", "-A"]);
+    git(&owner, &["commit", "-qm", "seed"]);
+    let side = owner.join("wt");
+    git(
+        &owner,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    stamp(&owner, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let file = format!("tasks/{id}.md");
+    let before = env.read(&owner, &file);
+
+    let mut explicit = report.to_vec();
+    explicit.extend(["--recur", id.as_str()]);
+    // The same title again is the automatic match; --recur names it outright.
+    for args in [report.to_vec(), explicit] {
+        let detail = stale_detail(&env, &reporter, &args);
+        assert!(detail.contains(side.to_str().unwrap()), "{detail}");
+        assert!(
+            detail.ends_with("nothing was written. Rerun with --new to file a separate entry"),
+            "{detail}"
+        );
+        assert_eq!(env.read(&owner, &file), before);
+    }
+}
+
+fn claim_worktree(env: &TestEnv, dir: &std::path::Path, id: &str) -> String {
+    env.json(dir, &["show", id])["claim"]["worktree"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn the_holders_writes_move_its_claim_to_the_checkout_they_land_in() {
+    let mut failures = Vec::new();
+    for command in ["note", "edit", "editor", "dep", "attach", "detach"] {
+        let mut env = TestEnv::new();
+        let (main, side, id) = started_then_branched(&mut env);
+        let before = env.json(&main, &["show", &id])["claim"].clone();
+        assert_eq!(claim_worktree(&env, &main, &id), main.display().to_string());
+        let mut cmd = as_agent(&env, &side, "agent-a");
+        match command {
+            "note" => {
+                cmd.args(["note", &id, "working here"]);
+            }
+            "edit" => {
+                cmd.args(["edit", &id, "-p", "1"]);
+            }
+            "editor" => {
+                let editor = editor_script(&side, "sed -i 's/^priority: 2$/priority: 1/' \"$1\"");
+                cmd.env("EDITOR", editor).args(["edit", &id]);
+            }
+            "dep" => {
+                let dependency = id_of(env.json(&side, &["add", "Dependency"]));
+                cmd.args(["dep", &id, "--on", &dependency]);
+            }
+            "attach" => {
+                cmd.args(["attach", &id, "-", "--name", "shot.png"])
+                    .write_stdin("image");
+            }
+            "detach" => {
+                as_agent(&env, &side, "agent-b")
+                    .args(["attach", &id, "-", "--name", "shot.png"])
+                    .write_stdin("image")
+                    .assert()
+                    .success();
+                cmd.args(["detach", &id, "shot.png", "finished"]);
+            }
+            _ => unreachable!(),
+        }
+        cmd.assert().success();
+        let after = env.json(&main, &["show", &id])["claim"].clone();
+
+        let mut expected = before;
+        expected["worktree"] = side.display().to_string().into();
+        expected["seen"] = after["seen"].clone();
+        if after != expected {
+            failures.push(format!("{command}: expected {expected}, got {after}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn another_sessions_write_leaves_the_claim_where_it_is() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = started_then_branched(&mut env);
+    as_agent(&env, &side, "agent-b")
+        .args(["note", &id, "passing through"])
+        .assert()
+        .success();
+    assert_eq!(claim_worktree(&env, &main, &id), main.display().to_string());
+}
+
+#[test]
+fn a_restart_in_the_new_worktree_makes_a_later_write_in_main_refuse() {
+    // tasks-142d2f with the protocol step: the note in main now refuses.
+    let mut env = TestEnv::new();
+    let (main, side, id) = started_then_branched(&mut env);
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(claim_worktree(&env, &side, &id), side.display().to_string());
+    // Another session writing from main is told who works there, with no retry.
+    let detail = stale_detail(&env, &main, &["note", &id, "from main"]);
+    assert!(
+        detail.starts_with(&format!("tasks/{id}.md in {} is newer", side.display())),
+        "{detail}"
+    );
+    assert!(
+        detail.contains("agent-a") && !detail.contains("tasks -C"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_holders_feedback_recurrence_moves_the_claim_to_the_owners_checkout() {
+    let mut env = TestEnv::new();
+    let owner = env.init("own");
+    accept_feedback(&owner, "the own tool");
+    git(&owner, &["init", "-q", "-b", "main"]);
+    let reporter = env.init("rep");
+    let report = [
+        "feedback",
+        "--project",
+        "own",
+        "slow startup",
+        "--category",
+        "friction",
+    ];
+    let id = env.json(&reporter, &report)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    git(&owner, &["add", "-A"]);
+    git(&owner, &["commit", "-qm", "seed"]);
+    let side = owner.join("wt");
+    git(
+        &owner,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(claim_worktree(&env, &side, &id), side.display().to_string());
+    // The owner's main checkout holds the newer copy, so the recurrence may land there.
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&owner, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let mut explicit = report.to_vec();
+    explicit.extend(["--recur", id.as_str()]);
+    as_agent(&env, &reporter, "agent-a")
+        .args(&explicit)
+        .assert()
+        .success();
+    assert_eq!(
+        claim_worktree(&env, &owner, &id),
+        owner.display().to_string()
+    );
+}
+
+#[test]
+fn a_claim_held_by_proof_moves_with_its_holder() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "Thing", "-p", "2"]));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    let state = relay_on(&env);
+    // Start under relay identity, commit, branch, then lose the registry: ownership can
+    // only come from the claim's recorded proof.
+    let script = format!(
+        "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
+         git add -A && git -c user.name=t -c user.email=t@e commit -qm start\n\
+         git worktree add -q -b side '{}'\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         \"$TASKS_BIN\" -C '{}' note {id} 'by proof'\n",
+        shim_env(&state, "codex", "s1"),
+        side.display(),
+        side.display()
+    );
+    let out = common::harness_shim(&main, env.home.path(), "codex", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(claim_worktree(&env, &main, &id), side.display().to_string());
+}
+
+#[test]
+fn show_reads_a_worktree_only_task_from_the_checkout_its_claim_or_park_names() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let claimed = id_of(env.json(&side, &["add", "Claimed there", "-p", "2"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &claimed])
+        .assert()
+        .success();
+    let v = env.json(&main, &["show", &claimed]);
+    assert_eq!(v["task"]["title"], "Claimed there", "{v}");
+    assert!(
+        warnings_of(&v).contains(&format!(
+            "{claimed} exists only in {}; shown from that checkout",
+            side.display()
+        )),
+        "{v}"
+    );
+
+    let parked = id_of(env.json(&side, &["add", "Parked there", "-p", "2"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &parked])
+        .assert()
+        .success();
+    as_agent(&env, &side, "agent-a")
+        .args(["park", &parked, "pick it up"])
+        .assert()
+        .success();
+    let v = env.json(&main, &["show", &parked]);
+    assert_eq!(v["task"]["title"], "Parked there", "{v}");
+    assert_eq!(v["park"]["next_step"], "pick it up", "{v}");
+}
+
+#[test]
+fn show_of_another_projects_worktree_only_task_falls_back_through_its_claims() {
+    let mut env = TestEnv::new();
+    let here = env.init("sci");
+    let (_, side, _) = repo_with_worktree_as(&mut env, "oth");
+    let id = id_of(env.json(&side, &["add", "Over there", "-p", "2"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let v = env.json(&here, &["show", &id]);
+    assert_eq!(v["task"]["title"], "Over there", "{v}");
+    assert!(
+        warnings_of(&v).iter().any(|w| w.contains("exists only in")),
+        "{v}"
+    );
+}
+
+#[test]
+fn show_names_the_checkout_when_the_one_holding_the_task_is_gone() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    let id = id_of(env.json(&side, &["add", "Lost", "-p", "2"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    git(
+        &main,
+        &["worktree", "remove", "--force", side.to_str().unwrap()],
+    );
+    let error = error_of(&env, &main, &["show", &id]);
+    assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!(
+            "claimed in {}, which is unavailable",
+            side.display()
+        )),
+        "{detail}"
+    );
+}
+
+#[test]
+fn show_reads_the_local_copy_even_when_the_claimed_one_is_newer() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let v = env.json(&main, &["show", &id]);
+    assert_eq!(v["task"]["status"], "todo", "{v}");
+    assert!(
+        !warnings_of(&v).iter().any(|w| w.contains("exists only in")),
+        "{v}"
+    );
 }

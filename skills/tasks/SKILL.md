@@ -51,7 +51,14 @@ nothing is eligible.
    `start` also records a claim outside git, visible from every worktree of the project,
    with the session identity and a liveness handle. A task claimed by another live session
    fails with `claimed`; `tasks start --force <id>` takes it over and records that in the
-   task's notes. `ready` and `next` omit live claims and explain each omission in warnings,
+   task's notes.
+   A write refuses with `stale_copy` when another checkout holds a newer copy of the
+   record, and the error says what to do: rerun there with the printed `tasks -C <root> …`,
+   merge the main checkout's copy into your worktree, or leave the record to the session
+   named as working there. There is no override. A write by the claim's holder moves the
+   claim to the checkout it lands in, and `show` finds a task that exists only in the
+   checkout its claim or park names.
+   `ready` and `next` omit live claims and explain each omission in warnings,
    and `ready` omits tasks parked waiting on the user.
    Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, when a long-lived process id is available)
    when several agents share one terminal or harness process; otherwise agents that resolve
@@ -190,7 +197,10 @@ applicable debugging, testing, verification, and code-review skills.
 Both code paths use an isolated task worktree: commit the task record before creating
 one with `git worktree add` under `.worktrees/`, or reuse it on resume. Then run `just
 setup` when defined; otherwise run only the root guide's explicit setup command. Do not
-guess an installer. Planned work creates the worktree before drafting the spec.
+guess an installer. After creating a worktree for a task you have started, run
+`tasks start <id>` there before any other `tasks` command for it: the claim moves there,
+and a later write from the main checkout refuses instead of forking the record.
+Planned work creates the worktree before drafting the spec.
 Run the worktree's code for a live test by explicit path or an environment override,
 never by repointing a shared launcher or symlink on the host; a pointer that must be
 repointed is noted when it happens (what, from, to, how to restore) and restored before

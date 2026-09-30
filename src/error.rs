@@ -33,6 +33,8 @@ pub enum Error {
     #[error("{0} is claimed by {1}")]
     Claimed(String, String),
     #[error("{0}")]
+    StaleCopy(String),
+    #[error("{0}")]
     Editor(String),
     #[error("{0}")]
     InvalidAttachmentName(String),
@@ -81,6 +83,7 @@ impl Error {
                 Error::ConcurrentModification(id, path + suffix)
             }
             Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
+            Error::StaleCopy(detail) => Error::StaleCopy(detail + suffix),
             Error::Editor(detail) => Error::Editor(detail + suffix),
             Error::InvalidAttachmentName(detail) => Error::InvalidAttachmentName(detail + suffix),
             Error::AttachmentExists(detail) => Error::AttachmentExists(detail + suffix),
@@ -111,6 +114,7 @@ impl Error {
             Error::DocNotFound(_) => "doc_not_found",
             Error::ConcurrentModification(..) => "concurrent_modification",
             Error::Claimed(..) => "claimed",
+            Error::StaleCopy(_) => "stale_copy",
             Error::Editor(_) => "editor",
             Error::InvalidAttachmentName(_) => "invalid_attachment_name",
             Error::AttachmentExists(_) => "attachment_exists",

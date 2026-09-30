@@ -24,6 +24,7 @@ mod repo;
 mod resolve;
 mod scope;
 mod similarity;
+mod stale;
 mod style;
 #[cfg(test)]
 mod surface;

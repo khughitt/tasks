@@ -193,8 +193,10 @@ the shared chokepoint covers all four paths at once.
   shared claim while its own checkout still reads `todo` — that is the ordinary
   cross-worktree case — and its `done` there would otherwise leave the claim behind forever.
 - **`note`** refreshes `seen`, but only on a claim held by this session, and never touches a
-  foreign claim. It is never refused. It is nonetheless serialized under the same lock as
-  every other mutation: notes are append-only in *meaning*, but at the storage layer `note`
+  foreign claim. The claim guard never refuses it. Like every write, it refuses from a
+  copy that another checkout's copy has moved past (record-home spec §3), and a note by
+  the claim's holder moves the claim to its checkout (§4). It is nonetheless serialized
+  under the same lock as every other mutation: notes are append-only in *meaning*, but at the storage layer `note`
   rewrites the whole markdown file, so an unserialized foreign note can clobber a concurrent
   status change.
 - **`ready` / `next`** omit every task under a live claim, **including this session's own**,
@@ -249,19 +251,17 @@ pruned.
 
 ## Warnings
 
-- **A newer copy elsewhere** (tasks-76671b): every write of an existing record compares the
-  `updated` stamp it loaded against the same record in every other worktree, found through
-  `git worktree list --porcelain -z` and read at the project's offset below the repository
-  top level. A checkout whose stamp is *newer* holds something this write will leave behind,
-  and is named. A checkout merely behind — the resting state of any long-lived worktree —
-  says nothing, because a line that fires constantly is a line nobody reads. Unlike the two
-  below this covers every writing command, not just `start`, so it catches the `done` that
-  closes a record from a stale copy. A copy that cannot be read or parsed is reported rather
-  than skipped; a git failure is a warning, never a refusal. Two accepted limits: `updated`
-  is second-precision, so same-second writes in two checkouts compare equal; and once this
-  write lands its stamp beats the sibling's, so the warning fires once per divergence and
-  then falls quiet until the sibling writes again. Closing that second one means comparing
-  content, which reintroduces exactly the noise the newer-only rule exists to avoid.
+- **A newer copy elsewhere** (tasks-76671b; a refusal since the record-home spec,
+  `docs/specs/2026-09-30-record-home-design.md` §3): every write of an existing record
+  compares the copy it loaded against the same record in every other worktree, found
+  through `git worktree list --porcelain -z` and read at the project's offset below the
+  repository top level. The check runs at load, under the mutation lock, before any other
+  input is read. A sibling with a *newer* stamp, or with the same stamp but different
+  bytes (a same-second fork), refuses the write as `stale_copy`. The error names that
+  checkout and says what to do. If another session works there, wait or merge. If this is
+  a worktree behind the main checkout, merge it in. Otherwise, rerun with `tasks -C
+  <root> …`. A sibling that is behind says nothing and is never compared by content. A
+  copy that cannot be read or parsed, or a git failure, is a warning, never a refusal.
 - **Divergent copies** (tasks-8f4b41): a live claim whose task's *local* file disagrees
   (local `todo` or `idea`, claim says `doing`) warns that the copies will conflict on merge,
   naming the holding worktree. Unlike a worktree-count test, this fires in the order actually

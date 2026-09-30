@@ -151,12 +151,13 @@ contract, and stops.
 Nothing else about the store changes:
 
 - `note` keeps its heartbeat on the caller's own claim, and stays permitted on a task
-  another session holds; it is never refused.
+  another session holds; the claim guard never refuses it, but the stale-copy check does
+  (record-home spec §3).
 - `block`, `unblock`, `done`, and `drop` keep releasing a claim as they do now.
 - Preserving the entry is not bypassing the guards. A status-preserving editor save still
   fails with `claimed` when another live session holds the task, as it does today, and
   still runs the concurrent-edit checks (`updated` comparison, raw-content comparison,
-  newer-sibling-copy warning).
+  stale-copy refusal under record-home spec §3).
 
 ### 4.4 Prefix rename
 
@@ -248,6 +249,10 @@ of the same prefix; anything else counts as unavailable) and scans it. The row i
 from that scan exactly as a local row would be: status, phase, dependencies, child counts.
 A task that exists in both checkouts is not store-only; it is scanned locally, and its
 row reflects the local copy even where the parked copy has moved on.
+
+`show` resolves a record this checkout lacks the same way (record-home spec §6.1): from the
+checkout its live claim names, or else its park, with the warning `<id> exists only in
+<worktree>; shown from that checkout`. A record present here is always read here.
 
 **Store-only entries are never `next` candidates**, resolved or not. `start` reads
 `tasks/<id>.md` from the current checkout, so a task that is not here cannot be resumed

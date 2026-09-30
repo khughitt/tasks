@@ -28,7 +28,7 @@ use crate::format::{validate_body, validate_line, validate_note_text, validate_t
 use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
 use crate::output::Output;
 use crate::registry::Registry;
-use crate::repo::{Project, SiblingCopy};
+use crate::repo::Project;
 use crate::resolve::{DocKind, Resolver};
 use crate::scope::{Origin, Scope};
 use std::path::{Path, PathBuf};
@@ -672,8 +672,160 @@ pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result
     project.create_task(registry, task)
 }
 
-pub fn load(ctx: &Ctx, id: &str) -> Result<Task> {
-    ctx.project.read_task(&parse_id(&ctx.registry, id)?)
+/// Reads `id` for a write and refuses when another checkout's copy must not be left behind
+/// (record-home spec §3.1). Every write command loads through here, under the mutation lock
+/// and before it reads any other input, so a refusal consumes nothing and creates nothing.
+pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
+    let (task, raw) = ctx
+        .project
+        .read_task_with_raw(&parse_id(&ctx.registry, id)?)?;
+    refuse_stale_copy(ctx, &task, &raw, Writer::Command)?;
+    Ok(task)
+}
+
+/// Who is writing, which decides whether a `-C` retry can be offered (spec §3.2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Writer {
+    Command,
+    /// A feedback recurrence: `-C` would change the reporting project.
+    Feedback,
+}
+
+/// The record-home §3 check for `task` as loaded (`raw` is the bytes it was read from).
+/// Its warnings are added once, however many times one command checks.
+pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer) -> Result<()> {
+    let (newer, warnings) = crate::stale::compare(&ctx.project, &task.id, &task.updated, raw);
+    for warning in warnings {
+        if !ctx.warnings.contains(&warning) {
+            ctx.warnings.push(warning);
+        }
+    }
+    let Some(newer) = newer else {
+        return Ok(());
+    };
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let (work, unknown) = match occupants(ctx, &newer.root) {
+        Ok(Occupants { work, unknown }) => (work, unknown),
+        Err(error) => (Vec::new(), Some(error)),
+    };
+    // The sibling lookup just ran the same git query, so a failure here is not expected. If
+    // it happens, only the handoff ordering is lost; the retry it falls back to is valid.
+    let main = ctx.project.main_checkout_root().ok().flatten();
+    let remedy = if !work.is_empty() {
+        crate::stale::Remedy::Occupied(work)
+    } else if newer.same_stamp {
+        crate::stale::Remedy::Merge
+    } else if writer == Writer::Feedback {
+        crate::stale::Remedy::New
+    } else if main.as_ref() == Some(&newer.root) {
+        crate::stale::Remedy::Handoff(&args)
+    } else {
+        crate::stale::Remedy::Rerun(&args)
+    };
+    // A refusal prints only its error object, so unknown ownership must travel in its
+    // detail, before the remedy so the shell retry remains the final command.
+    let detail = crate::stale::refusal(&task.id, &newer, &task.updated, remedy, unknown.as_ref());
+    Err(Error::StaleCopy(detail))
+}
+
+struct Occupants {
+    work: Vec<(String, String)>,
+    unknown: Option<Error>,
+}
+
+/// Spec §3.2 rule 1: every task that a session other than the caller holds live in `root`,
+/// or parked there. Claims are compared by `Ctx::ownership`, parks by their tagged session.
+/// An unresolvable identity makes every park someone else's.
+fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
+    let snapshot =
+        crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
+    let me = crate::claims::resolve_identity(&mut ctx.warnings);
+    let mine = me.identity().map(|identity| identity.tagged.clone());
+    let mut work = Vec::new();
+    for (task, (claim, liveness)) in snapshot.iter() {
+        if *liveness == crate::claims::Liveness::Live
+            && Path::new(&claim.worktree) == root
+            && ctx.ownership(claim, &me)? == Ownership::Foreign
+        {
+            work.push((task.clone(), claim.session.clone()));
+        }
+    }
+    for (task, park) in snapshot.parks() {
+        if Path::new(&park.worktree) == root && mine.as_deref() != Some(park.session.as_str()) {
+            work.push((task.clone(), park.session.clone()));
+        }
+    }
+    let unknown = match me {
+        crate::claims::Resolution::Failed(error) => Some(error),
+        crate::claims::Resolution::Resolved(_) => None,
+    };
+    Ok(Occupants { work, unknown })
+}
+
+/// Record-home spec §4: a write by the holder of a live claim moves the claim to this
+/// checkout and refreshes its heartbeat. Holder means `Ctx::ownership` is not `Foreign`,
+/// by identity or by proof. It runs after the record is saved and never fails the command.
+/// `me` is the caller's identity when the command already resolved it; otherwise it is
+/// resolved here, and only when a claim exists to follow.
+pub(crate) fn follow_holder(
+    ctx: &mut Ctx,
+    id: &TaskId,
+    me: Option<&crate::claims::Resolution>,
+    landed: &str,
+) {
+    let claim = match ctx.claims_mut() {
+        Ok(store) => {
+            // A write must not revive a stale claim.
+            store.prune_dead();
+            match store.get(id) {
+                Some(claim) => claim.clone(),
+                None => return,
+            }
+        }
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "{landed}, but the claim on {id} could not be read ({error})"
+            ));
+            return;
+        }
+    };
+    let resolved;
+    let me = match me {
+        Some(me) => me,
+        None => {
+            resolved = crate::claims::resolve_identity(&mut ctx.warnings);
+            &resolved
+        }
+    };
+    match ctx.ownership(&claim, me) {
+        Ok(Ownership::Foreign) => return,
+        Ok(Ownership::ByIdentity | Ownership::ByProof) => {}
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "{landed}, but whether this session holds the claim on {id} could not be \
+                 established ({error})"
+            ));
+            return;
+        }
+    }
+    let moved = crate::claims::Claim {
+        worktree: ctx.project.root.display().to_string(),
+        seen: crate::time::now(),
+        ..claim
+    };
+    let saved = ctx.claims_mut().and_then(|store| {
+        store.insert(id, moved);
+        store.save()
+    });
+    if let Err(error) = saved {
+        ctx.warnings.push(format!(
+            "{landed}, but the claim heartbeat on {id} was not refreshed ({error}); the \
+             claim may look stale to other sessions"
+        ));
+    }
 }
 
 pub fn id_out(ctx: Ctx, task: &Task) -> Output {
@@ -861,58 +1013,6 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     Ok(())
 }
 
-/// Persists status claim intents only after validation.
-///
-/// Everything that can reject the change runs first and touches nothing. From there the
-/// store and the task file move together, in the order that fails toward "claim held": a
-/// claim with no file update makes an idle task look busy and self-heals when the session
-/// dies, while a file update with no claim is the invisibility bug this exists to remove.
-/// Warn when another checkout of this repository holds a copy of `id` whose `updated` is
-/// newer than `loaded`, the stamp on the copy this command read. That copy carries
-/// something the write about to land does not, and a merge has to drop one of the two.
-///
-/// A checkout that is merely behind says nothing: that is the resting state of any
-/// long-lived worktree, and warning on it would train the reader to skip the line.
-///
-/// Two limits, chosen rather than overlooked. `updated` has second precision, so two writes
-/// to one record in the same second in two checkouts compare equal and slip through. And
-/// once this write lands, our stamp is `now()` and beats the sibling's, so the warning
-/// fires once per divergence and then falls quiet until the sibling writes again. Closing
-/// the second gap means comparing content, which warns on every worktree that is merely
-/// behind -- noise that would cost more than it catches.
-///
-/// Never refuses a write: the report this answers asked for a signal, not a gate.
-fn warn_on_newer_sibling_copies(ctx: &mut Ctx, id: &TaskId, loaded: &str) {
-    let copies = match ctx.project.sibling_task_copies(id) {
-        Ok(Some(copies)) => copies,
-        Ok(None) => return,
-        Err(error) => {
-            ctx.warnings.push(format!(
-                "could not check other checkouts for a newer copy of {id} ({error})"
-            ));
-            return;
-        }
-    };
-    for copy in copies {
-        match copy {
-            SiblingCopy::Found { root, updated } if updated.as_str() > loaded => {
-                ctx.warnings.push(format!(
-                    "tasks/{id}.md in {} is newer than this copy ({updated} there, {loaded} \
-                     here); this write may omit changes from that copy; reconcile the copies \
-                     before merging",
-                    root.display()
-                ));
-            }
-            SiblingCopy::Found { .. } => {}
-            SiblingCopy::Unreadable { root, detail } => ctx.warnings.push(format!(
-                "tasks/{id}.md in {} could not be read ({detail}); whether that copy has \
-                 diverged from this one is unknown",
-                root.display()
-            )),
-        }
-    }
-}
-
 /// The exact retry for a reassessment whose store save failed: what was actually given,
 /// not a placeholder, so running it verbatim redoes the same clear.
 fn escalation_retry_hint(id: &TaskId, given: Option<Complexity>) -> String {
@@ -922,14 +1022,17 @@ fn escalation_retry_hint(id: &TaskId, given: Option<Complexity>) -> String {
     }
 }
 
+/// Persists status claim intents only after validation.
+///
+/// Everything that can reject the change runs first and touches nothing. From there the
+/// store and the task file move together, in the order that fails toward "claim held": a
+/// claim with no file update makes an idle task look busy and self-heals when the session
+/// dies, while a file update with no claim is the invisibility bug this exists to remove.
 pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
-    // Until this line the record still carries the stamp it was loaded with, which is the
-    // only baseline the divergence check below has; the bump destroys it.
-    let loaded = std::mem::replace(&mut task.updated, crate::time::now());
+    task.updated = crate::time::now();
     validate_task(task)?;
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
-    warn_on_newer_sibling_copies(ctx, &task.id, &loaded);
     let clear_escalation = std::mem::take(&mut ctx.clear_escalation);
 
     match ctx.pending_claim.take() {
