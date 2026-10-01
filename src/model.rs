@@ -11,6 +11,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_input_trims_trailing_periods_only() {
+        for (input, expected) in [
+            ("tasks-2578c3.", "tasks-2578c3"),
+            ("tasks-2578c3..", "tasks-2578c3"),
+            ("tasks-2578c3", "tasks-2578c3"),
+        ] {
+            assert_eq!(
+                TaskId::parse_input(input).unwrap(),
+                TaskId::parse(expected).unwrap()
+            );
+        }
+        for bad in [
+            "tasks-.2578c3",
+            "tasks-2578c3. ",
+            " tasks-2578c3.",
+            "tasks-2578c3,",
+            "tasks-2578. ",
+            ".",
+        ] {
+            assert!(
+                TaskId::parse_input(bad).is_err(),
+                "{bad} should be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_bad_ids() {
         for bad in [
             "sci-4f2a",
@@ -162,6 +189,13 @@ pub struct TaskId {
 }
 
 impl TaskId {
+    /// The input form of an id, as typed on the command line: one or more trailing
+    /// ASCII periods are sentence punctuation, not part of the id. Embedded dots,
+    /// other punctuation, and whitespace are left for `parse` to reject.
+    pub fn parse_input(s: &str) -> Result<TaskId> {
+        Self::parse(s.trim_end_matches('.'))
+    }
+
     pub fn parse(s: &str) -> Result<TaskId> {
         let Some((prefix, hex)) = s.rsplit_once('-') else {
             return Err(Error::InvalidId(

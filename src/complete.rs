@@ -338,7 +338,7 @@ fn walk(words: &[Option<&str>]) -> Line {
         && ID_FIRST.contains(&name.as_str())
         && let Some(first) = positionals.first()
     {
-        line.subject = TaskId::parse(first).ok();
+        line.subject = TaskId::parse_input(first).ok();
     }
     line
 }

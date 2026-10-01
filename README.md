@@ -75,6 +75,12 @@ output (`--json` is the default, spelled out). A usage error — an unknown comm
 a missing argument, a value outside a closed set — exits 2 with the problem and the usage
 line on stderr; a command that ran and failed exits 1 with one JSON error object there.
 
+Task ids on the command line accept trailing sentence punctuation: one or more trailing
+ASCII periods on any positional id or id-valued flag (`--parent`, `--depends`, `dep
+--on/--rm`, `feedback --recur`) are stripped before validation and alias resolution, so an
+id copied from the end of a sentence works. Embedded dots, other punctuation, and leading
+or trailing whitespace are not accepted; records on disk and every output stay canonical.
+
 `start` also writes a per-project claim outside git, so every worktree sees the session and
 its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
 `TASKS_SESSION` per agent when agents share a terminal or harness process; use

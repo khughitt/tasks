@@ -1,15 +1,16 @@
 ---
 id: tasks-1e32d6
 title: Trim trailing periods from CLI task-ID inputs
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: trim-period
 created: 2026-10-01T16:30:37Z
-updated: 2026-10-01T16:35:58Z
+updated: 2026-10-01T16:47:32Z
 started: 2026-10-01T16:35:58Z
+completed: 2026-10-01T16:47:32Z
 depends: []
 tags: [cli]
 agent: codex
@@ -33,3 +34,7 @@ Process: direct; the normalization rule and verification are settled. Related re
 ## Notes
 
 - 2026-10-01T16:35:58Z (main): started
+- 2026-10-01T16:36:19Z (trim-period): resumed
+- 2026-10-01T16:36:19Z (trim-period): took over session sid:2486550 (owner main, stale)
+- 2026-10-01T16:47:32Z (trim-period): done
+- 2026-10-01T16:47:32Z (trim-period): CLI id inputs now strip trailing sentence periods: TaskId::parse_input trims trailing ASCII dots before validation and alias canonicalization, wired through parse_id (all positional ids and id-valued flags, including --parent, --depends, dep --on/--rm, feedback --recur, list --parent) and completion's subject parse. On-disk ids, TaskId::parse, and outputs stay strict and canonical. Integration test covers single/multiple periods, flags, outside-project routing, retired aliases, rejected punctuation, and on-disk rejection; README and skills/tasks/SKILL.md document the rule.

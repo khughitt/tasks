@@ -263,6 +263,12 @@ contract.
 
 ### Task operations
 
+An id copied from the end of a sentence may carry trailing periods: every positional
+task id and id-valued flag (`--parent`, `--depends`, `dep --on/--rm`, `feedback
+--recur`) strips one or more trailing ASCII periods before validation. Embedded dots,
+other punctuation, and whitespace are still rejected, and records and output stay
+canonical.
+
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
 - A thought to revisit later: `tasks add "<title>" --status idea --defer 60d` (or a date,
   `--defer 2026-11-10`); every status change clears the date, so scope it with

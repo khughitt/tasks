@@ -2750,6 +2750,94 @@ fn show_resolves_local_and_foreign_dependencies() {
 }
 
 #[test]
+fn trailing_periods_are_trimmed_from_cli_id_inputs() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&sci, &["add", "Shown", "-p", "2"]));
+    let far = id_of(env.json(&fam, &["add", "Far", "-p", "2"]));
+    let dotted = format!("{id}.");
+
+    // One and several trailing periods on a positional id, canonical output.
+    assert_eq!(env.json(&sci, &["show", &dotted])["task"]["id"], id);
+    assert_eq!(
+        env.json(&sci, &["show", &format!("{id}..")])["task"]["id"],
+        id
+    );
+
+    // ID-valued flags trim the same way.
+    let child = id_of(env.json(&sci, &["add", "Child", "-p", "2"]));
+    env.json(&sci, &["edit", &child, "--parent", &dotted]);
+    assert_eq!(env.json(&sci, &["show", &child])["task"]["parent"], id);
+    env.json(&sci, &["dep", &child, "--on", &format!("{far}.")]);
+    let shown = env.json(&sci, &["show", &child]);
+    assert_eq!(shown["depends_on"][0]["id"], far);
+    assert_eq!(shown["depends_on"][0]["resolved"], true);
+
+    // The list filter trims too.
+    let v = env.json(&sci, &["list", "--parent", &dotted]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+
+    // A full id with a trailing period routes outside a project.
+    assert_eq!(
+        env.json(env.home.path(), &["show", &dotted])["task"]["id"],
+        id
+    );
+
+    // A retired alias with a trailing period canonicalizes to the live id.
+    alias_registry(&env, "old", "sci");
+    let retired = format!("old-{}", id.split_once('-').unwrap().1);
+    assert_eq!(
+        env.json(&sci, &["show", &format!("{retired}.")])["task"]["id"],
+        id
+    );
+
+    // Other punctuation and whitespace are left for validation to reject.
+    assert_eq!(env.fail(&sci, &["show", &format!("{id}. ")]), "invalid_id");
+    assert_eq!(env.fail(&sci, &["show", "bogus,"]), "invalid_id");
+
+    // feedback --recur trims as well.
+    let feedback_task = id_of(env.json(&sci, &["add", "Fb", "--tag", "feedback"]));
+    accept_feedback(&sci, "*");
+    let recurred = env.json(
+        &sci,
+        &[
+            "feedback",
+            "--project",
+            "sci",
+            "trailing periods recur",
+            "--category",
+            "idea",
+            "--recur",
+            &format!("{feedback_task}."),
+        ],
+    );
+    assert_eq!(recurred["action"], "recurred");
+    assert_eq!(recurred["id"], feedback_task);
+
+    // On disk nothing relaxes: a file named with a trailing period is a parse finding.
+    let bad = sci.join(format!("tasks/{id}..md"));
+    std::fs::write(&bad, "").unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "parse" && e["file"] == format!("tasks/{id}..md")),
+        "{v}"
+    );
+    std::fs::remove_file(&bad).unwrap();
+}
+
+#[test]
 fn list_all_projects_walks_registry() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

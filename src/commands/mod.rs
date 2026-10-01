@@ -513,7 +513,7 @@ pub struct ReadCtx {
 
 /// Parses a user-supplied id under the registry's current prefix names.
 pub fn parse_id(registry: &Registry, id: &str) -> Result<TaskId> {
-    Ok(registry.canonical_id(&TaskId::parse(id)?))
+    Ok(registry.canonical_id(&TaskId::parse_input(id)?))
 }
 
 impl ReadCtx {
