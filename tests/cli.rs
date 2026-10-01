@@ -6875,6 +6875,199 @@ fn strip_ansi(text: &str) -> String {
     plain
 }
 
+fn write_project_color(dir: &std::path::Path, prefix: &str, color: &str) {
+    std::fs::write(
+        dir.join("tasks/.config.toml"),
+        format!("prefix = \"{prefix}\"\ncolor = \"{color}\"\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn project_colors_paint_prefixes_and_titles_without_changing_json_or_layout() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let dots = env.init("dots");
+    let plain = env.init("plain");
+    let gone = env.init("gone");
+    env.json(&sci, &["add", "Science", "--tag", "research"]);
+    env.json(&dots, &["add", "Dotfiles", "--status", "idea"]);
+    env.json(&plain, &["add", "Unassigned"]);
+    write_project_color(&gone, "gone", "#abcdef");
+    std::fs::remove_file(gone.join("tasks/.config.toml")).unwrap();
+    let commands = [&["projects"][..], &["list", "--all-projects"][..]];
+    let before: Vec<_> = commands.iter().map(|args| env.json(&sci, args)).collect();
+
+    write_project_color(&sci, "sci", "#123456");
+    write_project_color(&dots, "dots", "#aBCdEf");
+    for (&args, before) in commands.iter().zip(before) {
+        let colored = env
+            .cmd(&sci)
+            .env("TASKS_FORMAT", "pretty")
+            .env("NO_COLOR", "1")
+            .arg("--color=always")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(colored.status.success());
+        let colored = String::from_utf8(colored.stdout).unwrap();
+        assert_eq!(strip_ansi(&colored), env.pretty(&sci, args));
+        if args[0] == "projects" {
+            assert!(
+                colored.contains("\x1b[38;2;18;52;86msci    \x1b[0m"),
+                "{colored:?}"
+            );
+            assert!(
+                colored.contains("\x1b[38;2;171;205;239mdots   \x1b[0m"),
+                "{colored:?}"
+            );
+            assert!(colored.contains("\x1b[2mplain  \x1b[0m"), "{colored:?}");
+            assert!(colored.contains("\x1b[2mgone   \x1b[0m"), "{colored:?}");
+        } else {
+            assert!(
+                colored.contains("\x1b[38;2;18;52;86mScience\x1b[0m"),
+                "{colored:?}"
+            );
+            assert!(
+                colored.contains("\x1b[38;2;171;205;239mDotfiles\x1b[0m"),
+                "{colored:?}"
+            );
+            assert!(colored.contains("\x1b[2m [research]\x1b[0m"), "{colored:?}");
+            assert!(colored.contains("\x1b[34midea   \x1b[0m"), "{colored:?}");
+            assert!(colored.contains("  Unassigned\n"), "{colored:?}");
+        }
+        for mode in ["never", "auto"] {
+            let out = env
+                .cmd(&sci)
+                .env("TASKS_FORMAT", "pretty")
+                .args(["--color", mode])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+            assert!(!has_ansi(&out.stdout));
+        }
+        let suppressed = env
+            .cmd(&sci)
+            .env("TASKS_FORMAT", "pretty")
+            .env("TASKS_COLOR", "always")
+            .env("NO_COLOR", "1")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(suppressed.status.success());
+        assert!(!has_ansi(&suppressed.stdout));
+        let json = env
+            .cmd(&sci)
+            .arg("--color=always")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(json.status.success());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&json.stdout).unwrap(),
+            before
+        );
+    }
+}
+
+#[test]
+fn project_colors_reset_and_resume_on_wrapped_titles() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let title = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu";
+    env.json(&sci, &["add", title, "--tag", "research"]);
+    write_project_color(&sci, "sci", "#123456");
+    let run = |color| {
+        let out = env
+            .cmd(&sci)
+            .env("COLUMNS", "80")
+            .args(["--pretty", "--color", color, "list", "--all-projects"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let colored = run("always");
+    let plain = run("never");
+    assert_eq!(strip_ansi(&colored), plain);
+    let lines: Vec<_> = colored.trim_end().lines().collect();
+    assert!(lines.len() > 1, "{colored:?}");
+    let title_start = plain.lines().next().unwrap().find("alpha").unwrap();
+    for (i, line) in lines.iter().enumerate() {
+        let visible = strip_ansi(line);
+        assert!(visible.len() <= 80, "{line:?}");
+        if i > 0 {
+            assert_eq!(visible.len() - visible.trim_start().len(), title_start);
+        }
+        if visible.contains("[research]") {
+            assert!(line.contains("\x1b[2m"), "{line:?}");
+        }
+        if !visible.trim_start().starts_with("[research]") {
+            assert!(line.contains("\x1b[38;2;18;52;86m"), "{line:?}");
+        }
+        assert!(line.ends_with("\x1b[0m"), "reset before newline: {line:?}");
+    }
+}
+
+#[test]
+fn project_colors_reject_invalid_config_values() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    for value in [
+        "\"red\"",
+        "\"#123\"",
+        "\"#12345g\"",
+        "\"123456\"",
+        "\" #123456\"",
+        "\"\"",
+        "42",
+    ] {
+        std::fs::write(
+            sci.join("tasks/.config.toml"),
+            format!("prefix = \"sci\"\ncolor = {value}\n"),
+        )
+        .unwrap();
+        for args in [
+            &["list"][..],
+            &["projects"][..],
+            &["list", "--all-projects"][..],
+            &["init", "--prefix", "sci"][..],
+        ] {
+            assert_eq!(env.fail(&sci, args), "config", "{value}: {args:?}");
+        }
+    }
+}
+
+#[test]
+fn project_colors_survive_reinit_and_rename_and_can_be_removed() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Science"]));
+    write_project_color(&sci, "sci", "#123456");
+    env.json(&sci, &["init", "--prefix", "sci"]);
+    env.json(&sci, &["rename", "sci", "science"]);
+    let config: toml::Value = toml::from_str(&env.read(&sci, "tasks/.config.toml")).unwrap();
+    assert_eq!(config["color"].as_str(), Some("#123456"));
+    assert_eq!(config["prefix"].as_str(), Some("science"));
+    assert_eq!(
+        env.json(&sci, &["list"])["tasks"][0]["id"],
+        id.replace("sci-", "science-")
+    );
+    let colored = env.pretty(&sci, &["--color=always", "projects"]);
+    assert!(
+        colored.contains("\x1b[38;2;18;52;86mscience\x1b[0m"),
+        "{colored:?}"
+    );
+    std::fs::write(sci.join("tasks/.config.toml"), "prefix = \"science\"\n").unwrap();
+    let restored = env.pretty(&sci, &["--color=always", "projects"]);
+    assert!(restored.contains("\x1b[2mscience\x1b[0m"), "{restored:?}");
+    assert!(
+        !env.pretty(&sci, &["--color=always", "list", "--all-projects"])
+            .contains("38;2;18;52;86")
+    );
+}
+
 #[test]
 fn colored_tables_use_semantic_roles_without_changing_layout() {
     let mut env = TestEnv::new();

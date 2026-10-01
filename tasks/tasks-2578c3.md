@@ -1,15 +1,16 @@
 ---
 id: tasks-2578c3
 title: Assign project colors and use them in pretty output
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: direct
-owner: main
+owner: feat/project-colors
 created: 2026-10-01T15:44:32Z
-updated: 2026-10-01T17:03:36Z
+updated: 2026-10-01T17:11:14Z
 started: 2026-10-01T17:03:36Z
+completed: 2026-10-01T17:11:13Z
 depends: []
 tags: [cli, output]
 agent: codex
@@ -38,4 +39,12 @@ Original assessment request: choose storage location, accepted color values, and
 
 - 2026-10-01T16:31:18Z (main): scope: scoped; P2/m/mid/direct; optional project-config hex color, shared RGB parser and painter, project-prefix and task-title rendering, unchanged JSON and color controls; no registry color map needed
 - 2026-10-01T17:03:36Z (main): started
+  provenance: {"harness_session":"codex:01a0f86a-bd5d-7db0-8349-126bfe1752ab","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-01T17:03:46Z (feat/project-colors): resumed
+  provenance: {"harness_session":"codex:01a0f86a-bd5d-7db0-8349-126bfe1752ab","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-01T17:07:41Z (feat/project-colors): Implementation uses project-local validated RGB plus serde-skipped output fields; the existing painter handles padding and wrapped title resets. Integration coverage checks both commands, color controls, JSON equality, invalid values, and rename/reinitialization.
+- 2026-10-01T17:11:13Z (feat/project-colors): review: impl round 1 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-01T17:11:13Z (feat/project-colors): done
+  provenance: {"harness_session":"codex:01a0f86a-bd5d-7db0-8349-126bfe1752ab","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-01T17:11:13Z (feat/project-colors): Added validated project-local hex colors for pretty project prefixes and list titles; preserved JSON, color controls, wrapping, and configuration through reinitialization/rename. README and task skill updated; focused integration tests, just test-fast, and just check pass; independent review accepted.
   provenance: {"harness_session":"codex:01a0f86a-bd5d-7db0-8349-126bfe1752ab","harness_session_source":"CODEX_SESSION_ID"}

@@ -176,6 +176,7 @@ mod tests {
         let project = Project {
             root: PathBuf::new(),
             prefix: "sci".into(),
+            color: None,
             spec_dirs: vec![],
             plan_dirs: vec![],
             tags: None,
@@ -198,6 +199,7 @@ mod tests {
         let project = Project {
             root: PathBuf::new(),
             prefix: "sci".into(),
+            color: None,
             spec_dirs: vec![],
             plan_dirs: vec![],
             tags: None,

@@ -167,6 +167,17 @@ and tabs, which every new note already has stripped.
 tag dictionary (`[tags]` in `tasks/.config.toml`), `tasks tags` shows each tag's meaning:
 prefer a defined tag, and add an entry when a new tag is worth keeping — `check` warns
 on open tasks carrying an undefined one.
+
+Project identity colors are assigned by an optional top-level `color = "#RRGGBB"` in
+`tasks/.config.toml`, before any table headers. Use exactly six hex digits (either case);
+invalid values fail with a typed config error. Change the value to recolor or remove the
+key to restore existing styling. Init/reinitialization and prefix rename preserve it.
+`TASKS_FORMAT=pretty tasks --color=always projects` paints project prefixes, and
+`TASKS_FORMAT=pretty tasks --color=always list --all-projects` paints task titles with the
+same RGB (local `list` too). Unassigned or unreachable projects keep existing styling;
+other columns keep their roles. Existing `--color`, `TASKS_COLOR`, `NO_COLOR`, and auto
+controls apply; JSON and stored IDs are unchanged.
+
 `--source <ref>` records where a task came from (a URL, a message id, a note); tasks never interprets it.
 `tasks list --source <ref>` finds everything filed from one reference, matched exactly.
 A sourced `add` is idempotent: when the project already holds a task with that same source

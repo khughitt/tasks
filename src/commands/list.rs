@@ -82,7 +82,16 @@ pub fn list(
     Ok(Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
+            .map(|task| {
+                let mut row = TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now);
+                row.project_color = ctx
+                    .scope
+                    .projects()
+                    .iter()
+                    .find(|project| project.prefix == task.id.prefix)
+                    .and_then(|project| project.color);
+                row
+            })
             .collect(),
         halts: vec![],
         warnings: ctx.warnings,

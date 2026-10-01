@@ -88,6 +88,8 @@ pub struct RootOut {
 #[derive(Serialize)]
 pub struct ProjectRow {
     pub prefix: String,
+    #[serde(skip)]
+    pub color: Option<crate::palette::Rgb>,
     pub root: String,
     pub reachable: bool,
     /// Present only for a reachable project.
@@ -192,6 +194,8 @@ pub struct HaltRow {
 pub struct TaskSummary {
     pub id: String,
     pub title: String,
+    #[serde(skip)]
+    pub project_color: Option<crate::palette::Rgb>,
     pub status: Status,
     pub priority: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -397,6 +401,7 @@ impl TaskSummary {
         TaskSummary {
             id: task.id.to_string(),
             title: task.title.clone(),
+            project_color: None,
             status: task.status,
             priority: task.priority,
             size: task.size,
@@ -897,7 +902,11 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             }
             let mut grid = vec![header];
             for row in &o.projects {
-                let mut cells = vec![cell(&row.prefix, Align::Left, Some(Style::Chrome))];
+                let mut cells = vec![cell(
+                    &row.prefix,
+                    Align::Left,
+                    Some(row.color.map(Style::Project).unwrap_or(Style::Chrome)),
+                )];
                 match &row.counts {
                     Some(counts) => {
                         cells.extend(count_columns(counts, o.closed).into_iter().map(|column| {
@@ -1789,7 +1798,7 @@ pub fn table(
         rendered.push_str(&render_row(
             &prefix,
             &[
-                (row.title.as_str(), None),
+                (row.title.as_str(), row.project_color.map(Style::Project)),
                 (tags.as_str(), Some(Style::Chrome)),
                 (cadence.as_str(), Some(Style::Emphasis)),
                 (deferral.as_str(), Some(Style::Emphasis)),
@@ -1921,6 +1930,7 @@ mod tests {
         TaskSummary {
             id: id.into(),
             title: format!("title {id}"),
+            project_color: None,
             status: Status::Todo,
             priority: 2,
             size: None,

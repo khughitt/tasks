@@ -69,6 +69,7 @@ pub const DEFAULT_PLAN_DIRS: &[&str] = &["docs/plans", "docs/superpowers/plans"]
 pub struct Project {
     pub root: PathBuf,
     pub prefix: String,
+    pub color: Option<crate::palette::Rgb>,
     /// Roots a `spec` link may live under; also the search path for bare spec names.
     pub spec_dirs: Vec<String>,
     /// Roots a `plan` link may live under; also the search path for bare plan names.
@@ -101,6 +102,8 @@ pub enum SiblingCopy {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Config {
     prefix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spec_dirs: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -220,6 +223,7 @@ impl Project {
         if !config.exists() {
             let text = toml::to_string(&Config {
                 prefix: prefix.into(),
+                color: None,
                 spec_dirs: None,
                 plan_dirs: None,
                 tags: None,
@@ -249,6 +253,14 @@ impl Project {
         Ok(Project {
             root,
             prefix: config.prefix,
+            color: config
+                .color
+                .map(|color| {
+                    crate::palette::Rgb::parse_hex(&color).ok_or_else(|| {
+                        Error::Config(format!("{CONFIG_REL}: color {color:?} must be #RRGGBB"))
+                    })
+                })
+                .transpose()?,
             spec_dirs: doc_roots("spec_dirs", config.spec_dirs, DEFAULT_SPEC_DIRS)?,
             plan_dirs: doc_roots("plan_dirs", config.plan_dirs, DEFAULT_PLAN_DIRS)?,
             tags: tag_dictionary(config.tags)?,

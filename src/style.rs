@@ -53,6 +53,7 @@ impl ColorMode {
 /// looks, so the same meaning renders identically in every view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
+    Project(Rgb),
     Status(Status),
     Chrome,
     Emphasis,
@@ -189,6 +190,7 @@ impl Painter {
             "paint spans a newline; the reset would land after the break: {text:?}"
         );
         let code: String = match style {
+            Style::Project(color) => format!("38;2;{};{};{}", color.r, color.g, color.b),
             Style::Date(when) => match &self.recency {
                 Some(recency) => {
                     let color = recency.color(when);

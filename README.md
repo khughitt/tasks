@@ -421,6 +421,26 @@ same three values, styles `--pretty` output only; JSON never carries escape sequ
 in a shell rc leaves piped and agent-run output plain. A non-empty `NO_COLOR` turns off
 color selected through the environment, and an explicit `--color` overrides it.
 
+Assign a persistent project color with an optional top-level key in `tasks/.config.toml`,
+before any table headers:
+
+```toml
+prefix = "sci"
+color = "#123456"
+```
+
+The value must be exactly `#RRGGBB` (either hex case); invalid values fail with a config
+error. Change the value to change the color, or remove the key to restore existing styling.
+Init/reinitialization and prefix rename preserve the setting. These commands use the same
+RGB for the project prefix in `projects` and the task title in `list --all-projects`:
+
+    TASKS_FORMAT=pretty tasks --color=always projects
+    TASKS_FORMAT=pretty tasks --color=always list --all-projects
+
+Local `list` uses the project color too. Unassigned or unreachable projects keep their
+existing styling; status, priority, dates, tags, and metadata keep their own roles.
+Project colors obey the color controls above and never appear in JSON or stored task IDs.
+
 With color on, date columns fade by age: today in the terminal theme's cyan, older dates
 toward a dimmed foreground, anything two years or more away the same. Priorities take the
 theme's magenta: P0 bold, P1 full, then even steps down to a deeply dimmed foreground at
@@ -511,6 +531,6 @@ public.
 
 ## Layout
 
-    tasks/.config.toml               prefix = "sci"; optional spec_dirs / plan_dirs / [tags]
+    tasks/.config.toml               prefix = "sci"; optional color / spec_dirs / plan_dirs / [tags]
     tasks/sci-4f2a9c.md              one task
     ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live

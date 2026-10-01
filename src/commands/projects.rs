@@ -73,18 +73,24 @@ pub fn run(
     let mut rows = Vec::new();
     for (prefix, root) in &registry.projects {
         let reachable = is_reachable(root)?;
-        let (counts, total, last_activity) = if reachable {
+        let (counts, total, last_activity, color) = if reachable {
             let project = open_registered(&registry, prefix, Origin::Prefix)?;
             let tasks = project.scan()?;
             // Timestamps are fixed-width UTC with no fractional part, so the lexical max
             // is the chronological one.
             let last = tasks.iter().map(|task| task.updated.clone()).max();
-            (Some(Counts::of(&tasks)), Some(tasks.len()), last)
+            (
+                Some(Counts::of(&tasks)),
+                Some(tasks.len()),
+                last,
+                project.color,
+            )
         } else {
-            (None, None, None)
+            (None, None, None, None)
         };
         rows.push(ProjectRow {
             prefix: prefix.clone(),
+            color,
             root: root.display().to_string(),
             reachable,
             counts,
@@ -109,6 +115,7 @@ mod tests {
     fn row(prefix: &str, total: Option<usize>, activity: Option<&str>) -> ProjectRow {
         ProjectRow {
             prefix: prefix.into(),
+            color: None,
             root: format!("/tmp/{prefix}"),
             reachable: total.is_some(),
             counts: total.map(|_| Counts::default()),
