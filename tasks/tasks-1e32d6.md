@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: trim-period
 created: 2026-10-01T16:30:37Z
-updated: 2026-10-01T16:47:32Z
+updated: 2026-10-01T16:57:41Z
 started: 2026-10-01T16:35:58Z
 completed: 2026-10-01T16:47:32Z
 depends: []
@@ -38,3 +38,4 @@ Process: direct; the normalization rule and verification are settled. Related re
 - 2026-10-01T16:36:19Z (trim-period): took over session sid:2486550 (owner main, stale)
 - 2026-10-01T16:47:32Z (trim-period): done
 - 2026-10-01T16:47:32Z (trim-period): CLI id inputs now strip trailing sentence periods: TaskId::parse_input trims trailing ASCII dots before validation and alias canonicalization, wired through parse_id (all positional ids and id-valued flags, including --parent, --depends, dep --on/--rm, feedback --recur, list --parent) and completion's subject parse. On-disk ids, TaskId::parse, and outputs stay strict and canonical. Integration test covers single/multiple periods, flags, outside-project routing, retired aliases, rejected punctuation, and on-disk rejection; README and skills/tasks/SKILL.md document the rule.
+- 2026-10-01T16:57:41Z (trim-period): review: impl round 1 — verdict: accept; findings: none; reviewer: codex
