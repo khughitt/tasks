@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/edit-depends
 created: 2026-10-02T14:22:40Z
-updated: 2026-10-02T15:30:09Z
+updated: 2026-10-02T15:33:20Z
 started: 2026-10-02T15:24:43Z
 depends: []
 parent: tasks-671956
@@ -34,3 +34,9 @@ Ideas it wakes: On design completion, add the approved finding to tasks-8efda8 i
 - 2026-10-02T15:29:15Z (design/edit-depends): review: spec round 1 — verdict: accept; findings: P3 2; reviewer: codex/gpt-6
 - 2026-10-02T15:29:15Z (design/edit-depends): Spec review nits: section 3 says cycle validation runs when anything was added, while section 4 runs it for any nonempty input; recommend stating that duplicate-only requests also validate the full graph, matching dep --on, and covering that case. Section 1 overstates the rename issue: apply_fields canonicalizes explicitly supplied replacement ids, not all stored references; the preservation rule is in rename spec section 4, not section 3.
 - 2026-10-02T15:30:09Z (design/edit-depends): spec revised for review round 1: validation runs whenever --depends is given (duplicate-only + unreachable edge check added); rename rationale corrected to §4 and to what replacement actually does
+- 2026-10-02T15:30:58Z (design/edit-depends): resumed
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:30:58Z (design/edit-depends): spec approved by user
+- 2026-10-02T15:33:19Z (design/edit-depends): plan drafted: docs/plans/2026-10-02-edit-depends.md (2 tasks: shared add helper + additive --depends; --no-depends + docs); linking it and filing step children under tasks-8efda8 waits for plan approval so pickers do not offer unapproved steps
+- 2026-10-02T15:33:19Z (design/edit-depends): parked (waiting on user, review): user reviews docs/plans/2026-10-02-edit-depends.md in .worktrees/edit-depends and picks an execution method; then close e9af16, re-scope tasks-8efda8 against the plan, link the plan and file its two step children
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
