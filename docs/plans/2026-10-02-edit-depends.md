@@ -321,8 +321,16 @@ fn edit_no_depends_clears_and_with_depends_replaces() {
         serde_json::json!([c, a])
     );
 
-    // A: clear, alone, walks no graph: an unreachable stored dependency goes too.
+    // A failed replacement keeps the old list: the clear is not saved on its own.
     let task_path = sci.join("tasks").join(format!("{task}.md"));
+    let before = std::fs::read_to_string(&task_path).unwrap();
+    assert_eq!(
+        env.fail(&sci, &["edit", &task, "--no-depends", "--depends", &b, "--depends", "sci-000000"]),
+        "unresolvable_id"
+    );
+    assert_eq!(std::fs::read_to_string(&task_path).unwrap(), before);
+
+    // A: clear, alone, walks no graph: an unreachable stored dependency goes too.
     std::fs::write(
         &task_path,
         std::fs::read_to_string(&task_path)
