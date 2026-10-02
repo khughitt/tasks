@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-09-30T09:58:25Z
-updated: 2026-09-30T09:58:25Z
+updated: 2026-10-02T14:37:27Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -22,4 +22,8 @@ Bound: one controller and one delegated worker, using disposable tasks projects 
 
 Expected result: a compact table distinguishing observations from injected controls, mapping each report to the demonstrated resolution path; a recommendation for tasks, harness configuration/adapter, relay, or the controller hook owner, with a clear regression check. Explicitly settle whether child and controller share a process and whether the available signals distinguish their logical sessions. Keep claim identity, note provenance and controller completion gating separate; do not infer that fixing one fixes all three. Update the brief. A new ownership/precedence contract requires planned work after this investigation, not an implementation hidden inside it.
 
-Ideas it wakes: on completion add the finding to tasks-0c2c39, tasks-5745bb and tasks-616cd7 with tasks note in the same commit, then rerun scope on them.
+Ideas it wakes: on completion add the finding to tasks-0c2c39, tasks-5745bb, tasks-616cd7 and tasks-cf8687 with tasks note in the same commit, then rerun scope on them.
+
+## Notes
+
+- 2026-10-02T14:37:26Z (main): scope follow-up: tasks-cf8687 joins the existing conflict/provenance investigation and Ideas it wakes list; tasks-616cd7 recurred without capture evidence; task remains one bounded controller/worker capture
