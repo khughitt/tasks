@@ -1,13 +1,15 @@
 ---
 id: tasks-45e400
 title: "dep --on and --rm are mutually exclusive, so adding and removing a dependency takes two invocations"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-19T00:50:15Z
-updated: 2026-10-02T14:23:47Z
+updated: 2026-10-02T15:20:05Z
+started: 2026-10-02T15:20:05Z
 depends: []
 parent: tasks-671956
 tags: [feedback, friction, "from:material"]
@@ -27,3 +29,5 @@ Original report: tasks dep <id> --on <a> --rm <b> fails with 'cannot be used wit
 ## Notes
 
 - 2026-10-02T14:22:40Z (main): scope: scoped; one-save dependency swaps with canonical overlap rejection and final-graph validation; P2/s/mid/direct; original report preserved
+- 2026-10-02T15:20:05Z (main): started
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
