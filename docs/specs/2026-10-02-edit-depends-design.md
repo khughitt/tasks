@@ -12,9 +12,10 @@ does not say it replaces, and `add` shares the flag through `FieldArgs`, where a
 and replacing look the same because a new task has no dependencies.
 
 The replacement lives in `src/commands/mod.rs::apply_fields`
-(`task.depends = dependencies`). It also rewrites every stored spelling to its canonical
-form, which breaks the rename contract's rule that stored spellings stay until someone
-deliberately changes them (`docs/specs/2026-09-08-prefix-rename-design.md` §3).
+(`task.depends = dependencies`). It canonicalizes the ids supplied and stores them in
+place of the old list, so every edge the call does not name is dropped, along with its
+stored spelling. Additions keep the rename contract's rule that untouched stored
+references keep their spelling (`docs/specs/2026-09-08-prefix-rename-design.md` §4).
 
 ## 2. Evidence about replacement users
 
@@ -58,8 +59,10 @@ The rules:
    (tasks-2942cb). Repeats within one call are silently deduplicated. A new edge is
    stored in canonical form.
 2. **Validation.** Each added id is checked as now: a self-dependency is a `cycle`
-   error, an unresolvable id `unresolvable_id`, a malformed one `invalid_id`. When
-   anything was added, the final list is checked with `dep::ensure_acyclic`. Any
+   error, an unresolvable id `unresolvable_id`, a malformed one `invalid_id`. Whenever
+   `--depends` is supplied, the final list is checked with `dep::ensure_acyclic`, even
+   when every id named is already present, as `dep --on` does: a duplicate-only call on
+   a task with a stored unreachable dependency fails with `unresolvable_id`. Any
    failure leaves the record unchanged, because `edit` saves once at the end.
 3. **Clearing.** `--no-depends` alone walks no graph, so a stored dependency pointing at
    an unreachable task can always be cleared, as with `dep --rm`. `--no-depends` runs
@@ -111,7 +114,10 @@ CLI tests in `tests/cli.rs`:
 4. `edit --no-depends --depends X` leaves exactly X.
 5. `edit --depends X` that would close a cycle fails with `cycle` and leaves the file
    byte-identical, as does an unresolvable id in a list that also names a valid one.
-6. `add --depends` and the editor path keep their current behaviour (existing tests
+6. `edit --depends X`, where X is already present and the task also has a stored
+   unreachable dependency, fails with `unresolvable_id` and leaves the file
+   byte-identical.
+7. `add --depends` and the editor path keep their current behaviour (existing tests
    pass unchanged).
 
 Then `just test-fast` and `just check`.
