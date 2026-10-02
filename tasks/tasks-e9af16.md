@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/edit-depends
 created: 2026-10-02T14:22:40Z
-updated: 2026-10-02T15:26:21Z
+updated: 2026-10-02T15:26:37Z
 started: 2026-10-02T15:24:43Z
 depends: []
 parent: tasks-671956
@@ -29,3 +29,5 @@ Ideas it wakes: On design completion, add the approved finding to tasks-8efda8 i
 - 2026-10-02T15:24:48Z (design/edit-depends): resumed
   provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-02T15:26:20Z (design/edit-depends): spec drafted: additive edit --depends with --no-depends clear/replace (mirrors --tag/--no-tags); no replacement callers found in checkout, sibling tooling, or corpus
+- 2026-10-02T15:26:37Z (design/edit-depends): parked (waiting on user, review): user reviews docs/specs/2026-10-02-edit-depends-design.md in .worktrees/edit-depends; on approval, write the implementation plan there
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
