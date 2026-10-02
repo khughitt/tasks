@@ -1,13 +1,15 @@
 ---
 id: tasks-ead38f
 title: Record the all-of tag-filter exception in the shared CLI vocabulary
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-30T18:32:25Z
-updated: 2026-10-02T15:14:13Z
+updated: 2026-10-02T19:00:18Z
+started: 2026-10-02T19:00:18Z
 depends: []
 parent: tasks-cea445
 tags: [cli]
@@ -27,3 +29,5 @@ Where to look: tools/cli.toml (header, list and ready rows), src/filter.rs, src/
 ## Notes
 
 - 2026-10-02T15:14:13Z (main): scope: scoped; retain reviewed all-of tag filtering and record the CLI inventory exception through the authoritative publication workflow; priority 2, size s, complexity mid, process direct; brief: docs/notes/2026-10-02-tag-vocabulary-brief.md
+- 2026-10-02T19:00:18Z (main): started
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
