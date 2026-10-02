@@ -1,5 +1,5 @@
 use super::{
-    ClaimIntent, Ctx, append_lifecycle_note, append_note, follow_holder, id_out, load, owner_name,
+    ClaimIntent, Ctx, append_note, append_stamped_note, follow_holder, id_out, load, owner_name,
     save, transition,
 };
 use crate::error::{Error, Result};
@@ -153,10 +153,14 @@ fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {
     }
 }
 
-pub fn note(mut ctx: Ctx, id: String, text: String) -> Result<Output> {
+pub fn note(mut ctx: Ctx, id: String, text: String, stamp: bool) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
-    append_note(&mut task, &owner, &text)?;
+    if stamp {
+        append_stamped_note(&mut ctx, &mut task, &owner, &text)?;
+    } else {
+        append_note(&mut task, &owner, &text)?;
+    }
     // Identity and the store are resolved *before* the file write. Doing it afterwards
     // means a corrupt store returns an error after the note has already landed, and the
     // obvious retry then duplicates it.
@@ -208,7 +212,7 @@ pub fn close(
         && !ctx.recovered
     {
         let owner = owner_name(&ctx.project)?;
-        append_lifecycle_note(&mut ctx, &mut task, &owner, &message)?;
+        append_stamped_note(&mut ctx, &mut task, &owner, &message)?;
     }
     save(&mut ctx, &mut task)?;
     Ok(id_out(ctx, &task))

@@ -246,6 +246,141 @@ fn lifecycle_provenance_conflicts_warn_without_becoming_notes() {
 }
 
 #[test]
+fn note_stamp_carries_native_provenance_and_nothing_else() {
+    let gate = "gate: implementing -> verifying";
+    for (vars, expected) in [
+        (
+            &[("CLAUDE_CODE_SESSION_ID", "native-a")][..],
+            Some(("claude-code:native-a", "CLAUDE_CODE_SESSION_ID")),
+        ),
+        (
+            &[("CODEX_THREAD_ID", "native-a")][..],
+            Some(("codex:native-a", "CODEX_THREAD_ID")),
+        ),
+        (
+            &[
+                ("CODEX_SESSION_ID", "native-a"),
+                ("CODEX_THREAD_ID", "native-a"),
+            ][..],
+            Some(("codex:native-a", "CODEX_SESSION_ID")),
+        ),
+        (&[][..], None),
+    ] {
+        let mut env = TestEnv::new();
+        let dir = env.init("sci");
+        let id = id_of(env.json(&dir, &["add", "Gate", "--status", "todo"]));
+        env.cmd(&dir)
+            .env("TASKS_SESSION", "worker")
+            .args(["start", &id])
+            .assert()
+            .success();
+        let claims = ".local/state/tasks/claims/sci.toml";
+        let before: toml::Value = toml::from_str(&env.read(env.home.path(), claims)).unwrap();
+        for stamp in [false, true] {
+            let mut cmd = env.cmd(&dir);
+            cmd.env("TASKS_SESSION", "worker");
+            for (name, value) in vars {
+                cmd.env(name, value);
+            }
+            cmd.args(["note", &id, gate]);
+            if stamp {
+                cmd.arg("--stamp");
+            }
+            let out = cmd.output().unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            assert_eq!(v["warnings"], serde_json::json!([]), "{vars:?}");
+        }
+        let after: toml::Value = toml::from_str(&env.read(env.home.path(), claims)).unwrap();
+        for field in ["session", "pid", "pid_start", "boot_id", "started"] {
+            assert_eq!(
+                before["claims"][&id].get(field),
+                after["claims"][&id].get(field),
+                "{field}"
+            );
+        }
+
+        let shown = env.json(&dir, &["show", &id]);
+        assert_eq!(shown["task"]["status"], "doing");
+        assert_eq!(shown["claim"]["live"], true);
+        let notes = shown["task"]["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 3, "started, plain, stamped");
+        assert_eq!(notes[1]["text"], gate);
+        assert_eq!(notes[2]["text"], gate);
+        assert!(notes[1].get("harness_session").is_none(), "{vars:?}");
+        let keys: Vec<&str> = notes[2]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        match expected {
+            Some((key, source)) => {
+                assert_eq!(notes[2]["harness_session"], key);
+                assert_eq!(notes[2]["harness_session_source"], source);
+                assert_eq!(
+                    keys,
+                    [
+                        "at",
+                        "by",
+                        "harness_session",
+                        "harness_session_source",
+                        "text"
+                    ]
+                );
+            }
+            None => assert_eq!(keys, ["at", "by", "text"]),
+        }
+
+        let editor = editor_script(&dir, "true");
+        env.cmd(&dir)
+            .env("TASKS_SESSION", "worker")
+            .env("EDITOR", &editor)
+            .args(["edit", &id])
+            .assert()
+            .success();
+        let edited = env.json(&dir, &["show", &id]);
+        assert_eq!(edited["task"]["notes"], shown["task"]["notes"]);
+        assert_eq!(edited["task"]["status"], "doing");
+    }
+}
+
+#[test]
+fn note_stamp_conflicts_warn_without_values_and_still_land() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Conflict"]));
+    let out = env
+        .cmd(&dir)
+        .env("CODEX_SESSION_ID", "secret-a")
+        .env("CODEX_THREAD_ID", "secret-b")
+        .args(["note", &id, "gate: x", "--stamp"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("unknown harness provenance"),
+        "{combined}"
+    );
+    assert!(!combined.contains("secret-a") && !combined.contains("secret-b"));
+    let shown = env.json(&dir, &["show", &id]);
+    let notes = shown["task"]["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0]["text"], "gate: x");
+    assert!(notes[0].get("harness_session").is_none());
+    assert_eq!(shown["task"]["status"], "todo");
+}
+
+#[test]
 fn lifecycle_provenance_does_not_change_override_claims_or_plain_notes() {
     for with_pid in [false, true] {
         let mut env = TestEnv::new();

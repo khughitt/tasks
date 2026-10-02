@@ -265,7 +265,9 @@ lives by the TTL. Do not set `TASKS_SESSION` merely for obs.
 Generated lifecycle markers are `started`, `resumed`, `done`, `dropped`,
 `parked (waiting on …): <next step>`, and `completed; next due <YYYY-MM-DD>`.
 Close-message notes are stamped but are not lifecycle markers; plain `tasks note`,
-feedback, shelf notes and takeover commentary remain unstamped. Consumers use
+feedback, shelf notes and takeover commentary remain unstamped.
+`tasks note <id> "<text>" --stamp` stamps one note the same way (use it for gate notes);
+its text is never interpreted, so it is not a marker either. Consumers use
 generated text, not the presence of fields, to identify transitions.
 User text can equal a marker; the pair-only schema cannot disambiguate that collision.
 

@@ -126,6 +126,11 @@ There is no serialized marker kind: arbitrary user text can equal a generated te
 (for example, a close message of `resumed`). Text matching alone cannot disambiguate
 that collision; consumers must retain that uncertainty.
 Plain `tasks note`, shelf notes, feedback and takeover commentary remain unstamped.
+`tasks note <id> "<text>" --stamp` opts one note in: it carries the same pair under the
+same rules (a missing source leaves it off; a conflict warns without values and the note
+still lands), and changes nothing else about `note`. Its text is not interpreted, so a
+stamped note is no more a lifecycle marker than a close message is; flow's gate notes
+use it to name the session at each stage boundary.
 
 Binaries older than the provenance writer reject a stamped file outright, so every host
 that reads synced task files needs a current `tasks`. The contract and its rollout are

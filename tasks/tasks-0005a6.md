@@ -1,18 +1,20 @@
 ---
 id: tasks-0005a6
 title: Stamp gate notes with session provenance
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: feat/note-stamp
 created: 2026-09-18T19:09:47Z
-updated: 2026-10-02T18:23:55Z
+updated: 2026-10-02T18:28:07Z
 started: 2026-10-02T18:23:55Z
+completed: 2026-10-02T18:28:07Z
 depends: []
 tags: [quick-add, cli, observability]
 source: "mindful:thought:7b1b0c108103464388357acb293ad0ed"
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5
 ---
 
@@ -39,4 +41,10 @@ Source: mindful:thought:7b1b0c108103464388357acb293ad0ed
 
 - 2026-10-02T14:37:26Z (main): scope: scoped; opt-in note --stamp reuses the existing native provenance pair and warnings; plain notes and claim identity stay independent; P2/s/mid/direct; original source retained but lookup returned no match; brief: docs/notes/2026-09-30-delegated-identity-brief.md
 - 2026-10-02T18:23:55Z (main): started
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T18:24:00Z (feat/note-stamp): resumed
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T18:28:07Z (feat/note-stamp): done
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T18:28:07Z (feat/note-stamp): tasks note --stamp attaches the lifecycle provenance pair to one note; plain note unchanged; append_lifecycle_note renamed append_stamped_note; README, skill, and vendored cli.toml (ops e944fed) updated
   provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

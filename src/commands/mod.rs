@@ -854,7 +854,8 @@ pub fn append_note(task: &mut Task, by: &str, text: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn append_lifecycle_note(ctx: &mut Ctx, task: &mut Task, by: &str, text: &str) -> Result<()> {
+/// Appends a note stamped with the harness session provenance, when the environment names one.
+pub fn append_stamped_note(ctx: &mut Ctx, task: &mut Task, by: &str, text: &str) -> Result<()> {
     append_note(task, by, text)?;
     match crate::provenance::resolve_from(|name| std::env::var_os(name)) {
         Ok(provenance) => task.notes.last_mut().expect("just appended").provenance = provenance,
@@ -1000,7 +1001,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         })?;
         task.last_done = Some(now);
         let owner = owner_name(&ctx.project)?;
-        append_lifecycle_note(
+        append_stamped_note(
             ctx,
             task,
             &owner,
@@ -1008,10 +1009,10 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         )?;
     } else if closing {
         let owner = owner_name(&ctx.project)?;
-        append_lifecycle_note(ctx, task, &owner, to.as_str())?;
+        append_stamped_note(ctx, task, &owner, to.as_str())?;
     } else if to == Status::Doing {
         let owner = owner_name(&ctx.project)?;
-        append_lifecycle_note(
+        append_stamped_note(
             ctx,
             task,
             &owner,
@@ -1331,7 +1332,9 @@ pub fn run(cli: Cli) -> Result<Output> {
         } => sample::sample(open_read_ctx(dir, &scope)?, limit, older_than, seed),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
         Command::Prime { scope, closed } => list::prime(open_read_ctx(dir, &scope)?, closed),
-        Command::Note { id, text } => status::note(open_id_write_ctx(dir, &id)?, id, text),
+        Command::Note { id, text, stamp } => {
+            status::note(open_id_write_ctx(dir, &id)?, id, text, stamp)
+        }
         Command::Attach {
             id,
             source,

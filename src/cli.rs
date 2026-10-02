@@ -447,6 +447,9 @@ pub enum Command {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
         text: String,
+        /// Stamp the note with this session's harness provenance, as lifecycle notes are.
+        #[arg(long)]
+        stamp: bool,
     },
     /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note.
     #[command(

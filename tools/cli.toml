@@ -424,6 +424,7 @@ options = [
 path = ["note"]
 summary = "Append a timestamped note"
 args = [{ name = "id", value = "ref", required = true }, { name = "text", value = "string", required = true }]
+options = [{ names = ["--stamp"], value = "none" }]
 
 [[cli.tasks.commands]]
 path = ["attach"]
@@ -818,6 +819,9 @@ summary = "print review-round and after-close measures with their coverage"
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "since", role = "bound", value = "when", repeatable = false },
+  { shared = "until", role = "bound", value = "when", repeatable = false },
+  { names = ["--cohort"], value = "none" },
+  { names = ["--units"], value = "none" },
 ]
 
 [[cli.obs.commands]]
