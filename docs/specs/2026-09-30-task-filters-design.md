@@ -136,8 +136,9 @@ not in the filter:
   parent; `sample` draws from `idea`, `todo`, and `blocked`. Each rule defines that
   command's pool, not a user filter, so this design leaves them where they are.
 - **The all-of rule for `--tag` stays.** Changing it to any-of would break existing callers
-  and does not belong in this change. I'll file a follow-up to decide it against the
-  vocabulary.
+  and does not belong in this change. The `list` and `ready` `--tag` rows in the shared CLI
+  inventory record it as an `exception` (ops 3808a07, tasks-ead38f); `list --parked` uses the
+  `list` row.
 - **Ranges are out of scope.** Examples are `-p ..1` or a size range. Repeats cover the
   current need over sets of 5, 5, 3, and 2 values.
 

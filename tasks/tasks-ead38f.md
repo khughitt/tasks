@@ -1,18 +1,20 @@
 ---
 id: tasks-ead38f
 title: Record the all-of tag-filter exception in the shared CLI vocabulary
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: docs/tag-exception
 created: 2026-09-30T18:32:25Z
-updated: 2026-10-02T19:00:18Z
+updated: 2026-10-02T19:03:21Z
 started: 2026-10-02T19:00:18Z
+completed: 2026-10-02T19:03:21Z
 depends: []
 parent: tasks-cea445
 tags: [cli]
+model: claude-opus-5-5
 agent: codex
 ---
 
@@ -30,4 +32,10 @@ Where to look: tools/cli.toml (header, list and ready rows), src/filter.rs, src/
 
 - 2026-10-02T15:14:13Z (main): scope: scoped; retain reviewed all-of tag filtering and record the CLI inventory exception through the authoritative publication workflow; priority 2, size s, complexity mid, process direct; brief: docs/notes/2026-10-02-tag-vocabulary-brief.md
 - 2026-10-02T19:00:18Z (main): started
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T19:02:30Z (docs/tag-exception): resumed
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T19:03:21Z (docs/tag-exception): done
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T19:03:21Z (docs/tag-exception): list/ready --tag rows carry an all-of exception in the shared CLI inventory (ops 3808a07, adopted via vendored adopt); list --parked inherits the list row; filter design boundary updated; behavior unchanged (one tag A,B; two tags B; -p repeats widen)
   provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

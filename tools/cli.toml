@@ -11,7 +11,8 @@
 #   command: path, summary, verb, output, protocol, exception, args, options
 # `exception` carries the reason wherever a row departs from the vocabulary on purpose: on a
 # command row for its verb, on a shared option row for a value kind that differs from the
-# vocabulary entry's. Any other key on a row is a validation error.
+# vocabulary entry's or for a repeatable filter whose repeats narrow instead of widening.
+# Any other key on a row is a validation error.
 # --json, --pretty, -h/--help, -V/--version, and --color on typed CLIs are implied by the
 # CLI header and never rows; a protocol CLI implies only the help and version ones. The
 # root `help` command is implied by the Help rule the same way and is never a row.
@@ -324,7 +325,7 @@ options = [
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
-  { shared = "tag", role = "filter", value = "string", repeatable = true },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--parent"], value = "ref" },
@@ -346,7 +347,7 @@ options = [
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
-  { shared = "tag", role = "filter", value = "string", repeatable = true },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--parent"], value = "ref" },
