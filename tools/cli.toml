@@ -401,6 +401,7 @@ options = [
   { names = ["--no-model"], value = "none" },
   { names = ["--rm-tag"], value = "string", repeatable = true },
   { names = ["--no-tags"], value = "none" },
+  { names = ["--no-depends"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
@@ -1230,6 +1231,13 @@ options = [
 [[cli.science.commands]]
 path = ["build"]
 summary = "Build the world from its corpora"
+
+[[cli.science.commands]]
+path = ["epoch"]
+summary = "Publish an epoch over the session's corpora, or report the current one"
+options = [
+  { shared = "config", value = "path" },
+]
 
 [[cli.science.commands]]
 path = ["serve"]

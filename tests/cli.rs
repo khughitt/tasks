@@ -7753,6 +7753,77 @@ fn edit_depends_appends_keeps_spellings_and_validates_the_final_graph() {
 }
 
 #[test]
+fn edit_no_depends_clears_and_with_depends_replaces() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let task = id_of(env.json(&sci, &["add", "Task", "-p", "2"]));
+    let a = id_of(env.json(&sci, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&sci, &["add", "B", "-p", "2"]));
+    let c = id_of(env.json(&sci, &["add", "C", "-p", "2"]));
+    env.json(&sci, &["dep", &task, "--on", &a, &b]);
+
+    // Replace: exactly the ids given, and no warning for an id that was there before.
+    let replaced = env.json(
+        &sci,
+        &[
+            "edit",
+            &task,
+            "--no-depends",
+            "--depends",
+            &c,
+            "--depends",
+            &a,
+        ],
+    );
+    assert_eq!(replaced["warnings"], serde_json::json!([]), "{replaced}");
+    assert_eq!(
+        env.json(&sci, &["show", &task])["task"]["depends"],
+        serde_json::json!([c, a])
+    );
+
+    // A failed replacement keeps the old list: the clear is not saved on its own.
+    let task_path = sci.join("tasks").join(format!("{task}.md"));
+    let before = std::fs::read_to_string(&task_path).unwrap();
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "edit",
+                &task,
+                "--no-depends",
+                "--depends",
+                &b,
+                "--depends",
+                "sci-000000"
+            ]
+        ),
+        "unresolvable_id"
+    );
+    assert_eq!(std::fs::read_to_string(&task_path).unwrap(), before);
+
+    // A: clear, alone, walks no graph: an unreachable stored dependency goes too.
+    std::fs::write(
+        &task_path,
+        std::fs::read_to_string(&task_path)
+            .unwrap()
+            .replacen(&c, "zzz-000001", 1),
+    )
+    .unwrap();
+    // EDITOR=false: if `--no-depends` alone fell through to the editor path, the call
+    // would fail here instead of hanging on an inherited editor.
+    env.cmd(&sci)
+        .env("EDITOR", "false")
+        .args(["edit", &task, "--no-depends"])
+        .assert()
+        .success();
+    assert!(
+        env.json(&sci, &["show", &task])["task"]
+            .get("depends")
+            .is_none()
+    );
+}
+
+#[test]
 fn stored_retired_references_resolve_detect_cycles_and_keep_their_spelling() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

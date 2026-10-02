@@ -158,12 +158,13 @@ nothing is eligible.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--no-depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 Notes stay append-only there: the one note change it accepts is removing trailing spaces
 and tabs, which every new note already has stripped.
 `--tag` adds a tag and leaves the rest alone, so triage keeps the tags a task arrived with;
-`--rm-tag <tag>` removes one and `--no-tags` clears them all. When the project keeps a
+`--rm-tag <tag>` removes one and `--no-tags` clears them all. `--depends` likewise adds;
+`--no-depends` clears, and with `--depends` replaces the list. When the project keeps a
 tag dictionary (`[tags]` in `tasks/.config.toml`), `tasks tags` shows each tag's meaning:
 prefer a defined tag, and add an entry when a new tag is worth keeping — `check` warns
 on open tasks carrying an undefined one.

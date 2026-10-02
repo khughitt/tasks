@@ -329,6 +329,7 @@ tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-pr
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
            [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
+           [--no-depends]
            [--no-defer]
            [--source REF | --no-source]
            [--process direct|planned | --no-process]
@@ -338,6 +339,10 @@ tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
     replacing the list, so triage cannot silently drop the tags a task arrived with;
     --rm-tag removes one and is a validation error when the task lacks it, --no-tags
     clears the list, and the two conflict. --no-tags with --tag is a wholesale replace.
+    --depends appends the same way: an id the task already depends on under any
+    spelling changes nothing and warns, and every other stored edge keeps its spelling.
+    --no-depends clears the list without walking the graph, and --no-depends with
+    --depends is a wholesale replace. `dep --rm` removes one.
     --process replaces the workflow choice; --no-process clears it to unassessed,
     and these two flags conflict. Invalid process values are rejected before writes,
     including when supplied through the editor. Completion offers direct and planned.
@@ -682,12 +687,12 @@ the local one. See docs/specs/2026-09-05-shell-completions-design.md.
 
 ### 6.1 Cycle detection
 
-`dep --on`, `add --depends`, and `check` detect cycles by depth-first traversal of
+`dep --on`, `--depends` on `add` and `edit`, and `check` detect cycles by depth-first traversal of
 `depends` starting from the task being written (or every local task, for `check`),
 following foreign ids through the registry into other projects' task files. The traversal
 therefore reads foreign projects' `depends` too.
 
-If any id reached during traversal is unreachable, `dep --on` and `add --depends` fail with
+If any id reached during traversal is unreachable, `dep --on` and `--depends` on `add` and `edit` fail with
 `unresolvable_id` naming it (a cycle cannot be ruled out, so the link is not created);
 `check` emits a warning for it and reports only the cycles it could prove.
 

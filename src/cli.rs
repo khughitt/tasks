@@ -249,6 +249,9 @@ pub struct EditArgs {
     /// Clear every tag; with `--tag`, replaces the list wholesale.
     #[arg(long)]
     pub no_tags: bool,
+    /// Clear every dependency; with `--depends`, replaces the list wholesale.
+    #[arg(long)]
+    pub no_depends: bool,
     #[command(flatten)]
     pub fields: FieldArgs,
 }

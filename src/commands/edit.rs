@@ -114,6 +114,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.model.is_some()
         || args.no_model
         || args.no_tags
+        || args.no_depends
         || !args.rm_tags.is_empty();
     if !has_flags {
         return editor(ctx, id);
@@ -175,9 +176,13 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         task.model = Some(model.clone());
     }
     // Clear, then remove, then let `apply_fields` append: `--no-tags --tag x` is the
-    // wholesale replace `--tag` used to perform by itself.
+    // wholesale replace `--tag` used to perform by itself, and `--no-depends --depends x`
+    // the one `--depends` used to.
     if args.no_tags {
         task.tags.clear();
+    }
+    if args.no_depends {
+        task.depends.clear();
     }
     for tag in &args.rm_tags {
         let before = task.tags.len();

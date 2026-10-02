@@ -70,8 +70,9 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
      assumptions the text implies. Collect questions you cannot answer under one
      `## Open questions` heading at the end of the body; reuse an existing one. Notes
      are stored apart from the body and survive the rewrite.
-   - `--spec`, `--plan <topic> --step "<heading>"`, `--parent`, `--depends`: fix when
-     the linked thing exists and the link is missing or wrong.
+   - `--spec`, `--plan <topic> --step "<heading>"`, `--parent`: fix when the linked
+     thing exists and the link is missing or wrong. A missing dependency is added with
+     `--depends`; a wrong one is replaced with `tasks dep <id> --on <right> --rm <wrong>`.
    - `--size`: set or correct.
    - `--complexity`: set or correct against the rubric in the tasks skill (low: approach
      established, context identified, clear check; mid: bounded choices remain, scope
