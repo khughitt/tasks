@@ -239,6 +239,20 @@ instructions; other projects must adopt the policy in their agent instructions b
 relying on direct to waive mandatory brainstorming. The CLI never launches skills or
 creates worktrees, and does not gate selection or `start` on process.
 
+A record-only commit still runs content checks, and those read the working tree and
+the host's tasks registry, not the commit, so it can be refused for content it does
+not contain. Never bypass the hook or carry the record by patch; name the check and
+paths and ask the user, parking `--waiting-on user --reason decision` until they answer:
+- Failure committed in HEAD: on an explicit work-in-place instruction, repair it in
+  place, commit the repair by pathspec (`git commit -m "…" -- <paths>`) so the staged
+  record stays out, then commit the record and create the worktree.
+- Unrelated uncommitted edits (someone's draft): with their consent, `git stash push --
+  <paths>`, commit the record, `git stash pop`; confirm the commit holds only the record,
+  since a hook may regenerate and stage a guide the stash left clean. Never edit or
+  commit their draft.
+- A cross-project reference whose project is unregistered or unreachable on this host:
+  register or sync that project, then commit.
+
 `add --process` and `edit --process` accept `direct` or `planned`;
 `edit --no-process` clears the choice. `check` warns `process_missing` only on
 doing records, including goals and plan steps. An unassessed todo is not a finding;
