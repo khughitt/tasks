@@ -1,13 +1,15 @@
 ---
 id: tasks-cee8d9
 title: Establish a compliant bootstrap path when task-record commits fail
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-02T14:44:07Z
-updated: 2026-10-02T14:55:48Z
+updated: 2026-10-02T19:07:46Z
+started: 2026-10-02T19:07:46Z
 depends: []
 parent: tasks-0e7216
 tags: []
@@ -28,3 +30,5 @@ Ideas it wakes: On completion, add the finding to tasks-850488 with tasks note a
 
 - 2026-10-02T14:44:07Z (main): concerns: tasks-5a46b9 extension — add an evidence-backed isolated-repair bootstrap path for a task-record commit blocked by pre-existing content checks
 - 2026-10-02T14:55:48Z (main): scope: bound revised after user review — reproduce against ops's docs-only pre-commit recipe (where the incident occurred) and evaluate the existing work-in-place repair route before proposing any exception
+- 2026-10-02T19:07:46Z (main): started
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
