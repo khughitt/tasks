@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T10:35:27Z
-updated: 2026-10-02T14:44:09Z
+updated: 2026-10-02T14:55:48Z
 depends: []
 parent: tasks-0e7216
 tags: [feedback, friction, "from:sci"]
@@ -20,8 +20,11 @@ Decision to settle: Reconcile registered-checkout halt decisions and durable att
 
 Where to look: src/commands/status.rs::start, src/halt.rs::snapshot, src/commands/mod.rs::load/refuse_stale_copy/save, src/stale.rs, src/repo.rs::write_task; docs/specs/2026-09-30-halt-enforcement-design.md and docs/specs/2026-09-30-record-home-design.md; existing halt override and record-home CLI tests; docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md.
 
+When the implementation lands: update the status of any spec the approved design supersedes.
+
 Original report: start --force --reason run from a worktree writes the halt-override note into the registered checkout's working copy of the halt; when the halt itself is being worked in that worktree, the next write there refuses as stale_copy (and a same-second tie cannot be resolved by merging), so the override blocks the halt's own session
 
 ## Notes
 
 - 2026-10-02T14:44:07Z (main): scope: briefed; authority audit writer bypass is confirmed but ownership/refusal contract needs design; waits on tasks-10c968; brief: docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md
+- 2026-10-02T14:55:48Z (main): scope: owns updating superseded spec status when the implementation lands (moved from tasks-10c968, whose Done ends at the reviewed spec and plan)

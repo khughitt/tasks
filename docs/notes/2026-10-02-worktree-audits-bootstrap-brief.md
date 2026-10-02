@@ -3,7 +3,7 @@
 ## Problem
 
 Task worktrees should retain the latest record and support isolated repairs. This
-batch contrasts a successful stale-copy handoff (tasks-c1636f) with two gaps:
+batch contrasts a successful stale-copy handoff (tasks-c1636f, since dropped) with two gaps:
 halt-override audit writes into a sibling checkout (tasks-7ad96f), and a pre-existing
 content failure preventing the task-record commit required before isolation
 (tasks-850488). Goal: tasks-0e7216.
@@ -23,7 +23,11 @@ content failure preventing the task-record commit required before isolation
 - `.githooks/pre-commit` selects a task/guide-only recipe by staged paths. The recipe
   retains hygiene and task consistency; `tools/ops-check` examines tracked content.
   Thus a task-only commit does not necessarily escape an unrelated content failure.
-  The original incident command and gate output are unavailable.
+  The incident came from ops (tasks-850488 is `from:ops`), whose classifier is wider:
+  ops `docs_paths` is `*.md docs/* tasks/*` and its docs-only recipe runs
+  `bin/ops-check`, `bin/ops-docs check` and `tasks check`, so a task-only commit
+  there pays `ops-docs check` over every tracked doc. That is the likeliest incident
+  gate. The original incident command and gate output are unavailable.
 - `skills/tasks/SKILL.md` requires committing the record before worktree creation.
   The older fresh-worktree brief recommended that order and rejected CLI copying.
   tasks-5a46b9 delivered it. The reported staged-patch workaround is evidence of
@@ -42,8 +46,9 @@ Shared hooks belong to ops, global instructions to tack, and the shipped workflo
 to tasks; this pass writes only local handoffs.
 
 The earlier record-home and bootstrap goals are closed. Their briefs contain
-historical evidence, and the record-home spec header still says review revision;
-current code and completed task records establish the delivered behavior here.
+historical evidence. The record-home spec header, which still said round 3 review,
+was corrected in this pass to accepted and implemented; current code and completed
+task records establish the delivered behavior here.
 No overlapping open research or design follow-up was found. tasks-9b0a2e's linked
 project layout is related future context, not a prerequisite.
 
@@ -56,7 +61,9 @@ project layout is related future context, not a prerequisite.
    record explicitly while preserving incident visibility and audit ordering. This
    needs reviewed routing and failure semantics; it cannot be a silent fallback.
 3. **Retain normal bootstrap and define one evidenced exception.** First establish
-   whether a compliant existing path works. If none does, propose a narrowly reviewed
+   whether a compliant existing path works, starting with the route the instructions
+   already allow: on the user's explicit work-in-place instruction, repair the content
+   failure in place, commit it, then commit the record and branch. If none does, propose a narrowly reviewed
    isolated-repair handoff rather than disabling gates or adding a copying service.
 
 Prefer existing safeguards and the smallest explicit changes that satisfy both
@@ -68,8 +75,8 @@ contracts. The halt and bootstrap questions can progress independently.
   authority, and what does a safe refusal tell each owner to do? tasks-10c968 will
   propose the ownership and failure contract for user review.
 - Which check blocked the original bootstrap, and is a compliant recovery already
-  available? tasks-cee8d9 will trace the local gates and run one controlled scratch
-  case; the original incident remains unknown without its capture.
+  available? tasks-cee8d9 will trace this repo's and ops's docs-only gates,
+  evaluate the work-in-place route, and run one controlled scratch case; the original incident remains unknown without its capture.
 
 ## Proposed decomposition
 
@@ -77,10 +84,12 @@ contracts. The halt and bootstrap questions can progress independently.
   P2/m/high/planned design, then reviewed implementation plan.
 - tasks-850488 — **briefed**, remains an idea; waits on tasks-cee8d9,
   P2/s/mid/direct investigation with an explicit bound and result.
-- tasks-c1636f — **drop proposed**, remains an idea pending disposition. Supporting
-  delivery: tasks-9949f3 and `7054f6f`; retain the positive report in history.
+- tasks-c1636f — **dropped** on user acceptance. Supporting delivery: tasks-9949f3
+  and `7054f6f`; the positive report stays in history.
+- tasks-10c968 ends at the user-reviewed spec and plan; updating any superseded spec
+  status belongs to the re-scoped tasks-7ad96f when its implementation lands.
 
-All members and both follow-ups are children of tasks-0e7216. Follow-up completion
+All remaining members and both follow-ups are children of tasks-0e7216. Follow-up completion
 updates this brief and records a finding on its waiting idea in the same commit.
 The new follow-ups record their relationship to the delivered halt and bootstrap work
 through `concerns:` notes; they do not reopen the closed goals.

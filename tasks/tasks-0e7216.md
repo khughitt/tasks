@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T14:44:07Z
-updated: 2026-10-02T14:44:08Z
+updated: 2026-10-02T14:55:41Z
 depends: []
 tags: []
 source: docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md
@@ -15,7 +15,7 @@ agent: codex
 ---
 
 Why: The delivered record-home and bootstrap workflows have two uncovered interactions: an authority-side halt audit can fork the actively worked record, and an unrelated content gate can prevent the record commit required before an isolated repair.
-Done: Resolve the two handoffs in docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md while preserving halt visibility, attempted-audit ordering, stale-copy refusal, task provenance, and explicit setup. Dispose of the positive feedback proposal after user acceptance. Existing closed record-home and bootstrap goals remain closed; this goal owns the additional work.
+Done: Resolve the two handoffs in docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md while preserving halt visibility, attempted-audit ordering, stale-copy refusal, task provenance, and explicit setup. Existing closed record-home and bootstrap goals remain closed; this goal owns the additional work.
 
 ## Notes
 

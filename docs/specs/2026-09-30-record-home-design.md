@@ -1,7 +1,7 @@
 # Which checkout owns a task record
 
-Status: round 3 revision, for the user's re-review (drafted under tasks-ab8d2d, revised
-under tasks-9949f3). Round 2 was a Codex accept; the user returned round 3. Brief:
+Status: accepted (round 5, 2026-09-30) and implemented under tasks-9949f3 in
+c30bec2..323b1ed (drafted under tasks-ab8d2d). Brief:
 `docs/notes/2026-09-29-cross-checkout-records-brief.md`. Goal: tasks-c4ad8e.
 
 ## 1. Problem
