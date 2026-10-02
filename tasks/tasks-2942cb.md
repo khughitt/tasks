@@ -1,13 +1,15 @@
 ---
 id: tasks-2942cb
 title: "dep --on a retired-prefix id is a silent no-op when the task already depends on it, so repointing a dependency to the renamed prefix by --on then --rm drops it entirely"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-09-29T20:37:17Z
-updated: 2026-10-02T14:22:42Z
+updated: 2026-10-02T15:17:16Z
+started: 2026-10-02T15:17:16Z
 depends: []
 parent: tasks-671956
 tags: [feedback, friction, "from:tasks"]
@@ -27,3 +29,5 @@ Original report: tasks dep <id> --on tack-d5a56c then tasks dep <id> --rm ai-d5a
 ## Notes
 
 - 2026-10-02T14:22:40Z (main): scope: scoped; warn on existing canonical dependencies while preserving idempotence and stored spelling; P2/s/low/direct; original report preserved
+- 2026-10-02T15:17:16Z (main): started
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
