@@ -1,7 +1,7 @@
 # Additive `edit --depends` implementation plan
 
-**Status:** draft for review. Design task: tasks-e9af16; implementation task: tasks-8efda8
-(re-scoped against this plan when it is approved).
+**Status:** executed, 2026-10-02. Design task: tasks-e9af16; implementation task:
+tasks-8efda8. Approved after review round 1.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

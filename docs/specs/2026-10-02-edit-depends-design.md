@@ -1,6 +1,7 @@
 # Additive `edit --depends`
 
-Status: draft for review (tasks-e9af16, goal tasks-671956)
+Status: implemented, 2026-10-02 (design tasks-e9af16, implementation tasks-8efda8, goal
+tasks-671956). Approved after review round 1.
 Brief: `docs/notes/2026-10-02-dependency-editing-brief.md`
 
 ## 1. Problem

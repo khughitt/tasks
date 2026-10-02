@@ -7564,7 +7564,9 @@ fn dep_on_an_existing_dependency_warns_and_keeps_its_stored_spelling() {
     let again = env.json(&sci, &["dep", &a, "--on", &b]);
     assert_eq!(
         again["warnings"],
-        serde_json::json!([format!("{a} already depends on {b}; nothing changed")])
+        serde_json::json!([format!(
+            "{a} already depends on {b}; that dependency is unchanged"
+        )])
     );
 
     alias_registry(&env, "old", "sci");
@@ -7577,7 +7579,10 @@ fn dep_on_an_existing_dependency_warns_and_keeps_its_stored_spelling() {
         )),
         "{warning}"
     );
-    assert!(warning.contains("--rm with either spelling"), "{warning}");
+    assert!(
+        warning.contains("`tasks dep --rm` with either spelling"),
+        "{warning}"
+    );
 
     let a_path = sci.join("tasks").join(format!("{a}.md"));
     std::fs::write(
@@ -7677,6 +7682,18 @@ fn edit_depends_appends_keeps_spellings_and_validates_the_final_graph() {
         env.json(&sci, &["show", &task])["task"]["depends"],
         serde_json::json!(deps)
     );
+
+    // An edit that changes other fields beside a present dependency must not say that
+    // nothing changed.
+    let mixed = env.json(&sci, &["edit", &task, "--depends", &deps[5], "-p", "1"]);
+    assert_eq!(
+        mixed["warnings"],
+        serde_json::json!([format!(
+            "{task} already depends on {}; that dependency is unchanged",
+            deps[5]
+        )])
+    );
+    assert_eq!(env.json(&sci, &["show", &task])["task"]["priority"], 1);
 
     // B: an already-present edge named by its retired spelling warns and keeps one edge.
     alias_registry(&env, "old", "sci");

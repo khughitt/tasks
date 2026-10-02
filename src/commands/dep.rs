@@ -80,12 +80,12 @@ pub fn add_dependencies(
     Ok(warnings)
 }
 
-/// Explains an `--on` that named a dependency the task already had. Alias spellings
-/// name one task, so the add changed nothing; when the spellings differ, it says that
-/// `--rm` with either removes that one edge, which an `--on`/`--rm` pair would.
+/// Explains an `--on` or `--depends` that named a dependency the task already had. Alias
+/// spellings name one task, so that edge is unchanged; when the spellings differ, it says
+/// that `dep --rm` with either removes it, which an add/remove pair would.
 fn already_depends(task: &TaskId, canonical: &TaskId, stored: &TaskId, given: &TaskId) -> String {
     if stored == given {
-        return format!("{task} already depends on {canonical}; nothing changed");
+        return format!("{task} already depends on {canonical}; that dependency is unchanged");
     }
     let spellings = [("stored as", stored), ("given as", given)]
         .into_iter()
@@ -95,8 +95,8 @@ fn already_depends(task: &TaskId, canonical: &TaskId, stored: &TaskId, given: &T
         .join(", ");
     format!(
         "{task} already depends on {canonical} ({spellings}); both spellings name one task, \
-         so nothing changed and --rm with either spelling removes that one dependency: \
-         --on then --rm does not rewrite the stored prefix"
+         so that dependency is unchanged and `tasks dep --rm` with either spelling removes \
+         it: adding one spelling and removing the other does not rewrite the stored prefix"
     )
 }
 
