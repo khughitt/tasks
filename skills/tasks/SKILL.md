@@ -361,6 +361,10 @@ references. The retired prefix keeps resolving **for as long as the project stay
 registered**, so references in other projects and in prose need no edit. `unregister`
 drops the project's aliases with it. Retired names are reserved, and completion offers
 only live names; `check` can warn about stored retired references without rewriting them.
+A live id and its retired spelling are one task: `dep --on` of a dependency already
+stored under either spelling changes nothing and warns, and `dep --rm` with either
+spelling removes it. Never repoint a stored reference with `--on` then `--rm`; that
+drops the dependency.
 
 Start with clean `tasks/`, no live claims, and at most one git worktree. A pending rename
 freezes every writer to that project, including `start`, feedback, `init --force`, and

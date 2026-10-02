@@ -332,6 +332,11 @@ prose need no edits: retired names keep resolving **for as long as the project s
 registered**. `unregister` removes that project's aliases too; retired names cannot be
 reused while registered.
 
+A live id and its retired spelling are one task. `tasks dep <id> --on <x>` when the task
+already depends on `x` under any spelling changes nothing, keeps the stored spelling, and
+says so in `warnings`; `--rm` with either spelling removes that one dependency. An
+`--on`/`--rm` pair therefore cannot rewrite a stored retired prefix: it drops the edge.
+
 Rename requires clean `tasks/`, no live claims, and at most one git worktree. An interrupted
 rename freezes writes to that project; reads remain available. Re-run the same command to
 resume, or use `--explain` to observe its recovery verdict without writing, locking, or

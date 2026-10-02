@@ -1,18 +1,20 @@
 ---
 id: tasks-2942cb
 title: "dep --on a retired-prefix id is a silent no-op when the task already depends on it, so repointing a dependency to the renamed prefix by --on then --rm drops it entirely"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/dep-dup-warning
 created: 2026-09-29T20:37:17Z
-updated: 2026-10-02T15:17:16Z
+updated: 2026-10-02T15:19:20Z
 started: 2026-10-02T15:17:16Z
+completed: 2026-10-02T15:19:20Z
 depends: []
 parent: tasks-671956
 tags: [feedback, friction, "from:tasks"]
+model: claude-opus-5-5
 agent: claude-code/claude-sonnet-5-5
 ---
 
@@ -30,4 +32,10 @@ Original report: tasks dep <id> --on tack-d5a56c then tasks dep <id> --rm ai-d5a
 
 - 2026-10-02T14:22:40Z (main): scope: scoped; warn on existing canonical dependencies while preserving idempotence and stored spelling; P2/s/low/direct; original report preserved
 - 2026-10-02T15:17:16Z (main): started
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:17:21Z (fix/dep-dup-warning): resumed
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:19:20Z (fix/dep-dup-warning): done
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:19:20Z (fix/dep-dup-warning): dep --on of an already-present dependency (any alias spelling) stays idempotent, keeps the stored spelling, and warns naming the stored/given/canonical ids and that --rm with either spelling removes the one edge; README and tasks skill document the identity rule
   provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

@@ -38,24 +38,54 @@ pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
     Ok(())
 }
 
+/// Explains an `--on` that named a dependency the task already had. Alias spellings
+/// name one task, so the add changed nothing; when the spellings differ, it says that
+/// `--rm` with either removes that one edge, which an `--on`/`--rm` pair would.
+fn already_depends(task: &TaskId, canonical: &TaskId, stored: &TaskId, given: &TaskId) -> String {
+    if stored == given {
+        return format!("{task} already depends on {canonical}; nothing changed");
+    }
+    let spellings = [("stored as", stored), ("given as", given)]
+        .into_iter()
+        .filter(|(_, spelling)| *spelling != canonical)
+        .map(|(label, spelling)| format!("{label} {spelling}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "{task} already depends on {canonical} ({spellings}); both spellings name one task, \
+         so nothing changed and --rm with either spelling removes that one dependency: \
+         --on then --rm does not rewrite the stored prefix"
+    )
+}
+
 pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
     if !on.is_empty() {
         let resolver = Resolver::new(&ctx.project, &ctx.registry);
+        let existing = task.depends.len();
         for value in &on {
-            let dependency = super::parse_id(&ctx.registry, value)?;
+            let given = TaskId::parse_input(value)?;
+            let dependency = ctx.registry.canonical_id(&given);
             if dependency == task.id {
                 return Err(Error::Cycle(format!("{dependency} -> {dependency}")));
             }
             if resolver.resolve_task(&dependency)?.is_none() {
                 return Err(Error::UnresolvableId(dependency.to_string()));
             }
-            if !task
+            match task
                 .depends
                 .iter()
-                .any(|item| ctx.registry.canonical_id(item) == dependency)
+                .position(|item| ctx.registry.canonical_id(item) == dependency)
             {
-                task.depends.push(dependency);
+                Some(index) if index < existing => {
+                    let warning =
+                        already_depends(&task.id, &dependency, &task.depends[index], &given);
+                    if !ctx.warnings.contains(&warning) {
+                        ctx.warnings.push(warning);
+                    }
+                }
+                Some(_) => {}
+                None => task.depends.push(dependency),
             }
         }
         ensure_acyclic(&ctx, &task)?;

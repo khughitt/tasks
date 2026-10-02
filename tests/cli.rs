@@ -7545,6 +7545,66 @@ fn a_retired_id_is_one_task_for_routing_dedup_and_removal() {
 }
 
 #[test]
+fn dep_on_an_existing_dependency_warns_and_keeps_its_stored_spelling() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let a = id_of(env.json(&sci, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&sci, &["add", "B", "-p", "2"]));
+    let c = id_of(env.json(&sci, &["add", "C", "-p", "2"]));
+    let added = env.json(&sci, &["dep", &a, "--on", &b, "--on", &b]);
+    assert_eq!(added["warnings"], serde_json::json!([]), "{added}");
+
+    let again = env.json(&sci, &["dep", &a, "--on", &b]);
+    assert_eq!(
+        again["warnings"],
+        serde_json::json!([format!("{a} already depends on {b}; nothing changed")])
+    );
+
+    alias_registry(&env, "old", "sci");
+    let retired_b = b.replacen("sci-", "old-", 1);
+    let through_alias = env.json(&sci, &["dep", &a, "--on", &retired_b]);
+    let warning = through_alias["warnings"][0].as_str().unwrap();
+    assert!(
+        warning.starts_with(&format!(
+            "{a} already depends on {b} (given as {retired_b})"
+        )),
+        "{warning}"
+    );
+    assert!(warning.contains("--rm with either spelling"), "{warning}");
+
+    let a_path = sci.join("tasks").join(format!("{a}.md"));
+    std::fs::write(
+        &a_path,
+        std::fs::read_to_string(&a_path).unwrap().replace(
+            &format!("depends: [{b}]"),
+            &format!("depends: [{retired_b}]"),
+        ),
+    )
+    .unwrap();
+    let stored_alias = env.json(&sci, &["dep", &a, "--on", &b, "--on", &c]);
+    assert_eq!(stored_alias["warnings"].as_array().unwrap().len(), 1);
+    let warning = stored_alias["warnings"][0].as_str().unwrap();
+    assert!(
+        warning.starts_with(&format!(
+            "{a} already depends on {b} (stored as {retired_b})"
+        )),
+        "{warning}"
+    );
+    assert!(warning.contains("does not rewrite"), "{warning}");
+    assert!(
+        std::fs::read_to_string(&a_path)
+            .unwrap()
+            .contains(&format!("depends: [{retired_b}, {c}]"))
+    );
+
+    env.json(&sci, &["dep", &a, "--rm", &b]);
+    assert_eq!(
+        env.json(&sci, &["show", &a])["task"]["depends"],
+        serde_json::json!([c])
+    );
+}
+
+#[test]
 fn stored_retired_references_resolve_detect_cycles_and_keep_their_spelling() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
