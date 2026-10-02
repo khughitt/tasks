@@ -3,9 +3,13 @@ id: tasks-eb2b4e
 title: "A shared tag vocabulary: tasks draws tags from layered sources, with mindful as an optional provider"
 status: idea
 priority: 2
+size: m
+complexity: high
+process: planned
 created: 2026-09-30T14:23:41Z
-updated: 2026-09-30T14:23:41Z
+updated: 2026-10-02T15:14:13Z
 depends: []
+parent: tasks-cea445
 tags: [cross-project]
 source: "user:2026-09-30 thought-sweep session"
 agent: claude-code/claude-opus-5-5
@@ -21,3 +25,7 @@ Possible shape (to settle when scoped):
 - tasks check and quick-add validate against the resolved set; the provider is read at check time or cached, so tasks never needs the mindful service running.
 
 Open questions: which side is authoritative when both define a tag (the shared file, or mindful's tag thoughts); whether project dictionaries can narrow or rename shared tags; how renames and aliases propagate; whether tag meanings sync both ways or only mindful -> tasks; offline and missing-provider behaviour (fail, or warn and fall back to local layers).
+
+## Notes
+
+- 2026-10-02T15:14:13Z (main): scope: briefed; shared definitions need authority, precedence, offline, alias, and enforcement decisions; preserve the full captured proposal and source; waits on tasks-6ac7fd; brief: docs/notes/2026-10-02-tag-vocabulary-brief.md
