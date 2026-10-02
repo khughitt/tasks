@@ -18,6 +18,7 @@ use crate::model::{Complexity, Process, Size, Status, Task, TaskId};
 use crate::registry::Registry;
 use crate::repo::Project;
 use crate::scope::Origin;
+use crate::shorthand::Shorthand;
 
 fn plain(
     values: impl IntoIterator<Item = impl Into<std::ffi::OsString>>,
@@ -338,7 +339,13 @@ fn walk(words: &[Option<&str>]) -> Line {
         && ID_FIRST.contains(&name.as_str())
         && let Some(first) = positionals.first()
     {
-        line.subject = TaskId::parse_input(first).ok();
+        // A bare suffix names a task in the directory's project, exactly as on execution.
+        line.subject = match start(&line) {
+            Some(start) => Shorthand::new(start)
+                .parse(&Registry::load().unwrap_or_default(), first)
+                .ok(),
+            None => TaskId::parse_input(first).ok(),
+        };
     }
     line
 }
@@ -382,13 +389,43 @@ fn record(line: &mut Line, arg: &clap::Arg, values: &[&str]) {
     }
 }
 
+/// The effective directory: the last `-C`, else the cwd.
+fn start(line: &Line) -> Option<PathBuf> {
+    match &line.dir {
+        Some(dir) => Some(dir.clone()),
+        None => std::env::current_dir().ok(),
+    }
+}
+
 /// The project at the effective directory, if there is one.
 fn open_local(line: &Line) -> Option<Project> {
-    let dir = match &line.dir {
-        Some(dir) => dir.clone(),
-        None => std::env::current_dir().ok()?,
-    };
-    Project::locate(&dir).ok()
+    Project::locate(&start(line)?).ok()
+}
+
+/// A fragment that can only grow into a bare suffix: one to six lowercase hex digits.
+fn is_suffix_fragment(current: &str) -> bool {
+    (1..=6).contains(&current.len())
+        && current
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
+/// What `id` offers for the typed fragment: its canonical form when that matches, and its
+/// bare suffix when the fragment is hex and `id` is in the local project. A shell keeps
+/// only candidates that begin with the word, so a suffix fragment needs suffix candidates.
+fn offers(id: &TaskId, current: &str, local: Option<&str>) -> Vec<String> {
+    let mut offered = Vec::new();
+    let full = id.to_string();
+    if full.starts_with(current) {
+        offered.push(full);
+    }
+    if is_suffix_fragment(current)
+        && local == Some(id.prefix.as_str())
+        && id.hex.starts_with(current)
+    {
+        offered.push(id.hex.clone());
+    }
+    offered
 }
 
 /// A registered project, if the registry knows it and it is reachable.
@@ -436,17 +473,28 @@ fn open_then_id(a_open: bool, a_id: &TaskId, b_open: bool, b_id: &TaskId) -> std
     b_open.cmp(&a_open).then_with(|| a_id.cmp(b_id))
 }
 
-/// Filter to the typed fragment, open tasks first, each group by id.
-fn candidates(tasks: Vec<Task>, current: &str) -> Vec<CompletionCandidate> {
-    let mut matching: Vec<Task> = tasks
+/// Filter to the typed fragment, open tasks first, each group by id. `local` is the
+/// prefix a bare suffix stands for in this invocation.
+fn candidates(tasks: Vec<Task>, current: &str, local: Option<&str>) -> Vec<CompletionCandidate> {
+    let mut matching: Vec<(Task, Vec<String>)> = tasks
         .into_iter()
-        .filter(|task| task.id.to_string().starts_with(current))
+        .map(|task| {
+            let offered = offers(&task.id, current, local);
+            (task, offered)
+        })
+        .filter(|(_, offered)| !offered.is_empty())
         .collect();
-    matching.sort_by(|a, b| open_then_id(a.status.is_open(), &a.id, b.status.is_open(), &b.id));
+    matching.sort_by(|(a, _), (b, _)| {
+        open_then_id(a.status.is_open(), &a.id, b.status.is_open(), &b.id)
+    });
     matching
         .iter()
-        .map(|task| described(&task.id.to_string(), Some(task)))
+        .flat_map(|(task, offered)| offered.iter().map(|id| described(id, Some(task))))
         .collect()
+}
+
+fn local_prefix(line: &Line) -> Option<String> {
+    open_local(line).map(|project| project.prefix)
 }
 
 /// `show`, `root`, and every id-taking write.
@@ -456,9 +504,12 @@ pub fn id_directed(current: &OsStr) -> Vec<CompletionCandidate> {
     };
     let line = line();
     let registry = Registry::load().unwrap_or_default();
+    let local = open_local(&line);
+    let prefix = local.as_ref().map(|project| project.prefix.clone());
     candidates(
-        local_or_foreign(&registry, open_local(&line), current),
+        local_or_foreign(&registry, local, current),
         current,
+        prefix.as_deref(),
     )
 }
 
@@ -509,7 +560,7 @@ pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
             tasks.extend(project.scan_lenient().0);
         }
     }
-    candidates(tasks, current)
+    candidates(tasks, current, local_prefix(&line).as_deref())
 }
 
 /// `--parent`: a parent must live in the same project as its child, and never the child
@@ -527,7 +578,7 @@ pub fn destination_ids(current: &OsStr) -> Vec<CompletionCandidate> {
     if let Some(subject) = &line.subject {
         tasks.retain(|task| &task.id != subject);
     }
-    candidates(tasks, current)
+    candidates(tasks, current, local_prefix(&line).as_deref())
 }
 
 /// `--depends` and `dep --on`: whatever `Resolver` can reach *from the destination*,
@@ -542,11 +593,22 @@ pub fn resolvable(current: &OsStr) -> Vec<CompletionCandidate> {
     let line = line();
     let registry = Registry::load().unwrap_or_default();
     let base = destination(&registry, &line);
+    let base_prefix = base.as_ref().map(|project| project.prefix.clone());
+    let local = open_local(&line);
+    let prefix = local.as_ref().map(|project| project.prefix.clone());
     let mut tasks = local_or_foreign(&registry, base, current);
+    // A suffix means the local project even when the write goes to another one, and a
+    // dependency may cross projects, so the local tasks are reachable candidates too.
+    if is_suffix_fragment(current)
+        && base_prefix != prefix
+        && let Some(local) = local
+    {
+        tasks.extend(local.scan_lenient().0);
+    }
     if let Some(subject) = &line.subject {
         tasks.retain(|task| &task.id != subject);
     }
-    candidates(tasks, current)
+    candidates(tasks, current, prefix.as_deref())
 }
 
 /// `dep --rm`: only what the task already depends on. Removal does not resolve ids, so an
@@ -564,22 +626,30 @@ pub fn dependencies(current: &OsStr) -> Vec<CompletionCandidate> {
         return Vec::new();
     };
     let resolver = crate::resolve::Resolver::new(&project, &registry);
-    let mut resolved: Vec<(TaskId, Option<Task>)> = task
+    let local = local_prefix(&line);
+    let mut resolved: Vec<(TaskId, Option<Task>, Vec<String>)> = task
         .depends
         .iter()
-        .filter(|id| id.to_string().starts_with(current))
-        .map(|id| (id.clone(), resolver.resolve_task(id).ok().flatten()))
+        .map(|id| (id, offers(id, current, local.as_deref())))
+        .filter(|(_, offered)| !offered.is_empty())
+        .map(|(id, offered)| {
+            (
+                id.clone(),
+                resolver.resolve_task(id).ok().flatten(),
+                offered,
+            )
+        })
         .collect();
     // Open dependencies before closed-or-unresolvable, each group by id ascending —
     // the same ordering `candidates()` applies, via the same helper.
-    resolved.sort_by(|(a_id, a_task), (b_id, b_task)| {
+    resolved.sort_by(|(a_id, a_task, _), (b_id, b_task, _)| {
         let a_open = a_task.as_ref().is_some_and(|task| task.status.is_open());
         let b_open = b_task.as_ref().is_some_and(|task| task.status.is_open());
         open_then_id(a_open, a_id, b_open, b_id)
     });
     resolved
-        .into_iter()
-        .map(|(id, task)| described(&id.to_string(), task.as_ref()))
+        .iter()
+        .flat_map(|(_, task, offered)| offered.iter().map(|id| described(id, task.as_ref())))
         .collect()
 }
 
@@ -599,7 +669,8 @@ pub fn feedback_recur(current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();
     };
-    let Some(owner) = line().project else {
+    let line = line();
+    let Some(owner) = line.project.clone() else {
         return Vec::new();
     };
     let registry = Registry::load().unwrap_or_default();
@@ -612,7 +683,7 @@ pub fn feedback_recur(current: &OsStr) -> Vec<CompletionCandidate> {
         .into_iter()
         .filter(crate::commands::feedback::is_open_feedback)
         .collect();
-    candidates(tasks, current)
+    candidates(tasks, current, local_prefix(&line).as_deref())
 }
 
 #[cfg(test)]

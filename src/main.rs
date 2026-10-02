@@ -25,6 +25,7 @@ mod rename;
 mod repo;
 mod resolve;
 mod scope;
+mod shorthand;
 mod similarity;
 mod stale;
 mod style;

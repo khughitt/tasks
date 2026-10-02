@@ -51,7 +51,7 @@ pub fn add_dependencies(
     let existing = task.depends.len();
     let mut warnings = Vec::new();
     for value in values {
-        let given = TaskId::parse_input(value)?;
+        let given = ctx.shorthand.parse(&ctx.registry, value)?;
         let dependency = ctx.registry.canonical_id(&given);
         if dependency == task.id {
             return Err(Error::Cycle(format!("{dependency} -> {dependency}")));
@@ -104,11 +104,11 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
     let mut task = load(&mut ctx, &id)?;
     let additions = on
         .iter()
-        .map(|value| super::parse_id(&ctx.registry, value))
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
         .collect::<Result<Vec<_>>>()?;
     let removals = rm
         .iter()
-        .map(|value| super::parse_id(&ctx.registry, value))
+        .map(|value| super::parse_id(&ctx.registry, &ctx.shorthand, value))
         .collect::<Result<Vec<_>>>()?;
     if let Some(both) = additions
         .iter()

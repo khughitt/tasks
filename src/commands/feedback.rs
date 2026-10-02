@@ -129,7 +129,7 @@ pub fn run(
     // none, so an unrelated malformed file there cannot block an explicit request.
     let existing: Option<(TaskId, bool)> = match (&recur, new) {
         (Some(id), _) => {
-            let id = super::parse_id(&ctx.registry, id)?;
+            let id = super::parse_id(&ctx.registry, &ctx.shorthand, id)?;
             let not_feedback =
                 || Error::Validation(format!("{id} is not an open feedback task in {owner:?}"));
             let task = match target.read_task(&id) {

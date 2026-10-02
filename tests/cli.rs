@@ -902,6 +902,11 @@ fn a_checkout_still_using_a_retired_prefix_refuses() {
     // Both a read and a write refuse, rather than routing or minting an old-prefix file.
     assert_eq!(env.fail(&stale, &["list"]), "config");
     assert_eq!(env.fail(&stale, &["add", "New", "-p", "2"]), "config");
+    // A bare suffix located lazily (under --project) is held to the same rule.
+    assert_eq!(
+        env.fail(&stale, &["list", "--project", "dots", "--parent", "a00088"]),
+        "config"
+    );
 }
 
 /// Writes a claim straight into the store.
@@ -2973,6 +2978,154 @@ fn trailing_periods_are_trimmed_from_cli_id_inputs() {
 }
 
 #[test]
+fn bare_suffixes_name_tasks_in_the_current_project() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&sci, &["add", "Shown", "-p", "2"]));
+    let hex = id.split_once('-').unwrap().1.to_string();
+    let far = id_of(env.json(&fam, &["add", "Far", "-p", "2"]));
+    let far_hex = far.split_once('-').unwrap().1.to_string();
+
+    // Positional ids, from the root, a subdirectory, and -C; output stays canonical.
+    assert_eq!(env.json(&sci, &["show", &hex])["task"]["id"], id);
+    let sub = sci.join("src/deep");
+    std::fs::create_dir_all(&sub).unwrap();
+    assert_eq!(env.json(&sub, &["show", &hex])["task"]["id"], id);
+    let sci_dir = sci.to_str().unwrap();
+    assert_eq!(
+        env.json(env.home.path(), &["-C", sci_dir, "show", &hex])["task"]["id"],
+        id
+    );
+    assert_eq!(
+        env.json(&sci, &["show", &format!("{hex}.")])["task"]["id"],
+        id
+    );
+    assert_eq!(env.json(&sci, &["root", &hex])["prefix"], "sci");
+    env.json(&sci, &["note", &hex, "via shorthand"]);
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["notes"][0]["text"],
+        "via shorthand"
+    );
+
+    // ID-valued flags: add/edit --parent and --depends, dep --on/--rm, list --parent.
+    let child = id_of(env.json(&sci, &["add", "Child", "--parent", &hex, "--depends", &hex]));
+    let shown = env.json(&sci, &["show", &child]);
+    assert_eq!(shown["task"]["parent"], id);
+    assert_eq!(shown["task"]["depends"], serde_json::json!([id]));
+    let child_hex = child.split_once('-').unwrap().1.to_string();
+    let other = id_of(env.json(&sci, &["add", "Other"]));
+    let other_hex = other.split_once('-').unwrap().1.to_string();
+    env.json(&sci, &["edit", &child_hex, "--depends", &other_hex]);
+    env.json(&sci, &["dep", &child_hex, "--rm", &hex]);
+    assert_eq!(
+        env.json(&sci, &["show", &child])["task"]["depends"],
+        serde_json::json!([other])
+    );
+    let v = env.json(&sci, &["list", "--parent", &hex]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+    // ready filters the same parent (child is blocked on other until it closes).
+    env.json(&sci, &["done", &other_hex]);
+    let v = env.json(&sci, &["ready", "--parent", &hex]);
+    assert_eq!(v["tasks"][0]["id"], child);
+    assert_eq!(env.json(&sci, &["tree", &hex])["nodes"][0]["id"], id);
+
+    // Routing to another project never changes what a suffix means: fam's task depends on
+    // sci's, not on a fam task with the same suffix.
+    env.json(&sci, &["dep", &far, "--on", &hex]);
+    assert_eq!(
+        env.json(&fam, &["show", &far])["task"]["depends"],
+        serde_json::json!([id])
+    );
+    // --project moves the destination, not the meaning: the parent is still sci's, which
+    // fam's parent validation refuses.
+    let kind = env.fail(&sci, &["add", "X", "--project", "fam", "--parent", &hex]);
+    assert_ne!(kind, "invalid_id");
+    assert!(
+        env.json(&fam, &["list"])["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["title"] != "X")
+    );
+
+    // A suffix that exists only in another project is not found here; nothing is searched.
+    assert_eq!(env.fail(&sci, &["show", &far_hex]), "task_not_found");
+
+    // feedback --recur expands against the reporter, not the target.
+    let feedback_task = id_of(env.json(&sci, &["add", "Fb", "--tag", "feedback"]));
+    accept_feedback(&sci, "*");
+    let recurred = env.json(
+        &sci,
+        &[
+            "feedback",
+            "--project",
+            "sci",
+            "shorthand recurs",
+            "--category",
+            "idea",
+            "--recur",
+            feedback_task.split_once('-').unwrap().1,
+        ],
+    );
+    assert_eq!(recurred["id"], feedback_task);
+
+    // Malformed suffixes are still invalid ids.
+    for bad in ["abcde", "ABCDEF", "abcdefa", "abcdeg"] {
+        assert_eq!(env.fail(&sci, &["show", bad]), "invalid_id", "{bad}");
+    }
+
+    // Lifecycle commands load through the same path.
+    let lifecycle = id_of(env.json(&sci, &["add", "Lifecycle"]));
+    let lifecycle_hex = lifecycle.split_once('-').unwrap().1;
+    env.json(&sci, &["start", lifecycle_hex]);
+    env.json(&sci, &["done", &format!("{lifecycle_hex}.")]);
+    assert_eq!(
+        env.json(&sci, &["show", &lifecycle])["task"]["status"],
+        "done"
+    );
+
+    // On disk every reference stays fully qualified.
+    let raw = env.read(&sci, &format!("tasks/{child}.md"));
+    assert!(raw.contains(&format!("parent: {id}")), "{raw}");
+
+    // A second checkout of the prefix (a worktree) expands against itself.
+    let tree = env.init_forced("sci");
+    let there = id_of(env.json(&tree, &["add", "There"]));
+    assert_eq!(
+        env.json(&tree, &["show", there.split_once('-').unwrap().1])["task"]["title"],
+        "There"
+    );
+}
+
+#[test]
+fn bare_suffixes_need_a_current_project() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Shown"]));
+    let hex = id.split_once('-').unwrap().1;
+    let outside = env.home.path();
+    for args in [
+        vec!["show", hex],
+        vec!["root", hex],
+        vec!["note", hex, "x"],
+        vec!["list", "--project", "sci", "--parent", hex],
+        vec!["list", "--all-projects", "--parent", hex],
+    ] {
+        let out = env.cmd(outside).args(&args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(v["error"]["kind"], "invalid_id", "{args:?}");
+        assert!(
+            v["error"]["detail"].as_str().unwrap().contains("full id"),
+            "{v}"
+        );
+    }
+    // A full id still routes from outside every project.
+    assert_eq!(env.json(outside, &["show", &id])["task"]["id"], id);
+}
+
+#[test]
 fn list_all_projects_walks_registry() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
@@ -3224,6 +3377,56 @@ fn completion_follows_the_named_project_scope() {
             .contains(&"fam".to_string()),
         "the prefix itself completes"
     );
+}
+
+#[test]
+fn completion_offers_local_suffixes_for_a_hex_fragment() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    let dep = id_of(env.json(&sci, &["add", "Dep"]));
+    let foreign = id_of(env.json(&fam, &["add", "Foreign"]));
+    let hex = |id: &str| id.split_once('-').unwrap().1.to_string();
+    env.json(&sci, &["dep", &local, "--on", &dep]);
+
+    // An empty word still offers canonical full ids.
+    assert_eq!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]),
+        {
+            let mut ids = [local.clone(), dep.clone()];
+            ids.sort();
+            ids
+        }
+    );
+    // A hex fragment offers the local suffix it begins, never a foreign one.
+    let fragment = &hex(&local)[..4];
+    let offered = env.complete_values(&sci, "bash", 2, &["tasks", "show", fragment]);
+    assert!(offered.contains(&hex(&local)), "{offered:?}");
+    assert!(!offered.contains(&hex(&foreign)), "{offered:?}");
+    assert!(
+        offered.iter().all(|c| c.starts_with(fragment)),
+        "{offered:?}"
+    );
+
+    // A bare subject scopes the flags that read it: dep --rm offers its dependencies.
+    assert_eq!(
+        env.complete_values(
+            &sci,
+            "bash",
+            4,
+            &["tasks", "dep", &hex(&local), "--rm", &hex(&dep)[..3]]
+        ),
+        [hex(&dep)]
+    );
+    // And --parent excludes the bare subject itself.
+    let offered = env.complete_values(
+        &sci,
+        "bash",
+        4,
+        &["tasks", "edit", &hex(&local), "--parent", ""],
+    );
+    assert_eq!(offered, std::slice::from_ref(&dep));
 }
 
 #[test]

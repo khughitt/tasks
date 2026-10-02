@@ -113,6 +113,15 @@ Without an explicit scope or a target id, the project is located by walking up f
 current directory or `-C`, and its absence is `no_project`. ID-directed commands use the
 registry only when no local project exists; malformed local configuration still errors.
 
+ID input has two forms. The canonical `<prefix>-<hex6>` is the only form stored anywhere
+(frontmatter, filenames, claims, references, JSON) and the one that routes by prefix.
+A bare `<hex6>` (exactly six lowercase hex digits) is input shorthand for the project
+located from the current directory or `-C`, expanded before any id-directed routing and
+fixed for the whole invocation: `--project` or a foreign positional id changes where
+the command goes, not what a bare suffix means, and a missing local task is never
+searched for in other projects. Outside every project a bare suffix is `invalid_id`,
+asking for the full id.
+
 ## 4. Commands
 
 ### 4.1 Existing commands gaining `--all-projects`

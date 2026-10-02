@@ -287,6 +287,7 @@ from a clone):
     tasks projects                   # the registry: reachable? counts?
     tasks add "Piece" --project fam  # create in another registered project
     tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
+    tasks show 4f2a9c                # a bare suffix means the current project's task (sci-4f2a9c)
     tasks edit sci-4f2a9c --tag cli --rm-tag triage  # --tag adds; --rm-tag/--no-tags remove
     tasks edit sci-4f2a9c --depends sci-7b1e04       # --depends adds; --no-depends clears
     tasks dep sci-4f2a9c --on sci-7b1e04 --rm sci-0c3d7e  # swap a dependency in one save

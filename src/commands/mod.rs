@@ -31,6 +31,7 @@ use crate::registry::Registry;
 use crate::repo::Project;
 use crate::resolve::{DocKind, Resolver};
 use crate::scope::{Origin, Scope};
+use crate::shorthand::Shorthand;
 use std::path::{Path, PathBuf};
 
 /// What `save` must do to the claim store once every validation has passed. Recorded by the
@@ -73,6 +74,9 @@ pub struct Ctx {
     /// task record may keep. Host, pid, and worktree stay in the warning and the claim
     /// store, which never reach git.
     pub takeover: Option<String>,
+    /// What a bare id suffix means in this invocation: the caller's project, not the one
+    /// the command routed to.
+    pub shorthand: Shorthand,
 }
 
 /// How this caller's right to act on an existing claim was established.
@@ -89,10 +93,11 @@ pub(crate) enum Ownership {
 }
 
 impl Ctx {
-    fn new(project: Project, registry: Registry, routing: Routing) -> Self {
+    fn new(project: Project, registry: Registry, routing: Routing, shorthand: Shorthand) -> Self {
         Self {
             project,
             registry,
+            shorthand,
             warnings: Vec::new(),
             lock: None,
             routing,
@@ -371,7 +376,8 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
     let project = Project::locate(&start)?;
     let registry = Registry::load()?;
     reject_stale_local(&registry, &project)?;
-    Ok(Ctx::new(project, registry, Routing::Local))
+    let shorthand = Shorthand::located(start, project.prefix.clone());
+    Ok(Ctx::new(project, registry, Routing::Local, shorthand))
 }
 
 /// A checkout whose own prefix the registry has retired. Nothing else sees this:
@@ -397,13 +403,15 @@ fn open_id_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
         Ok(ctx) => ctx,
         Err(Error::NoProject(_)) => {
             let registry = Registry::load()?;
-            let id = parse_id(&registry, id)?;
+            let shorthand = Shorthand::new(start_dir(dir)?);
+            let id = parse_id(&registry, &shorthand, id)?;
             let project = crate::scope::open_registered(&registry, &id.prefix, Origin::Id(&id))?;
-            return Ok(Ctx::new(project, registry, Routing::Registered(id.prefix)));
+            let routing = Routing::Registered(id.prefix);
+            return Ok(Ctx::new(project, registry, routing, shorthand));
         }
         Err(error) => return Err(error),
     };
-    let id = parse_id(&ctx.registry, id)?;
+    let id = parse_id(&ctx.registry, &ctx.shorthand, id)?;
     if id.prefix != ctx.project.prefix {
         ctx.project = crate::scope::open_registered(&ctx.registry, &id.prefix, Origin::Id(&id))?;
         ctx.routing = Routing::Registered(id.prefix);
@@ -502,6 +510,7 @@ pub fn open_id_read_ctx(
         scope: Scope::Local(ctx.project),
         registry: ctx.registry,
         warnings: ctx.warnings,
+        shorthand: ctx.shorthand,
     })
 }
 
@@ -509,11 +518,13 @@ pub struct ReadCtx {
     pub scope: Scope,
     pub registry: Registry,
     pub warnings: Vec<String>,
+    pub shorthand: Shorthand,
 }
 
-/// Parses a user-supplied id under the registry's current prefix names.
-pub fn parse_id(registry: &Registry, id: &str) -> Result<TaskId> {
-    Ok(registry.canonical_id(&TaskId::parse_input(id)?))
+/// Parses a user-supplied id, full or a bare suffix, under the registry's current prefix
+/// names.
+pub fn parse_id(registry: &Registry, shorthand: &Shorthand, id: &str) -> Result<TaskId> {
+    Ok(registry.canonical_id(&shorthand.parse(registry, id)?))
 }
 
 impl ReadCtx {
@@ -553,27 +564,30 @@ pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
             scope,
             registry,
             warnings,
+            shorthand: Shorthand::new(start),
         });
     }
     // The local arm locates before loading the registry, so a cwd outside every project
     // still reports `no_project` rather than a malformed registry's `config`.
-    let (project, registry) = match &scope.project {
+    let (project, registry, shorthand) = match &scope.project {
         Some(prefix) => {
             let registry = Registry::load()?;
             let project = crate::scope::open_registered(&registry, prefix, Origin::Prefix)?;
-            (project, registry)
+            (project, registry, Shorthand::new(start))
         }
         None => {
             let project = Project::locate(&start)?;
             let registry = Registry::load()?;
             reject_stale_local(&registry, &project)?;
-            (project, registry)
+            let shorthand = Shorthand::located(start, project.prefix.clone());
+            (project, registry, shorthand)
         }
     };
     Ok(ReadCtx {
         scope: Scope::Local(project),
         registry,
         warnings: Vec::new(),
+        shorthand,
     })
 }
 
@@ -637,7 +651,7 @@ pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs) -> Resul
     let warnings = dep::add_dependencies(ctx, &resolver, task, &fields.depends)?;
     ctx.warnings.extend(warnings);
     if let Some(parent) = &fields.parent {
-        task.parent = Some(parse_id(&ctx.registry, parent)?);
+        task.parent = Some(parse_id(&ctx.registry, &ctx.shorthand, parent)?);
     }
     if let Some(source) = &fields.source {
         validate_line("source", source)?;
@@ -684,9 +698,9 @@ pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result
 /// (record-home spec §3.1). Every write command loads through here, under the mutation lock
 /// and before it reads any other input, so a refusal consumes nothing and creates nothing.
 pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
-    let (task, raw) = ctx
-        .project
-        .read_task_with_raw(&parse_id(&ctx.registry, id)?)?;
+    let (task, raw) =
+        ctx.project
+            .read_task_with_raw(&parse_id(&ctx.registry, &ctx.shorthand, id)?)?;
     refuse_stale_copy(ctx, &task, &raw, Writer::Command)?;
     Ok(task)
 }
@@ -1287,7 +1301,8 @@ pub fn run(cli: Cli) -> Result<Output> {
                     let registry = Registry::load()?;
                     let project =
                         crate::scope::open_registered(&registry, &prefix, Origin::Prefix)?;
-                    Ctx::new(project, registry, routing.clone())
+                    let shorthand = Shorthand::new(start_dir(dir)?);
+                    Ctx::new(project, registry, routing.clone(), shorthand)
                 }
                 None => open_ctx(dir)?,
             };

@@ -9,7 +9,7 @@ use std::path::Path;
 use time::OffsetDateTime;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
-    let id = super::parse_id(&ctx.registry, &id)?;
+    let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
     let (recorded, task, all) = match ctx.project.read_task(&id) {
         Ok(task) => (None, task, ctx.project.scan()?),

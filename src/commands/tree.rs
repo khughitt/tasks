@@ -10,7 +10,7 @@ use crate::output::{Output, TreeOut};
 pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
     let root = id
         .as_deref()
-        .map(|id| super::parse_id(&ctx.registry, id))
+        .map(|id| super::parse_id(&ctx.registry, &ctx.shorthand, id))
         .transpose()?;
     let now = crate::time::parse(&crate::time::now())?;
     let mut nodes = Vec::new();

@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 use crate::model::{Complexity, Process, Size, Status, Task, TaskId};
 use crate::output::ParkedRow;
 use crate::registry::Registry;
+use crate::shorthand::Shorthand;
 
 /// The flag value that selects a record whose field is unset.
 pub const NONE: &str = "none";
@@ -62,6 +63,7 @@ impl TaskFilter {
         args: &FilterArgs,
         statuses: &[String],
         registry: &Registry,
+        shorthand: &Shorthand,
     ) -> Result<TaskFilter> {
         Ok(TaskFilter {
             statuses: statuses
@@ -90,7 +92,7 @@ impl TaskFilter {
             parent: args
                 .parent
                 .as_deref()
-                .map(|id| crate::commands::parse_id(registry, id))
+                .map(|id| crate::commands::parse_id(registry, shorthand, id))
                 .transpose()?,
             parallel: args.parallel,
         })

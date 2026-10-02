@@ -283,6 +283,12 @@ task id and id-valued flag (`--parent`, `--depends`, `dep --on/--rm`, `feedback
 other punctuation, and whitespace are still rejected, and records and output stay
 canonical.
 
+Inside a project, every one of those inputs also accepts the bare six-hex suffix:
+`tasks show 4f2a9c` is `tasks show sci-4f2a9c` when the cwd (or `-C`) is in `sci`. The
+suffix always means the project you stand in, even when `--project` or another id sends
+the command elsewhere, and a suffix missing locally is not found rather than searched for.
+Outside every project it is `invalid_id`; use the full id there and for other projects.
+
 - An unscoped thought: `tasks add "<title>" --status idea -b "<why>"`. Ideas never appear in `ready`.
 - A thought to revisit later: `tasks add "<title>" --status idea --defer 60d` (or a date,
   `--defer 2026-11-10`); every status change clears the date, so scope it with

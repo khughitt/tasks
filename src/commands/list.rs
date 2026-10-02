@@ -37,7 +37,7 @@ pub fn list(
     deferred: bool,
 ) -> Result<Output> {
     let sort = SortKey::parse(&sort)?;
-    let filter = TaskFilter::parse(&filter, &statuses, &ctx.registry)?;
+    let filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
     if parked {
         return list_parked(ctx, filter);
     }
@@ -305,7 +305,7 @@ pub fn ready(
     max_complexity: Option<String>,
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
-    let filter = TaskFilter::parse(&filter, &[], &ctx.registry)?;
+    let filter = TaskFilter::parse(&filter, &[], &ctx.registry, &ctx.shorthand)?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
@@ -650,6 +650,7 @@ mod tests {
             scope: Scope::All(vec![]),
             registry,
             warnings: vec![],
+            shorthand: crate::shorthand::Shorthand::new(dir.path().to_path_buf()),
         };
 
         assert_eq!(

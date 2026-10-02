@@ -1,17 +1,19 @@
 ---
 id: tasks-dda2ea
 title: Accept prefix-free task IDs for the current project
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: direct
-owner: main
+owner: feat/bare-ids
 created: 2026-10-01T16:27:45Z
-updated: 2026-10-02T18:33:45Z
+updated: 2026-10-02T18:45:47Z
 started: 2026-10-02T18:33:45Z
+completed: 2026-10-02T18:45:47Z
 depends: []
 tags: [cli]
+model: claude-opus-5-5
 agent: codex
 ---
 
@@ -45,4 +47,11 @@ Original request: assess ambiguity, misrouting, and significant complexity befor
 
 - 2026-10-01T16:32:15Z (main): scope: scoped; P2/m/mid/direct; exact six-hex shorthand fixed to original cwd/-C project before routing, no registry suffix search, strict stored IDs; static assessment found bounded routing/filter/completion work; trailing-period trimming split to tasks-1e32d6
 - 2026-10-02T18:33:45Z (main): started
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T18:33:46Z (feat/bare-ids): resumed
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T18:44:35Z (feat/bare-ids): review: impl round 1 — verdict: accept; findings: Minor 3; reviewer: claude-code/claude-opus-5-5
+- 2026-10-02T18:45:47Z (feat/bare-ids): done
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T18:45:47Z (feat/bare-ids): bare six-hex suffixes resolve against the invocation's project for every id input and in completion; outside a project they are invalid_id; stored ids stay canonical; review minors 1-2 fixed (lazy stale-prefix check, start/done/ready coverage)
   provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
