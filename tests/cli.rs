@@ -4891,6 +4891,13 @@ fn cross_project_cycle_is_rejected_and_unreachable_blocks_link() {
         env.fail(&sci, &["dep", &s2, "--on", &f1]),
         "unresolvable_id"
     );
+    // Removal alone never walks the graph, so the unreachable edge can be cleaned up.
+    env.json(&sci, &["dep", &f1, "--rm", "zzz-000001"]);
+    assert!(
+        env.json(&sci, &["show", &f1])["task"]
+            .get("depends")
+            .is_none()
+    );
 }
 
 #[test]
@@ -7602,6 +7609,49 @@ fn dep_on_an_existing_dependency_warns_and_keeps_its_stored_spelling() {
         env.json(&sci, &["show", &a])["task"]["depends"],
         serde_json::json!([c])
     );
+}
+
+#[test]
+fn dep_on_and_rm_together_swap_in_one_save_or_change_nothing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let a = id_of(env.json(&sci, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&sci, &["add", "B", "-p", "2"]));
+    let c = id_of(env.json(&sci, &["add", "C", "-p", "2"]));
+    let d = id_of(env.json(&sci, &["add", "D", "-p", "2"]));
+    env.json(&sci, &["dep", &a, "--on", &b, &d]);
+
+    let swapped = env.json(&sci, &["dep", &a, "--on", &c, "--rm", &b]);
+    assert_eq!(swapped["warnings"], serde_json::json!([]), "{swapped}");
+    assert_eq!(
+        env.json(&sci, &["show", &a])["task"]["depends"],
+        serde_json::json!([d, c])
+    );
+
+    let a_path = sci.join("tasks").join(format!("{a}.md"));
+    let before = std::fs::read_to_string(&a_path).unwrap();
+    alias_registry(&env, "old", "sci");
+    let retired_c = c.replacen("sci-", "old-", 1);
+    assert_eq!(
+        env.fail(&sci, &["dep", &a, "--on", &b, &c, "--rm", &retired_c]),
+        "validation"
+    );
+    // A removal that is absent fails the whole batch, additions included.
+    assert_eq!(
+        env.fail(&sci, &["dep", &a, "--on", &b, "--rm", &b]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&sci, &["dep", &a, "--on", &b, "--rm", &d, &b]),
+        "validation"
+    );
+    // The final graph is what gets checked: b already depends on a.
+    env.json(&sci, &["dep", &b, "--on", &a]);
+    assert_eq!(
+        env.fail(&sci, &["dep", &a, "--on", &b, "--rm", &d]),
+        "cycle"
+    );
+    assert_eq!(std::fs::read_to_string(&a_path).unwrap(), before);
 }
 
 #[test]

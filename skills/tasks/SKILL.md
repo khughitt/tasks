@@ -310,7 +310,8 @@ canonical.
   removes one. Never copy files into `tasks/files/` by hand: the record's notes are the
   ledger, and `check` fails on a file no ledger lists. `feedback` takes no attachments.
 - Decomposing: `tasks add "<piece>" --parent <goal>` for each part; `tasks dep` only
-  for ordering between the pieces. A goal that is committed work is a `todo` with a
+  for ordering between the pieces. `tasks dep <id> --on <new> --rm <old>` swaps a
+  dependency in one save; any failure in the batch changes nothing. A goal that is committed work is a `todo` with a
   body, however large; `idea` is for uncommitted thoughts. `done` refuses while any
   descendant is open (`--force` overrides); `drop` refuses while any descendant is
   open and has no override — drop or reparent the subtree first
@@ -363,8 +364,8 @@ drops the project's aliases with it. Retired names are reserved, and completion 
 only live names; `check` can warn about stored retired references without rewriting them.
 A live id and its retired spelling are one task: `dep --on` of a dependency already
 stored under either spelling changes nothing and warns, and `dep --rm` with either
-spelling removes it. Never repoint a stored reference with `--on` then `--rm`; that
-drops the dependency.
+spelling removes it. Never repoint a stored reference with `--on` then `--rm`; in two
+calls that drops the dependency, and in one call it is refused.
 
 Start with clean `tasks/`, no live claims, and at most one git worktree. A pending rename
 freezes every writer to that project, including `start`, feedback, `init --force`, and

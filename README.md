@@ -283,6 +283,7 @@ from a clone):
     tasks add "Piece" --project fam  # create in another registered project
     tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
     tasks edit sci-4f2a9c --tag cli --rm-tag triage  # --tag adds; --rm-tag/--no-tags remove
+    tasks dep sci-4f2a9c --on sci-7b1e04 --rm sci-0c3d7e  # swap a dependency in one save
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
     tasks --pretty --color auto ready # color when stdout is a terminal
     tasks start sci-4f2a9c
@@ -335,7 +336,8 @@ reused while registered.
 A live id and its retired spelling are one task. `tasks dep <id> --on <x>` when the task
 already depends on `x` under any spelling changes nothing, keeps the stored spelling, and
 says so in `warnings`; `--rm` with either spelling removes that one dependency. An
-`--on`/`--rm` pair therefore cannot rewrite a stored retired prefix: it drops the edge.
+`--on`/`--rm` pair therefore cannot rewrite a stored retired prefix: in two calls it drops
+the edge, and in one call it is refused because both flags name the same task.
 
 Rename requires clean `tasks/`, no live claims, and at most one git worktree. An interrupted
 rename freezes writes to that project; reads remain available. Re-run the same command to

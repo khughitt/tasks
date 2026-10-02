@@ -373,8 +373,13 @@ tasks shelve <id> "<wake condition>" / tasks unshelve <id>
     open descendants that are not shelved; clears a park entry and its escalation) /
     status=idea. `start` and `park` refuse a shelved task.
 
-tasks dep <id> --on <id>...  |  tasks dep <id> --rm <id>...
-    Add or remove dependencies. --on rejects cycles (§6.1) and unresolvable ids.
+tasks dep <id> [--on <id>...] [--rm <id>...]
+    Add or remove dependencies; at least one flag. Together they apply in one save:
+    removals first, then additions, and the final graph is checked. --on rejects cycles
+    (§6.1) and unresolvable ids; an id named by both flags (under any alias spelling) or
+    a removal the task lacks is a validation error. Any failure leaves the record
+    unchanged. A removal-only call never walks the graph, so a stored unreachable
+    reference can always be removed.
 
 tasks graph [--format mermaid|dot] [--all]
     Dependency graph of open tasks (--all includes closed).

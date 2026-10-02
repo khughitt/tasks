@@ -1,18 +1,20 @@
 ---
 id: tasks-45e400
 title: "dep --on and --rm are mutually exclusive, so adding and removing a dependency takes two invocations"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: feat/dep-swap
 created: 2026-09-19T00:50:15Z
-updated: 2026-10-02T15:20:05Z
+updated: 2026-10-02T15:22:14Z
 started: 2026-10-02T15:20:05Z
+completed: 2026-10-02T15:22:14Z
 depends: []
 parent: tasks-671956
 tags: [feedback, friction, "from:material"]
+model: claude-opus-5-5
 agent: "claude-code/claude-opus-5[1m]"
 ---
 
@@ -30,4 +32,10 @@ Original report: tasks dep <id> --on <a> --rm <b> fails with 'cannot be used wit
 
 - 2026-10-02T14:22:40Z (main): scope: scoped; one-save dependency swaps with canonical overlap rejection and final-graph validation; P2/s/mid/direct; original report preserved
 - 2026-10-02T15:20:05Z (main): started
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:20:06Z (feat/dep-swap): resumed
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:22:14Z (feat/dep-swap): done
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:22:14Z (feat/dep-swap): dep accepts --on and --rm together: canonical overlap is a validation error, removals then additions apply to one candidate saved once, additions validate the final graph, removal-only skips graph traversal; any failure leaves the record unchanged; spec, README and skill updated
   provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

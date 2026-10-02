@@ -60,12 +60,43 @@ fn already_depends(task: &TaskId, canonical: &TaskId, stored: &TaskId, given: &T
 
 pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
-    if !on.is_empty() {
+    let additions = on
+        .iter()
+        .map(|value| {
+            let given = TaskId::parse_input(value)?;
+            Ok((ctx.registry.canonical_id(&given), given))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let removals = rm
+        .iter()
+        .map(|value| super::parse_id(&ctx.registry, value))
+        .collect::<Result<Vec<_>>>()?;
+    if let Some((both, _)) = additions
+        .iter()
+        .find(|(dependency, _)| removals.contains(dependency))
+    {
+        return Err(Error::Validation(format!(
+            "{both} is named by both --on and --rm"
+        )));
+    }
+
+    // Removals go first and never walk the graph, so a stored unreachable reference can
+    // always be cleaned up.
+    for dependency in &removals {
+        let before = task.depends.len();
+        task.depends
+            .retain(|item| ctx.registry.canonical_id(item) != *dependency);
+        if task.depends.len() == before {
+            return Err(Error::Validation(format!(
+                "{} does not depend on {dependency}",
+                task.id
+            )));
+        }
+    }
+    if !additions.is_empty() {
         let resolver = Resolver::new(&ctx.project, &ctx.registry);
         let existing = task.depends.len();
-        for value in &on {
-            let given = TaskId::parse_input(value)?;
-            let dependency = ctx.registry.canonical_id(&given);
+        for (dependency, given) in additions {
             if dependency == task.id {
                 return Err(Error::Cycle(format!("{dependency} -> {dependency}")));
             }
@@ -89,19 +120,6 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
             }
         }
         ensure_acyclic(&ctx, &task)?;
-    } else {
-        for value in &rm {
-            let dependency = super::parse_id(&ctx.registry, value)?;
-            let before = task.depends.len();
-            task.depends
-                .retain(|item| ctx.registry.canonical_id(item) != dependency);
-            if task.depends.len() == before {
-                return Err(Error::Validation(format!(
-                    "{} does not depend on {dependency}",
-                    task.id
-                )));
-            }
-        }
     }
     save(&mut ctx, &mut task)?;
     super::follow_holder(&mut ctx, &task.id, None, "the dependency change landed");

@@ -582,13 +582,12 @@ pub enum Command {
         #[arg(
             long = "on",
             value_name = "REF",
-            conflicts_with = "rm",
             required_unless_present = "rm",
             num_args = 1..,
             add = ArgValueCompleter::new(crate::complete::resolvable)
         )]
         on: Vec<String>,
-        /// Stop depending on these tasks.
+        /// Stop depending on these tasks; with --on, both apply in one save.
         #[arg(
             long = "rm",
             value_name = "REF",
