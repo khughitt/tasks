@@ -1,13 +1,15 @@
 ---
 id: tasks-dda2ea
 title: Accept prefix-free task IDs for the current project
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-01T16:27:45Z
-updated: 2026-10-01T16:32:16Z
+updated: 2026-10-02T18:33:45Z
+started: 2026-10-02T18:33:45Z
 depends: []
 tags: [cli]
 agent: codex
@@ -42,3 +44,5 @@ Original request: assess ambiguity, misrouting, and significant complexity befor
 ## Notes
 
 - 2026-10-01T16:32:15Z (main): scope: scoped; P2/m/mid/direct; exact six-hex shorthand fixed to original cwd/-C project before routing, no registry suffix search, strict stored IDs; static assessment found bounded routing/filter/completion work; trailing-period trimming split to tasks-1e32d6
+- 2026-10-02T18:33:45Z (main): started
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
