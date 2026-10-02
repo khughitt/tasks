@@ -1,0 +1,20 @@
+---
+id: tasks-e9af16
+title: Design safe edit --depends semantics from the dependency-editing brief
+status: todo
+priority: 2
+size: m
+complexity: high
+process: planned
+created: 2026-10-02T14:22:40Z
+updated: 2026-10-02T14:22:40Z
+depends: []
+parent: tasks-671956
+tags: []
+agent: codex
+---
+
+Why: Silent replacement can erase existing edges, but changing replacement to append alters the CLI contract.
+Done: Inspect replacement use cases in this checkout and tests; compare explicit replacement documentation with additive edits plus an explicit clear/replace operation. Recommend the smallest safe contract, including add/edit/editor differences, clear-all behavior, alias deduplication, validation failures, and focused acceptance checks. Produce a user-reviewed spec and then a user-reviewed plan before implementation. Recommendation: follow additive tags with explicit replacement, unless evidence establishes intentional replacement consumers that need a different contract.
+Where to look: docs/notes/2026-10-02-dependency-editing-brief.md; src/cli.rs::TaskFields, src/commands/mod.rs::apply_fields, src/commands/edit.rs::run, tests/cli.rs, README.md, skills/tasks/SKILL.md.
+Ideas it wakes: On design completion, add the approved finding to tasks-8efda8 in the same commit, then re-scope it against that contract. No additional swap or alias work belongs in this design task.
