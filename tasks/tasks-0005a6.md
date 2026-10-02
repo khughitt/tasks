@@ -1,13 +1,15 @@
 ---
 id: tasks-0005a6
 title: Stamp gate notes with session provenance
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-18T19:09:47Z
-updated: 2026-10-02T14:37:27Z
+updated: 2026-10-02T18:23:55Z
+started: 2026-10-02T18:23:55Z
 depends: []
 tags: [quick-add, cli, observability]
 source: "mindful:thought:7b1b0c108103464388357acb293ad0ed"
@@ -36,3 +38,5 @@ Source: mindful:thought:7b1b0c108103464388357acb293ad0ed
 ## Notes
 
 - 2026-10-02T14:37:26Z (main): scope: scoped; opt-in note --stamp reuses the existing native provenance pair and warnings; plain notes and claim identity stay independent; P2/s/mid/direct; original source retained but lookup returned no match; brief: docs/notes/2026-09-30-delegated-identity-brief.md
+- 2026-10-02T18:23:55Z (main): started
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
