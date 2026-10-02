@@ -6,14 +6,15 @@ priority: 2
 size: m
 complexity: high
 process: planned
-owner: main
+owner: design/edit-depends
 created: 2026-10-02T14:22:40Z
-updated: 2026-10-02T15:24:43Z
+updated: 2026-10-02T15:26:21Z
 started: 2026-10-02T15:24:43Z
 depends: []
 parent: tasks-671956
 tags: []
 agent: codex
+spec: docs/specs/2026-10-02-edit-depends-design.md
 ---
 
 Why: Silent replacement can erase existing edges, but changing replacement to append alters the CLI contract.
@@ -25,3 +26,6 @@ Ideas it wakes: On design completion, add the approved finding to tasks-8efda8 i
 
 - 2026-10-02T15:24:43Z (main): started
   provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:24:48Z (design/edit-depends): resumed
+  provenance: {"harness_session":"claude-code:e9d6021e-11dc-417c-a01a-7061cb2cb618","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T15:26:20Z (design/edit-depends): spec drafted: additive edit --depends with --no-depends clear/replace (mirrors --tag/--no-tags); no replacement callers found in checkout, sibling tooling, or corpus
