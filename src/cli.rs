@@ -163,7 +163,8 @@ pub struct FieldArgs {
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
-    /// Depend on another task (repeatable); `dep` edits dependencies later.
+    /// Depend on another task (repeatable). On `edit` this appends; see `--no-depends`
+    /// and `dep --rm`.
     #[arg(long = "depends", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
     pub depends: Vec<String>,
     #[arg(long)]

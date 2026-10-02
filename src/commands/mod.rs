@@ -632,23 +632,10 @@ pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs) -> Resul
             task.tags.push(tag.clone());
         }
     }
-    if !fields.depends.is_empty() {
-        let mut dependencies = Vec::new();
-        for dependency in &fields.depends {
-            let id = parse_id(&ctx.registry, dependency)?;
-            if id == task.id {
-                return Err(Error::Cycle(format!("{id} -> {id}")));
-            }
-            if resolver.resolve_task(&id)?.is_none() {
-                return Err(Error::UnresolvableId(id.to_string()));
-            }
-            if !dependencies.contains(&id) {
-                dependencies.push(id);
-            }
-        }
-        task.depends = dependencies;
-        dep::ensure_acyclic(ctx, task)?;
-    }
+    // Additive like `--tag`: an edit that names one dependency must not drop the others.
+    // `edit --no-depends` clears the list before this runs; `dep --rm` removes one.
+    let warnings = dep::add_dependencies(ctx, &resolver, task, &fields.depends)?;
+    ctx.warnings.extend(warnings);
     if let Some(parent) = &fields.parent {
         task.parent = Some(parse_id(&ctx.registry, parent)?);
     }

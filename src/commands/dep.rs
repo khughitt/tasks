@@ -38,6 +38,48 @@ pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
     Ok(())
 }
 
+/// Adds each of `values` to `task.depends` unless the task already depends on it under
+/// any spelling, then checks the final graph. Returns a warning for each id the task
+/// already held before the call; repeats within one call are deduplicated silently.
+/// Shared by `dep --on` and by `--depends` on `add` and `edit`.
+pub fn add_dependencies(
+    ctx: &Ctx,
+    resolver: &Resolver<'_>,
+    task: &mut Task,
+    values: &[String],
+) -> Result<Vec<String>> {
+    let existing = task.depends.len();
+    let mut warnings = Vec::new();
+    for value in values {
+        let given = TaskId::parse_input(value)?;
+        let dependency = ctx.registry.canonical_id(&given);
+        if dependency == task.id {
+            return Err(Error::Cycle(format!("{dependency} -> {dependency}")));
+        }
+        if resolver.resolve_task(&dependency)?.is_none() {
+            return Err(Error::UnresolvableId(dependency.to_string()));
+        }
+        match task
+            .depends
+            .iter()
+            .position(|item| ctx.registry.canonical_id(item) == dependency)
+        {
+            Some(index) if index < existing => {
+                let warning = already_depends(&task.id, &dependency, &task.depends[index], &given);
+                if !warnings.contains(&warning) {
+                    warnings.push(warning);
+                }
+            }
+            Some(_) => {}
+            None => task.depends.push(dependency),
+        }
+    }
+    if !values.is_empty() {
+        ensure_acyclic(ctx, task)?;
+    }
+    Ok(warnings)
+}
+
 /// Explains an `--on` that named a dependency the task already had. Alias spellings
 /// name one task, so the add changed nothing; when the spellings differ, it says that
 /// `--rm` with either removes that one edge, which an `--on`/`--rm` pair would.
@@ -62,18 +104,15 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
     let mut task = load(&mut ctx, &id)?;
     let additions = on
         .iter()
-        .map(|value| {
-            let given = TaskId::parse_input(value)?;
-            Ok((ctx.registry.canonical_id(&given), given))
-        })
+        .map(|value| super::parse_id(&ctx.registry, value))
         .collect::<Result<Vec<_>>>()?;
     let removals = rm
         .iter()
         .map(|value| super::parse_id(&ctx.registry, value))
         .collect::<Result<Vec<_>>>()?;
-    if let Some((both, _)) = additions
+    if let Some(both) = additions
         .iter()
-        .find(|(dependency, _)| removals.contains(dependency))
+        .find(|dependency| removals.contains(dependency))
     {
         return Err(Error::Validation(format!(
             "{both} is named by both --on and --rm"
@@ -93,34 +132,9 @@ pub fn run(mut ctx: Ctx, id: String, on: Vec<String>, rm: Vec<String>) -> Result
             )));
         }
     }
-    if !additions.is_empty() {
-        let resolver = Resolver::new(&ctx.project, &ctx.registry);
-        let existing = task.depends.len();
-        for (dependency, given) in additions {
-            if dependency == task.id {
-                return Err(Error::Cycle(format!("{dependency} -> {dependency}")));
-            }
-            if resolver.resolve_task(&dependency)?.is_none() {
-                return Err(Error::UnresolvableId(dependency.to_string()));
-            }
-            match task
-                .depends
-                .iter()
-                .position(|item| ctx.registry.canonical_id(item) == dependency)
-            {
-                Some(index) if index < existing => {
-                    let warning =
-                        already_depends(&task.id, &dependency, &task.depends[index], &given);
-                    if !ctx.warnings.contains(&warning) {
-                        ctx.warnings.push(warning);
-                    }
-                }
-                Some(_) => {}
-                None => task.depends.push(dependency),
-            }
-        }
-        ensure_acyclic(&ctx, &task)?;
-    }
+    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let warnings = add_dependencies(&ctx, &resolver, &mut task, &on)?;
+    ctx.warnings.extend(warnings);
     save(&mut ctx, &mut task)?;
     super::follow_holder(&mut ctx, &task.id, None, "the dependency change landed");
     Ok(id_out(ctx, &task))

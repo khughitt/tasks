@@ -7655,6 +7655,104 @@ fn dep_on_and_rm_together_swap_in_one_save_or_change_nothing() {
 }
 
 #[test]
+fn edit_depends_appends_keeps_spellings_and_validates_the_final_graph() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let task = id_of(env.json(&sci, &["add", "Task", "-p", "2"]));
+    let deps: Vec<String> = (0..6)
+        .map(|n| id_of(env.json(&sci, &["add", &format!("Dep {n}"), "-p", "2"])))
+        .collect();
+    let task_path = sci.join("tasks").join(format!("{task}.md"));
+
+    // A: five edges, then a sixth through edit: all six remain, the new one last.
+    env.json(
+        &sci,
+        &[
+            "dep", &task, "--on", &deps[0], &deps[1], &deps[2], &deps[3], &deps[4],
+        ],
+    );
+    let added = env.json(&sci, &["edit", &task, "--depends", &deps[5]]);
+    assert_eq!(added["warnings"], serde_json::json!([]), "{added}");
+    assert_eq!(
+        env.json(&sci, &["show", &task])["task"]["depends"],
+        serde_json::json!(deps)
+    );
+
+    // B: an already-present edge named by its retired spelling warns and keeps one edge.
+    alias_registry(&env, "old", "sci");
+    let retired = deps[0].replacen("sci-", "old-", 1);
+    let again = env.json(&sci, &["edit", &task, "--depends", &retired]);
+    let warning = again["warnings"][0].as_str().unwrap();
+    assert!(
+        warning.starts_with(&format!(
+            "{task} already depends on {} (given as {retired})",
+            deps[0]
+        )),
+        "{warning}"
+    );
+    // The reverse: the stored spelling is retired and the live one is supplied.
+    std::fs::write(
+        &task_path,
+        std::fs::read_to_string(&task_path)
+            .unwrap()
+            .replacen(&deps[0], &retired, 1),
+    )
+    .unwrap();
+    let live = env.json(&sci, &["edit", &task, "--depends", &deps[0]]);
+    assert!(
+        live["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains(&format!("(stored as {retired})")),
+        "{live}"
+    );
+    let text = std::fs::read_to_string(&task_path).unwrap();
+    assert!(text.contains(&retired), "{text}");
+    assert_eq!(
+        env.json(&sci, &["show", &task])["task"]["depends"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
+
+    // C: a cycle, or an unresolvable id beside a valid one, changes nothing.
+    let upstream = id_of(env.json(&sci, &["add", "Upstream", "-p", "2"]));
+    let fresh = id_of(env.json(&sci, &["add", "Fresh", "-p", "2"]));
+    env.json(&sci, &["dep", &upstream, "--on", &task]);
+    let before = std::fs::read_to_string(&task_path).unwrap();
+    assert_eq!(
+        env.fail(&sci, &["edit", &task, "--depends", &upstream]),
+        "cycle"
+    );
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "edit",
+                &task,
+                "--depends",
+                &fresh,
+                "--depends",
+                "sci-000000"
+            ]
+        ),
+        "unresolvable_id"
+    );
+    assert_eq!(std::fs::read_to_string(&task_path).unwrap(), before);
+
+    // D: a duplicate-only add still checks the final graph, so a stored unreachable
+    // dependency fails it and the file stays as it was.
+    std::fs::write(&task_path, before.replacen(&deps[1], "zzz-000001", 1)).unwrap();
+    let before = std::fs::read_to_string(&task_path).unwrap();
+    assert_eq!(
+        env.fail(&sci, &["edit", &task, "--depends", &deps[2]]),
+        "unresolvable_id"
+    );
+    assert_eq!(std::fs::read_to_string(&task_path).unwrap(), before);
+}
+
+#[test]
 fn stored_retired_references_resolve_detect_cycles_and_keep_their_spelling() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
