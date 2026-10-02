@@ -1,18 +1,20 @@
 ---
 id: tasks-cee8d9
 title: Establish a compliant bootstrap path when task-record commits fail
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: docs/bootstrap-finding
 created: 2026-10-02T14:44:07Z
-updated: 2026-10-02T19:07:46Z
+updated: 2026-10-02T19:10:54Z
 started: 2026-10-02T19:07:46Z
+completed: 2026-10-02T19:10:54Z
 depends: []
 parent: tasks-0e7216
 tags: []
+model: claude-opus-5-5
 agent: codex
 ---
 
@@ -31,4 +33,10 @@ Ideas it wakes: On completion, add the finding to tasks-850488 with tasks note a
 - 2026-10-02T14:44:07Z (main): concerns: tasks-5a46b9 extension — add an evidence-backed isolated-repair bootstrap path for a task-record commit blocked by pre-existing content checks
 - 2026-10-02T14:55:48Z (main): scope: bound revised after user review — reproduce against ops's docs-only pre-commit recipe (where the incident occurred) and evaluate the existing work-in-place repair route before proposing any exception
 - 2026-10-02T19:07:46Z (main): started
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T19:10:21Z (docs/bootstrap-finding): resumed
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T19:10:54Z (docs/bootstrap-finding): done
+  provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-02T19:10:54Z (docs/bootstrap-finding): existing routes suffice: task-only commits keep working-tree and registry-reading checks; reproduced A (committed failure: in-place repair + pathspec commit) and B (uncommitted edits: stash with consent) in a scratch ops clone, found C (unregistered prefix, filed ops-d50aa5); brief updated; tasks-850488 re-scoped to the skill paragraph
   provenance: {"harness_session":"claude-code:4315d401-9c79-47bd-a5c6-86ff6afb8586","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
