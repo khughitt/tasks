@@ -24613,3 +24613,20 @@ fn prime_warns_once_when_identity_cannot_resolve_with_lanes_present() {
         .count();
     assert_eq!(unresolved, 1, "{prime}");
 }
+
+#[test]
+fn a_registry_naming_an_unregistered_group_member_fails_to_load() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\n[groups]\nmix = [\"sci\", \"gone\"]\n");
+    std::fs::write(&path, text).unwrap();
+    let error = error_of(&env, &sci, &["list"]);
+    assert_eq!(error["error"]["kind"], "config");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("\"mix\"") && detail.contains("\"gone\""),
+        "{detail}"
+    );
+}

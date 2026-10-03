@@ -12,6 +12,12 @@ pub struct Registry {
     /// a live prefix, enforced on load, so resolution is always one hop.
     #[serde(default)]
     pub aliases: BTreeMap<String, String>,
+    /// Group name -> member prefixes, each a live prefix, sorted and distinct
+    /// (docs/specs/2026-10-03-lanes-needs-groups-design.md §6). Host-local like the rest
+    /// of the registry. Not written when empty, so a registry without groups keeps its
+    /// shape on save.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub groups: BTreeMap<String, Vec<String>>,
 }
 
 impl Registry {
@@ -66,6 +72,27 @@ impl Registry {
             if !registry.projects.contains_key(target) {
                 return Err(Error::Config(format!(
                     "{}: alias {alias:?} targets {target:?}, which is not a registered project",
+                    path.display()
+                )));
+            }
+        }
+        for (name, members) in &registry.groups {
+            if let Some(problem) = registry.group_name_problem(name) {
+                return Err(Error::Config(format!("{}: {problem}", path.display())));
+            }
+            if members.is_empty() {
+                return Err(Error::Config(format!(
+                    "{}: group {name:?} has no members",
+                    path.display()
+                )));
+            }
+            if let Some(member) = members
+                .iter()
+                .find(|member| !registry.projects.contains_key(*member))
+            {
+                return Err(Error::Config(format!(
+                    "{}: group {name:?} names {member:?}, which is not a registered project; \
+                     edit [groups] in this file",
                     path.display()
                 )));
             }
@@ -241,6 +268,37 @@ impl Registry {
     pub fn is_taken(&self, prefix: &str) -> bool {
         self.projects.contains_key(prefix) || self.aliases.contains_key(prefix)
     }
+
+    /// Why `name` cannot name a group, if anything. The grammar is checked first. Then the
+    /// two namespaces a group name shares: a live prefix and a retired one. `load` reports
+    /// a problem as `config`.
+    fn group_name_problem(&self, name: &str) -> Option<String> {
+        if !is_valid_group_name(name) {
+            return Some(format!(
+                "group name {name:?} must use lowercase letters, digits, and -, \
+                 not starting with -"
+            ));
+        }
+        if self.projects.contains_key(name) {
+            return Some(format!("group name {name:?} is a registered prefix"));
+        }
+        if let Some(target) = self.aliases.get(name) {
+            return Some(format!(
+                "group name {name:?} is a retired prefix of {target:?}"
+            ));
+        }
+        None
+    }
+}
+
+/// The need-name grammar: non-empty, lowercase ASCII letters, digits, and `-`, not
+/// starting with `-`.
+fn is_valid_group_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 #[cfg(test)]
@@ -415,5 +473,50 @@ mod tests {
         let r = Registry::load_from(&path).unwrap();
         assert!(r.aliases.is_empty());
         assert_eq!(r.project_root("sci").unwrap(), Path::new("/tmp/a"));
+    }
+
+    #[test]
+    fn groups_round_trip_and_an_empty_table_is_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        let mut r = Registry::default();
+        r.register("sci", Path::new("/tmp/a")).unwrap();
+        r.save_to(&path).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path).unwrap().contains("[groups]"),
+            "a registry without groups keeps its shape"
+        );
+        r.groups.insert("vf".into(), vec!["sci".into()]);
+        r.save_to(&path).unwrap();
+        assert_eq!(Registry::load_from(&path).unwrap().groups, r.groups);
+    }
+
+    #[test]
+    fn load_rejects_an_invalid_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        let base = "[projects]\nsci = \"/tmp/a\"\n\n[aliases]\nold = \"sci\"\n\n[groups]\n";
+        for (groups, named) in [
+            ("mix = [\"sci\", \"gone\"]\n", ["\"mix\"", "\"gone\""]),
+            ("vf = [\"old\"]\n", ["\"vf\"", "\"old\""]),
+            ("empty = []\n", ["\"empty\"", "no members"]),
+            ("Bad = [\"sci\"]\n", ["\"Bad\"", "lowercase"]),
+            ("\"-x\" = [\"sci\"]\n", ["\"-x\"", "lowercase"]),
+            ("sci = [\"sci\"]\n", ["\"sci\"", "registered prefix"]),
+            ("old = [\"sci\"]\n", ["\"old\"", "retired prefix"]),
+        ] {
+            std::fs::write(&path, format!("{base}{groups}")).unwrap();
+            let error = Registry::load_from(&path).unwrap_err();
+            assert_eq!(error.kind(), "config", "{groups}");
+            for word in named {
+                assert!(error.to_string().contains(word), "{groups}: {error}");
+            }
+        }
+        std::fs::write(&path, format!("{base}data-2 = [\"sci\"]\n")).unwrap();
+        assert_eq!(
+            Registry::load_from(&path).unwrap().groups["data-2"],
+            ["sci"],
+            "digits and - are the tag grammar"
+        );
     }
 }
