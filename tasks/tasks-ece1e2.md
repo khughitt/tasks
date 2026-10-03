@@ -1,15 +1,16 @@
 ---
 id: tasks-ece1e2
 title: Design project groups and goal focus from the work-selection brief
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 owner: ece1e2-work-selection
 created: 2026-09-30T10:04:57Z
-updated: 2026-10-03T13:22:33Z
+updated: 2026-10-03T15:53:57Z
 started: 2026-10-03T09:53:20Z
+completed: 2026-10-03T15:53:57Z
 depends: []
 parent: tasks-46d207
 tags: []
@@ -75,3 +76,7 @@ Ideas it wakes: record the resulting decisions on tasks-77dbc6 and tasks-9bdd68 
 - 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 4.2 = 34f711bbe625820ae5ba499f9328f614b095a246
 - 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 4.4 = 8547a851d4bab11d85ce541af15a12f7e2ae8f2c
 - 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 4.5 = 55daece7e7b57a8f57791ba6d757d25d221ef4f9
+- 2026-10-03T15:53:57Z (main): done
+  provenance: {"harness_session":"claude-code:83185704-f448-42a6-ac20-8857595bdb59","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-03T15:53:57Z (main): Lanes, needs, exclusive holds, and project groups landed (spec docs/specs/2026-10-03-lanes-needs-groups-design.md; merge b92b782); follow-up tasks-015078
+  provenance: {"harness_session":"claude-code:83185704-f448-42a6-ac20-8857595bdb59","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
