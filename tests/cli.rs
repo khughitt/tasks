@@ -21695,3 +21695,70 @@ fn ready_selection_and_cutoff_intersect() {
         .collect();
     assert_eq!(warnings, vec!["max-complexity mid: 1 above cutoff hidden"]);
 }
+
+/// Writes `needs: [<list>]` into a record by hand, ahead of `created`. Fixture-only: it
+/// reaches records the flags never write, such as an undeclared or since-removed need.
+fn seed_needs(dir: &std::path::Path, id: &str, list: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\ncreated: "), "{text}");
+    std::fs::write(
+        &path,
+        text.replacen("\ncreated: ", &format!("\nneeds: [{list}]\ncreated: "), 1),
+    )
+    .unwrap();
+}
+
+#[test]
+fn needs_record_reaches_show_ready_and_parked_rows_and_stays_sparse() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let plain = id_of(env.json(&sci, &["add", "Plain"]));
+    let needy = id_of(env.json(&sci, &["add", "Needy"]));
+    seed_needs(&sci, &needy, "quiet, owner");
+
+    let show = env.json(&sci, &["show", &needy]);
+    assert_eq!(show["task"]["needs"], serde_json::json!(["quiet", "owner"]));
+    assert!(
+        env.json(&sci, &["show", &plain])["task"]
+            .get("needs")
+            .is_none(),
+        "sparse on Task"
+    );
+
+    let ready = env.json(&sci, &["ready"]);
+    let row = |id: &str| {
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(
+        row(needy.as_str())["needs"],
+        serde_json::json!(["quiet", "owner"])
+    );
+    assert!(
+        row(plain.as_str()).get("needs").is_none(),
+        "sparse on TaskSummary"
+    );
+
+    // An unrelated edit keeps the list and writes it in its place: with no size,
+    // complexity, process, or parallel set, directly after priority.
+    env.json(&sci, &["edit", &needy, "-p", "1"]);
+    let raw = env.read(&sci, &format!("tasks/{needy}.md"));
+    assert!(
+        raw.contains("\npriority: 1\nneeds: [quiet, owner]\ncreated: "),
+        "{raw}"
+    );
+
+    env.json(&sci, &["park", &needy, "Resume the capture"]);
+    let parked = env.json(&sci, &["list", "--parked"]);
+    assert_eq!(
+        parked["tasks"][0]["needs"],
+        serde_json::json!(["quiet", "owner"]),
+        "{parked}"
+    );
+}

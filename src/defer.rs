@@ -143,6 +143,7 @@ mod tests {
             complexity: None,
             process: None,
             parallel: false,
+            needs: vec![],
             every: None,
             defer: defer.map(|date| Defer::parse(date).unwrap()),
             owner: None,

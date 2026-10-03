@@ -205,6 +205,8 @@ pub struct TaskSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     pub parallel: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     pub created: String,
@@ -408,6 +410,7 @@ impl TaskSummary {
             complexity: task.complexity,
             process: task.process,
             parallel: task.parallel,
+            needs: task.needs.clone(),
             owner: task.owner.clone(),
             created: task.created.clone(),
             updated: task.updated.clone(),
@@ -452,6 +455,8 @@ pub struct ParkedRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     pub parallel: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -501,6 +506,7 @@ impl ParkedRow {
             complexity: summary.complexity,
             process: summary.process,
             parallel: summary.parallel,
+            needs: summary.needs,
             owner: summary.owner,
             created: Some(summary.created),
             updated: Some(summary.updated),
@@ -531,6 +537,7 @@ impl ParkedRow {
             complexity: None,
             process: None,
             parallel: false,
+            needs: Vec::new(),
             owner: None,
             created: None,
             updated: None,
@@ -1954,6 +1961,7 @@ mod tests {
             escalation: None,
             periodic: None,
             deferred: None,
+            needs: vec![],
             parallel,
         }
     }

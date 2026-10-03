@@ -14,6 +14,7 @@ mod frontmatter;
 mod halt;
 mod hierarchy;
 mod model;
+mod needs;
 mod output;
 mod palette;
 mod periodic;

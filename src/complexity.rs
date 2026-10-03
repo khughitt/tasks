@@ -114,6 +114,7 @@ mod tests {
             complexity,
             process: None,
             parallel: false,
+            needs: vec![],
             every: None,
             defer: None,
             owner: None,
