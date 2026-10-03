@@ -617,6 +617,7 @@ options = [
   { shared = "limit", value = "int" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]

@@ -770,13 +770,21 @@ pub enum Command {
         /// One registered project instead of all of them.
         #[arg(
             long,
-            conflicts_with = "all_projects",
+            conflicts_with_all = ["all_projects", "group"],
             add = ArgValueCandidates::new(crate::complete::prefixes)
         )]
         project: Option<String>,
         /// The default; accepted for consistency with other read commands.
         #[arg(long)]
         all_projects: bool,
+        /// The members of this project group instead of all of them.
+        #[arg(
+            long,
+            value_name = "NAME",
+            conflicts_with = "all_projects",
+            add = ArgValueCandidates::new(crate::complete::groups)
+        )]
+        group: Option<String>,
     },
     /// Every claim in the registry's claim stores, with liveness; opens no checkout.
     Claims {

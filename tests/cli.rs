@@ -25097,3 +25097,60 @@ fn group_halt_views_filter_members_and_warn_only_about_members() {
         );
     }
 }
+
+#[test]
+fn quiet_group_lists_only_member_parks_and_claims_keeps_its_single_scope() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["group", "set", "solo", "sci"]);
+    let mine = id_of(env.json(&sci, &["add", "Capture here", "-p", "2"]));
+    let theirs = id_of(env.json(&fam, &["add", "Capture there", "-p", "1"]));
+    for (dir, id) in [(&sci, &mine), (&fam, &theirs)] {
+        as_agent(&env, dir, "agent-a")
+            .args([
+                "park",
+                id.as_str(),
+                "run it",
+                "--waiting-on",
+                "user",
+                "--reason",
+                "quiet",
+                "--minutes",
+                "30",
+            ])
+            .assert()
+            .success();
+    }
+    let nowhere = tempfile::tempdir().unwrap();
+    let ids = |value: serde_json::Value| -> Vec<String> {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(
+        ids(env.json(nowhere.path(), &["quiet"])),
+        [theirs.clone(), mine.clone()]
+    );
+    assert_eq!(
+        ids(env.json(nowhere.path(), &["quiet", "--group", "solo"])),
+        std::slice::from_ref(&mine)
+    );
+    env.usage(
+        nowhere.path(),
+        &["quiet", "--group", "solo", "--project", "sci"],
+    );
+    env.usage(
+        nowhere.path(),
+        &["quiet", "--group", "solo", "--all-projects"],
+    );
+    assert_eq!(
+        env.fail(nowhere.path(), &["quiet", "--group", "nope"]),
+        "unknown_group"
+    );
+    // By contract claims fails rather than answering for part of the registry.
+    env.usage(nowhere.path(), &["claims", "--group", "solo"]);
+}

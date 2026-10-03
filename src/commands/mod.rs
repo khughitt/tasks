@@ -1793,11 +1793,12 @@ pub fn run(cli: Cli) -> Result<Output> {
             limit,
             project,
             all_projects: _,
+            group,
         } => {
             let scope = ScopeArgs {
-                all_projects: project.is_none(),
+                all_projects: project.is_none() && group.is_none(),
                 project,
-                group: None,
+                group,
             };
             quiet::run(open_read_ctx(dir, &scope)?, limit)
         }
