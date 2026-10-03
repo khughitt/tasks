@@ -180,6 +180,7 @@ pub fn candidates(
 ) -> Result<crate::query::Picked> {
     let mut found = Vec::new();
     let mut deferred = Vec::new();
+    let mut paused = Vec::new();
     for task in all {
         let Some(park) = claims.park(&task.id) else {
             continue;
@@ -204,17 +205,24 @@ pub fn candidates(
                 }
             }
         }
-        if !held {
-            if crate::defer::is_deferred(task, now) {
-                deferred.push(task.clone());
-            } else {
-                found.push((park.at.clone(), task.clone()));
-            }
+        if held {
+            continue;
+        }
+        // Lanes design §3.4: a candidate in a paused lane is set aside once it has passed
+        // the dependency check; a deferred one is in neither the deferred nor the paused
+        // count.
+        let in_paused_lane = crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some();
+        match (crate::defer::is_deferred(task, now), in_paused_lane) {
+            (true, true) => {}
+            (true, false) => deferred.push(task.clone()),
+            (false, true) => paused.push(task.clone()),
+            (false, false) => found.push((park.at.clone(), task.clone())),
         }
     }
     found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.id.cmp(&b.1.id)));
     Ok(crate::query::Picked {
         tasks: found.into_iter().map(|(_, task)| task).collect(),
         deferred,
+        paused,
     })
 }

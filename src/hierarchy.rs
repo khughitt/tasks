@@ -254,6 +254,13 @@ pub fn lane_of(all: &[Task], task: &Task, registry: &Registry) -> Option<TaskId>
     enclosing_lane(all, task, registry).map(|lane| lane.id.clone())
 }
 
+/// Lanes design §3.4: the paused lane above `task`, if any. A `blocked` lane pauses its
+/// descendants; the one place an ancestor's status gates a descendant, and only for
+/// lanes. The task itself is never its own pause: a lane is a goal and never ready.
+pub fn paused_lane<'a>(all: &'a [Task], task: &Task, registry: &Registry) -> Option<&'a Task> {
+    enclosing_lane(all, task, registry).filter(|lane| lane.status == Status::Blocked)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Shelved {
     Hidden,

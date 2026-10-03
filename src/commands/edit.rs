@@ -139,6 +139,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
 
     let mut task = load(&mut ctx, &id)?;
     let original_needs = task.needs.clone();
+    let was_lane = task.lane;
     if args.fields.body.as_deref() == Some("-") {
         let mut body = String::new();
         std::io::stdin().read_to_string(&mut body)?;
@@ -265,6 +266,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         // above, `--complexity <level>` set it in `apply_fields`, and nothing since has
         // touched it.
         ctx.reassess(&task.id, task.complexity)?;
+    }
+    if let Some(warning) = pause_warning(&task, was_lane) {
+        ctx.warnings.push(warning);
     }
     save(&mut ctx, &mut task)?;
     // Lanes/needs design §4.5: a holder learns of the override only once it has landed.
@@ -430,6 +434,9 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         }
         Err(error) => return Err(keep(error)),
     }
+    if let Some(warning) = pause_warning(&edited, original.lane) {
+        ctx.warnings.push(warning);
+    }
     save(&mut ctx, &mut edited).map_err(keep)?;
     super::follow_holder(&mut ctx, &edited.id, None, "the edit landed");
     if let Err(error) = std::fs::remove_file(&tmp) {
@@ -445,6 +452,18 @@ fn refuse_shelving(id: &crate::model::TaskId) -> Result<()> {
     Err(Error::Validation(format!(
         "use `tasks shelve {id} \"<wake condition>\"` to shelve a task"
     )))
+}
+
+/// Lanes design §3.4: marking a goal that is already `blocked` as a lane pauses it, which
+/// hides its whole subtree from the pickers at once.
+fn pause_warning(task: &Task, was_lane: bool) -> Option<String> {
+    (task.lane && !was_lane && task.status == Status::Blocked).then(|| {
+        format!(
+            "{id} is blocked, so marking it a lane pauses it: its subtree leaves ready, \
+             next, and prime's ready list until `tasks unblock {id}`",
+            id = task.id
+        )
+    })
 }
 
 fn create_edit_temp(

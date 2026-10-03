@@ -23805,3 +23805,148 @@ fn lane_checks_terminate_on_a_parent_cycle() {
     assert!(out.status.code().is_some());
     let _ = env.cmd(&sci).args(["edit", &b, "--lane"]).output().unwrap();
 }
+
+#[test]
+fn a_blocked_lane_pauses_its_subtree_in_the_pickers_until_unblocked() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+    let step = id_of(env.json(&sci, &["add", "Capture", "--parent", &lane, "-p", "0"]));
+    let resumed = id_of(env.json(&sci, &["add", "Resume", "--parent", &lane, "-p", "0"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &resumed, "rerun"])
+        .assert()
+        .success();
+    // Neither of these would be offered with the lane unpaused, so neither is counted.
+    let later = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Later",
+            "--parent",
+            &lane,
+            "-p",
+            "0",
+            "--defer",
+            "2099-01-01",
+        ],
+    ));
+    let asks = id_of(env.json(&sci, &["add", "Ask", "--parent", &lane, "-p", "0"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &asks, "which host?", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let goal = id_of(env.json(&sci, &["add", "Plain goal", "-p", "2"]));
+    let under_goal = id_of(env.json(&sci, &["add", "Under goal", "--parent", &goal, "-p", "2"]));
+    let loose = id_of(env.json(&sci, &["add", "Loose", "-p", "3"]));
+    env.json(&sci, &["block", &goal, "an ordinary blocked goal"]);
+    env.json(&sci, &["block", &lane, "waiting on the idle host"]);
+    let ids = |value: &serde_json::Value| -> Vec<String> {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let ready = env.json(&sci, &["ready"]);
+    assert_eq!(
+        ids(&ready),
+        [under_goal.clone(), loose.clone()],
+        "a blocked goal does not block its children; a paused lane does"
+    );
+    assert!(
+        ready["warnings"]
+            .to_string()
+            .contains(&format!("2 task(s) hidden by paused lane {lane}")),
+        "Capture and Resume only; Later is deferred and Ask waits on the user: {ready}"
+    );
+    let warnings = ready["warnings"].to_string();
+    assert!(
+        !warnings.contains("deferred task") && !warnings.contains(&later),
+        "a deferred task in a paused lane is in neither count: {ready}"
+    );
+    assert!(!warnings.contains(&asks), "{ready}");
+    let cut = env.json(&sci, &["ready", "--max-complexity", "low"]);
+    assert!(
+        !cut["warnings"].to_string().contains("paused lane"),
+        "unrated steps the cutoff hides are not counted as paused: {cut}"
+    );
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(
+        next["next"]["task"]["id"], under_goal,
+        "the parked step is paused too"
+    );
+    assert!(
+        next["warnings"]
+            .to_string()
+            .contains(&format!("2 task(s) hidden by paused lane {lane}")),
+        "counted once across parked and ready: {next}"
+    );
+    let prime = env.json(&sci, &["prime"]);
+    let primed: Vec<&str> = prime["ready"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert!(!primed.contains(&step.as_str()) && !primed.contains(&resumed.as_str()));
+
+    // A person who names a task directly gets it.
+    env.json(&sci, &["start", &step]);
+    env.json(&sci, &["unblock", &lane]);
+    let ready = env.json(&sci, &["ready"]);
+    assert!(ids(&ready).contains(&resumed), "{ready}");
+    assert!(
+        !ready["warnings"].to_string().contains("paused lane"),
+        "{ready}"
+    );
+}
+
+#[test]
+fn the_paused_count_is_taken_before_exclusive_holds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let holding = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+    let held = id_of(env.json(
+        &sci,
+        &[
+            "add", "Rerun", "--parent", &lane, "-p", "0", "--need", "quiet",
+        ],
+    ));
+    // Another session holds `quiet`, so `held` would be held back even if unpaused.
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &holding])
+        .assert()
+        .success();
+    env.json(&sci, &["block", &lane, "waiting on the idle host"]);
+    let ready = env.json(&sci, &["ready"]);
+    assert!(
+        ready["warnings"]
+            .to_string()
+            .contains(&format!("1 task(s) hidden by paused lane {lane}")),
+        "{held} is counted: the paused count is taken before exclusive holds: {ready}"
+    );
+}
+
+#[test]
+fn marking_a_blocked_goal_as_a_lane_warns_that_it_pauses_the_subtree() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal"]));
+    env.json(&sci, &["add", "Kid", "--parent", &goal]);
+    env.json(&sci, &["block", &goal, "stuck"]);
+    let out = env.json(&sci, &["edit", &goal, "--lane"]);
+    assert!(
+        out["warnings"].to_string().contains(&format!(
+            "{goal} is blocked, so marking it a lane pauses it"
+        )),
+        "{out}"
+    );
+    let open = id_of(env.json(&sci, &["add", "Open goal"]));
+    let out = env.json(&sci, &["edit", &open, "--lane"]);
+    assert_eq!(out["warnings"], serde_json::json!([]), "{out}");
+}

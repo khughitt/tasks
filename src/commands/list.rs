@@ -11,11 +11,11 @@ use crate::output::{
     PeriodicSummary, PrimeOut, TaskSummary,
 };
 use crate::query::{
-    Picked, Readiness, SortKey, deferred_omission, is_candidate, readiness, sort_by_key, sort_list,
-    sort_periodic, sort_ready,
+    Picked, Readiness, SortKey, deferred_omission, is_candidate, paused_omissions, readiness,
+    sort_by_key, sort_list, sort_periodic, sort_ready,
 };
 use crate::scope::Scope;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use time::OffsetDateTime;
 
 pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
@@ -204,6 +204,20 @@ pub fn ready_tasks(
         }
     }
     sort_ready(&mut ready);
+    // Lanes design §3.4: a paused lane keeps its subtree out of every picker. Its work
+    // leaves here, before the claim and park checks that warn about what they drop, and
+    // passes those same checks silently, so the paused count holds only work that would
+    // otherwise be offered. A deferred task in a paused lane is in neither count.
+    let (mut paused, mut ready): (Vec<Task>, Vec<Task>) = ready
+        .into_iter()
+        .partition(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some());
+    paused.retain(|task| {
+        claims.live(&task.id).is_none()
+            && !claims
+                .park(&task.id)
+                .is_some_and(|park| park.waiting_on == WaitingOn::User)
+    });
+    deferred.retain(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_none());
     ready.retain(|task| match claims.live(&task.id) {
         Some(claim) => {
             warnings.push(format!(
@@ -235,6 +249,7 @@ pub fn ready_tasks(
     Ok(Picked {
         tasks: ready,
         deferred,
+        paused,
     })
 }
 
@@ -301,6 +316,38 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
         ctx.warnings
             .push(format!("{hidden} ready task(s) hidden by halt"));
     }
+}
+
+/// Lanes design §3.4: one `<n> task(s) hidden by paused lane <id>` warning per lane,
+/// counted before exclusive holds. The pickers already applied the dependency, defer,
+/// claim, and park checks to `paused`; this applies the halt, `--without`, and cutoff
+/// gates the caller applies to its own list, without their warnings, then counts each
+/// task once under its lane.
+fn warn_paused(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    mut paused: Vec<Task>,
+    snapshots: &HashMap<String, HaltSnapshot>,
+    without: &Without,
+    cutoff: Option<crate::model::Complexity>,
+    claims: &crate::claims::ClaimSnapshot,
+) {
+    let _ = retain_allowed(&mut paused, snapshots);
+    // Each task is hidden only where its own project declares the need.
+    let _ = without.retain(&mut paused, &vocabularies(&ctx.scope));
+    if let Some(cutoff) = cutoff {
+        let _ = crate::complexity::apply(&mut paused, cutoff, claims);
+    }
+    let mut by_lane: BTreeMap<TaskId, BTreeSet<TaskId>> = BTreeMap::new();
+    for task in &paused {
+        if let Some(lane) = crate::hierarchy::paused_lane(all, task, &ctx.registry) {
+            by_lane
+                .entry(lane.id.clone())
+                .or_default()
+                .insert(task.id.clone());
+        }
+    }
+    ctx.warnings.extend(paused_omissions(&by_lane));
 }
 
 /// Lanes/needs design §4.5: drop tasks held back by another session's exclusive hold,
@@ -392,6 +439,15 @@ pub fn ready(
     if let Some(warning) = deferred_omission(&picked.deferred) {
         ctx.warnings.push(warning);
     }
+    warn_paused(
+        &mut ctx,
+        &all,
+        picked.paused,
+        &snapshots,
+        &without,
+        cutoff,
+        &claims,
+    );
     let mut tasks = picked.tasks;
     if let Some(limit) = limit {
         tasks.truncate(limit);
@@ -463,6 +519,13 @@ pub fn next(
     if let Some(warning) = deferred_omission(&omitted) {
         ctx.warnings.push(warning);
     }
+    // A parked todo is both a candidate and a ready row; `warn_paused` counts ids in a
+    // set, so it is counted once.
+    let mut paused = candidates.paused;
+    paused.extend(ready.paused);
+    warn_paused(
+        &mut ctx, &all, paused, &snapshots, &without, cutoff, &claims,
+    );
     let next = match pool.into_iter().next() {
         None => None,
         Some(task) => {

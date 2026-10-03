@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::model::{Size, Status, Task, TaskId};
 use crate::output::DateColumn;
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use time::OffsetDateTime;
 
 /// Depth-first search for a cycle reachable from `start`.
@@ -165,11 +165,15 @@ pub fn readiness(
     }
 }
 
-/// What a picker found: the tasks it may hand out, and the ones a deferral held back.
+/// What a picker found: the tasks it may hand out, the ones a deferral held back, and the
+/// ones a paused lane kept out (lanes design §3.4). `paused` holds only work that passed
+/// the picker's own dependency, defer, claim, and park checks; the caller applies its
+/// session gates to it before counting.
 #[derive(Default)]
 pub struct Picked {
     pub tasks: Vec<Task>,
     pub deferred: Vec<Task>,
+    pub paused: Vec<Task>,
 }
 
 /// The one-line omission warning, or `None` when nothing was held back.
@@ -180,6 +184,14 @@ pub fn deferred_omission(deferred: &[Task]) -> Option<String> {
         deferred.len(),
         if deferred.len() == 1 { "" } else { "s" },
     ))
+}
+
+/// One warning per paused lane that kept work out, in lane id order.
+pub fn paused_omissions(paused: &BTreeMap<TaskId, BTreeSet<TaskId>>) -> Vec<String> {
+    paused
+        .iter()
+        .map(|(lane, hidden)| format!("{} task(s) hidden by paused lane {lane}", hidden.len()))
+        .collect()
 }
 
 /// The order `list` prints in. `Priority` is the default (priority, updated desc, id);
@@ -522,5 +534,23 @@ mod tests {
             ids,
             ["000005", "000002", "000003", "000004", "000000", "000001"]
         );
+    }
+
+    #[test]
+    fn paused_omissions_name_each_lane_with_its_count() {
+        let mut paused: std::collections::BTreeMap<TaskId, std::collections::BTreeSet<TaskId>> =
+            std::collections::BTreeMap::new();
+        paused
+            .entry(TaskId::parse("sci-00000a").unwrap())
+            .or_default()
+            .extend([
+                TaskId::parse("sci-000001").unwrap(),
+                TaskId::parse("sci-000002").unwrap(),
+            ]);
+        assert_eq!(
+            paused_omissions(&paused),
+            ["2 task(s) hidden by paused lane sci-00000a"]
+        );
+        assert!(paused_omissions(&std::collections::BTreeMap::new()).is_empty());
     }
 }
