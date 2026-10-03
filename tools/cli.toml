@@ -279,6 +279,24 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["group"]
+summary = "Named sets of registered projects, read together with --group"
+
+[[cli.tasks.commands]]
+path = ["group", "set"]
+summary = "Create or replace a group; a retired prefix resolves to its live one"
+args = [{ name = "name", value = "string", required = true }, { name = "prefixes", value = "string", required = true, variadic = true }]
+
+[[cli.tasks.commands]]
+path = ["group", "rm"]
+summary = "Delete a group. Its projects stay registered"
+args = [{ name = "name", value = "string", required = true }]
+
+[[cli.tasks.commands]]
+path = ["groups"]
+summary = "Every group with its members and whether each is reachable"
+
+[[cli.tasks.commands]]
 path = ["root"]
 summary = "The registered root of the project an id belongs to"
 args = [{ name = "id", value = "ref", required = true }]

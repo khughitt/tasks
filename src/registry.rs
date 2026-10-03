@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::repo::atomic_write;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -289,6 +289,43 @@ impl Registry {
         }
         None
     }
+
+    /// Creates or replaces group `name`. A retired prefix resolves to its live one, and
+    /// each member is stored once, in prefix order. Returns the stored members.
+    pub fn set_group(&mut self, name: &str, members: &[String]) -> Result<Vec<String>> {
+        if let Some(problem) = self.group_name_problem(name) {
+            return Err(Error::Validation(problem));
+        }
+        if members.is_empty() {
+            return Err(Error::Validation(format!(
+                "group {name:?} needs at least one member"
+            )));
+        }
+        let mut resolved = BTreeSet::new();
+        for member in members {
+            let live = self.canonical_prefix(member);
+            if !self.projects.contains_key(live) {
+                return Err(Error::Config(format!(
+                    "no project registered as {member:?}"
+                )));
+            }
+            resolved.insert(live.to_string());
+        }
+        let stored: Vec<String> = resolved.into_iter().collect();
+        self.groups.insert(name.into(), stored.clone());
+        Ok(stored)
+    }
+
+    /// Deletes group `name`, returning the members it had. Its projects stay registered.
+    pub fn remove_group(&mut self, name: &str) -> Result<Vec<String>> {
+        self.groups.remove(name).ok_or_else(|| unknown_group(name))
+    }
+}
+
+fn unknown_group(name: &str) -> Error {
+    Error::UnknownGroup(format!(
+        "no group named {name:?}; `tasks groups` lists them"
+    ))
 }
 
 /// The need-name grammar: non-empty, lowercase ASCII letters, digits, and `-`, not
@@ -518,5 +555,49 @@ mod tests {
             ["sci"],
             "digits and - are the tag grammar"
         );
+    }
+
+    #[test]
+    fn set_group_resolves_aliases_stores_each_member_once_and_validates() {
+        let mut r = Registry::default();
+        r.register("sci", Path::new("/tmp/a")).unwrap();
+        r.register("fam", Path::new("/tmp/b")).unwrap();
+        r.aliases.insert("old".into(), "fam".into());
+
+        let stored = r
+            .set_group("vf", &["sci".into(), "old".into(), "sci".into()])
+            .unwrap();
+        assert_eq!(stored, ["fam", "sci"]);
+        assert_eq!(r.groups["vf"], ["fam", "sci"]);
+        assert_eq!(r.set_group("vf", &["sci".into()]).unwrap(), ["sci"]);
+        assert_eq!(r.groups["vf"], ["sci"], "set replaces");
+
+        for name in ["", "Bad", "under_score", "fam", "old"] {
+            assert_eq!(
+                r.set_group(name, &["sci".into()]).unwrap_err().kind(),
+                "validation",
+                "{name:?}"
+            );
+        }
+        assert_eq!(
+            r.set_group("vf", &[]).unwrap_err().kind(),
+            "validation",
+            "a group needs a member"
+        );
+        assert_eq!(
+            r.set_group("vf", &["nope".into()]).unwrap_err().kind(),
+            "config"
+        );
+        assert_eq!(r.groups["vf"], ["sci"], "a refused set changes nothing");
+    }
+
+    #[test]
+    fn remove_group_returns_its_members_and_an_unknown_name_is_unknown_group() {
+        let mut r = Registry::default();
+        r.register("sci", Path::new("/tmp/a")).unwrap();
+        r.set_group("vf", &["sci".into()]).unwrap();
+        assert_eq!(r.remove_group("vf").unwrap(), ["sci"]);
+        assert!(r.groups.is_empty());
+        assert_eq!(r.remove_group("vf").unwrap_err().kind(), "unknown_group");
     }
 }

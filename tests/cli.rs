@@ -24630,3 +24630,143 @@ fn a_registry_naming_an_unregistered_group_member_fails_to_load() {
         "{detail}"
     );
 }
+
+#[test]
+fn group_set_rm_and_groups_manage_named_project_sets() {
+    let mut env = TestEnv::new();
+    env.init("sci");
+    let fam = env.init("fam");
+    alias_registry(&env, "old", "fam");
+    let nowhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.json(nowhere.path(), &["groups"]),
+        serde_json::json!({"groups": [], "warnings": []})
+    );
+
+    // A retired prefix resolves to its live one, and a repeated prefix is stored once.
+    assert_eq!(
+        env.json(nowhere.path(), &["group", "set", "vf", "sci", "old", "sci"]),
+        serde_json::json!({"name": "vf", "members": ["fam", "sci"], "warnings": []})
+    );
+    let registry: toml::Value = toml::from_str(
+        &std::fs::read_to_string(env.home.path().join(".config/tasks/projects.toml")).unwrap(),
+    )
+    .unwrap();
+    let stored: Vec<&str> = registry["groups"]["vf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|member| member.as_str().unwrap())
+        .collect();
+    assert_eq!(stored, ["fam", "sci"]);
+
+    // set replaces; groups lists every group with each member's reachability.
+    env.json(nowhere.path(), &["group", "set", "vf", "sci"]);
+    env.json(nowhere.path(), &["group", "set", "pair", "fam", "sci"]);
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    assert_eq!(
+        env.json(nowhere.path(), &["groups"])["groups"],
+        serde_json::json!([
+            {"name": "pair", "members": [
+                {"prefix": "fam", "reachable": false},
+                {"prefix": "sci", "reachable": true},
+            ]},
+            {"name": "vf", "members": [{"prefix": "sci", "reachable": true}]},
+        ])
+    );
+    assert_eq!(
+        env.pretty(nowhere.path(), &["groups"]).trim_end(),
+        "pair  fam (unreachable), sci\nvf  sci"
+    );
+
+    let removed = env.json(nowhere.path(), &["group", "rm", "pair"]);
+    assert_eq!(removed["members"], serde_json::json!(["fam", "sci"]));
+    assert_eq!(
+        env.fail(nowhere.path(), &["group", "rm", "pair"]),
+        "unknown_group"
+    );
+    assert_eq!(
+        env.pretty(nowhere.path(), &["group", "rm", "vf"]).trim(),
+        "vf"
+    );
+    assert_eq!(
+        env.json(nowhere.path(), &["groups"])["groups"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn group_set_refuses_bad_or_colliding_names_and_unknown_members() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+    alias_registry(&env, "old", "fam");
+    for name in ["", "Bad", "under_score", "sp ace"] {
+        assert_eq!(
+            env.fail(&sci, &["group", "set", name, "sci"]),
+            "validation",
+            "{name:?}"
+        );
+    }
+    assert_eq!(
+        env.fail(&sci, &["group", "set", "fam", "sci"]),
+        "validation",
+        "a live prefix"
+    );
+    assert_eq!(
+        env.fail(&sci, &["group", "set", "old", "sci"]),
+        "validation",
+        "a retired prefix"
+    );
+    assert_eq!(
+        env.fail(&sci, &["group", "set", "vf", "sci", "nope"]),
+        "config"
+    );
+    env.usage(&sci, &["group", "set", "vf"]);
+    assert_eq!(env.json(&sci, &["groups"])["groups"], serde_json::json!([]));
+    env.json(&sci, &["group", "set", "data-2", "sci"]);
+}
+
+#[test]
+fn group_set_refuses_a_name_an_unfinished_rename_reserves() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&sci, &["add", "S", "-p", "2"]));
+    let stopped = env
+        .raw(&sci)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "sci", "lab"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+
+    // `lab` is not yet a prefix, so only the reservation stands between it and a group.
+    // A group there would make the resume rewrite files and config, then fail at the
+    // registry step on the collision.
+    let error = error_of(&env, &fam, &["group", "set", "lab", "fam"]);
+    assert_eq!(error["error"]["kind"], "validation");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("reserved by unfinished rename sci -> lab"),
+        "{detail}"
+    );
+    assert_eq!(env.json(&fam, &["groups"])["groups"], serde_json::json!([]));
+
+    // The name stayed free, so the rename resumes and finishes.
+    assert_eq!(
+        env.json(&sci, &["rename", "sci", "lab"])["recovery"],
+        "resume_files"
+    );
+    assert!(sci.join(format!("tasks/lab-{}.md", &id[4..])).is_file());
+    // Finished, `lab` is a live prefix and `sci` a retired one: still refused, now as
+    // prefixes rather than reservations.
+    for name in ["lab", "sci"] {
+        assert_eq!(
+            env.fail(&fam, &["group", "set", name, "fam"]),
+            "validation",
+            "{name}"
+        );
+    }
+    env.json(&fam, &["group", "set", "vf", "lab", "fam"]);
+}

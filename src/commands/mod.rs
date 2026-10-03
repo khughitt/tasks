@@ -6,6 +6,7 @@ pub mod dep;
 pub mod edit;
 pub mod feedback;
 pub mod graph;
+pub mod group;
 pub mod init;
 pub mod lanes;
 pub mod list;
@@ -23,7 +24,7 @@ pub mod tree;
 pub mod unregister;
 
 use crate::claims::{ClaimStore, Liveness, MutationLock};
-use crate::cli::{Cli, Command, FieldArgs, ScopeArgs};
+use crate::cli::{Cli, Command, FieldArgs, GroupAction, ScopeArgs};
 use crate::error::{Error, Result};
 use crate::format::{normalize_note_text, validate_body, validate_line, validate_task};
 use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
@@ -1629,6 +1630,11 @@ pub fn run(cli: Cli) -> Result<Output> {
             closed,
             paths,
         } => projects::run(dir, &sort, reverse, closed, paths),
+        Command::Group { action } => match action {
+            GroupAction::Set { name, prefixes } => group::set(name, prefixes),
+            GroupAction::Rm { name } => group::rm(name),
+        },
+        Command::Groups => group::list(dir),
         Command::Root { id } => root::run(id, dir),
         Command::Add {
             title,

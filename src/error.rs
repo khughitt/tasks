@@ -43,6 +43,8 @@ pub enum Error {
     #[error("{0}")]
     UnknownNeed(String),
     #[error("{0}")]
+    UnknownGroup(String),
+    #[error("{0}")]
     Editor(String),
     #[error("{0}")]
     InvalidAttachmentName(String),
@@ -96,6 +98,7 @@ impl Error {
             Error::NestedLane(detail) => Error::NestedLane(detail + suffix),
             Error::NeedHeld(detail) => Error::NeedHeld(detail + suffix),
             Error::UnknownNeed(detail) => Error::UnknownNeed(detail + suffix),
+            Error::UnknownGroup(detail) => Error::UnknownGroup(detail + suffix),
             Error::Editor(detail) => Error::Editor(detail + suffix),
             Error::InvalidAttachmentName(detail) => Error::InvalidAttachmentName(detail + suffix),
             Error::AttachmentExists(detail) => Error::AttachmentExists(detail + suffix),
@@ -131,6 +134,7 @@ impl Error {
             Error::NestedLane(_) => "nested_lane",
             Error::NeedHeld(_) => "need_held",
             Error::UnknownNeed(_) => "unknown_need",
+            Error::UnknownGroup(_) => "unknown_group",
             Error::Editor(_) => "editor",
             Error::InvalidAttachmentName(_) => "invalid_attachment_name",
             Error::AttachmentExists(_) => "attachment_exists",

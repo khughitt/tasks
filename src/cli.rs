@@ -345,6 +345,13 @@ pub enum Command {
         #[arg(long)]
         paths: bool,
     },
+    /// Named sets of registered projects, read together with --group.
+    Group {
+        #[command(subcommand)]
+        action: GroupAction,
+    },
+    /// Every group with its members and whether each is reachable.
+    Groups,
     /// The registered root of the project an id belongs to.
     Root {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
@@ -768,5 +775,21 @@ pub enum Command {
         /// The default and only scope; accepted for consistency with other read commands.
         #[arg(long)]
         all_projects: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GroupAction {
+    /// Create or replace a group; a retired prefix resolves to its live one.
+    Set {
+        /// Lowercase letters, digits, and -; not a registered or retired prefix.
+        name: String,
+        #[arg(required = true, add = ArgValueCandidates::new(crate::complete::prefixes))]
+        prefixes: Vec<String>,
+    },
+    /// Delete a group. Its projects stay registered.
+    Rm {
+        #[arg(add = ArgValueCandidates::new(crate::complete::groups))]
+        name: String,
     },
 }

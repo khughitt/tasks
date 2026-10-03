@@ -210,6 +210,14 @@ pub fn prefixes() -> Vec<CompletionCandidate> {
     plain(registry.projects.keys().cloned().collect::<Vec<_>>())
 }
 
+/// Declared group names, in name order. An unreadable registry offers nothing.
+pub fn groups() -> Vec<CompletionCandidate> {
+    let Ok(registry) = Registry::load() else {
+        return Vec::new();
+    };
+    plain(registry.groups.keys().cloned().collect::<Vec<_>>())
+}
+
 /// Subcommands whose first positional is a task id. `add`'s is a title, so it has no
 /// subject; guessing one there would read `tasks add fam-000001 --parent <TAB>` as an
 /// invocation against `fam`.

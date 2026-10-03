@@ -105,6 +105,33 @@ pub struct ProjectRow {
     pub last_activity: Option<String>,
 }
 
+/// `group set` and `group rm`: the group, and the members it now has (set) or had (rm).
+#[derive(Serialize)]
+pub struct GroupOut {
+    pub name: String,
+    pub members: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct GroupMember {
+    pub prefix: String,
+    /// The registered root exists and holds a config: the test `projects` applies.
+    pub reachable: bool,
+}
+
+#[derive(Serialize)]
+pub struct GroupRow {
+    pub name: String,
+    pub members: Vec<GroupMember>,
+}
+
+#[derive(Serialize)]
+pub struct GroupsOut {
+    pub groups: Vec<GroupRow>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Serialize)]
 pub struct ProjectsOut {
     pub projects: Vec<ProjectRow>,
@@ -874,6 +901,8 @@ pub enum Output {
     Add(AddOut),
     Root(RootOut),
     Projects(ProjectsOut),
+    Group(GroupOut),
+    Groups(GroupsOut),
     Show(Box<ShowOut>),
     Next(Box<NextOut>),
     List(ListOut),
@@ -928,6 +957,26 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
         Output::Id(o) => o.id.clone(),
         Output::Add(o) => o.id.clone(),
         Output::Root(o) => o.root.clone(),
+        Output::Group(o) => o.name.clone(),
+        Output::Groups(o) => o
+            .groups
+            .iter()
+            .map(|row| {
+                let members: Vec<String> = row
+                    .members
+                    .iter()
+                    .map(|member| {
+                        if member.reachable {
+                            member.prefix.clone()
+                        } else {
+                            format!("{} (unreachable)", member.prefix)
+                        }
+                    })
+                    .collect();
+                format!("{}  {}", row.name, members.join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         Output::Projects(o) if o.projects.is_empty() => String::new(),
         Output::Projects(o) => {
             // Header labels come from the same call the rows use, so a column can never
@@ -2027,6 +2076,8 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Id(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),
+        Output::Group(o) => o.warnings.clone(),
+        Output::Groups(o) => o.warnings.clone(),
         Output::Projects(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),
         Output::Next(o) => o.warnings.clone(),
