@@ -92,6 +92,13 @@ worktrees. `prime`, `ready`, and `next` show the halt and eligible work. An audi
 override is `tasks start <id> --force --reason "<one-line explanation>"`; its free-text
 reason is recorded on the halt and target, unlike park's fixed-list `--reason`.
 
+An exclusive need (`exclusive = true` under `[needs]`) is held by the live claim of the
+task that needs it, across every registered project on the host. Other sessions' steps
+that need it leave `ready`, `next` and `prime` with a warning naming the holder, and `start`
+refuses them with `need_held`. `tasks start <id> --force --reason "…"` overrides with a
+note on the task, and on the holder when it is in the same project. A park or a dead
+session releases the hold.
+
 Lifecycle notes automatically record native harness provenance, independently of
 claim identity and liveness. A stamped note has one indented JSON continuation:
 
@@ -305,7 +312,7 @@ from a clone):
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
     tasks --pretty --color auto ready # color when stdout is a terminal
     tasks start sci-4f2a9c
-    tasks start sci-4f2a9c --force --reason "restore the service"  # audited halt override
+    tasks start sci-4f2a9c --force --reason "restore the service"  # audited halt or held-need override
     tasks note sci-4f2a9c "spec §4 no longer holds"
     tasks attach sci-4f2a9c ~/Pictures/before.png --caption "the stale row"  # copy into tasks/files/<id>/
     tasks attach sci-4f2a9c --clipboard       # an image from wl-paste; --name to choose the name

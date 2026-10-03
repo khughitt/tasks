@@ -3,6 +3,9 @@
 **Status:** approved for implementation planning, 2026-10-03 (review round 5, at 8a7accd).
 Amended 2026-10-03 during plan review round 2: §5.1 `depends` applies only to work that
 could be a step. Task: tasks-ece1e2.
+Amended 2026-10-03 after the holds implementation: §4.4 "Atomic across projects" (the
+holds lock covers every holds change, through rollback), the read-view warning for an
+unresolved identity, and §4.5 gate order.
 Waiting ideas: tasks-9bdd68 (focus marker), tasks-77dbc6 (project groups),
 tasks-e02860 (lanes and shared resources). Brief:
 `docs/notes/2026-09-30-work-selection-brief.md`.
@@ -313,7 +316,8 @@ Two consequences:
 
 Read views (`ready`, `next`, `prime`, `lanes`) resolve "this session" the way
 `occupants` does. When the identity cannot be resolved, every hold counts as another
-session's.
+session's, and the view warns `session identity unresolved (<error>); every hold counts
+as another session's`.
 
 **Which stores are read.** The gate reads the claim store of every registered project,
 not only those in scope, so that a capture claimed in another project holds the host here
@@ -325,11 +329,16 @@ contributes no holds, following the halt pattern. It does not fail the command.
 `ClaimSnapshot::load_from_paths` stops at the first bad store, so this needs a new loader
 that tolerates each store separately.
 
-**Atomic across projects.** An acquire that would record a non-empty `holds` takes one
-host-wide lock, `claims/.holds.lock`, around the hold check and the claim save. A prefix
-cannot start with `.`, so no project's `claims/<prefix>.lock` can take that name. Two `start`s
-in different projects then cannot both win the same need. The project's mutation lock is
-taken first and the holds lock second, everywhere, so the order is fixed.
+**Atomic across projects.** The host-wide lock `claims/.holds.lock` is taken for any claim
+replacement that changes holds (adding one, reducing them, or removing the last) and for
+every acquire that records holds. It is held through the claim publish, the task write and
+any rollback of the claim, so no other project's acquire can see a need released for the
+instant before a failed write restores it. `save` refuses with an `io` error a holds
+change made without the lock. A release takes no holds lock, because it removes the claim
+only after the record is written. A prefix cannot start with `.`, so no project's
+`claims/<prefix>.lock` can take that name. Two `start`s in different projects then cannot
+both win the same need. The project's mutation lock is taken first and the holds lock
+second, everywhere, so the order is fixed.
 
 **Older binaries.** An older binary that saves the claim store drops `holds`, because
 unknown keys are ignored and dropped on save. The effect is a weaker gate, never a false
@@ -340,7 +349,9 @@ block. This is documented, not engineered around.
 - **`ready`, `next`, and the `ready` list in `prime`** drop a task that is held back
   (§4.4). Parked-agent candidates in `next` go through the same gate. Ordering is
   unchanged. Warnings are aggregated per need and holder:
-  `<n> task(s) wait for <need>, held by <holder id> (<session>)`.
+  `<n> task(s) wait for <need>, held by <holder id> (<session>)`. The gates apply in
+  this order: the hidden-task warning, `--without`, the complexity cutoff, then holds, so
+  a task another gate already hides is never counted as waiting.
 - **Acquire** refuses a held-back task with the error kind `need_held`, on every acquire
   path. This mirrors halt's `guard_new_start`:
   - `start --force --reason "<why>"` overrides. When the task is held back, `--force`
@@ -353,10 +364,15 @@ block. This is documented, not engineered around.
   - `--force` keeps its existing meaning of taking over another session's claim on the
     same task, which never raises `need_held` (§4.4).
 
+  A `start` that continues the caller's own live claim, which already holds every one of
+  the task's exclusive needs, acquires nothing new and is not gated.
+
   The override writes a note on the acquired task:
   `need override: acquired while <need> held by <holder>: <reason>`. A matching note goes
   on the holder only when the holder is in the same project, as halt does. A cross-project
-  write would need the other project's lock.
+  write would need the other project's lock, so none is made. The holder note is written
+  only after the acquiring task's save succeeds, so a refused or rolled-back acquire leaves
+  none; a holder note that then cannot be written is a warning.
 
 Needs change eligibility only through holds (§4.4) and `--without` (§4.3). A task that
 needs `owner` is still ready: the need tells whoever picks it what the step will ask of

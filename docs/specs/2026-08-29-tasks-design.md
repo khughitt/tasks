@@ -607,6 +607,25 @@ ready/next/prime += one warning "without <names>: <n> task(s) hidden" when
 check       += kind unknown_need (error): a record names a need [needs] does not declare
 error kinds += unknown_need: add/edit --need or an editor save naming an undeclared
                need; ready/next/prime --without naming one no project in scope declares
+ClaimInfo   += holds: [string]          the exclusive needs the claim holds; omitted when empty
+                                        (lanes/needs design §4.4). Reaches TaskSummary.claim,
+                                        prime.doing rows, show, and tasks claims
+ready/next  += a task whose exclusive need another session's live claim holds is omitted,
+prime          with one warning per need and holder:
+               "<n> task(s) wait for <need>, held by <id> (<session>)".
+               The gate runs after the hidden-task warning, --without, and the complexity
+               cutoff. When the session identity cannot be resolved, every hold counts as
+               another session's, with one warning
+start       += refuses need_held when another session's live claim on another task holds one
+               of the task's exclusive needs; --force --reason overrides and notes the task, and
+               the holder when it is in the same project (written only after the task's save
+               succeeds); --force alone is refused there. A re-start under the caller's own live
+               claim that already holds every exclusive need is not gated.
+               edit --status doing and editor saves to doing refuse the same way.
+edit        += --reason (only with --force --need under the caller's own claim; warns
+               "--reason was unused" when no held need was added); a needs change under
+               another session's live claim fails claimed
+errors      += need_held
 ```
 
 Pretty summary and parked rows include a process column, using `-` for unassessed;

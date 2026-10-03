@@ -79,6 +79,18 @@ nothing is eligible.
    halt, use `tasks start <id> --force --reason "<one-line explanation>"`. The reason
    is recorded on both the halt and the started task. Start's reason is free text;
    park's `--reason` below is a fixed choice from its own vocabulary.
+   A need declared `exclusive` names a host resource (an idle host, a device) and serves
+   one session at a time across every project on the host that uses the name. `start`
+   records the task's exclusive needs as holds on its claim. `ready`, `next` and `prime`
+   hide other sessions' steps that need a held resource, with a warning naming the holder.
+   Starting such a step (or `edit --status doing`) fails with `need_held`. Override it
+   deliberately with `tasks start <id> --force --reason "<why>"`, which notes the task and
+   a same-project holder. Your own session may start more steps that need what it already
+   holds. A park or a dead session releases the hold. A long run that keeps the resource
+   should heartbeat with `tasks note`, or a pid-less claim lapses with its TTL. Change the
+   needs of a claimed task only under your own claim (`start --force` takes it over first).
+   Adding an exclusive need that another session holds takes `tasks edit <id> --need <n>
+   --force --reason "<why>"`.
    Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, when a long-lived process id is available)
    when several agents share one terminal or harness process; otherwise agents that resolve
    to the same session id are indistinguishable to the claim store.
