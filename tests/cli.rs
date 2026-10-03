@@ -3277,7 +3277,9 @@ fn project_and_all_projects_conflict_on_every_read_command() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     env.init("fam");
-    for command in ["list", "ready", "next", "prime", "tree", "tags", "quiet"] {
+    for command in [
+        "list", "ready", "next", "prime", "lanes", "tree", "tags", "quiet",
+    ] {
         let out = env
             .cmd(&sci)
             .args([command, "--project", "fam", "--all-projects"])
@@ -19204,6 +19206,10 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
             vec!["next", "--max-complexity", "low"],
         ),
         (
+            (vec!["lanes"], "--max-complexity"),
+            vec!["lanes", "--max-complexity", "low"],
+        ),
+        (
             (vec!["graph"], "--format"),
             vec!["graph", "--format", "dot"],
         ),
@@ -24029,4 +24035,432 @@ fn under_selects_descendants_at_any_depth_on_list_ready_and_next() {
         env.fail(&sci, &["ready", "--under", "sci-ffffff"]),
         "task_not_found"
     );
+}
+
+#[test]
+fn lanes_view_reports_every_state_and_picks_as_next_does() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let ready_lane = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Ready lane",
+            "--lane",
+            "-p",
+            "0",
+            "-b",
+            "# Ready lane\n\nShip the captures.\nFirst milestone: one clean run.\n\nDetail.",
+        ],
+    ));
+    env.json(
+        &sci,
+        &["add", "Urgent step", "--parent", &ready_lane, "-p", "0"],
+    );
+    let resumed = id_of(env.json(
+        &sci,
+        &["add", "Resumed step", "--parent", &ready_lane, "-p", "3"],
+    ));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &resumed, "pick it up"])
+        .assert()
+        .success();
+    let held_lane = id_of(env.json(&sci, &["add", "Held lane", "--lane", "-p", "1"]));
+    let waits = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Needs quiet",
+            "--parent",
+            &held_lane,
+            "--need",
+            "quiet",
+        ],
+    ));
+    let capture = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet", "-p", "4"]));
+    as_agent(&env, &sci, "other")
+        .args(["start", &capture])
+        .assert()
+        .success();
+    let waiting_lane = id_of(env.json(&sci, &["add", "Waiting lane", "--lane", "-p", "2"]));
+    let review = id_of(env.json(&sci, &["add", "Review", "--parent", &waiting_lane]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &review, "look at it", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let empty_lane = id_of(env.json(&sci, &["add", "Empty lane", "--lane", "-p", "3"]));
+    let paused_lane = id_of(env.json(&sci, &["add", "Paused lane", "--lane", "-p", "4"]));
+    let running = id_of(env.json(&sci, &["add", "Running", "--parent", &paused_lane]));
+    as_agent(&env, &sci, "other")
+        .args(["start", &running])
+        .assert()
+        .success();
+    env.json(&sci, &["block", &paused_lane, "the host is busy"]);
+    let shelved_lane = id_of(env.json(&sci, &["add", "Shelved lane", "--lane"]));
+    env.json(&sci, &["shelve", &shelved_lane, "next quarter"]);
+
+    let view = json_as(&env, &sci, "me", &["lanes"]);
+    let rows = view["lanes"].as_array().unwrap();
+    let order: Vec<&str> = rows
+        .iter()
+        .map(|row| row["lane"]["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        order,
+        [
+            ready_lane.as_str(),
+            held_lane.as_str(),
+            waiting_lane.as_str(),
+            empty_lane.as_str(),
+            paused_lane.as_str()
+        ],
+        "lane order; the shelved lane is absent"
+    );
+
+    let ready = &rows[0];
+    assert_eq!(ready["state"], "ready");
+    assert_eq!(
+        ready["pick"]["id"], resumed,
+        "parked candidates first, as next takes them"
+    );
+    assert_eq!(ready["steps"], 1);
+    assert_eq!(
+        ready["guidance"],
+        "Ship the captures. First milestone: one clean run."
+    );
+    assert!(
+        ready.get("held").is_none() && ready.get("causes").is_none(),
+        "{ready}"
+    );
+    assert_eq!(
+        json_as(&env, &sci, "me", &["next", "--under", &ready_lane])["next"]["task"]["id"],
+        resumed
+    );
+
+    let held = &rows[1];
+    assert_eq!(held["state"], "held");
+    assert_eq!(held["pick"], serde_json::Value::Null);
+    assert_eq!(
+        held["held"],
+        serde_json::json!([{"id": waits, "need": "quiet", "holder": capture, "by": "claim"}])
+    );
+    assert_eq!(held["causes"], serde_json::json!({"held": 1}));
+    assert_eq!(held["steps"], 0, "a held step counts under held only");
+
+    assert_eq!(rows[2]["state"], "waiting");
+    assert_eq!(rows[2]["causes"], serde_json::json!({"user": 1}));
+    assert_eq!(rows[3]["state"], "empty");
+    assert_eq!(
+        rows[3]["guidance"],
+        serde_json::Value::Null,
+        "an empty body"
+    );
+
+    let paused = &rows[4];
+    assert_eq!(paused["state"], "paused");
+    assert_eq!(paused["pick"], serde_json::Value::Null);
+    assert_eq!(paused["active"][0]["id"], running);
+    assert!(paused.get("causes").is_none(), "{paused}");
+
+    let out = as_agent(&env, &sci, "me")
+        .args(["--pretty", "lanes"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains(&format!("ready → {resumed} Resumed step")),
+        "{text}"
+    );
+    assert!(
+        text.contains("    Ship the captures. First milestone: one clean run."),
+        "{text}"
+    );
+    assert!(text.contains(&format!("held: quiet ← {capture}")), "{text}");
+    assert!(text.contains("waiting: 1 user"), "{text}");
+    assert!(
+        text.contains(&format!("    active: {running} Running @")),
+        "{text}"
+    );
+
+    env.json(&sci, &["unblock", &paused_lane]);
+    let view = json_as(&env, &sci, "me", &["lanes"]);
+    assert_eq!(view["lanes"][4]["state"], "waiting");
+    assert_eq!(view["lanes"][4]["causes"], serde_json::json!({"active": 1}));
+}
+
+#[test]
+fn lanes_view_counts_every_live_descendant_once_including_recurrences() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let due_lane = id_of(env.json(&sci, &["add", "Due lane", "--lane", "-p", "0"]));
+    let due = id_of(env.json(&sci, &["add", "Due sweep", "--parent", &due_lane]));
+    env.json(&sci, &["done", &due]);
+    env.json(&sci, &["edit", &due, "--every", "30d"]);
+    let soon_lane = id_of(env.json(&sci, &["add", "Soon lane", "--lane", "-p", "1"]));
+    let soon = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Soon sweep",
+            "--parent",
+            &soon_lane,
+            "--every",
+            "30d",
+        ],
+    ));
+    env.json(&sci, &["start", &soon]);
+    env.json(&sci, &["done", &soon]);
+    let gone_lane = id_of(env.json(&sci, &["add", "Gone lane", "--lane", "-p", "2"]));
+    let gone = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Gone sweep",
+            "--parent",
+            &gone_lane,
+            "--every",
+            "30d",
+        ],
+    ));
+    env.json(&sci, &["drop", &gone, "retired"]);
+    let deep_lane = id_of(env.json(&sci, &["add", "Deep lane", "--lane", "-p", "3"]));
+    let deep_goal = id_of(env.json(&sci, &["add", "Deep goal", "--parent", &deep_lane]));
+    let deep_step = id_of(env.json(&sci, &["add", "Deep step", "--parent", &deep_goal]));
+
+    let mixed = id_of(env.json(&sci, &["add", "Mixed lane", "--lane", "-p", "4"]));
+    let first = id_of(env.json(&sci, &["add", "First", "--parent", &mixed, "-p", "0"]));
+    env.json(&sci, &["add", "Second", "--parent", &mixed, "-p", "1"]);
+    let sub = id_of(env.json(&sci, &["add", "Sub-goal", "--parent", &mixed, "-p", "1"]));
+    env.json(&sci, &["add", "Sub step", "--parent", &sub, "-p", "2"]);
+    let blocked = id_of(env.json(&sci, &["add", "Blocked", "--parent", &mixed]));
+    env.json(&sci, &["block", &blocked, "why"]);
+    let both = id_of(env.json(&sci, &["add", "Deferred and blocked", "--parent", &mixed]));
+    env.json(&sci, &["block", &both, "why"]);
+    env.json(&sci, &["edit", &both, "--defer", "2099-01-01"]);
+    env.json(
+        &sci,
+        &["add", "Depends", "--parent", &mixed, "--depends", &blocked],
+    );
+    env.json(
+        &sci,
+        &["add", "Idea", "--parent", &mixed, "--status", "idea"],
+    );
+    let closed = id_of(env.json(&sci, &["add", "Closed", "--parent", &mixed]));
+    env.json(&sci, &["done", &closed, "landed"]);
+    let shelved = id_of(env.json(
+        &sci,
+        &["add", "Shelved", "--parent", &mixed, "--status", "idea"],
+    ));
+    env.json(&sci, &["shelve", &shelved, "later"]);
+
+    let view = env.json(&sci, &["lanes"]);
+    let rows = view["lanes"].as_array().unwrap();
+    assert_eq!(rows[0]["state"], "ready", "{view}");
+    assert_eq!(rows[0]["pick"]["id"], due, "a due recurrence is the pick");
+    assert_eq!(rows[1]["state"], "waiting");
+    assert_eq!(
+        rows[1]["causes"],
+        serde_json::json!({"periodic": 1}),
+        "not empty"
+    );
+    assert_eq!(
+        rows[2]["state"], "empty",
+        "a dropped recurrence is not live"
+    );
+    assert_eq!(
+        rows[3]["pick"]["id"], deep_step,
+        "picked from inside the sub-goal"
+    );
+    assert_eq!(rows[3]["causes"], serde_json::json!({"goal": 1}));
+
+    let row = &rows[4];
+    assert_eq!(row["lane"]["id"], mixed);
+    assert_eq!(row["pick"]["id"], first);
+    assert_eq!(row["steps"], 2, "Second and Sub step");
+    assert_eq!(
+        row["causes"],
+        serde_json::json!({"deferred": 1, "blocked": 1, "depends": 1, "goal": 1, "other": 1}),
+        "deferred-and-blocked counts once, under deferred; closed and shelved are absent"
+    );
+}
+
+#[test]
+fn an_earlier_lane_wins_a_contested_exclusive_need_without_reordering_next() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let first_lane = id_of(env.json(&sci, &["add", "First lane", "--lane", "-p", "1"]));
+    let a1 = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "A1",
+            "--parent",
+            &first_lane,
+            "--need",
+            "quiet",
+            "-p",
+            "2",
+        ],
+    ));
+    let second_lane = id_of(env.json(&sci, &["add", "Second lane", "--lane", "-p", "2"]));
+    let b1 = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "B1",
+            "--parent",
+            &second_lane,
+            "--need",
+            "quiet",
+            "-p",
+            "0",
+        ],
+    ));
+    let b2 = id_of(env.json(&sci, &["add", "B2", "--parent", &second_lane, "-p", "3"]));
+
+    let view = env.json(&sci, &["lanes"]);
+    let rows = view["lanes"].as_array().unwrap();
+    assert_eq!(rows[0]["pick"]["id"], a1);
+    assert_eq!(
+        rows[1]["pick"]["id"], b2,
+        "the later lane picks its next step"
+    );
+    assert_eq!(
+        rows[1]["held"],
+        serde_json::json!([{"id": b1, "need": "quiet", "holder": a1, "by": "pick"}])
+    );
+    assert_eq!(rows[1]["causes"], serde_json::json!({"held": 1}));
+    assert_eq!(rows[1]["steps"], 0);
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        b1,
+        "lane order never reorders next"
+    );
+
+    env.json(&sci, &["drop", &b2, "not needed"]);
+    let view = env.json(&sci, &["lanes"]);
+    assert_eq!(view["lanes"][1]["state"], "held");
+    assert_eq!(view["lanes"][1]["pick"], serde_json::Value::Null);
+}
+
+#[test]
+fn lanes_view_reports_the_session_gates_as_causes() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("owner", "the owner judges", false)]);
+    let lane = id_of(env.json(&sci, &["add", "Lane", "--lane", "-p", "1"]));
+    env.json(
+        &sci,
+        &[
+            "add",
+            "Needs the owner",
+            "--parent",
+            &lane,
+            "-p",
+            "0",
+            "--need",
+            "owner",
+            "--complexity",
+            "low",
+        ],
+    );
+    env.json(&sci, &["add", "Unrated", "--parent", &lane, "-p", "1"]);
+    env.json(
+        &sci,
+        &[
+            "add",
+            "Below the halt",
+            "--parent",
+            &lane,
+            "-p",
+            "3",
+            "--complexity",
+            "low",
+        ],
+    );
+    env.json(&sci, &["add", "Stop the line", "-p", "0", "--tag", "halt"]);
+
+    let view = env.json(
+        &sci,
+        &["lanes", "--without", "owner", "--max-complexity", "low"],
+    );
+    assert_eq!(view["lanes"][0]["state"], "waiting", "{view}");
+    assert_eq!(
+        view["lanes"][0]["causes"],
+        serde_json::json!({"without": 1, "cutoff": 1, "halt": 1})
+    );
+    assert_eq!(env.json(&sci, &["lanes"])["lanes"][0]["state"], "ready");
+    assert_eq!(
+        env.fail(&sci, &["lanes", "--without", "nope"]),
+        "unknown_need"
+    );
+}
+
+#[test]
+fn lanes_across_projects_name_their_own_lane() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let sci_lane = id_of(env.json(&sci, &["add", "Sci lane", "--lane", "-p", "1"]));
+    env.json(&sci, &["add", "Sci step", "--parent", &sci_lane]);
+    let fam_lane = id_of(env.json(&fam, &["add", "Fam lane", "--lane", "-p", "0"]));
+    let fam_goal = id_of(env.json(&fam, &["add", "Fam goal", "--parent", &fam_lane]));
+    let fam_step = id_of(env.json(&fam, &["add", "Fam step", "--parent", &fam_goal]));
+
+    let view = env.json(&sci, &["lanes", "--all-projects"]);
+    let rows = view["lanes"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{view}");
+    assert_eq!(
+        rows[0]["lane"]["id"], fam_lane,
+        "priority orders across projects"
+    );
+    assert_eq!(rows[0]["lane"]["in_lane"], fam_lane);
+    assert_eq!(rows[0]["pick"]["id"], fam_step);
+    assert_eq!(rows[0]["pick"]["in_lane"], fam_lane);
+    assert_eq!(rows[1]["pick"]["in_lane"], sci_lane);
+
+    assert_eq!(
+        env.json(&sci, &["lanes"])["lanes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        env.json(&sci, &["lanes", "--project", "fam"])["lanes"][0]["lane"]["id"],
+        fam_lane
+    );
+}
+
+#[test]
+fn lanes_view_reads_holds_only_where_a_project_declares_an_exclusive_need() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let _fam = env.init("fam");
+    let lane = id_of(env.json(&sci, &["add", "Lane", "--lane"]));
+    env.json(&sci, &["add", "Step", "--parent", &lane]);
+    let store = env.claim_store("fam");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "claims = [not toml").unwrap();
+    let unknown = |view: &serde_json::Value| {
+        warnings_of(view)
+            .iter()
+            .filter(|w| w.starts_with("hold state unknown for fam"))
+            .count()
+    };
+
+    let view = env.json(&sci, &["lanes"]);
+    assert_eq!(view["lanes"][0]["state"], "ready", "{view}");
+    assert_eq!(
+        unknown(&view),
+        0,
+        "no exclusive need: no claim store is read: {view}"
+    );
+
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let view = env.json(&sci, &["lanes"]);
+    assert_eq!(view["lanes"][0]["state"], "ready", "{view}");
+    assert_eq!(unknown(&view), 1, "{view}");
 }

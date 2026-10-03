@@ -674,6 +674,23 @@ pub enum Command {
         #[command(flatten)]
         without: WithoutArgs,
     },
+    /// Each open lane: its guidance, its state, and the step it could take now.
+    Lanes {
+        #[command(flatten)]
+        without: WithoutArgs,
+        /// Hide steps rated above this level and unassessed steps; overrides
+        /// TASKS_MAX_COMPLEXITY.
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            add = ArgValueCandidates::new(crate::complete::complexities),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
+        max_complexity: Option<String>,
+        #[command(flatten)]
+        scope: ScopeArgs,
+    },
     /// File feedback about a project's tooling into that project.
     Feedback {
         /// The registered project that owns the tooling; its config must have [feedback].

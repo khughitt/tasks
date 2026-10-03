@@ -7,6 +7,7 @@ pub mod edit;
 pub mod feedback;
 pub mod graph;
 pub mod init;
+pub mod lanes;
 pub mod list;
 pub mod park;
 pub mod parked;
@@ -1707,6 +1708,11 @@ pub fn run(cli: Cli) -> Result<Output> {
             closed,
             without,
         } => list::prime(open_read_ctx(dir, &scope)?, closed, without.without),
+        Command::Lanes {
+            without,
+            max_complexity,
+            scope,
+        } => lanes::run(open_read_ctx(dir, &scope)?, without, max_complexity),
         Command::Note { id, text, stamp } => {
             status::note(open_id_write_ctx(dir, &id)?, id, text, stamp)
         }

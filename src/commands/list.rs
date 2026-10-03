@@ -255,7 +255,7 @@ pub fn ready_tasks(
     })
 }
 
-fn halt_snapshots(ctx: &mut ReadCtx, all: &[Task]) -> HashMap<String, HaltSnapshot> {
+pub(super) fn halt_snapshots(ctx: &mut ReadCtx, all: &[Task]) -> HashMap<String, HaltSnapshot> {
     let mut snapshots = HashMap::new();
     for project in ctx.scope.projects() {
         let local: Vec<Task> = all
@@ -372,13 +372,7 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
     if snapshot.is_empty() {
         return Ok(());
     }
-    let me = crate::claims::resolve_identity(&mut ctx.warnings);
-    if let crate::claims::Resolution::Failed(error) = &me {
-        ctx.warnings.push(format!(
-            "session identity unresolved ({error}); every hold counts as another session's"
-        ));
-    }
-    let mine = super::read_holds(&snapshot, &me)?;
+    let mine = view_holds(&snapshot, &mut ctx.warnings)?;
     let mut held = crate::holds::HeldWarnings::default();
     tasks.retain(|task| {
         let Some(vocabulary) = vocabularies.get(task.id.prefix.as_str()) else {
@@ -394,6 +388,22 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
     });
     ctx.warnings.extend(held.into_warnings());
     Ok(())
+}
+
+/// The caller's own holds in `snapshot`, by the read views' rule (`read_holds`): the
+/// session's identity is resolved here, and when that fails every hold counts as another
+/// session's, with a warning naming the error.
+pub(super) fn view_holds(
+    snapshot: &crate::holds::HoldSnapshot,
+    warnings: &mut Vec<String>,
+) -> Result<crate::holds::Mine> {
+    let me = crate::claims::resolve_identity(warnings);
+    if let crate::claims::Resolution::Failed(error) = &me {
+        warnings.push(format!(
+            "session identity unresolved ({error}); every hold counts as another session's"
+        ));
+    }
+    super::read_holds(snapshot, &me)
 }
 
 /// Every in-scope project's vocabulary, by prefix: the names `--without` may use, and

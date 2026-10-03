@@ -544,6 +544,16 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["lanes"]
+summary = "Each open lane: its guidance, its state, and the step it could take now"
+options = [
+  { names = ["--without"], value = "string", repeatable = true },
+  { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+[[cli.tasks.commands]]
 path = ["feedback"]
 summary = "File feedback about a project's tooling into that project"
 args = [{ name = "summary", value = "string", required = true }]

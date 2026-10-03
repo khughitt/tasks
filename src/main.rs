@@ -14,6 +14,7 @@ mod frontmatter;
 mod halt;
 mod hierarchy;
 mod holds;
+mod lanes;
 mod model;
 mod needs;
 mod output;

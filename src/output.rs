@@ -2,6 +2,7 @@ use std::io::IsTerminal;
 use unicode_width::UnicodeWidthChar;
 
 use crate::error::{Error, Result};
+use crate::lanes::{Causes, LaneRow, LaneState};
 use crate::model::{Complexity, Process, Size, Status, Task, TaskId};
 use crate::registry::Registry;
 use crate::style::{Painter, Style, When};
@@ -825,6 +826,13 @@ pub struct PrimeOut {
     pub warnings: Vec<String>,
 }
 
+/// `tasks lanes` (lanes design §5.3).
+#[derive(Serialize)]
+pub struct LanesOut {
+    pub lanes: Vec<LaneRow>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Serialize)]
 pub struct GraphOut {
     pub format: String,
@@ -871,6 +879,7 @@ pub enum Output {
     Quiet(QuietOut),
     Claims(ClaimsOut),
     Prime(PrimeOut),
+    Lanes(LanesOut),
     Graph(GraphOut),
     Check(CheckOut),
     Tree(TreeOut),
@@ -1157,6 +1166,12 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             ));
             rendered
         }
+        Output::Lanes(o) => lane_lines(
+            &o.lanes,
+            painter,
+            id_width(o.lanes.iter().map(|row| row.lane.id.as_str())),
+            true,
+        ),
         Output::Graph(o) => o.text.clone(),
         Output::Check(o) => {
             let mut rendered = String::new();
@@ -1384,6 +1399,72 @@ fn tree_text(
     rendered
 }
 
+/// One line per lane: id, priority, title, then its state with the pick or its main
+/// cause (lanes design §5.3). `detail` adds the guidance and the active claims under each
+/// row, as `tasks lanes` prints them; `prime` leaves them out.
+fn lane_lines(rows: &[LaneRow], painter: &Painter, id_width: usize, detail: bool) -> String {
+    let mut rendered = String::new();
+    for row in rows {
+        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.lane.id));
+        let priority = painter.paint(
+            Style::Priority(row.lane.priority),
+            &format!("P{}", row.lane.priority),
+        );
+        let state = match row.state {
+            LaneState::Ready => {
+                let pick = row.pick.as_ref().expect("a ready lane has a pick");
+                format!("ready → {} {}", pick.id, pick.title)
+            }
+            LaneState::Held => {
+                let first = row
+                    .held
+                    .first()
+                    .expect("a held lane names what it waits for");
+                format!("held: {} ← {}", first.need, first.holder)
+            }
+            LaneState::Waiting => waiting_text(&row.causes),
+            LaneState::Paused => "paused".into(),
+            LaneState::Empty => "empty".into(),
+        };
+        rendered.push_str(&format!(
+            "{id}  {priority}  {}  {}\n",
+            row.lane.title,
+            painter.paint(Style::Emphasis, &state)
+        ));
+        if !detail {
+            continue;
+        }
+        if let Some(guidance) = &row.guidance {
+            rendered.push_str(&format!("    {guidance}\n"));
+        }
+        for active in &row.active {
+            let holder = active
+                .claim
+                .as_ref()
+                .map(|claim| format!(" @{} [{}]", claim.owner, claim.session))
+                .unwrap_or_default();
+            rendered.push_str(&painter.paint(
+                Style::Chrome,
+                &format!("    active: {} {}{holder}", active.id, active.title),
+            ));
+            rendered.push('\n');
+        }
+    }
+    rendered
+}
+
+/// `waiting: 2 user, 1 deferred`: every cause with its count, the largest first, ties in
+/// table order.
+fn waiting_text(causes: &Causes) -> String {
+    let mut entries = causes.entries();
+    entries.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    let parts: Vec<String> = entries
+        .iter()
+        .map(|(cause, count)| format!("{count} {cause}"))
+        .collect();
+    format!("waiting: {}", parts.join(", "))
+}
+
 /// Whether a pretty rendering must reserve the parallel column. Decided once per command
 /// output and passed into `table`: `tree_text` and `prime`'s roadmap call `table` one row
 /// at a time, so a per-call decision would shift dates between adjacent siblings.
@@ -1452,6 +1533,7 @@ pub fn needs_theme(out: &Output) -> bool {
         out,
         Output::List(_)
             | Output::Prime(_)
+            | Output::Lanes(_)
             | Output::Tree(_)
             | Output::Parked(_)
             | Output::Quiet(_)
@@ -1464,7 +1546,7 @@ pub fn needs_theme(out: &Output) -> bool {
 pub fn shows_priority(out: &Output) -> bool {
     matches!(
         out,
-        Output::List(_) | Output::Prime(_) | Output::Tree(_) | Output::Quiet(_)
+        Output::List(_) | Output::Prime(_) | Output::Lanes(_) | Output::Tree(_) | Output::Quiet(_)
     )
 }
 
@@ -1941,6 +2023,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Quiet(o) => o.warnings.clone(),
         Output::Claims(_) => Vec::new(),
         Output::Prime(o) => o.warnings.clone(),
+        Output::Lanes(o) => o.warnings.clone(),
         Output::Graph(o) => o.warnings.clone(),
         Output::Check(o) => o
             .warnings
