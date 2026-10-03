@@ -253,6 +253,8 @@ fn main() {
                         | output::Output::Prime(_)
                         | output::Output::Parked(_)
                         | output::Output::Tree(_)
+                        | output::Output::Show(_)
+                        | output::Output::Next(_)
                 ) {
                 match output::terminal_width() {
                     Ok(Some(width)) => output::Wrap::at(width),

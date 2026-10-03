@@ -2024,11 +2024,11 @@ fn an_invalid_columns_value_fails_as_config() {
 }
 
 #[test]
-fn columns_only_applies_to_pretty_tables() {
+fn columns_applies_to_pretty_output_only() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "A task"]));
-    for args in [vec!["--json", "list"], vec!["--pretty", "show", &id]] {
+    for args in [vec!["--json", "list"], vec!["--json", "show", &id]] {
         let out = env
             .cmd(&sci)
             .env("COLUMNS", "wide")
@@ -2041,6 +2041,17 @@ fn columns_only_applies_to_pretty_tables() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
+    let pretty = env
+        .cmd(&sci)
+        .env("COLUMNS", "wide")
+        .args(["--pretty", "show", &id])
+        .output()
+        .unwrap();
+    assert_eq!(
+        pretty.status.code(),
+        Some(1),
+        "pretty show now reads COLUMNS"
+    );
 }
 
 #[test]
@@ -7639,7 +7650,7 @@ fn colored_tables_use_semantic_roles_without_changing_layout() {
 }
 
 #[test]
-fn colored_show_keeps_bold_priority_without_a_warning() {
+fn colored_show_paints_dates_and_priorities_from_the_theme() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let id = id_of(env.json(&dir, &["add", "Urgent", "-p", "1"]));
@@ -7650,8 +7661,96 @@ fn colored_show_keeps_bold_priority_without_a_warning() {
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("\x1b[1mP1\x1b[0m"), "{text:?}");
+    assert!(text.contains("\x1b[38;2;215;95;215mP1\x1b[0m"), "{text:?}");
+    assert!(
+        text.contains("\x1b[38;2;0;215;255m"),
+        "created today paints: {text:?}"
+    );
     assert!(String::from_utf8(out.stderr).unwrap().is_empty());
+}
+
+#[test]
+fn colored_show_warns_like_list_when_the_palette_lacks_magenta() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Urgent", "-p", "1"]));
+    let out = env
+        .cmd(&dir)
+        .env("TASKS_PALETTE", "fg=#e5e3d7 bg=#13140d cyan=#00d7ff")
+        .args(["--pretty", "--color", "always", "show", &id])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("\x1b[1mP1\x1b[0m"), "{text:?}");
+    assert!(
+        String::from_utf8(out.stderr)
+            .unwrap()
+            .contains("priority colors off: TASKS_PALETTE has no magenta")
+    );
+}
+
+#[test]
+fn pretty_show_and_next_wrap_at_columns_and_json_ignores_it() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let long = "word ".repeat(40);
+    let id = id_of(env.json(&dir, &["add", "Wrapped", "-b", long.trim_end()]));
+    for command in [vec!["show", id.as_str()], vec!["next"]] {
+        let out = env
+            .cmd(&dir)
+            .env("COLUMNS", "60")
+            .arg("--pretty")
+            .args(&command)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{command:?}");
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(text.contains("── description"), "{command:?}: {text}");
+        assert!(
+            text.lines().all(|line| line.chars().count() <= 60),
+            "{command:?}: {text}"
+        );
+
+        let invalid = env
+            .cmd(&dir)
+            .env("COLUMNS", "0")
+            .arg("--pretty")
+            .args(&command)
+            .output()
+            .unwrap();
+        assert_eq!(invalid.status.code(), Some(1), "{command:?}");
+        assert!(
+            String::from_utf8(invalid.stderr)
+                .unwrap()
+                .contains("COLUMNS"),
+            "{command:?}"
+        );
+
+        let json = env
+            .cmd(&dir)
+            .env("COLUMNS", "0")
+            .args(&command)
+            .output()
+            .unwrap();
+        assert!(json.status.success(), "{command:?}: JSON ignores COLUMNS");
+        let plain = env.cmd(&dir).args(&command).output().unwrap();
+        assert_eq!(json.stdout, plain.stdout, "{command:?}: JSON unchanged");
+    }
+}
+
+#[test]
+fn piped_pretty_show_keeps_notes_on_one_line() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Piped"]));
+    let long = "word ".repeat(40);
+    env.json(&dir, &["note", &id, long.trim_end()]);
+    let text = env.pretty(&dir, &["show", &id]);
+    assert!(
+        text.contains(&format!("\n    {}\n", long.trim_end())),
+        "{text}"
+    );
 }
 
 #[test]
@@ -7805,7 +7904,7 @@ fn colored_show_paints_fields_with_table_roles() {
     for span in [
         format!("\x1b[2m({id})\x1b[0m"),
         "\x1b[33mdoing\x1b[0m".to_string(),
-        "\x1b[1mP0\x1b[0m".to_string(),
+        "\x1b[1;38;2;215;95;215mP0\x1b[0m".to_string(),
         format!("\x1b[2m{owner}\x1b[0m"),
         format!("\x1b[2m{parent}\x1b[0m"),
         format!("\x1b[2m{dep}\x1b[0m"),

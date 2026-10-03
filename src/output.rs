@@ -1443,8 +1443,8 @@ fn id_width_tree(nodes: &[TreeNode]) -> usize {
 }
 
 /// Whether a pretty rendering of `out` paints from the theme's colors, and so whether
-/// the stdout painter needs them (date spec §3.1; priority spec §3.1). Every output with
-/// a priority column also has a date column.
+/// the stdout painter needs them (date spec §3.1; priority spec §3.1). Every output showing
+/// a priority also shows dates, including show and next.
 pub fn needs_theme(out: &Output) -> bool {
     matches!(
         out,
@@ -1455,6 +1455,8 @@ pub fn needs_theme(out: &Output) -> bool {
             | Output::Parked(_)
             | Output::Quiet(_)
             | Output::Projects(_)
+            | Output::Show(_)
+            | Output::Next(_)
     )
 }
 
@@ -1463,7 +1465,13 @@ pub fn needs_theme(out: &Output) -> bool {
 pub fn shows_priority(out: &Output) -> bool {
     matches!(
         out,
-        Output::List(_) | Output::Prime(_) | Output::Lanes(_) | Output::Tree(_) | Output::Quiet(_)
+        Output::List(_)
+            | Output::Prime(_)
+            | Output::Lanes(_)
+            | Output::Tree(_)
+            | Output::Quiet(_)
+            | Output::Show(_)
+            | Output::Next(_)
     )
 }
 
@@ -2296,6 +2304,13 @@ mod tests {
         });
         assert!(needs_theme(&list));
         assert!(shows_priority(&list));
+        let show = Output::Next(Box::new(NextOut {
+            next: None,
+            halts: vec![],
+            warnings: vec![],
+        }));
+        assert!(needs_theme(&show));
+        assert!(shows_priority(&show));
         let parked = Output::Parked(ParkedOut {
             tasks: vec![],
             warnings: vec![],
