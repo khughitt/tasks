@@ -54,15 +54,15 @@ code; integration tests are in `tests/cli.rs`, using `tests/common/mod.rs`, whos
 
 ---
 
-### Task 1: `present` module and the heading role
+### Task 1: the `present` module
 
-Moves every field's role into one module and adds `Style::Heading`. No visible output
-changes.
+Moves every field's role into one module. No visible output changes. The heading role
+waits for Task 2, its first caller: an unused item fails `just check` (`dead_code` is
+denied through clippy's `-D warnings`).
 
 **Files:**
 - Create: `src/present.rs`
 - Modify: `src/main.rs` (add `mod present;` after `mod palette;`)
-- Modify: `src/style.rs` (`Style` enum, `Painter::paint`, tests)
 - Modify: `src/output.rs` (`count_column`, the `projects` grid, `lane_lines`, `table`,
   `parked_table`, `quiet_briefs`; delete `date_role`)
 
@@ -72,8 +72,7 @@ changes.
     `Span::plain(impl Into<String>) -> Span`, `Span::left(self, width: usize) -> Span`,
     and `Span::paint(&self, &Painter) -> String`.
   - Field functions:
-    - `present::id(&str)`, `title(&str, Option<Rgb>)`, `heading(&str, Option<Rgb>)`,
-      `project(&str, Option<Rgb>)`
+    - `present::id(&str)`, `title(&str, Option<Rgb>)`, `project(&str, Option<Rgb>)`
     - `status(Status)`, `status_of(Option<Status>)`, `priority(u8)`
     - `size(Option<Size>)`, `complexity(Option<Complexity>)`,
       `process(Option<Process>, unset: &str)`
@@ -81,64 +80,8 @@ changes.
       `count(Status, usize)`
 
     All return `Span`.
-  - `Style::Heading(Option<Rgb>)`: bold, or bold in the color when one is given.
 
-- [ ] **Step 1: Write the failing style test**
-
-In `src/style.rs`'s `painter_obeys_format_mode_stream_and_roles`, after the
-`(Style::Warning, "33"),` entry of the role table, add:
-
-```rust
-            (Style::Heading(None), "1"),
-```
-
-And after that loop, add:
-
-```rust
-        assert_eq!(
-            colored.paint(
-                Style::Heading(Some(Rgb {
-                    r: 1,
-                    g: 2,
-                    b: 3
-                })),
-                "x"
-            ),
-            "\x1b[1;38;2;1;2;3mx\x1b[0m"
-        );
-```
-
-`Rgb` is imported further down in that test module (`use crate::palette::{Palette, Rgb};`).
-Move that `use` to the top of `mod tests` if the compiler needs it earlier.
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `just test-one painter_obeys_format_mode_stream_and_roles`
-Expected: compile error, `no variant named Heading`.
-
-- [ ] **Step 3: Add the role**
-
-In `src/style.rs`, add a variant to `pub enum Style` after `Priority(u8)`:
-
-```rust
-    /// A heading: a `show` section name, a task title shown as a heading, a body `#` line.
-    /// Bold; in the project's color when it has one (show layout spec §4.2).
-    Heading(Option<Rgb>),
-```
-
-In `Painter::paint`'s `match style`, before `Style::Status(Status::Idea)`, add:
-
-```rust
-            Style::Heading(None) => "1".into(),
-            Style::Heading(Some(color)) => format!("1;38;2;{};{};{}", color.r, color.g, color.b),
-```
-
-- [ ] **Step 4: Run it to verify it passes**
-
-Run: `just test-one painter_obeys_format_mode_stream_and_roles`
-Expected: PASS.
-
-- [ ] **Step 5: Write `src/present.rs` with its tests**
+- [ ] **Step 1: Write `src/present.rs` with its tests**
 
 ```rust
 //! The look of each task field, decided once (show layout spec §4). Views ask this module
@@ -199,11 +142,6 @@ pub fn title(title: &str, project: Option<Rgb>) -> Span {
         text: title.into(),
         style: project.map(Style::Project),
     }
-}
-
-/// Text shown as a heading: bold, in the project's color when it has one.
-pub fn heading(text: &str, project: Option<Rgb>) -> Span {
-    Span::styled(text, Style::Heading(project))
 }
 
 /// A project prefix: its color when assigned, else dim.
@@ -289,6 +227,7 @@ mod tests {
     #[test]
     fn fields_carry_their_roles() {
         assert_eq!(id("xx-000001").style, Some(Style::Chrome));
+        assert_eq!(owner("me").style, Some(Style::Chrome));
         assert_eq!(status(Status::Doing).style, Some(Style::Status(Status::Doing)));
         assert_eq!(status_of(None), Span::styled("?", Style::Chrome));
         assert_eq!(priority(1), Span::styled("P1", Style::Priority(1)));
@@ -348,14 +287,14 @@ mod tests {
 
 Add `mod present;` to `src/main.rs` after `mod palette;`.
 
-- [ ] **Step 6: Run the present tests to verify the guard fails**
+- [ ] **Step 2: Run the present tests to verify the guard fails**
 
 Run: `just test-one present::`
 Expected: `fields_carry_their_roles`, `a_date_shows_the_day_and_paints_by_it` and
 `left_pads_before_painting` PASS. `field_roles_are_built_only_here` FAILS, because
 `output.rs` still builds `Style::Status(` and the other roles.
 
-- [ ] **Step 7: Route `output.rs`'s field cells through `present`**
+- [ ] **Step 3: Route `output.rs`'s field cells through `present`**
 
 In `src/output.rs`:
 
@@ -417,9 +356,9 @@ fn count_column(label: &'static str, value: usize, status: Status) -> CountColum
             .unwrap_or_else(|| "-".into());
         let id = present::id(&row.id).left(id_width).paint(painter);
         let priority = present::priority(row.priority).paint(painter);
-        let size = present::size(row.size).text;
-        let complexity = present::complexity(row.complexity).text;
-        let process = present::process(row.process, "-").text;
+        let size = present::size(row.size).left(2).paint(painter);
+        let complexity = present::complexity(row.complexity).left(4).paint(painter);
+        let process = present::process(row.process, "-").left(7).paint(painter);
         let status = present::status(row.status).left(7).paint(painter);
         let tags = if row.tags.is_empty() {
             String::new()
@@ -428,18 +367,28 @@ fn count_column(label: &'static str, value: usize, status: Status) -> CountColum
         };
 ```
 
-   Leave the `size`/`complexity`/`process` padding in the `prefix` format string unchanged
-   (`{size:<2} {complexity:<4} {process:<7}`). Replace the `owner` match:
+   Every field keeps the style its span carries: pad with `left`, then `paint`, never take
+   `.text` alone for a field. The three columns are padded already, so drop their width
+   specifiers from the `prefix` format string:
+
+```rust
+        let prefix = format!(
+            "{id}  {priority} {size} {complexity} {process} {status} {mark}{kind}{date}  "
+        );
+```
+
+   Replace the `owner` match with a span, so the owner piece takes its style from
+   `present` too:
 
 ```rust
         let owner = match &row.claim {
-            Some(claim) => format!(" @{}", present::claim(claim).text),
-            None => row
-                .owner
-                .as_ref()
-                .map(|owner| format!(" @{}", present::owner(owner).text))
-                .unwrap_or_default(),
+            Some(claim) => Some(present::claim(claim)),
+            None => row.owner.as_deref().map(present::owner),
         };
+        let owner_text = owner
+            .as_ref()
+            .map(|span| format!(" @{}", span.text))
+            .unwrap_or_default();
 ```
 
    In the `render_row` pieces, replace the title and tags entries:
@@ -449,14 +398,20 @@ fn count_column(label: &'static str, value: usize, status: Status) -> CountColum
                 (tags.as_str(), present::tags(&row.tags).style),
 ```
 
-   Leave the cadence, deferral, quiet and owner entries as they are: chrome and emphasis
-   are not field roles.
+   and the owner entry:
+
+```rust
+                (owner_text.as_str(), owner.as_ref().and_then(|span| span.style)),
+```
+
+   Leave the cadence, deferral and quiet entries as they are: emphasis is not a field
+   role.
 6. In `parked_table`:
 
 ```rust
         let id = present::id(&row.id).left(id_width).paint(painter);
         let status = present::status_of(row.status).left(7).paint(painter);
-        let process = present::process(row.process, "-").text;
+        let process = present::process(row.process, "-").left(7).paint(painter);
         let parked = present::date(&park.at).paint(painter);
 ```
 
@@ -481,11 +436,14 @@ fn count_column(label: &'static str, value: usize, status: Status) -> CountColum
    - In `show_text`'s `related_row`, `painter.paint(Style::Status(status), status.as_str())`
      becomes `present::status(status).paint(painter)`.
 
+   In `parked_table`'s `prefix` format string, change `{process:<7}` to `{process}`; the
+   span is padded already.
+
 `status_of(None)` now paints `?` as chrome in `parked_table`, which already did that.
 `present::claim` builds the same text the old `owner` match did: `" @owner [session]"`, or
 `" @owner [session stale]"`.
 
-- [ ] **Step 8: Run the guard and the fast suite**
+- [ ] **Step 4: Run the guard and the fast suite**
 
 Run: `just test-one present::`
 Expected: all four PASS.
@@ -494,11 +452,11 @@ Run: `just test-fast`
 Expected: PASS with no test edits. Any failure means a table's output changed: fix the
 call site, not the test.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 just check
-git add src/present.rs src/main.rs src/style.rs src/output.rs
+git add src/present.rs src/main.rs src/output.rs
 git commit -m "refactor(output): take every field's role from one present module"
 ```
 
@@ -506,10 +464,11 @@ git commit -m "refactor(output): take every field's role from one present module
 
 ### Task 2: the `show` layout
 
-Replaces the file-shaped `show` text with the spec §3 layout and updates the integration
-tests that assert the old text.
+Adds the heading role, replaces the file-shaped `show` text with the spec §3 layout, and
+updates the integration tests that assert the old text.
 
 **Files:**
+- Modify: `src/style.rs` (`Style::Heading`, `Painter::paint`, tests)
 - Create: `src/show_text.rs`
 - Modify: `src/main.rs` (add `mod show_text;` after `mod shorthand;`)
 - Modify: `src/output.rs`:
@@ -518,21 +477,88 @@ tests that assert the old text.
   - route `Show`/`Next` in `pretty` to the new renderer;
   - delete `paint_frontmatter`, `paint_field` and `show_text`.
 - Modify: `src/commands/show.rs` (set `project_color` in `describe`)
-- Modify: `src/present.rs` (the guard covers `show_text.rs`)
-- Test: `src/show_text.rs` (unit), `tests/cli.rs` (existing pretty `show` and `next`
-  assertions)
+- Modify: `src/present.rs` (`heading`; the guard covers `show_text.rs`)
+- Test: `src/show_text.rs` (unit), `src/style.rs` (unit), `tests/cli.rs` and
+  `tests/attachments.rs` (existing pretty `show` and `next` assertions)
 
 **Interfaces:**
 - Consumes: `present::*` and `Span` (Task 1); `output::wrap_lines(&[(char, Option<Style>)], usize) -> Vec<Vec<(char, Option<Style>)>>`
   and `output::paint_runs(&[(char, Option<Style>)], &Painter) -> String`, both made
   `pub(crate)` here.
 - Produces:
+  - `Style::Heading(Option<Rgb>)`: bold, or bold in the color when one is given; and
+    `present::heading(&str, Option<Rgb>) -> Span`.
   - `show_text::render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String`
   - `show_text::MEASURE: usize = 100`
   - `ShowFields.project_color: Option<Rgb>` (`#[serde(skip)]`)
   - `Wrap::width(&self) -> Option<usize>`
 
-- [ ] **Step 1: Expose the wrap helpers and add the `ShowFields` color**
+- [ ] **Step 1: Write the failing style test**
+
+In `src/style.rs`'s `painter_obeys_format_mode_stream_and_roles`, after the
+`(Style::Warning, "33"),` entry of the role table, add:
+
+```rust
+            (Style::Heading(None), "1"),
+```
+
+And after that loop, add:
+
+```rust
+        assert_eq!(
+            colored.paint(
+                Style::Heading(Some(Rgb {
+                    r: 1,
+                    g: 2,
+                    b: 3
+                })),
+                "x"
+            ),
+            "\x1b[1;38;2;1;2;3mx\x1b[0m"
+        );
+```
+
+`Rgb` is imported further down in that test module (`use crate::palette::{Palette, Rgb};`).
+Move that `use` to the top of `mod tests` if the compiler needs it earlier.
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `just test-one painter_obeys_format_mode_stream_and_roles`
+Expected: compile error, `no variant named Heading`.
+
+- [ ] **Step 3: Add the role**
+
+In `src/style.rs`, add a variant to `pub enum Style` after `Priority(u8)`:
+
+```rust
+    /// A heading: a `show` section name, a task title shown as a heading, a body `#` line.
+    /// Bold; in the project's color when it has one (show layout spec §4.2).
+    Heading(Option<Rgb>),
+```
+
+In `Painter::paint`'s `match style`, before `Style::Status(Status::Idea)`, add:
+
+```rust
+            Style::Heading(None) => "1".into(),
+            Style::Heading(Some(color)) => format!("1;38;2;{};{};{}", color.r, color.g, color.b),
+```
+
+In `src/present.rs`, after `title`, add:
+
+```rust
+/// Text shown as a heading: bold, in the project's color when it has one.
+pub fn heading(text: &str, project: Option<Rgb>) -> Span {
+    Span::styled(text, Style::Heading(project))
+}
+```
+
+- [ ] **Step 4: Run it to verify it passes**
+
+Run: `just test-one painter_obeys_format_mode_stream_and_roles`
+Expected: PASS. (`just check` would still flag `heading` as unused here; its callers
+arrive in Step 8.)
+
+- [ ] **Step 5: Expose the wrap helpers and add the `ShowFields` color**
 
 In `src/output.rs`:
 - Change `fn paint_runs` to `pub(crate) fn paint_runs` and `fn wrap_lines` to
@@ -557,7 +583,7 @@ In `src/output.rs`:
 In `src/commands/show.rs`'s `describe`, add `project_color: project.color,` to the
 `ShowFields { … }` literal.
 
-- [ ] **Step 2: Write `src/show_text.rs` with failing tests**
+- [ ] **Step 6: Write `src/show_text.rs` with failing tests**
 
 Create the file with the tests first and a stub `render` that returns `String::new()`:
 
@@ -839,6 +865,36 @@ mod tests {
     }
 
     #[test]
+    fn generated_markers_are_recognised_in_every_form() {
+        for (text, marker, rest) in [
+            ("resumed", "resumed", None),
+            ("completed; next due 2026-11-02", "completed; next due 2026-11-02", None),
+            ("parked (waiting on agent): go on", "parked (waiting on agent)", Some("go on")),
+            (
+                "parked (waiting on user, quiet; idle, 50 min): run it",
+                "parked (waiting on user, quiet; idle, 50 min)",
+                Some("run it"),
+            ),
+        ] {
+            assert_eq!(lifecycle(text), (Some(marker), rest), "{text}");
+        }
+    }
+
+    #[test]
+    fn marker_prefixes_on_authored_text_are_not_markers() {
+        for text in [
+            "completed; next due date is undecided",
+            "completed; next due 2026-13-40",
+            "parked (waiting on the vendor): call them",
+            "parked (waiting on user, someday): later",
+            "parked (waiting on user; 5 min, idle): wrong order",
+            "parked (waiting on user)",
+        ] {
+            assert_eq!(lifecycle(text), (None, Some(text)), "{text}");
+        }
+    }
+
+    #[test]
     fn a_long_note_header_wraps_with_a_two_column_continuation() {
         let mut o = fields();
         o.task.notes = vec![note(
@@ -918,12 +974,12 @@ The `ParkInfo` literal in `sections_follow_the_spec_order` must list every `Park
 field. Read `pub struct ParkInfo` in `src/output.rs` and match it exactly, including any
 fields after `worktree`.
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [ ] **Step 7: Run the tests to verify they fail**
 
 Run: `just test-one show_text::`
 Expected: FAIL. The output is empty, so every assertion on it fails.
 
-- [ ] **Step 4: Implement the renderer**
+- [ ] **Step 8: Implement the renderer**
 
 Replace the stub `render` with:
 
@@ -1290,19 +1346,59 @@ fn notes(notes: &[Note], painter: &Painter, width: Option<usize>) -> String {
     rendered
 }
 
-/// Splits a generated lifecycle marker from its text (spec §3.5), recognised by its
-/// generated form: `started` is all marker, `parked (waiting on user): next` is a marker
-/// and the next step, and anything else is authored text.
+/// Splits a generated lifecycle marker from its text (spec §3.5). Only the complete
+/// forms the writers generate count: `started` is all marker, `completed; next due
+/// <date>` too, `parked (waiting on <stop>): <next>` is a marker and the next step, and
+/// anything else, however it begins, is authored text.
 fn lifecycle(text: &str) -> (Option<&str>, Option<&str>) {
-    match text {
-        "started" | "resumed" | "done" | "dropped" => (Some(text), None),
-        _ if text.starts_with("completed; next due ") => (Some(text), None),
-        _ if text.starts_with("parked (waiting on ") => match text.split_once("): ") {
-            Some((marker, next)) => (Some(&text[..marker.len() + 1]), Some(next)),
-            None => (None, Some(text)),
-        },
-        _ => (None, Some(text)),
+    if matches!(text, "started" | "resumed" | "done" | "dropped") {
+        return (Some(text), None);
     }
+    if let Some(day) = text.strip_prefix("completed; next due ")
+        && crate::time::calendar_day(day).is_ok_and(|date| date.to_string() == day)
+    {
+        return (Some(text), None);
+    }
+    if let Some(rest) = text.strip_prefix("parked (waiting on ")
+        && let Some((stop, next)) = rest.split_once("): ")
+        && is_generated_stop(stop)
+    {
+        return (Some(&text[..text.len() - next.len() - 2]), Some(next));
+    }
+    (None, Some(text))
+}
+
+/// Whether `stop` is exactly what `claims::describe_stop` writes for some inputs: parse
+/// it into those inputs, render them again, and compare. The round trip rejects unknown
+/// words, a wrong order, and repeats without restating the grammar here.
+fn is_generated_stop(stop: &str) -> bool {
+    use crate::claims::{Needs, Reason, WaitingOn, describe_stop};
+    let (head, recipe) = stop
+        .split_once("; ")
+        .map_or((stop, None), |(head, recipe)| (head, Some(recipe)));
+    let (who, reason) = head
+        .split_once(", ")
+        .map_or((head, None), |(who, reason)| (who, Some(reason)));
+    let Ok(who) = WaitingOn::parse(who) else {
+        return false;
+    };
+    let Ok(reason) = reason.map(Reason::parse).transpose() else {
+        return false;
+    };
+    let (mut needs, mut minutes) = (None, None);
+    for part in recipe.into_iter().flat_map(|recipe| recipe.split(", ")) {
+        match part.strip_suffix(" min") {
+            Some(count) => match count.parse::<u32>() {
+                Ok(count) => minutes = Some(count),
+                Err(_) => return false,
+            },
+            None => match Needs::parse(part) {
+                Ok(parsed) => needs = Some(parsed),
+                Err(_) => return false,
+            },
+        }
+    }
+    describe_stop(who, reason, needs, minutes) == stop
 }
 ```
 
@@ -1315,14 +1411,14 @@ Notes on this code:
 - The `if let … && …` chain needs edition 2024, which the crate uses. If clippy rejects
   it, nest the two conditions.
 
-- [ ] **Step 5: Run the unit tests to verify they pass**
+- [ ] **Step 9: Run the unit tests to verify they pass**
 
 Run: `just test-one show_text::`
 Expected: all PASS. If `the_example_renders_as_the_spec_shows` fails, diff the actual
 output against the expected text: the expected text is the spec, so change the code,
 not the expectation.
 
-- [ ] **Step 6: Switch `pretty` to the renderer and delete the old one**
+- [ ] **Step 10: Switch `pretty` to the renderer and delete the old one**
 
 In `src/output.rs`'s `fn pretty`:
 
@@ -1353,7 +1449,7 @@ In `src/present.rs`'s `field_roles_are_built_only_here`, extend the file list:
 `show_text.rs` builds `Style::Chrome`, `Style::Emphasis` and `Style::Error` directly.
 Those are not field roles, so the guard allows them.
 
-- [ ] **Step 7: Update the integration tests that read the old text**
+- [ ] **Step 11: Update the integration tests that read the old text**
 
 Add this helper to `tests/cli.rs` next to `strip_ansi`:
 
@@ -1385,6 +1481,10 @@ what each test checks; change only how it reads the text.
 | `process_survives_ready_and_parked_next` | `Process: planned`, `Process: unassessed` | `overview_value(&text, "process").as_deref() == Some("planned")` / `Some("unassessed")` |
 | `summary_rows_and_parked_rows_carry_agent` | `agent: codex/gpt-6\n` | `overview_value(&text, "agent").as_deref() == Some("codex/gpt-6")` |
 
+In `tests/attachments.rs`, the attach/show test asserts `pretty.contains("# files")`.
+Change it to `pretty.contains("── files")`, and keep its path and size check
+(`"{path} (2 B)"`) as it is: the files section still prints `- <path> (<size>)`.
+
 The quiet-park test (`a_quiet_park_records_…`), the park-reason test, the halt `next`
 test, and `a_closed_stdout_reader_ends_the_command_quietly` read phrases the new layout
 keeps (`waiting on user, quiet; idle, 50 min since`, `waiting on user, review since`,
@@ -1394,16 +1494,16 @@ assertion to the new text the same way.
 Any other failing pretty-`show` assertion is updated by the same rule: find the field's
 new spelling in spec §3, and use `overview_value` for overview rows.
 
-- [ ] **Step 8: Run the fast suite**
+- [ ] **Step 12: Run the fast suite**
 
 Run: `just test-fast`
-Expected: PASS.
+Expected: PASS, including `tests/attachments.rs`.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
 just check
-git add src/show_text.rs src/main.rs src/output.rs src/present.rs src/commands/show.rs tests/cli.rs
+git add src/style.rs src/show_text.rs src/main.rs src/output.rs src/present.rs src/commands/show.rs tests/cli.rs tests/attachments.rs
 git commit -m "feat(show): print pretty show in a reading layout"
 ```
 
