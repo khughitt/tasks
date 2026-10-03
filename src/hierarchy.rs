@@ -67,11 +67,27 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
 /// No lane may have a lane as an ancestor. Covers both directions for the record being
 /// written: a lane above it when it is a lane, and a lane below it when it becomes a lane
 /// or moves under one. Ancestors are read from disk, as in `validate_parent`, which runs
-/// first and has already refused a parent loop. The project is scanned only when the
-/// record's subtree could newly meet a lane, so ordinary writes inside a lane stay cheap;
-/// nesting that was already on disk is `check`'s to report.
+/// first and has already refused a parent loop. Only a write that creates nesting is refused,
+/// and the project is scanned only when the record's subtree could newly meet a lane, so
+/// ordinary writes inside a lane stay cheap; nesting already on disk is `check`'s to report.
 pub fn validate_lanes(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
     let task_id = registry.canonical_id(&task.id);
+    // A record not yet on disk has no children, and any lane above it is new nesting.
+    let stored = match project.read_task(&task_id) {
+        Ok(stored) => Some(stored),
+        Err(Error::TaskNotFound(_)) => None,
+        Err(error) => return Err(error),
+    };
+    let canonical = |parent: &Option<TaskId>| parent.as_ref().map(|id| registry.canonical_id(id));
+    let moved = stored
+        .as_ref()
+        .is_none_or(|stored| canonical(&stored.parent) != canonical(&task.parent));
+    let became_lane = task.lane && stored.as_ref().is_none_or(|stored| !stored.lane);
+    // Only a write that introduces nesting is refused; a write that leaves nesting already
+    // on disk as it is (a note, a status change) goes through.
+    if !became_lane && !moved {
+        return Ok(());
+    }
     let above = lane_above(project, registry, task)?;
     if task.lane
         && let Some(outer) = &above
@@ -81,17 +97,7 @@ pub fn validate_lanes(project: &Project, registry: &Registry, task: &Task) -> Re
              ordinary child goal"
         )));
     }
-    // A record not yet on disk has no children, so nothing can sit below it.
-    let stored = match project.read_task(&task_id) {
-        Ok(stored) => stored,
-        Err(Error::TaskNotFound(_)) => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    let canonical = |parent: &Option<TaskId>| parent.as_ref().map(|id| registry.canonical_id(id));
-    let moved = canonical(&stored.parent) != canonical(&task.parent);
-    let became_lane = task.lane && !stored.lane;
-    let moved_under_a_lane = !task.lane && above.is_some() && moved;
-    if !became_lane && !moved_under_a_lane {
+    if stored.is_none() || (!became_lane && above.is_none()) {
         return Ok(());
     }
     let all = project.scan()?;

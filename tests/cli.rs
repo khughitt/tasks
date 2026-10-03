@@ -23744,3 +23744,64 @@ fn nested_lanes_are_refused_on_every_write_path_and_reported_by_check() {
         "{check}"
     );
 }
+
+#[test]
+fn writes_that_leave_existing_nesting_alone_are_not_refused() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let outer = id_of(env.json(&sci, &["add", "Outer", "--lane"]));
+    let inner = id_of(env.json(&sci, &["add", "Inner", "--parent", &outer]));
+    let path = sci.join(format!("tasks/{inner}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", "lane: true\ndepends: []\n"),
+    )
+    .unwrap();
+    let nested = |env: &TestEnv| {
+        let out = env.cmd(&sci).args(["check"]).output().unwrap();
+        if out.stdout.is_empty() {
+            assert!(out.status.success());
+            return false;
+        }
+        let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        check["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "nested_lane" && f["id"] == inner)
+    };
+
+    env.json(&sci, &["note", &inner, "still writable"]);
+    env.json(&sci, &["edit", &inner, "-p", "1"]);
+    env.json(&sci, &["start", &inner]);
+    assert!(nested(&env), "check still reports the nesting");
+    env.json(&sci, &["done", &inner]);
+    assert!(nested(&env), "check still reports the nesting");
+
+    // a fresh edit that would create nesting is still refused
+    let fresh = id_of(env.json(&sci, &["add", "Fresh", "--parent", &outer]));
+    assert_eq!(env.fail(&sci, &["edit", &fresh, "--lane"]), "nested_lane");
+
+    // removing the nesting works
+    env.json(&sci, &["edit", &inner, "--no-lane"]);
+    assert!(!nested(&env));
+}
+
+#[test]
+fn lane_checks_terminate_on_a_parent_cycle() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let a = id_of(env.json(&sci, &["add", "A"]));
+    let b = id_of(env.json(&sci, &["add", "B", "--parent", &a]));
+    let path = sci.join(format!("tasks/{a}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", &format!("parent: {b}\ndepends: []\n")),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert!(out.status.code().is_some());
+    let _ = env.cmd(&sci).args(["edit", &b, "--lane"]).output().unwrap();
+}
