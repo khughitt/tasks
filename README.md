@@ -58,7 +58,7 @@ Each step is idempotent.
 
 4. Work:
 
-       tasks prime                      # counts, ready list, who is doing what
+       tasks prime                      # counts, lanes, ready list, who is doing what
        tasks ready                      # what can be worked on now
        tasks tree                       # the goal hierarchy
        tasks start <id>                 # claim it
@@ -288,6 +288,10 @@ from a clone):
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
     tasks add "Capture lane" --lane -p 1 -b "Why it runs; first milestone"  # an effort beside the others
     tasks edit <id> --no-lane        # clear the lane marker
+    tasks lanes                      # each lane: guidance, state, and the step it could take now
+    tasks next --under sci-4f2a9c    # the next step inside one lane, at any depth
+    tasks list --under sci-4f2a9c    # a goal's whole subtree (--parent is direct children)
+    tasks block sci-4f2a9c "host busy"  # pause a lane; tasks unblock resumes it
     tasks add "Capture the trace" --need quiet  # a shared resource from [needs] in tasks/.config.toml
     tasks edit <id> --rm-need quiet  # --need adds; --rm-need/--no-needs remove
     tasks list --need quiet          # tasks that need it (all-of, like --tag)

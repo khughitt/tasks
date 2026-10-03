@@ -118,8 +118,8 @@ Free-form markdown body.
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
 | `process`  | enum                | no       | `direct` or `planned`; absent means unassessed. Explicitly chosen, never inferred or inherited. See `2026-09-13-task-process-design.md`. |
 | `parallel` | bool                | no       | Safe to run beside other tasks marked `parallel`. Omitted when false. |
-| `lane`     | bool                | no       | A goal meant to proceed alongside other lanes; its members are the `parent` tree below it. Set by `add`/`edit --lane`, cleared by `--no-lane`. Omitted when false; written after `parallel`. No lane may sit below another (`nested_lane`). See `2026-10-03-lanes-needs-groups-design.md`. |
-| `needs`    | list of names       | no       | Shared resources the work uses, each declared in the project's `[needs]` vocabulary (§6); names use lowercase letters, digits, and `-`, and do not start with `-`. Set by `add --need`; `edit --need` appends, `--rm-need` and `--no-needs` remove. Omitted when empty; written after `parallel`. An undeclared name is refused on write and is a `check` error, but is carried as-is on read. See `2026-10-03-lanes-needs-groups-design.md` §4. |
+| `lane`     | bool                | no       | A goal meant to proceed alongside other lanes; its members are the `parent` tree below it. Set by `add`/`edit --lane`, cleared by `--no-lane`. Omitted when false; written after `parallel`. No lane may sit below another: a write that creates nesting is refused (`nested_lane`), and `check` reports nesting already on disk. See `2026-10-03-lanes-needs-groups-design.md`. |
+| `needs`    | list of names       | no       | Shared resources the work uses, each declared in the project's `[needs]` vocabulary (§6); names use lowercase letters, digits, and `-`, and do not start with `-`. Set by `add --need`; `edit --need` appends, `--rm-need` and `--no-needs` remove. Omitted when empty; written after `lane`. An undeclared name is refused on write and is a `check` error, but is carried as-is on read. See `2026-10-03-lanes-needs-groups-design.md` §4. |
 | `defer`    | `YYYY-MM-DD`        | no       | One-shot calendar date; the pickers skip the task until it arrives. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status transition. Never beside `every`. Written after `every`. See `2026-09-15-defer-design.md`. |
 | `owner`    | string              | no       | Advisory tracked-file owner; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
@@ -290,8 +290,9 @@ tasks show <id>
 
 tasks list [--status S]... [--tag T]... [--need N]... [--owner O] [--source REF]
            [--project P | --all-projects]
-           [--parent ID] [--sort priority|updated|created] [--reverse]
-    Default: open tasks, sorted by priority then updated desc, then id. --source keeps
+           [--parent ID] [--under ID] [--sort priority|updated|created] [--reverse]
+    Default: open tasks, sorted by priority then updated desc, then id. --under keeps
+    descendants of ID at any depth; --parent keeps direct children. --source keeps
     only tasks whose source equals REF byte for byte — no prefix, substring, or
     case-folded matching — so it answers "what came from this reference"; closed ones
     need --status as everywhere. Filters combine as AND. --sort updated
@@ -314,7 +315,7 @@ tasks tree [<id>] [--all] [--project P | --all-projects]
     a subtree of another project: <id> is still looked up in the scope, not routed by its
     own prefix.
 
-tasks ready [--size S] [--parallel] [--need N]... [--without N]... [-n N] [--project P | --all-projects]
+tasks ready [--size S] [--parallel] [--need N]... [--without N]... [--under ID] [-n N] [--project P | --all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
     priority, then size (xs first, unsized last), then created, then id.
     --all-projects: the same order over every reachable registered project; no project
@@ -328,6 +329,10 @@ tasks ready [--size S] [--parallel] [--need N]... [--without N]... [-n N] [--pro
     when the task's own project declares it, so a name hides nothing in a project
     that does not declare it, even a record still naming it. One warning,
     "without <names>: <n> task(s) hidden", counts what was hidden.
+    A paused lane (a `blocked` goal marked `lane`) hides its descendants, with one
+    warning per lane; the count is taken before exclusive holds. An ordinary blocked
+    goal pauses nothing, and `start` inside a paused lane is not refused. `edit --lane`
+    on a blocked goal warns that it now pauses its subtree.
 
 tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-projects]
     N tasks (default 3) drawn uniformly without replacement from the curable pool: status
@@ -419,11 +424,13 @@ tasks check
     prefix) are warnings. process_missing warns only for doing records without a
     process choice, including goals and plan steps; unassessed todos are not findings.
 
-tasks next [--without N]... [--project P | --all-projects]
+tasks next [--without N]... [--under ID] [--project P | --all-projects]
     The most recently parked task waiting on the agent that is open, unblocked,
     with all dependencies resolved and closed, and childless, else the first ready task,
     in the show shape. --without and TASKS_WITHOUT as for ready; next applies them to
-    parked candidates too, and prime to its ready list.
+    parked candidates too, and prime to its ready list. --under picks only among
+    descendants of ID at any depth: how a session committed to one lane takes its next
+    step. Without it, lanes never reorder the pick.
 
 tasks prime [--without N]... [--project P | --all-projects] [--closed]
     Agent session context: prefix, counts by status, the ready list, doing tasks
@@ -436,7 +443,17 @@ tasks prime [--without N]... [--project P | --all-projects] [--closed]
     The pretty counts line shows the open statuses and a total; --closed adds done and
     dropped. Same columns, same colors, and same default as tasks projects: one
     definition renders both. --without and TASKS_WITHOUT as for ready; prime applies
-    them to its ready list.
+    them to its ready list. `lanes` lists every open lane with its guidance, state, and
+    pick, as `tasks lanes` does; it is always present and empty without lanes. Pretty
+    output prints a `lanes:` block before `roadmap:` when there is a lane.
+
+tasks lanes [--without NEED]... [--max-complexity LEVEL] [--project P | --all-projects]
+    Every open, unshelved lane in lane order (priority, size, created, id), with its
+    guidance (the first body paragraph after headings), its state (paused, ready, held,
+    waiting, empty), the step it could take now, its active claims, the steps held for
+    an exclusive need (by another session's claim or an earlier lane's pick), and the
+    causes for the rest of its live descendants. See
+    2026-10-03-lanes-needs-groups-design.md §5.
 
 tasks tags [--status S]... [--project P | --all-projects]
     Tag frequencies over open tasks (or the given statuses), with a count per project.
@@ -630,6 +647,22 @@ errors      += need_held
 Task        += lane: bool                     always present, like parallel; written after parallel
 TaskSummary += lane: bool
 ParkedRow   += lane: bool                     false when unresolved
+TaskSummary += in_lane: string                the nearest lane at or above (its own id for a lane); omitted when none
+ParkedRow   += in_lane: string                omitted when unresolved or none
+show        += in_lane: string                next carries the same field
+prime       += lanes: [LaneRow]               always present; [] when the scope has no lane
+lanes       -> { lanes: [LaneRow], warnings }
+               LaneRow = { lane: TaskSummary, guidance: string|null,
+                 state: "paused"|"ready"|"held"|"waiting"|"empty", pick: TaskSummary|null,
+                 steps: int, active: [TaskSummary],
+                 held: [{ id, need, holder, by: "claim"|"pick" }] (omitted when empty),
+                 causes: { active|held|without|cutoff|halt|deferred|periodic|user|
+                           blocked|depends|goal|other: int } (non-zero only; omitted when empty) }
+ready/next  += one warning per paused lane: "<n> task(s) hidden by paused lane <id>"
+list/ready/next += --under ID: descendants at any depth; an ID not in scope is task_not_found
+errors      += nested_lane
+check       += kinds nested_lane (error), childless_lane (warning); periodic_goal and
+               deferred_goal also cover a lane with no children
 ```
 
 Pretty summary and parked rows include a process column, using `-` for unassessed;

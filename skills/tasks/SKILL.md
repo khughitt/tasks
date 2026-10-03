@@ -15,8 +15,9 @@ nothing is eligible.
 
 ## Session protocol
 
-1. `tasks prime` — roadmap (the open goal tree), closeout (goals whose work is all
-   done), the ready list, and who is working on what.
+1. `tasks prime` — lanes (the efforts meant to run side by side, each with its guidance
+   and the step it could take now), roadmap (the open goal tree), closeout (goals whose
+   work is all done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Use the `scope` skill for a deliberate idea review.
    A `shelved` task is out of active work: `list --status shelved` sees it, and
@@ -49,6 +50,13 @@ nothing is eligible.
    not the session cutoff: a session under a cutoff still picks only through `ready` and
    `next`.
    Never pick a task with children; those are goals. `ready` already omits them.
+   A lane (`lane: true`) is a goal too, even before it has children, and every row names
+   its lane in `in_lane` (the nearest lane at or above it). A session committed to one
+   lane picks with `tasks next --under <lane>`; `--under` also narrows `list` and `ready`
+   to descendants at any depth, while `--parent` stays direct children. Without `--under`,
+   `next` keeps its priority order. `tasks lanes` answers what can run in parallel: each
+   lane is `ready` with its pick, `held` on an exclusive need, `waiting` with its causes,
+   `paused`, or `empty`.
    With nothing in hand, `tasks next` prints the most recently parked task waiting on the
    agent, else the first ready task, in full; `tasks next --all-projects` does the same
    across every registered project, and `tasks next
@@ -367,6 +375,18 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   descendant is open (`--force` overrides); `drop` refuses while any descendant is
   open and has no override — drop or reparent the subtree first
   (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
+- An effort meant to run beside the project's other efforts:
+  `tasks add "<effort>" --lane -p <0-4> -b "<why it exists and its first milestone>"`,
+  then decompose it with `--parent` like any goal. Lead the body with that paragraph:
+  `prime` and `tasks lanes` show it as the lane's guidance, skipping headings above it.
+  Make a lane only for a standalone effort; a sub-effort inside a lane is an ordinary
+  child goal, and a write that nests a lane inside a lane is refused (`nested_lane`).
+  A lane's priority ranks it in the lanes view and decides which lane wins a contested
+  exclusive need; it never reorders `ready` or `next`. Pause a lane with
+  `tasks block <lane> "<why>"`: its subtree leaves `ready`, `next`, and `prime`'s ready
+  list, with a warning, until `tasks unblock <lane>`. `start` on a task inside a paused
+  lane still works. Never pause with `shelve`, which hides the lane from every view and
+  needs its subtree shelved first. `check` warns about a lane with no steps yet.
 - Dispatching several agents at once: mark each self-contained task with
   `tasks edit <id> --parallel`, then `tasks ready --parallel -n <N>` for the set to hand
   out. The marker asserts only that marked tasks do not collide with *each other* — it

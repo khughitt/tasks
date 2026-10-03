@@ -114,6 +114,11 @@ Members already owned by different goals retain those parents and are associated
 the handoff and audit note. Preserve every existing source; do not rewrite shared goals
 incidentally. Research and design follow-ups are children of the cluster goal.
 
+When the cluster is a standalone effort meant to run beside the project's other work,
+create that goal with `--lane` and lead its body with the guidance paragraph: why the
+effort exists and its first milestone. A cluster inside an existing lane gets an ordinary
+child goal, never a lane.
+
 Reuse an existing goal, handoff, and open research task when its question still stands.
 If a new goal would have neither member nor follow-up children, do not create it merely
 to hold a document; keep the association in member notes.
