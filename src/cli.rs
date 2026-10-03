@@ -98,6 +98,9 @@ pub struct FilterArgs {
     /// Filter by tag (repeatable); a task must carry every one.
     #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
+    /// Filter by need (repeatable); a task must need every one.
+    #[arg(long = "need", value_name = "NEED")]
+    pub needs: Vec<String>,
     /// Only tasks owned by this value.
     #[arg(long)]
     pub owner: Option<String>,

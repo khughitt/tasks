@@ -22058,3 +22058,56 @@ fn needs_status_editor_save_cannot_change_status_and_needs_together() {
     assert_eq!(task["status"], "todo");
     assert_eq!(task["needs"], serde_json::json!(["quiet"]));
 }
+
+/// The `id` of every row of a `{tasks: [...]}` payload, in payload order.
+fn task_ids(v: &serde_json::Value) -> Vec<String> {
+    v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn needs_filter_list_ready_and_parked_select_all_of() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(
+        &sci,
+        &[
+            ("quiet", "an idle host", true),
+            ("owner", "the owner judges", false),
+        ],
+    );
+    let quiet = id_of(env.json(&sci, &["add", "Quiet", "--need", "quiet"]));
+    let both = id_of(env.json(&sci, &["add", "Both", "--need", "quiet", "--need", "owner"]));
+    env.json(&sci, &["add", "Plain"]);
+    let sorted = |v: serde_json::Value| {
+        let mut ids = task_ids(&v);
+        ids.sort();
+        ids
+    };
+    let mut either = vec![quiet.clone(), both.clone()];
+    either.sort();
+    assert_eq!(sorted(env.json(&sci, &["list", "--need", "quiet"])), either);
+    assert_eq!(
+        sorted(env.json(&sci, &["ready", "--need", "quiet"])),
+        either
+    );
+    assert_eq!(
+        sorted(env.json(&sci, &["list", "--need", "quiet", "--need", "owner"])),
+        std::slice::from_ref(&both),
+        "repeats narrow, like --tag"
+    );
+    assert_eq!(
+        sorted(env.json(&sci, &["ready", "--need", "quiet", "--need", "owner"])),
+        std::slice::from_ref(&both)
+    );
+    env.json(&sci, &["park", &quiet, "Rerun"]);
+    env.json(&sci, &["park", &both, "Judge"]);
+    assert_eq!(
+        sorted(env.json(&sci, &["list", "--parked", "--need", "owner"])),
+        std::slice::from_ref(&both)
+    );
+}

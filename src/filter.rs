@@ -1,6 +1,6 @@
 //! One selection over record fields for the read commands that filter
 //! (docs/specs/2026-09-30-task-filters-design.md). Repeats of one field widen (any of
-//! them); different fields narrow (all of them); `--tag` alone is all-of. Each command
+//! them); different fields narrow (all of them); `--tag` and `--need` are all-of. Each command
 //! keeps its own default status pool; an explicit `--status` replaces it here.
 
 use crate::claims::ClaimSnapshot;
@@ -22,6 +22,7 @@ pub struct TaskFilter {
     complexities: Vec<Option<Complexity>>,
     processes: Vec<Option<Process>>,
     tags: Vec<String>,
+    needs: Vec<String>,
     owner: Option<String>,
     source: Option<String>,
     parent: Option<TaskId>,
@@ -37,6 +38,7 @@ pub struct Fields<'a> {
     pub complexity: Option<Complexity>,
     pub process: Option<Process>,
     pub tags: &'a [String],
+    pub needs: &'a [String],
     pub owner: Option<&'a str>,
     pub source: Option<&'a str>,
     /// Canonical, so a retired prefix and its live one compare equal.
@@ -87,6 +89,7 @@ impl TaskFilter {
                 .map(|value| optional(value, Process::parse))
                 .collect::<Result<_>>()?,
             tags: args.tags.clone(),
+            needs: args.needs.clone(),
             owner: args.owner.clone(),
             source: args.source.clone(),
             parent: args
@@ -111,6 +114,7 @@ impl TaskFilter {
             && self.complexities.is_empty()
             && self.processes.is_empty()
             && self.tags.is_empty()
+            && self.needs.is_empty()
             && self.owner.is_none()
             && self.source.is_none()
             && self.parent.is_none()
@@ -124,6 +128,7 @@ impl TaskFilter {
             && any_of(&self.complexities, &fields.complexity)
             && any_of(&self.processes, &fields.process)
             && self.tags.iter().all(|tag| fields.tags.contains(tag))
+            && self.needs.iter().all(|need| fields.needs.contains(need))
             && self
                 .owner
                 .as_deref()
@@ -149,6 +154,7 @@ impl<'a> Fields<'a> {
             complexity: crate::complexity::effective(task, claims),
             process: task.process,
             tags: &task.tags,
+            needs: &task.needs,
             owner: task.owner.as_deref(),
             source: task.source.as_deref(),
             parent: task
@@ -171,6 +177,7 @@ impl<'a> Fields<'a> {
             ),
             process: row.process,
             tags: &row.tags,
+            needs: &row.needs,
             owner: row.owner.as_deref(),
             source: row.source.as_deref(),
             parent: row
@@ -212,6 +219,7 @@ mod tests {
             complexity: Some(Complexity::Mid),
             process: None,
             tags: NO_TAGS,
+            needs: &[],
             owner: None,
             source: None,
             parent: None,
@@ -274,6 +282,32 @@ mod tests {
             ..TaskFilter::default()
         };
         assert!(!set_only.matches(&fields()));
+    }
+
+    #[test]
+    fn needs_are_all_of_like_tags() {
+        let needs = vec!["quiet".to_string(), "owner".to_string()];
+        let needy = Fields {
+            needs: &needs,
+            ..fields()
+        };
+        let one = TaskFilter {
+            needs: vec!["quiet".into()],
+            ..TaskFilter::default()
+        };
+        assert!(!one.is_empty());
+        assert!(one.matches(&needy));
+        assert!(!one.matches(&fields()));
+        let both = TaskFilter {
+            needs: vec!["quiet".into(), "owner".into()],
+            ..TaskFilter::default()
+        };
+        assert!(both.matches(&needy));
+        let extra = TaskFilter {
+            needs: vec!["quiet".into(), "gpu".into()],
+            ..TaskFilter::default()
+        };
+        assert!(!extra.matches(&needy));
     }
 
     #[test]
