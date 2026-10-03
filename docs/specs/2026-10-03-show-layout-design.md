@@ -127,14 +127,15 @@ brackets or quotes.
 | `claim` | `<owner> [<session>]`, with `stale` appended when not live | when claimed |
 | `tags` | tags | when any |
 | `created`, `updated`, `started`, `completed` | `YYYY-MM-DD` | when set |
-| `every` | interval, then `, due <date>` or `, due now` | when recurring |
+| `every` | interval; then `, due <date>` when a next due date exists, or `, due now` when due with no date; the interval alone otherwise (an open or dropped recurring task) | when recurring |
+| `last done` | `YYYY-MM-DD` | when `last_done` is set and differs from `completed` (a reopened recurring task keeps `last_done` after `completed` is cleared) |
 | `deferred` | `until <date>`, plus ` (due)` once it has passed | when deferred |
 | `source`, `agent`, `model` | as stored | when set |
 | `spec`, `plan` | resolved path, else the stored name | when set |
 | `step` | heading, plus `  MISSING` (error role) when not found | when set |
 
 `depends` and `parent` have no rows: the `related` section lists them with their titles.
-`last_done` has no row either: `every` and `completed` already show what it says.
+`last_done` gets its own row only when `completed` does not already show it: completion stamps both to the same second, and a reopen clears `completed` but keeps `last_done`.
 
 ### 3.4 Related
 
@@ -155,13 +156,17 @@ heading role. No other markdown is interpreted.
 **Notes.** Each note is a header line followed by its text, indented 4 and wrapped:
 
 - Header: `<YYYY-MM-DD> <HH:MM>  <owner>`. The date takes the date role; the time and the
-  owner take the chrome role.
+  owner take the chrome role. A header wider than the line width wraps at spaces with
+  continuation lines indented 2, so they cannot be mistaken for the text, which is
+  indented 4; a single word wider than the line is split hard. No header is ever left to
+  the terminal's own mid-word wrap.
 - A note that is a generated lifecycle marker (`started`, `resumed`, `done`, `dropped`,
   `completed; next due <date>`, or `parked (waiting on …): <next step>`) puts the marker on
   the header in the marker role. For a park, the text after `: ` becomes the indented body.
   Markers are recognised by their generated text, the way other consumers recognise them.
 - A note with provenance appends its `harness_session` to the header in full, in the
-  chrome role. `harness_session_source` is left out of the pretty output; JSON keeps both.
+  chrome role, as the header's last word, so it is the first to move to a continuation
+  line. `harness_session_source` is left out of the pretty output; JSON keeps both.
 - A marker with no further text prints no body.
 
 **Park.** `waiting on <describe_stop> since <date>`, the next step indented 4 and
@@ -231,7 +236,13 @@ with the 100-column cap applied in the show renderer.
 - `--color never`, and `--pretty` without a terminal, produce the same layout uncolored.
   `strip_ansi(colored) == plain` still holds for one width.
 - The task file, `serialize_task`, and every writer are untouched.
-- `show`'s exit codes, warnings and errors are unchanged.
+- `show`'s exit codes, warnings and errors are unchanged, with two deliberate exceptions
+  that pretty `show` and `next` now share with `list` (§5):
+  - a theme the painter needs but cannot get adds the same stderr warning `list` prints;
+  - an invalid `COLUMNS` (`0`, or not a positive integer) now fails a pretty `show` or
+    `next` with the config error `list` gives, where it was ignored before.
+
+  JSON output computes no width and reads no theme, so neither exception reaches it.
 
 ## 7. Testing
 
@@ -243,6 +254,13 @@ with the 100-column cap applied in the show renderer.
   - lifecycle-marker headers, including a park's next step moving to the body;
   - body wrapping: hanging indents, fenced and indented lines kept whole, `#` lines;
   - the 100-column cap; and no wrapping with no width.
+- A note header test at `COLUMNS=80`: a `parked (waiting on user, review)` lifecycle note
+  with provenance and a long branch-name owner wraps its header at spaces with the
+  2-column continuation, and no line exceeds 80 columns.
+- Overview rows for recurrence: a recurring open task (interval only), a due one with a
+  date, one due now with no date, and a reopened one showing `last done`.
+- `show` and `next` with `COLUMNS=0`: pretty fails with the config error, JSON succeeds
+  with unchanged output.
 - `tests/cli.rs`: the existing `show` painting test (`plain` vs `colored`) is rewritten
   for the new layout. It keeps the strip-ANSI invariant, checks the roles in §4.2 on
   status, priority, a date, a heading and an id, and pins `TASKS_PALETTE` so the date and
