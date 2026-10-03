@@ -8,13 +8,14 @@ complexity: high
 process: planned
 owner: ece1e2-work-selection
 created: 2026-09-30T10:04:57Z
-updated: 2026-10-03T10:35:51Z
+updated: 2026-10-03T11:08:33Z
 started: 2026-10-03T09:53:20Z
 depends: []
 parent: tasks-46d207
 tags: []
 agent: codex
 spec: docs/specs/2026-10-03-lanes-needs-groups-design.md
+plan: docs/plans/2026-10-03-lanes-needs-groups.md
 ---
 
 Why: tasks-77dbc6 and tasks-9bdd68 need a shared contract for narrowing the project pool and preferring a goal without overriding eligibility.
