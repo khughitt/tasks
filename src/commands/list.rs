@@ -5,16 +5,17 @@ use crate::error::Result;
 use crate::filter::{Fields, TaskFilter, check_parent};
 use crate::halt::{self, HaltSnapshot};
 use crate::model::{Status, Task, TaskId};
+use crate::needs::{Vocabularies, Without};
 use crate::output::{
     Counts, DateColumn, DeferredSummary, HaltRow, ListOut, NextOut, Output, ParkedOut,
     PeriodicSummary, PrimeOut, TaskSummary,
 };
 use crate::query::{
-    Picked, Readiness, SortKey, deferred_omission, is_candidate, readiness, sort_by_key, sort_list,
-    sort_periodic, sort_ready,
+    Picked, Readiness, SortKey, deferred_omission, is_candidate, paused_omissions, readiness,
+    sort_by_key, sort_list, sort_periodic, sort_ready,
 };
 use crate::scope::Scope;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use time::OffsetDateTime;
 
 pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
@@ -37,13 +38,14 @@ pub fn list(
     deferred: bool,
 ) -> Result<Output> {
     let sort = SortKey::parse(&sort)?;
-    let filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
+    let mut filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
     if parked {
         return list_parked(ctx, filter);
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
+    filter.resolve_under(&all, &ctx.registry)?;
     let mut tasks = all.clone();
     tasks.retain(|task| {
         let periodic_ok = !periodic || task.every.is_some();
@@ -103,7 +105,7 @@ pub fn list(
     }))
 }
 
-fn list_parked(mut ctx: ReadCtx, filter: TaskFilter) -> Result<Output> {
+fn list_parked(mut ctx: ReadCtx, mut filter: TaskFilter) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let rows = super::parked::rows(&mut ctx, &all, &claims, now)?;
@@ -114,6 +116,7 @@ fn list_parked(mut ctx: ReadCtx, filter: TaskFilter) -> Result<Output> {
                 .is_some_and(|fields| fields.parent.as_ref() == Some(parent))
         })
     })?;
+    filter.resolve_under(&all, &ctx.registry)?;
     let tasks = rows
         .into_iter()
         .filter(|row| match Fields::of_row(row, &ctx.registry) {
@@ -191,14 +194,32 @@ pub fn ready_tasks(
                 ));
             }
         }
-        let has_children = !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty();
-        match readiness(task, has_children, &lookup, now) {
+        // A lane is a goal even before its first child exists.
+        let goal = crate::hierarchy::is_goal(
+            task,
+            !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty(),
+        );
+        match readiness(task, goal, &lookup, now) {
             Readiness::Ready => ready.push(task.clone()),
             Readiness::Deferred => deferred.push(task.clone()),
             Readiness::Not => {}
         }
     }
     sort_ready(&mut ready);
+    // Lanes design §3.4: a paused lane keeps its subtree out of every picker. Its work
+    // leaves here, before the claim and park checks that warn about what they drop, and
+    // passes those same checks silently, so the paused count holds only work that would
+    // otherwise be offered. A deferred task in a paused lane is in neither count.
+    let (mut paused, mut ready): (Vec<Task>, Vec<Task>) = ready
+        .into_iter()
+        .partition(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some());
+    paused.retain(|task| {
+        claims.live(&task.id).is_none()
+            && !claims
+                .park(&task.id)
+                .is_some_and(|park| park.waiting_on == WaitingOn::User)
+    });
+    deferred.retain(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_none());
     ready.retain(|task| match claims.live(&task.id) {
         Some(claim) => {
             warnings.push(format!(
@@ -230,10 +251,11 @@ pub fn ready_tasks(
     Ok(Picked {
         tasks: ready,
         deferred,
+        paused,
     })
 }
 
-fn halt_snapshots(ctx: &mut ReadCtx, all: &[Task]) -> HashMap<String, HaltSnapshot> {
+pub(super) fn halt_snapshots(ctx: &mut ReadCtx, all: &[Task]) -> HashMap<String, HaltSnapshot> {
     let mut snapshots = HashMap::new();
     for project in ctx.scope.projects() {
         let local: Vec<Task> = all
@@ -251,9 +273,10 @@ fn halt_snapshots(ctx: &mut ReadCtx, all: &[Task]) -> HashMap<String, HaltSnapsh
             )),
         }
     }
-    if matches!(ctx.scope, Scope::All(_)) {
+    // Only what the scope asked for: under --group a non-member's checkout is no gap.
+    if let Scope::All { members, .. } = &ctx.scope {
         let scoped = ctx.scope.prefixes();
-        for prefix in ctx.registry.projects.keys() {
+        for prefix in members {
             if !scoped.contains(prefix) {
                 ctx.warnings.push(format!(
                     "{prefix}: halt state unknown (registered checkout unreachable)"
@@ -298,31 +321,147 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
     }
 }
 
+/// Lanes design §3.4: one `<n> task(s) hidden by paused lane <id>` warning per lane,
+/// counted before exclusive holds. The pickers already applied the dependency, defer,
+/// claim, and park checks to `paused`; this applies the halt, `--without`, and cutoff
+/// gates the caller applies to its own list, without their warnings, then counts each
+/// task once under its lane.
+fn warn_paused(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    mut paused: Vec<Task>,
+    snapshots: &HashMap<String, HaltSnapshot>,
+    without: &Without,
+    cutoff: Option<crate::model::Complexity>,
+    claims: &crate::claims::ClaimSnapshot,
+) {
+    let _ = retain_allowed(&mut paused, snapshots);
+    // Each task is hidden only where its own project declares the need.
+    let _ = without.retain(&mut paused, &vocabularies(&ctx.scope));
+    if let Some(cutoff) = cutoff {
+        let _ = crate::complexity::apply(&mut paused, cutoff, claims);
+    }
+    let mut by_lane: BTreeMap<TaskId, BTreeSet<TaskId>> = BTreeMap::new();
+    for task in &paused {
+        if let Some(lane) = crate::hierarchy::paused_lane(all, task, &ctx.registry) {
+            by_lane
+                .entry(lane.id.clone())
+                .or_default()
+                .insert(task.id.clone());
+        }
+    }
+    ctx.warnings.extend(paused_omissions(&by_lane));
+}
+
+/// Lanes/needs design §4.5: drop tasks held back by another session's exclusive hold,
+/// with one warning per need and holder; order is unchanged. Whether a hold is this
+/// session's is the read views' rule, `read_holds`: with a resolved identity, as
+/// `occupants` decides a claim (the identity, or else the claim's process proof); with
+/// none, every hold counts as another session's, and a warning names the resolution error.
+/// Callers run it after every other gate, the complexity cutoff included, so a task those
+/// hide is never counted as waiting. A scope whose projects declare no exclusive need
+/// reads no claim store and resolves no identity, so its output is exactly what it was
+/// before holds existed.
+fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) -> Result<()> {
+    let mut vocabularies = vocabularies(&ctx.scope);
+    vocabularies.retain(|_, vocabulary| vocabulary.values().any(|need| need.exclusive));
+    if vocabularies.is_empty() {
+        return Ok(());
+    }
+    let (snapshot, warnings) = crate::holds::HoldSnapshot::load(&ctx.registry, now);
+    ctx.warnings.extend(warnings);
+    if snapshot.is_empty() {
+        return Ok(());
+    }
+    let mine = view_holds(&snapshot, &mut ctx.warnings)?;
+    let mut held = crate::holds::HeldWarnings::default();
+    tasks.retain(|task| {
+        let Some(vocabulary) = vocabularies.get(task.id.prefix.as_str()) else {
+            return true;
+        };
+        match crate::holds::held_back(&snapshot, vocabulary, task, &mine) {
+            Some((need, holder)) => {
+                held.add(&need, &holder);
+                false
+            }
+            None => true,
+        }
+    });
+    ctx.warnings.extend(held.into_warnings());
+    Ok(())
+}
+
+/// The caller's own holds in `snapshot`, by the read views' rule (`read_holds`): the
+/// session's identity is resolved here, and when that fails every hold counts as another
+/// session's, with a warning naming the error.
+pub(super) fn view_holds(
+    snapshot: &crate::holds::HoldSnapshot,
+    warnings: &mut Vec<String>,
+) -> Result<crate::holds::Mine> {
+    let me = crate::claims::resolve_identity(warnings);
+    if let crate::claims::Resolution::Failed(error) = &me {
+        warnings.push(format!(
+            "session identity unresolved ({error}); every hold counts as another session's"
+        ));
+    }
+    super::read_holds(snapshot, &me)
+}
+
+/// Every in-scope project's vocabulary, by prefix: the names `--without` may use, and
+/// the vocabulary each task's needs are judged by (spec §4.3). It borrows the scope
+/// alone, so a caller may hold it while pushing to `ctx.warnings`.
+pub(super) fn vocabularies(scope: &Scope) -> Vocabularies<'_> {
+    scope
+        .projects()
+        .iter()
+        .map(|project| (project.prefix.as_str(), &project.needs))
+        .collect()
+}
+
 pub fn ready(
     mut ctx: ReadCtx,
     filter: FilterArgs,
     limit: Option<usize>,
     max_complexity: Option<String>,
+    without: Vec<String>,
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
-    let filter = TaskFilter::parse(&filter, &[], &ctx.registry, &ctx.shorthand)?;
+    let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
+    let mut filter = TaskFilter::parse(&filter, &[], &ctx.registry, &ctx.shorthand)?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
+    filter.resolve_under(&all, &ctx.registry)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
     let mut picked = ready_tasks(&mut ctx, &all, &claims, &snapshots, &filter, now)?;
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut picked.tasks, &snapshots);
     warn_hidden(&mut ctx, hidden);
+    if !without.is_empty() {
+        let vocabs = vocabularies(&ctx.scope);
+        let hidden = without.retain(&mut picked.tasks, &vocabs);
+        let _ = without.retain(&mut picked.deferred, &vocabs);
+        ctx.warnings.extend(without.warning(hidden));
+    }
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut picked.tasks, cutoff, &claims);
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
         let _ = crate::complexity::apply(&mut picked.deferred, cutoff, &claims);
     }
+    retain_unheld(&mut ctx, &mut picked.tasks, now)?;
     if let Some(warning) = deferred_omission(&picked.deferred) {
         ctx.warnings.push(warning);
     }
+    warn_paused(
+        &mut ctx,
+        &all,
+        picked.paused,
+        &snapshots,
+        &without,
+        cutoff,
+        &claims,
+    );
     let mut tasks = picked.tasks;
     if let Some(limit) = limit {
         tasks.truncate(limit);
@@ -340,21 +479,30 @@ pub fn ready(
 
 /// The head of `ready` in the show shape, so a caller can start on it without a second
 /// lookup. Nothing ready is a normal state: null, warnings, exit 0.
-pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> {
+pub fn next(
+    mut ctx: ReadCtx,
+    max_complexity: Option<String>,
+    without: Vec<String>,
+    under: Option<String>,
+) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
+    let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
+    let mut filter = TaskFilter::parse(
+        &FilterArgs {
+            under,
+            ..FilterArgs::default()
+        },
+        &[],
+        &ctx.registry,
+        &ctx.shorthand,
+    )?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    filter.resolve_under(&all, &ctx.registry)?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let candidates = super::parked::candidates(&mut ctx, &all, &claims, now)?;
+    let candidates = super::parked::candidates(&mut ctx, &all, &claims, &filter, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let ready = ready_tasks(
-        &mut ctx,
-        &all,
-        &claims,
-        &snapshots,
-        &TaskFilter::default(),
-        now,
-    )?;
+    let ready = ready_tasks(&mut ctx, &all, &claims, &snapshots, &filter, now)?;
     // One pool in pick order — parked candidates first, then the ready list — with each
     // task once, so a parked todo that is also ready is hidden and counted once.
     let mut pool = candidates.tasks;
@@ -372,15 +520,30 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
             omitted.push(task);
         }
     }
+    if !without.is_empty() {
+        let vocabs = vocabularies(&ctx.scope);
+        let hidden = without.retain(&mut pool, &vocabs);
+        let _ = without.retain(&mut omitted, &vocabs);
+        ctx.warnings.extend(without.warning(hidden));
+    }
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut pool, cutoff, &claims);
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
         let _ = crate::complexity::apply(&mut omitted, cutoff, &claims);
     }
+    // On the whole pool, so parked-agent candidates pass the same gate.
+    retain_unheld(&mut ctx, &mut pool, now)?;
     if let Some(warning) = deferred_omission(&omitted) {
         ctx.warnings.push(warning);
     }
+    // A parked todo is both a candidate and a ready row; `warn_paused` counts ids in a
+    // set, so it is counted once.
+    let mut paused = candidates.paused;
+    paused.extend(ready.paused);
+    warn_paused(
+        &mut ctx, &all, paused, &snapshots, &without, cutoff, &claims,
+    );
     let next = match pool.into_iter().next() {
         None => None,
         Some(task) => {
@@ -460,8 +623,9 @@ fn claimed_elsewhere(
     found
 }
 
-pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
+pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(None)?;
+    let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let upcoming: Vec<OffsetDateTime> = all
@@ -505,6 +669,10 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut ready, &snapshots);
     warn_hidden(&mut ctx, hidden);
+    if !without.is_empty() {
+        let hidden = without.retain(&mut ready, &vocabularies(&ctx.scope));
+        ctx.warnings.extend(without.warning(hidden));
+    }
     let mut doing: Vec<Task> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
@@ -565,8 +733,11 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
     }
+    retain_unheld(&mut ctx, &mut ready, now)?;
     ctx.warnings.extend(held);
-    let wide = matches!(ctx.scope, Scope::All(_));
+    // The same builder as `tasks lanes`, under this session's cutoff and `--without`.
+    let lanes = super::lanes::rows(&mut ctx, &all, &claims, &snapshots, cutoff, &without, now)?;
+    let wide = matches!(ctx.scope, Scope::All { .. });
     for project in ctx.scope.projects() {
         if let Some(files) = project.uncommitted_task_files()?
             && !files.is_empty()
@@ -598,11 +769,12 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
             force_hint(id, &snapshots)
         ));
     }
-    Ok(Output::Prime(PrimeOut {
+    Ok(Output::Prime(Box::new(PrimeOut {
         prefix: match &ctx.scope {
             Scope::Local(project) => Some(project.prefix.clone()),
-            Scope::All(_) => None,
+            Scope::All { .. } => None,
         },
+        group: ctx.scope.group().map(str::to_string),
         projects: ctx.scope.prefixes(),
         counts,
         periodic,
@@ -613,6 +785,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         parked,
+        lanes,
         doing: doing
             .iter()
             .map(|task| {
@@ -630,7 +803,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
             .collect(),
         halts,
         warnings: ctx.warnings,
-    }))
+    })))
 }
 
 #[cfg(test)]
@@ -647,7 +820,11 @@ mod tests {
         let mut registry = crate::registry::Registry::default();
         registry.register("sci", &project.root).unwrap();
         let ctx = ReadCtx {
-            scope: Scope::All(vec![]),
+            scope: Scope::All {
+                projects: vec![],
+                members: vec![],
+                group: None,
+            },
             registry,
             warnings: vec![],
             shorthand: crate::shorthand::Shorthand::new(dir.path().to_path_buf()),

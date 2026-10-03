@@ -118,7 +118,7 @@ Rules:
 
 ## 5. The queue
 
-    tasks quiet [-n <N>] [--project <prefix> | --all-projects]
+    tasks quiet [-n <N>] [--project <prefix> | --group <name> | --all-projects]
 
 Lists quiet parks as resume briefs. Rules:
 

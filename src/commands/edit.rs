@@ -78,8 +78,20 @@ fn notes_unchanged_or_trimmed(original: &[Note], edited: &[Note]) -> bool {
 }
 
 pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
-    if args.force && args.status.as_deref() != Some("done") {
-        return Err(Error::Validation("--force requires --status done".into()));
+    // `--status` conflicts with `--need` at the CLI, so the two uses never meet.
+    let adds_needs = !args.fields.needs.is_empty();
+    if args.force && args.status.as_deref() != Some("done") && !adds_needs {
+        return Err(Error::Validation(
+            "--force requires --status done, or --need to add a need another session holds".into(),
+        ));
+    }
+    if args.reason.is_some() && !(args.force && adds_needs) {
+        return Err(Error::Validation(
+            "--reason requires --force and --need".into(),
+        ));
+    }
+    if let Some(reason) = args.reason.as_deref() {
+        crate::format::validate_line("reason", reason)?;
     }
     let fields = &args.fields;
     let has_flags = args.title.is_some()
@@ -93,6 +105,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_process
         || fields.parallel
         || args.no_parallel
+        || fields.lane
+        || args.no_lane
         || fields.every.is_some()
         || args.no_every
         || fields.defer.is_some()
@@ -115,12 +129,17 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_model
         || args.no_tags
         || args.no_depends
+        || !fields.needs.is_empty()
+        || !args.rm_needs.is_empty()
+        || args.no_needs
         || !args.rm_tags.is_empty();
     if !has_flags {
         return editor(ctx, id);
     }
 
     let mut task = load(&mut ctx, &id)?;
+    let original_needs = task.needs.clone();
+    let was_lane = task.lane;
     if args.fields.body.as_deref() == Some("-") {
         let mut body = String::new();
         std::io::stdin().read_to_string(&mut body)?;
@@ -134,6 +153,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     if args.no_parallel {
         task.parallel = false;
+    }
+    if args.no_lane {
+        task.lane = false;
     }
     if args.no_every {
         task.every = None;
@@ -194,7 +216,36 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
             )));
         }
     }
+    // Mirrors the tag flags: clear, then remove, then `apply_fields` appends.
+    if args.no_needs {
+        task.needs.clear();
+    }
+    for need in &args.rm_needs {
+        let before = task.needs.len();
+        task.needs.retain(|existing| existing != need);
+        if task.needs.len() == before {
+            return Err(Error::Validation(format!(
+                "{} does not need {need:?}",
+                task.id
+            )));
+        }
+    }
     apply_fields(&mut ctx, &mut task, &args.fields)?;
+    // Lanes/needs design §4.4: needs change under no live claim or the caller's own, and
+    // under the caller's own the claim's holds follow in the same save.
+    // The target's override notes are appended here and land with its save. The
+    // holders' notes are held in `holder_notes` until that save has succeeded.
+    let mut holder_notes = None;
+    if task.needs != original_needs {
+        ctx.refuse_foreign_live_claim(&task.id)?;
+        ctx.need_reason = args.reason.clone();
+        ctx.update_holds(&task, args.force)?;
+        holder_notes = super::record_need_overrides(&mut ctx, &mut task)?;
+    }
+    if args.reason.is_some() && holder_notes.is_none() {
+        ctx.warnings
+            .push("--reason was unused because no held need was added".into());
+    }
     if let Some(status) = args.status {
         let to = Status::parse(&status)?;
         if to == task.status {
@@ -216,7 +267,15 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         // touched it.
         ctx.reassess(&task.id, task.complexity)?;
     }
+    if let Some(warning) = pause_warning(&task, was_lane) {
+        ctx.warnings.push(warning);
+    }
     save(&mut ctx, &mut task)?;
+    // Lanes/needs design §4.5: a holder learns of the override only once it has landed.
+    // A save refused by its own validation (a parent cycle, say) writes no note anywhere.
+    if let Some(notes) = holder_notes {
+        super::note_need_holders(&mut ctx, notes);
+    }
     super::follow_holder(&mut ctx, &task.id, None, "the edit landed");
     Ok(id_out(ctx, &task))
 }
@@ -318,6 +377,15 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
                 .into(),
         )));
     }
+    // Lanes-needs spec §4.4: status and needs change in separate operations, as status
+    // and defer do, so every acquire reads the needs already on the record.
+    if status != original.status && edited.needs != original.needs {
+        return Err(keep(Error::Validation(
+            "a save that changes the status cannot also change needs; change the status \
+             first, then the needs"
+                .into(),
+        )));
+    }
     // spec §3.2: the status rule is the writers' to enforce. A status-changing save
     // reaches `transition`, which clears the field; an equal-status save must not leave
     // a deferral on a status that cannot carry one.
@@ -328,10 +396,24 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             status.as_str()
         ))));
     }
+    // Lanes-needs spec §4.2: only names this save adds must be declared (the grammar
+    // was checked by `parse_task`); one the vocabulary has since dropped may stay or go.
+    let added: Vec<String> = edited
+        .needs
+        .iter()
+        .filter(|need| !original.needs.contains(*need))
+        .cloned()
+        .collect();
+    crate::needs::require_declared(&ctx.project.needs, &added).map_err(keep)?;
     edited.status = original.status;
     if status == original.status {
         ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;
         ctx.preserve_claim_store(&original.id);
+        // Lanes/needs design §4.4: no flags here, so a held need refuses and names
+        // `tasks edit <id> --need <n> --force --reason`.
+        if edited.needs != original.needs {
+            ctx.update_holds(&edited, false).map_err(keep)?;
+        }
     } else {
         if status == Status::Shelved {
             refuse_shelving(&original.id).map_err(keep)?;
@@ -352,6 +434,9 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         }
         Err(error) => return Err(keep(error)),
     }
+    if let Some(warning) = pause_warning(&edited, original.lane) {
+        ctx.warnings.push(warning);
+    }
     save(&mut ctx, &mut edited).map_err(keep)?;
     super::follow_holder(&mut ctx, &edited.id, None, "the edit landed");
     if let Err(error) = std::fs::remove_file(&tmp) {
@@ -367,6 +452,18 @@ fn refuse_shelving(id: &crate::model::TaskId) -> Result<()> {
     Err(Error::Validation(format!(
         "use `tasks shelve {id} \"<wake condition>\"` to shelve a task"
     )))
+}
+
+/// Lanes design §3.4: marking a goal that is already `blocked` as a lane pauses it, which
+/// hides its whole subtree from the pickers at once.
+fn pause_warning(task: &Task, was_lane: bool) -> Option<String> {
+    (task.lane && !was_lane && task.status == Status::Blocked).then(|| {
+        format!(
+            "{id} is blocked, so marking it a lane pauses it: its subtree leaves ready, \
+             next, and prime's ready list until `tasks unblock {id}`",
+            id = task.id
+        )
+    })
 }
 
 fn create_edit_temp(

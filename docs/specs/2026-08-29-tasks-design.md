@@ -118,6 +118,8 @@ Free-form markdown body.
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
 | `process`  | enum                | no       | `direct` or `planned`; absent means unassessed. Explicitly chosen, never inferred or inherited. See `2026-09-13-task-process-design.md`. |
 | `parallel` | bool                | no       | Safe to run beside other tasks marked `parallel`. Omitted when false. |
+| `lane`     | bool                | no       | A goal meant to proceed alongside other lanes; its members are the `parent` tree below it. Set by `add`/`edit --lane`, cleared by `--no-lane`. Omitted when false; written after `parallel`. No lane may sit below another: a write that creates nesting is refused (`nested_lane`), and `check` reports nesting already on disk. See `2026-10-03-lanes-needs-groups-design.md`. |
+| `needs`    | list of names       | no       | Shared resources the work uses, each declared in the project's `[needs]` vocabulary (§6); names use lowercase letters, digits, and `-`, and do not start with `-`. Set by `add --need`; `edit --need` appends, `--rm-need` and `--no-needs` remove. Omitted when empty; written after `lane`. An undeclared name is refused on write and is a `check` error, but is carried as-is on read. See `2026-10-03-lanes-needs-groups-design.md` §4. |
 | `defer`    | `YYYY-MM-DD`        | no       | One-shot calendar date; the pickers skip the task until it arrives. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status transition. Never beside `every`. Written after `every`. See `2026-09-15-defer-design.md`. |
 | `owner`    | string              | no       | Advisory tracked-file owner; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
@@ -256,8 +258,24 @@ tasks unregister <prefix>
     an unregistered prefix is an error, not a no-op. Project files are untouched; only
     ~/.config/tasks/projects.toml changes.
 
-tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel] [--defer DATE|<n>d|<n>w]
+tasks group set <name> <prefix>...
+    Create or replace a project group in the registry's [groups] table. A retired prefix
+    resolves to its live one, and members are stored once, in prefix order. The name uses
+    the tag grammar and may not be a live or retired prefix or one an unfinished rename
+    reserves (validation); a prefix that is not registered is a config error. Needs no
+    project; the registry is written under its lock.
+
+tasks group rm <name>
+    Delete a group and report the members it had. Its projects stay registered. An
+    undeclared name is unknown_group. Needs no project.
+
+tasks groups
+    Every group in name order, each member with whether it is reachable (the test
+    `projects` applies). Needs no project.
+
+tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel] [--lane] [--defer DATE|<n>d|<n>w]
           [--process direct|planned]
+          [--need N]...
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
           [--source REF] [--parent ID] [--project PREFIX]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
@@ -267,6 +285,9 @@ tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--par
     task in that registered project instead of the current one, validating every field
     against it; no local project is needed. An unregistered prefix is config.
     --process selects a workflow explicitly; omission leaves it unassessed.
+    --need names a shared resource from the project's `[needs]` vocabulary (§6),
+    repeatable. A name that breaks the grammar is validation, and an undeclared one is
+    unknown_need.
     With --source, the add is idempotent: if the target project already holds a task
     with exactly that source and that title, in any status, its id is returned with
     action "reused" and a warning, and nothing is written — the other flags on that
@@ -282,10 +303,11 @@ tasks show <id>
     paths resolved against that project's root; an unregistered or unreachable prefix is
     unresolvable_id.
 
-tasks list [--status S]... [--tag T]... [--owner O] [--source REF]
-           [--project P | --all-projects]
-           [--parent ID] [--sort priority|updated|created] [--reverse]
-    Default: open tasks, sorted by priority then updated desc, then id. --source keeps
+tasks list [--status S]... [--tag T]... [--need N]... [--owner O] [--source REF]
+           [--project P | --group NAME | --all-projects]
+           [--parent ID] [--under ID] [--sort priority|updated|created] [--reverse]
+    Default: open tasks, sorted by priority then updated desc, then id. --under keeps
+    descendants of ID at any depth; --parent keeps direct children. --source keeps
     only tasks whose source equals REF byte for byte — no prefix, substring, or
     case-folded matching — so it answers "what came from this reference"; closed ones
     need --status as everywhere. Filters combine as AND. --sort updated
@@ -296,7 +318,7 @@ tasks list [--status S]... [--tag T]... [--owner O] [--source REF]
     on, or updated (last activity) when the order is not a date. Every command that
     prints summary rows (ready, prime, tree, sample) shows the updated day.
 
-tasks tree [<id>] [--all] [--project P | --all-projects]
+tasks tree [<id>] [--all] [--project P | --group NAME | --all-projects]
     The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
     the read side of parent, as graph is of depends. Without --all the forest is pruned
     to nodes that are open or have an open descendant, so a closed ancestor of open work
@@ -308,14 +330,26 @@ tasks tree [<id>] [--all] [--project P | --all-projects]
     a subtree of another project: <id> is still looked up in the scope, not routed by its
     own prefix.
 
-tasks ready [--size S] [--parallel] [-n N] [--project P | --all-projects]
+tasks ready [--size S] [--parallel] [--need N]... [--without N]... [--under ID] [-n N] [--project P | --group NAME | --all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
     priority, then size (xs first, unsized last), then created, then id.
     --all-projects: the same order over every reachable registered project; no project
     grouping or weighting (the final id tiebreak orders by prefix only among tasks equal
     on everything else). Omits tasks parked waiting on the user, with a warning.
+    --need is all-of, like --tag: a task must need every name given.
+    --without N (repeatable) hides tasks needing N, as does each comma-separated name
+    in TASKS_WITHOUT; the two are a union. The flag is strict: a name no project in
+    scope declares is unknown_need. The variable is lenient: any name is accepted,
+    since a host sets it once for every project. Either way a name hides a task only
+    when the task's own project declares it, so a name hides nothing in a project
+    that does not declare it, even a record still naming it. One warning,
+    "without <names>: <n> task(s) hidden", counts what was hidden.
+    A paused lane (a `blocked` goal marked `lane`) hides its descendants, with one
+    warning per lane; the count is taken before exclusive holds. An ordinary blocked
+    goal pauses nothing, and `start` inside a paused lane is not refused. `edit --lane`
+    on a blocked goal warns that it now pauses its subtree.
 
-tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-projects]
+tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --group NAME | --all-projects]
     N tasks (default 3) drawn uniformly without replacement from the curable pool: status
     idea, todo, or blocked; no live claim; updated longer ago than AGE, an `<n>d`/`<n>w`
     age (default 7d, at most 36500 days; 0d skips the age check, so even a future-dated
@@ -328,8 +362,9 @@ tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-pr
     (docs/specs/2026-09-08-task-curation-design.md).
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
-           [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
+           [--parent ID | --no-parent] [--parallel|--no-parallel] [--lane|--no-lane] [--rm-tag T]... [--no-tags]
            [--no-depends]
+           [--need N]... [--rm-need N]... [--no-needs]
            [--no-defer]
            [--source REF | --no-source]
            [--process direct|planned | --no-process]
@@ -346,6 +381,12 @@ tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
     --process replaces the workflow choice; --no-process clears it to unassessed,
     and these two flags conflict. Invalid process values are rejected before writes,
     including when supplied through the editor. Completion offers direct and planned.
+    --need appends like --tag; --rm-need removes one and is a validation error when
+    the task lacks it; --no-needs clears, and with --need replaces. Only names being
+    added must be declared, so a need since dropped from the vocabulary can still be
+    removed. --status conflicts with all three, and an editor save that changes both
+    the status and needs is refused: status and needs change in separate operations
+    (2026-10-03-lanes-needs-groups-design.md §4.4).
 
 tasks note <id> <text>
     Append a timestamped bullet under ## Notes.
@@ -398,12 +439,15 @@ tasks check
     prefix) are warnings. process_missing warns only for doing records without a
     process choice, including goals and plan steps; unassessed todos are not findings.
 
-tasks next [--project P | --all-projects]
+tasks next [--without N]... [--under ID] [--project P | --group NAME | --all-projects]
     The most recently parked task waiting on the agent that is open, unblocked,
     with all dependencies resolved and closed, and childless, else the first ready task,
-    in the show shape.
+    in the show shape. --without and TASKS_WITHOUT as for ready; next applies them to
+    parked candidates too, and prime to its ready list. --under picks only among
+    descendants of ID at any depth: how a session committed to one lane takes its next
+    step. Without it, lanes never reorder the pick.
 
-tasks prime [--project P | --all-projects] [--closed]
+tasks prime [--without N]... [--project P | --group NAME | --all-projects] [--closed]
     Agent session context: prefix, counts by status, the ready list, doing tasks
     with owners, the roadmap (open forest) and closeout list. Intended to be run at
     the start of every agent session. Warns about uncommitted files under tasks/
@@ -413,9 +457,20 @@ tasks prime [--project P | --all-projects] [--closed]
     uncommitted-files warning is emitted per project, prefixed with its prefix.
     The pretty counts line shows the open statuses and a total; --closed adds done and
     dropped. Same columns, same colors, and same default as tasks projects: one
-    definition renders both.
+    definition renders both. --without and TASKS_WITHOUT as for ready; prime applies
+    them to its ready list. `lanes` lists every open lane with its guidance, state, and
+    pick, as `tasks lanes` does; it is always present and empty without lanes. Pretty
+    output prints a `lanes:` block before `roadmap:` when there is a lane.
 
-tasks tags [--status S]... [--project P | --all-projects]
+tasks lanes [--without NEED]... [--max-complexity LEVEL] [--project P | --group NAME | --all-projects]
+    Every open, unshelved lane in lane order (priority, size, created, id), with its
+    guidance (the first body paragraph after headings), its state (paused, ready, held,
+    waiting, empty), the step it could take now, its active claims, the steps held for
+    an exclusive need (by another session's claim or an earlier lane's pick), and the
+    causes for the rest of its live descendants. See
+    2026-10-03-lanes-needs-groups-design.md §5.
+
+tasks tags [--status S]... [--project P | --group NAME | --all-projects]
     Tag frequencies over open tasks (or the given statuses), with a count per project.
 
 tasks projects [--sort prefix|size|activity] [--reverse] [--closed] [--paths]
@@ -576,6 +631,64 @@ projects    -> { projects: [{ prefix, root, reachable: bool, counts: Counts|null
 
 feedback    -> { id, action: "created"|"recurred", path, warnings }
                path is the absolute task file in the target project
+
+Task        += needs: [string]                omitted when empty (lanes-needs §4.2)
+TaskSummary += needs: [string]                omitted when empty; the task's need list, not
+                                              park.needs (ParkInfo's quiet-park recipe, a
+                                              string "idle"|"headless", quiet-queue §4)
+ParkedRow   += needs: [string]                omitted when empty or unresolved; the task's
+                                              need list, distinct from the row's park.needs
+ready/next/prime += one warning "without <names>: <n> task(s) hidden" when
+                    --without or TASKS_WITHOUT hid ready work
+check       += kind unknown_need (error): a record names a need [needs] does not declare
+error kinds += unknown_need: add/edit --need or an editor save naming an undeclared
+               need; ready/next/prime --without naming one no project in scope declares
+ClaimInfo   += holds: [string]          the exclusive needs the claim holds; omitted when empty
+                                        (lanes/needs design §4.4). Reaches TaskSummary.claim,
+                                        prime.doing rows, show, and tasks claims
+ready/next  += a task whose exclusive need another session's live claim holds is omitted,
+prime          with one warning per need and holder:
+               "<n> task(s) wait for <need>, held by <id> (<session>)".
+               The gate runs after the hidden-task warning, --without, and the complexity
+               cutoff. When the session identity cannot be resolved, every hold counts as
+               another session's, with one warning
+start       += refuses need_held when another session's live claim on another task holds one
+               of the task's exclusive needs; --force --reason overrides and notes the task, and
+               the holder when it is in the same project (written only after the task's save
+               succeeds); --force alone is refused there. A re-start under the caller's own live
+               claim that already holds every exclusive need is not gated.
+               edit --status doing and editor saves to doing refuse the same way.
+edit        += --reason (only with --force --need under the caller's own claim; warns
+               "--reason was unused" when no held need was added); a needs change under
+               another session's live claim fails claimed
+errors      += need_held
+Task        += lane: bool                     always present, like parallel; written after parallel
+TaskSummary += lane: bool
+ParkedRow   += lane: bool                     false when unresolved
+TaskSummary += in_lane: string                the nearest lane at or above (its own id for a lane); omitted when none
+ParkedRow   += in_lane: string                omitted when unresolved or none
+show        += in_lane: string                next carries the same field
+prime       += lanes: [LaneRow]               always present; [] when the scope has no lane
+lanes       -> { lanes: [LaneRow], warnings }
+               LaneRow = { lane: TaskSummary, guidance: string|null,
+                 state: "paused"|"ready"|"held"|"waiting"|"empty", pick: TaskSummary|null,
+                 steps: int, active: [TaskSummary],
+                 held: [{ id, need, holder, by: "claim"|"pick" }] (omitted when empty),
+                 causes: { active|held|without|cutoff|halt|deferred|periodic|user|
+                           blocked|depends|goal|other: int } (non-zero only; omitted when empty) }
+ready/next  += one warning per paused lane: "<n> task(s) hidden by paused lane <id>"
+list/ready/next += --under ID: descendants at any depth; an ID not in scope is task_not_found
+errors      += nested_lane
+check       += kinds nested_lane (error), childless_lane (warning); periodic_goal and
+               deferred_goal also cover a lane with no children
+
+prime       += group: string                  only under --group; prefix is null there
+groups      -> { groups: [{ name, members: [{ prefix, reachable: bool }] }], warnings }
+group set, group rm
+            -> { name, members: [string], warnings }
+               set: the members stored (live prefixes, sorted, distinct); rm: those it had
+unregister  += warnings: one per group it emptied and deleted
+errors      += unknown_group                  a --group or group rm name not declared
 ```
 
 Pretty summary and parked rows include a process column, using `-` for unassessed;
@@ -628,12 +741,29 @@ Validation of an edited task (flags or editor) compares against the original:
 prefix = "sci"
 ```
 
+A project may declare the shared resources its tasks use:
+
+```toml
+[needs.quiet]
+meaning = "an idle host: a TTY with the desktop stopped"
+exclusive = true
+```
+
+Each `[needs.<name>]` table takes a one-line `meaning` (required) and `exclusive`
+(optional, default false); any other key, a missing meaning, or a name outside the tag
+grammar is a `config` error. The names of exclusive needs form one namespace across the
+host's projects: two projects using the same name mean the same machine resource. See
+`2026-10-03-lanes-needs-groups-design.md` §4.1.
+
 `~/.config/tasks/projects.toml` (per machine; written by `init`, hand-editable):
 
 ```toml
 [projects]
 sci = "~/d/science"
 fam = "~/d/familiar"
+
+[groups]
+verifiably = ["atoms", "nodes"]
 ```
 
 A registry path may start with `~/`; it expands to the user's home directory. A foreign id
@@ -659,8 +789,9 @@ through the registry: the prefix already supplies the target. Only `no_project` 
 this route; invalid local configuration still fails. `feedback` requires a local project
 for its provenance tag.
 
-The same seven read commands (list, ready, prime, tree, next, tags, sample) take
-`--project <p>` and `--all-projects`, which conflict. Both locate no local project.
+The same eight read commands (list, ready, prime, tree, next, tags, sample, lanes) take
+`--project <p>`, `--group <name>`, and `--all-projects`, which conflict pairwise. None
+locates a local project.
 
 `--project <p>` reads that one registered project through the rule `add --project` uses:
 the *registered root*, so a worktree sharing the prefix does not displace it, and the
@@ -672,6 +803,7 @@ a project that cannot be read is a failure, not an entry to skip.
 `--all-projects` reads the registry: a missing root or config is a warning and the entry
 is skipped; a malformed config or a prefix that disagrees with the registry key is a
 config error.
+
 `projects` applies the same test but reports an unreachable entry as a row with
 reachable=false rather than a warning, since the row is the report; a malformed entry is
 still a config error and emits the two wide-scope warnings (empty registry; current
@@ -679,6 +811,20 @@ directory inside an unregistered project). `root` resolves one prefix strictly:
 unregistered or without a config is unresolvable_id, mismatched is config. On success it
 emits the unregistered-current-project warning; an empty registry cannot produce a
 successful root lookup. See docs/specs/2026-09-04-multi-project-design.md.
+
+`--group <name>` reads the members of a project group declared in the registry's
+`[groups]` table:
+
+- **Each member** is handled by `--all-projects`' rules.
+- **Warnings.** Warnings about unreachable projects and unknown halt state name members
+  only, and an undeclared name is `unknown_group`.
+- **Commands.** `quiet` takes it too; `claims` keeps its single registry-wide scope.
+- **Names and members.** Group names use the tag grammar and never equal a live or retired
+  prefix, and `group set` refuses one an unfinished rename reserves. Members are live
+  prefixes, kept so by `rename` and `unregister`; a registry naming any other is a
+  `config` error that names the group and the prefix.
+
+See docs/specs/2026-10-03-lanes-needs-groups-design.md §6.
 
 Shell completion is activated by `TASKS_COMPLETE=<shell> tasks`, which prints a stub for a
 shell rc to source; the stub calls the binary back on each TAB. Candidates for an id

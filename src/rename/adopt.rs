@@ -202,6 +202,11 @@ fn classify_registry(
     if registry.aliases.contains_key(new) {
         return Ok(Stage::Refuse(format!("target prefix {new:?} is retired")));
     }
+    if registry.groups.contains_key(new) {
+        return Ok(Stage::Refuse(format!(
+            "target prefix {new:?} is the name of a group; remove it with `tasks group rm {new}` first"
+        )));
+    }
     let root = root_identity(&project.root)?;
     let source = registry.project_root(old);
     let target = registry.project_root(new);

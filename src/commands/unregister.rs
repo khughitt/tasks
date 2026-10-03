@@ -9,12 +9,17 @@ pub fn run(prefix: String) -> Result<Output> {
     let mut registry = Registry::load()?;
     let root = registry.project_root(registry.canonical_prefix(&prefix));
     super::reject_pending_rename_at(root, &prefix)?;
-    let (root, aliases) = registry.unregister(&prefix)?;
+    let removed = registry.unregister(&prefix)?;
     registry.save()?;
+    let warnings = removed
+        .emptied_groups
+        .iter()
+        .map(|name| format!("group {name} lost its last member {prefix} and was deleted"))
+        .collect();
     Ok(Output::Init(InitOut {
         prefix,
-        root: root.display().to_string(),
-        warnings: Vec::new(),
-        aliases,
+        root: removed.root.display().to_string(),
+        warnings,
+        aliases: removed.aliases,
     }))
 }

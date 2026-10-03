@@ -82,3 +82,15 @@ found for these selection decisions.
   proposals or the existing proposal view becomes inadequate. No new queue task.
 
 Both design follow-ups require design and implementation-plan review before code.
+
+## Decisions (2026-10-03, tasks-ece1e2)
+
+Design: `docs/specs/2026-10-03-lanes-needs-groups-design.md`.
+
+- tasks-77dbc6 (project groups): done. The registry gains `[groups]`. `tasks group set|rm` and
+  `tasks groups` manage them, and `--group` scopes the read views and `quiet`.
+- tasks-e02860 (lanes and shared resources): done. Goals marked `lane: true` group concurrent
+  efforts. `prime` and `tasks lanes` show each lane's pick, and `next --under` picks within one
+  lane. Tasks declare `needs` from a project vocabulary. An exclusive need serves one session at
+  a time across projects, and `TASKS_WITHOUT` hides steps a session cannot meet.
+- tasks-9bdd68 (focus marker): drop proposed, as superseded by lanes (design §7).

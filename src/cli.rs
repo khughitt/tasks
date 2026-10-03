@@ -35,8 +35,8 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// The three read scopes: the current project (neither flag), one named registered
-/// project, or every reachable one. `--project` opens the registered root through the
+/// The four read scopes: the current project (no flag), one named registered project,
+/// the members of a project group, or every reachable one. `--project` opens the registered root through the
 /// same path `add --project` uses, so a worktree of that prefix does not displace it.
 #[derive(Args, Debug)]
 pub struct ScopeArgs {
@@ -50,6 +50,14 @@ pub struct ScopeArgs {
     /// Every reachable registered project; needs no local project.
     #[arg(long)]
     pub all_projects: bool,
+    /// The members of this project group (`tasks groups`); needs no local project.
+    #[arg(
+        long,
+        value_name = "NAME",
+        conflicts_with_all = ["project", "all_projects"],
+        add = ArgValueCandidates::new(crate::complete::groups)
+    )]
+    pub group: Option<String>,
 }
 
 /// Selection over record fields, shared by `list` and `ready`. Repeats of one flag widen
@@ -98,6 +106,9 @@ pub struct FilterArgs {
     /// Filter by tag (repeatable); a task must carry every one.
     #[arg(long = "tag", value_name = "TAG")]
     pub tags: Vec<String>,
+    /// Filter by need (repeatable); a task must need every one.
+    #[arg(long = "need", value_name = "NEED")]
+    pub needs: Vec<String>,
     /// Only tasks owned by this value.
     #[arg(long)]
     pub owner: Option<String>,
@@ -108,9 +119,21 @@ pub struct FilterArgs {
     /// Only direct children of this task.
     #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
     pub parent: Option<String>,
+    /// Only descendants of this task, at any depth (`--parent` is direct children only).
+    #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
+    pub under: Option<String>,
     /// Only tasks marked safe to run beside each other.
     #[arg(long)]
     pub parallel: bool,
+}
+
+/// The needs this session cannot meet, shared by the pickers (lanes-needs spec §4.3).
+#[derive(Args, Debug, Default, Clone)]
+pub struct WithoutArgs {
+    /// Hide tasks that need this (repeatable), in the projects that declare it; adds to
+    /// TASKS_WITHOUT. Refused when no project in scope declares it.
+    #[arg(long = "without", value_name = "NEED")]
+    pub without: Vec<String>,
 }
 
 #[derive(Args, Debug, Default, Clone)]
@@ -154,6 +177,10 @@ pub struct FieldArgs {
     /// flag; see `--no-parallel` to clear it.
     #[arg(long)]
     pub parallel: bool,
+    /// Mark this goal as a lane: an effort meant to proceed alongside other lanes. On
+    /// `edit` this sets the flag; see `--no-lane` to clear it.
+    #[arg(long)]
+    pub lane: bool,
     /// Make this a recurrence: `<n>d` or `<n>w`, measured from each completion.
     #[arg(long, value_name = "AGE", add = ArgValueCandidates::new(crate::complete::intervals))]
     pub every: Option<String>,
@@ -163,6 +190,10 @@ pub struct FieldArgs {
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
+    /// Need a shared resource declared in `[needs]` (repeatable). On `edit` this
+    /// appends; see `--rm-need` and `--no-needs`.
+    #[arg(long = "need", value_name = "NEED")]
+    pub needs: Vec<String>,
     /// Depend on another task (repeatable). On `edit` this appends; see `--no-depends`
     /// and `dep --rm`.
     #[arg(long = "depends", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
@@ -194,9 +225,10 @@ pub struct EditArgs {
     pub title: Option<String>,
     /// Move to a status: idea, todo, doing, blocked, done, or dropped. Shelved is
     /// entered with `shelve`, never here.
+    /// Status, defer, and needs change in separate operations.
     #[arg(
         long,
-        conflicts_with = "defer",
+        conflicts_with_all = ["defer", "needs", "rm_needs", "no_needs"],
         add = ArgValueCandidates::new(crate::complete::edit_statuses),
         add = ValueSet,
         value_parser = ValueSet
@@ -204,12 +236,19 @@ pub struct EditArgs {
     pub status: Option<String>,
     #[arg(long)]
     pub force: bool,
+    /// With --force and --need: why the need is added while another session holds it.
+    /// Noted on the task, and on the holder when it is in this project.
+    #[arg(long)]
+    pub reason: Option<String>,
     /// Detach from the parent.
     #[arg(long, conflicts_with = "parent")]
     pub no_parent: bool,
     /// Clear the parallel marker.
     #[arg(long, conflicts_with = "parallel")]
     pub no_parallel: bool,
+    /// Clear the lane marker.
+    #[arg(long, conflicts_with = "lane")]
+    pub no_lane: bool,
     /// Stop the recurrence, clearing both the cadence and its anchor.
     #[arg(long, conflicts_with = "every")]
     pub no_every: bool,
@@ -249,6 +288,12 @@ pub struct EditArgs {
     /// Clear every tag; with `--tag`, replaces the list wholesale.
     #[arg(long)]
     pub no_tags: bool,
+    /// Remove a need (repeatable); `--need` adds one.
+    #[arg(long = "rm-need", value_name = "NEED", conflicts_with = "no_needs")]
+    pub rm_needs: Vec<String>,
+    /// Clear every need; with `--need`, replaces the list wholesale.
+    #[arg(long)]
+    pub no_needs: bool,
     /// Clear every dependency; with `--depends`, replaces the list wholesale.
     #[arg(long)]
     pub no_depends: bool,
@@ -308,6 +353,13 @@ pub enum Command {
         #[arg(long)]
         paths: bool,
     },
+    /// Named sets of registered projects, read together with --group.
+    Group {
+        #[command(subcommand)]
+        action: GroupAction,
+    },
+    /// Every group with its members and whether each is reachable.
+    Groups,
     /// The registered root of the project an id belongs to.
     Root {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
@@ -397,6 +449,8 @@ pub enum Command {
         )]
         max_complexity: Option<String>,
         #[command(flatten)]
+        without: WithoutArgs,
+        #[command(flatten)]
         scope: ScopeArgs,
     },
     /// The first ready task, in the show shape; null when nothing is ready.
@@ -411,6 +465,12 @@ pub enum Command {
             value_parser = ValueSet
         )]
         max_complexity: Option<String>,
+        #[command(flatten)]
+        without: WithoutArgs,
+        /// Pick only among descendants of this task, at any depth: how a session
+        /// committed to one lane takes its next step.
+        #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
+        under: Option<String>,
         #[command(flatten)]
         scope: ScopeArgs,
     },
@@ -483,10 +543,10 @@ pub enum Command {
     Start {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
-        /// Take over a claim another live session holds.
+        /// Take over a claim another live session holds, or acquire past a held need.
         #[arg(long)]
         force: bool,
-        /// Explain an audited halt override or forced takeover.
+        /// Explain an audited halt override, need override, or forced takeover.
         #[arg(long)]
         reason: Option<String>,
     },
@@ -626,6 +686,25 @@ pub enum Command {
         /// Also show the done and dropped counts.
         #[arg(long)]
         closed: bool,
+        #[command(flatten)]
+        without: WithoutArgs,
+    },
+    /// Each open lane: its guidance, its state, and the step it could take now.
+    Lanes {
+        #[command(flatten)]
+        without: WithoutArgs,
+        /// Hide steps rated above this level and unassessed steps; overrides
+        /// TASKS_MAX_COMPLEXITY.
+        #[arg(
+            long,
+            value_name = "LEVEL",
+            add = ArgValueCandidates::new(crate::complete::complexities),
+            add = ValueSet,
+            value_parser = ValueSet
+        )]
+        max_complexity: Option<String>,
+        #[command(flatten)]
+        scope: ScopeArgs,
     },
     /// File feedback about a project's tooling into that project.
     Feedback {
@@ -659,9 +738,9 @@ pub enum Command {
     },
     /// The task hierarchy as nested nodes (open work only unless --all).
     Tree {
-        /// One forest per project in scope, so `--all-projects` and an id conflict.
+        /// One forest per project in scope, so a registry-wide scope and an id conflict.
         #[arg(
-            conflicts_with = "all_projects",
+            conflicts_with_all = ["all_projects", "group"],
             add = ArgValueCompleter::new(crate::complete::scoped)
         )]
         id: Option<String>,
@@ -691,18 +770,42 @@ pub enum Command {
         /// One registered project instead of all of them.
         #[arg(
             long,
-            conflicts_with = "all_projects",
+            conflicts_with_all = ["all_projects", "group"],
             add = ArgValueCandidates::new(crate::complete::prefixes)
         )]
         project: Option<String>,
         /// The default; accepted for consistency with other read commands.
         #[arg(long)]
         all_projects: bool,
+        /// The members of this project group instead of all of them.
+        #[arg(
+            long,
+            value_name = "NAME",
+            conflicts_with = "all_projects",
+            add = ArgValueCandidates::new(crate::complete::groups)
+        )]
+        group: Option<String>,
     },
     /// Every claim in the registry's claim stores, with liveness; opens no checkout.
     Claims {
         /// The default and only scope; accepted for consistency with other read commands.
         #[arg(long)]
         all_projects: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GroupAction {
+    /// Create or replace a group; a retired prefix resolves to its live one.
+    Set {
+        /// Lowercase letters, digits, and -; not a registered or retired prefix.
+        name: String,
+        #[arg(required = true, add = ArgValueCandidates::new(crate::complete::prefixes))]
+        prefixes: Vec<String>,
+    },
+    /// Delete a group. Its projects stay registered.
+    Rm {
+        #[arg(add = ArgValueCandidates::new(crate::complete::groups))]
+        name: String,
     },
 }

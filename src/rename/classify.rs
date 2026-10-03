@@ -207,6 +207,13 @@ fn refusal(snap: &Snapshot) -> Option<String> {
             snap.invocation.root.display()
         ));
     }
+    if snap.registry.target_group {
+        return Some(format!(
+            "R12: target prefix {:?} is the name of a group; remove it with \
+             `tasks group rm {}` first",
+            snap.invocation.target, snap.invocation.target
+        ));
+    }
     None
 }
 
@@ -277,6 +284,7 @@ mod tests {
                 old_key: Some(inventory.root.clone()),
                 new_key: None,
                 alias: None,
+                target_group: false,
             },
             config: Some(ConfigState {
                 prefix: inventory.source.clone(),
@@ -329,6 +337,7 @@ mod tests {
             old_key: None,
             new_key: Some("/project".into()),
             alias: Some("new".into()),
+            target_group: false,
         };
         assert_eq!(classify(&snap), Recovery::ResumeCleanup, "after P5");
         snap.inventory = None;
@@ -358,7 +367,7 @@ mod tests {
 
     #[test]
     fn each_refusal_fires_on_its_own_before_the_table() {
-        for rule in 1..=11 {
+        for rule in 1..=12 {
             let mut snap = inventory_only();
             match rule {
                 1 => snap.inventory.as_mut().unwrap().source = "other".into(),
@@ -378,13 +387,14 @@ mod tests {
                 9 => snap.entries[0].dirs.dest = true,
                 10 => snap.inventory.as_mut().unwrap().entries[0].attachments = true,
                 11 => snap.entries[0].dirs.source = true,
+                12 => snap.registry.target_group = true,
                 _ => unreachable!(),
             }
             let Recovery::Refuse(reason) = classify(&snap) else {
                 panic!("R{rule} did not refuse: {snap:?}");
             };
             assert!(reason.starts_with(&format!("R{rule}:")), "{reason}");
-            if (7..=8).contains(&rule) {
+            if matches!(rule, 7 | 8 | 12) {
                 snap.inventory = None;
                 let Recovery::Refuse(reason) = classify(&snap) else {
                     panic!("R{rule} needs no inventory");
@@ -433,7 +443,7 @@ mod tests {
             }
             _ => 0,
         };
-        let mut excluded = two_roots || foreign_target;
+        let mut excluded = two_roots || foreign_target || registry.target_group;
         let mut done = true;
         let (has_inventory, config_column) = match &snap.inventory {
             Some(inv) => {
@@ -585,6 +595,7 @@ mod tests {
                                     old_key: old.clone(),
                                     new_key: new.clone(),
                                     alias: alias.clone(),
+                                    target_group: false,
                                 };
                                 for config in &configs {
                                     snap.config = config.clone();

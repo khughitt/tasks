@@ -134,6 +134,12 @@ list it.
 Parents do not inherit or propagate anything else. A `blocked` parent does not block its
 children; priority and size are per task; a child's owner is its own.
 
+**Addendum (2026-10-03, lanes):** one exception. A `blocked` lane (`lane: true`) is
+*paused*: its descendants leave `ready`, `next`, and `prime`'s ready list, and `ready` and
+`next` warn `<n> task(s) hidden by paused lane <id>`. `start` on a task inside it still
+works. An ordinary blocked goal keeps the rule above. See
+`2026-10-03-lanes-needs-groups-design.md` §3.4.
+
 ### 4.4 Commands
 
 ```

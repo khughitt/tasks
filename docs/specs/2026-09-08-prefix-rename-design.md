@@ -314,7 +314,7 @@ every refusal is decided **first**. Any of these ends classification with `Refus
 what it saw:
 
 **R1–R6 apply only when the inventory is present**; they are baseline comparisons and have
-nothing to compare against otherwise. **R7–R8 always apply**: they read the registry alone.
+nothing to compare against otherwise. **R7, R8 and R12 always apply**: they read the registry alone.
 
 | | Scope | |
 |---|---|---|
@@ -326,9 +326,17 @@ nothing to compare against otherwise. **R7–R8 always apply**: they read the re
 | R6 | inventory | the config digest is neither `config_from` nor `config_to` — an unrelated config edit |
 | R7 | always | `old_key` and `new_key` are both present and name different roots |
 | R8 | always | `new_key` is present and does not name this project's root |
+| R12 | always | the target prefix is the name of a project group (docs/specs/2026-10-03-lanes-needs-groups-design.md §6) |
 
 R9–R11 (attachment directories) are defined in
 docs/specs/2026-09-28-task-attachments-design.md, "Rename".
+
+R12 is the group collision that `is_taken` also refuses on a fresh rename. As a refusal
+it is decided before the table, so `--explain` reports it, and a rename interrupted
+before a group took its target refuses to resume rather than failing at the registry
+step. Plain `rename` reports it as `config`, as it reports a retired target. `rename
+--adopt` reports it as `validation`, and the split is
+deliberate.
 
 R2, R5, and R6 are what an earlier draft's `rename_only` predicate was reaching for and
 could not express: it compared against git's idea of dirt, which accepted *any* modified

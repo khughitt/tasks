@@ -4,7 +4,7 @@ use crate::output::{TaskSummary, TreeNode};
 use crate::query::ready_order;
 use crate::registry::Registry;
 use crate::repo::Project;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 
 /// Rejects a `parent` that is foreign, missing, or would make `task` its own ancestor.
@@ -62,6 +62,85 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
             .map(|parent| registry.canonical_id(parent));
     }
     Ok(())
+}
+
+/// No lane may have a lane as an ancestor. Covers both directions for the record being
+/// written: a lane above it when it is a lane, and a lane below it when it becomes a lane
+/// or moves under one. Ancestors are read from disk, as in `validate_parent`, which runs
+/// first and has already refused a parent loop. Only a write that creates nesting is refused,
+/// and the project is scanned only when the record's subtree could newly meet a lane, so
+/// ordinary writes inside a lane stay cheap; nesting already on disk is `check`'s to report.
+pub fn validate_lanes(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
+    let task_id = registry.canonical_id(&task.id);
+    // A record not yet on disk has no children, and any lane above it is new nesting.
+    let stored = match project.read_task(&task_id) {
+        Ok(stored) => Some(stored),
+        Err(Error::TaskNotFound(_)) => None,
+        Err(error) => return Err(error),
+    };
+    let canonical = |parent: &Option<TaskId>| parent.as_ref().map(|id| registry.canonical_id(id));
+    let moved = stored
+        .as_ref()
+        .is_none_or(|stored| canonical(&stored.parent) != canonical(&task.parent));
+    let became_lane = task.lane && stored.as_ref().is_none_or(|stored| !stored.lane);
+    // Only a write that introduces nesting is refused; a write that leaves nesting already
+    // on disk as it is (a note, a status change) goes through.
+    if !became_lane && !moved {
+        return Ok(());
+    }
+    let above = lane_above(project, registry, task)?;
+    if task.lane
+        && let Some(outer) = &above
+    {
+        return Err(Error::NestedLane(format!(
+            "{task_id} cannot be a lane inside lane {outer}; a sub-effort inside a lane is an \
+             ordinary child goal"
+        )));
+    }
+    if stored.is_none() || (!became_lane && above.is_none()) {
+        return Ok(());
+    }
+    let all = project.scan()?;
+    let Some(inner) = descendants(&all, &task_id, registry)
+        .into_iter()
+        .find(|descendant| descendant.lane)
+    else {
+        return Ok(());
+    };
+    Err(Error::NestedLane(match above {
+        Some(outer) => format!(
+            "moving {task_id} under lane {outer} would put lane {} inside it",
+            inner.id
+        ),
+        None => format!("{task_id} cannot be a lane: lane {} is below it", inner.id),
+    }))
+}
+
+/// The nearest lane above `task` on disk. A loop or a missing parent ends the walk.
+fn lane_above(project: &Project, registry: &Registry, task: &Task) -> Result<Option<TaskId>> {
+    let mut seen = HashSet::new();
+    let mut current = task
+        .parent
+        .as_ref()
+        .map(|parent| registry.canonical_id(parent));
+    while let Some(id) = current {
+        if !seen.insert(id.clone()) {
+            break;
+        }
+        let ancestor = match project.read_task(&id) {
+            Ok(ancestor) => ancestor,
+            Err(Error::TaskNotFound(_)) => break,
+            Err(error) => return Err(error),
+        };
+        if ancestor.lane {
+            return Ok(Some(id));
+        }
+        current = ancestor
+            .parent
+            .as_ref()
+            .map(|parent| registry.canonical_id(parent));
+    }
+    Ok(None)
 }
 
 /// Walks the parent chain upward from `start` and returns the loop it runs into, if any,
@@ -136,6 +215,52 @@ pub fn is_active(task: &Task) -> bool {
     task.status.is_open() && task.status != Status::Shelved
 }
 
+/// The one test for "this task is a goal", used wherever a goal is treated specially. A
+/// lane is a goal even before its first child exists.
+pub fn is_goal(task: &Task, has_children: bool) -> bool {
+    has_children || task.lane
+}
+
+/// The nearest lane strictly above `task` in `all`, walking `parent` links. A visited set
+/// ends a corrupt loop, and a parent missing from `all` ends the walk.
+pub fn enclosing_lane<'a>(all: &'a [Task], task: &Task, registry: &Registry) -> Option<&'a Task> {
+    let mut seen = std::collections::HashSet::new();
+    let mut current = task
+        .parent
+        .as_ref()
+        .map(|parent| registry.canonical_id(parent));
+    while let Some(id) = current {
+        if !seen.insert(id.clone()) {
+            return None;
+        }
+        let ancestor = all.iter().find(|candidate| candidate.id == id)?;
+        if ancestor.lane {
+            return Some(ancestor);
+        }
+        current = ancestor
+            .parent
+            .as_ref()
+            .map(|parent| registry.canonical_id(parent));
+    }
+    None
+}
+
+/// The lane a row belongs to: the task itself when it is a lane, else its nearest lane
+/// ancestor. Computed from the scan, never stored.
+pub fn lane_of(all: &[Task], task: &Task, registry: &Registry) -> Option<TaskId> {
+    if task.lane {
+        return Some(registry.canonical_id(&task.id));
+    }
+    enclosing_lane(all, task, registry).map(|lane| lane.id.clone())
+}
+
+/// Lanes design §3.4: the paused lane above `task`, if any. A `blocked` lane pauses its
+/// descendants; the one place an ancestor's status gates a descendant, and only for
+/// lanes. The task itself is never its own pause: a lane is a goal and never ready.
+pub fn paused_lane<'a>(all: &'a [Task], task: &Task, registry: &Registry) -> Option<&'a Task> {
+    enclosing_lane(all, task, registry).filter(|lane| lane.status == Status::Blocked)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Shelved {
     Hidden,
@@ -149,48 +274,51 @@ enum Visibility {
     UnderShownParent,
 }
 
-/// spec §4.7: `readiness` excludes any task with children, so a cadence on a goal could
-/// never fire. Refuse it at the write rather than leave a silent dead end. Scans only when
-/// a cadence is actually set, which is rare.
+/// spec §4.7: `readiness` excludes a goal, so a cadence on one could never fire. Refuse it
+/// at the write rather than leave a silent dead end.
 pub fn validate_periodic(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
     if task.every.is_none() {
         return Ok(());
     }
-    let all = project.scan()?;
-    let kids = children(&all, &task.id, registry);
-    if !kids.is_empty() {
-        return Err(Error::Validation(format!(
-            "{} has children ({}) and cannot be a recurrence; a task with children is a \
-             goal, and a goal is never ready",
-            task.id,
-            kids.iter()
-                .map(|kid| kid.id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
-    }
-    Ok(())
+    refuse_goal(project, registry, task, "be a recurrence")
 }
 
-/// A deferred task with children would never appear in a picker.
+/// A deferred goal would never appear in a picker.
 pub fn validate_defer(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
     if task.defer.is_none() {
         return Ok(());
     }
-    let all = project.scan()?;
-    let kids = children(&all, &task.id, registry);
-    if !kids.is_empty() {
-        return Err(Error::Validation(format!(
-            "{} has children ({}) and cannot be deferred; a task with children is a \
-             goal, and a goal is never ready",
-            task.id,
-            kids.iter()
-                .map(|kid| kid.id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
+    refuse_goal(project, registry, task, "be deferred")
+}
+
+/// Refuses `task` when it is a goal. A lane is refused without a scan, and a record not yet
+/// on disk has no children, so the project is scanned only when the field is set on an
+/// existing record that is not a lane, which is rare.
+fn refuse_goal(project: &Project, registry: &Registry, task: &Task, what: &str) -> Result<()> {
+    let kids: Vec<String> = if task.lane || !project.task_path(&task.id).is_file() {
+        Vec::new()
+    } else {
+        children(&project.scan()?, &task.id, registry)
+            .iter()
+            .map(|kid| kid.id.to_string())
+            .collect()
+    };
+    if !is_goal(task, !kids.is_empty()) {
+        return Ok(());
     }
-    Ok(())
+    Err(Error::Validation(if kids.is_empty() {
+        format!(
+            "{} is a lane and cannot {what}; a lane is a goal, and a goal is never ready",
+            task.id
+        )
+    } else {
+        format!(
+            "{} has children ({}) and cannot {what}; a task with children is a goal, and a \
+             goal is never ready",
+            task.id,
+            kids.join(", ")
+        )
+    }))
 }
 
 /// The forest under `root` (or every root when `None`). Without `include_closed`, a node
@@ -303,6 +431,8 @@ mod tests {
             complexity: None,
             process: None,
             parallel: false,
+            lane: false,
+            needs: vec![],
             every: None,
             defer: None,
             owner: None,
@@ -323,6 +453,31 @@ mod tests {
             body: String::new(),
             notes: vec![],
         }
+    }
+
+    #[test]
+    fn lane_of_is_the_task_itself_or_its_nearest_lane_ancestor() {
+        let registry = Registry::default();
+        let mut lane = task("xx-000001", None, Status::Todo);
+        lane.lane = true;
+        let goal = task("xx-000002", Some("xx-000001"), Status::Todo);
+        let step = task("xx-000003", Some("xx-000002"), Status::Todo);
+        let loose = task("xx-000004", None, Status::Todo);
+        let all = [lane.clone(), goal, step.clone(), loose.clone()];
+        assert_eq!(lane_of(&all, &step, &registry), Some(lane.id.clone()));
+        assert_eq!(lane_of(&all, &lane, &registry), Some(lane.id.clone()));
+        assert!(
+            enclosing_lane(&all, &lane, &registry).is_none(),
+            "strictly above"
+        );
+        assert_eq!(lane_of(&all, &loose, &registry), None);
+        let a = task("xx-000005", Some("xx-000006"), Status::Todo);
+        let b = task("xx-000006", Some("xx-000005"), Status::Todo);
+        assert_eq!(
+            lane_of(&[a.clone(), b], &a, &registry),
+            None,
+            "a parent loop ends the walk"
+        );
     }
 
     #[test]
@@ -386,6 +541,18 @@ mod tests {
             .map(|t| t.id.to_string())
             .collect();
         assert_eq!(open, ["xx-000003"]);
+    }
+
+    #[test]
+    fn a_lane_is_a_goal_with_or_without_children() {
+        let mut lane = task("xx-000001", None, Status::Todo);
+        assert!(!is_goal(&lane, false));
+        assert!(is_goal(&lane, true));
+        lane.lane = true;
+        assert!(
+            is_goal(&lane, false),
+            "a lane is a goal before its first child"
+        );
     }
 
     #[test]

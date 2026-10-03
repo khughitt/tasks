@@ -126,6 +126,8 @@ mod tests {
             complexity: None,
             process: None,
             parallel: false,
+            lane: false,
+            needs: vec![],
             every: None,
             defer: None,
             owner: None,
@@ -465,6 +467,15 @@ pub struct Task {
     /// Marked safe to run beside any other task marked parallel. Hand-set; nothing
     /// infers or validates it. See docs/specs/2026-09-06-parallel-candidates-design.md.
     pub parallel: bool,
+    /// A goal meant to proceed alongside other lanes; its members are the `parent` tree
+    /// below it. Hand-set by `add`/`edit --lane`, cleared by `--no-lane`. See
+    /// docs/specs/2026-10-03-lanes-needs-groups-design.md §3.
+    pub lane: bool,
+    /// Shared resources the work uses, each declared in the project's `[needs]`
+    /// vocabulary. Checked against it on write and by `check`, carried as-is on read.
+    /// See docs/specs/2026-10-03-lanes-needs-groups-design.md §4.2.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
     /// The recurrence interval. A closed task carrying one falls due again; an open one is
     /// an ordinary task. See docs/specs/2026-09-09-periodic-design.md.
     #[serde(skip_serializing_if = "Option::is_none")]

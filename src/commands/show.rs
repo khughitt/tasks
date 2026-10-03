@@ -162,6 +162,7 @@ pub fn describe(
         step_found,
         depends_on,
         parent,
+        in_lane: crate::hierarchy::lane_of(all, &task, registry),
         children,
         claim: claims
             .and_then(|snapshot| snapshot.get(&task.id))

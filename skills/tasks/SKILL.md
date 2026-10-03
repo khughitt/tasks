@@ -15,8 +15,9 @@ nothing is eligible.
 
 ## Session protocol
 
-1. `tasks prime` — roadmap (the open goal tree), closeout (goals whose work is all
-   done), the ready list, and who is working on what.
+1. `tasks prime` — lanes (the efforts meant to run side by side, each with its guidance
+   and the step it could take now), roadmap (the open goal tree), closeout (goals whose
+   work is all done), the ready list, and who is working on what.
 2. Pick from `tasks ready` (sorted by priority, then size). Never pick an `idea`; scope it first.
    Use the `scope` skill for a deliberate idea review.
    A `shelved` task is out of active work: `list --status shelved` sees it, and
@@ -31,6 +32,12 @@ nothing is eligible.
    hid. Do not take work from `prime`'s parked or roadmap sections or from `list --parked`,
    and close goals only when `prime`'s closeout offers them. The variable is the harness
    form; the flag is for a person at a terminal.
+   A session that cannot meet a shared resource says so: `TASKS_WITHOUT=quiet` (comma-
+   separated) in a host's ordinary session environment, or `--without <need>` on
+   `ready`/`next`/`prime`/`lanes`, hides tasks that need it: `ready`, `next`, and `prime`
+   with one warning counting them, `lanes` under its `without` cause.
+   The flag refuses a name no project in scope declares; the variable never errors.
+   A TTY session handed the idle host runs without the variable.
    The one exception: an idea `next` hands you because it is parked waiting on the agent,
    which means resume its scoping, never implement it.
    `tasks list` is the wider view: open tasks by priority, or `--sort updated` /
@@ -40,17 +47,25 @@ nothing is eligible.
    narrow (all of them). `--size`, `--complexity`, and `--process` accept `none` for an
    unset field; `--priority` does not, since every task has one. `--tag` stays all-of: a
    task must carry every tag given. `--owner`, `--source`, and `--parent` take one value,
-   and `--parallel` is a switch. `--complexity` is a selection over the effective rating,
+   and `--parallel` is a switch. `--need` is all-of, like `--tag`. `--complexity` is a selection over the effective rating,
    not the session cutoff: a session under a cutoff still picks only through `ready` and
    `next`.
    Never pick a task with children; those are goals. `ready` already omits them.
+   A lane (`lane: true`) is a goal too, even before it has children, and every row names
+   its lane in `in_lane` (the nearest lane at or above it). A session committed to one
+   lane picks with `tasks next --under <lane>`; `--under` also narrows `list` and `ready`
+   to descendants at any depth, while `--parent` stays direct children. Without `--under`,
+   `next` keeps its priority order. `tasks lanes` answers what can run in parallel: each
+   lane is `ready` with its pick, `held` on an exclusive need, `waiting` with its causes,
+   `paused`, or `empty`.
    With nothing in hand, `tasks next` prints the most recently parked task waiting on the
    agent, else the first ready task, in full; `tasks next --all-projects` does the same
    across every registered project, and `tasks next
    --project <prefix>` reads one of them.
    `tasks quiet` lists work parked waiting for an idle host across every registered
    project, priority first, as resume briefs with the checkout to open; `-n 1` is the
-   top of the queue and `--project <prefix>` narrows it. It is the person's bedtime
+   top of the queue, and `--project <prefix>`
+   or `--group <name>` narrows it. It is the person's bedtime
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
 3. Read the task's `process` and follow **Process and workspace** below before
@@ -74,6 +89,18 @@ nothing is eligible.
    halt, use `tasks start <id> --force --reason "<one-line explanation>"`. The reason
    is recorded on both the halt and the started task. Start's reason is free text;
    park's `--reason` below is a fixed choice from its own vocabulary.
+   A need declared `exclusive` names a host resource (an idle host, a device) and serves
+   one session at a time across every project on the host that uses the name. `start`
+   records the task's exclusive needs as holds on its claim. `ready`, `next` and `prime`
+   hide other sessions' steps that need a held resource, with a warning naming the holder.
+   Starting such a step (or `edit --status doing`) fails with `need_held`. Override it
+   deliberately with `tasks start <id> --force --reason "<why>"`, which notes the task and
+   a same-project holder. Your own session may start more steps that need what it already
+   holds. A park or a dead session releases the hold. A long run that keeps the resource
+   should heartbeat with `tasks note`, or a pid-less claim lapses with its TTL. Change the
+   needs of a claimed task only under your own claim (`start --force` takes it over first).
+   Adding an exclusive need that another session holds takes `tasks edit <id> --need <n>
+   --force --reason "<why>"`.
    Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, when a long-lived process id is available)
    when several agents share one terminal or harness process; otherwise agents that resolve
    to the same session id are indistinguishable to the claim store.
@@ -158,7 +185,7 @@ nothing is eligible.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--no-depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--lane/--no-lane/--tag/--depends/--no-depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer/--need/--rm-need/--no-needs`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 Notes stay append-only there: the one note change it accepts is removing trailing spaces
 and tabs, which every new note already has stripped.
@@ -168,6 +195,17 @@ and tabs, which every new note already has stripped.
 tag dictionary (`[tags]` in `tasks/.config.toml`), `tasks tags` shows each tag's meaning:
 prefer a defined tag, and add an entry when a new tag is worth keeping — `check` warns
 on open tasks carrying an undefined one.
+
+A step that uses a shared resource records it with `--need <name>` (repeatable), drawn
+from the project's `[needs]` vocabulary in `tasks/.config.toml`:
+`[needs.quiet]` with `meaning = "<one line>"` and, for a resource only one session can use
+at a time, `exclusive = true`. Name an exclusive need after the host resource it stands
+for: exclusive names are one namespace across every project on the host. Prefer a need to
+an ad hoc `needs-*` tag. `add`/`edit` refuse an undeclared name (`unknown_need`), and
+`check` errors on a record naming one; add the vocabulary entry first. `edit --need`
+appends, `--rm-need` removes, and `--no-needs` clears. Change status and needs in
+separate operations: `edit --status` refuses the needs flags, and an editor save may not
+change both.
 
 Project identity colors are assigned by an optional top-level `color = "#RRGGBB"` in
 `tasks/.config.toml`, before any table headers. Use exactly six hex digits (either case);
@@ -194,13 +232,33 @@ always means this checkout; without a local project, the registry supplies the r
 Malformed local configuration still fails. `feedback` needs a local project for its `from:` tag.
 
 The read commands say where to look instead of inferring it from an id: `list`, `ready`,
-`next`, `prime`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one registered
-project or `--all-projects` for every reachable one. Either works from anywhere, including
+`next`, `prime`, `lanes`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one
+registered project, `--group <name>` for the members of a project group, or
+`--all-projects` for every reachable one. Each works from anywhere, including
 outside every project. `--project` reads that project's *registered* root, so from a
 worktree it is how you ask for the main checkout. `tree <id>` is the exception that needs
 no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
 `tasks tree <other-prefix>-<hex>` reads that subtree from wherever you are. Passing
 `--project` alongside an id names the scope explicitly and wins over the prefix.
+
+A project group is a named set of registered projects, declared in this host's registry
+and not synced. Each host declares its own groups.
+
+- **Managing groups.** `tasks group set <name> <prefix>...` creates or replaces a group,
+  and a retired prefix resolves to its live name. `tasks group rm <name>` deletes a group.
+  `tasks groups` lists each group with whether each member is reachable.
+- **Names.** Names use the tag grammar (lowercase letters, digits, `-`). A name cannot be
+  a live or retired prefix, or a prefix an unfinished rename reserves. Registering a
+  prefix (`init`, and `init --force` re-pointing one) and `rename` refuse a prefix that
+  names a group. Groups may overlap.
+- **Membership changes.** `rename` carries membership to the new prefix. `unregister`
+  drops the prefix from every group, and deletes, with a warning, any group it leaves
+  empty.
+- **Reading a group.** Under `--group`, `prime` adds `group` and its `prefix` is null.
+  Warnings about unreachable projects or unknown halt state name members only. A group
+  whose members are all unreachable gives those warnings and empty results.
+- **Errors and limits.** A misspelled name is `unknown_group`. `tasks claims` always reads
+  every store.
 
 ## Process and workspace
 
@@ -314,7 +372,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
   `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
   returns it to `idea`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"]`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or
@@ -339,6 +397,19 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   descendant is open (`--force` overrides); `drop` refuses while any descendant is
   open and has no override — drop or reparent the subtree first
   (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).
+- An effort meant to run beside the project's other efforts:
+  `tasks add "<effort>" --lane -p <0-4> -b "<why it exists and its first milestone>"`,
+  then decompose it with `--parent` like any goal. Lead the body with that paragraph:
+  `prime` and `tasks lanes` show it as the lane's guidance, skipping headings above it.
+  Make a lane only for a standalone effort; a sub-effort inside a lane is an ordinary
+  child goal, and a write that nests a lane inside a lane is refused (`nested_lane`).
+  A lane's priority ranks it in the lanes view and decides which lane wins a contested
+  exclusive need; it never reorders `ready` or `next`. Pause a lane with
+  `tasks block <lane> "<why>"`: its subtree leaves `ready`, `next`, and `prime`'s ready
+  list until `tasks unblock <lane>`. `ready` and `next` warn about the paused work;
+  `prime` shows the lane as `paused` in its lanes block. `start` on a task inside a paused
+  lane still works. Never pause with `shelve`, which hides the lane from every view and
+  needs its subtree shelved first. `check` warns about a lane with no steps yet.
 - Dispatching several agents at once: mark each self-contained task with
   `tasks edit <id> --parallel`, then `tasks ready --parallel -n <N>` for the set to hand
   out. The marker asserts only that marked tasks do not collide with *each other* — it

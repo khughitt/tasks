@@ -58,7 +58,7 @@ Each step is idempotent.
 
 4. Work:
 
-       tasks prime                      # counts, ready list, who is doing what
+       tasks prime                      # counts, lanes, ready list, who is doing what
        tasks ready                      # what can be worked on now
        tasks tree                       # the goal hierarchy
        tasks start <id>                 # claim it
@@ -91,6 +91,13 @@ An open `halt` task in the registered checkout blocks new lower-priority starts 
 worktrees. `prime`, `ready`, and `next` show the halt and eligible work. An audited
 override is `tasks start <id> --force --reason "<one-line explanation>"`; its free-text
 reason is recorded on the halt and target, unlike park's fixed-list `--reason`.
+
+An exclusive need (`exclusive = true` under `[needs]`) is held by the live claim of the
+task that needs it, across every registered project on the host. Other sessions' steps
+that need it leave `ready`, `next` and `prime` with a warning naming the holder, and `start`
+refuses them with `need_held`. `tasks start <id> --force --reason "…"` overrides with a
+note on the task, and on the holder when it is in the same project. A park or a dead
+session releases the hold.
 
 Lifecycle notes automatically record native harness provenance, independently of
 claim identity and liveness. A stamped note has one indented JSON continuation:
@@ -151,6 +158,13 @@ they know their ids. Design:
 `ready`, `next`, and `prime` hide tasks rated above it and unassessed tasks, and say how
 many. `--max-complexity` on `ready`/`next` overrides it for one call. Design:
 `docs/specs/2026-09-12-task-complexity-design.md`.
+`TASKS_WITHOUT` (comma-separated need names) is the other half of a session's envelope:
+`ready`, `next`, and `prime` hide tasks needing any of them, in the projects that declare
+the name, and say how many.
+`--without` adds to it for one call and refuses a name no project in scope declares; the
+variable never errors, so a host in ordinary use can set `TASKS_WITHOUT=quiet` once for
+every project. Needs are declared per project in `[needs]` (see the design's §6). Design:
+`docs/specs/2026-10-03-lanes-needs-groups-design.md`.
 `park` sets a task down with its next step in the same store, who it waits on, and
 optionally why:
 
@@ -272,6 +286,16 @@ from a clone):
     tasks ready --complexity none             # ready work nobody has rated yet
     tasks ready                      # what can be worked on now (JSON)
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
+    tasks add "Capture lane" --lane -p 1 -b "Why it runs; first milestone"  # an effort beside the others
+    tasks edit <id> --no-lane        # clear the lane marker
+    tasks lanes                      # each lane: guidance, state, and the step it could take now
+    tasks next --under sci-4f2a9c    # the next step inside one lane, at any depth
+    tasks list --under sci-4f2a9c    # a goal's whole subtree (--parent is direct children)
+    tasks block sci-4f2a9c "host busy"  # pause a lane; tasks unblock resumes it
+    tasks add "Capture the trace" --need quiet  # a shared resource from [needs] in tasks/.config.toml
+    tasks edit <id> --rm-need quiet  # --need adds; --rm-need/--no-needs remove
+    tasks list --need quiet          # tasks that need it (all-of, like --tag)
+    tasks ready --without quiet      # hide steps this session cannot meet; also TASKS_WITHOUT
     tasks sample --limit 3           # random open tasks for a curation pass (see skills/curate)
     tasks tree                       # the goal hierarchy
     tasks next                       # parked work waiting on you, else the first ready task
@@ -285,6 +309,11 @@ from a clone):
     tasks prime --project fam        # read another registered project; also list, ready,
                                      #   next, tree, tags, sample. Needs no local project.
     tasks projects                   # the registry: reachable? counts?
+    tasks group set vf nodes atoms   # a named set of registered projects (this host only)
+    tasks ready --group vf           # read a group; also list, next, prime, tree, tags,
+                                     #   sample, lanes, quiet. Needs no local project.
+    tasks groups                     # each group, its members, and whether they are reachable
+    tasks group rm vf                # delete the group; its projects stay registered
     tasks add "Piece" --project fam  # create in another registered project
     tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
     tasks show 4f2a9c                # a bare suffix means the current project's task (sci-4f2a9c)
@@ -294,7 +323,7 @@ from a clone):
     tasks --pretty ready             # same, as a table (or export TASKS_FORMAT=pretty)
     tasks --pretty --color auto ready # color when stdout is a terminal
     tasks start sci-4f2a9c
-    tasks start sci-4f2a9c --force --reason "restore the service"  # audited halt override
+    tasks start sci-4f2a9c --force --reason "restore the service"  # audited halt or held-need override
     tasks note sci-4f2a9c "spec §4 no longer holds"
     tasks attach sci-4f2a9c ~/Pictures/before.png --caption "the stale row"  # copy into tasks/files/<id>/
     tasks attach sci-4f2a9c --clipboard       # an image from wl-paste; --name to choose the name
@@ -339,6 +368,11 @@ live name. `tasks rename <old> <new>` updates the project's filenames, ids, loca
 prose need no edits: retired names keep resolving **for as long as the project stays
 registered**. `unregister` removes that project's aliases too; retired names cannot be
 reused while registered.
+
+The registry can also declare project groups (`[groups]`), named sets of live prefixes
+that `--group <name>` reads together. `rename` carries a member to its new prefix.
+`unregister` removes the prefix from every group and deletes, with a warning, any group it
+leaves empty. A group name is never a live or retired prefix.
 
 A live id and its retired spelling are one task. `tasks dep <id> --on <x>` when the task
 already depends on `x` under any spelling changes nothing, keeps the stored spelling, and
@@ -547,4 +581,4 @@ public.
 
     tasks/.config.toml               prefix = "sci"; optional color / spec_dirs / plan_dirs / [tags]
     tasks/sci-4f2a9c.md              one task
-    ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live
+    ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live; [groups] name -> prefixes

@@ -3,7 +3,7 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Complexity, HarnessProvenance, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 25] = [
+const KEYS: [&str; 27] = [
     "id",
     "title",
     "status",
@@ -12,6 +12,8 @@ const KEYS: [&str; 25] = [
     "complexity",
     "process",
     "parallel",
+    "lane",
+    "needs",
     "every",
     "defer",
     "owner",
@@ -85,6 +87,16 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             Some(v) => Err(perr(file, format!("{k} must be true or false, not {v:?}"))),
         }
     };
+    // An optional list: absent is empty. `tags` and `depends` stay required.
+    let optional_list = |k: &str| -> Result<Vec<String>> {
+        match pairs.iter().find(|(key, _)| key == k) {
+            None => Ok(Vec::new()),
+            Some((_, Value::List(v))) => Ok(v.clone()),
+            Some((_, Value::Scalar(_) | Value::Raw(_))) => {
+                Err(perr(file, format!("{k} must be a list")))
+            }
+        }
+    };
     let priority: u8 = required("priority")?
         .parse()
         .map_err(|_| perr(file, "priority must be an integer 0-4"))?;
@@ -119,6 +131,8 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
         parallel: boolean("parallel")?,
+        lane: boolean("lane")?,
+        needs: optional_list("needs")?,
         every: scalar("every")?
             .map(|value| crate::periodic::Interval::parse(&value))
             .transpose()
@@ -374,6 +388,9 @@ pub fn validate_task(t: &Task) -> Result<()> {
     for tag in &t.tags {
         validate_line("tag", tag)?;
     }
+    for need in &t.needs {
+        crate::needs::validate_name(need)?;
+    }
     if let Some(source) = &t.source {
         validate_line("source", source)?;
     }
@@ -419,6 +436,14 @@ pub fn serialize_task(t: &Task) -> String {
     // `parallel: "true"` — readable back, but out of step with every other scalar.
     if t.parallel {
         pairs.push(("parallel".into(), Value::Raw("true".into())));
+    }
+    // Raw for the same reason as `parallel`: a quoted `"true"` would read back but sit
+    // out of step with every other scalar.
+    if t.lane {
+        pairs.push(("lane".into(), Value::Raw("true".into())));
+    }
+    if !t.needs.is_empty() {
+        pairs.push(("needs".into(), Value::List(t.needs.clone())));
     }
     if let Some(every) = t.every {
         pairs.push(("every".into(), s(&every.to_string())));
@@ -765,6 +790,65 @@ mod tests {
         let t = parse_task(&text, "x").unwrap();
         assert!(!t.parallel);
         assert!(!serialize_task(&t).contains("parallel"));
+    }
+
+    #[test]
+    fn lane_round_trips_after_parallel_and_is_omitted_when_false() {
+        let mut t = parse_task(MINIMAL, "x").unwrap();
+        assert!(!t.lane, "absent key reads as false");
+        assert!(
+            !serialize_task(&t).contains("lane"),
+            "false is never written"
+        );
+
+        t.parallel = true;
+        t.lane = true;
+        let text = serialize_task(&t);
+        assert!(
+            text.contains("\nparallel: true\nlane: true\n"),
+            "unquoted, right after parallel: {text}"
+        );
+        assert!(parse_task(&text, "x").unwrap().lane);
+
+        let bad = MINIMAL.replace("depends: []", "lane: yes\ndepends: []");
+        let err = parse_task(&bad, "x").unwrap_err().to_string();
+        assert!(err.contains("lane must be true or false"), "{err}");
+    }
+
+    #[test]
+    fn needs_round_trip_after_parallel_and_are_omitted_when_empty() {
+        let t = parse_task(MINIMAL, "x").unwrap();
+        assert!(t.needs.is_empty(), "absent key reads as empty");
+        assert!(!serialize_task(&t).contains("needs"));
+
+        let text = MINIMAL.replace(
+            "priority: 2\n",
+            "priority: 2\nparallel: true\nneeds: [quiet, owner]\n",
+        );
+        let t = parse_task(&text, "x").unwrap();
+        assert_eq!(t.needs, ["quiet", "owner"]);
+        let out = serialize_task(&t);
+        assert!(
+            out.contains("\nparallel: true\nneeds: [quiet, owner]\ncreated: "),
+            "written after parallel: {out}"
+        );
+        assert_eq!(parse_task(&out, "x").unwrap(), t);
+    }
+
+    #[test]
+    fn needs_empty_list_is_dropped_and_bad_values_are_refused() {
+        let empty = MINIMAL.replace("tags: []", "tags: []\nneeds: []");
+        let t = parse_task(&empty, "x").unwrap();
+        assert!(t.needs.is_empty());
+        assert!(!serialize_task(&t).contains("needs"));
+
+        let upper = MINIMAL.replace("tags: []", "tags: []\nneeds: [Quiet]");
+        let err = parse_task(&upper, "x").unwrap_err().to_string();
+        assert!(err.contains("need \"Quiet\""), "{err}");
+
+        let scalar = MINIMAL.replace("tags: []", "tags: []\nneeds: quiet");
+        let err = parse_task(&scalar, "x").unwrap_err().to_string();
+        assert!(err.contains("needs must be a list"), "{err}");
     }
 
     #[test]

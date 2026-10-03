@@ -47,6 +47,7 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                     && state.alias.as_ref() == Some(&invocation.target);
                 return Err(
                     if registry.aliases.contains_key(&invocation.target)
+                        || registry.groups.contains_key(&invocation.target)
                         || !(registry_old || registry_new)
                     {
                         Error::Config(reason.clone())

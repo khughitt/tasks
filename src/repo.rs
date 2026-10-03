@@ -81,6 +81,10 @@ pub struct Project {
     /// The `[feedback]` table's scope: `Some` means the project accepts feedback, and the
     /// line says what it owns. See ops docs/specs/2026-09-26-ecosystem-feedback-design.md.
     pub feedback: Option<String>,
+    /// The need vocabulary from the config's `[needs]` tables: name -> meaning and
+    /// exclusivity. Empty when the project declares none. See
+    /// docs/specs/2026-10-03-lanes-needs-groups-design.md §4.1.
+    pub needs: crate::needs::Vocabulary,
     /// The per-file cap from `[attachments] max_bytes`; `attachments::DEFAULT_MAX_BYTES` when unset.
     pub attachments_max_bytes: u64,
 }
@@ -114,6 +118,8 @@ struct Config {
     feedback: Option<FeedbackConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     attachments: Option<AttachmentsConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    needs: Option<crate::needs::Vocabulary>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -155,6 +161,19 @@ fn tag_dictionary(
             .map_err(|error| Error::Config(format!("{CONFIG_REL}: [tags] {tag:?}: {error}")))?;
     }
     Ok(Some(entries))
+}
+
+/// Each `[needs]` name follows the tag grammar and each meaning is one non-empty line;
+/// anything else is a config error naming the entry. Unknown keys and a missing meaning
+/// already failed the TOML parse (`deny_unknown_fields`).
+fn need_vocabulary(raw: Option<crate::needs::Vocabulary>) -> Result<crate::needs::Vocabulary> {
+    let vocabulary = raw.unwrap_or_default();
+    for (name, decl) in &vocabulary {
+        crate::needs::validate_name(name)
+            .and_then(|()| crate::format::validate_line("meaning", &decl.meaning))
+            .map_err(|error| Error::Config(format!("{CONFIG_REL}: [needs] {name:?}: {error}")))?;
+    }
+    Ok(vocabulary)
 }
 
 /// The scope of a `[feedback]` table: no control character (Unicode `Cc`: line breaks,
@@ -229,6 +248,7 @@ impl Project {
                 tags: None,
                 feedback: None,
                 attachments: None,
+                needs: None,
             })
             .expect("config serializes");
             atomic_write(&config, text.as_bytes())?;
@@ -265,6 +285,7 @@ impl Project {
             plan_dirs: doc_roots("plan_dirs", config.plan_dirs, DEFAULT_PLAN_DIRS)?,
             tags: tag_dictionary(config.tags)?,
             feedback: feedback_scope(config.feedback)?,
+            needs: need_vocabulary(config.needs)?,
             attachments_max_bytes: attachments_max_bytes(config.attachments)?,
         })
     }
@@ -414,6 +435,7 @@ impl Project {
 
     pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
         crate::hierarchy::validate_parent(self, registry, task)?;
+        crate::hierarchy::validate_lanes(self, registry, task)?;
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
@@ -648,6 +670,10 @@ impl Project {
         mut candidate: impl FnMut() -> u32,
     ) -> Result<()> {
         crate::hierarchy::validate_parent(self, registry, task)?;
+        crate::hierarchy::validate_lanes(self, registry, task)?;
+        // A new record has no children, so these refuse only a lane.
+        crate::hierarchy::validate_periodic(self, registry, task)?;
+        crate::hierarchy::validate_defer(self, registry, task)?;
         for _ in 0..16 {
             task.id = TaskId {
                 prefix: self.prefix.clone(),
@@ -723,6 +749,8 @@ mod tests {
             complexity: None,
             process: None,
             parallel: false,
+            lane: false,
+            needs: vec![],
             every: None,
             defer: None,
             owner: None,
@@ -764,6 +792,50 @@ mod tests {
         let error = Project::open(dir.path()).unwrap_err().to_string();
         assert!(error.contains("[tags] \"testing\""), "{error}");
         assert!(error.contains("must not be empty"), "{error}");
+    }
+
+    #[test]
+    fn need_vocabulary_is_optional_and_its_entries_are_validated() {
+        let (dir, p) = temp_project();
+        assert!(p.needs.is_empty(), "init declares no needs");
+        let config = dir.path().join("tasks/.config.toml");
+        std::fs::write(
+            &config,
+            "prefix = \"tst\"\n\n[needs.quiet]\nmeaning = \"an idle host\"\nexclusive = true\n\n\
+             [needs.owner]\nmeaning = \"the owner judges an image\"\n",
+        )
+        .unwrap();
+        let p = Project::open(dir.path()).unwrap();
+        assert_eq!(p.needs.len(), 2);
+        assert!(p.needs["quiet"].exclusive);
+        assert!(!p.needs["owner"].exclusive, "exclusive defaults to false");
+        assert_eq!(p.needs["owner"].meaning, "the owner judges an image");
+
+        // Each malformed table is a config error; ours name the entry.
+        for (table, fragment) in [
+            ("[needs.quiet]\n", None),
+            ("[needs.quiet]\nmeaning = \"x\"\ncapacity = 2\n", None),
+            (
+                "[needs.quiet]\nmeaning = \"x\"\nexclusive = \"yes\"\n",
+                None,
+            ),
+            ("[needs]\nquiet = \"an idle host\"\n", None),
+            (
+                "[needs.quiet]\nmeaning = \"\"\n",
+                Some("[needs] \"quiet\": meaning must not be empty"),
+            ),
+            (
+                "[needs.Quiet]\nmeaning = \"x\"\n",
+                Some("[needs] \"Quiet\": need \"Quiet\""),
+            ),
+        ] {
+            std::fs::write(&config, format!("prefix = \"tst\"\n\n{table}")).unwrap();
+            let error = Project::open(dir.path()).unwrap_err();
+            assert_eq!(error.kind(), "config", "{table}");
+            if let Some(fragment) = fragment {
+                assert!(error.to_string().contains(fragment), "{table}: {error}");
+            }
+        }
     }
 
     #[test]

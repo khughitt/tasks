@@ -86,6 +86,20 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ));
             }
         }
+        // Lanes-needs spec §4.2: reads carry an undeclared need as-is; `check` refuses
+        // it on every record, open or closed, since a reopen or an acquire reads it again.
+        for need in &task.needs {
+            if let Err(error) =
+                crate::needs::require_declared(&ctx.project.needs, std::slice::from_ref(need))
+            {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "unknown_need",
+                    error.to_string(),
+                ));
+            }
+        }
         if let Some(completed) = &task.completed
             && task.status != Status::Done
         {
@@ -208,30 +222,40 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
         if task.every.is_some() {
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
-            if !kids.is_empty() {
-                errors.push(finding(
-                    Some(task),
-                    file.clone(),
-                    "periodic_goal",
+            if crate::hierarchy::is_goal(task, !kids.is_empty()) {
+                let detail = if kids.is_empty() {
+                    "is a lane and has a cadence; a goal is never ready, so the cadence can \
+                     never fire"
+                        .to_string()
+                } else {
                     format!(
                         "has a cadence and children ({}); a goal is never ready, so the cadence can never fire",
-                        kids.iter().map(|kid| kid.id.to_string()).collect::<Vec<_>>().join(", ")
-                    ),
-                ));
+                        kids.iter()
+                            .map(|kid| kid.id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                errors.push(finding(Some(task), file.clone(), "periodic_goal", detail));
             }
         }
         if task.defer.is_some() {
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
-            if !kids.is_empty() {
-                errors.push(finding(
-                    Some(task),
-                    file.clone(),
-                    "deferred_goal",
+            if crate::hierarchy::is_goal(task, !kids.is_empty()) {
+                let detail = if kids.is_empty() {
+                    "is a lane and is deferred; a goal is never ready, so the deferral hides \
+                     nothing"
+                        .to_string()
+                } else {
                     format!(
                         "is deferred and has children ({}); a goal is never ready, so the deferral hides nothing",
-                        kids.iter().map(|kid| kid.id.to_string()).collect::<Vec<_>>().join(", ")
-                    ),
-                ));
+                        kids.iter()
+                            .map(|kid| kid.id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                errors.push(finding(Some(task), file.clone(), "deferred_goal", detail));
             }
             // spec §3.2: the status rule lives here and in the writers, not in parsing.
             if !crate::defer::can_carry(task.status) {
@@ -245,6 +269,37 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     ),
                 ));
             }
+        }
+        // A merge or a hand edit can leave a lane inside a lane.
+        if task.lane
+            && let Some(outer) = crate::hierarchy::enclosing_lane(&tasks, task, &ctx.registry)
+        {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "nested_lane",
+                format!(
+                    "is a lane inside lane {}; a sub-effort inside a lane is an ordinary \
+                     child goal",
+                    outer.id
+                ),
+            ));
+        }
+        // A lane is often filed before its steps exist, so a childless one is a reminder,
+        // not an error.
+        if task.lane
+            && crate::hierarchy::is_active(task)
+            && crate::hierarchy::children(&tasks, &task.id, &ctx.registry).is_empty()
+        {
+            warnings.push(finding(
+                Some(task),
+                file.clone(),
+                "childless_lane",
+                format!(
+                    "is a lane with no steps yet; add them with `tasks add \"<step>\" --parent {}`",
+                    task.id
+                ),
+            ));
         }
         // Spec §7: link drift is held against open work only. A closed record's links are
         // history, and a later plan revision that merges its heading away is not an error.

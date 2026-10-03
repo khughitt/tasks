@@ -54,6 +54,12 @@ The store holds a second entry kind, `[parks."<id>"]`, with one entry per task o
 kind; see `2026-09-09-park-design.md` §4. Park entries have no liveness and are not
 pruned. An empty kind is omitted from the file.
 
+A claim entry may also carry `holds = ["quiet"]`: the task's needs that its project
+declares exclusive. They are computed on every acquire and recomputed by a needs save under
+the holder's own claim (`2026-10-03-lanes-needs-groups-design.md` §4.4). An entry without
+the key holds nothing. An older binary drops the key on save, which weakens the hold gate
+and never blocks falsely.
+
 If the hostname cannot be read, `host` is recorded as `"unknown"`. This degrades display
 metadata only; liveness uses the pid, process start time, boot id, and TTL described below.
 
@@ -106,7 +112,19 @@ Three exceptions, all deliberate:
   lock. Its source `Ctx` stays unlocked, so only one lock is ever held — which also keeps
   this correct when source and target are the same project, as they are in this repository,
   since a second `flock` on the same file from the same process would deadlock. No command
-  holding two locks means there is no lock ordering to reason about.
+  holds two project locks, so there is no project-lock ordering to reason about (a
+  second, host-wide lock is taken only after the project lock; see below).
+
+One command may hold a second lock, with a fixed order. Any claim replacement that
+changes `holds` (an acquire that records one, or a needs save that adds, reduces or
+removes one) also takes the host-wide `claims/.holds.lock`, after the project lock and
+never before. It holds the lock until the command ends: across the hold check, the claim
+save, the record write, and the restore of the previous claim when that write fails.
+Two projects therefore cannot both acquire one exclusive need, and no acquire can see a
+hold that a failed write is about to restore. `save` refuses with an `io` error a holds
+change made without the lock. A release takes no holds lock, because it removes the claim
+only after the record is written. A prefix cannot start with `.`, so no project lock can
+be that file.
 
 ## Identity
 

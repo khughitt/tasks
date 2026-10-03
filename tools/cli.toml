@@ -279,6 +279,24 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["group"]
+summary = "Named sets of registered projects, read together with --group"
+
+[[cli.tasks.commands]]
+path = ["group", "set"]
+summary = "Create or replace a group; a retired prefix resolves to its live one"
+args = [{ name = "name", value = "string", required = true }, { name = "prefixes", value = "string", required = true, variadic = true }]
+
+[[cli.tasks.commands]]
+path = ["group", "rm"]
+summary = "Delete a group. Its projects stay registered"
+args = [{ name = "name", value = "string", required = true }]
+
+[[cli.tasks.commands]]
+path = ["groups"]
+summary = "Every group with its members and whether each is reachable"
+
+[[cli.tasks.commands]]
 path = ["root"]
 summary = "The registered root of the project an id belongs to"
 args = [{ name = "id", value = "ref", required = true }]
@@ -297,9 +315,11 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high"] },
   { names = ["--process"], value = "enum", values = ["direct", "planned"] },
   { names = ["--parallel"], value = "none" },
+  { names = ["--lane"], value = "none" },
   { names = ["--every"], value = "age", role = "set" },
   { names = ["--defer"], value = "when", role = "set" },
   { shared = "tag", role = "set", value = "string", repeatable = true },
+  { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -326,9 +346,11 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--parent"], value = "ref" },
+  { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
   { shared = "sort", role = "select", value = "enum", values = ["priority", "updated", "created"], default = "priority" },
   { shared = "reverse", value = "none" },
@@ -337,6 +359,7 @@ options = [
   { names = ["--deferred"], value = "none" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -348,14 +371,18 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--parent"], value = "ref" },
+  { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
   { shared = "limit", value = "int" },
   { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { names = ["--without"], value = "string", repeatable = true },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -363,8 +390,11 @@ path = ["next"]
 summary = "The first ready task, in the show shape; null when nothing is ready"
 options = [
   { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { names = ["--without"], value = "string", repeatable = true },
+  { names = ["--under"], value = "ref" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -376,6 +406,7 @@ options = [
   { shared = "seed", value = "int" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -387,8 +418,10 @@ options = [
   { names = ["--title"], value = "string" },
   { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped"], repeatable = false },
   { shared = "force", value = "none" },
+  { names = ["--reason"], value = "string" },
   { names = ["--no-parent"], value = "none" },
   { names = ["--no-parallel"], value = "none" },
+  { names = ["--no-lane"], value = "none" },
   { names = ["--no-every"], value = "none" },
   { names = ["--no-defer"], value = "none" },
   { names = ["--no-source"], value = "none" },
@@ -402,6 +435,8 @@ options = [
   { names = ["--no-model"], value = "none" },
   { names = ["--rm-tag"], value = "string", repeatable = true },
   { names = ["--no-tags"], value = "none" },
+  { names = ["--rm-need"], value = "string", repeatable = true },
+  { names = ["--no-needs"], value = "none" },
   { names = ["--no-depends"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
@@ -409,9 +444,11 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high"] },
   { names = ["--process"], value = "enum", values = ["direct", "planned"] },
   { names = ["--parallel"], value = "none" },
+  { names = ["--lane"], value = "none" },
   { names = ["--every"], value = "age", role = "set" },
   { names = ["--defer"], value = "when", role = "set" },
   { shared = "tag", role = "set", value = "string", repeatable = true },
+  { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -524,7 +561,20 @@ summary = "Session context for agents"
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
   { names = ["--closed"], value = "none" },
+  { names = ["--without"], value = "string", repeatable = true },
+]
+
+[[cli.tasks.commands]]
+path = ["lanes"]
+summary = "Each open lane: its guidance, its state, and the step it could take now"
+options = [
+  { names = ["--without"], value = "string", repeatable = true },
+  { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -547,6 +597,7 @@ options = [
   { shared = "all", value = "none" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -556,6 +607,7 @@ options = [
   { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped"], repeatable = true },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -565,6 +617,7 @@ options = [
   { shared = "limit", value = "int" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -748,12 +801,13 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost or quiet"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet or hooks"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
   { shared = "since", role = "bound", value = "when", repeatable = false },
+  { shared = "until", role = "bound", value = "when", repeatable = false },
   { names = ["--task"], value = "string" },
 ]
 

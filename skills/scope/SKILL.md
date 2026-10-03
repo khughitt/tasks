@@ -80,6 +80,11 @@ reviews are needed. Set it explicitly alongside size and complexity, including o
 children. Do not derive it from those fields, parentage, or document presence.
 Missing process remains unassessed, and assigning it never makes an idea executable.
 
+When a member's work uses a shared resource the project declares in `[needs]` (an idle
+host, the owner's judgement), record it with `--need <name>` on the task you scope or
+create. Never invent a name: an undeclared one is refused. Propose the vocabulary entry in
+the handoff brief instead.
+
 Every successfully processed member receives exactly one audit note:
 
     scope: <verdict>; <what changed>[; brief: <path>][; proposal: <text>]
@@ -108,6 +113,11 @@ source is the brief path, and parent only previously unparented members beneath 
 Members already owned by different goals retain those parents and are associated through
 the handoff and audit note. Preserve every existing source; do not rewrite shared goals
 incidentally. Research and design follow-ups are children of the cluster goal.
+
+When the cluster is a standalone effort meant to run beside the project's other work,
+create that goal with `--lane` and lead its body with the guidance paragraph: why the
+effort exists and its first milestone. A cluster inside an existing lane gets an ordinary
+child goal, never a lane.
 
 Reuse an existing goal, handoff, and open research task when its question still stands.
 If a new goal would have neither member nor follow-up children, do not create it merely

@@ -2,7 +2,8 @@ use std::io::IsTerminal;
 use unicode_width::UnicodeWidthChar;
 
 use crate::error::{Error, Result};
-use crate::model::{Complexity, Process, Size, Status, Task};
+use crate::lanes::{Causes, LaneRow, LaneState};
+use crate::model::{Complexity, Process, Size, Status, Task, TaskId};
 use crate::registry::Registry;
 use crate::style::{Painter, Style, When};
 use serde::Serialize;
@@ -104,6 +105,33 @@ pub struct ProjectRow {
     pub last_activity: Option<String>,
 }
 
+/// `group set` and `group rm`: the group, and the members it now has (set) or had (rm).
+#[derive(Serialize)]
+pub struct GroupOut {
+    pub name: String,
+    pub members: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct GroupMember {
+    pub prefix: String,
+    /// The registered root exists and holds a config: the test `projects` applies.
+    pub reachable: bool,
+}
+
+#[derive(Serialize)]
+pub struct GroupRow {
+    pub name: String,
+    pub members: Vec<GroupMember>,
+}
+
+#[derive(Serialize)]
+pub struct GroupsOut {
+    pub groups: Vec<GroupRow>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Serialize)]
 pub struct ProjectsOut {
     pub projects: Vec<ProjectRow>,
@@ -149,6 +177,9 @@ pub struct ShowFields {
     pub depends_on: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<Related>,
+    /// The nearest lane at or above the task; omitted when none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_lane: Option<TaskId>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Related>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,6 +236,10 @@ pub struct TaskSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     pub parallel: bool,
+    /// Marked as a lane; always present, like `parallel`.
+    pub lane: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     pub created: String,
@@ -225,6 +260,10 @@ pub struct TaskSummary {
     pub depends: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// The nearest lane at or above this task: its own id when it is a lane. Computed
+    /// from the scan, never stored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_lane: Option<TaskId>,
     pub child_count: usize,
     pub open_descendant_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -250,6 +289,8 @@ pub struct ClaimInfo {
     pub started: String,
     pub seen: String,
     pub live: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub holds: Vec<String>,
 }
 
 impl ClaimInfo {
@@ -263,6 +304,7 @@ impl ClaimInfo {
             started: claim.started.clone(),
             seen: claim.seen.clone(),
             live: live == &crate::claims::Liveness::Live,
+            holds: claim.holds.clone(),
         }
     }
 }
@@ -408,6 +450,8 @@ impl TaskSummary {
             complexity: task.complexity,
             process: task.process,
             parallel: task.parallel,
+            lane: task.lane,
+            needs: task.needs.clone(),
             owner: task.owner.clone(),
             created: task.created.clone(),
             updated: task.updated.clone(),
@@ -419,6 +463,7 @@ impl TaskSummary {
             agent: task.agent.clone(),
             depends: task.depends.iter().map(ToString::to_string).collect(),
             parent: task.parent.as_ref().map(ToString::to_string),
+            in_lane: crate::hierarchy::lane_of(all, task, registry),
             child_count: crate::hierarchy::children(all, &task.id, registry).len(),
             open_descendant_count: crate::hierarchy::open_descendants(all, &task.id, registry)
                 .len(),
@@ -452,6 +497,10 @@ pub struct ParkedRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     pub parallel: bool,
+    /// Marked as a lane; always present, like `parallel`.
+    pub lane: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -474,6 +523,8 @@ pub struct ParkedRow {
     pub depends: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_lane: Option<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub child_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -501,6 +552,8 @@ impl ParkedRow {
             complexity: summary.complexity,
             process: summary.process,
             parallel: summary.parallel,
+            lane: summary.lane,
+            needs: summary.needs,
             owner: summary.owner,
             created: Some(summary.created),
             updated: Some(summary.updated),
@@ -512,6 +565,7 @@ impl ParkedRow {
             agent: summary.agent,
             depends: summary.depends,
             parent: summary.parent,
+            in_lane: summary.in_lane,
             child_count: Some(summary.child_count),
             open_descendant_count: Some(summary.open_descendant_count),
             claim: summary.claim,
@@ -531,6 +585,8 @@ impl ParkedRow {
             complexity: None,
             process: None,
             parallel: false,
+            lane: false,
+            needs: Vec::new(),
             owner: None,
             created: None,
             updated: None,
@@ -542,6 +598,7 @@ impl ParkedRow {
             agent: None,
             depends: Vec::new(),
             parent: None,
+            in_lane: None,
             child_count: None,
             open_descendant_count: None,
             claim: None,
@@ -776,8 +833,11 @@ pub struct DeferredSummary {
 
 #[derive(Serialize)]
 pub struct PrimeOut {
-    /// The local project; null under --all-projects.
+    /// The local project; null under --all-projects and --group.
     pub prefix: Option<String>,
+    /// The group under --group; absent otherwise. `prefix` is then null.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     /// Every prefix in scope; one entry locally.
     pub projects: Vec<String>,
     pub counts: Counts,
@@ -789,10 +849,19 @@ pub struct PrimeOut {
     pub ready: Vec<TaskSummary>,
     pub parked: Vec<ParkedRow>,
     pub doing: Vec<TaskSummary>,
+    /// Every open lane in scope; always present, `[]` without lanes.
+    pub lanes: Vec<LaneRow>,
     pub roadmap: Vec<TreeNode>,
     pub closeout: Vec<TaskSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub halts: Vec<HaltRow>,
+    pub warnings: Vec<String>,
+}
+
+/// `tasks lanes` (lanes design §5.3).
+#[derive(Serialize)]
+pub struct LanesOut {
+    pub lanes: Vec<LaneRow>,
     pub warnings: Vec<String>,
 }
 
@@ -835,13 +904,16 @@ pub enum Output {
     Add(AddOut),
     Root(RootOut),
     Projects(ProjectsOut),
+    Group(GroupOut),
+    Groups(GroupsOut),
     Show(Box<ShowOut>),
     Next(Box<NextOut>),
     List(ListOut),
     Parked(ParkedOut),
     Quiet(QuietOut),
     Claims(ClaimsOut),
-    Prime(PrimeOut),
+    Prime(Box<PrimeOut>),
+    Lanes(LanesOut),
     Graph(GraphOut),
     Check(CheckOut),
     Tree(TreeOut),
@@ -888,6 +960,26 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
         Output::Id(o) => o.id.clone(),
         Output::Add(o) => o.id.clone(),
         Output::Root(o) => o.root.clone(),
+        Output::Group(o) => o.name.clone(),
+        Output::Groups(o) => o
+            .groups
+            .iter()
+            .map(|row| {
+                let members: Vec<String> = row
+                    .members
+                    .iter()
+                    .map(|member| {
+                        if member.reachable {
+                            member.prefix.clone()
+                        } else {
+                            format!("{} (unreachable)", member.prefix)
+                        }
+                    })
+                    .collect();
+                format!("{}  {}", row.name, members.join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         Output::Projects(o) if o.projects.is_empty() => String::new(),
         Output::Projects(o) => {
             // Header labels come from the same call the rows use, so a column can never
@@ -1002,9 +1094,10 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                     .chain(o.parked.iter().map(|row| row.id.as_str())),
             )
             .max(id_width_tree(&o.roadmap));
-            let header = match &o.prefix {
-                Some(prefix) => format!("project {prefix}"),
-                None => format!("projects {}", o.projects.join(", ")),
+            let header = match (&o.prefix, &o.group) {
+                (Some(prefix), _) => format!("project {prefix}"),
+                (None, Some(group)) => format!("group {group}: projects {}", o.projects.join(", ")),
+                (None, None) => format!("projects {}", o.projects.join(", ")),
             };
             // One row, so labels stay beside their values instead of over them - but the
             // columns and their colors are the same definition `projects` renders.
@@ -1066,6 +1159,16 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                 type_column,
                 wrap,
             ));
+            if !o.lanes.is_empty() {
+                rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "lanes:")));
+                let lane_width = o
+                    .lanes
+                    .iter()
+                    .map(|row| row.lane.id.len())
+                    .max()
+                    .unwrap_or(0);
+                rendered.push_str(&lane_lines(&o.lanes, painter, lane_width, false));
+            }
             rendered.push_str(&format!(
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "roadmap:")
@@ -1128,6 +1231,12 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             ));
             rendered
         }
+        Output::Lanes(o) => lane_lines(
+            &o.lanes,
+            painter,
+            id_width(o.lanes.iter().map(|row| row.lane.id.as_str())),
+            true,
+        ),
         Output::Graph(o) => o.text.clone(),
         Output::Check(o) => {
             let mut rendered = String::new();
@@ -1355,6 +1464,72 @@ fn tree_text(
     rendered
 }
 
+/// One line per lane: id, priority, title, then its state with the pick or its main
+/// cause (lanes design §5.3). `detail` adds the guidance and the active claims under each
+/// row, as `tasks lanes` prints them; `prime` leaves them out.
+fn lane_lines(rows: &[LaneRow], painter: &Painter, id_width: usize, detail: bool) -> String {
+    let mut rendered = String::new();
+    for row in rows {
+        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.lane.id));
+        let priority = painter.paint(
+            Style::Priority(row.lane.priority),
+            &format!("P{}", row.lane.priority),
+        );
+        let state = match row.state {
+            LaneState::Ready => {
+                let pick = row.pick.as_ref().expect("a ready lane has a pick");
+                format!("ready → {} {}", pick.id, pick.title)
+            }
+            LaneState::Held => {
+                let first = row
+                    .held
+                    .first()
+                    .expect("a held lane names what it waits for");
+                format!("held: {} ← {}", first.need, first.holder)
+            }
+            LaneState::Waiting => waiting_text(&row.causes),
+            LaneState::Paused => "paused".into(),
+            LaneState::Empty => "empty".into(),
+        };
+        rendered.push_str(&format!(
+            "{id}  {priority}  {}  {}\n",
+            row.lane.title,
+            painter.paint(Style::Emphasis, &state)
+        ));
+        if !detail {
+            continue;
+        }
+        if let Some(guidance) = &row.guidance {
+            rendered.push_str(&format!("    {guidance}\n"));
+        }
+        for active in &row.active {
+            let holder = active
+                .claim
+                .as_ref()
+                .map(|claim| format!(" @{} [{}]", claim.owner, claim.session))
+                .unwrap_or_default();
+            rendered.push_str(&painter.paint(
+                Style::Chrome,
+                &format!("    active: {} {}{holder}", active.id, active.title),
+            ));
+            rendered.push('\n');
+        }
+    }
+    rendered
+}
+
+/// `waiting: 2 user, 1 deferred`: every cause with its count, the largest first, ties in
+/// table order.
+fn waiting_text(causes: &Causes) -> String {
+    let mut entries = causes.entries();
+    entries.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    let parts: Vec<String> = entries
+        .iter()
+        .map(|(cause, count)| format!("{count} {cause}"))
+        .collect();
+    format!("waiting: {}", parts.join(", "))
+}
+
 /// Whether a pretty rendering must reserve the parallel column. Decided once per command
 /// output and passed into `table`: `tree_text` and `prime`'s roadmap call `table` one row
 /// at a time, so a per-call decision would shift dates between adjacent siblings.
@@ -1368,10 +1543,15 @@ pub fn any_parallel_tree(nodes: &[TreeNode]) -> bool {
         .any(|node| node.summary.parallel || any_parallel_tree(&node.children))
 }
 
-/// The one-letter type marker for a summary row: `p` for a record carrying a cadence, and
-/// nothing otherwise. A future type is another arm here, another letter in the same slot;
-/// the column is reserved once per output (see `any_type`), so it is never a layout change.
+/// The one-letter type marker for a summary row: `≡` for a lane, `p` for a record
+/// carrying a cadence, and nothing otherwise. A lane is a goal and never recurs, so the
+/// two never compete for the slot. A future type is another arm here, another letter in
+/// the same slot; the column is reserved once per output (see `any_type`), so it is never
+/// a layout change.
 fn type_letter(row: &TaskSummary) -> Option<char> {
+    if row.lane {
+        return Some('≡');
+    }
     row.periodic.as_ref().map(|_| 'p')
 }
 
@@ -1418,6 +1598,7 @@ pub fn needs_theme(out: &Output) -> bool {
         out,
         Output::List(_)
             | Output::Prime(_)
+            | Output::Lanes(_)
             | Output::Tree(_)
             | Output::Parked(_)
             | Output::Quiet(_)
@@ -1430,7 +1611,7 @@ pub fn needs_theme(out: &Output) -> bool {
 pub fn shows_priority(out: &Output) -> bool {
     matches!(
         out,
-        Output::List(_) | Output::Prime(_) | Output::Tree(_) | Output::Quiet(_)
+        Output::List(_) | Output::Prime(_) | Output::Lanes(_) | Output::Tree(_) | Output::Quiet(_)
     )
 }
 
@@ -1899,6 +2080,8 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Id(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),
+        Output::Group(o) => o.warnings.clone(),
+        Output::Groups(o) => o.warnings.clone(),
         Output::Projects(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),
         Output::Next(o) => o.warnings.clone(),
@@ -1907,6 +2090,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Quiet(o) => o.warnings.clone(),
         Output::Claims(_) => Vec::new(),
         Output::Prime(o) => o.warnings.clone(),
+        Output::Lanes(o) => o.warnings.clone(),
         Output::Graph(o) => o.warnings.clone(),
         Output::Check(o) => o
             .warnings
@@ -1947,6 +2131,7 @@ mod tests {
             agent: None,
             depends: vec![],
             parent: None,
+            in_lane: None,
             child_count: 0,
             open_descendant_count: 0,
             claim: None,
@@ -1954,7 +2139,9 @@ mod tests {
             escalation: None,
             periodic: None,
             deferred: None,
+            needs: vec![],
             parallel,
+            lane: false,
         }
     }
 
@@ -2087,6 +2274,26 @@ mod tests {
             }],
         }];
         assert!(any_type_tree(&nodes));
+    }
+
+    #[test]
+    fn a_lane_row_carries_the_lane_mark_in_the_type_column() {
+        let mut lane = row("xx-000001", false);
+        lane.lane = true;
+        let rows = [lane, row("xx-000002", false)];
+        assert!(any_type(&rows));
+        let text = table(
+            &rows,
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            true,
+            Wrap::NONE,
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[0].contains("todo    ≡ 2026-09-06"), "{}", lines[0]);
+        assert!(lines[1].contains("todo      2026-09-06"), "{}", lines[1]);
     }
 
     #[test]
@@ -2533,5 +2740,30 @@ mod tests {
         assert_eq!(wrap_width(None, None).unwrap(), None);
         assert!(wrap_width(Some("wide"), None).is_err());
         assert!(wrap_width(Some("0"), None).is_err());
+    }
+
+    #[test]
+    fn claim_info_carries_holds_only_when_the_claim_has_some() {
+        let claim = crate::claims::Claim {
+            owner: "o".into(),
+            session: "s".into(),
+            pid: None,
+            pid_start: None,
+            boot_id: None,
+            host: "h".into(),
+            worktree: "/w".into(),
+            started: "2026-10-03T00:00:00Z".into(),
+            seen: "2026-10-03T00:00:00Z".into(),
+            holds: Vec::new(),
+        };
+        let live = crate::claims::Liveness::Live;
+        let bare = serde_json::to_value(ClaimInfo::of(&claim, &live)).unwrap();
+        assert!(bare.get("holds").is_none(), "{bare}");
+        let holding = crate::claims::Claim {
+            holds: vec!["quiet".into()],
+            ..claim
+        };
+        let shown = serde_json::to_value(ClaimInfo::of(&holding, &live)).unwrap();
+        assert_eq!(shown["holds"], serde_json::json!(["quiet"]));
     }
 }

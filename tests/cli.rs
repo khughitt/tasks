@@ -3277,7 +3277,9 @@ fn project_and_all_projects_conflict_on_every_read_command() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     env.init("fam");
-    for command in ["list", "ready", "next", "prime", "tree", "tags", "quiet"] {
+    for command in [
+        "list", "ready", "next", "prime", "lanes", "tree", "tags", "quiet",
+    ] {
         let out = env
             .cmd(&sci)
             .args([command, "--project", "fam", "--all-projects"])
@@ -4028,6 +4030,155 @@ fn prime_shows_roadmap_and_closeout() {
         roadmap.contains("1 childless root(s) are listed under ready"),
         "{roadmap}"
     );
+}
+
+#[test]
+fn a_childless_lane_is_never_ready_never_parked_and_never_deferred_or_recurring() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let kind = |env: &TestEnv, args: &[&str]| {
+        error_of(env, &sci, args)["error"]["kind"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "0"]));
+    let other = id_of(env.json(&sci, &["add", "Other", "-p", "3"]));
+    let ready: Vec<String> = env.json(&sci, &["ready"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        ready,
+        std::slice::from_ref(&other),
+        "a lane is a goal even with no children"
+    );
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &lane, "split it"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        other,
+        "a lane is never a parked candidate"
+    );
+
+    assert_eq!(
+        kind(&env, &["edit", &lane, "--defer", "2099-01-01"]),
+        "validation"
+    );
+    assert_eq!(kind(&env, &["edit", &lane, "--every", "7d"]), "validation");
+    assert_eq!(
+        kind(&env, &["add", "Sweep lane", "--lane", "--every", "7d"]),
+        "validation"
+    );
+    assert_eq!(
+        kind(
+            &env,
+            &["add", "Later lane", "--lane", "--defer", "2099-01-01"]
+        ),
+        "validation"
+    );
+    let plain = id_of(env.json(&sci, &["add", "Plain"]));
+    env.json(&sci, &["edit", &plain, "--every", "7d"]);
+    assert_eq!(
+        kind(&env, &["edit", &plain, "--lane"]),
+        "validation",
+        "a recurrence cannot become a lane"
+    );
+
+    let check = env.check(&sci);
+    assert!(
+        check["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "childless_lane" && f["id"] == lane),
+        "{check}"
+    );
+    assert!(check["errors"].as_array().unwrap().is_empty(), "{check}");
+    env.json(&sci, &["add", "Step", "--parent", &lane]);
+    assert!(
+        !env.check(&sci)["warnings"]
+            .to_string()
+            .contains("childless_lane"),
+        "a lane with a step is not childless"
+    );
+
+    // A cadence written onto a lane by hand is a periodic goal.
+    let path = sci.join(format!("tasks/{lane}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", "every: 7d\ndepends: []\n"),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        check["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "periodic_goal" && f["id"] == lane),
+        "{check}"
+    );
+}
+
+#[test]
+fn lane_field_round_trips_through_add_edit_and_every_row() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "--parallel"]));
+    let raw = env.read(&sci, &format!("tasks/{lane}.md"));
+    assert!(raw.contains("\nparallel: true\nlane: true\n"), "{raw}");
+    assert_eq!(env.json(&sci, &["show", &lane])["task"]["lane"], true);
+
+    let plain = id_of(env.json(&sci, &["add", "Plain"]));
+    assert_eq!(
+        env.json(&sci, &["show", &plain])["task"]["lane"],
+        false,
+        "always present, like parallel"
+    );
+    let list = env.json(&sci, &["list"]);
+    let row = |id: &str| {
+        list["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(row(&lane)["lane"], true);
+    assert_eq!(row(&plain)["lane"], false);
+
+    env.json(&sci, &["edit", &plain, "--lane"]);
+    assert_eq!(env.json(&sci, &["show", &plain])["task"]["lane"], true);
+    env.json(&sci, &["edit", &plain, "--no-lane"]);
+    assert!(
+        !env.read(&sci, &format!("tasks/{plain}.md"))
+            .contains("lane"),
+        "false is never written"
+    );
+    env.usage(&sci, &["edit", &plain, "--lane", "--no-lane"]);
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &lane, "split it"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["list", "--parked"])["tasks"][0]["lane"],
+        true
+    );
+
+    let text = env.pretty(&sci, &["list"]);
+    let line = text.lines().find(|line| line.contains(&lane)).unwrap();
+    assert!(line.contains("≡ "), "lane rows carry the mark: {text}");
 }
 
 /// An EDITOR value that has sh read the script rather than exec it: executing a file this
@@ -19055,6 +19206,10 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
             vec!["next", "--max-complexity", "low"],
         ),
         (
+            (vec!["lanes"], "--max-complexity"),
+            vec!["lanes", "--max-complexity", "low"],
+        ),
+        (
             (vec!["graph"], "--format"),
             vec!["graph", "--format", "dot"],
         ),
@@ -19376,7 +19531,7 @@ fn a_continuity_repeated_start_by_the_owner_keeps_one_claim() {
 
 // NOTE: the explicit-mismatch case lives in Task 8 as an acceptance test. It has to run
 // under a harness shim with relay enabled and a matching boundary, or removing the
-// explicit-identity guard from `Ctx::ownership` would leave it passing — proof would never
+// explicit-identity guard from `ownership` would leave it passing — proof would never
 // have been consulted in the first place.
 
 #[test]
@@ -19949,7 +20104,7 @@ fn an_acceptance_explicit_pair_works_under_a_harness_with_no_registry() {
 fn an_acceptance_explicit_mismatch_stays_foreign_under_one_harness() {
     // Two workers beneath the *same* shim, so the ancestry, host and boot all agree and
     // the claim's proof names their shared harness process. Only TASKS_SESSION tells them
-    // apart. If `Ctx::ownership` stopped honouring the explicit pair, worker-b's proof
+    // apart. If `ownership` stopped honouring the explicit pair, worker-b's proof
     // would succeed and this close would land — which is exactly the bypass to catch.
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -19979,7 +20134,12 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
     // ordinary stale takeover and the test would pass with proof-based continuity broken.
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    // Lanes/needs §4.4: both tasks need the exclusive `quiet`. The first claim's hold is
+    // this session's only by proof once relay re-keys its identity, so the second start
+    // passes the hold gate only if the gate uses the ownership rule, not session strings.
+    hold_vocab(&dir);
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&dir, &["add", "Second", "-p", "2", "--need", "quiet"]));
     let state = env.home.path().join("relay-state");
     let after_start = env.home.path().join("after-start.toml");
 
@@ -19996,6 +20156,8 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
          printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
          CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {id}\n\
          cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" ready > \"$HOME/ready.json\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {second}\n\
          CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
         shim_env(&state, "claude-code", "c1"),
         after_start.display()
@@ -20034,6 +20196,32 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
         "continuation must not take over: {text}"
     );
     assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
+    // The second start passed the hold gate: the first claim's hold was this session's by
+    // proof, although its session string `c1` differs from the resolved `claude-code:c1`.
+    let shown = env.json(&dir, &["show", &second]);
+    assert_eq!(shown["task"]["status"], "doing", "{shown}");
+    assert_eq!(
+        shown["claim"]["holds"],
+        serde_json::json!(["quiet"]),
+        "{shown}"
+    );
+    // `ready` under relay identity applies the same rule: the second task is listed, not
+    // hidden behind this session's own hold.
+    let ready: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home.path().join("ready.json")).unwrap())
+            .unwrap();
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == second.as_str()),
+        "{ready}"
+    );
+    assert!(
+        !warnings_of(&ready).iter().any(|w| w.contains("wait for")),
+        "{ready}"
+    );
 }
 
 #[test]
@@ -21694,4 +21882,3275 @@ fn ready_selection_and_cutoff_intersect() {
         .map(|w| w.as_str().unwrap())
         .collect();
     assert_eq!(warnings, vec!["max-complexity mid: 1 above cutoff hidden"]);
+}
+
+/// Writes `needs: [<list>]` into a record by hand, ahead of `created`. Fixture-only: it
+/// reaches records the flags never write, such as an undeclared or since-removed need.
+fn seed_needs(dir: &std::path::Path, id: &str, list: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\ncreated: "), "{text}");
+    std::fs::write(
+        &path,
+        text.replacen("\ncreated: ", &format!("\nneeds: [{list}]\ncreated: "), 1),
+    )
+    .unwrap();
+}
+
+#[test]
+fn needs_record_reaches_show_ready_and_parked_rows_and_stays_sparse() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let plain = id_of(env.json(&sci, &["add", "Plain"]));
+    let needy = id_of(env.json(&sci, &["add", "Needy"]));
+    seed_needs(&sci, &needy, "quiet, owner");
+
+    let show = env.json(&sci, &["show", &needy]);
+    assert_eq!(show["task"]["needs"], serde_json::json!(["quiet", "owner"]));
+    assert!(
+        env.json(&sci, &["show", &plain])["task"]
+            .get("needs")
+            .is_none(),
+        "sparse on Task"
+    );
+
+    let ready = env.json(&sci, &["ready"]);
+    let row = |id: &str| {
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(
+        row(needy.as_str())["needs"],
+        serde_json::json!(["quiet", "owner"])
+    );
+    assert!(
+        row(plain.as_str()).get("needs").is_none(),
+        "sparse on TaskSummary"
+    );
+
+    // An unrelated edit keeps the list and writes it in its place: with no size,
+    // complexity, process, or parallel set, directly after priority.
+    env.json(&sci, &["edit", &needy, "-p", "1"]);
+    let raw = env.read(&sci, &format!("tasks/{needy}.md"));
+    assert!(
+        raw.contains("\npriority: 1\nneeds: [quiet, owner]\ncreated: "),
+        "{raw}"
+    );
+
+    env.json(&sci, &["park", &needy, "Resume the capture"]);
+    let parked = env.json(&sci, &["list", "--parked"]);
+    assert_eq!(
+        parked["tasks"][0]["needs"],
+        serde_json::json!(["quiet", "owner"]),
+        "{parked}"
+    );
+}
+
+/// Appends one `[needs.<name>]` table per entry to a test project's config.
+fn declare_needs(dir: &std::path::Path, entries: &[(&str, &str, bool)]) {
+    let path = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    for (name, meaning, exclusive) in entries {
+        text.push_str(&format!(
+            "\n[needs.{name}]\nmeaning = \"{meaning}\"\nexclusive = {exclusive}\n"
+        ));
+    }
+    std::fs::write(path, text).unwrap();
+}
+
+#[test]
+fn needs_check_errors_on_an_undeclared_need_on_every_record() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let declared = id_of(env.json(&sci, &["add", "Declared"]));
+    let stale = id_of(env.json(&sci, &["add", "Stale"]));
+    let closed = id_of(env.json(&sci, &["add", "Closed"]));
+    env.json(&sci, &["done", &closed, "landed"]);
+    seed_needs(&sci, &declared, "quiet");
+    seed_needs(&sci, &stale, "quiet, gpu");
+    seed_needs(&sci, &closed, "gpu");
+
+    // Reads stay lenient: the record lists with its undeclared need.
+    let listed = env.json(&sci, &["list"]);
+    let row = listed["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == stale.as_str())
+        .unwrap();
+    assert_eq!(row["needs"], serde_json::json!(["quiet", "gpu"]));
+
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let mut errors: Vec<(String, String)> = report["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["kind"].as_str().unwrap().to_string(),
+                f["id"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    errors.sort();
+    let mut expected = vec![
+        ("unknown_need".to_string(), stale.clone()),
+        ("unknown_need".to_string(), closed.clone()),
+    ];
+    expected.sort();
+    assert_eq!(errors, expected, "{report}");
+    assert!(
+        report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["detail"].as_str().unwrap().contains("\"gpu\"")),
+        "{report}"
+    );
+}
+
+#[test]
+fn needs_flags_set_append_remove_and_clear() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(
+        &sci,
+        &[
+            ("quiet", "an idle host", true),
+            ("owner", "the owner judges an image", false),
+            ("gpu", "the GPU", true),
+        ],
+    );
+    let id = id_of(env.json(
+        &sci,
+        &[
+            "add", "Capture", "--need", "quiet", "--need", "owner", "--need", "quiet",
+        ],
+    ));
+    let needs = |env: &TestEnv| env.json(&sci, &["show", &id])["task"]["needs"].clone();
+    assert_eq!(
+        needs(&env),
+        serde_json::json!(["quiet", "owner"]),
+        "repeats are no-ops"
+    );
+    assert!(
+        env.read(&sci, &format!("tasks/{id}.md"))
+            .contains("\nneeds: [quiet, owner]\n")
+    );
+
+    env.json(&sci, &["edit", &id, "--need", "gpu"]);
+    assert_eq!(
+        needs(&env),
+        serde_json::json!(["quiet", "owner", "gpu"]),
+        "--need appends"
+    );
+
+    env.json(&sci, &["edit", &id, "--rm-need", "owner"]);
+    assert_eq!(needs(&env), serde_json::json!(["quiet", "gpu"]));
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--rm-need", "owner"]),
+        "validation"
+    );
+
+    env.json(&sci, &["edit", &id, "--no-needs", "--need", "owner"]);
+    assert_eq!(
+        needs(&env),
+        serde_json::json!(["owner"]),
+        "--no-needs --need replaces"
+    );
+
+    env.json(&sci, &["edit", &id, "--no-needs"]);
+    assert!(
+        env.json(&sci, &["show", &id])["task"]
+            .get("needs")
+            .is_none()
+    );
+    assert!(
+        !env.read(&sci, &format!("tasks/{id}.md")).contains("needs"),
+        "the key is dropped, not written empty"
+    );
+
+    env.usage(&sci, &["edit", &id, "--rm-need", "quiet", "--no-needs"]);
+}
+
+#[test]
+fn needs_flags_refuse_an_undeclared_or_malformed_name() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let _fam = env.init("fam");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+
+    assert_eq!(
+        env.fail(&sci, &["add", "Typo", "--need", "gpu"]),
+        "unknown_need"
+    );
+    assert_eq!(
+        env.fail(&sci, &["add", "Upper", "--need", "Quiet"]),
+        "validation"
+    );
+    // Validated against the target project: fam declares nothing.
+    assert_eq!(
+        env.fail(
+            &sci,
+            &["add", "Elsewhere", "--project", "fam", "--need", "quiet"]
+        ),
+        "unknown_need"
+    );
+    assert!(
+        env.json(&sci, &["list", "--all-projects"])["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "nothing was written"
+    );
+
+    let id = id_of(env.json(&sci, &["add", "Capture"]));
+    let before = env.read(&sci, &format!("tasks/{id}.md"));
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--need", "gpu"]),
+        "unknown_need"
+    );
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), before);
+
+    // An editor save may add only declared names.
+    let undeclared = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\nneeds: [gpu]/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &undeclared)
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unknown_need");
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), before);
+    let declared = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\nneeds: [quiet]/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &declared)
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["needs"],
+        serde_json::json!(["quiet"])
+    );
+}
+
+#[test]
+fn needs_flags_a_need_dropped_from_the_vocabulary_still_lists_but_fails_check() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let id = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet"]));
+    std::fs::write(sci.join("tasks/.config.toml"), "prefix = \"sci\"\n").unwrap();
+
+    let listed = env.json(&sci, &["list"]);
+    assert_eq!(listed["tasks"][0]["needs"], serde_json::json!(["quiet"]));
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["errors"][0]["kind"], "unknown_need", "{report}");
+
+    // Edits that add nothing are not held to the vocabulary, and the stale name can go.
+    env.json(&sci, &["edit", &id, "-p", "1"]);
+    env.json(&sci, &["edit", &id, "--rm-need", "quiet"]);
+    let report = env.check(&sci);
+    assert!(report["errors"].as_array().unwrap().is_empty(), "{report}");
+}
+
+#[test]
+fn needs_status_flags_conflict_with_every_needs_flag_on_edit() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let id = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet"]));
+    let path = format!("tasks/{id}.md");
+    let before = env.read(&sci, &path);
+    let needs_flags: [&[&str]; 3] = [
+        &["--need", "quiet"],
+        &["--rm-need", "quiet"],
+        &["--no-needs"],
+    ];
+    for needs in needs_flags {
+        let mut args = vec!["edit", id.as_str(), "--status", "doing"];
+        args.extend_from_slice(needs);
+        let err = env.usage(&sci, &args);
+        assert!(err.contains("--status"), "{needs:?}: {err}");
+        assert_eq!(env.read(&sci, &path), before, "{needs:?} wrote nothing");
+    }
+    // Separately, each lands.
+    env.json(&sci, &["edit", &id, "--status", "blocked"]);
+    env.json(&sci, &["edit", &id, "--no-needs"]);
+    let task = env.json(&sci, &["show", &id])["task"].clone();
+    assert_eq!(task["status"], "blocked");
+    assert!(task.get("needs").is_none());
+}
+
+#[test]
+fn needs_status_editor_save_cannot_change_status_and_needs_together() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let id = id_of(env.json(&sci, &["add", "Capture", "--status", "idea"]));
+    let path = format!("tasks/{id}.md");
+    let before = env.read(&sci, &path);
+
+    let both = editor_script(
+        &sci,
+        "sed -i -e 's/^status: idea$/status: todo/' -e 's/^priority: 2$/priority: 2\\nneeds: [quiet]/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &both)
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "validation");
+    assert!(
+        err_detail(&out).contains(
+            "a save that changes the status cannot also change needs; change the status first, then the needs"
+        ),
+        "{}",
+        err_detail(&out)
+    );
+    assert_eq!(env.read(&sci, &path), before, "the record is unchanged");
+
+    let status = editor_script(&sci, "sed -i 's/^status: idea$/status: todo/' \"$1\"");
+    env.cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &status)
+        .assert()
+        .success();
+    let needs = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\nneeds: [quiet]/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &needs)
+        .assert()
+        .success();
+    let task = env.json(&sci, &["show", &id])["task"].clone();
+    assert_eq!(task["status"], "todo");
+    assert_eq!(task["needs"], serde_json::json!(["quiet"]));
+}
+
+/// The `id` of every row of a `{tasks: [...]}` payload, in payload order.
+fn task_ids(v: &serde_json::Value) -> Vec<String> {
+    v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn needs_filter_list_ready_and_parked_select_all_of() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(
+        &sci,
+        &[
+            ("quiet", "an idle host", true),
+            ("owner", "the owner judges", false),
+        ],
+    );
+    let quiet = id_of(env.json(&sci, &["add", "Quiet", "--need", "quiet"]));
+    let both = id_of(env.json(&sci, &["add", "Both", "--need", "quiet", "--need", "owner"]));
+    env.json(&sci, &["add", "Plain"]);
+    let sorted = |v: serde_json::Value| {
+        let mut ids = task_ids(&v);
+        ids.sort();
+        ids
+    };
+    let mut either = vec![quiet.clone(), both.clone()];
+    either.sort();
+    assert_eq!(sorted(env.json(&sci, &["list", "--need", "quiet"])), either);
+    assert_eq!(
+        sorted(env.json(&sci, &["ready", "--need", "quiet"])),
+        either
+    );
+    assert_eq!(
+        sorted(env.json(&sci, &["list", "--need", "quiet", "--need", "owner"])),
+        std::slice::from_ref(&both),
+        "repeats narrow, like --tag"
+    );
+    assert_eq!(
+        sorted(env.json(&sci, &["ready", "--need", "quiet", "--need", "owner"])),
+        std::slice::from_ref(&both)
+    );
+    env.json(&sci, &["park", &quiet, "Rerun"]);
+    env.json(&sci, &["park", &both, "Judge"]);
+    assert_eq!(
+        sorted(env.json(&sci, &["list", "--parked", "--need", "owner"])),
+        std::slice::from_ref(&both)
+    );
+}
+
+#[test]
+fn needs_without_hides_needy_steps_from_ready_next_and_prime() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(
+        &sci,
+        &[
+            ("quiet", "an idle host", true),
+            ("owner", "the owner judges", false),
+        ],
+    );
+    let quiet = id_of(env.json(&sci, &["add", "Capture", "-p", "0", "--need", "quiet"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+
+    assert_eq!(
+        task_ids(&env.json(&sci, &["ready"])),
+        [quiet.clone(), plain.clone()]
+    );
+    let v = env.json(&sci, &["ready", "--without", "quiet"]);
+    assert_eq!(task_ids(&v), [plain.as_str()]);
+    assert!(
+        warnings_of(&v).contains(&"without quiet: 1 task(s) hidden".to_string()),
+        "{v}"
+    );
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        quiet.as_str()
+    );
+    assert_eq!(
+        env.json(&sci, &["next", "--without", "quiet"])["next"]["task"]["id"],
+        plain.as_str()
+    );
+    let prime = env.json(&sci, &["prime", "--without", "quiet"]);
+    let ready: Vec<&str> = prime["ready"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ready, [plain.as_str()], "{prime}");
+
+    // A parked candidate goes through the same gate: next takes it first until hidden.
+    let parked = id_of(env.json(&sci, &["add", "Recapture", "-p", "3", "--need", "quiet"]));
+    env.json(&sci, &["park", &parked, "Rerun the capture"]);
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        parked.as_str()
+    );
+    assert_eq!(
+        env.json(&sci, &["next", "--without", "quiet"])["next"]["task"]["id"],
+        plain.as_str()
+    );
+    // Withholding a need nothing ready uses hides nothing, and says nothing.
+    let v = env.json(&sci, &["ready", "--without", "owner"]);
+    assert_eq!(task_ids(&v).len(), 3);
+    assert!(
+        !warnings_of(&v).iter().any(|w| w.starts_with("without ")),
+        "{v}"
+    );
+}
+
+#[test]
+fn needs_without_refuses_a_name_no_project_in_scope_declares() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    env.json(&sci, &["add", "Capture", "--need", "quiet"]);
+    let fam_task = id_of(env.json(&fam, &["add", "Fam work"]));
+
+    for command in ["ready", "next", "prime"] {
+        assert_eq!(
+            env.fail(&fam, &[command, "--without", "quiet"]),
+            "unknown_need",
+            "{command}: fam declares no needs"
+        );
+        assert_eq!(
+            env.fail(&sci, &[command, "--without", "gpu"]),
+            "unknown_need",
+            "{command}: a typo"
+        );
+        assert_eq!(
+            env.fail(&sci, &[command, "--project", "fam", "--without", "quiet"]),
+            "unknown_need",
+            "{command}: the scope, not the cwd, supplies the vocabulary"
+        );
+    }
+    // Under --all-projects one declaring project is enough; only its task is hidden.
+    let v = env.json(&fam, &["ready", "--all-projects", "--without", "quiet"]);
+    assert_eq!(task_ids(&v), [fam_task.as_str()]);
+    assert_eq!(
+        env.json(&fam, &["next", "--all-projects", "--without", "quiet"])["next"]["task"]["id"],
+        fam_task.as_str()
+    );
+    env.json(&fam, &["prime", "--all-projects", "--without", "quiet"]);
+}
+
+#[test]
+fn needs_without_variable_is_lenient_trimmed_and_joins_the_flag() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    declare_needs(
+        &sci,
+        &[
+            ("quiet", "an idle host", true),
+            ("owner", "the owner judges", false),
+        ],
+    );
+    let quiet = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet"]));
+    let owner = id_of(env.json(&sci, &["add", "Review", "--need", "owner"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain"]));
+    let fam_task = id_of(env.json(&fam, &["add", "Fam work"]));
+    let with_env = |dir: &std::path::Path, value: &str, args: &[&str]| -> serde_json::Value {
+        let out = env
+            .cmd(dir)
+            .env("TASKS_WITHOUT", value)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let sorted = |v: serde_json::Value| {
+        let mut ids = task_ids(&v);
+        ids.sort();
+        ids
+    };
+
+    let mut expected = vec![owner.clone(), plain.clone()];
+    expected.sort();
+    assert_eq!(sorted(with_env(&sci, ",quiet, ", &["ready"])), expected);
+    let prime = with_env(&sci, "quiet", &["prime"]);
+    assert!(
+        !prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == quiet.as_str()),
+        "{prime}"
+    );
+    assert_eq!(
+        sorted(with_env(&sci, "", &["ready"])).len(),
+        3,
+        "empty hides nothing"
+    );
+
+    // A project that never declares the name: nothing hidden, no error, on every view.
+    assert_eq!(
+        sorted(with_env(&fam, "quiet", &["ready"])),
+        [fam_task.as_str()]
+    );
+    assert_eq!(
+        with_env(&fam, "quiet", &["next"])["next"]["task"]["id"],
+        fam_task.as_str()
+    );
+    with_env(&fam, "quiet", &["prime"]);
+
+    // The union: the variable withholds owner, the flag adds quiet.
+    assert_eq!(
+        sorted(with_env(&sci, "owner", &["ready", "--without", "quiet"])),
+        [plain.as_str()]
+    );
+    // The flag stays strict under the variable.
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_WITHOUT", "quiet")
+        .args(["ready", "--without", "gpu"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unknown_need");
+}
+
+#[test]
+fn needs_without_hides_only_where_the_owning_project_declares_the_name() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let capture = id_of(env.json(&sci, &["add", "Capture", "-p", "0", "--need", "quiet"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+    // fam declares no needs, yet its record still names quiet (say, from a vocabulary
+    // since dropped). The union of the scope's vocabularies declares quiet; fam's does not.
+    let stale = id_of(env.json(&fam, &["add", "Stale", "-p", "1"]));
+    seed_needs(&fam, &stale, "quiet");
+    let run = |variable: Option<&str>, args: &[&str]| -> serde_json::Value {
+        let mut cmd = env.cmd(&fam);
+        if let Some(value) = variable {
+            cmd.env("TASKS_WITHOUT", value);
+        }
+        let out = cmd.args(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+
+    // In fam alone the variable hides nothing, on every view.
+    assert_eq!(task_ids(&run(Some("quiet"), &["ready"])), [stale.as_str()]);
+    assert_eq!(
+        run(Some("quiet"), &["next"])["next"]["task"]["id"],
+        stale.as_str()
+    );
+    let prime = run(Some("quiet"), &["prime"]);
+    assert!(
+        prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == stale.as_str()),
+        "{prime}"
+    );
+
+    // Across both projects the variable and the flag each hide sci's capture, and only it.
+    assert_eq!(
+        run(None, &["next", "--all-projects"])["next"]["task"]["id"],
+        capture.as_str()
+    );
+    let mut expected = vec![plain.clone(), stale.clone()];
+    expected.sort();
+    for (source, variable, args) in [
+        ("variable", Some("quiet"), &["--all-projects"][..]),
+        ("flag", None, &["--all-projects", "--without", "quiet"][..]),
+    ] {
+        let v = run(variable, &[&["ready"][..], args].concat());
+        let mut ids = task_ids(&v);
+        ids.sort();
+        assert_eq!(ids, expected, "{source}: {v}");
+        assert!(
+            warnings_of(&v).contains(&"without quiet: 1 task(s) hidden".to_string()),
+            "{source}: {v}"
+        );
+        assert_eq!(
+            run(variable, &[&["next"][..], args].concat())["next"]["task"]["id"],
+            stale.as_str(),
+            "{source}"
+        );
+        let prime = run(variable, &[&["prime"][..], args].concat());
+        let ready: Vec<&str> = prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        assert!(!ready.contains(&capture.as_str()), "{source}: {prime}");
+        assert!(ready.contains(&stale.as_str()), "{source}: {prime}");
+    }
+}
+
+// ---- Exclusive holds (lanes/needs design §4.4–§4.5) ----
+
+/// The vocabulary every holds test uses: `quiet` is exclusive, `owner` is not.
+fn hold_vocab(dir: &std::path::Path) {
+    let path = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(
+        "\n[needs.quiet]\nmeaning = \"an idle host\"\nexclusive = true\n\
+         \n[needs.owner]\nmeaning = \"the owner judges an image\"\n",
+    );
+    std::fs::write(&path, text).unwrap();
+}
+
+/// `tasks <args>` run as `session` (with the runner's live pid), parsed; it must succeed.
+fn json_as(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    session: &str,
+    args: &[&str],
+) -> serde_json::Value {
+    let out = as_agent(env, dir, session).args(args).output().unwrap();
+    assert!(
+        out.status.success(),
+        "tasks {args:?} as {session} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+/// The `{"error": …}` of `tasks <args>` run as `session`; it must exit 1.
+fn error_as(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    session: &str,
+    args: &[&str],
+) -> serde_json::Value {
+    let out = as_agent(env, dir, session).args(args).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "tasks {args:?} as {session}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stderr).unwrap()
+}
+
+/// The `holds` of the claim `show` reports on `id`: null when there is no claim or it
+/// holds nothing (the key is sparse).
+fn holds_of(env: &TestEnv, dir: &std::path::Path, id: &str) -> serde_json::Value {
+    env.json(dir, &["show", id])["claim"]["holds"].clone()
+}
+
+/// A claim written straight into `prefix`'s store, holding `holds`.
+fn write_hold(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool, holds: &[&str]) {
+    write_claim(env, prefix, id, session, live);
+    let path = env.claim_store(prefix);
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    let list = holds
+        .iter()
+        .map(|need| format!("{need:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // `write_claim` ends inside the claim's table, so this key lands in that entry.
+    text.push_str(&format!("holds = [{list}]\n"));
+    std::fs::write(&path, text).unwrap();
+}
+
+#[test]
+fn every_acquire_path_records_the_tasks_exclusive_needs_as_holds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let started = id_of(env.json(
+        &sci,
+        &[
+            "add", "Capture", "-p", "2", "--need", "quiet", "--need", "owner",
+        ],
+    ));
+    let flagged = id_of(env.json(&sci, &["add", "Flagged", "-p", "2", "--need", "quiet"]));
+    let edited = id_of(env.json(&sci, &["add", "Edited", "-p", "2", "--need", "quiet"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2", "--need", "owner"]));
+
+    json_as(&env, &sci, "agent-a", &["start", &started]);
+    json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &flagged, "--status", "doing"],
+    );
+    let editor = editor_script(&sci, "sed -i 's/status: todo/status: doing/' \"$1\"");
+    let out = as_agent(&env, &sci, "agent-a")
+        .env("EDITOR", editor)
+        .args(["edit", &edited])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    json_as(&env, &sci, "agent-a", &["start", &plain]);
+
+    for id in [&started, &flagged, &edited] {
+        assert_eq!(
+            holds_of(&env, &sci, id),
+            serde_json::json!(["quiet"]),
+            "{id}"
+        );
+    }
+    // A non-exclusive need is no hold, and an empty `holds` is absent everywhere.
+    assert!(holds_of(&env, &sci, &plain).is_null());
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(store.matches("holds = [\"quiet\"]").count(), 3, "{store}");
+}
+
+#[test]
+fn every_acquire_path_refuses_a_need_another_session_holds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let holding = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let started = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    let flagged = id_of(env.json(&sci, &["add", "Sweep", "-p", "2", "--need", "quiet"]));
+    let edited = id_of(env.json(&sci, &["add", "Trace", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &holding]);
+    let records: Vec<(String, String)> = [&started, &flagged, &edited]
+        .iter()
+        .map(|id| (id.to_string(), env.read(&sci, &format!("tasks/{id}.md"))))
+        .collect();
+
+    let error = error_as(&env, &sci, "agent-b", &["start", &started]);
+    assert_eq!(error["error"]["kind"], "need_held", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!("held by {holding} (agent-a)")),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("tasks start {started} --force --reason")),
+        "{detail}"
+    );
+
+    let error = error_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["edit", &flagged, "--status", "doing"],
+    );
+    assert_eq!(error["error"]["kind"], "need_held", "{error}");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("tasks start {flagged} --force --reason")),
+        "{error}"
+    );
+
+    let editor = editor_script(&sci, "sed -i 's/status: todo/status: doing/' \"$1\"");
+    let out = as_agent(&env, &sci, "agent-b")
+        .env("EDITOR", editor)
+        .args(["edit", &edited])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(err_kind(&out), "need_held");
+    assert!(err_detail(&out).contains(&format!("tasks start {edited} --force --reason")));
+
+    for (id, before) in &records {
+        assert_eq!(&env.read(&sci, &format!("tasks/{id}.md")), before, "{id}");
+        assert!(env.json(&sci, &["show", id])["claim"].is_null(), "{id}");
+    }
+}
+
+#[test]
+fn a_holding_session_takes_more_and_a_takeover_of_the_held_task_is_not_held_back() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+
+    // A claim on the target itself never holds it back: --force alone takes it over.
+    json_as(&env, &sci, "agent-b", &["start", &first, "--force"]);
+    let shown = env.json(&sci, &["show", &first]);
+    assert_eq!(shown["claim"]["session"], "agent-b");
+    assert_eq!(shown["claim"]["holds"], serde_json::json!(["quiet"]));
+
+    // The session that now holds quiet may start more work that needs it.
+    json_as(&env, &sci, "agent-b", &["start", &second]);
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_park_releases_the_hold() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &second])["error"]["kind"],
+        "need_held"
+    );
+    json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["park", &first, "wait for the idle host"],
+    );
+    json_as(&env, &sci, "agent-b", &["start", &second]);
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_claim_without_a_pid_holds_until_its_ttl() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    // TASKS_SESSION without TASKS_SESSION_PID: the claim lives by its TTL alone.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "ttl-agent")
+        .args(["start", &first])
+        .assert()
+        .success();
+    assert!(env.json(&sci, &["show", &first])["claim"]["pid"].is_null());
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &second])["error"]["kind"],
+        "need_held"
+    );
+
+    // Past the TTL the claim is stale, and a stale claim holds nothing.
+    let store = env.claim_store("sci");
+    let aged: String = std::fs::read_to_string(&store)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            if line.starts_with("seen = ") {
+                "seen = \"2026-01-01T00:00:00Z\"\n".to_string()
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect();
+    std::fs::write(&store, aged).unwrap();
+    json_as(&env, &sci, "agent-b", &["start", &second]);
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+}
+
+/// These pass before the gate exists; they keep it from over-reaching.
+#[test]
+fn claims_that_cannot_hold_do_not_hold_back_an_acquire() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let dead = id_of(env.json(&sci, &["add", "Dead", "-p", "2", "--need", "quiet"]));
+    let older = id_of(env.json(&sci, &["add", "Older", "-p", "2", "--need", "quiet"]));
+    let targets: Vec<String> = (0..3)
+        .map(|n| {
+            id_of(env.json(
+                &sci,
+                &["add", &format!("T{n}"), "-p", "2", "--need", "quiet"],
+            ))
+        })
+        .collect();
+
+    // A dead claim holds nothing.
+    write_hold(&env, "sci", &dead, "ghost", false, &["quiet"]);
+    json_as(&env, &sci, "agent-b", &["start", &targets[0]]);
+    // A live entry written before holds existed holds nothing.
+    write_claim(&env, "sci", &older, "agent-old", true);
+    json_as(&env, &sci, "agent-b", &["start", &targets[1]]);
+    // A store left behind by an unregistered prefix is never read.
+    write_hold(&env, "old", "old-a00001", "ghost", true, &["quiet"]);
+    json_as(&env, &sci, "agent-b", &["start", &targets[2]]);
+    for id in &targets {
+        assert_eq!(
+            holds_of(&env, &sci, id),
+            serde_json::json!(["quiet"]),
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn a_forced_start_past_a_held_need_needs_a_reason_and_notes_both_tasks() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    let path = format!("tasks/{second}.md");
+    let before = env.read(&sci, &path);
+
+    // --force without --reason is refused when the task is held back.
+    let error = error_as(&env, &sci, "agent-b", &["start", &second, "--force"]);
+    assert_eq!(error["error"]["kind"], "validation", "{error}");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("requires --reason"),
+        "{error}"
+    );
+    assert_eq!(env.read(&sci, &path), before);
+    assert!(env.json(&sci, &["show", &second])["claim"].is_null());
+
+    let out = json_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["start", &second, "--force", "--reason", "capture window"],
+    );
+    assert!(
+        !warnings_of(&out)
+            .iter()
+            .any(|w| w.contains("--reason was unused")),
+        "{out}"
+    );
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+    let target = env.read(&sci, &path);
+    assert!(
+        target.contains(&format!(
+            "need override: acquired while quiet held by {first} (agent-a): capture window"
+        )),
+        "{target}"
+    );
+    let holder = env.read(&sci, &format!("tasks/{first}.md"));
+    assert!(
+        holder.contains(&format!(
+            "need override: {second} acquired quiet by agent-b while this task held it: \
+             capture window"
+        )),
+        "{holder}"
+    );
+}
+
+#[test]
+fn a_need_override_notes_a_holder_only_in_the_same_project() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let holding = id_of(env.json(&fam, &["add", "Fam capture", "-p", "2", "--need", "quiet"]));
+    let target = id_of(env.json(&sci, &["add", "Sci capture", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &fam, "agent-a", &["start", &holding]);
+    let holder_path = format!("tasks/{holding}.md");
+    let holder_before = env.read(&fam, &holder_path);
+
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &target])["error"]["kind"],
+        "need_held"
+    );
+    json_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["start", &target, "--force", "--reason", "owner asked"],
+    );
+    assert!(
+        env.read(&sci, &format!("tasks/{target}.md"))
+            .contains(&format!(
+                "need override: acquired while quiet held by {holding} (agent-a): owner asked"
+            ))
+    );
+    // A cross-project write would need fam's lock, so fam's record is untouched.
+    assert_eq!(env.read(&fam, &holder_path), holder_before);
+}
+
+#[test]
+fn a_refused_status_and_needs_change_leaves_the_record_and_start_resolves_the_hold() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    let path = format!("tasks/{second}.md");
+    let before = env.read(&sci, &path);
+
+    env.usage(
+        &sci,
+        &["edit", &second, "--status", "doing", "--need", "owner"],
+    );
+    assert_eq!(env.read(&sci, &path), before);
+
+    let editor = editor_script(
+        &sci,
+        "sed -i -e 's/status: todo/status: doing/' \
+         -e 's/^needs: \\[quiet\\]/needs: [owner, quiet]/' \"$1\"",
+    );
+    let out = as_agent(&env, &sci, "agent-b")
+        .env("EDITOR", editor)
+        .args(["edit", &second])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(
+        err_detail(&out).contains("cannot also change needs"),
+        "{out:?}"
+    );
+    assert_eq!(env.read(&sci, &path), before);
+
+    // The recorded needs are what the recovery acquires.
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &second])["error"]["kind"],
+        "need_held"
+    );
+    json_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["start", &second, "--force", "--reason", "capture window"],
+    );
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_restart_of_an_own_live_claim_is_not_held_back_by_an_override_holder() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    json_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["start", &second, "--force", "--reason", "capture window"],
+    );
+
+    // Both sessions now hold quiet. A re-start continues the caller's own claim and
+    // acquires nothing new, so neither is held back by the other's hold.
+    json_as(&env, &sci, "agent-b", &["start", &second]);
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+    assert_eq!(holds_of(&env, &sci, &first), serde_json::json!(["quiet"]));
+    // Only the forced start's pair of notes: one on each task.
+    for id in [&second, &first] {
+        let record = env.read(&sci, &format!("tasks/{id}.md"));
+        assert_eq!(
+            record.matches("need override:").count(),
+            1,
+            "a continuation records no new override: {record}"
+        );
+    }
+}
+
+#[test]
+fn needs_changes_under_another_sessions_live_claim_are_refused_and_other_edits_are_not() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let id = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "owner"]));
+    json_as(&env, &sci, "agent-b", &["start", &id]);
+    let path = format!("tasks/{id}.md");
+    let before = env.read(&sci, &path);
+
+    for args in [
+        vec!["edit", id.as_str(), "--need", "quiet"],
+        vec!["edit", id.as_str(), "--rm-need", "owner"],
+        vec!["edit", id.as_str(), "--no-needs"],
+    ] {
+        assert_eq!(
+            error_as(&env, &sci, "agent-a", &args)["error"]["kind"],
+            "claimed",
+            "{args:?}"
+        );
+    }
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^needs: \\[owner\\]/needs: [owner, quiet]/' \"$1\"",
+    );
+    let out = as_agent(&env, &sci, "agent-a")
+        .env("EDITOR", editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(err_kind(&out), "claimed");
+    assert_eq!(env.read(&sci, &path), before);
+
+    // A field edit that leaves needs alone keeps today's behaviour: no claim check.
+    json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &id, "-p", "1", "--tag", "capture"],
+    );
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["priority"], 1);
+    assert_eq!(shown["task"]["needs"], serde_json::json!(["owner"]));
+    assert_eq!(shown["claim"]["session"], "agent-b");
+}
+
+#[test]
+fn removing_a_need_under_ones_own_claim_drops_it_from_holds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let mine = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let theirs = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &theirs])["error"]["kind"],
+        "need_held"
+    );
+
+    json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &mine, "--rm-need", "quiet"],
+    );
+    assert!(holds_of(&env, &sci, &mine).is_null());
+    assert_eq!(
+        env.json(&sci, &["show", &mine])["claim"]["session"],
+        "agent-a"
+    );
+    json_as(&env, &sci, "agent-b", &["start", &theirs]);
+}
+
+#[test]
+fn adding_an_exclusive_need_under_ones_own_claim_is_an_acquire() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let mine = id_of(env.json(&sci, &["add", "Mine", "-p", "2", "--need", "owner"]));
+    let other = id_of(env.json(&sci, &["add", "Other", "-p", "2", "--need", "owner"]));
+    let theirs = id_of(env.json(&sci, &["add", "Theirs", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    json_as(&env, &sci, "agent-a", &["start", &other]);
+    json_as(&env, &sci, "agent-b", &["start", &theirs]);
+    let path = format!("tasks/{mine}.md");
+    let before = env.read(&sci, &path);
+
+    let error = error_as(&env, &sci, "agent-a", &["edit", &mine, "--need", "quiet"]);
+    assert_eq!(error["error"]["kind"], "need_held", "{error}");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("tasks edit {mine} --need quiet --force --reason")),
+        "{error}"
+    );
+    assert_eq!(env.read(&sci, &path), before);
+    assert_eq!(
+        error_as(
+            &env,
+            &sci,
+            "agent-a",
+            &["edit", &mine, "--need", "quiet", "--force"]
+        )["error"]["kind"],
+        "validation"
+    );
+    assert_eq!(env.read(&sci, &path), before);
+    assert!(holds_of(&env, &sci, &mine).is_null());
+
+    let out = json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &[
+            "edit",
+            &mine,
+            "--need",
+            "quiet",
+            "--force",
+            "--reason",
+            "share the capture",
+        ],
+    );
+    assert!(
+        !warnings_of(&out)
+            .iter()
+            .any(|w| w.contains("--reason was unused"))
+    );
+    assert_eq!(holds_of(&env, &sci, &mine), serde_json::json!(["quiet"]));
+    assert!(env.read(&sci, &path).contains(&format!(
+        "need override: acquired while quiet held by {theirs} (agent-b): share the capture"
+    )));
+    assert!(env.read(&sci, &format!("tasks/{theirs}.md")).contains(&format!(
+        "need override: {mine} acquired quiet by agent-a while this task held it: share the \
+         capture"
+    )));
+
+    // An editor save has no flags: it refuses and names the edit form.
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^needs: \\[owner\\]/needs: [owner, quiet]/' \"$1\"",
+    );
+    let out = as_agent(&env, &sci, "agent-a")
+        .env("EDITOR", editor)
+        .args(["edit", &other])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(err_kind(&out), "need_held");
+    assert!(
+        err_detail(&out).contains(&format!("tasks edit {other} --need quiet --force --reason"))
+    );
+    assert!(holds_of(&env, &sci, &other).is_null());
+}
+
+#[test]
+fn edit_force_and_reason_are_only_for_adding_a_held_need() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let id = id_of(env.json(&sci, &["add", "Capture", "-p", "2"]));
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--reason", "why", "-p", "1"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--force", "-p", "1"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(
+            &sci,
+            &["edit", &id, "--force", "--reason", "why", "-p", "1"]
+        ),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "edit", &id, "--need", "quiet", "--force", "--reason", "a\nb"
+            ]
+        ),
+        "validation"
+    );
+    // No claim: adding the need acquires nothing, so the reason goes unused.
+    let out = env.json(
+        &sci,
+        &["edit", &id, "--need", "quiet", "--force", "--reason", "why"],
+    );
+    assert!(
+        warnings_of(&out)
+            .iter()
+            .any(|w| w.contains("--reason was unused")),
+        "{out}"
+    );
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["needs"], serde_json::json!(["quiet"]));
+    assert!(shown["claim"].is_null());
+}
+
+#[test]
+fn a_need_override_that_save_refuses_leaves_both_records_and_the_claim_store_unchanged() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let mine = id_of(env.json(&sci, &["add", "Mine", "-p", "2", "--need", "owner"]));
+    let theirs = id_of(env.json(&sci, &["add", "Theirs", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    json_as(&env, &sci, "agent-b", &["start", &theirs]);
+    let records: Vec<(String, String)> = [&mine, &theirs]
+        .iter()
+        .map(|id| (id.to_string(), env.read(&sci, &format!("tasks/{id}.md"))))
+        .collect();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+
+    // Every hold check passes (--force --reason under agent-a's own claim). Only `save`
+    // refuses, on a parent check no earlier step makes: a task cannot be its own parent.
+    let error = error_as(
+        &env,
+        &sci,
+        "agent-a",
+        &[
+            "edit", &mine, "--need", "quiet", "--force", "--reason", "share", "--parent", &mine,
+        ],
+    );
+    assert_eq!(error["error"]["kind"], "cycle", "{error}");
+    // No "acquired quiet" note on the holder, no note on the target, no claim change.
+    for (id, before) in &records {
+        assert_eq!(&env.read(&sci, &format!("tasks/{id}.md")), before, "{id}");
+    }
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+}
+
+#[test]
+fn views_hide_work_held_back_by_another_sessions_hold_across_projects() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let holding = id_of(env.json(&sci, &["add", "Sci capture", "-p", "2", "--need", "quiet"]));
+    let sci_waiting = id_of(env.json(&sci, &["add", "Sci rerun", "-p", "2", "--need", "quiet"]));
+    let first = id_of(env.json(&fam, &["add", "Fam capture", "-p", "1", "--need", "quiet"]));
+    let second = id_of(env.json(
+        &fam,
+        &[
+            "add",
+            "Fam sweep",
+            "-p",
+            "1",
+            "--need",
+            "quiet",
+            "--need",
+            "owner",
+        ],
+    ));
+    let free = id_of(env.json(&fam, &["add", "Fam docs", "-p", "3", "--need", "owner"]));
+    let parked = id_of(env.json(&fam, &["add", "Fam resume", "-p", "0", "--need", "quiet"]));
+    // A parked-agent candidate, parked before the hold exists: `next` would take it first.
+    json_as(&env, &fam, "agent-d", &["start", &parked]);
+    json_as(
+        &env,
+        &fam,
+        "agent-d",
+        &["park", &parked, "rerun the capture"],
+    );
+    json_as(&env, &sci, "agent-a", &["start", &holding]);
+
+    let wait =
+        |count: usize| format!("{count} task(s) wait for quiet, held by {holding} (agent-a)");
+    let ids = |rows: &serde_json::Value| -> Vec<String> {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let waits = |value: &serde_json::Value| -> Vec<String> {
+        warnings_of(value)
+            .into_iter()
+            .filter(|warning| warning.contains("wait for"))
+            .collect()
+    };
+
+    let ready = json_as(&env, &fam, "agent-c", &["ready"]);
+    assert_eq!(ids(&ready["tasks"]), [free.as_str()]);
+    assert_eq!(waits(&ready), [wait(2)]);
+
+    let next = json_as(&env, &fam, "agent-c", &["next"]);
+    assert_eq!(next["next"]["task"]["id"], free.as_str(), "{next}");
+    assert_eq!(waits(&next), [wait(3)]);
+
+    let prime = json_as(&env, &fam, "agent-c", &["prime"]);
+    assert_eq!(ids(&prime["ready"]), [free.as_str()]);
+    assert_eq!(waits(&prime), [wait(2)]);
+
+    // One warning per need and holder, however many projects the held tasks are in.
+    let all = json_as(&env, &fam, "agent-c", &["ready", "--all-projects"]);
+    assert_eq!(ids(&all["tasks"]), [free.as_str()]);
+    assert!(!ids(&all["tasks"]).contains(&sci_waiting));
+    assert_eq!(waits(&all), [wait(3)]);
+
+    // The holding session is already using the resource: nothing is held back from it.
+    let own = json_as(&env, &fam, "agent-a", &["ready"]);
+    for id in [&first, &second, &free] {
+        assert!(ids(&own["tasks"]).contains(id), "{own}");
+    }
+    assert!(waits(&own).is_empty(), "{own}");
+}
+
+#[test]
+fn an_unreadable_claim_store_leaves_hold_state_unknown_without_failing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let _fam = env.init("fam");
+    hold_vocab(&sci);
+    let id = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let store = env.claim_store("fam");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "claims = [not toml").unwrap();
+
+    for command in ["ready", "next", "prime"] {
+        let out = env.json(&sci, &[command]);
+        assert!(out.to_string().contains(&id), "{command}: {out}");
+        assert!(
+            warnings_of(&out)
+                .iter()
+                .any(|w| w.starts_with("hold state unknown for fam")),
+            "{command}: {out}"
+        );
+    }
+    let started = env.json(&sci, &["start", &id]);
+    assert!(
+        warnings_of(&started)
+            .iter()
+            .any(|w| w.starts_with("hold state unknown for fam")),
+        "{started}"
+    );
+    assert_eq!(holds_of(&env, &sci, &id), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign() {
+    // Spec §4.4: when a read view cannot resolve "this session", every hold counts as
+    // another session's, even one this process could prove by pid. Claim natively with
+    // proof, enable relay, then remove the relay registry so identity cannot resolve.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let first = id_of(env.json(&dir, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&dir, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    let state = env.home.path().join("relay-state");
+    let script = format!(
+        "set -e\n{}\nwrite_registry\n\
+         CLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {first}\n\
+         mkdir -p \"$HOME/.config/tasks\"\n\
+         printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" ready > \"$HOME/ready.json\"\n",
+        shim_env(&state, "claude-code", "c1"),
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "ready must still answer when identity cannot resolve: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let ready: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home.path().join("ready.json")).unwrap())
+            .unwrap();
+    assert!(
+        !ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == second.as_str()),
+        "an unresolved view must not use process proof to treat the hold as its own: {ready}"
+    );
+    assert!(
+        warnings_of(&ready)
+            .iter()
+            .any(|w| w.contains("wait for quiet") && w.contains(first.as_str())),
+        "{ready}"
+    );
+    assert!(
+        warnings_of(&ready).iter().any(|w| {
+            w.starts_with("session identity unresolved (")
+                && w.ends_with("); every hold counts as another session's")
+        }),
+        "the view must say why its own hold counts as foreign: {ready}"
+    );
+}
+
+/// Holds the host-wide holds lock, as a concurrent acquire in another project would.
+fn hold_holds_lock(env: &TestEnv) -> File {
+    let path = env.claim_store("sci").with_file_name(".holds.lock");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let file = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    file.lock().unwrap();
+    file
+}
+
+/// Waits, bounded, until another process holds `prefix`'s project lock. A probe that gets
+/// the lock drops it at once and tries again. It observes only and never asserts, so no
+/// child is stranded by a panic here.
+fn wait_for_project_lock_holder(env: &TestEnv, prefix: &str, limit: Duration) {
+    let path = env
+        .claim_store(prefix)
+        .with_file_name(format!("{prefix}.lock"));
+    let deadline = Instant::now() + limit;
+    while Instant::now() < deadline {
+        if let Ok(probe) = File::options()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            && let Err(std::fs::TryLockError::WouldBlock) = probe.try_lock()
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `tasks <args>` spawned as `session` (with the runner's live pid), output piped.
+fn spawn_as(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    session: &str,
+    args: &[&str],
+) -> std::process::Child {
+    let mut cmd = env.raw(dir);
+    cmd.args(args)
+        .env("TASKS_SESSION", session)
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    cmd.spawn().unwrap()
+}
+
+#[test]
+fn an_acquire_that_records_holds_waits_for_the_holds_lock_and_one_that_does_not_never_does() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    let quiet = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    // In another project: the blocked start above holds sci's project lock.
+    let plain = id_of(env.json(&fam, &["add", "Docs", "-p", "2"]));
+
+    let held = hold_holds_lock(&env);
+    let mut holding = spawn_as(&env, &sci, "agent-a", &["start", &quiet]);
+    let mut free = spawn_as(&env, &fam, "agent-b", &["start", &plain]);
+    // Observations only while the lock is held.
+    let free_finished = wait_bounded(&mut free, Duration::from_secs(10));
+    let holding_still_blocked = !wait_bounded(&mut holding, Duration::from_millis(300));
+    drop(held);
+
+    let free = reap(free, REAP);
+    let holding = reap(holding, REAP);
+    assert!(
+        free_finished,
+        "a start that records no holds must not take the holds lock"
+    );
+    assert!(
+        holding_still_blocked,
+        "a start that records holds must wait for the holds lock"
+    );
+    assert!(free.expect("the plain start never exited").status.success());
+    let holding = holding.expect("the holding start never exited after the release");
+    assert!(
+        holding.status.success(),
+        "{}",
+        String::from_utf8_lossy(&holding.stderr)
+    );
+    assert_eq!(holds_of(&env, &sci, &quiet), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn concurrent_starts_in_two_projects_contending_for_one_need_have_one_winner() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let in_sci = id_of(env.json(&sci, &["add", "Sci capture", "-p", "2", "--need", "quiet"]));
+    let in_fam = id_of(env.json(&fam, &["add", "Fam capture", "-p", "2", "--need", "quiet"]));
+
+    let held = hold_holds_lock(&env);
+    let sci_start = spawn_as(&env, &sci, "agent-a", &["start", &in_sci]);
+    let fam_start = spawn_as(&env, &fam, "agent-b", &["start", &in_fam]);
+    wait_for_project_lock_holder(&env, "sci", Duration::from_secs(10));
+    wait_for_project_lock_holder(&env, "fam", Duration::from_secs(10));
+    drop(held);
+
+    // Reap both before asserting anything.
+    let reaped = [reap(sci_start, REAP), reap(fam_start, REAP)];
+    assert!(
+        reaped.iter().all(Option::is_some),
+        "a queued start never exited"
+    );
+    let outs: Vec<_> = reaped.into_iter().flatten().collect();
+    assert_eq!(
+        outs.iter().filter(|out| out.status.success()).count(),
+        1,
+        "exactly one session may take the idle host: {outs:?}"
+    );
+    let loser = outs.iter().find(|out| !out.status.success()).unwrap();
+    assert_eq!(err_kind(loser), "need_held");
+    let holding = [(&sci, &in_sci), (&fam, &in_fam)]
+        .into_iter()
+        .filter(|(dir, id)| holds_of(&env, dir, id) == serde_json::json!(["quiet"]))
+        .count();
+    assert_eq!(holding, 1);
+}
+
+#[test]
+fn a_project_whose_prefix_is_holds_can_start_a_task_that_needs_an_exclusive_resource() {
+    let mut env = TestEnv::new();
+    let holds = env.init("holds");
+    hold_vocab(&holds);
+    let id = id_of(env.json(&holds, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    // Its project lock is `holds.lock`. Were the host-wide lock that same file, this start
+    // would wait on itself forever; `reap` kills it instead of hanging the suite.
+    let out = reap(
+        spawn_as(&env, &holds, "agent-a", &["start", &id]),
+        Duration::from_secs(30),
+    );
+    let out = out.expect("start waited on its own lock");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(holds_of(&env, &holds, &id), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_hold_removal_whose_record_write_fails_keeps_the_holds_lock_through_its_rollback() {
+    use std::os::unix::fs::PermissionsExt;
+    struct Restore(std::path::PathBuf, std::fs::Permissions);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let mine = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let theirs = id_of(env.json(&fam, &["add", "Fam capture", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    let store_before = std::fs::read(env.claim_store("sci")).unwrap();
+    let record_before = env.read(&sci, &format!("tasks/{mine}.md"));
+
+    // The removal's record write fails: reads still work, `atomic_write` cannot create its
+    // temp file.
+    let tasks_dir = sci.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let restore = Restore(tasks_dir, original);
+
+    let held = hold_holds_lock(&env);
+    let mut removal = spawn_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &mine, "--rm-need", "quiet"],
+    );
+    let acquire = spawn_as(&env, &fam, "agent-b", &["start", &theirs]);
+    // Observations only while the lock is held: both children are past their project
+    // lock, and the removal has not published, failed and rolled back on its own.
+    wait_for_project_lock_holder(&env, "sci", Duration::from_secs(10));
+    wait_for_project_lock_holder(&env, "fam", Duration::from_secs(10));
+    let removal_waited = !wait_bounded(&mut removal, Duration::from_millis(300));
+    drop(held);
+
+    // Reap both, and restore the directory, before asserting anything.
+    let [removal, acquire] = [reap(removal, REAP), reap(acquire, REAP)];
+    drop(restore);
+    assert!(
+        removal_waited,
+        "removing a hold must take the holds lock before save publishes the reduced claim"
+    );
+    let removal = removal.expect("the removal never exited after the release");
+    let acquire = acquire.expect("the acquire never exited after the release");
+    assert_eq!(
+        removal.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&removal.stderr)
+    );
+    assert_eq!(err_kind(&removal), "io");
+    // Before the removal, or after its rollback restored the hold: never in between.
+    assert_eq!(
+        acquire.status.code(),
+        Some(1),
+        "the acquire saw quiet released: {}",
+        String::from_utf8_lossy(&acquire.stdout)
+    );
+    assert_eq!(err_kind(&acquire), "need_held");
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store_before);
+    assert_eq!(env.read(&sci, &format!("tasks/{mine}.md")), record_before);
+    assert!(env.json(&fam, &["show", &theirs])["claim"].is_null());
+}
+
+#[test]
+fn in_lane_names_the_nearest_lane_on_ready_next_show_and_parked_rows() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+    let sub = id_of(env.json(&sci, &["add", "Sub-goal", "--parent", &lane]));
+    let step = id_of(env.json(&sci, &["add", "Step", "--parent", &sub, "-p", "0"]));
+    let loose = id_of(env.json(&sci, &["add", "Loose", "-p", "1"]));
+    let row = |value: &serde_json::Value, id: &str| {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .unwrap()
+            .clone()
+    };
+
+    let ready = env.json(&sci, &["ready"]);
+    assert_eq!(row(&ready, &step)["in_lane"], lane, "{ready}");
+    assert!(
+        row(&ready, &loose).get("in_lane").is_none(),
+        "sparse: {ready}"
+    );
+    let list = env.json(&sci, &["list"]);
+    assert_eq!(row(&list, &lane)["in_lane"], lane, "a lane names itself");
+    assert_eq!(row(&list, &sub)["in_lane"], lane);
+
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(next["next"]["task"]["id"], step);
+    assert_eq!(next["next"]["in_lane"], lane, "{next}");
+    assert_eq!(env.json(&sci, &["show", &sub])["in_lane"], lane);
+    assert!(env.json(&sci, &["show", &loose]).get("in_lane").is_none());
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &step, "ask", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let parked = env.json(&sci, &["list", "--parked"]);
+    assert_eq!(parked["tasks"][0]["in_lane"], lane, "{parked}");
+    assert_eq!(env.json(&sci, &["prime"])["parked"][0]["in_lane"], lane);
+
+    // Another project's lane, read across the registry, names its own lane.
+    let fam_lane = id_of(env.json(&fam, &["add", "Fam lane", "--lane"]));
+    let fam_step = id_of(env.json(&fam, &["add", "Fam step", "--parent", &fam_lane]));
+    let wide = env.json(&sci, &["ready", "--all-projects"]);
+    assert_eq!(row(&wide, &fam_step)["in_lane"], fam_lane, "{wide}");
+}
+
+#[test]
+fn nested_lanes_are_refused_on_every_write_path_and_reported_by_check() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let outer = id_of(env.json(&sci, &["add", "Outer", "--lane"]));
+    let child = id_of(env.json(&sci, &["add", "Child", "--parent", &outer]));
+
+    // add --lane --parent, directly and further down
+    assert_eq!(
+        env.fail(&sci, &["add", "Inner", "--lane", "--parent", &outer]),
+        "nested_lane"
+    );
+    assert_eq!(
+        env.fail(&sci, &["add", "Deeper", "--lane", "--parent", &child]),
+        "nested_lane"
+    );
+    // edit --lane with a lane above
+    assert_eq!(env.fail(&sci, &["edit", &child, "--lane"]), "nested_lane");
+    // edit --lane with a lane below
+    let top = id_of(env.json(&sci, &["add", "Top"]));
+    env.json(&sci, &["edit", &outer, "--parent", &top]);
+    assert_eq!(env.fail(&sci, &["edit", &top, "--lane"]), "nested_lane");
+    // re-parenting a subtree that contains a lane under a lane
+    let other = id_of(env.json(&sci, &["add", "Other", "--lane"]));
+    assert_eq!(
+        env.fail(&sci, &["edit", &top, "--parent", &other]),
+        "nested_lane"
+    );
+    assert_eq!(
+        env.fail(&sci, &["edit", &outer, "--parent", &other]),
+        "nested_lane"
+    );
+    // ordinary writes inside a lane still land
+    env.json(&sci, &["note", &child, "still writable"]);
+    env.json(&sci, &["edit", &child, "-p", "1"]);
+
+    // an editor save
+    let set = editor_script(
+        &sci,
+        "sed -i 's/^depends: \\[\\]$/lane: true\\ndepends: []/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &set)
+        .args(["edit", &child])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "nested_lane", "{err}");
+    assert_eq!(
+        env.json(&sci, &["show", &child])["task"]["lane"],
+        false,
+        "nothing written"
+    );
+
+    // check reports nesting written by hand
+    let path = sci.join(format!("tasks/{child}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", "lane: true\ndepends: []\n"),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        check["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "nested_lane" && f["id"] == child),
+        "{check}"
+    );
+}
+
+#[test]
+fn writes_that_leave_existing_nesting_alone_are_not_refused() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let outer = id_of(env.json(&sci, &["add", "Outer", "--lane"]));
+    let inner = id_of(env.json(&sci, &["add", "Inner", "--parent", &outer]));
+    let path = sci.join(format!("tasks/{inner}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", "lane: true\ndepends: []\n"),
+    )
+    .unwrap();
+    let nested = |env: &TestEnv| {
+        let out = env.cmd(&sci).args(["check"]).output().unwrap();
+        if out.stdout.is_empty() {
+            assert!(out.status.success());
+            return false;
+        }
+        let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        check["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "nested_lane" && f["id"] == inner)
+    };
+
+    env.json(&sci, &["note", &inner, "still writable"]);
+    env.json(&sci, &["edit", &inner, "-p", "1"]);
+    env.json(&sci, &["start", &inner]);
+    assert!(nested(&env), "check still reports the nesting");
+    env.json(&sci, &["done", &inner]);
+    assert!(nested(&env), "check still reports the nesting");
+
+    // a fresh edit that would create nesting is still refused
+    let fresh = id_of(env.json(&sci, &["add", "Fresh", "--parent", &outer]));
+    assert_eq!(env.fail(&sci, &["edit", &fresh, "--lane"]), "nested_lane");
+
+    // removing the nesting works
+    env.json(&sci, &["edit", &inner, "--no-lane"]);
+    assert!(!nested(&env));
+}
+
+#[test]
+fn lane_checks_terminate_on_a_parent_cycle() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let a = id_of(env.json(&sci, &["add", "A"]));
+    let b = id_of(env.json(&sci, &["add", "B", "--parent", &a]));
+    let path = sci.join(format!("tasks/{a}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", &format!("parent: {b}\ndepends: []\n")),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert!(out.status.code().is_some());
+    let _ = env.cmd(&sci).args(["edit", &b, "--lane"]).output().unwrap();
+}
+
+#[test]
+fn a_blocked_lane_pauses_its_subtree_in_the_pickers_until_unblocked() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+    let step = id_of(env.json(&sci, &["add", "Capture", "--parent", &lane, "-p", "0"]));
+    let resumed = id_of(env.json(&sci, &["add", "Resume", "--parent", &lane, "-p", "0"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &resumed, "rerun"])
+        .assert()
+        .success();
+    // Neither of these would be offered with the lane unpaused, so neither is counted.
+    let later = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Later",
+            "--parent",
+            &lane,
+            "-p",
+            "0",
+            "--defer",
+            "2099-01-01",
+        ],
+    ));
+    let asks = id_of(env.json(&sci, &["add", "Ask", "--parent", &lane, "-p", "0"]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &asks, "which host?", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let goal = id_of(env.json(&sci, &["add", "Plain goal", "-p", "2"]));
+    let under_goal = id_of(env.json(&sci, &["add", "Under goal", "--parent", &goal, "-p", "2"]));
+    let loose = id_of(env.json(&sci, &["add", "Loose", "-p", "3"]));
+    env.json(&sci, &["block", &goal, "an ordinary blocked goal"]);
+    env.json(&sci, &["block", &lane, "waiting on the idle host"]);
+    let ids = |value: &serde_json::Value| -> Vec<String> {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let ready = env.json(&sci, &["ready"]);
+    assert_eq!(
+        ids(&ready),
+        [under_goal.clone(), loose.clone()],
+        "a blocked goal does not block its children; a paused lane does"
+    );
+    assert!(
+        ready["warnings"]
+            .to_string()
+            .contains(&format!("2 task(s) hidden by paused lane {lane}")),
+        "Capture and Resume only; Later is deferred and Ask waits on the user: {ready}"
+    );
+    let warnings = ready["warnings"].to_string();
+    assert!(
+        !warnings.contains("deferred task") && !warnings.contains(&later),
+        "a deferred task in a paused lane is in neither count: {ready}"
+    );
+    assert!(!warnings.contains(&asks), "{ready}");
+    let cut = env.json(&sci, &["ready", "--max-complexity", "low"]);
+    assert!(
+        !cut["warnings"].to_string().contains("paused lane"),
+        "unrated steps the cutoff hides are not counted as paused: {cut}"
+    );
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(
+        next["next"]["task"]["id"], under_goal,
+        "the parked step is paused too"
+    );
+    assert!(
+        next["warnings"]
+            .to_string()
+            .contains(&format!("2 task(s) hidden by paused lane {lane}")),
+        "counted once across parked and ready: {next}"
+    );
+    let prime = env.json(&sci, &["prime"]);
+    let primed: Vec<&str> = prime["ready"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert!(!primed.contains(&step.as_str()) && !primed.contains(&resumed.as_str()));
+
+    // A person who names a task directly gets it.
+    env.json(&sci, &["start", &step]);
+    env.json(&sci, &["unblock", &lane]);
+    let ready = env.json(&sci, &["ready"]);
+    assert!(ids(&ready).contains(&resumed), "{ready}");
+    assert!(
+        !ready["warnings"].to_string().contains("paused lane"),
+        "{ready}"
+    );
+}
+
+#[test]
+fn the_paused_count_is_taken_before_exclusive_holds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let holding = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+    let held = id_of(env.json(
+        &sci,
+        &[
+            "add", "Rerun", "--parent", &lane, "-p", "0", "--need", "quiet",
+        ],
+    ));
+    // Another session holds `quiet`, so `held` would be held back even if unpaused.
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &holding])
+        .assert()
+        .success();
+    env.json(&sci, &["block", &lane, "waiting on the idle host"]);
+    let ready = env.json(&sci, &["ready"]);
+    assert!(
+        ready["warnings"]
+            .to_string()
+            .contains(&format!("1 task(s) hidden by paused lane {lane}")),
+        "{held} is counted: the paused count is taken before exclusive holds: {ready}"
+    );
+}
+
+#[test]
+fn marking_a_blocked_goal_as_a_lane_warns_that_it_pauses_the_subtree() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal"]));
+    env.json(&sci, &["add", "Kid", "--parent", &goal]);
+    env.json(&sci, &["block", &goal, "stuck"]);
+    let out = env.json(&sci, &["edit", &goal, "--lane"]);
+    assert!(
+        out["warnings"].to_string().contains(&format!(
+            "{goal} is blocked, so marking it a lane pauses it"
+        )),
+        "{out}"
+    );
+    let open = id_of(env.json(&sci, &["add", "Open goal"]));
+    let out = env.json(&sci, &["edit", &open, "--lane"]);
+    assert_eq!(out["warnings"], serde_json::json!([]), "{out}");
+}
+
+#[test]
+fn under_selects_descendants_at_any_depth_on_list_ready_and_next() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "2"]));
+    let sub = id_of(env.json(&sci, &["add", "Sub", "--parent", &lane, "-p", "2"]));
+    let deep = id_of(env.json(&sci, &["add", "Deep", "--parent", &sub, "-p", "3"]));
+    let direct = id_of(env.json(&sci, &["add", "Direct", "--parent", &lane, "-p", "4"]));
+    let urgent = id_of(env.json(&sci, &["add", "Urgent outside", "-p", "0"]));
+    let ids = |value: &serde_json::Value| -> Vec<String> {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let mut listed = ids(&env.json(&sci, &["list", "--under", &lane]));
+    listed.sort();
+    let mut expected = vec![sub.clone(), deep.clone(), direct.clone()];
+    expected.sort();
+    assert_eq!(listed, expected, "any depth, never the root itself");
+    assert_eq!(
+        ids(&env.json(&sci, &["list", "--parent", &lane])).len(),
+        2,
+        "--parent keeps its direct-child meaning"
+    );
+    assert_eq!(
+        ids(&env.json(&sci, &["ready", "--under", &lane])),
+        [deep.clone(), direct.clone()]
+    );
+    assert_eq!(
+        ids(&env.json(&sci, &["ready", "--under", &lane, "-p", "4"])),
+        std::slice::from_ref(&direct),
+        "--under narrows with the other filters"
+    );
+
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        urgent,
+        "without --under, priority still wins"
+    );
+    assert_eq!(
+        env.json(&sci, &["next", "--under", &lane])["next"]["task"]["id"],
+        deep
+    );
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &urgent, "resume it"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["next", "--under", &lane])["next"]["task"]["id"],
+        deep,
+        "a parked candidate outside the subtree is not taken"
+    );
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &deep, "ask", "--waiting-on", "user"])
+        .assert()
+        .success();
+    assert_eq!(
+        ids(&env.json(&sci, &["list", "--parked", "--under", &lane])),
+        std::slice::from_ref(&deep)
+    );
+
+    assert_eq!(
+        env.fail(&sci, &["next", "--under", "sci-ffffff"]),
+        "task_not_found"
+    );
+    assert_eq!(
+        env.fail(&sci, &["list", "--under", "sci-ffffff"]),
+        "task_not_found"
+    );
+    assert_eq!(
+        env.fail(&sci, &["ready", "--under", "sci-ffffff"]),
+        "task_not_found"
+    );
+}
+
+#[test]
+fn lanes_view_reports_every_state_and_picks_as_next_does() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let ready_lane = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Ready lane",
+            "--lane",
+            "-p",
+            "0",
+            "-b",
+            "# Ready lane\n\nShip the captures.\nFirst milestone: one clean run.\n\nDetail.",
+        ],
+    ));
+    env.json(
+        &sci,
+        &["add", "Urgent step", "--parent", &ready_lane, "-p", "0"],
+    );
+    let resumed = id_of(env.json(
+        &sci,
+        &["add", "Resumed step", "--parent", &ready_lane, "-p", "3"],
+    ));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &resumed, "pick it up"])
+        .assert()
+        .success();
+    let held_lane = id_of(env.json(&sci, &["add", "Held lane", "--lane", "-p", "1"]));
+    let waits = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Needs quiet",
+            "--parent",
+            &held_lane,
+            "--need",
+            "quiet",
+        ],
+    ));
+    let capture = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet", "-p", "4"]));
+    as_agent(&env, &sci, "other")
+        .args(["start", &capture])
+        .assert()
+        .success();
+    let waiting_lane = id_of(env.json(&sci, &["add", "Waiting lane", "--lane", "-p", "2"]));
+    let review = id_of(env.json(&sci, &["add", "Review", "--parent", &waiting_lane]));
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &review, "look at it", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let empty_lane = id_of(env.json(&sci, &["add", "Empty lane", "--lane", "-p", "3"]));
+    let paused_lane = id_of(env.json(&sci, &["add", "Paused lane", "--lane", "-p", "4"]));
+    let running = id_of(env.json(&sci, &["add", "Running", "--parent", &paused_lane]));
+    as_agent(&env, &sci, "other")
+        .args(["start", &running])
+        .assert()
+        .success();
+    env.json(&sci, &["block", &paused_lane, "the host is busy"]);
+    let shelved_lane = id_of(env.json(&sci, &["add", "Shelved lane", "--lane"]));
+    env.json(&sci, &["shelve", &shelved_lane, "next quarter"]);
+
+    let view = json_as(&env, &sci, "me", &["lanes"]);
+    let rows = view["lanes"].as_array().unwrap();
+    let order: Vec<&str> = rows
+        .iter()
+        .map(|row| row["lane"]["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        order,
+        [
+            ready_lane.as_str(),
+            held_lane.as_str(),
+            waiting_lane.as_str(),
+            empty_lane.as_str(),
+            paused_lane.as_str()
+        ],
+        "lane order; the shelved lane is absent"
+    );
+
+    let ready = &rows[0];
+    assert_eq!(ready["state"], "ready");
+    assert_eq!(
+        ready["pick"]["id"], resumed,
+        "parked candidates first, as next takes them"
+    );
+    assert_eq!(ready["steps"], 1);
+    assert_eq!(
+        ready["guidance"],
+        "Ship the captures. First milestone: one clean run."
+    );
+    assert!(
+        ready.get("held").is_none() && ready.get("causes").is_none(),
+        "{ready}"
+    );
+    assert_eq!(
+        json_as(&env, &sci, "me", &["next", "--under", &ready_lane])["next"]["task"]["id"],
+        resumed
+    );
+
+    let held = &rows[1];
+    assert_eq!(held["state"], "held");
+    assert_eq!(held["pick"], serde_json::Value::Null);
+    assert_eq!(
+        held["held"],
+        serde_json::json!([{"id": waits, "need": "quiet", "holder": capture, "by": "claim"}])
+    );
+    assert_eq!(held["causes"], serde_json::json!({"held": 1}));
+    assert_eq!(held["steps"], 0, "a held step counts under held only");
+
+    assert_eq!(rows[2]["state"], "waiting");
+    assert_eq!(rows[2]["causes"], serde_json::json!({"user": 1}));
+    assert_eq!(rows[3]["state"], "empty");
+    assert_eq!(
+        rows[3]["guidance"],
+        serde_json::Value::Null,
+        "an empty body"
+    );
+
+    let paused = &rows[4];
+    assert_eq!(paused["state"], "paused");
+    assert_eq!(paused["pick"], serde_json::Value::Null);
+    assert_eq!(paused["active"][0]["id"], running);
+    assert!(paused.get("causes").is_none(), "{paused}");
+
+    let out = as_agent(&env, &sci, "me")
+        .args(["--pretty", "lanes"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains(&format!("ready → {resumed} Resumed step")),
+        "{text}"
+    );
+    assert!(
+        text.contains("    Ship the captures. First milestone: one clean run."),
+        "{text}"
+    );
+    assert!(text.contains(&format!("held: quiet ← {capture}")), "{text}");
+    assert!(text.contains("waiting: 1 user"), "{text}");
+    assert!(
+        text.contains(&format!("    active: {running} Running @")),
+        "{text}"
+    );
+
+    env.json(&sci, &["unblock", &paused_lane]);
+    let view = json_as(&env, &sci, "me", &["lanes"]);
+    assert_eq!(view["lanes"][4]["state"], "waiting");
+    assert_eq!(view["lanes"][4]["causes"], serde_json::json!({"active": 1}));
+}
+
+#[test]
+fn lanes_view_counts_every_live_descendant_once_including_recurrences() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let due_lane = id_of(env.json(&sci, &["add", "Due lane", "--lane", "-p", "0"]));
+    let due = id_of(env.json(&sci, &["add", "Due sweep", "--parent", &due_lane]));
+    env.json(&sci, &["done", &due]);
+    env.json(&sci, &["edit", &due, "--every", "30d"]);
+    let soon_lane = id_of(env.json(&sci, &["add", "Soon lane", "--lane", "-p", "1"]));
+    let soon = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Soon sweep",
+            "--parent",
+            &soon_lane,
+            "--every",
+            "30d",
+        ],
+    ));
+    env.json(&sci, &["start", &soon]);
+    env.json(&sci, &["done", &soon]);
+    let gone_lane = id_of(env.json(&sci, &["add", "Gone lane", "--lane", "-p", "2"]));
+    let gone = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Gone sweep",
+            "--parent",
+            &gone_lane,
+            "--every",
+            "30d",
+        ],
+    ));
+    env.json(&sci, &["drop", &gone, "retired"]);
+    let deep_lane = id_of(env.json(&sci, &["add", "Deep lane", "--lane", "-p", "3"]));
+    let deep_goal = id_of(env.json(&sci, &["add", "Deep goal", "--parent", &deep_lane]));
+    let deep_step = id_of(env.json(&sci, &["add", "Deep step", "--parent", &deep_goal]));
+
+    let mixed = id_of(env.json(&sci, &["add", "Mixed lane", "--lane", "-p", "4"]));
+    let first = id_of(env.json(&sci, &["add", "First", "--parent", &mixed, "-p", "0"]));
+    env.json(&sci, &["add", "Second", "--parent", &mixed, "-p", "1"]);
+    let sub = id_of(env.json(&sci, &["add", "Sub-goal", "--parent", &mixed, "-p", "1"]));
+    env.json(&sci, &["add", "Sub step", "--parent", &sub, "-p", "2"]);
+    let blocked = id_of(env.json(&sci, &["add", "Blocked", "--parent", &mixed]));
+    env.json(&sci, &["block", &blocked, "why"]);
+    let both = id_of(env.json(&sci, &["add", "Deferred and blocked", "--parent", &mixed]));
+    env.json(&sci, &["block", &both, "why"]);
+    env.json(&sci, &["edit", &both, "--defer", "2099-01-01"]);
+    env.json(
+        &sci,
+        &["add", "Depends", "--parent", &mixed, "--depends", &blocked],
+    );
+    env.json(
+        &sci,
+        &["add", "Idea", "--parent", &mixed, "--status", "idea"],
+    );
+    let closed = id_of(env.json(&sci, &["add", "Closed", "--parent", &mixed]));
+    env.json(&sci, &["done", &closed, "landed"]);
+    let shelved = id_of(env.json(
+        &sci,
+        &["add", "Shelved", "--parent", &mixed, "--status", "idea"],
+    ));
+    env.json(&sci, &["shelve", &shelved, "later"]);
+
+    let view = env.json(&sci, &["lanes"]);
+    let rows = view["lanes"].as_array().unwrap();
+    assert_eq!(rows[0]["state"], "ready", "{view}");
+    assert_eq!(rows[0]["pick"]["id"], due, "a due recurrence is the pick");
+    assert_eq!(rows[1]["state"], "waiting");
+    assert_eq!(
+        rows[1]["causes"],
+        serde_json::json!({"periodic": 1}),
+        "not empty"
+    );
+    assert_eq!(
+        rows[2]["state"], "empty",
+        "a dropped recurrence is not live"
+    );
+    assert_eq!(
+        rows[3]["pick"]["id"], deep_step,
+        "picked from inside the sub-goal"
+    );
+    assert_eq!(rows[3]["causes"], serde_json::json!({"goal": 1}));
+
+    let row = &rows[4];
+    assert_eq!(row["lane"]["id"], mixed);
+    assert_eq!(row["pick"]["id"], first);
+    assert_eq!(row["steps"], 2, "Second and Sub step");
+    assert_eq!(
+        row["causes"],
+        serde_json::json!({"deferred": 1, "blocked": 1, "depends": 1, "goal": 1, "other": 1}),
+        "deferred-and-blocked counts once, under deferred; closed and shelved are absent"
+    );
+}
+
+#[test]
+fn an_earlier_lane_wins_a_contested_exclusive_need_without_reordering_next() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let first_lane = id_of(env.json(&sci, &["add", "First lane", "--lane", "-p", "1"]));
+    let a1 = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "A1",
+            "--parent",
+            &first_lane,
+            "--need",
+            "quiet",
+            "-p",
+            "2",
+        ],
+    ));
+    let second_lane = id_of(env.json(&sci, &["add", "Second lane", "--lane", "-p", "2"]));
+    let b1 = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "B1",
+            "--parent",
+            &second_lane,
+            "--need",
+            "quiet",
+            "-p",
+            "0",
+        ],
+    ));
+    let b2 = id_of(env.json(&sci, &["add", "B2", "--parent", &second_lane, "-p", "3"]));
+
+    let view = env.json(&sci, &["lanes"]);
+    let rows = view["lanes"].as_array().unwrap();
+    assert_eq!(rows[0]["pick"]["id"], a1);
+    assert_eq!(
+        rows[1]["pick"]["id"], b2,
+        "the later lane picks its next step"
+    );
+    assert_eq!(
+        rows[1]["held"],
+        serde_json::json!([{"id": b1, "need": "quiet", "holder": a1, "by": "pick"}])
+    );
+    assert_eq!(rows[1]["causes"], serde_json::json!({"held": 1}));
+    assert_eq!(rows[1]["steps"], 0);
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        b1,
+        "lane order never reorders next"
+    );
+
+    env.json(&sci, &["drop", &b2, "not needed"]);
+    let view = env.json(&sci, &["lanes"]);
+    assert_eq!(view["lanes"][1]["state"], "held");
+    assert_eq!(view["lanes"][1]["pick"], serde_json::Value::Null);
+}
+
+#[test]
+fn lanes_view_reports_the_session_gates_as_causes() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("owner", "the owner judges", false)]);
+    let lane = id_of(env.json(&sci, &["add", "Lane", "--lane", "-p", "1"]));
+    env.json(
+        &sci,
+        &[
+            "add",
+            "Needs the owner",
+            "--parent",
+            &lane,
+            "-p",
+            "0",
+            "--need",
+            "owner",
+            "--complexity",
+            "low",
+        ],
+    );
+    env.json(&sci, &["add", "Unrated", "--parent", &lane, "-p", "1"]);
+    env.json(
+        &sci,
+        &[
+            "add",
+            "Below the halt",
+            "--parent",
+            &lane,
+            "-p",
+            "3",
+            "--complexity",
+            "low",
+        ],
+    );
+    env.json(&sci, &["add", "Stop the line", "-p", "0", "--tag", "halt"]);
+
+    let view = env.json(
+        &sci,
+        &["lanes", "--without", "owner", "--max-complexity", "low"],
+    );
+    assert_eq!(view["lanes"][0]["state"], "waiting", "{view}");
+    assert_eq!(
+        view["lanes"][0]["causes"],
+        serde_json::json!({"without": 1, "cutoff": 1, "halt": 1})
+    );
+    assert_eq!(env.json(&sci, &["lanes"])["lanes"][0]["state"], "ready");
+    assert_eq!(
+        env.fail(&sci, &["lanes", "--without", "nope"]),
+        "unknown_need"
+    );
+}
+
+#[test]
+fn lanes_across_projects_name_their_own_lane() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let sci_lane = id_of(env.json(&sci, &["add", "Sci lane", "--lane", "-p", "1"]));
+    env.json(&sci, &["add", "Sci step", "--parent", &sci_lane]);
+    let fam_lane = id_of(env.json(&fam, &["add", "Fam lane", "--lane", "-p", "0"]));
+    let fam_goal = id_of(env.json(&fam, &["add", "Fam goal", "--parent", &fam_lane]));
+    let fam_step = id_of(env.json(&fam, &["add", "Fam step", "--parent", &fam_goal]));
+
+    let view = env.json(&sci, &["lanes", "--all-projects"]);
+    let rows = view["lanes"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{view}");
+    assert_eq!(
+        rows[0]["lane"]["id"], fam_lane,
+        "priority orders across projects"
+    );
+    assert_eq!(rows[0]["lane"]["in_lane"], fam_lane);
+    assert_eq!(rows[0]["pick"]["id"], fam_step);
+    assert_eq!(rows[0]["pick"]["in_lane"], fam_lane);
+    assert_eq!(rows[1]["pick"]["in_lane"], sci_lane);
+
+    assert_eq!(
+        env.json(&sci, &["lanes"])["lanes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        env.json(&sci, &["lanes", "--project", "fam"])["lanes"][0]["lane"]["id"],
+        fam_lane
+    );
+}
+
+#[test]
+fn lanes_view_reads_holds_only_where_a_project_declares_an_exclusive_need() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let _fam = env.init("fam");
+    let lane = id_of(env.json(&sci, &["add", "Lane", "--lane"]));
+    env.json(&sci, &["add", "Step", "--parent", &lane]);
+    let store = env.claim_store("fam");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "claims = [not toml").unwrap();
+    let unknown = |view: &serde_json::Value| {
+        warnings_of(view)
+            .iter()
+            .filter(|w| w.starts_with("hold state unknown for fam"))
+            .count()
+    };
+
+    let view = env.json(&sci, &["lanes"]);
+    assert_eq!(view["lanes"][0]["state"], "ready", "{view}");
+    assert_eq!(
+        unknown(&view),
+        0,
+        "no exclusive need: no claim store is read: {view}"
+    );
+
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let view = env.json(&sci, &["lanes"]);
+    assert_eq!(view["lanes"][0]["state"], "ready", "{view}");
+    assert_eq!(unknown(&view), 1, "{view}");
+}
+
+#[test]
+fn prime_always_carries_lanes_and_prints_them_before_the_roadmap() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "Loose"]);
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(
+        prime["lanes"],
+        serde_json::json!([]),
+        "present and empty: {prime}"
+    );
+    assert!(!env.pretty(&sci, &["prime"]).contains("lanes:"));
+
+    let lane = id_of(env.json(
+        &sci,
+        &["add", "Captures", "--lane", "-p", "1", "-b", "## Captures"],
+    ));
+    let step = id_of(env.json(&sci, &["add", "Take one", "--parent", &lane]));
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["lanes"][0]["lane"]["id"], lane);
+    assert_eq!(prime["lanes"][0]["state"], "ready");
+    assert_eq!(prime["lanes"][0]["pick"]["id"], step);
+    assert_eq!(
+        prime["lanes"][0]["guidance"],
+        serde_json::Value::Null,
+        "a body that is only a heading has no guidance"
+    );
+
+    let text = env.pretty(&sci, &["prime"]);
+    let lanes_at = text.find("\nlanes:\n").unwrap_or_else(|| panic!("{text}"));
+    assert!(lanes_at < text.find("\nroadmap:\n").unwrap(), "{text}");
+    assert!(text.contains(&format!("ready → {step} Take one")), "{text}");
+
+    let all = env.json(&sci, &["prime", "--all-projects"]);
+    assert_eq!(all["lanes"][0]["lane"]["id"], lane, "{all}");
+}
+
+#[test]
+fn prime_and_lanes_never_read_the_dependencies_of_closed_or_shelved_lane_work() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let far = id_of(env.json(&fam, &["add", "Far"]));
+    env.json(&fam, &["done", &far, "landed"]);
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+    let step = id_of(env.json(&sci, &["add", "Take one", "--parent", &lane]));
+    let closed = id_of(env.json(
+        &sci,
+        &["add", "Closed", "--parent", &lane, "--depends", &far],
+    ));
+    env.json(&sci, &["done", &closed, "landed"]);
+    let shelved = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Shelved",
+            "--parent",
+            &lane,
+            "--status",
+            "idea",
+            "--depends",
+            &far,
+        ],
+    ));
+    env.json(&sci, &["shelve", &shelved, "later"]);
+    // Garble the one record both depend on: resolving it is now a parse error, so any
+    // read of these two records' dependencies fails the command.
+    std::fs::write(fam.join(format!("tasks/{far}.md")), "garbage").unwrap();
+
+    let prime = env.json(&sci, &["prime"]);
+    let row = &prime["lanes"][0];
+    assert_eq!(row["lane"]["id"], lane, "{prime}");
+    assert_eq!(row["state"], "ready", "{row}");
+    assert_eq!(row["pick"]["id"], step);
+    assert_eq!(row["steps"], 0);
+    assert!(
+        row.get("causes").is_none() && row.get("held").is_none(),
+        "a closed child and a shelved child are not live: {row}"
+    );
+    let view = env.json(&sci, &["lanes"]);
+    assert_eq!(view["lanes"][0]["pick"]["id"], step, "{view}");
+}
+
+#[test]
+fn prime_warns_once_about_unknown_hold_state_with_lanes_present() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let _fam = env.init("fam");
+    hold_vocab(&sci);
+    let lane = id_of(env.json(&sci, &["add", "Lane", "--lane"]));
+    env.json(
+        &sci,
+        &[
+            "add", "Capture", "-p", "2", "--need", "quiet", "--parent", &lane,
+        ],
+    );
+    let store = env.claim_store("fam");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "claims = [not toml").unwrap();
+
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["lanes"][0]["lane"]["id"], lane, "{prime}");
+    let unknown = warnings_of(&prime)
+        .iter()
+        .filter(|w| w.starts_with("hold state unknown for fam"))
+        .count();
+    assert_eq!(unknown, 1, "{prime}");
+}
+
+#[test]
+fn prime_warns_once_when_identity_cannot_resolve_with_lanes_present() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let lane = id_of(env.json(&dir, &["add", "Lane", "--lane"]));
+    let first = id_of(env.json(
+        &dir,
+        &[
+            "add", "Capture", "-p", "2", "--need", "quiet", "--parent", &lane,
+        ],
+    ));
+    let state = env.home.path().join("relay-state");
+    let script = format!(
+        "set -e\n{}\nwrite_registry\n\
+         CLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {first}\n\
+         mkdir -p \"$HOME/.config/tasks\"\n\
+         printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" prime > \"$HOME/prime.json\"\n",
+        shim_env(&state, "claude-code", "c1"),
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let prime: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home.path().join("prime.json")).unwrap())
+            .unwrap();
+    assert_eq!(prime["lanes"][0]["lane"]["id"], lane, "{prime}");
+    let unresolved = warnings_of(&prime)
+        .iter()
+        .filter(|w| w.starts_with("session identity unresolved ("))
+        .count();
+    assert_eq!(unresolved, 1, "{prime}");
+}
+
+#[test]
+fn a_registry_naming_an_unregistered_group_member_fails_to_load() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\n[groups]\nmix = [\"sci\", \"gone\"]\n");
+    std::fs::write(&path, text).unwrap();
+    let error = error_of(&env, &sci, &["list"]);
+    assert_eq!(error["error"]["kind"], "config");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("\"mix\"") && detail.contains("\"gone\""),
+        "{detail}"
+    );
+}
+
+#[test]
+fn group_set_rm_and_groups_manage_named_project_sets() {
+    let mut env = TestEnv::new();
+    env.init("sci");
+    let fam = env.init("fam");
+    alias_registry(&env, "old", "fam");
+    let nowhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.json(nowhere.path(), &["groups"]),
+        serde_json::json!({"groups": [], "warnings": []})
+    );
+
+    // A retired prefix resolves to its live one, and a repeated prefix is stored once.
+    assert_eq!(
+        env.json(nowhere.path(), &["group", "set", "vf", "sci", "old", "sci"]),
+        serde_json::json!({"name": "vf", "members": ["fam", "sci"], "warnings": []})
+    );
+    let registry: toml::Value = toml::from_str(
+        &std::fs::read_to_string(env.home.path().join(".config/tasks/projects.toml")).unwrap(),
+    )
+    .unwrap();
+    let stored: Vec<&str> = registry["groups"]["vf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|member| member.as_str().unwrap())
+        .collect();
+    assert_eq!(stored, ["fam", "sci"]);
+
+    // set replaces; groups lists every group with each member's reachability.
+    env.json(nowhere.path(), &["group", "set", "vf", "sci"]);
+    env.json(nowhere.path(), &["group", "set", "pair", "fam", "sci"]);
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    assert_eq!(
+        env.json(nowhere.path(), &["groups"])["groups"],
+        serde_json::json!([
+            {"name": "pair", "members": [
+                {"prefix": "fam", "reachable": false},
+                {"prefix": "sci", "reachable": true},
+            ]},
+            {"name": "vf", "members": [{"prefix": "sci", "reachable": true}]},
+        ])
+    );
+    assert_eq!(
+        env.pretty(nowhere.path(), &["groups"]).trim_end(),
+        "pair  fam (unreachable), sci\nvf  sci"
+    );
+
+    let removed = env.json(nowhere.path(), &["group", "rm", "pair"]);
+    assert_eq!(removed["members"], serde_json::json!(["fam", "sci"]));
+    assert_eq!(
+        env.fail(nowhere.path(), &["group", "rm", "pair"]),
+        "unknown_group"
+    );
+    assert_eq!(
+        env.pretty(nowhere.path(), &["group", "rm", "vf"]).trim(),
+        "vf"
+    );
+    assert_eq!(
+        env.json(nowhere.path(), &["groups"])["groups"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn group_set_refuses_bad_or_colliding_names_and_unknown_members() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+    alias_registry(&env, "old", "fam");
+    for name in ["", "Bad", "under_score", "sp ace"] {
+        assert_eq!(
+            env.fail(&sci, &["group", "set", name, "sci"]),
+            "validation",
+            "{name:?}"
+        );
+    }
+    assert_eq!(
+        env.fail(&sci, &["group", "set", "fam", "sci"]),
+        "validation",
+        "a live prefix"
+    );
+    assert_eq!(
+        env.fail(&sci, &["group", "set", "old", "sci"]),
+        "validation",
+        "a retired prefix"
+    );
+    assert_eq!(
+        env.fail(&sci, &["group", "set", "vf", "sci", "nope"]),
+        "config"
+    );
+    env.usage(&sci, &["group", "set", "vf"]);
+    assert_eq!(env.json(&sci, &["groups"])["groups"], serde_json::json!([]));
+    env.json(&sci, &["group", "set", "data-2", "sci"]);
+}
+
+#[test]
+fn group_set_refuses_a_name_an_unfinished_rename_reserves() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&sci, &["add", "S", "-p", "2"]));
+    let stopped = env
+        .raw(&sci)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "sci", "lab"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+
+    // `lab` is not yet a prefix, so only the reservation stands between it and a group.
+    // A group there would make the resume rewrite files and config, then fail at the
+    // registry step on the collision.
+    let error = error_of(&env, &fam, &["group", "set", "lab", "fam"]);
+    assert_eq!(error["error"]["kind"], "validation");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("reserved by unfinished rename sci -> lab"),
+        "{detail}"
+    );
+    assert_eq!(env.json(&fam, &["groups"])["groups"], serde_json::json!([]));
+
+    // The name stayed free, so the rename resumes and finishes.
+    assert_eq!(
+        env.json(&sci, &["rename", "sci", "lab"])["recovery"],
+        "resume_files"
+    );
+    assert!(sci.join(format!("tasks/lab-{}.md", &id[4..])).is_file());
+    // Finished, `lab` is a live prefix and `sci` a retired one: still refused, now as
+    // prefixes rather than reservations.
+    for name in ["lab", "sci"] {
+        assert_eq!(
+            env.fail(&fam, &["group", "set", name, "fam"]),
+            "validation",
+            "{name}"
+        );
+    }
+    env.json(&fam, &["group", "set", "vf", "lab", "fam"]);
+}
+
+#[test]
+fn init_refuses_a_prefix_that_names_a_group() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["group", "set", "vf", "sci"]);
+    let fresh = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.fail(fresh.path(), &["init", "--prefix", "vf"]),
+        "config"
+    );
+    assert_eq!(
+        env.fail(fresh.path(), &["init", "--prefix", "vf", "--force"]),
+        "config"
+    );
+    assert!(
+        !fresh.path().join("tasks").exists(),
+        "a refused init writes nothing"
+    );
+}
+
+#[test]
+fn rename_rewrites_group_members_and_refuses_a_group_name_as_target() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+    env.json(&sci, &["group", "set", "vf", "sci", "fam"]);
+    env.json(&sci, &["group", "set", "science", "fam"]);
+    assert_eq!(env.fail(&sci, &["rename", "sci", "science"]), "config");
+    env.json(&sci, &["rename", "sci", "lab"]);
+    assert_eq!(
+        env.json(&sci, &["groups"])["groups"][1],
+        serde_json::json!({"name": "vf", "members": [
+            {"prefix": "fam", "reachable": true},
+            {"prefix": "lab", "reachable": true},
+        ]})
+    );
+    // The retired name resolves on set, as any alias does.
+    assert_eq!(
+        env.json(&sci, &["group", "set", "vf", "sci"])["members"],
+        serde_json::json!(["lab"])
+    );
+}
+
+#[test]
+fn unregister_removes_the_prefix_from_groups_and_deletes_emptied_ones() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+    env.json(&sci, &["group", "set", "pair", "sci", "fam"]);
+    env.json(&sci, &["group", "set", "solo", "fam"]);
+    let out = env.json(&sci, &["unregister", "fam"]);
+    assert_eq!(
+        out["warnings"],
+        serde_json::json!(["group solo lost its last member fam and was deleted"])
+    );
+    assert_eq!(
+        env.json(&sci, &["groups"])["groups"],
+        serde_json::json!([{"name": "pair", "members": [{"prefix": "sci", "reachable": true}]}])
+    );
+    // The saved registry loads: no dangling member.
+    assert_eq!(env.json(&sci, &["list"])["tasks"], serde_json::json!([]));
+}
+
+#[test]
+fn adopt_carries_group_membership_and_refuses_a_group_named_target() {
+    let env = TestEnv::new();
+    let (dir, _) = adopt_fixture(&env);
+    adopt_json(&env, &dir, &["group", "set", "new", "old"]);
+    let refused = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+    let error: serde_json::Value = serde_json::from_slice(&refused.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    assert!(
+        error["error"]["detail"].as_str().unwrap().contains("group"),
+        "{error}"
+    );
+
+    adopt_json(&env, &dir, &["group", "rm", "new"]);
+    adopt_json(&env, &dir, &["group", "set", "vf", "old"]);
+    assert_eq!(
+        adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+        "fresh"
+    );
+    assert_eq!(
+        adopt_json(&env, &dir, &["groups"])["groups"],
+        serde_json::json!([{"name": "vf", "members": [{"prefix": "new", "reachable": true}]}])
+    );
+}
+
+#[test]
+fn rename_explain_and_execution_both_refuse_a_group_named_target() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&sci, &["add", "S", "-p", "2"]));
+    env.json(&fam, &["group", "set", "vf", "fam"]);
+    let state = env.home.path().join(".local/state/tasks/rename");
+
+    // Fresh: explain predicts the refusal execution gives.
+    let explained = env.json(&sci, &["rename", "sci", "vf", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse", "{explained}");
+    assert!(
+        explained["warnings"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("R12:"),
+        "{explained}"
+    );
+    assert_eq!(env.fail(&sci, &["rename", "sci", "vf"]), "config");
+    assert!(
+        !state.join("sci.toml").exists(),
+        "refused before the inventory"
+    );
+
+    // Mid-rename: a group that appears under the pending target blocks the resume before
+    // any file moves. `group set` refuses the reserved name, so only a hand edit of the
+    // registry gets there.
+    let stopped = env
+        .raw(&sci)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "sci", "lab"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("[groups]\n"), "{text}");
+    std::fs::write(
+        &path,
+        text.replace("[groups]\n", "[groups]\nlab = [\"fam\"]\n"),
+    )
+    .unwrap();
+    let explained = env.json(&sci, &["rename", "sci", "lab", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse", "{explained}");
+    assert!(
+        explained["warnings"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("R12:"),
+        "{explained}"
+    );
+    assert_eq!(env.fail(&sci, &["rename", "sci", "lab"]), "config");
+    assert!(
+        sci.join(format!("tasks/{id}.md")).is_file(),
+        "no task file moved"
+    );
+    assert!(!sci.join(format!("tasks/lab-{}.md", &id[4..])).exists());
+    assert!(
+        state.join("sci.toml").is_file(),
+        "the inventory waits for the resume"
+    );
+
+    env.json(&fam, &["group", "rm", "lab"]);
+    assert_eq!(
+        env.json(&sci, &["rename", "sci", "lab"])["recovery"],
+        "resume_files"
+    );
+}
+
+/// Three registered projects; group `vf` holds the first two.
+fn grouped_projects(
+    env: &mut TestEnv,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let ops = env.init("ops");
+    env.json(&sci, &["group", "set", "vf", "sci", "fam"]);
+    (sci, fam, ops)
+}
+
+#[test]
+fn group_scopes_the_read_views_to_its_members() {
+    let mut env = TestEnv::new();
+    let (sci, fam, ops) = grouped_projects(&mut env);
+    let s = id_of(env.json(&sci, &["add", "S", "-p", "1"]));
+    let f = id_of(env.json(&fam, &["add", "F", "-p", "2"]));
+    let o = id_of(env.json(&ops, &["add", "O", "-p", "0", "--tag", "only-ops"]));
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let ready = env.json(nowhere.path(), &["ready", "--group", "vf"]);
+    let ids: Vec<&str> = ready["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [s.as_str(), f.as_str()]);
+    assert_eq!(
+        env.json(nowhere.path(), &["next", "--group", "vf"])["next"]["task"]["id"],
+        s,
+        "ops's P0 is outside the group"
+    );
+
+    let prime = env.json(nowhere.path(), &["prime", "--group", "vf"]);
+    assert_eq!(prime["group"], "vf");
+    assert_eq!(prime["prefix"], serde_json::Value::Null);
+    assert_eq!(prime["projects"], serde_json::json!(["fam", "sci"]));
+    assert!(!prime["ready"].to_string().contains(&o), "{prime}");
+    assert!(
+        env.json(nowhere.path(), &["prime", "--all-projects"])
+            .get("group")
+            .is_none()
+    );
+    assert!(env.json(&sci, &["prime"]).get("group").is_none());
+    let text = env.pretty(nowhere.path(), &["prime", "--group", "vf"]);
+    assert!(text.starts_with("group vf: projects fam, sci\n"), "{text}");
+
+    let tree = env.json(nowhere.path(), &["tree", "--group", "vf"]);
+    assert_eq!(tree["nodes"].as_array().unwrap().len(), 2, "{tree}");
+    for command in ["list", "sample", "tree"] {
+        let out = env.json(nowhere.path(), &[command, "--group", "vf"]);
+        assert!(!out.to_string().contains(&o), "{command}: {out}");
+    }
+    let tags = env.json(nowhere.path(), &["tags", "--group", "vf"]);
+    assert!(!tags.to_string().contains("only-ops"), "{tags}");
+
+    // `lanes` flattens the same scope arguments.
+    let lane = id_of(env.json(&ops, &["add", "Ops effort", "--lane"]));
+    assert_eq!(
+        env.json(nowhere.path(), &["lanes", "--group", "vf"])["lanes"],
+        serde_json::json!([])
+    );
+    assert!(
+        env.json(nowhere.path(), &["lanes", "--all-projects"])["lanes"]
+            .to_string()
+            .contains(&lane)
+    );
+}
+
+#[test]
+fn group_conflicts_with_the_other_scopes_and_an_unknown_name_is_unknown_group() {
+    let mut env = TestEnv::new();
+    let (sci, _, _) = grouped_projects(&mut env);
+    for command in [
+        "list", "ready", "next", "prime", "tree", "tags", "sample", "lanes",
+    ] {
+        env.usage(&sci, &[command, "--group", "vf", "--project", "sci"]);
+        env.usage(&sci, &[command, "--group", "vf", "--all-projects"]);
+        assert_eq!(
+            env.fail(&sci, &[command, "--group", "nope"]),
+            "unknown_group",
+            "{command}"
+        );
+    }
+    let id = id_of(env.json(&sci, &["add", "Goal"]));
+    env.usage(&sci, &["tree", id.as_str(), "--group", "vf"]);
+}
+
+#[test]
+fn a_group_whose_members_are_all_unreachable_warns_and_reads_empty() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "S"]);
+    env.json(&sci, &["group", "set", "away", "fam"]);
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    let nowhere = tempfile::tempdir().unwrap();
+    for command in [
+        "list", "ready", "next", "prime", "tree", "tags", "sample", "lanes",
+    ] {
+        let out = env.json(nowhere.path(), &[command, "--group", "away"]);
+        let warnings = warnings_of(&out);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.starts_with("project fam at ") && w.ends_with(" is unreachable")),
+            "{command}: {warnings:?}"
+        );
+        assert!(
+            !warnings
+                .iter()
+                .any(|w| w.starts_with("sci") || w.contains("project sci ")),
+            "{command}: {warnings:?}"
+        );
+    }
+    assert_eq!(
+        env.json(nowhere.path(), &["ready", "--group", "away"])["tasks"],
+        serde_json::json!([])
+    );
+    assert!(env.json(nowhere.path(), &["next", "--group", "away"])["next"].is_null());
+    let prime = env.json(nowhere.path(), &["prime", "--group", "away"]);
+    assert_eq!(prime["projects"], serde_json::json!([]));
+    assert!(
+        warnings_of(&prime)
+            .iter()
+            .any(|w| w == "fam: halt state unknown (registered checkout unreachable)"),
+        "{prime}"
+    );
+}
+
+#[test]
+fn group_halt_views_filter_members_and_warn_only_about_members() {
+    let mut env = TestEnv::new();
+    let (sci, fam, ops) = grouped_projects(&mut env);
+    let sci_task = id_of(env.json(&sci, &["add", "Sci work", "-p", "2"]));
+    let fam_task = id_of(env.json(&fam, &["add", "Fam work", "-p", "2"]));
+    let halt = id_of(env.json(&sci, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    env.json(&sci, &["shelve", &halt, "pending"]);
+    std::fs::remove_file(ops.join("tasks/.config.toml")).unwrap();
+    let about_ops = |w: &String| w.starts_with("ops:") || w.starts_with("project ops ");
+    for command in ["ready", "prime", "next"] {
+        let output = env.json(&fam, &[command, "--group", "vf"]);
+        assert_eq!(output["halts"][0]["id"], halt, "{output}");
+        let rows = match command {
+            "prime" => &output["ready"],
+            "ready" => &output["tasks"],
+            _ => &output["next"],
+        };
+        assert!(rows.to_string().contains(&fam_task), "{output}");
+        assert!(!rows.to_string().contains(&sci_task), "{output}");
+        assert!(
+            !warnings_of(&output).iter().any(about_ops),
+            "{command}: {output}"
+        );
+        let wide = env.json(&fam, &[command, "--all-projects"]);
+        assert!(
+            warnings_of(&wide)
+                .iter()
+                .any(|w| w == "ops: halt state unknown (registered checkout unreachable)"),
+            "{command}: {wide}"
+        );
+    }
+}
+
+#[test]
+fn quiet_group_lists_only_member_parks_and_claims_keeps_its_single_scope() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["group", "set", "solo", "sci"]);
+    let mine = id_of(env.json(&sci, &["add", "Capture here", "-p", "2"]));
+    let theirs = id_of(env.json(&fam, &["add", "Capture there", "-p", "1"]));
+    for (dir, id) in [(&sci, &mine), (&fam, &theirs)] {
+        as_agent(&env, dir, "agent-a")
+            .args([
+                "park",
+                id.as_str(),
+                "run it",
+                "--waiting-on",
+                "user",
+                "--reason",
+                "quiet",
+                "--minutes",
+                "30",
+            ])
+            .assert()
+            .success();
+    }
+    let nowhere = tempfile::tempdir().unwrap();
+    let ids = |value: serde_json::Value| -> Vec<String> {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(
+        ids(env.json(nowhere.path(), &["quiet"])),
+        [theirs.clone(), mine.clone()]
+    );
+    assert_eq!(
+        ids(env.json(nowhere.path(), &["quiet", "--group", "solo"])),
+        std::slice::from_ref(&mine)
+    );
+    env.usage(
+        nowhere.path(),
+        &["quiet", "--group", "solo", "--project", "sci"],
+    );
+    env.usage(
+        nowhere.path(),
+        &["quiet", "--group", "solo", "--all-projects"],
+    );
+    assert_eq!(
+        env.fail(nowhere.path(), &["quiet", "--group", "nope"]),
+        "unknown_group"
+    );
+    // By contract claims fails rather than answering for part of the registry.
+    env.usage(nowhere.path(), &["claims", "--group", "solo"]);
 }

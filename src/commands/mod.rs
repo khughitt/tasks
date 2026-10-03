@@ -6,7 +6,9 @@ pub mod dep;
 pub mod edit;
 pub mod feedback;
 pub mod graph;
+pub mod group;
 pub mod init;
+pub mod lanes;
 pub mod list;
 pub mod park;
 pub mod parked;
@@ -22,7 +24,7 @@ pub mod tree;
 pub mod unregister;
 
 use crate::claims::{ClaimStore, Liveness, MutationLock};
-use crate::cli::{Cli, Command, FieldArgs, ScopeArgs};
+use crate::cli::{Cli, Command, FieldArgs, GroupAction, ScopeArgs};
 use crate::error::{Error, Result};
 use crate::format::{normalize_note_text, validate_body, validate_line, validate_task};
 use crate::model::{Complexity, Note, Process, Size, Status, Task, TaskId};
@@ -60,6 +62,10 @@ pub struct Ctx {
     pub warnings: Vec<String>,
     /// Held for a write command; absent from reads and during an interactive edit.
     pub lock: Option<MutationLock>,
+    /// The host-wide holds lock, taken after `lock` by every acquire that records holds
+    /// and every claim replacement that changes them. Held until the command ends: past
+    /// `save`'s publish, record write, and rollback (lanes/needs design §4.4).
+    holds_lock: Option<MutationLock>,
     routing: Routing,
     claims: Option<ClaimStore>,
     pending_claim: Option<(TaskId, ClaimIntent)>,
@@ -74,6 +80,13 @@ pub struct Ctx {
     /// task record may keep. Host, pid, and worktree stay in the warning and the claim
     /// store, which never reach git.
     pub takeover: Option<String>,
+    /// `start --reason` / `edit --reason`: what lets `--force` past a held need (lanes/needs
+    /// design §4.5). Set by the command before the hold guard runs.
+    need_reason: Option<String>,
+    /// The held needs this command acquires past, with their holders: recorded by the hold
+    /// guard, turned into the acquired task's notes by `record_need_overrides` before
+    /// `save`. The holders' notes wait for `note_need_holders`, after `save` has landed.
+    need_overrides: Vec<(String, crate::holds::Holder)>,
     /// What a bare id suffix means in this invocation: the caller's project, not the one
     /// the command routed to.
     pub shorthand: Shorthand,
@@ -100,12 +113,15 @@ impl Ctx {
             shorthand,
             warnings: Vec::new(),
             lock: None,
+            holds_lock: None,
             routing,
             claims: None,
             pending_claim: None,
             recovered: false,
             clear_escalation: None,
             takeover: None,
+            need_reason: None,
+            need_overrides: Vec::new(),
         }
     }
 
@@ -167,51 +183,13 @@ impl Ctx {
         }
     }
 
-    /// Spec §6.2.2 steps 2 and 3. Which of the two established the caller's right to act
-    /// matters: only proof-only ownership records the claim's own identity, because only
-    /// then is there no resolved identity that already agrees.
-    pub(crate) fn ownership(
-        &mut self,
-        claim: &crate::claims::Claim,
-        me: &crate::claims::Resolution,
-    ) -> Result<Ownership> {
-        if let Some(identity) = me.identity()
-            && claim.session == identity.session
-        {
-            return Ok(Ownership::ByIdentity);
-        }
-        // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
-        // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
-        // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
-        let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
-        if explicit || !crate::relay::enabled()? {
-            return Ok(Ownership::Foreign);
-        }
-        let proved = crate::claims::proves_ownership(
-            claim,
-            &crate::relay::ancestry::current_scope(),
-            &crate::claims::hostname(),
-            crate::claims::boot_id().as_deref(),
-            &|key| {
-                std::env::var_os(key)
-                    .and_then(|value| value.into_string().ok())
-                    .filter(|value| !value.is_empty())
-            },
-        );
-        Ok(if proved {
-            Ownership::ByProof
-        } else {
-            Ownership::Foreign
-        })
-    }
-
     pub fn refuse_foreign_live_claim(&mut self, id: &TaskId) -> Result<()> {
         let me = self.resolve_for_guard()?;
         let existing = self.claims_mut()?.get(id).cloned();
         let Some(existing) = existing else {
             return me.require().map(|_| ());
         };
-        if self.ownership(&existing, &me)? != Ownership::Foreign {
+        if ownership(&existing, &me)? != Ownership::Foreign {
             return Ok(());
         }
         // Not the owner. Today's behaviour resolved an identity here whatever the verdict,
@@ -228,6 +206,84 @@ impl Ctx {
                 Ctx::describe_claim(&existing, &live),
             ));
         }
+        Ok(())
+    }
+
+    /// Lanes/needs design §4.4: a save that changes `needs` under the caller's own live
+    /// claim recomputes the claim's `holds` in the same save. A removed need drops out. An
+    /// added exclusive need is an acquire: refused with `need_held` while another session's
+    /// live claim on another task holds it, unless `force` and `need_reason` override. Only
+    /// added needs are checked; what the claim already holds was checked when acquired.
+    /// With no live claim of the caller's there is nothing to recompute. Runs after
+    /// `refuse_foreign_live_claim`, under the project lock.
+    pub(crate) fn update_holds(&mut self, task: &Task, force: bool) -> Result<()> {
+        let Some(existing) = self.claims_mut()?.get(&task.id).cloned() else {
+            return Ok(());
+        };
+        if crate::claims::liveness(&existing) != Liveness::Live {
+            return Ok(());
+        }
+        let me = self.resolve_for_guard()?;
+        if ownership(&existing, &me)? == Ownership::Foreign {
+            return Ok(());
+        }
+        let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
+        if holds == existing.holds {
+            return Ok(());
+        }
+        // Any change, whether a hold is added, reduced, or the last one removed, is
+        // published by `save` before the record write and restored if that write fails.
+        // The lock spans both, so no other project's acquire sees a need released for the
+        // instant in between and takes it.
+        self.take_holds_lock()?;
+        let added: Vec<String> = holds
+            .iter()
+            .filter(|need| !existing.holds.contains(*need))
+            .cloned()
+            .collect();
+        if !added.is_empty() {
+            let (snapshot, warnings) =
+                crate::holds::HoldSnapshot::load(&self.registry, time::OffsetDateTime::now_utc());
+            self.warnings.extend(warnings);
+            // "Another session" by the ownership rule, as in `guard_holds`.
+            let mine = own_holds(&snapshot, &me)?;
+            let held: Vec<(String, crate::holds::Holder)> = added
+                .iter()
+                .filter_map(|need| {
+                    snapshot
+                        .holder(need, &task.id, &mine)
+                        .map(|holder| (need.clone(), holder.clone()))
+                })
+                .collect();
+            if let Some((need, holder)) = held.first() {
+                if !force {
+                    return Err(Error::NeedHeld(format!(
+                        "{id} needs {need}, held by {} ({}); add it past the hold with \
+                         `tasks edit {id} --need {need} --force --reason \"...\"`",
+                        holder.task,
+                        holder.session,
+                        id = task.id
+                    )));
+                }
+                if self
+                    .need_reason
+                    .as_deref()
+                    .is_none_or(|reason| reason.trim().is_empty())
+                {
+                    return Err(Error::Validation(format!(
+                        "--force past a held need requires --reason: {} needs {need}, held \
+                         by {} ({})",
+                        task.id, holder.task, holder.session
+                    )));
+                }
+                self.need_overrides = held;
+            }
+        }
+        // `save` treats this as an acquire: store first, restored if the record write fails.
+        self.pending_claim = Some((
+            task.id.clone(),
+            ClaimIntent::Acquire(crate::claims::Claim { holds, ..existing }),
+        ));
         Ok(())
     }
 
@@ -256,6 +312,113 @@ impl Ctx {
         Ok(())
     }
 
+    /// Lanes/needs design §4.4 "Atomic across projects": the host-wide holds lock, after
+    /// the project lock and never before. Kept on `Ctx` until the command ends, so it
+    /// spans the hold check, `save`'s publish of the claim, the record write, and the
+    /// restore of the previous claim when that write fails.
+    fn take_holds_lock(&mut self) -> Result<()> {
+        if self.lock.is_none() {
+            return Err(Error::Io(
+                "the holds lock was requested without the project lock".into(),
+            ));
+        }
+        if self.holds_lock.is_none() {
+            self.holds_lock = Some(crate::holds::lock()?);
+        }
+        Ok(())
+    }
+
+    /// Lanes/needs design §4.4–§4.5: every acquire records the task's needs that this
+    /// project declares exclusive (undeclared names ignored) as the claim's `holds`, and is
+    /// refused with `need_held` while another session's live claim on another task holds
+    /// one of them. Status and needs never change in one operation, so this always reads
+    /// the needs on the record, and `start --force --reason` acquires the same ones.
+    ///
+    /// `force` comes only from `start` here (`edit --force` never reaches a move to doing).
+    /// It overrides only with a reason; every held need is recorded for the audit notes.
+    /// A claim on the task itself never holds it back, so a plain takeover needs none.
+    /// A re-start that continues the caller's own live claim, already holding every one of
+    /// these needs, acquires nothing new and is never held back.
+    ///
+    /// "Another session" is decided by `ownership`, as for the claim itself. The caller is
+    /// the identity this acquire records: the resolved one, or the claim's own on a
+    /// proof-only continuation. A hold whose session string differs but whose process
+    /// proof names this caller's harness is therefore its own.
+    fn guard_holds(&mut self, task: &Task, force: bool) -> Result<()> {
+        let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
+        // What the claim this acquire replaces holds: a repeated start's, a takeover's, or
+        // a dead entry's. `save` publishes the new claim before writing the record and
+        // restores this one if the write fails, so a change either way needs the lock.
+        let replaced = self
+            .claims_mut()?
+            .get(&task.id)
+            .map(|claim| claim.holds.clone())
+            .unwrap_or_default();
+        let me = match self.pending_claim.as_mut() {
+            Some((_, ClaimIntent::Acquire(claim))) => {
+                claim.holds = holds.clone();
+                crate::claims::Resolution::Resolved(crate::claims::continuation_identity(claim))
+            }
+            _ => unreachable!("claim_guard records an acquire for every move to doing"),
+        };
+        if holds.is_empty() && replaced.is_empty() {
+            return Ok(());
+        }
+        // The project lock is already held (every write command takes it first).
+        self.take_holds_lock()?;
+        if holds.is_empty() {
+            // Dropping a hold checks nothing; only its publish and rollback need the lock.
+            return Ok(());
+        }
+        // A re-start that continues the caller's own live claim, which already holds every
+        // one of these needs, acquires nothing new: another session's hold, even one taken
+        // by override, never refuses it.
+        if let Some(existing) = self.claims_mut()?.get(&task.id).cloned()
+            && crate::claims::liveness(&existing) == Liveness::Live
+            && holds.iter().all(|need| existing.holds.contains(need))
+            && ownership(&existing, &me)? != Ownership::Foreign
+        {
+            return Ok(());
+        }
+        let (snapshot, warnings) =
+            crate::holds::HoldSnapshot::load(&self.registry, time::OffsetDateTime::now_utc());
+        self.warnings.extend(warnings);
+        let mine = own_holds(&snapshot, &me)?;
+        let Some((need, holder)) =
+            crate::holds::held_back(&snapshot, &self.project.needs, task, &mine)
+        else {
+            return Ok(());
+        };
+        if !force {
+            return Err(Error::NeedHeld(format!(
+                "{id} needs {need}, held by {} ({}); override with `tasks start {id} --force \
+                 --reason \"...\"`",
+                holder.task,
+                holder.session,
+                id = task.id
+            )));
+        }
+        if self
+            .need_reason
+            .as_deref()
+            .is_none_or(|reason| reason.trim().is_empty())
+        {
+            return Err(Error::Validation(format!(
+                "--force past a held need requires --reason: {} needs {need}, held by {} ({})",
+                task.id, holder.task, holder.session
+            )));
+        }
+        self.need_overrides = holds
+            .iter()
+            .filter_map(|need| {
+                snapshot
+                    .holder(need, &task.id, &mine)
+                    .map(|holder| (need.clone(), holder.clone()))
+            })
+            .collect();
+        Ok(())
+    }
+
     /// Guard only. Decides whether this session may make the change and records what `save`
     /// should do — **and persists nothing**, so a validation failure, a rejected concurrent
     /// edit, or a failed write cannot leave the store mutated.
@@ -271,7 +434,7 @@ impl Ctx {
 
         let existing = self.claims_mut()?.get(id).cloned();
         let ownership = match &existing {
-            Some(claim) => self.ownership(claim, &resolution)?,
+            Some(claim) => ownership(claim, &resolution)?,
             None => Ownership::Foreign,
         };
         let mine = ownership != Ownership::Foreign;
@@ -352,6 +515,8 @@ impl Ctx {
                     worktree,
                     started,
                     seen: now,
+                    // Filled by `guard_holds`, which knows the task's needs.
+                    holds: Vec::new(),
                 }),
             )
         } else {
@@ -368,6 +533,69 @@ impl Ctx {
             self.warnings.push(warning);
         }
         Ok(())
+    }
+}
+
+/// Spec §6.2.2 steps 2 and 3. Which of the two established the caller's right to act
+/// matters: only proof-only ownership records the claim's own identity, because only
+/// then is there no resolved identity that already agrees.
+pub(crate) fn ownership(
+    claim: &crate::claims::Claim,
+    me: &crate::claims::Resolution,
+) -> Result<Ownership> {
+    if let Some(identity) = me.identity()
+        && claim.session == identity.session
+    {
+        return Ok(Ownership::ByIdentity);
+    }
+    // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
+    // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
+    // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
+    let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
+    if explicit || !crate::relay::enabled()? {
+        return Ok(Ownership::Foreign);
+    }
+    let proved = crate::claims::proves_ownership(
+        claim,
+        &crate::relay::ancestry::current_scope(),
+        &crate::claims::hostname(),
+        crate::claims::boot_id().as_deref(),
+        &|key| {
+            std::env::var_os(key)
+                .and_then(|value| value.into_string().ok())
+                .filter(|value| !value.is_empty())
+        },
+    );
+    Ok(if proved {
+        Ownership::ByProof
+    } else {
+        Ownership::Foreign
+    })
+}
+
+/// Lanes/needs design §4.4 "Blocks other sessions only": the live holding claims in
+/// `snapshot` that are the caller's own, by the rule every claim check uses (`ownership`:
+/// the resolved identity, else the claim's process proof). A session that moved from
+/// native to relay identity therefore keeps its holds as it keeps its claims.
+pub(crate) fn own_holds(
+    snapshot: &crate::holds::HoldSnapshot,
+    me: &crate::claims::Resolution,
+) -> Result<crate::holds::Mine> {
+    snapshot.mine(|claim| Ok(ownership(claim, me)? != Ownership::Foreign))
+}
+
+/// Which holds a read view counts as the caller's own (lanes design §4.4). A read view
+/// whose identity cannot resolve owns nothing: every hold counts as another session's,
+/// even one this process could prove by pid. A resolved identity follows `own_holds`,
+/// including process proof across a native-to-relay change. Write paths call
+/// `own_holds` directly, because their continuations need proof.
+pub(crate) fn read_holds(
+    snapshot: &crate::holds::HoldSnapshot,
+    me: &crate::claims::Resolution,
+) -> Result<crate::holds::Mine> {
+    match me {
+        crate::claims::Resolution::Failed(_) => Ok(crate::holds::Mine::default()),
+        crate::claims::Resolution::Resolved(_) => own_holds(snapshot, me),
     }
 }
 
@@ -492,14 +720,14 @@ pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()>
 /// `open_registered` is the same call `show` makes, so a prefix naming no project gives
 /// `show`'s error rather than a misleading `task_not_found`.
 ///
-/// An explicit `--project` or `--all-projects` is the caller naming the scope and wins
-/// over the prefix.
+/// An explicit `--project`, `--group` or `--all-projects` is the caller naming the scope
+/// and wins over the prefix.
 pub fn open_id_read_ctx(
     dir: Option<&Path>,
     scope: &ScopeArgs,
     id: Option<&str>,
 ) -> Result<ReadCtx> {
-    if scope.project.is_some() || scope.all_projects {
+    if scope.project.is_some() || scope.all_projects || scope.group.is_some() {
         return open_read_ctx(dir, scope);
     }
     let Some(id) = id else {
@@ -550,16 +778,20 @@ pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
 }
 
 /// Read commands: the local project, one named registered project, or with
-/// `all_projects` every reachable one. Both flags skip the local lookup entirely
+/// `all_projects` every reachable one, or with `group` the reachable members of that
+/// group. All three flags skip the local lookup entirely
 /// (spec §3.2), so either works from a directory inside no project at all. A named
 /// project is a `Local` scope like any other, so every command's output is what it
 /// would be run inside that project's registered root — a worktree sharing the prefix
 /// does not displace it, matching `add --project`.
 pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
     let start = start_dir(dir)?;
-    if scope.all_projects {
+    if scope.all_projects || scope.group.is_some() {
         let registry = Registry::load()?;
-        let (scope, warnings) = Scope::open_all(&registry, &start)?;
+        let (scope, warnings) = match &scope.group {
+            Some(name) => Scope::open_group(&registry, &start, name)?,
+            None => Scope::open_all(&registry, &start)?,
+        };
         return Ok(ReadCtx {
             scope,
             registry,
@@ -639,11 +871,27 @@ pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs) -> Resul
     if fields.parallel {
         task.parallel = true;
     }
+    // Setting only. `edit --no-lane` clears it before this runs, like --no-parallel.
+    if fields.lane {
+        task.lane = true;
+    }
     // Additive, never a replacement: a triage `--tag` must not silently drop the tags a
     // task already carries. `edit` removes with `--rm-tag` / `--no-tags`.
     for tag in &fields.tags {
         if !task.tags.contains(tag) {
             task.tags.push(tag.clone());
+        }
+    }
+    // Additive like `--tag`. Only the names being added are checked: grammar, then the
+    // project's vocabulary (lanes-needs spec §4.2), so `edit --rm-need` can still clear
+    // a need the vocabulary has since dropped.
+    for need in &fields.needs {
+        crate::needs::validate_name(need)?;
+    }
+    crate::needs::require_declared(&ctx.project.needs, &fields.needs)?;
+    for need in &fields.needs {
+        if !task.needs.contains(need) {
+            task.needs.push(need.clone());
         }
     }
     // Additive like `--tag`: an edit that names one dependency must not drop the others.
@@ -759,7 +1007,7 @@ struct Occupants {
 }
 
 /// Spec §3.2 rule 1: every task that a session other than the caller holds live in `root`,
-/// or parked there. Claims are compared by `Ctx::ownership`, parks by their tagged session.
+/// or parked there. Claims are compared by `ownership`, parks by their tagged session.
 /// An unresolvable identity makes every park someone else's.
 fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
     let snapshot =
@@ -770,7 +1018,7 @@ fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
     for (task, (claim, liveness)) in snapshot.iter() {
         if *liveness == crate::claims::Liveness::Live
             && Path::new(&claim.worktree) == root
-            && ctx.ownership(claim, &me)? == Ownership::Foreign
+            && ownership(claim, &me)? == Ownership::Foreign
         {
             work.push((task.clone(), claim.session.clone()));
         }
@@ -788,7 +1036,7 @@ fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
 }
 
 /// Record-home spec §4: a write by the holder of a live claim moves the claim to this
-/// checkout and refreshes its heartbeat. Holder means `Ctx::ownership` is not `Foreign`,
+/// checkout and refreshes its heartbeat. Holder means `ownership` is not `Foreign`,
 /// by identity or by proof. It runs after the record is saved and never fails the command.
 /// `me` is the caller's identity when the command already resolved it; otherwise it is
 /// resolved here, and only when a claim exists to follow.
@@ -822,7 +1070,7 @@ pub(crate) fn follow_holder(
             &resolved
         }
     };
-    match ctx.ownership(&claim, me) {
+    match ownership(&claim, me) {
         Ok(Ownership::Foreign) => return,
         Ok(Ownership::ByIdentity | Ownership::ByProof) => {}
         Err(error) => {
@@ -876,6 +1124,88 @@ pub fn append_stamped_note(ctx: &mut Ctx, task: &mut Task, by: &str, text: &str)
         Err(diagnostic) => ctx.warnings.push(diagnostic),
     }
     Ok(())
+}
+
+/// The notes a need override owes to holders in this project, written by
+/// `note_need_holders` only once the acquiring save has landed. A note saying a task
+/// acquired a need must never outlive a refused or rolled-back acquire.
+pub(crate) struct HolderNotes {
+    owner: String,
+    /// Holder task, need, note text.
+    notes: Vec<(TaskId, String, String)>,
+}
+
+/// Lanes/needs design §4.5: the notes a need override leaves. The acquired task gets one
+/// per held need now, so they land with its own save or not at all. A holder gets a
+/// matching one only when it is in this project, the only one whose lock this command
+/// holds. Those are returned, not written: the caller passes them to `note_need_holders`
+/// after `save` succeeds. Both texts are validated here, before anything is saved.
+/// `None` when no held need was overridden.
+pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<Option<HolderNotes>> {
+    let overrides = std::mem::take(&mut ctx.need_overrides);
+    if overrides.is_empty() {
+        return Ok(None);
+    }
+    let reason = ctx
+        .need_reason
+        .clone()
+        .expect("the hold guard records an override only with a reason");
+    let session = match &ctx.pending_claim {
+        Some((_, ClaimIntent::Acquire(claim))) => claim.session.clone(),
+        _ => unreachable!("a need override is recorded only on an acquire"),
+    };
+    let owner = owner_name(&ctx.project)?;
+    let mut holders = HolderNotes {
+        owner: owner.clone(),
+        notes: Vec::new(),
+    };
+    for (need, holder) in &overrides {
+        let target_note = format!(
+            "need override: acquired while {need} held by {} ({}): {reason}",
+            holder.task, holder.session
+        );
+        crate::format::validate_note_text(&target_note)?;
+        if holder.prefix == ctx.project.prefix {
+            let holder_note = format!(
+                "need override: {} acquired {need} by {session} while this task held it: \
+                 {reason}",
+                task.id
+            );
+            crate::format::validate_note_text(&holder_note)?;
+            holders
+                .notes
+                .push((holder.task.clone(), need.clone(), holder_note));
+        }
+        append_note(task, &owner, &target_note)?;
+    }
+    Ok(Some(holders))
+}
+
+/// Writes the holder notes `record_need_overrides` returned. Call it only after the
+/// acquiring `save` returned `Ok`, still under the project lock. The acquisition has
+/// landed by then, so a holder that cannot be noted is a warning, never the command's
+/// failure.
+pub(crate) fn note_need_holders(ctx: &mut Ctx, holders: HolderNotes) {
+    for (holder, need, text) in holders.notes {
+        let written = ctx.project.read_task(&holder).and_then(|mut held| {
+            append_note(&mut held, &holders.owner, &text)?;
+            held.updated = crate::time::after(&held.updated)?;
+            validate_task(&held)?;
+            ctx.project.validate_docs(&held)?;
+            // Append-only audit note, as halt's: it skips load's stale-copy guard.
+            ctx.project.write_task(&ctx.registry, &held)
+        });
+        match written {
+            Ok(()) => {}
+            Err(Error::TaskNotFound(_)) => ctx.warnings.push(format!(
+                "{holder} holds {need} but its record is not in this checkout; no override \
+                 note was written on it"
+            )),
+            Err(error) => ctx.warnings.push(format!(
+                "the need override landed, but its note on {holder} was not written ({error})"
+            )),
+        }
+    }
 }
 
 /// Ids of dependencies that are open or unreachable.
@@ -968,6 +1298,9 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     // Guard before the dependency and descendant checks, so a session that no longer holds
     // the task is told *that* rather than something incidental.
     ctx.claim_guard(&task.id, to, force)?;
+    if to == Status::Doing {
+        ctx.guard_holds(task, force)?;
+    }
     if to == Status::Done && task.status != Status::Done && !force {
         let open = open_deps(ctx, task)?;
         if !open.is_empty() {
@@ -1056,10 +1389,25 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     validate_task(task)?;
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
+    crate::hierarchy::validate_lanes(&ctx.project, &ctx.registry, task)?;
     let clear_escalation = std::mem::take(&mut ctx.clear_escalation);
 
     match ctx.pending_claim.take() {
         Some((id, ClaimIntent::Acquire(claim))) => {
+            // Lanes/needs design §4.4: a claim whose holds differ from the one it replaces
+            // is published, and on a failed record write rolled back, only under the holds
+            // lock. A path that changed holds without taking it is a bug, refused here
+            // before anything is written.
+            let replaced = ctx
+                .claims_mut()?
+                .get(&id)
+                .map(|claim| claim.holds.clone())
+                .unwrap_or_default();
+            if claim.holds != replaced && ctx.holds_lock.is_none() {
+                return Err(Error::Io(format!(
+                    "the claim on {id} changes its holds without the holds lock"
+                )));
+            }
             let store = ctx.claims_mut()?;
             // Captured, never assumed absent: a repeated `start` by the owner and a forced
             // takeover both write over an existing claim, and a blanket removal on failure
@@ -1286,6 +1634,11 @@ pub fn run(cli: Cli) -> Result<Output> {
             closed,
             paths,
         } => projects::run(dir, &sort, reverse, closed, paths),
+        Command::Group { action } => match action {
+            GroupAction::Set { name, prefixes } => group::set(name, prefixes),
+            GroupAction::Rm { name } => group::rm(name),
+        },
+        Command::Groups => group::list(dir),
         Command::Root { id } => root::run(id, dir),
         Command::Add {
             title,
@@ -1333,12 +1686,26 @@ pub fn run(cli: Cli) -> Result<Output> {
             filter,
             limit,
             max_complexity,
+            without,
             scope,
-        } => list::ready(open_read_ctx(dir, &scope)?, filter, limit, max_complexity),
+        } => list::ready(
+            open_read_ctx(dir, &scope)?,
+            filter,
+            limit,
+            max_complexity,
+            without.without,
+        ),
         Command::Next {
             max_complexity,
+            without,
+            under,
             scope,
-        } => list::next(open_read_ctx(dir, &scope)?, max_complexity),
+        } => list::next(
+            open_read_ctx(dir, &scope)?,
+            max_complexity,
+            without.without,
+            under,
+        ),
         Command::Sample {
             limit,
             older_than,
@@ -1346,7 +1713,16 @@ pub fn run(cli: Cli) -> Result<Output> {
             scope,
         } => sample::sample(open_read_ctx(dir, &scope)?, limit, older_than, seed),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
-        Command::Prime { scope, closed } => list::prime(open_read_ctx(dir, &scope)?, closed),
+        Command::Prime {
+            scope,
+            closed,
+            without,
+        } => list::prime(open_read_ctx(dir, &scope)?, closed, without.without),
+        Command::Lanes {
+            without,
+            max_complexity,
+            scope,
+        } => lanes::run(open_read_ctx(dir, &scope)?, without, max_complexity),
         Command::Note { id, text, stamp } => {
             status::note(open_id_write_ctx(dir, &id)?, id, text, stamp)
         }
@@ -1417,10 +1793,12 @@ pub fn run(cli: Cli) -> Result<Output> {
             limit,
             project,
             all_projects: _,
+            group,
         } => {
             let scope = ScopeArgs {
-                all_projects: project.is_none(),
+                all_projects: project.is_none() && group.is_none(),
                 project,
+                group,
             };
             quiet::run(open_read_ctx(dir, &scope)?, limit)
         }
