@@ -7,6 +7,8 @@ original decision to leave the whole task text plain is recorded there.
 (tasks-142d2f): dates take a 24-bit recency scale between colors read from the terminal.
 P0/P1 bold in the priority column is now the no-theme look; with the theme's colors,
 priorities paint on a magenta scale (docs/specs/2026-09-25-priority-color-design.md, tasks-92757e).
+`show`'s layout and colors are superseded by docs/specs/2026-10-03-show-layout-design.md
+(tasks-606552).
 
 ## 1. Problem
 

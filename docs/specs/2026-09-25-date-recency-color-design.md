@@ -4,6 +4,8 @@
 §2 ("no 256-color or truecolor values") and §6 for date columns only.
 §3.1's query and §3.3's TASKS_PALETTE are extended by docs/specs/2026-09-25-priority-color-design.md
 (slot 5, optional magenta), and its warning is reworded there.
+`show`'s layout and colors are superseded by docs/specs/2026-10-03-show-layout-design.md
+(tasks-606552).
 
 ## 1. Problem
 

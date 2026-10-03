@@ -1,8 +1,8 @@
 # Reading layout for pretty `show` implementation plan
 
-**Status:** draft (2026-10-03), tasks-606552.
+**Status:** executed (2026-10-03), tasks-606552.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** `tasks show --pretty` and `tasks next --pretty` print a layout made for reading:
 ruled sections, aligned `key: value` overview rows, wrapped prose, and the same field colors
@@ -81,7 +81,7 @@ denied through clippy's `-D warnings`).
 
     All return `Span`.
 
-- [ ] **Step 1: Write `src/present.rs` with its tests**
+- [x] **Step 1: Write `src/present.rs` with its tests**
 
 ```rust
 //! The look of each task field, decided once (show layout spec §4). Views ask this module
@@ -287,14 +287,14 @@ mod tests {
 
 Add `mod present;` to `src/main.rs` after `mod palette;`.
 
-- [ ] **Step 2: Run the present tests to verify the guard fails**
+- [x] **Step 2: Run the present tests to verify the guard fails**
 
 Run: `just test-one present::`
 Expected: `fields_carry_their_roles`, `a_date_shows_the_day_and_paints_by_it` and
 `left_pads_before_painting` PASS. `field_roles_are_built_only_here` FAILS, because
 `output.rs` still builds `Style::Status(` and the other roles.
 
-- [ ] **Step 3: Route `output.rs`'s field cells through `present`**
+- [x] **Step 3: Route `output.rs`'s field cells through `present`**
 
 In `src/output.rs`:
 
@@ -443,7 +443,7 @@ fn count_column(label: &'static str, value: usize, status: Status) -> CountColum
 `present::claim` builds the same text the old `owner` match did: `" @owner [session]"`, or
 `" @owner [session stale]"`.
 
-- [ ] **Step 4: Run the guard and the fast suite**
+- [x] **Step 4: Run the guard and the fast suite**
 
 Run: `just test-one present::`
 Expected: all four PASS.
@@ -452,7 +452,7 @@ Run: `just test-fast`
 Expected: PASS with no test edits. Any failure means a table's output changed: fix the
 call site, not the test.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 just check
@@ -493,7 +493,7 @@ updates the integration tests that assert the old text.
   - `ShowFields.project_color: Option<Rgb>` (`#[serde(skip)]`)
   - `Wrap::width(&self) -> Option<usize>`
 
-- [ ] **Step 1: Write the failing style test**
+- [x] **Step 1: Write the failing style test**
 
 In `src/style.rs`'s `painter_obeys_format_mode_stream_and_roles`, after the
 `(Style::Warning, "33"),` entry of the role table, add:
@@ -521,12 +521,12 @@ And after that loop, add:
 `Rgb` is imported further down in that test module (`use crate::palette::{Palette, Rgb};`).
 Move that `use` to the top of `mod tests` if the compiler needs it earlier.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `just test-one painter_obeys_format_mode_stream_and_roles`
 Expected: compile error, `no variant named Heading`.
 
-- [ ] **Step 3: Add the role**
+- [x] **Step 3: Add the role**
 
 In `src/style.rs`, add a variant to `pub enum Style` after `Priority(u8)`:
 
@@ -552,13 +552,13 @@ pub fn heading(text: &str, project: Option<Rgb>) -> Span {
 }
 ```
 
-- [ ] **Step 4: Run it to verify it passes**
+- [x] **Step 4: Run it to verify it passes**
 
 Run: `just test-one painter_obeys_format_mode_stream_and_roles`
 Expected: PASS. (`just check` would still flag `heading` as unused here; its callers
 arrive in Step 8.)
 
-- [ ] **Step 5: Expose the wrap helpers and add the `ShowFields` color**
+- [x] **Step 5: Expose the wrap helpers and add the `ShowFields` color**
 
 In `src/output.rs`:
 - Change `fn paint_runs` to `pub(crate) fn paint_runs` and `fn wrap_lines` to
@@ -583,7 +583,7 @@ In `src/output.rs`:
 In `src/commands/show.rs`'s `describe`, add `project_color: project.color,` to the
 `ShowFields { … }` literal.
 
-- [ ] **Step 6: Write `src/show_text.rs` with failing tests**
+- [x] **Step 6: Write `src/show_text.rs` with failing tests**
 
 Create the file with the tests first and a stub `render` that returns `String::new()`:
 
@@ -974,12 +974,12 @@ The `ParkInfo` literal in `sections_follow_the_spec_order` must list every `Park
 field. Read `pub struct ParkInfo` in `src/output.rs` and match it exactly, including any
 fields after `worktree`.
 
-- [ ] **Step 7: Run the tests to verify they fail**
+- [x] **Step 7: Run the tests to verify they fail**
 
 Run: `just test-one show_text::`
 Expected: FAIL. The output is empty, so every assertion on it fails.
 
-- [ ] **Step 8: Implement the renderer**
+- [x] **Step 8: Implement the renderer**
 
 Replace the stub `render` with:
 
@@ -1411,14 +1411,14 @@ Notes on this code:
 - The `if let … && …` chain needs edition 2024, which the crate uses. If clippy rejects
   it, nest the two conditions.
 
-- [ ] **Step 9: Run the unit tests to verify they pass**
+- [x] **Step 9: Run the unit tests to verify they pass**
 
 Run: `just test-one show_text::`
 Expected: all PASS. If `the_example_renders_as_the_spec_shows` fails, diff the actual
 output against the expected text: the expected text is the spec, so change the code,
 not the expectation.
 
-- [ ] **Step 10: Switch `pretty` to the renderer and delete the old one**
+- [x] **Step 10: Switch `pretty` to the renderer and delete the old one**
 
 In `src/output.rs`'s `fn pretty`:
 
@@ -1449,7 +1449,7 @@ In `src/present.rs`'s `field_roles_are_built_only_here`, extend the file list:
 `show_text.rs` builds `Style::Chrome`, `Style::Emphasis` and `Style::Error` directly.
 Those are not field roles, so the guard allows them.
 
-- [ ] **Step 11: Update the integration tests that read the old text**
+- [x] **Step 11: Update the integration tests that read the old text**
 
 Add this helper to `tests/cli.rs` next to `strip_ansi`:
 
@@ -1494,12 +1494,12 @@ assertion to the new text the same way.
 Any other failing pretty-`show` assertion is updated by the same rule: find the field's
 new spelling in spec §3, and use `overview_value` for overview rows.
 
-- [ ] **Step 12: Run the fast suite**
+- [x] **Step 12: Run the fast suite**
 
 Run: `just test-fast`
 Expected: PASS, including `tests/attachments.rs`.
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 just check
@@ -1522,7 +1522,7 @@ terminal width.
 **Interfaces:**
 - Consumes: `show_text::render(…, width)` (Task 2), `Wrap::width` (Task 2).
 
-- [ ] **Step 1: Write the failing integration tests**
+- [x] **Step 1: Write the failing integration tests**
 
 In `tests/cli.rs`, replace `colored_show_keeps_bold_priority_without_a_warning` with:
 
@@ -1648,14 +1648,14 @@ In `colored_show_paints_fields_with_table_roles` (renamed in Task 2), change
 `\x1b[1mP0\x1b[0m` to `\x1b[1;38;2;215;95;215mP0\x1b[0m`: the theme now paints P0 bold
 magenta.
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `just test-one --test cli show`
 Expected: FAIL. `colored_show_paints_dates_and_priorities_from_the_theme` finds no
 magenta, the wrap test finds lines wider than 60, the invalid-`COLUMNS` case succeeds,
 and `columns_applies_to_pretty_output_only` sees pretty `show` succeed.
 
-- [ ] **Step 3: Wire the theme and the width**
+- [x] **Step 3: Wire the theme and the width**
 
 In `src/output.rs`, add `Output::Show(_) | Output::Next(_)` to both `needs_theme` and
 `shows_priority`:
@@ -1717,7 +1717,7 @@ In `src/main.rs`, add the two variants to the wrap-width selection:
                         | output::Output::Next(_)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `just test-one --test cli show`
 Expected: PASS.
@@ -1725,7 +1725,7 @@ Expected: PASS.
 Run: `just test-fast`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 just check
@@ -1745,7 +1745,7 @@ git commit -m "feat(show): paint show from the terminal theme and wrap it at the
   `docs/specs/2026-09-25-priority-color-design.md` (status lines)
 - Modify: `docs/plans/2026-10-03-show-layout.md` (status line)
 
-- [ ] **Step 1: README**
+- [x] **Step 1: README**
 
 In the process paragraph, replace "show and next print `Process: direct`, `Process:
 planned`, or `Process: unassessed`" with "show and next print a `process:` row reading
@@ -1762,16 +1762,16 @@ the colors `list` gives them. The task file itself is `tasks/<id>.md`, and JSON 
 carries every field.
 ```
 
-- [ ] **Step 2: Spec status lines**
+- [x] **Step 2: Spec status lines**
 
 - `docs/specs/2026-10-03-show-layout-design.md`: change `**Status:** approved (2026-10-03)`
   to `**Status:** implemented (2026-10-03); see docs/plans/2026-10-03-show-layout.md`.
 - Each of the three amended specs: append to its status paragraph the sentence
   "`show`'s layout and colors are superseded by docs/specs/2026-10-03-show-layout-design.md
   (tasks-606552)."
-- This plan: change `**Status:** draft (2026-10-03)` to `**Status:** executed (<date>)`.
+- This plan: change `**Status:** executed (2026-10-03)` to `**Status:** executed (<date>)`.
 
-- [ ] **Step 3: Verify the live binary and close**
+- [x] **Step 3: Verify the live binary and close**
 
 Check the worktree's build by explicit path, never by installing it over the host's
 `tasks` before the branch merges:

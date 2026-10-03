@@ -424,7 +424,7 @@ Ideas still need scoping. Existing document links do not establish approval.
 
 JSON task, summary, and parked rows expose `process` as a string when assessed;
 unassessed rows omit it. Pretty summary and parked rows show a process column (`-` when unassessed); show and next
-print `Process: direct`, `Process: planned`, or `Process: unassessed`. The parked
+print a `process:` row reading `direct`, `planned`, or `unassessed`. The parked
 `phase` remains a link-derived resume hint: a todo without document links can show
 `phase: implementing` alongside `process: planned`, which still requires both reviews.
 
@@ -502,6 +502,13 @@ from the terminal itself. `TASKS_THEME=default` instead uses the palette tasks s
 (`fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7`), which sends no query and is
 meant for dark backgrounds; a set `TASKS_PALETTE` still wins over it.
 `TASKS_THEME=terminal` is the default behavior, spelled out.
+
+`show` and `next` print their task in a reading layout: an `overview` section with one
+aligned `key: value` row per set field, then the park, the description, related tasks,
+attached files, and the notes, each under a ruled heading. Prose wraps at the terminal
+width (or `COLUMNS`), capped at 100 columns, and stays unwrapped when piped. Fields take
+the colors `list` gives them. The task file itself is `tasks/<id>.md`, and JSON output
+carries every field.
 
 ## Agent skill
 

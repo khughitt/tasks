@@ -1,6 +1,6 @@
 # A reading layout for pretty `show` — design
 
-**Status:** approved (2026-10-03), tasks-606552. Amends docs/specs/2026-09-03-color-output-design.md
+**Status:** implemented (2026-10-03), tasks-606552; see docs/plans/2026-10-03-show-layout.md. Amends docs/specs/2026-09-03-color-output-design.md
 §3 (`show`'s frontmatter values; the body and notes left plain),
 docs/specs/2026-09-25-date-recency-color-design.md §2.3 (`show` not painted) and
 docs/specs/2026-09-25-priority-color-design.md §2.1–§2.2 (`show` never queries).

@@ -4,6 +4,8 @@
 §6 (P0 and P1 bold) and docs/specs/2026-09-25-date-recency-color-design.md §3.1 (the
 query) and §3.3 (`TASKS_PALETTE`). §2's steps and end amended the same day after the
 kitty check (§2.4).
+`show`'s layout and colors are superseded by docs/specs/2026-10-03-show-layout-design.md
+(tasks-606552).
 
 ## 1. Problem
 
