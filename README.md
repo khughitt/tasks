@@ -151,6 +151,13 @@ they know their ids. Design:
 `ready`, `next`, and `prime` hide tasks rated above it and unassessed tasks, and say how
 many. `--max-complexity` on `ready`/`next` overrides it for one call. Design:
 `docs/specs/2026-09-12-task-complexity-design.md`.
+`TASKS_WITHOUT` (comma-separated need names) is the other half of a session's envelope:
+`ready`, `next`, and `prime` hide tasks needing any of them, in the projects that declare
+the name, and say how many.
+`--without` adds to it for one call and refuses a name no project in scope declares; the
+variable never errors, so a host in ordinary use can set `TASKS_WITHOUT=quiet` once for
+every project. Needs are declared per project in `[needs]` (see the design's §6). Design:
+`docs/specs/2026-10-03-lanes-needs-groups-design.md`.
 `park` sets a task down with its next step in the same store, who it waits on, and
 optionally why:
 
@@ -272,6 +279,10 @@ from a clone):
     tasks ready --complexity none             # ready work nobody has rated yet
     tasks ready                      # what can be worked on now (JSON)
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
+    tasks add "Capture the trace" --need quiet  # a shared resource from [needs] in tasks/.config.toml
+    tasks edit <id> --rm-need quiet  # --need adds; --rm-need/--no-needs remove
+    tasks list --need quiet          # tasks that need it (all-of, like --tag)
+    tasks ready --without quiet      # hide steps this session cannot meet; also TASKS_WITHOUT
     tasks sample --limit 3           # random open tasks for a curation pass (see skills/curate)
     tasks tree                       # the goal hierarchy
     tasks next                       # parked work waiting on you, else the first ready task

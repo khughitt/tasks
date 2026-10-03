@@ -31,6 +31,11 @@ nothing is eligible.
    hid. Do not take work from `prime`'s parked or roadmap sections or from `list --parked`,
    and close goals only when `prime`'s closeout offers them. The variable is the harness
    form; the flag is for a person at a terminal.
+   A session that cannot meet a shared resource says so: `TASKS_WITHOUT=quiet` (comma-
+   separated) in a host's ordinary session environment, or `--without <need>` on
+   `ready`/`next`/`prime`, hides tasks that need it, with one warning counting them.
+   The flag refuses a name no project in scope declares; the variable never errors.
+   A TTY session handed the idle host runs without the variable.
    The one exception: an idea `next` hands you because it is parked waiting on the agent,
    which means resume its scoping, never implement it.
    `tasks list` is the wider view: open tasks by priority, or `--sort updated` /
@@ -40,7 +45,7 @@ nothing is eligible.
    narrow (all of them). `--size`, `--complexity`, and `--process` accept `none` for an
    unset field; `--priority` does not, since every task has one. `--tag` stays all-of: a
    task must carry every tag given. `--owner`, `--source`, and `--parent` take one value,
-   and `--parallel` is a switch. `--complexity` is a selection over the effective rating,
+   and `--parallel` is a switch. `--need` is all-of, like `--tag`. `--complexity` is a selection over the effective rating,
    not the session cutoff: a session under a cutoff still picks only through `ready` and
    `next`.
    Never pick a task with children; those are goals. `ready` already omits them.
@@ -158,7 +163,7 @@ nothing is eligible.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--no-depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--tag/--depends/--no-depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer/--need/--rm-need/--no-needs`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 Notes stay append-only there: the one note change it accepts is removing trailing spaces
 and tabs, which every new note already has stripped.
@@ -168,6 +173,17 @@ and tabs, which every new note already has stripped.
 tag dictionary (`[tags]` in `tasks/.config.toml`), `tasks tags` shows each tag's meaning:
 prefer a defined tag, and add an entry when a new tag is worth keeping — `check` warns
 on open tasks carrying an undefined one.
+
+A step that uses a shared resource records it with `--need <name>` (repeatable), drawn
+from the project's `[needs]` vocabulary in `tasks/.config.toml`:
+`[needs.quiet]` with `meaning = "<one line>"` and, for a resource only one session can use
+at a time, `exclusive = true`. Name an exclusive need after the host resource it stands
+for: exclusive names are one namespace across every project on the host. Prefer a need to
+an ad hoc `needs-*` tag. `add`/`edit` refuse an undeclared name (`unknown_need`), and
+`check` errors on a record naming one; add the vocabulary entry first. `edit --need`
+appends, `--rm-need` removes, and `--no-needs` clears. Change status and needs in
+separate operations: `edit --status` refuses the needs flags, and an editor save may not
+change both.
 
 Project identity colors are assigned by an optional top-level `color = "#RRGGBB"` in
 `tasks/.config.toml`, before any table headers. Use exactly six hex digits (either case);
@@ -314,7 +330,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
   `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
   returns it to `idea`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"]`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or

@@ -80,6 +80,11 @@ reviews are needed. Set it explicitly alongside size and complexity, including o
 children. Do not derive it from those fields, parentage, or document presence.
 Missing process remains unassessed, and assigning it never makes an idea executable.
 
+When a member's work uses a shared resource the project declares in `[needs]` (an idle
+host, the owner's judgement), record it with `--need <name>` on the task you scope or
+create. Never invent a name: an undeclared one is refused. Propose the vocabulary entry in
+the handoff brief instead.
+
 Every successfully processed member receives exactly one audit note:
 
     scope: <verdict>; <what changed>[; brief: <path>][; proposal: <text>]

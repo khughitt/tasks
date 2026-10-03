@@ -118,6 +118,7 @@ Free-form markdown body.
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
 | `process`  | enum                | no       | `direct` or `planned`; absent means unassessed. Explicitly chosen, never inferred or inherited. See `2026-09-13-task-process-design.md`. |
 | `parallel` | bool                | no       | Safe to run beside other tasks marked `parallel`. Omitted when false. |
+| `needs`    | list of names       | no       | Shared resources the work uses, each declared in the project's `[needs]` vocabulary (§6); names use lowercase letters, digits, and `-`, and do not start with `-`. Set by `add --need`; `edit --need` appends, `--rm-need` and `--no-needs` remove. Omitted when empty; written after `parallel`. An undeclared name is refused on write and is a `check` error, but is carried as-is on read. See `2026-10-03-lanes-needs-groups-design.md` §4. |
 | `defer`    | `YYYY-MM-DD`        | no       | One-shot calendar date; the pickers skip the task until it arrives. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status transition. Never beside `every`. Written after `every`. See `2026-09-15-defer-design.md`. |
 | `owner`    | string              | no       | Advisory tracked-file owner; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
 | `created`  | RFC 3339 UTC        | yes      | Set once by `add`. Immutable. |
@@ -258,6 +259,7 @@ tasks unregister <prefix>
 
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel] [--defer DATE|<n>d|<n>w]
           [--process direct|planned]
+          [--need N]...
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
           [--source REF] [--parent ID] [--project PREFIX]
     Create a task. Default status todo, priority 2. --spec/--plan accept either a
@@ -267,6 +269,9 @@ tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--par
     task in that registered project instead of the current one, validating every field
     against it; no local project is needed. An unregistered prefix is config.
     --process selects a workflow explicitly; omission leaves it unassessed.
+    --need names a shared resource from the project's `[needs]` vocabulary (§6),
+    repeatable. A name that breaks the grammar is validation, and an undeclared one is
+    unknown_need.
     With --source, the add is idempotent: if the target project already holds a task
     with exactly that source and that title, in any status, its id is returned with
     action "reused" and a warning, and nothing is written — the other flags on that
@@ -282,7 +287,7 @@ tasks show <id>
     paths resolved against that project's root; an unregistered or unreachable prefix is
     unresolvable_id.
 
-tasks list [--status S]... [--tag T]... [--owner O] [--source REF]
+tasks list [--status S]... [--tag T]... [--need N]... [--owner O] [--source REF]
            [--project P | --all-projects]
            [--parent ID] [--sort priority|updated|created] [--reverse]
     Default: open tasks, sorted by priority then updated desc, then id. --source keeps
@@ -308,12 +313,20 @@ tasks tree [<id>] [--all] [--project P | --all-projects]
     a subtree of another project: <id> is still looked up in the scope, not routed by its
     own prefix.
 
-tasks ready [--size S] [--parallel] [-n N] [--project P | --all-projects]
+tasks ready [--size S] [--parallel] [--need N]... [--without N]... [-n N] [--project P | --all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
     priority, then size (xs first, unsized last), then created, then id.
     --all-projects: the same order over every reachable registered project; no project
     grouping or weighting (the final id tiebreak orders by prefix only among tasks equal
     on everything else). Omits tasks parked waiting on the user, with a warning.
+    --need is all-of, like --tag: a task must need every name given.
+    --without N (repeatable) hides tasks needing N, as does each comma-separated name
+    in TASKS_WITHOUT; the two are a union. The flag is strict: a name no project in
+    scope declares is unknown_need. The variable is lenient: any name is accepted,
+    since a host sets it once for every project. Either way a name hides a task only
+    when the task's own project declares it, so a name hides nothing in a project
+    that does not declare it, even a record still naming it. One warning,
+    "without <names>: <n> task(s) hidden", counts what was hidden.
 
 tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-projects]
     N tasks (default 3) drawn uniformly without replacement from the curable pool: status
@@ -330,6 +343,7 @@ tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-pr
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
            [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
            [--no-depends]
+           [--need N]... [--rm-need N]... [--no-needs]
            [--no-defer]
            [--source REF | --no-source]
            [--process direct|planned | --no-process]
@@ -346,6 +360,12 @@ tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
     --process replaces the workflow choice; --no-process clears it to unassessed,
     and these two flags conflict. Invalid process values are rejected before writes,
     including when supplied through the editor. Completion offers direct and planned.
+    --need appends like --tag; --rm-need removes one and is a validation error when
+    the task lacks it; --no-needs clears, and with --need replaces. Only names being
+    added must be declared, so a need since dropped from the vocabulary can still be
+    removed. --status conflicts with all three, and an editor save that changes both
+    the status and needs is refused: status and needs change in separate operations
+    (2026-10-03-lanes-needs-groups-design.md §4.4).
 
 tasks note <id> <text>
     Append a timestamped bullet under ## Notes.
@@ -398,12 +418,13 @@ tasks check
     prefix) are warnings. process_missing warns only for doing records without a
     process choice, including goals and plan steps; unassessed todos are not findings.
 
-tasks next [--project P | --all-projects]
+tasks next [--without N]... [--project P | --all-projects]
     The most recently parked task waiting on the agent that is open, unblocked,
     with all dependencies resolved and closed, and childless, else the first ready task,
-    in the show shape.
+    in the show shape. --without and TASKS_WITHOUT as for ready; next applies them to
+    parked candidates too, and prime to its ready list.
 
-tasks prime [--project P | --all-projects] [--closed]
+tasks prime [--without N]... [--project P | --all-projects] [--closed]
     Agent session context: prefix, counts by status, the ready list, doing tasks
     with owners, the roadmap (open forest) and closeout list. Intended to be run at
     the start of every agent session. Warns about uncommitted files under tasks/
@@ -413,7 +434,8 @@ tasks prime [--project P | --all-projects] [--closed]
     uncommitted-files warning is emitted per project, prefixed with its prefix.
     The pretty counts line shows the open statuses and a total; --closed adds done and
     dropped. Same columns, same colors, and same default as tasks projects: one
-    definition renders both.
+    definition renders both. --without and TASKS_WITHOUT as for ready; prime applies
+    them to its ready list.
 
 tasks tags [--status S]... [--project P | --all-projects]
     Tag frequencies over open tasks (or the given statuses), with a count per project.
@@ -576,6 +598,15 @@ projects    -> { projects: [{ prefix, root, reachable: bool, counts: Counts|null
 
 feedback    -> { id, action: "created"|"recurred", path, warnings }
                path is the absolute task file in the target project
+
+Task        += needs: [string]                omitted when empty (lanes-needs §4.2)
+TaskSummary += needs: [string]                omitted when empty
+ParkedRow   += needs: [string]                omitted when empty or unresolved
+ready/next/prime += one warning "without <names>: <n> task(s) hidden" when
+                    --without or TASKS_WITHOUT hid ready work
+check       += kind unknown_need (error): a record names a need [needs] does not declare
+error kinds += unknown_need: add/edit --need or an editor save naming an undeclared
+               need; ready/next/prime --without naming one no project in scope declares
 ```
 
 Pretty summary and parked rows include a process column, using `-` for unassessed;
@@ -627,6 +658,20 @@ Validation of an edited task (flags or editor) compares against the original:
 ```toml
 prefix = "sci"
 ```
+
+A project may declare the shared resources its tasks use:
+
+```toml
+[needs.quiet]
+meaning = "an idle host: a TTY with the desktop stopped"
+exclusive = true
+```
+
+Each `[needs.<name>]` table takes a one-line `meaning` (required) and `exclusive`
+(optional, default false); any other key, a missing meaning, or a name outside the tag
+grammar is a `config` error. The names of exclusive needs form one namespace across the
+host's projects: two projects using the same name mean the same machine resource. See
+`2026-10-03-lanes-needs-groups-design.md` §4.1.
 
 `~/.config/tasks/projects.toml` (per machine; written by `init`, hand-editable):
 
