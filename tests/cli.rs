@@ -20001,6 +20001,7 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
          printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
          CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {id}\n\
          cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" ready > \"$HOME/ready.json\"\n\
          CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {second}\n\
          CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
         shim_env(&state, "claude-code", "c1"),
@@ -20048,6 +20049,23 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
         shown["claim"]["holds"],
         serde_json::json!(["quiet"]),
         "{shown}"
+    );
+    // `ready` under relay identity applies the same rule: the second task is listed, not
+    // hidden behind this session's own hold.
+    let ready: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home.path().join("ready.json")).unwrap())
+            .unwrap();
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == second.as_str()),
+        "{ready}"
+    );
+    assert!(
+        !warnings_of(&ready).iter().any(|w| w.contains("wait for")),
+        "{ready}"
     );
 }
 
@@ -23069,4 +23087,158 @@ fn a_need_override_that_save_refuses_leaves_both_records_and_the_claim_store_unc
         assert_eq!(&env.read(&sci, &format!("tasks/{id}.md")), before, "{id}");
     }
     assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+}
+
+#[test]
+fn views_hide_work_held_back_by_another_sessions_hold_across_projects() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let holding = id_of(env.json(&sci, &["add", "Sci capture", "-p", "2", "--need", "quiet"]));
+    let sci_waiting = id_of(env.json(&sci, &["add", "Sci rerun", "-p", "2", "--need", "quiet"]));
+    let first = id_of(env.json(&fam, &["add", "Fam capture", "-p", "1", "--need", "quiet"]));
+    let second = id_of(env.json(
+        &fam,
+        &[
+            "add",
+            "Fam sweep",
+            "-p",
+            "1",
+            "--need",
+            "quiet",
+            "--need",
+            "owner",
+        ],
+    ));
+    let free = id_of(env.json(&fam, &["add", "Fam docs", "-p", "3", "--need", "owner"]));
+    let parked = id_of(env.json(&fam, &["add", "Fam resume", "-p", "0", "--need", "quiet"]));
+    // A parked-agent candidate, parked before the hold exists: `next` would take it first.
+    json_as(&env, &fam, "agent-d", &["start", &parked]);
+    json_as(
+        &env,
+        &fam,
+        "agent-d",
+        &["park", &parked, "rerun the capture"],
+    );
+    json_as(&env, &sci, "agent-a", &["start", &holding]);
+
+    let wait =
+        |count: usize| format!("{count} task(s) wait for quiet, held by {holding} (agent-a)");
+    let ids = |rows: &serde_json::Value| -> Vec<String> {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let waits = |value: &serde_json::Value| -> Vec<String> {
+        warnings_of(value)
+            .into_iter()
+            .filter(|warning| warning.contains("wait for"))
+            .collect()
+    };
+
+    let ready = json_as(&env, &fam, "agent-c", &["ready"]);
+    assert_eq!(ids(&ready["tasks"]), [free.as_str()]);
+    assert_eq!(waits(&ready), [wait(2)]);
+
+    let next = json_as(&env, &fam, "agent-c", &["next"]);
+    assert_eq!(next["next"]["task"]["id"], free.as_str(), "{next}");
+    assert_eq!(waits(&next), [wait(3)]);
+
+    let prime = json_as(&env, &fam, "agent-c", &["prime"]);
+    assert_eq!(ids(&prime["ready"]), [free.as_str()]);
+    assert_eq!(waits(&prime), [wait(2)]);
+
+    // One warning per need and holder, however many projects the held tasks are in.
+    let all = json_as(&env, &fam, "agent-c", &["ready", "--all-projects"]);
+    assert_eq!(ids(&all["tasks"]), [free.as_str()]);
+    assert!(!ids(&all["tasks"]).contains(&sci_waiting));
+    assert_eq!(waits(&all), [wait(3)]);
+
+    // The holding session is already using the resource: nothing is held back from it.
+    let own = json_as(&env, &fam, "agent-a", &["ready"]);
+    for id in [&first, &second, &free] {
+        assert!(ids(&own["tasks"]).contains(id), "{own}");
+    }
+    assert!(waits(&own).is_empty(), "{own}");
+}
+
+#[test]
+fn an_unreadable_claim_store_leaves_hold_state_unknown_without_failing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let _fam = env.init("fam");
+    hold_vocab(&sci);
+    let id = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let store = env.claim_store("fam");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "claims = [not toml").unwrap();
+
+    for command in ["ready", "next", "prime"] {
+        let out = env.json(&sci, &[command]);
+        assert!(out.to_string().contains(&id), "{command}: {out}");
+        assert!(
+            warnings_of(&out)
+                .iter()
+                .any(|w| w.starts_with("hold state unknown for fam")),
+            "{command}: {out}"
+        );
+    }
+    let started = env.json(&sci, &["start", &id]);
+    assert!(
+        warnings_of(&started)
+            .iter()
+            .any(|w| w.starts_with("hold state unknown for fam")),
+        "{started}"
+    );
+    assert_eq!(holds_of(&env, &sci, &id), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign() {
+    // Spec §4.4: when a read view cannot resolve "this session", every hold counts as
+    // another session's, even one this process could prove by pid. Claim natively with
+    // proof, enable relay, then remove the relay registry so identity cannot resolve.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let first = id_of(env.json(&dir, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&dir, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    let state = env.home.path().join("relay-state");
+    let script = format!(
+        "set -e\n{}\nwrite_registry\n\
+         CLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {first}\n\
+         mkdir -p \"$HOME/.config/tasks\"\n\
+         printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" ready > \"$HOME/ready.json\"\n",
+        shim_env(&state, "claude-code", "c1"),
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "ready must still answer when identity cannot resolve: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let ready: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home.path().join("ready.json")).unwrap())
+            .unwrap();
+    assert!(
+        !ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == second.as_str()),
+        "an unresolved view must not use process proof to treat the hold as its own: {ready}"
+    );
+    assert!(
+        warnings_of(&ready)
+            .iter()
+            .any(|w| w.contains("wait for quiet") && w.contains(first.as_str())),
+        "{ready}"
+    );
 }

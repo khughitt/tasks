@@ -154,6 +154,11 @@ impl HoldSnapshot {
             .iter()
             .find(|holder| holder.task != *task && !mine.owns(holder))
     }
+
+    /// No live hold anywhere: a view can skip resolving the caller's identity.
+    pub fn is_empty(&self) -> bool {
+        self.by_need.is_empty()
+    }
 }
 
 /// §4.4 "Blocks other sessions only": `task` is held back when its own project declares a
@@ -173,6 +178,34 @@ pub fn held_back(
                 .cloned()
                 .map(|holder| (need, holder))
         })
+}
+
+/// The views' one warning per need and holder (§4.5), however many tasks wait on it.
+#[derive(Debug, Default)]
+pub struct HeldWarnings {
+    counts: BTreeMap<(String, String, String), usize>,
+}
+
+impl HeldWarnings {
+    pub fn add(&mut self, need: &str, holder: &Holder) {
+        *self
+            .counts
+            .entry((
+                need.to_string(),
+                holder.task.to_string(),
+                holder.session.clone(),
+            ))
+            .or_default() += 1;
+    }
+
+    pub fn into_warnings(self) -> Vec<String> {
+        self.counts
+            .into_iter()
+            .map(|((need, id, session), count)| {
+                format!("{count} task(s) wait for {need}, held by {id} ({session})")
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -416,6 +449,31 @@ mod tests {
         assert!(
             error.to_string().contains("relay config unreadable"),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn held_warnings_aggregate_per_need_and_holder() {
+        let sci = Holder {
+            task: id("sci-000001"),
+            session: "a".into(),
+            prefix: "sci".into(),
+        };
+        let fam = Holder {
+            task: id("fam-000002"),
+            session: "b".into(),
+            prefix: "fam".into(),
+        };
+        let mut warnings = HeldWarnings::default();
+        warnings.add("quiet", &sci);
+        warnings.add("quiet", &sci);
+        warnings.add("gpu", &fam);
+        assert_eq!(
+            warnings.into_warnings(),
+            [
+                "1 task(s) wait for gpu, held by fam-000002 (b)",
+                "2 task(s) wait for quiet, held by sci-000001 (a)",
+            ]
         );
     }
 }

@@ -299,6 +299,48 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
     }
 }
 
+/// Lanes/needs design §4.5: drop tasks held back by another session's exclusive hold,
+/// with one warning per need and holder; order is unchanged. Whether a hold is this
+/// session's is the read views' rule, `read_holds`: with a resolved identity, as
+/// `occupants` decides a claim (the identity, or else the claim's process proof); with
+/// none, every hold counts as another session's. A scope whose projects declare no
+/// exclusive need reads no claim store and resolves no identity, so its output is exactly
+/// what it was before holds existed.
+fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) -> Result<()> {
+    let vocabularies: HashMap<String, crate::needs::Vocabulary> = ctx
+        .scope
+        .projects()
+        .iter()
+        .filter(|project| project.needs.values().any(|need| need.exclusive))
+        .map(|project| (project.prefix.clone(), project.needs.clone()))
+        .collect();
+    if vocabularies.is_empty() {
+        return Ok(());
+    }
+    let (snapshot, warnings) = crate::holds::HoldSnapshot::load(&ctx.registry, now);
+    ctx.warnings.extend(warnings);
+    if snapshot.is_empty() {
+        return Ok(());
+    }
+    let me = crate::claims::resolve_identity(&mut ctx.warnings);
+    let mine = super::read_holds(&snapshot, &me)?;
+    let mut held = crate::holds::HeldWarnings::default();
+    tasks.retain(|task| {
+        let Some(vocabulary) = vocabularies.get(&task.id.prefix) else {
+            return true;
+        };
+        match crate::holds::held_back(&snapshot, vocabulary, task, &mine) {
+            Some((need, holder)) => {
+                held.add(&need, &holder);
+                false
+            }
+            None => true,
+        }
+    });
+    ctx.warnings.extend(held.into_warnings());
+    Ok(())
+}
+
 /// Every in-scope project's vocabulary, by prefix: the names `--without` may use, and
 /// the vocabulary each task's needs are judged by (spec §4.3). It borrows the scope
 /// alone, so a caller may hold it while pushing to `ctx.warnings`.
@@ -334,6 +376,7 @@ pub fn ready(
         let _ = without.retain(&mut picked.deferred, &vocabs);
         ctx.warnings.extend(without.warning(hidden));
     }
+    retain_unheld(&mut ctx, &mut picked.tasks, now)?;
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut picked.tasks, cutoff, &claims);
         ctx.warnings
@@ -403,6 +446,8 @@ pub fn next(
         let _ = without.retain(&mut omitted, &vocabs);
         ctx.warnings.extend(without.warning(hidden));
     }
+    // On the whole pool, so parked-agent candidates pass the same gate.
+    retain_unheld(&mut ctx, &mut pool, now)?;
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut pool, cutoff, &claims);
         ctx.warnings
@@ -541,6 +586,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
         let hidden = without.retain(&mut ready, &vocabularies(&ctx.scope));
         ctx.warnings.extend(without.warning(hidden));
     }
+    retain_unheld(&mut ctx, &mut ready, now)?;
     let mut doing: Vec<Task> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())

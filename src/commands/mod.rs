@@ -542,6 +542,21 @@ pub(crate) fn own_holds(
     snapshot.mine(|claim| Ok(ownership(claim, me)? != Ownership::Foreign))
 }
 
+/// Which holds a read view counts as the caller's own (lanes design §4.4). A read view
+/// whose identity cannot resolve owns nothing: every hold counts as another session's,
+/// even one this process could prove by pid. A resolved identity follows `own_holds`,
+/// including process proof across a native-to-relay change. Write paths call
+/// `own_holds` directly, because their continuations need proof.
+pub(crate) fn read_holds(
+    snapshot: &crate::holds::HoldSnapshot,
+    me: &crate::claims::Resolution,
+) -> Result<crate::holds::Mine> {
+    match me {
+        crate::claims::Resolution::Failed(_) => Ok(crate::holds::Mine::default()),
+        crate::claims::Resolution::Resolved(_) => own_holds(snapshot, me),
+    }
+}
+
 pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
     let start = start_dir(dir)?;
     let project = Project::locate(&start)?;
