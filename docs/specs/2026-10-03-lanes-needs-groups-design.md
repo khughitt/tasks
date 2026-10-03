@@ -1,6 +1,6 @@
 # Lanes, needs, and project groups — design
 
-**Status:** draft, revised after review round 3, 2026-10-03. Task: tasks-ece1e2.
+**Status:** draft, revised after review round 4, 2026-10-03. Task: tasks-ece1e2.
 Waiting ideas: tasks-9bdd68 (focus marker), tasks-77dbc6 (project groups),
 tasks-e02860 (lanes and shared resources). Brief:
 `docs/notes/2026-09-30-work-selection-brief.md`.
@@ -252,7 +252,17 @@ them without opening another checkout.
 
 **Recorded on every acquire.** `holds` is computed whenever a claim is acquired: on
 `start`, and on `edit --status doing` or an editor save that moves to `doing`. These are
-every path that builds `ClaimIntent::Acquire`. Changing the `needs` of a task with a live claim has two cases.
+every path that builds `ClaimIntent::Acquire`. **Status and needs change in separate operations.** This follows the existing
+status/defer rule (`edit.rs`):
+
+- `edit --status` conflicts with `--need`, `--rm-need` and `--no-needs` at the CLI.
+- An editor save that changes both is refused: `a save that changes the status cannot
+  also change needs; change the status first, then the needs`.
+
+Every acquire therefore reads the needs already on the record, and its recovery
+(`start --force --reason`) acquires the same needs the refused attempt did.
+
+Changing the `needs` of a task with a live claim has two cases.
 
 **Under another session's live claim, needs changes are refused.** A flag edit, an
 editor save, or any other write that changes `needs` uses the existing claim error
@@ -334,8 +344,8 @@ block. This is documented, not engineered around.
   - `start --force --reason "<why>"` overrides. When the task is held back, `--force`
     without `--reason` is refused.
   - `edit --status doing` and editor saves that move to `doing` have no override, as
-    under halt. They refuse and name `tasks start <id> --force --reason`. The status
-    change leaves `needs` as they are, so `start` acquires the same needs and its override
+    under halt. They refuse and name `tasks start <id> --force --reason`. A status change
+    cannot also change `needs` (§4.4), so `start` acquires the same needs and its override
     resolves the refusal. Adding a need while holding the claim has its own one-step
     override (§4.4).
   - `--force` keeps its existing meaning of taking over another session's claim on the
@@ -380,9 +390,10 @@ nothing else.
    The picks across lanes form a set of steps that can run at the same time, as far as
    declared needs can tell. Earlier lanes win contested needs because lane order is the
    person's ranking.
-4. **Classify** the lane's **live descendants**: open, unshelved descendants, plus
-   recurring descendants (`every` set) whatever their status. A due recurrence keeps
-   status `done`, but `ready_tasks` offers it as a step, so it must be counted. Shelved
+4. **Classify** the lane's **live descendants**: open, unshelved descendants, plus `done`
+   descendants with `every` set. A recurrence keeps status `done` between occurrences, and
+   `ready_tasks` offers it as a step once it is due, so it must be counted. A `dropped`
+   task keeps its `every` field but is permanently ineligible, so it is not live. Shelved
    descendants are left out of the view entirely. The partition is:
 
    > descendants = the pick + unpicked steps + Σ causes
@@ -399,7 +410,7 @@ nothing else.
    | `cutoff` | above the complexity cutoff |
    | `halt` | stopped by a halt |
    | `deferred` | deferred |
-   | `periodic` | a recurrence that is not yet due |
+   | `periodic` | a `done` recurrence that is scheduled and not yet due |
    | `user` | parked waiting on a person |
    | `blocked` | status `blocked` |
    | `depends` | has an open dependency |
@@ -584,6 +595,7 @@ park and halt tests.
     recurrence as its pick.
   - With the recurrence not yet due, the lane is `waiting` with `periodic: 1`, not
     `empty`.
+  - With the recurrence dropped, the lane is `empty`.
 - Two lanes whose heads need the same exclusive resource: the earlier lane picks it, and
   the later lane picks its next step without it or is `held` with `by: "pick"`.
 
@@ -609,6 +621,12 @@ park and halt tests.
   with `--force --reason` succeeds, records the hold, and writes the note.
 - An edit or editor save that changes `needs` under another session's live claim is
   refused. A field edit that leaves `needs` alone is not.
+- Status and needs together:
+  - `edit --status doing --need quiet` is a usage error.
+  - An editor save changing both status and needs is refused with the separate-operations
+    message.
+  - In each case the record is unchanged, and `start --force --reason` then resolves a
+    `need_held` on the recorded needs.
 - A `start --force` takeover of a `quiet` task succeeds without `--reason`.
 - A project whose prefix is `holds` can start a task that needs `quiet`.
 - A claim in an unregistered leftover store does not hold.
