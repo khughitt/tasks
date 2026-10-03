@@ -258,6 +258,21 @@ tasks unregister <prefix>
     an unregistered prefix is an error, not a no-op. Project files are untouched; only
     ~/.config/tasks/projects.toml changes.
 
+tasks group set <name> <prefix>...
+    Create or replace a project group in the registry's [groups] table. A retired prefix
+    resolves to its live one, and members are stored once, in prefix order. The name uses
+    the tag grammar and may not be a live or retired prefix or one an unfinished rename
+    reserves (validation); a prefix that is not registered is a config error. Needs no
+    project; the registry is written under its lock.
+
+tasks group rm <name>
+    Delete a group and report the members it had. Its projects stay registered. An
+    undeclared name is unknown_group. Needs no project.
+
+tasks groups
+    Every group in name order, each member with whether it is reachable (the test
+    `projects` applies). Needs no project.
+
 tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel] [--lane] [--defer DATE|<n>d|<n>w]
           [--process direct|planned]
           [--need N]...
@@ -618,8 +633,11 @@ feedback    -> { id, action: "created"|"recurred", path, warnings }
                path is the absolute task file in the target project
 
 Task        += needs: [string]                omitted when empty (lanes-needs §4.2)
-TaskSummary += needs: [string]                omitted when empty
-ParkedRow   += needs: [string]                omitted when empty or unresolved
+TaskSummary += needs: [string]                omitted when empty; the task's need list, not
+                                              park.needs (ParkInfo's quiet-park recipe, a
+                                              string "idle"|"headless", quiet-queue §4)
+ParkedRow   += needs: [string]                omitted when empty or unresolved; the task's
+                                              need list, distinct from the row's park.needs
 ready/next/prime += one warning "without <names>: <n> task(s) hidden" when
                     --without or TASKS_WITHOUT hid ready work
 check       += kind unknown_need (error): a record names a need [needs] does not declare
@@ -786,6 +804,14 @@ a project that cannot be read is a failure, not an entry to skip.
 is skipped; a malformed config or a prefix that disagrees with the registry key is a
 config error.
 
+`projects` applies the same test but reports an unreachable entry as a row with
+reachable=false rather than a warning, since the row is the report; a malformed entry is
+still a config error and emits the two wide-scope warnings (empty registry; current
+directory inside an unregistered project). `root` resolves one prefix strictly:
+unregistered or without a config is unresolvable_id, mismatched is config. On success it
+emits the unregistered-current-project warning; an empty registry cannot produce a
+successful root lookup. See docs/specs/2026-09-04-multi-project-design.md.
+
 `--group <name>` reads the members of a project group declared in the registry's
 `[groups]` table:
 
@@ -799,13 +825,6 @@ config error.
   `config` error that names the group and the prefix.
 
 See docs/specs/2026-10-03-lanes-needs-groups-design.md §6.
-`projects` applies the same test but reports an unreachable entry as a row with
-reachable=false rather than a warning, since the row is the report; a malformed entry is
-still a config error and emits the two wide-scope warnings (empty registry; current
-directory inside an unregistered project). `root` resolves one prefix strictly:
-unregistered or without a config is unresolvable_id, mismatched is config. On success it
-emits the unregistered-current-project warning; an empty registry cannot produce a
-successful root lookup. See docs/specs/2026-09-04-multi-project-design.md.
 
 Shell completion is activated by `TASKS_COMPLETE=<shell> tasks`, which prints a stub for a
 shell rc to source; the stub calls the binary back on each TAB. Candidates for an id
