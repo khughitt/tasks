@@ -542,7 +542,7 @@ fn next_is_the_head_of_ready_in_show_shape() {
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("title: Top") && text.contains("# depends on"),
+        text.contains("Top (") && text.contains("── related") && text.contains("depends on"),
         "{text}"
     );
 }
@@ -1155,7 +1155,7 @@ fn park_appears_in_show_and_list_json_and_pretty_show() {
         "user"
     );
     let text = env.pretty(&sci, &["show", &id]);
-    assert!(text.contains("# parked"), "{text}");
+    assert!(text.contains("── parked"), "{text}");
     assert!(text.contains("waiting on user"), "{text}");
     assert!(text.contains("finish §3"), "{text}");
 }
@@ -2590,7 +2590,7 @@ fn add_resolves_spec_plan_and_step() {
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(
-        text.contains("\n\x1b[31m# step MISSING\x1b[0m\n"),
+        text.contains("\x1b[31mMISSING\x1b[0m"),
         "no painted step marker: {text:?}"
     );
 }
@@ -2872,11 +2872,11 @@ fn show_resolves_local_and_foreign_dependencies() {
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(
-        text.contains(&format!("\x1b[2m{aid}\x1b[0m [todo] Local dep")),
+        text.contains(&format!("\x1b[2m{aid}\x1b[0m  todo     Local dep")),
         "{text:?}"
     );
     assert!(
-        text.contains(&format!("\x1b[2m{fid}\x1b[0m [todo] Foreign dep")),
+        text.contains(&format!("\x1b[2m{fid}\x1b[0m  todo     Foreign dep")),
         "{text:?}"
     );
 
@@ -4733,7 +4733,10 @@ fn show_pretty_prints_the_model_line() {
         .assert()
         .success();
     let text = String::from_utf8_lossy(&out.get_output().stdout);
-    assert!(text.contains("model: claude-fable-5-1\n"), "{text}");
+    assert_eq!(
+        overview_value(&text, "model").as_deref(),
+        Some("claude-fable-5-1")
+    );
 }
 
 #[test]
@@ -6124,23 +6127,23 @@ fn show_reports_parent_and_children_and_list_filters_by_parent() {
     };
     let text = colored(&goal);
     assert!(
-        text.contains(&format!("\x1b[2m{one}\x1b[0m [todo] One")),
+        text.contains(&format!("\x1b[2m{one}\x1b[0m  todo     One")),
         "{text:?}"
     );
     assert!(
-        text.contains(&format!("\x1b[2m{two}\x1b[0m [todo] Two")),
+        text.contains(&format!("\x1b[2m{two}\x1b[0m  todo     Two")),
         "{text:?}"
     );
 
     env.json(&dir, &["block", &two, "waiting"]);
     let text = colored(&goal);
     assert!(
-        text.contains(&format!("\x1b[2m{two}\x1b[0m [\x1b[31mblocked\x1b[0m] Two")),
+        text.contains(&format!("\x1b[2m{two}\x1b[0m  \x1b[31mblocked\x1b[0m  Two")),
         "footer statuses use the same role as tables: {text:?}"
     );
     let text = colored(&one);
     assert!(
-        text.contains(&format!("\x1b[2m{goal}\x1b[0m [todo] Goal")),
+        text.contains(&format!("\x1b[2m{goal}\x1b[0m  todo     Goal")),
         "{text:?}"
     );
 }
@@ -7358,6 +7361,15 @@ fn tasks_color_is_always_validated_and_warnings_use_the_stderr_painter() {
     assert!(String::from_utf8_lossy(&warned.stderr).starts_with("\x1b[33mwarning:\x1b[0m "));
 }
 
+/// A pretty show overview row's value, independent of key column width.
+fn overview_value(text: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}:");
+    text.lines().find_map(|line| {
+        line.strip_prefix(&prefix)
+            .map(|rest| rest.trim().to_string())
+    })
+}
+
 fn strip_ansi(text: &str) -> String {
     let mut plain = String::new();
     let mut rest = text;
@@ -7638,7 +7650,7 @@ fn colored_show_keeps_bold_priority_without_a_warning() {
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("priority: \x1b[1m1\x1b[0m\n"), "{text:?}");
+    assert!(text.contains("\x1b[1mP1\x1b[0m"), "{text:?}");
     assert!(String::from_utf8(out.stderr).unwrap().is_empty());
 }
 
@@ -7741,7 +7753,7 @@ fn a_malformed_magenta_is_a_config_error_whenever_set() {
 }
 
 #[test]
-fn colored_show_paints_frontmatter_values_with_table_roles() {
+fn colored_show_paints_fields_with_table_roles() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let dep = id_of(env.json(&dir, &["add", "Dep"]));
@@ -7769,7 +7781,6 @@ fn colored_show_paints_frontmatter_values_with_table_roles() {
     env.json(&dir, &["note", &id, "doing the work"]);
     let task = env.json(&dir, &["show", &id]);
     let owner = task["task"]["owner"].as_str().unwrap().to_string();
-    let created = task["task"]["created"].as_str().unwrap().to_string();
 
     let show = |args: &[&str]| {
         let out = env.cmd(&dir).args(args).output().unwrap();
@@ -7792,41 +7803,16 @@ fn colored_show_paints_frontmatter_values_with_table_roles() {
 
     // painted values take the roles the list table gives the same fields
     for span in [
-        format!("id: \x1b[2m{id}\x1b[0m\n"),
-        "status: \x1b[33mdoing\x1b[0m\n".to_string(),
-        "priority: \x1b[1m0\x1b[0m\n".to_string(),
-        format!("owner: \x1b[2m{owner}\x1b[0m\n"),
-        format!("parent: \x1b[2m{parent}\x1b[0m\n"),
-        format!("depends: \x1b[2m[{dep}]\x1b[0m\n"),
-        "tags: \x1b[2m[now]\x1b[0m\n".to_string(),
+        format!("\x1b[2m({id})\x1b[0m"),
+        "\x1b[33mdoing\x1b[0m".to_string(),
+        "\x1b[1mP0\x1b[0m".to_string(),
+        format!("\x1b[2m{owner}\x1b[0m"),
+        format!("\x1b[2m{parent}\x1b[0m"),
+        format!("\x1b[2m{dep}\x1b[0m"),
+        "\x1b[2mnow\x1b[0m".to_string(),
     ] {
         assert!(colored.contains(&span), "missing {span:?}: {colored:?}");
     }
-
-    // the rest of the file text stays plain
-    for span in [
-        "title: Painted\n".to_string(),
-        "size: m\n".to_string(),
-        format!("created: {created}\n"),
-    ] {
-        assert!(
-            colored.contains(&span),
-            "{span:?} must stay plain: {colored:?}"
-        );
-    }
-    let (_, after) = colored.split_once("\n---\n").unwrap();
-    let body = after.split("\n# ").next().unwrap();
-    assert!(
-        !body.contains("\x1b["),
-        "body and notes stay plain: {body:?}"
-    );
-
-    // emphasis is for P0/P1 only, exactly as in the table
-    let ordinary = show(&["--pretty", "--color", "always", "show", &dep]);
-    assert!(
-        ordinary.contains("priority: 2\n"),
-        "an ordinary priority stays plain: {ordinary:?}"
-    );
 }
 
 #[test]
@@ -12374,7 +12360,7 @@ fn source_is_set_by_add_replaced_and_cleared_by_edit() {
     );
     let pretty = env.pretty(&dir, &["show", &id]);
     assert!(
-        pretty.contains("source: \"mail:<42@example.org>\""),
+        overview_value(&pretty, "source").as_deref() == Some("mail:<42@example.org>"),
         "{pretty}"
     );
 
@@ -16518,8 +16504,10 @@ fn a_due_row_shows_its_cadence_and_due_date() {
     assert!(text.is_ascii(), "pretty output is ASCII only: {text}");
 
     let shown = env.pretty(&sci, &["show", &due]);
-    assert!(shown.contains("every: 30d"), "{shown}");
-    assert!(shown.contains("due: now"), "{shown}");
+    assert_eq!(
+        overview_value(&shown, "every").as_deref(),
+        Some("30d, due now")
+    );
 
     // An anchored, not-yet-due recurrence is not in ready at all, and its show page
     // carries a real date.
@@ -16527,8 +16515,11 @@ fn a_due_row_shows_its_cadence_and_due_date() {
     env.json(&sci, &["start", &anchored]);
     env.json(&sci, &["done", &anchored]);
     let shown = env.pretty(&sci, &["show", &anchored]);
-    assert!(shown.contains("every: 2w"), "{shown}");
-    assert!(shown.contains("due: 2"), "{shown}");
+    assert!(
+        overview_value(&shown, "every")
+            .unwrap()
+            .starts_with("2w, due 2")
+    );
     assert!(
         !env.pretty(&sci, &["ready"]).contains(&anchored),
         "not due yet"
@@ -17275,7 +17266,7 @@ fn capability_park_validates_the_level_and_records_the_escalation() {
     let v = env.json(&sci, &["list"]);
     assert_eq!(v["tasks"][0]["escalation"]["level"], "high");
     let pretty = env.pretty(&sci, &["show", &id]);
-    assert!(pretty.contains("# escalation"), "{pretty}");
+    assert!(pretty.contains("── escalation"), "{pretty}");
     assert!(pretty.contains("agent, capability"), "{pretty}");
     let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
     assert!(store.contains("[escalations."), "{store}");
@@ -18171,7 +18162,10 @@ fn process_survives_ready_and_parked_next() {
         "planned"
     );
     assert!(env.pretty(&dir, &["ready"]).contains("planned"));
-    assert!(env.pretty(&dir, &["next"]).contains("Process: planned"));
+    assert_eq!(
+        overview_value(&env.pretty(&dir, &["next"]), "process").as_deref(),
+        Some("planned")
+    );
     env.json(&dir, &["park", &id, "resume here"]);
     let parked = env.json(&dir, &["list", "--parked"]);
     assert_eq!(parked["tasks"][0]["process"], "planned");
@@ -18182,9 +18176,9 @@ fn process_survives_ready_and_parked_next() {
     );
     assert!(env.pretty(&dir, &["list", "--parked"]).contains("planned"));
     env.json(&dir, &["edit", &id, "--no-process"]);
-    assert!(
-        env.pretty(&dir, &["show", &id])
-            .contains("Process: unassessed")
+    assert_eq!(
+        overview_value(&env.pretty(&dir, &["show", &id]), "process").as_deref(),
+        Some("unassessed")
     );
     assert!(
         env.json(&dir, &["list", "--parked"])["tasks"][0]
@@ -18573,7 +18567,10 @@ fn summary_rows_and_parked_rows_carry_agent() {
         .assert()
         .success();
     let text = String::from_utf8_lossy(&out.get_output().stdout);
-    assert!(text.contains("agent: codex/gpt-6\n"), "{text}");
+    assert_eq!(
+        overview_value(&text, "agent").as_deref(),
+        Some("codex/gpt-6")
+    );
     let out = env.cmd(&sci).args(["--pretty", "list"]).assert().success();
     let text = String::from_utf8_lossy(&out.get_output().stdout);
     assert!(
@@ -18971,7 +18968,7 @@ fn prime_carries_the_deferred_line_and_aggregate() {
 
     let show = env.pretty(&sci, &["show", &idea]);
     assert!(
-        show.contains("# deferred\nuntil: 2026-01-01 (due)\n"),
+        overview_value(&show, "deferred").as_deref() == Some("until 2026-01-01 (due)"),
         "{show}"
     );
 }

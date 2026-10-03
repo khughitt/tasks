@@ -157,6 +157,7 @@ pub fn describe(
         })
         .collect();
     Ok(ShowFields {
+        project_color: project.color,
         spec_path,
         plan_path,
         step_found,

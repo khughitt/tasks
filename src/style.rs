@@ -65,6 +65,8 @@ pub enum Style {
     /// A priority, painted on the magenta scale when the painter has one
     /// (docs/specs/2026-09-25-priority-color-design.md), else bold at P0 and P1.
     Priority(u8),
+    /// A section or title, bold and optionally in its project color.
+    Heading(Option<Rgb>),
 }
 
 /// Which day a date cell shows. `Today` is the due column's `now`, which names no date.
@@ -207,6 +209,8 @@ impl Painter {
                 None if priority <= 1 => "1".into(),
                 None => return text.into(),
             },
+            Style::Heading(None) => "1".into(),
+            Style::Heading(Some(color)) => format!("1;38;2;{};{};{}", color.r, color.g, color.b),
             Style::Status(Status::Idea) => "34".into(),
             Style::Status(Status::Todo) => return text.into(),
             Style::Status(Status::Doing) => "33".into(),
@@ -291,11 +295,16 @@ mod tests {
             (Style::Error, "31"),
             (Style::Ok, "32"),
             (Style::Warning, "33"),
+            (Style::Heading(None), "1"),
         ] {
             let painted = colored.paint(style, "x");
             assert_eq!(painted, format!("\x1b[{code}mx\x1b[0m"));
             assert!(painted.ends_with("\x1b[0m"));
         }
+        assert_eq!(
+            colored.paint(Style::Heading(Some(Rgb { r: 1, g: 2, b: 3 })), "x"),
+            "\x1b[1;38;2;1;2;3mx\x1b[0m"
+        );
         assert_eq!(colored.paint(Style::Status(Status::Todo), "todo"), "todo");
     }
 

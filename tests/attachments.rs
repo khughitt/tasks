@@ -726,7 +726,7 @@ fn show_and_next_list_files_with_absolute_paths() {
         "a.png"
     );
     let pretty = env.pretty(&dir, &["show", &id]);
-    assert!(pretty.contains("# files"), "{pretty}");
+    assert!(pretty.contains("── files"), "{pretty}");
     assert!(
         pretty.contains(&format!("{} (2 B)", stored(&dir, &id, "b.png").display())),
         "{pretty}"

@@ -30,6 +30,7 @@ mod repo;
 mod resolve;
 mod scope;
 mod shorthand;
+mod show_text;
 mod similarity;
 mod stale;
 mod style;

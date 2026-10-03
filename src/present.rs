@@ -58,6 +58,11 @@ pub fn title(title: &str, project: Option<Rgb>) -> Span {
     }
 }
 
+/// Text shown as a heading: bold, in the project's color when it has one.
+pub fn heading(text: &str, project: Option<Rgb>) -> Span {
+    Span::styled(text, Style::Heading(project))
+}
+
 /// A project prefix: its color when assigned, else dim.
 pub fn project(prefix: &str, color: Option<Rgb>) -> Span {
     Span::styled(prefix, color.map(Style::Project).unwrap_or(Style::Chrome))
@@ -184,7 +189,10 @@ mod tests {
     /// of them. Test code is exempt.
     #[test]
     fn field_roles_are_built_only_here() {
-        for (file, text) in [("output.rs", include_str!("output.rs"))] {
+        for (file, text) in [
+            ("output.rs", include_str!("output.rs")),
+            ("show_text.rs", include_str!("show_text.rs")),
+        ] {
             let code = text.split("#[cfg(test)]").next().unwrap();
             for role in [
                 "Style::Status(",

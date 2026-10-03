@@ -168,6 +168,9 @@ pub struct Related {
 #[derive(Serialize)]
 pub struct ShowFields {
     pub task: Task,
+    /// Pretty-only title color, from the record's project.
+    #[serde(skip)]
+    pub project_color: Option<crate::palette::Rgb>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1021,12 +1024,12 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             }
             grid_text(&grid, painter)
         }
-        Output::Show(o) => show_text(&o.fields, painter),
+        Output::Show(o) => crate::show_text::render(&o.fields, painter, wrap.width()),
         Output::Next(o) => format!(
             "{}{}",
             halt_line(&o.halts),
             match &o.next {
-                Some(fields) => show_text(fields, painter),
+                Some(fields) => crate::show_text::render(fields, painter, wrap.width()),
                 None => "nothing ready".into(),
             }
         ),
@@ -1288,145 +1291,6 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
     }
 }
 
-/// The `serialize_task` text for `task`, with its frontmatter values painted in the roles
-/// the `list` table gives the same fields. Keys, the `---` delimiters, the body, and the
-/// notes are returned verbatim: that is prose and file text, and it stays copy-pasteable.
-///
-/// Painting the writer's output rather than teaching `serialize_task` about a painter keeps
-/// escape sequences unreachable from the code that writes task files to disk, and leaves one
-/// serializer to maintain: a field added later is simply unpainted until it is named below.
-fn paint_frontmatter(text: &str, task: &Task, painter: &Painter) -> String {
-    // Same split as `format::parse_task`: no frontmatter line is ever exactly `---`, so the
-    // first `\n---\n` is the closing delimiter.
-    let Some((fields, rest)) = text
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---\n"))
-    else {
-        return text.into();
-    };
-    let mut rendered = String::from("---\n");
-    for line in fields.lines() {
-        rendered.push_str(&paint_field(line, task, painter));
-        rendered.push('\n');
-    }
-    rendered.push_str("---\n");
-    rendered.push_str(rest);
-    rendered
-}
-
-/// One `key: value` frontmatter line. The value is painted, never the key, and a key with
-/// no role in the table is left alone.
-fn paint_field(line: &str, task: &Task, painter: &Painter) -> String {
-    let Some((key, value)) = line.split_once(": ") else {
-        return line.into();
-    };
-    let style = match key {
-        // an id is chrome wherever it appears, including `show`'s own footers below
-        "id" | "parent" | "depends" => Style::Chrome,
-        "owner" | "tags" => Style::Chrome,
-        "status" => present::status(task.status)
-            .style
-            .expect("a status has a role"),
-        "priority" => present::priority(task.priority)
-            .style
-            .expect("a priority has a role"),
-        _ => return line.into(),
-    };
-    format!("{key}: {}", painter.paint(style, value))
-}
-
-fn show_text(o: &ShowFields, painter: &Painter) -> String {
-    let mut rendered = paint_frontmatter(&crate::format::serialize_task(&o.task), &o.task, painter);
-    rendered.push_str(&format!(
-        "\nProcess: {}\n",
-        o.task.process.map(Process::as_str).unwrap_or("unassessed")
-    ));
-    if let Some(periodic) = &o.periodic {
-        let due = match (&periodic.due, periodic.due_now) {
-            (Some(due), _) => Some(crate::time::day(due)),
-            (None, true) => Some("now"),
-            (None, false) => None,
-        };
-        if let Some(due) = due {
-            rendered.push_str(&format!("\n# periodic\ndue: {due}\n"));
-        }
-    }
-    if let Some(deferred) = &o.deferred {
-        let state = if deferred.due { " (due)" } else { "" };
-        rendered.push_str(&format!("\n# deferred\nuntil: {}{state}\n", deferred.until));
-    }
-    let related_row = |id: &str, status: Option<Status>, title: &str| {
-        let status = match status {
-            Some(status) => present::status(status).paint(painter),
-            None => "?".into(),
-        };
-        format!(
-            "- {} [{status}] {title}\n",
-            painter.paint(Style::Chrome, id)
-        )
-    };
-    if !o.depends_on.is_empty() {
-        rendered.push_str("\n# depends on\n");
-        for dependency in &o.depends_on {
-            let title = dependency.title.as_deref().unwrap_or("(unresolved)");
-            rendered.push_str(&related_row(&dependency.id, dependency.status, title));
-        }
-    }
-    if let Some(found) = o.step_found {
-        rendered.push_str(&if found {
-            "\n# step found\n".to_string()
-        } else {
-            format!("\n{}\n", painter.paint(Style::Error, "# step MISSING"))
-        });
-    }
-    if let Some(parent) = &o.parent {
-        rendered.push_str("\n# parent\n");
-        rendered.push_str(&related_row(&parent.id, Some(parent.status), &parent.title));
-    }
-    if !o.children.is_empty() {
-        rendered.push_str("\n# children\n");
-        for child in &o.children {
-            rendered.push_str(&related_row(&child.id, Some(child.status), &child.title));
-        }
-    }
-    if !o.files.is_empty() {
-        rendered.push_str("\n# files\n");
-        for file in &o.files {
-            rendered.push_str(&format!(
-                "- {} ({})\n",
-                file.path,
-                crate::attachments::human_size(file.bytes)
-            ));
-        }
-    }
-    if let Some(park) = &o.park {
-        rendered.push_str("\n# parked\n");
-        rendered.push_str(&format!(
-            "- waiting on {} since {}: {}\n",
-            crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes),
-            crate::time::day(&park.at),
-            park.next_step
-        ));
-        rendered.push_str(&painter.paint(
-            Style::Chrome,
-            &format!("  session {} in {}", park.session, park.worktree),
-        ));
-        rendered.push('\n');
-    }
-    if let Some(escalation) = &o.escalation {
-        rendered.push_str("\n# escalation\n");
-        rendered.push_str(&format!(
-            "- needs at least {} since {}\n",
-            escalation.level.as_str(),
-            crate::time::day(&escalation.at)
-        ));
-        rendered
-            .push_str(&painter.paint(Style::Chrome, &format!("  session {}", escalation.session)));
-        rendered.push('\n');
-    }
-    rendered
-}
-
 fn tree_text(
     nodes: &[TreeNode],
     depth: usize,
@@ -1685,6 +1549,11 @@ pub struct Wrap {
 }
 
 impl Wrap {
+    /// The width rows wrap at; None keeps every row on one line.
+    pub fn width(&self) -> Option<usize> {
+        self.width
+    }
+
     /// Every row on one line, whatever its length.
     pub const NONE: Wrap = Wrap {
         width: None,
@@ -1752,7 +1621,7 @@ fn render_row(
 /// Paint runs of one style each. Adjacent pieces sharing a style merge into one run; the
 /// visible text is unchanged, so `ColorMode::Never` output matches painting each piece
 /// whole.
-fn paint_runs(chars: &[(char, Option<Style>)], painter: &Painter) -> String {
+pub(crate) fn paint_runs(chars: &[(char, Option<Style>)], painter: &Painter) -> String {
     let mut rendered = String::new();
     let mut index = 0;
     while index < chars.len() {
@@ -1775,7 +1644,7 @@ fn paint_runs(chars: &[(char, Option<Style>)], painter: &Painter) -> String {
 /// Greedy word wrap over already-styled characters: a break lands on a space run, which is
 /// dropped there, and a word longer than `available` is hard-split at the width. A word
 /// keeps its style across the split.
-fn wrap_lines(
+pub(crate) fn wrap_lines(
     chars: &[(char, Option<Style>)],
     available: usize,
 ) -> Vec<Vec<(char, Option<Style>)>> {
