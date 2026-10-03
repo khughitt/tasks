@@ -22366,3 +22366,126 @@ fn needs_without_hides_only_where_the_owning_project_declares_the_name() {
         assert!(ready.contains(&stale.as_str()), "{source}: {prime}");
     }
 }
+
+// ---- Exclusive holds (lanes/needs design §4.4–§4.5) ----
+
+/// The vocabulary every holds test uses: `quiet` is exclusive, `owner` is not.
+fn hold_vocab(dir: &std::path::Path) {
+    let path = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(
+        "\n[needs.quiet]\nmeaning = \"an idle host\"\nexclusive = true\n\
+         \n[needs.owner]\nmeaning = \"the owner judges an image\"\n",
+    );
+    std::fs::write(&path, text).unwrap();
+}
+
+/// `tasks <args>` run as `session` (with the runner's live pid), parsed; it must succeed.
+fn json_as(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    session: &str,
+    args: &[&str],
+) -> serde_json::Value {
+    let out = as_agent(env, dir, session).args(args).output().unwrap();
+    assert!(
+        out.status.success(),
+        "tasks {args:?} as {session} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+/// The `{"error": …}` of `tasks <args>` run as `session`; it must exit 1.
+#[expect(
+    dead_code,
+    reason = "used by the later exclusive-holds tests (slice 2)"
+)]
+fn error_as(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    session: &str,
+    args: &[&str],
+) -> serde_json::Value {
+    let out = as_agent(env, dir, session).args(args).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "tasks {args:?} as {session}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stderr).unwrap()
+}
+
+/// The `holds` of the claim `show` reports on `id`: null when there is no claim or it
+/// holds nothing (the key is sparse).
+fn holds_of(env: &TestEnv, dir: &std::path::Path, id: &str) -> serde_json::Value {
+    env.json(dir, &["show", id])["claim"]["holds"].clone()
+}
+
+/// A claim written straight into `prefix`'s store, holding `holds`.
+#[expect(
+    dead_code,
+    reason = "used by the later exclusive-holds tests (slice 2)"
+)]
+fn write_hold(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool, holds: &[&str]) {
+    write_claim(env, prefix, id, session, live);
+    let path = env.claim_store(prefix);
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    let list = holds
+        .iter()
+        .map(|need| format!("{need:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // `write_claim` ends inside the claim's table, so this key lands in that entry.
+    text.push_str(&format!("holds = [{list}]\n"));
+    std::fs::write(&path, text).unwrap();
+}
+
+#[test]
+fn every_acquire_path_records_the_tasks_exclusive_needs_as_holds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let started = id_of(env.json(
+        &sci,
+        &[
+            "add", "Capture", "-p", "2", "--need", "quiet", "--need", "owner",
+        ],
+    ));
+    let flagged = id_of(env.json(&sci, &["add", "Flagged", "-p", "2", "--need", "quiet"]));
+    let edited = id_of(env.json(&sci, &["add", "Edited", "-p", "2", "--need", "quiet"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2", "--need", "owner"]));
+
+    json_as(&env, &sci, "agent-a", &["start", &started]);
+    json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &flagged, "--status", "doing"],
+    );
+    let editor = editor_script(&sci, "sed -i 's/status: todo/status: doing/' \"$1\"");
+    let out = as_agent(&env, &sci, "agent-a")
+        .env("EDITOR", editor)
+        .args(["edit", &edited])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    json_as(&env, &sci, "agent-a", &["start", &plain]);
+
+    for id in [&started, &flagged, &edited] {
+        assert_eq!(
+            holds_of(&env, &sci, id),
+            serde_json::json!(["quiet"]),
+            "{id}"
+        );
+    }
+    // A non-exclusive need is no hold, and an empty `holds` is absent everywhere.
+    assert!(holds_of(&env, &sci, &plain).is_null());
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    assert_eq!(store.matches("holds = [\"quiet\"]").count(), 3, "{store}");
+}

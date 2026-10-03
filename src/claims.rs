@@ -146,6 +146,11 @@ pub struct Claim {
     pub worktree: String,
     pub started: String,
     pub seen: String,
+    /// The exclusive needs this claim holds: the task's needs that its own project declares
+    /// exclusive, computed on every acquire (lanes/needs design §4.4). Absent in entries
+    /// written before holds existed, which therefore hold nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holds: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -958,6 +963,7 @@ mod tests {
             worktree: "/tmp/wt".into(),
             started: "2026-09-05T08:00:00Z".into(),
             seen: "2026-09-05T08:00:00Z".into(),
+            holds: Vec::new(),
         }
     }
 
@@ -989,6 +995,7 @@ mod tests {
             worktree: "/w".into(),
             started: "2026-09-22T00:00:00Z".into(),
             seen: "2026-09-22T00:00:00Z".into(),
+            holds: Vec::new(),
         }
     }
 
@@ -1773,6 +1780,7 @@ mod tests {
             worktree: "/w".into(),
             started: "2026-09-09T20:00:00Z".into(),
             seen: "2026-09-09T20:00:00Z".into(),
+            holds: Vec::new(),
         }
     }
 
@@ -2142,6 +2150,7 @@ mod tests {
                 worktree: "/w".into(),
                 started: "2026-09-09T22:00:00Z".into(),
                 seen: "2026-09-09T22:00:00Z".into(),
+                holds: Vec::new(),
             },
         );
         assert_eq!(store.parks().count(), 0, "one entry per task");
@@ -2185,5 +2194,41 @@ mod tests {
                 .is_none()
         );
         assert!(snapshot.live(&parked).is_none());
+    }
+
+    #[test]
+    fn a_claim_written_before_holds_loads_holding_nothing_and_saves_without_the_key() {
+        let (dir, store) = store_from(A_CLAIM);
+        let id = TaskId::parse("sci-000001").unwrap();
+        assert!(store.get(&id).unwrap().holds.is_empty());
+        store.save().unwrap();
+        let text = std::fs::read_to_string(dir.path().join("sci.toml")).unwrap();
+        assert!(!text.contains("holds"), "{text}");
+    }
+
+    #[test]
+    fn holds_round_trip_on_a_claim_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sci.toml");
+        let id = TaskId::parse("sci-000001").unwrap();
+        let mut store = ClaimStore::load_from(&path).unwrap();
+        store.insert(
+            &id,
+            Claim {
+                holds: vec!["quiet".into()],
+                ..sample_claim()
+            },
+        );
+        store.save().unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("holds = [\"quiet\"]"), "{text}");
+        assert_eq!(
+            ClaimStore::load_from(&path)
+                .unwrap()
+                .get(&id)
+                .unwrap()
+                .holds,
+            ["quiet"]
+        );
     }
 }

@@ -256,6 +256,18 @@ impl Ctx {
         Ok(())
     }
 
+    /// Lanes/needs design §4.4: every acquire records the task's needs that this project
+    /// declares exclusive (undeclared names ignored) as the claim's `holds`. Status and
+    /// needs never change in one operation, so this always reads the needs on the record.
+    fn guard_holds(&mut self, task: &Task) -> Result<()> {
+        let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
+        match self.pending_claim.as_mut() {
+            Some((_, ClaimIntent::Acquire(claim))) => claim.holds = holds,
+            _ => unreachable!("claim_guard records an acquire for every move to doing"),
+        }
+        Ok(())
+    }
+
     /// Guard only. Decides whether this session may make the change and records what `save`
     /// should do — **and persists nothing**, so a validation failure, a rejected concurrent
     /// edit, or a failed write cannot leave the store mutated.
@@ -352,6 +364,8 @@ impl Ctx {
                     worktree,
                     started,
                     seen: now,
+                    // Filled by `guard_holds`, which knows the task's needs.
+                    holds: Vec::new(),
                 }),
             )
         } else {
@@ -980,6 +994,9 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     // Guard before the dependency and descendant checks, so a session that no longer holds
     // the task is told *that* rather than something incidental.
     ctx.claim_guard(&task.id, to, force)?;
+    if to == Status::Doing {
+        ctx.guard_holds(task)?;
+    }
     if to == Status::Done && task.status != Status::Done && !force {
         let open = open_deps(ctx, task)?;
         if !open.is_empty() {

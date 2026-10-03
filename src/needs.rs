@@ -62,10 +62,6 @@ pub fn require_declared(vocab: &Vocabulary, names: &[String]) -> Result<()> {
 
 /// The needs a claim holds (spec §4.4): those its own project declares exclusive. An
 /// undeclared name is ignored. Sorted and deduped.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "exclusive holds (slice 2) are its first caller")
-)]
 pub fn exclusive_of(vocab: &Vocabulary, needs: &[String]) -> Vec<String> {
     needs
         .iter()

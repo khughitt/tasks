@@ -252,6 +252,8 @@ pub struct ClaimInfo {
     pub started: String,
     pub seen: String,
     pub live: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub holds: Vec<String>,
 }
 
 impl ClaimInfo {
@@ -265,6 +267,7 @@ impl ClaimInfo {
             started: claim.started.clone(),
             seen: claim.seen.clone(),
             live: live == &crate::claims::Liveness::Live,
+            holds: claim.holds.clone(),
         }
     }
 }
@@ -2541,5 +2544,30 @@ mod tests {
         assert_eq!(wrap_width(None, None).unwrap(), None);
         assert!(wrap_width(Some("wide"), None).is_err());
         assert!(wrap_width(Some("0"), None).is_err());
+    }
+
+    #[test]
+    fn claim_info_carries_holds_only_when_the_claim_has_some() {
+        let claim = crate::claims::Claim {
+            owner: "o".into(),
+            session: "s".into(),
+            pid: None,
+            pid_start: None,
+            boot_id: None,
+            host: "h".into(),
+            worktree: "/w".into(),
+            started: "2026-10-03T00:00:00Z".into(),
+            seen: "2026-10-03T00:00:00Z".into(),
+            holds: Vec::new(),
+        };
+        let live = crate::claims::Liveness::Live;
+        let bare = serde_json::to_value(ClaimInfo::of(&claim, &live)).unwrap();
+        assert!(bare.get("holds").is_none(), "{bare}");
+        let holding = crate::claims::Claim {
+            holds: vec!["quiet".into()],
+            ..claim
+        };
+        let shown = serde_json::to_value(ClaimInfo::of(&holding, &live)).unwrap();
+        assert_eq!(shown["holds"], serde_json::json!(["quiet"]));
     }
 }
