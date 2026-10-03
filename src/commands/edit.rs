@@ -115,6 +115,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_model
         || args.no_tags
         || args.no_depends
+        || !fields.needs.is_empty()
+        || !args.rm_needs.is_empty()
+        || args.no_needs
         || !args.rm_tags.is_empty();
     if !has_flags {
         return editor(ctx, id);
@@ -190,6 +193,20 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         if task.tags.len() == before {
             return Err(Error::Validation(format!(
                 "{} is not tagged {tag:?}",
+                task.id
+            )));
+        }
+    }
+    // Mirrors the tag flags: clear, then remove, then `apply_fields` appends.
+    if args.no_needs {
+        task.needs.clear();
+    }
+    for need in &args.rm_needs {
+        let before = task.needs.len();
+        task.needs.retain(|existing| existing != need);
+        if task.needs.len() == before {
+            return Err(Error::Validation(format!(
+                "{} does not need {need:?}",
                 task.id
             )));
         }
@@ -328,6 +345,15 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
             status.as_str()
         ))));
     }
+    // Lanes-needs spec §4.2: only names this save adds must be declared (the grammar
+    // was checked by `parse_task`); one the vocabulary has since dropped may stay or go.
+    let added: Vec<String> = edited
+        .needs
+        .iter()
+        .filter(|need| !original.needs.contains(*need))
+        .cloned()
+        .collect();
+    crate::needs::require_declared(&ctx.project.needs, &added).map_err(keep)?;
     edited.status = original.status;
     if status == original.status {
         ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;

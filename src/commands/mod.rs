@@ -646,6 +646,18 @@ pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs) -> Resul
             task.tags.push(tag.clone());
         }
     }
+    // Additive like `--tag`. Only the names being added are checked: grammar, then the
+    // project's vocabulary (lanes-needs spec §4.2), so `edit --rm-need` can still clear
+    // a need the vocabulary has since dropped.
+    for need in &fields.needs {
+        crate::needs::validate_name(need)?;
+    }
+    crate::needs::require_declared(&ctx.project.needs, &fields.needs)?;
+    for need in &fields.needs {
+        if !task.needs.contains(need) {
+            task.needs.push(need.clone());
+        }
+    }
     // Additive like `--tag`: an edit that names one dependency must not drop the others.
     // `edit --no-depends` clears the list before this runs; `dep --rm` removes one.
     let warnings = dep::add_dependencies(ctx, &resolver, task, &fields.depends)?;

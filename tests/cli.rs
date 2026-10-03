@@ -21828,3 +21828,156 @@ fn needs_check_errors_on_an_undeclared_need_on_every_record() {
         "{report}"
     );
 }
+
+#[test]
+fn needs_flags_set_append_remove_and_clear() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(
+        &sci,
+        &[
+            ("quiet", "an idle host", true),
+            ("owner", "the owner judges an image", false),
+            ("gpu", "the GPU", true),
+        ],
+    );
+    let id = id_of(env.json(
+        &sci,
+        &[
+            "add", "Capture", "--need", "quiet", "--need", "owner", "--need", "quiet",
+        ],
+    ));
+    let needs = |env: &TestEnv| env.json(&sci, &["show", &id])["task"]["needs"].clone();
+    assert_eq!(
+        needs(&env),
+        serde_json::json!(["quiet", "owner"]),
+        "repeats are no-ops"
+    );
+    assert!(
+        env.read(&sci, &format!("tasks/{id}.md"))
+            .contains("\nneeds: [quiet, owner]\n")
+    );
+
+    env.json(&sci, &["edit", &id, "--need", "gpu"]);
+    assert_eq!(
+        needs(&env),
+        serde_json::json!(["quiet", "owner", "gpu"]),
+        "--need appends"
+    );
+
+    env.json(&sci, &["edit", &id, "--rm-need", "owner"]);
+    assert_eq!(needs(&env), serde_json::json!(["quiet", "gpu"]));
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--rm-need", "owner"]),
+        "validation"
+    );
+
+    env.json(&sci, &["edit", &id, "--no-needs", "--need", "owner"]);
+    assert_eq!(
+        needs(&env),
+        serde_json::json!(["owner"]),
+        "--no-needs --need replaces"
+    );
+
+    env.json(&sci, &["edit", &id, "--no-needs"]);
+    assert!(
+        env.json(&sci, &["show", &id])["task"]
+            .get("needs")
+            .is_none()
+    );
+    assert!(
+        !env.read(&sci, &format!("tasks/{id}.md")).contains("needs"),
+        "the key is dropped, not written empty"
+    );
+
+    env.usage(&sci, &["edit", &id, "--rm-need", "quiet", "--no-needs"]);
+}
+
+#[test]
+fn needs_flags_refuse_an_undeclared_or_malformed_name() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let _fam = env.init("fam");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+
+    assert_eq!(
+        env.fail(&sci, &["add", "Typo", "--need", "gpu"]),
+        "unknown_need"
+    );
+    assert_eq!(
+        env.fail(&sci, &["add", "Upper", "--need", "Quiet"]),
+        "validation"
+    );
+    // Validated against the target project: fam declares nothing.
+    assert_eq!(
+        env.fail(
+            &sci,
+            &["add", "Elsewhere", "--project", "fam", "--need", "quiet"]
+        ),
+        "unknown_need"
+    );
+    assert!(
+        env.json(&sci, &["list", "--all-projects"])["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "nothing was written"
+    );
+
+    let id = id_of(env.json(&sci, &["add", "Capture"]));
+    let before = env.read(&sci, &format!("tasks/{id}.md"));
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--need", "gpu"]),
+        "unknown_need"
+    );
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), before);
+
+    // An editor save may add only declared names.
+    let undeclared = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\nneeds: [gpu]/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &undeclared)
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unknown_need");
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), before);
+    let declared = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\nneeds: [quiet]/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &declared)
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["show", &id])["task"]["needs"],
+        serde_json::json!(["quiet"])
+    );
+}
+
+#[test]
+fn needs_flags_a_need_dropped_from_the_vocabulary_still_lists_but_fails_check() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let id = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet"]));
+    std::fs::write(sci.join("tasks/.config.toml"), "prefix = \"sci\"\n").unwrap();
+
+    let listed = env.json(&sci, &["list"]);
+    assert_eq!(listed["tasks"][0]["needs"], serde_json::json!(["quiet"]));
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["errors"][0]["kind"], "unknown_need", "{report}");
+
+    // Edits that add nothing are not held to the vocabulary, and the stale name can go.
+    env.json(&sci, &["edit", &id, "-p", "1"]);
+    env.json(&sci, &["edit", &id, "--rm-need", "quiet"]);
+    let report = env.check(&sci);
+    assert!(report["errors"].as_array().unwrap().is_empty(), "{report}");
+}

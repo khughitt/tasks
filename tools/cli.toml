@@ -300,6 +300,7 @@ options = [
   { names = ["--every"], value = "age", role = "set" },
   { names = ["--defer"], value = "when", role = "set" },
   { shared = "tag", role = "set", value = "string", repeatable = true },
+  { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -402,6 +403,8 @@ options = [
   { names = ["--no-model"], value = "none" },
   { names = ["--rm-tag"], value = "string", repeatable = true },
   { names = ["--no-tags"], value = "none" },
+  { names = ["--rm-need"], value = "string", repeatable = true },
+  { names = ["--no-needs"], value = "none" },
   { names = ["--no-depends"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
@@ -412,6 +415,7 @@ options = [
   { names = ["--every"], value = "age", role = "set" },
   { names = ["--defer"], value = "when", role = "set" },
   { shared = "tag", role = "set", value = "string", repeatable = true },
+  { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -748,12 +752,13 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost or quiet"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet or hooks"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
   { shared = "since", role = "bound", value = "when", repeatable = false },
+  { shared = "until", role = "bound", value = "when", repeatable = false },
   { names = ["--task"], value = "string" },
 ]
 

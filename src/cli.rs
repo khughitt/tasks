@@ -163,6 +163,10 @@ pub struct FieldArgs {
     /// Add a tag (repeatable). On `edit` this appends; see `--rm-tag` and `--no-tags`.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
+    /// Need a shared resource declared in `[needs]` (repeatable). On `edit` this
+    /// appends; see `--rm-need` and `--no-needs`.
+    #[arg(long = "need", value_name = "NEED")]
+    pub needs: Vec<String>,
     /// Depend on another task (repeatable). On `edit` this appends; see `--no-depends`
     /// and `dep --rm`.
     #[arg(long = "depends", value_name = "REF", add = ArgValueCompleter::new(crate::complete::resolvable))]
@@ -249,6 +253,12 @@ pub struct EditArgs {
     /// Clear every tag; with `--tag`, replaces the list wholesale.
     #[arg(long)]
     pub no_tags: bool,
+    /// Remove a need (repeatable); `--need` adds one.
+    #[arg(long = "rm-need", value_name = "NEED", conflicts_with = "no_needs")]
+    pub rm_needs: Vec<String>,
+    /// Clear every need; with `--need`, replaces the list wholesale.
+    #[arg(long)]
+    pub no_needs: bool,
     /// Clear every dependency; with `--depends`, replaces the list wholesale.
     #[arg(long)]
     pub no_depends: bool,
