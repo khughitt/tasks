@@ -734,6 +734,8 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
     }
     retain_unheld(&mut ctx, &mut ready, now)?;
     ctx.warnings.extend(held);
+    // The same builder as `tasks lanes`, under this session's cutoff and `--without`.
+    let lanes = super::lanes::rows(&mut ctx, &all, &claims, &snapshots, cutoff, &without, now)?;
     let wide = matches!(ctx.scope, Scope::All(_));
     for project in ctx.scope.projects() {
         if let Some(files) = project.uncommitted_task_files()?
@@ -766,7 +768,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
             force_hint(id, &snapshots)
         ));
     }
-    Ok(Output::Prime(PrimeOut {
+    Ok(Output::Prime(Box::new(PrimeOut {
         prefix: match &ctx.scope {
             Scope::Local(project) => Some(project.prefix.clone()),
             Scope::All(_) => None,
@@ -781,6 +783,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         parked,
+        lanes,
         doing: doing
             .iter()
             .map(|task| {
@@ -798,7 +801,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
             .collect(),
         halts,
         warnings: ctx.warnings,
-    }))
+    })))
 }
 
 #[cfg(test)]

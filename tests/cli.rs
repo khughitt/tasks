@@ -24464,3 +24464,152 @@ fn lanes_view_reads_holds_only_where_a_project_declares_an_exclusive_need() {
     assert_eq!(view["lanes"][0]["state"], "ready", "{view}");
     assert_eq!(unknown(&view), 1, "{view}");
 }
+
+#[test]
+fn prime_always_carries_lanes_and_prints_them_before_the_roadmap() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "Loose"]);
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(
+        prime["lanes"],
+        serde_json::json!([]),
+        "present and empty: {prime}"
+    );
+    assert!(!env.pretty(&sci, &["prime"]).contains("lanes:"));
+
+    let lane = id_of(env.json(
+        &sci,
+        &["add", "Captures", "--lane", "-p", "1", "-b", "## Captures"],
+    ));
+    let step = id_of(env.json(&sci, &["add", "Take one", "--parent", &lane]));
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["lanes"][0]["lane"]["id"], lane);
+    assert_eq!(prime["lanes"][0]["state"], "ready");
+    assert_eq!(prime["lanes"][0]["pick"]["id"], step);
+    assert_eq!(
+        prime["lanes"][0]["guidance"],
+        serde_json::Value::Null,
+        "a body that is only a heading has no guidance"
+    );
+
+    let text = env.pretty(&sci, &["prime"]);
+    let lanes_at = text.find("\nlanes:\n").unwrap_or_else(|| panic!("{text}"));
+    assert!(lanes_at < text.find("\nroadmap:\n").unwrap(), "{text}");
+    assert!(text.contains(&format!("ready → {step} Take one")), "{text}");
+
+    let all = env.json(&sci, &["prime", "--all-projects"]);
+    assert_eq!(all["lanes"][0]["lane"]["id"], lane, "{all}");
+}
+
+#[test]
+fn prime_and_lanes_never_read_the_dependencies_of_closed_or_shelved_lane_work() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let far = id_of(env.json(&fam, &["add", "Far"]));
+    env.json(&fam, &["done", &far, "landed"]);
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+    let step = id_of(env.json(&sci, &["add", "Take one", "--parent", &lane]));
+    let closed = id_of(env.json(
+        &sci,
+        &["add", "Closed", "--parent", &lane, "--depends", &far],
+    ));
+    env.json(&sci, &["done", &closed, "landed"]);
+    let shelved = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Shelved",
+            "--parent",
+            &lane,
+            "--status",
+            "idea",
+            "--depends",
+            &far,
+        ],
+    ));
+    env.json(&sci, &["shelve", &shelved, "later"]);
+    // Garble the one record both depend on: resolving it is now a parse error, so any
+    // read of these two records' dependencies fails the command.
+    std::fs::write(fam.join(format!("tasks/{far}.md")), "garbage").unwrap();
+
+    let prime = env.json(&sci, &["prime"]);
+    let row = &prime["lanes"][0];
+    assert_eq!(row["lane"]["id"], lane, "{prime}");
+    assert_eq!(row["state"], "ready", "{row}");
+    assert_eq!(row["pick"]["id"], step);
+    assert_eq!(row["steps"], 0);
+    assert!(
+        row.get("causes").is_none() && row.get("held").is_none(),
+        "a closed child and a shelved child are not live: {row}"
+    );
+    let view = env.json(&sci, &["lanes"]);
+    assert_eq!(view["lanes"][0]["pick"]["id"], step, "{view}");
+}
+
+#[test]
+fn prime_warns_once_about_unknown_hold_state_with_lanes_present() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let _fam = env.init("fam");
+    hold_vocab(&sci);
+    let lane = id_of(env.json(&sci, &["add", "Lane", "--lane"]));
+    env.json(
+        &sci,
+        &[
+            "add", "Capture", "-p", "2", "--need", "quiet", "--parent", &lane,
+        ],
+    );
+    let store = env.claim_store("fam");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    std::fs::write(&store, "claims = [not toml").unwrap();
+
+    let prime = env.json(&sci, &["prime"]);
+    assert_eq!(prime["lanes"][0]["lane"]["id"], lane, "{prime}");
+    let unknown = warnings_of(&prime)
+        .iter()
+        .filter(|w| w.starts_with("hold state unknown for fam"))
+        .count();
+    assert_eq!(unknown, 1, "{prime}");
+}
+
+#[test]
+fn prime_warns_once_when_identity_cannot_resolve_with_lanes_present() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let lane = id_of(env.json(&dir, &["add", "Lane", "--lane"]));
+    let first = id_of(env.json(
+        &dir,
+        &[
+            "add", "Capture", "-p", "2", "--need", "quiet", "--parent", &lane,
+        ],
+    ));
+    let state = env.home.path().join("relay-state");
+    let script = format!(
+        "set -e\n{}\nwrite_registry\n\
+         CLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {first}\n\
+         mkdir -p \"$HOME/.config/tasks\"\n\
+         printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" prime > \"$HOME/prime.json\"\n",
+        shim_env(&state, "claude-code", "c1"),
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let prime: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home.path().join("prime.json")).unwrap())
+            .unwrap();
+    assert_eq!(prime["lanes"][0]["lane"]["id"], lane, "{prime}");
+    let unresolved = warnings_of(&prime)
+        .iter()
+        .filter(|w| w.starts_with("session identity unresolved ("))
+        .count();
+    assert_eq!(unresolved, 1, "{prime}");
+}

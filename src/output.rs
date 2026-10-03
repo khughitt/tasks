@@ -819,6 +819,8 @@ pub struct PrimeOut {
     pub ready: Vec<TaskSummary>,
     pub parked: Vec<ParkedRow>,
     pub doing: Vec<TaskSummary>,
+    /// Every open lane in scope; always present, `[]` without lanes.
+    pub lanes: Vec<LaneRow>,
     pub roadmap: Vec<TreeNode>,
     pub closeout: Vec<TaskSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -878,7 +880,7 @@ pub enum Output {
     Parked(ParkedOut),
     Quiet(QuietOut),
     Claims(ClaimsOut),
-    Prime(PrimeOut),
+    Prime(Box<PrimeOut>),
     Lanes(LanesOut),
     Graph(GraphOut),
     Check(CheckOut),
@@ -1104,6 +1106,16 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                 type_column,
                 wrap,
             ));
+            if !o.lanes.is_empty() {
+                rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "lanes:")));
+                let lane_width = o
+                    .lanes
+                    .iter()
+                    .map(|row| row.lane.id.len())
+                    .max()
+                    .unwrap_or(0);
+                rendered.push_str(&lane_lines(&o.lanes, painter, lane_width, false));
+            }
             rendered.push_str(&format!(
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "roadmap:")
