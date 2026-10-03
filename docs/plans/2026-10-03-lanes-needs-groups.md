@@ -57,23 +57,24 @@ The ops rule is in ops `AGENTS.md` and in ops `docs/specs/2026-10-01-vendoring-r
 **Interfaces:**
 - Produces: ten notes on tasks-ece1e2 of the form `inventory: Task <n> = <full sha>`, one for each n in 1.3, 1.5, 1.6, 2.4, 3.1, 3.6, 3.7, 4.2, 4.4, 4.5. These are the CLI-touching tasks in execution order. Each task's adopt step reads its sha from these notes.
 
-- [ ] **Step 1: Create the ops worktree.**
-  `$OPS` is the `ops` root printed by `tasks projects`.
-  ```bash
-  cd "$OPS" && work-link --ensure .worktrees
-  git worktree add .worktrees/ece1e2-cli -b feat/ece1e2-cli
-  git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees/ece1e2-cli
-  cd .worktrees/ece1e2-cli && just setup
-  ```
-
-- [ ] **Step 2: File the ops task and link it to its piece.**
-  This follows the ops procedure, step 2. In `$OPS`:
+- [ ] **Step 1: File the ops task and link it to its piece, on ops `main`.**
+  This follows the ops procedure, step 2. It comes before the worktree, so the inventory branch starts from the `main` that holds this record and Step 5's `--ff-only` merge succeeds. `$OPS` is the `ops` root printed by `tasks projects`. In `$OPS`, on `main`:
   ```bash
   tasks add "cli.toml rows for tasks lanes, needs, holds, and groups" --status todo -p 2 --source tasks-ece1e2 \
     -b "Rows for the tasks CLI from docs/specs/2026-10-03-lanes-needs-groups-design.md in the tasks repo; one commit per implementing task (tasks plan docs/plans/2026-10-03-lanes-needs-groups.md Task 0.1). tasks-ece1e2 adopts them."
   tasks dep <new ops id> --on tasks-ece1e2
+  tasks check && git add tasks && git commit -m "chore(tasks): file <new ops id>"
   ```
-  Commit the record on ops `main` as `chore(tasks): file <new ops id>`.
+
+- [ ] **Step 2: Create the ops worktree from that `main`, and start the ops task there.**
+  ```bash
+  cd "$OPS" && work-link --ensure .worktrees
+  git worktree add .worktrees/ece1e2-cli -b feat/ece1e2-cli main
+  git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees/ece1e2-cli
+  cd .worktrees/ece1e2-cli && just setup
+  tasks start <new ops id>
+  ```
+  Expected: `git merge-base --is-ancestor main HEAD` exits 0 at every later step, as long as nobody else commits to ops `main`. If ops `main` moves before Step 5, rebase `feat/ece1e2-cli` onto it and rerun `just test-one test_cli` before asking for approval.
 
 - [ ] **Step 3: Write the ten commits, in this order.**
   In `$OPS/.worktrees/ece1e2-cli`, do the following for each task, in the order 1.3, 1.5, 1.6, 2.4, 3.1, 3.6, 3.7, 4.2, 4.4, 4.5:
@@ -4531,6 +4532,10 @@ fn a_need_override_that_save_refuses_leaves_both_records_and_the_claim_store_unc
   - `Project.needs`;
   - `NeedDecl.exclusive`.
 - Produces:
+  - `pub(crate) fn read_holds(snapshot: &holds::HoldSnapshot, me: &claims::Resolution) -> Result<holds::Mine>`
+    in `src/commands/mod.rs`. It is the read views' rule (spec §4.4): a failed resolution owns
+    nothing (`Mine::default()`), and a resolved identity uses `own_holds`, keeping process
+    proof. Slice 3's lanes view calls it too. Write paths keep calling `own_holds`;
   - `pub fn is_empty(&self) -> bool` on `HoldSnapshot`;
   - `#[derive(Debug, Default)] pub struct HeldWarnings`, with
     `pub fn add(&mut self, need: &str, holder: &Holder)` and
@@ -4712,6 +4717,57 @@ fn an_unreadable_claim_store_leaves_hold_state_unknown_without_failing() {
     );
 ```
 
+- [ ] **Write the failed-resolution regression.** Append to `tests/cli.rs`:
+
+```rust
+#[test]
+fn a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign() {
+    // Spec §4.4: when a read view cannot resolve "this session", every hold counts as
+    // another session's, even one this process could prove by pid. Claim natively with
+    // proof, enable relay, then remove the relay registry so identity cannot resolve.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let first = id_of(env.json(&dir, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&dir, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    let state = env.home.path().join("relay-state");
+    let script = format!(
+        "set -e\n{}\nwrite_registry\n\
+         CLAUDE_CODE_SESSION_ID=c1 CLAUDE_PID=$$ \"$TASKS_BIN\" start {first}\n\
+         mkdir -p \"$HOME/.config/tasks\"\n\
+         printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
+         rm \"$RELAY_STATE_DIR/agents.json\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" ready > \"$HOME/ready.json\"\n",
+        shim_env(&state, "claude-code", "c1"),
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "claude", &script);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "ready must still answer when identity cannot resolve: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let ready: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(env.home.path().join("ready.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        !ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == second.as_str()),
+        "an unresolved view must not use process proof to treat the hold as its own: {ready}"
+    );
+    assert!(
+        warnings_of(&ready)
+            .iter()
+            .any(|w| w.contains("wait for quiet") && w.contains(first.as_str())),
+        "{ready}"
+    );
+}
+```
+
 - [ ] **Run the tests and confirm they fail.**
   - `just test-one --bin tasks held_warnings_aggregate` fails to compile: `HeldWarnings` is
     unresolved.
@@ -4719,11 +4775,32 @@ fn an_unreadable_claim_store_leaves_hold_state_unknown_without_failing() {
     `first`, `second` and `free`.
   - `an_unreadable_claim_store_leaves_hold_state_unknown` fails on `ready`, which has no
     `hold state unknown for fam` warning.
+  - `a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign` fails because
+    `ready` lists `second`.
   - `an_acceptance_mode_change_continues_a_natively_held_claim` passes before the view
     gate exists. It is the regression check for the gate: a view that compared session
     strings would hide `second` from `claude-code:c1` behind `c1`'s hold.
 
 - [ ] **Implement.**
+
+  In `src/commands/mod.rs`, after `own_holds` (Task 2.2), add the read views' rule:
+
+```rust
+/// Which holds a read view counts as the caller's own (lanes design §4.4). A read view
+/// whose identity cannot resolve owns nothing: every hold counts as another session's,
+/// even one this process could prove by pid. A resolved identity follows `own_holds`,
+/// including process proof across a native-to-relay change. Write paths call
+/// `own_holds` directly, because their continuations need proof.
+pub(crate) fn read_holds(
+    snapshot: &crate::holds::HoldSnapshot,
+    me: &crate::claims::Resolution,
+) -> Result<crate::holds::Mine> {
+    match me {
+        crate::claims::Resolution::Failed(_) => Ok(crate::holds::Mine::default()),
+        crate::claims::Resolution::Resolved(_) => own_holds(snapshot, me),
+    }
+}
+```
 
   In `src/holds.rs`, add to `impl HoldSnapshot` after `holder`:
 
@@ -4788,7 +4865,7 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
         return Ok(());
     }
     let me = crate::claims::resolve_identity(&mut ctx.warnings);
-    let mine = super::own_holds(&snapshot, &me)?;
+    let mine = super::read_holds(&snapshot, &me)?;
     let mut held = crate::holds::HeldWarnings::default();
     tasks.retain(|task| {
         let Some(vocabulary) = vocabularies.get(&task.id.prefix) else {
@@ -4833,12 +4910,13 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
   - `just test-one --test cli views_hide_work_held_back`
   - `just test-one --test cli an_unreadable_claim_store_leaves_hold_state_unknown`
   - `just test-one --test cli an_acceptance_mode_change_continues_a_natively_held_claim`
+  - `just test-one --test cli a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign`
 
 - [ ] Run `just test-fast` (every existing picker, park, halt and filter test still passes)
   and `tasks check`.
 
 - [ ] **Commit.**
-  `git add src/holds.rs src/commands/list.rs tests/cli.rs`
+  `git add src/holds.rs src/commands/mod.rs src/commands/list.rs tests/cli.rs`
   `git commit -m "feat(holds): hide work held back by another session from ready, next and prime"`
 
 ---
@@ -6690,10 +6768,13 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 - Consumes: `enclosing_lane` (3.3); `retain_allowed`, `complexity::apply`; Slice 1's
   resolved `without` binding in `ready` and `next` and its `Without::retain` (Task 1.6).
 
-The warning counts a paused-lane task only when every other gate would offer it: it has
-passed the dependency, defer, claim, and user-park checks inside the picker, and the halt,
-`--without`, and complexity-cutoff gates the caller applies to its own list. A deferred
-task in a paused lane is in neither the deferred count nor the paused one.
+The warning counts a paused-lane task **before exclusive holds**. A task is counted once
+it passes two sets of checks:
+- the dependency, defer, claim and user-park checks inside the picker;
+- the halt, `--without` and complexity-cutoff gates the caller applies to its own list.
+
+The exclusive-hold gate is not applied, so a held step in a paused lane is still counted.
+A deferred task in a paused lane is in neither the deferred count nor the paused one.
 
 - [ ] **Step 1: Write the failing tests.**
 
@@ -6806,6 +6887,32 @@ task in a paused lane is in neither the deferred count nor the paused one.
   }
 
   #[test]
+  fn the_paused_count_is_taken_before_exclusive_holds() {
+      let mut env = TestEnv::new();
+      let sci = env.init("sci");
+      hold_vocab(&sci);
+      let holding = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+      let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+      let held = id_of(env.json(
+          &sci,
+          &["add", "Rerun", "--parent", &lane, "-p", "0", "--need", "quiet"],
+      ));
+      // Another session holds `quiet`, so `held` would be held back even if unpaused.
+      as_agent(&env, &sci, "agent-a")
+          .args(["start", &holding])
+          .assert()
+          .success();
+      env.json(&sci, &["block", &lane, "waiting on the idle host"]);
+      let ready = env.json(&sci, &["ready"]);
+      assert!(
+          ready["warnings"]
+              .to_string()
+              .contains(&format!("1 task(s) hidden by paused lane {lane}")),
+          "{held} is counted: the paused count is taken before exclusive holds: {ready}"
+      );
+  }
+
+  #[test]
   fn marking_a_blocked_goal_as_a_lane_warns_that_it_pauses_the_subtree() {
       let mut env = TestEnv::new();
       let sci = env.init("sci");
@@ -6829,8 +6936,9 @@ task in a paused lane is in neither the deferred count nor the paused one.
 
   `just test-one paused_omissions_name_each_lane` — fails to compile: `cannot find function
   'paused_omissions'`. `just test-one --test cli a_blocked_lane_pauses` — `ready` lists
-  `Capture` and `Resume`. `just test-one --test cli marking_a_blocked_goal` — the warnings
-  array is empty.
+  `Capture` and `Resume`. `just test-one --test cli the_paused_count_is_taken_before` —
+  `ready` has no paused-lane warning. `just test-one --test cli marking_a_blocked_goal` —
+  the warnings array is empty.
 
 - [ ] **Step 3: Implement.**
 
@@ -6902,7 +7010,7 @@ task in a paused lane is in neither the deferred count nor the paused one.
 
   ```rust
   /// Lanes design §3.4: one `<n> task(s) hidden by paused lane <id>` warning per lane,
-  /// counting only work every other gate would offer. The pickers already applied the
+  /// counted before exclusive holds. The pickers already applied the
   /// dependency, defer, claim, and park checks to `paused`; this applies the halt,
   /// `--without`, and cutoff gates the caller applies to its own list, without their
   /// warnings, then counts each task once under its lane.
@@ -7027,6 +7135,7 @@ task in a paused lane is in neither the deferred count nor the paused one.
 
   `just test-one paused_omissions_name_each_lane`,
   `just test-one --test cli a_blocked_lane_pauses`,
+  `just test-one --test cli the_paused_count_is_taken_before`,
   `just test-one --test cli marking_a_blocked_goal`.
 
 - [ ] **Step 5: Gate.** `cargo fmt`, `just test-fast` (all picker, park, halt tests
@@ -7918,7 +8027,7 @@ The `--without` row is spelled as Slice 1 spells it on `ready`, `next`, and `pri
       pub holds: &'a HoldSnapshot,
       /// Each scanned project's need vocabulary, by prefix.
       pub vocabularies: &'a HashMap<&'a str, &'a Vocabulary>,
-      /// The caller's own live holds (`commands::own_holds`, Slice 2), for the hold gate;
+      /// The caller's own live holds (`commands::read_holds`, Slice 2 Task 2.5), for the hold gate;
       /// `Mine::default()` counts every hold as another session's.
       pub mine: &'a Mine,
       pub now: OffsetDateTime,
@@ -8572,9 +8681,9 @@ The `--without` row is spelled as Slice 1 spells it on `ready`, `next`, and `pri
               ctx.warnings.push(warning);
           }
       }
-      // Same-session holds follow the claim ownership rule, including process proof
-      // across a native-to-relay identity change (Slice 2 Task 2.2).
-      let mine = super::own_holds(&holds, &me)?;
+      // The read views' rule (Slice 2 Task 2.5): a failed resolution owns no hold; a
+      // resolved identity follows the claim ownership rule, including process proof.
+      let mine = super::read_holds(&holds, &me)?;
       let vocabularies: HashMap<&str, &Vocabulary> = ctx
           .scope
           .projects()
@@ -9046,9 +9155,8 @@ The `--without` row is spelled as Slice 1 spells it on `ready`, `next`, and `pri
   `lanes`. This keeps every existing pretty `prime` output byte-identical.
 - **The waiting line lists every cause, largest count first**, matching §5.3's example
   (`waiting: 2 user, 1 deferred`), with table order breaking ties.
-- **The paused warning counts only work that would be offered if the lane were
-  unpaused.** A paused-lane task is counted once it passes every other gate the command
-  applies: the dependency and defer checks, the live-claim and user-park checks (inside
+- **The paused warning is a count before exclusive holds.** A paused-lane task is
+  counted once it passes these gates: the dependency and defer checks, the live-claim and user-park checks (inside
   `ready_tasks`, silently for paused work), and the halt, `--without`, and cutoff gates
   (in `warn_paused`, silently). It covers `ready` rows and parked candidates, counted once
   by id in `next`. A deferred step in a paused lane is in neither the deferred count nor
