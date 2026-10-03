@@ -12,16 +12,20 @@
 
 ## Global Constraints
 
-- **Order:** Slice 1 → Slice 2 → Slice 3, each starting from the previous slice's end state. Slice 4 is independent and may run before, between, or after them. Task numbers are `<slice>.<n>`.
+- **Order:** Task 0.1, then Slice 1 → Slice 2 → Slice 3 → Slice 4, each task starting from the previous task's end state. Slice 4 does not depend on the others' code, but it runs last. The inventory is adopted with `--at`, and each `--at` commit must be at or after the previous one (see below). Task numbers are `<slice>.<n>`.
 - **Gates:** while working, `just test-one <filter>` or `just test-one --test cli <name>`; before each commit, `just test-fast` and `just check`. Never run `cargo test` directly. `tasks check` runs inside `just check`. Every commit passes `cargo clippy --all-targets -- -D warnings`.
 - **Commits:** conventional commits, no attribution trailers. Commit on branch `ece1e2-work-selection` in `.worktrees/ece1e2-work-selection`.
 - **JSON:** additive only. Each new field or payload gets its `+=` addendum in main design §5.1, in the task that ships it (§3.4 checklist of `docs/specs/2026-08-29-tasks-design.md`).
-- **CLI inventory, all slices:** ops `cli.toml` is the authority and `tools/cli.toml` is a byte-for-byte copy. Every step that says "modify `tools/cli.toml`" (Slices 2–4 phrase it that way) means:
-  1. make the change in the ops worktree's `cli.toml` first;
-  2. copy that file over `tools/cli.toml`.
+- **CLI inventory** (ops AGENTS.md rule; ops `docs/specs/2026-10-01-vendoring-rollout-order-design.md`, "Adopted file"):
+  - Rows land in ops first.
+  - This project adopts them with `vendored adopt`, in this worktree, and commits the copy together with the implementation that needs it.
+  - Nobody writes `tools/cli.toml` by hand or with `cp`.
 
-  Never edit `tools/cli.toml` into a state the ops source does not have. Create the ops worktree once, before Task 1.3 (or before the first inventory step of whichever slice runs first):
-  `cd $OPS && work-link --ensure .worktrees && git worktree add .worktrees/ece1e2-cli -b feat/ece1e2-cli && git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees/ece1e2-cli && (cd .worktrees/ece1e2-cli && just setup)`, where `$OPS` is the `ops` root from `tasks projects`. The ops change stays uncommitted until Task 5.1.
+  How the plan does it:
+  - Task 0.1 lands **one ops commit per CLI-touching task**, in execution order.
+  - Each such task carries its row edit in a block titled **"Ops rows (landed by Task 0.1)"**, and adopts exactly the rows landed up to its own commit: `python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`. The sha is read from the `inventory: Task <n> = <sha>` note on tasks-ece1e2.
+  - `$OPS` is the `ops` root from `tasks projects`.
+  - **Approval boundary:** Task 0.1 Step 4 stops for the user before merging into ops `main`, because ops is shared tooling. No implementation task starts before that merge.
 - **The installed `tasks`:** do not run `cargo install --path .` from this worktree before Task 5.1. That would repoint the host's installed `tasks`.
 - **The cross-slice seam:** the hold check runs in `ready`/`next`/`prime` after `ready_tasks` (Slice 2, Task 2.5), not inside it. The lanes builder (Task 3.7) therefore sees steps before holds apply and counts them as `held` itself (spec §5.1 step 1).
 - **Retiring `exclusive_of`'s lint attribute:** Slice 1 gives `needs::exclusive_of` the attribute `#[cfg_attr(not(test), expect(dead_code, ...))]`. The first Slice 2 task that calls it (Task 2.1) deletes that attribute in the same commit; otherwise clippy fails on the unfulfilled expectation.
@@ -31,10 +35,81 @@
 These are the five inputs most likely to bite a user that the spec implies but does not spell out. Each is pinned by a test in the owning task:
 
 1. **`TASKS_WITHOUT` set on the host.** A value like `",quiet, "` parses to `{quiet}`. A project that does not declare `quiet` lists normally. The suite strips the variable so the host's value never leaks into it. *Task 1.6*
-2. **Two sessions starting `quiet` work in different projects at the same moment.** Exactly one wins and the other gets `need_held`. *Task 2.6*
+2. **Two sessions contending for `quiet` in different projects at the same moment.** This includes one session releasing its hold while its record write fails and is rolled back. Exactly one session holds `quiet` at a time, and a failed write never frees it early. *Task 2.6*
 3. **Claim stores written by an older binary.** An entry without `holds` loads as holding nothing, and a TTL-only claim (no pid) holds until its TTL. *Tasks 2.1, 2.2*
 4. **Lane shapes the spec only implies.** Covered: a lane whose steps sit under a sub-goal, a lane holding only a recurrence (due, not yet due, dropped), and a lane whose body is only a heading. Each gives the right state and partition. *Task 3.7*
 5. **A group whose every member is unreachable.** It gives warnings and empty results, not an error. *Task 4.4*
+
+---
+
+## Slice 0 — CLI inventory in ops
+
+### Task 0.1: Land every new CLI row in ops, one commit per task
+
+The ops rule is in ops `AGENTS.md` and in ops `docs/specs/2026-10-01-vendoring-rollout-order-design.md` ("Adopted file"). A new CLI option changes `cli.toml` in ops first. The project then adopts the landed table with `vendored adopt`, committing the copy together with its implementation.
+
+`--at` adopts every row landed up to a commit. So each CLI-touching task gets its own ops commit, landed in execution order. Each task then adopts exactly its own rows.
+
+**Files:**
+- Modify (ops worktree): `cli.toml`, ten commits.
+- Task records: an ops task, plus `inventory:` notes on tasks-ece1e2.
+
+**Interfaces:**
+- Produces: ten notes on tasks-ece1e2 of the form `inventory: Task <n> = <full sha>`, one for each n in 1.3, 1.5, 1.6, 2.4, 3.1, 3.6, 3.7, 4.2, 4.4, 4.5. These are the CLI-touching tasks in execution order. Each task's adopt step reads its sha from these notes.
+
+- [ ] **Step 1: Create the ops worktree.**
+  `$OPS` is the `ops` root printed by `tasks projects`.
+  ```bash
+  cd "$OPS" && work-link --ensure .worktrees
+  git worktree add .worktrees/ece1e2-cli -b feat/ece1e2-cli
+  git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees/ece1e2-cli
+  cd .worktrees/ece1e2-cli && just setup
+  ```
+
+- [ ] **Step 2: File the ops task and link it to its piece.**
+  This follows the ops procedure, step 2. In `$OPS`:
+  ```bash
+  tasks add "cli.toml rows for tasks lanes, needs, holds, and groups" --status todo -p 2 --source tasks-ece1e2 \
+    -b "Rows for the tasks CLI from docs/specs/2026-10-03-lanes-needs-groups-design.md in the tasks repo; one commit per implementing task (tasks plan docs/plans/2026-10-03-lanes-needs-groups.md Task 0.1). tasks-ece1e2 adopts them."
+  tasks dep <new ops id> --on tasks-ece1e2
+  ```
+  Commit the record on ops `main` as `chore(tasks): file <new ops id>`.
+
+- [ ] **Step 3: Write the ten commits, in this order.**
+  In `$OPS/.worktrees/ece1e2-cli`, do the following for each task, in the order 1.3, 1.5, 1.6, 2.4, 3.1, 3.6, 3.7, 4.2, 4.4, 4.5:
+  1. Apply that task's **Ops rows (landed by Task 0.1)** block to `cli.toml`, exactly as written in the task.
+  2. Run `just test-one test_cli`. Expected: PASS.
+  3. Commit: `git commit -am "feat(cli): tasks rows for tasks-ece1e2 Task <n>"`.
+
+  Then run `git log --oneline main..` and check that it lists exactly ten commits, in that order.
+
+- [ ] **Step 4: STOP — ask the user before landing in ops `main`.**
+  Ops is shared tooling: landing these rows changes a table every project adopts from. Show the user the ten commits (`git log --stat main..`) and wait for an explicit yes. On a no, park tasks-ece1e2 with `--waiting-on user --reason approval` and stop.
+
+- [ ] **Step 5: Merge, push, and record the shas.**
+  On approval, merge the branch into ops `main` with `--ff-only`, which keeps the ten shas. Push ops per its guide.
+
+  Other projects then carry these rows harmlessly, because each project's test reads only its own rows. This project keeps passing until it adopts.
+
+  Then record each sha in the tasks worktree:
+  ```bash
+  cd .worktrees/ece1e2-work-selection   # in the tasks repo
+  for n in 1.3 1.5 1.6 2.4 3.1 3.6 3.7 4.2 4.4 4.5; do
+    sha=$(git -C "$OPS" log --format=%H --grep "tasks rows for tasks-ece1e2 Task $n\$" -1 main)
+    tasks note tasks-ece1e2 "inventory: Task $n = $sha"
+  done
+  tasks check && git add tasks && git commit -m "chore(tasks): record the ops inventory commits for tasks-ece1e2"
+  ```
+  Expected: ten notes, each with a 40-character sha.
+
+- [ ] **Step 6: Remove the ops worktree.**
+  ```bash
+  cd "$OPS"
+  tt-report
+  git worktree unlock .worktrees/ece1e2-cli
+  git worktree remove .worktrees/ece1e2-cli
+  git branch -d feat/ece1e2-cli
+  ```
 
 ---
 
@@ -53,13 +128,18 @@ refusal and `edit --reason` are Slice 2.
   which the contract has Slice 1 produce and only Slice 2 reads. It carries
   `#[cfg_attr(not(test), expect(dead_code, reason = "..."))]`. Once Slice 2 calls it,
   the expectation goes unfulfilled, clippy fails, and Slice 2 must delete the attribute.
-- Ops inventory: change ops `cli.toml` first, in the ops worktree `.worktrees/ece1e2-cli`
-  of the ops checkout (`$OPS` below; `tasks projects --paths` names it). The plan's
-  Global Constraints create that worktree once (`work-link --ensure .worktrees`,
-  `git worktree add .worktrees/ece1e2-cli -b feat/ece1e2-cli`, `git worktree lock`,
-  `just setup`). Then copy the file byte for byte to this worktree's `tools/cli.toml`.
-  Never edit `tools/cli.toml` into a state the ops source does not have. Leave the ops
-  change uncommitted; the plan's integration task publishes and commits it.
+- CLI inventory: the rows live in ops `cli.toml` and land there first. Each CLI-touching
+  task in this slice (1.3, 1.5, 1.6, in that order) keeps its exact row edit in a block
+  titled **Ops rows (landed by Task 0.1)**. Task 0.1 applies those blocks in ops, one ops
+  commit per task in execution order, and records each commit as the note
+  `inventory: Task <n> = <sha>` on tasks-ece1e2. The task itself never edits ops. Its
+  inventory step adopts the rows in this worktree with
+  `python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`, where `$OPS` is the `ops`
+  root from `tasks projects` and `<sha>` is the value of that task's inventory note
+  (`tasks show tasks-ece1e2`). `--at` adopts every row landed up to that commit, so the
+  tasks run in the order of the ops commits. Never write `tools/cli.toml` by hand or with
+  `cp`. The adopt also refreshes `tools/cli_surface.py` when the pair changed; the
+  commit adds it whenever `git status` shows it new or modified.
 - Tests: `just test-one <filter>` while working, then `just test-fast` and `just check`
   before each commit. Never run `cargo test` directly. `tasks check` runs inside
   `just check`.
@@ -76,6 +156,11 @@ refusal and `edit --reason` are Slice 2.
   `needs_flags_refuse_an_undeclared_or_malformed_name`).
 - `--without` under `--all-projects` is accepted when only one project declares the name
   (Task 1.6, `needs_without_refuses_a_name_no_project_in_scope_declares`).
+- Hiding uses the vocabulary of the task's own project, never the union of the scope's.
+  A stale `needs: [quiet]` record in a project that does not declare `quiet` stays
+  visible under both `TASKS_WITHOUT=quiet` and `--all-projects --without quiet` (Task 1.6,
+  unit `without_hides_only_where_the_owning_project_declares_the_name`, and end to end
+  in `needs_without_hides_only_where_the_owning_project_declares_the_name`).
 - A record whose need was removed from the vocabulary still lists and fails `tasks check`.
   Task 1.2 covers a hand-written record, Task 1.3 a flag-written one
   (`needs_check_errors_on_an_undeclared_need_on_every_record`,
@@ -87,7 +172,7 @@ refusal and `edit --reason` are Slice 2.
 
 - Create `src/needs.rs`. It holds the need-name grammar (`validate_name`), the vocabulary
   types (`NeedDecl`, `Vocabulary`), `require_declared`, `exclusive_of` (for Slice 2), and
-  the session availability set (`WITHOUT_ENV`, `Without`).
+  the session availability set (`WITHOUT_ENV`, `Vocabularies`, `vocabulary_of`, `Without`).
 - Modify `src/main.rs`: register `mod needs;`.
 - Modify `src/error.rs`: add `Error::UnknownNeed`, kind `unknown_need`.
 - Modify `src/model.rs`: add `Task.needs` and update the `task_with` helper.
@@ -115,9 +200,10 @@ refusal and `edit --reason` are Slice 2.
   `shim_command`.
 - Modify `tests/cli.rs`: add the end-to-end tests and three helpers that later slices
   reuse: `seed_needs`, `declare_needs` and `task_ids`.
-- Modify ops `cli.toml`, then copy it to `tools/cli.toml`: `add` `--need`; `edit`
-  `--need` / `--rm-need` / `--no-needs`; `list` and `ready` `--need`; `ready`, `next`
-  and `prime` `--without`.
+- Adopt `tools/cli.toml` (and `tools/cli_surface.py` when the adopt refreshes it) from
+  the ops rows Task 0.1 lands: `add` `--need`; `edit` `--need` / `--rm-need` /
+  `--no-needs` (Task 1.3); `list` and `ready` `--need` (Task 1.5); `ready`, `next` and
+  `prime` `--without` (Task 1.6).
 - Modify `docs/specs/2026-08-29-tasks-design.md`: the §3.1 row, the §5 usage lines, the
   §5.1 `+=` addenda and the §6 `[needs]` config.
 - Modify `skills/tasks/SKILL.md`, `skills/scope/SKILL.md` and `README.md`.
@@ -808,9 +894,33 @@ git commit -m "feat(needs): declare the need vocabulary and check records agains
 - Modify: `src/commands/mod.rs:640-650` (`apply_fields`, after the `--tag` loop)
 - Modify: `src/commands/edit.rs:116-118` (`has_flags`), `:187-196` (after the
   `rm_tags` loop), and `:331` (editor, before `edited.status = original.status;`)
-- Modify: ops `cli.toml` (the `tasks add` and `tasks edit` rows), then copy it to
-  `tools/cli.toml`
+- Adopt: `tools/cli.toml` (and `tools/cli_surface.py` if the adopt changes it) at the
+  ops commit Task 0.1 recorded as `inventory: Task 1.3 = <sha>`
 - Test: `tests/cli.rs`, `src/surface.rs` (conformance)
+
+**Ops rows (landed by Task 0.1):** the edit to ops `cli.toml` for this task only.
+
+- In the `tasks add` row's `options`, directly after
+  `{ shared = "tag", role = "set", value = "string", repeatable = true },`:
+
+```toml
+  { names = ["--need"], value = "string", repeatable = true },
+```
+
+- In the `tasks edit` row's `options`, directly after
+  `{ names = ["--no-tags"], value = "none" },`:
+
+```toml
+  { names = ["--rm-need"], value = "string", repeatable = true },
+  { names = ["--no-needs"], value = "none" },
+```
+
+  and directly after that row's
+  `{ shared = "tag", role = "set", value = "string", repeatable = true },`:
+
+```toml
+  { names = ["--need"], value = "string", repeatable = true },
+```
 
 **Interfaces:**
 - Consumes: `needs::validate_name`, `needs::require_declared` and `Project.needs`
@@ -1040,44 +1150,27 @@ In `src/commands/edit.rs`:
     crate::needs::require_declared(&ctx.project.needs, &added).map_err(keep)?;
 ```
 
-- [ ] **Step 4: Change the ops inventory, then copy it**
+- [ ] **Step 4: Adopt this task's rows**
 
-In `$OPS/.worktrees/ece1e2-cli/cli.toml`:
-
-- In the `tasks add` row's `options`, directly after
-  `{ shared = "tag", role = "set", value = "string", repeatable = true },`:
-
-```toml
-  { names = ["--need"], value = "string", repeatable = true },
-```
-
-- In the `tasks edit` row's `options`, directly after
-  `{ names = ["--no-tags"], value = "none" },`:
-
-```toml
-  { names = ["--rm-need"], value = "string", repeatable = true },
-  { names = ["--no-needs"], value = "none" },
-```
-
-  and directly after that row's
-  `{ shared = "tag", role = "set", value = "string", repeatable = true },`:
-
-```toml
-  { names = ["--need"], value = "string", repeatable = true },
-```
-
-In the ops worktree, run `just test-one tests.test_cli`. Expected: PASS. Then
-`cp "$OPS/.worktrees/ece1e2-cli/cli.toml" tools/cli.toml`.
+In .worktrees/ece1e2-work-selection, run
+`python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`, where `<sha>` is the value of
+the `inventory: Task 1.3 = <sha>` note on tasks-ece1e2 (`tasks show tasks-ece1e2`). It
+writes `tools/cli.toml` with the **Ops rows** above, and refreshes
+`tools/cli_surface.py` when the pair changed. Then run
+`just test-one parser_surface_equals_table`. Expected: PASS.
 
 - [ ] **Step 5: Run the focused tests to see them pass**
 
 Run: `just test-one --test cli needs_flags_`, then `just test-one surface`.
-Expected: PASS for both. If the surface test reports a difference, fix the ops row first
-and copy again.
+Expected: PASS for both. If the surface test reports a difference, change the parser to
+match the adopted row. If the row itself is wrong, stop and report it: the correction
+lands in ops through Task 0.1's procedure and is adopted again. Never edit
+`tools/cli.toml`.
 
 - [ ] **Step 6: Run the fast suite and the check, then commit**
 
-Run `cargo fmt`, then `just test-fast` and `just check`. Expected: both pass.
+Run `cargo fmt`, then `just test-fast` and `just check`. Expected: both pass. Run
+`git status`; when it shows `tools/cli_surface.py` new or modified, add it as well.
 
 ```bash
 git add src/cli.rs src/commands/mod.rs src/commands/edit.rs tools/cli.toml tests/cli.rs
@@ -1220,8 +1313,8 @@ In `src/commands/edit.rs`, `editor`, directly after the block that returns
 - [ ] **Step 4: Run them to see them pass**
 
 Run: `just test-one --test cli needs_status_`, then `just test-one surface`.
-Expected: PASS. The surface table does not record conflicts, so `tools/cli.toml` is
-unchanged.
+Expected: PASS. The surface table does not record conflicts, so this task has no ops
+rows and `tools/cli.toml` is unchanged.
 
 - [ ] **Step 5: Run the fast suite and the check, then commit**
 
@@ -1241,9 +1334,19 @@ git commit -m "feat(edit): change status and needs in separate operations"
 - Modify: `src/filter.rs:18-29` (`TaskFilter`), `:32-44` (`Fields`), `:66-98`
   (`parse`), `:106-117` (`is_empty`), `:119-136` (`matches`), `:139-185`
   (`of_task`/`of_row`), and the tests (`fields()` helper and a new test)
-- Modify: ops `cli.toml` (the `tasks list` and `tasks ready` rows), then copy it to
-  `tools/cli.toml`
+- Adopt: `tools/cli.toml` (and `tools/cli_surface.py` if the adopt changes it) at the
+  ops commit Task 0.1 recorded as `inventory: Task 1.5 = <sha>`
 - Test: `src/filter.rs` (unit), `tests/cli.rs`, `src/surface.rs`
+
+**Ops rows (landed by Task 0.1):** the edit to ops `cli.toml` for this task only. In both
+the `tasks list` and the `tasks ready` rows, directly after the
+`{ shared = "tag", role = "filter", ... }` line:
+
+```toml
+  { names = ["--need"], value = "string", repeatable = true },
+```
+
+The ops validator requires `exception` only on shared rows, and `--need` is not shared.
 
 **Interfaces:**
 - Consumes: `Task.needs`, `ParkedRow.needs` (Task 1.1); `declare_needs`; `add --need`
@@ -1375,28 +1478,26 @@ Make these changes in `src/filter.rs`. First, update the module doc's last sente
 - `of_task`: after `tags: &task.tags,`, add `needs: &task.needs,`.
 - `of_row`: after `tags: &row.tags,`, add `needs: &row.needs,`.
 
-- [ ] **Step 4: Change the ops inventory, then copy it**
+- [ ] **Step 4: Adopt this task's rows**
 
-In `$OPS/.worktrees/ece1e2-cli/cli.toml`, in both the `tasks list` and the `tasks ready`
-rows, directly after the `{ shared = "tag", role = "filter", ... }` line:
-
-```toml
-  { names = ["--need"], value = "string", repeatable = true },
-```
-
-The ops validator requires `exception` only on shared rows, and `--need` is not shared.
-In the ops worktree, run `just test-one tests.test_cli`. Expected: PASS. Then
-`cp "$OPS/.worktrees/ece1e2-cli/cli.toml" tools/cli.toml`.
+In .worktrees/ece1e2-work-selection, run
+`python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`, where `<sha>` is the value of
+the `inventory: Task 1.5 = <sha>` note on tasks-ece1e2 (`tasks show tasks-ece1e2`). It
+adopts the **Ops rows** above on top of Task 1.3's, and refreshes
+`tools/cli_surface.py` when the pair changed. Then run
+`just test-one parser_surface_equals_table`. Expected: PASS.
 
 - [ ] **Step 5: Run the focused tests to see them pass**
 
 Run `just test-one filter::`, `just test-one --test cli needs_filter_` and
 `just test-one surface`.
-Expected: PASS for all three.
+Expected: PASS for all three. A surface difference is handled as in Task 1.3 Step 5:
+never by editing `tools/cli.toml`.
 
 - [ ] **Step 6: Run the fast suite and the check, then commit**
 
-Run `cargo fmt`, then `just test-fast` and `just check`. Expected: both pass.
+Run `cargo fmt`, then `just test-fast` and `just check`. Expected: both pass. Run
+`git status`; when it shows `tools/cli_surface.py` new or modified, add it as well.
 
 ```bash
 git add src/cli.rs src/filter.rs tools/cli.toml tests/cli.rs
@@ -1408,42 +1509,79 @@ git commit -m "feat(list): filter list and ready by need"
 ### Task 1.6: `--without` and `TASKS_WITHOUT` on ready, next, and prime
 
 **Files:**
-- Modify: `src/needs.rs` (`WITHOUT_ENV` and `Without`, with unit tests)
+- Modify: `src/needs.rs` (`WITHOUT_ENV`, `Vocabularies`, `vocabulary_of` and `Without`,
+  with unit tests)
 - Modify: `src/cli.rs` (new `WithoutArgs` after `FilterArgs`, ~line 114; flattened into
   `Command::Ready` ~383, `Command::Next` ~403 and `Command::Prime` ~623)
 - Modify: `src/commands/mod.rs:1332-1349` (the `Ready`/`Next`/`Prime` dispatch arms)
 - Modify: `src/commands/list.rs` (imports; a new `vocabularies` helper; `ready`
   :301-340; `next` :343-380; `prime` :463-510)
 - Modify: `tests/common/mod.rs` (`cmd`, `raw` and `shim_command`)
-- Modify: ops `cli.toml` (the `tasks ready`, `tasks next` and `tasks prime` rows), then
-  copy it to `tools/cli.toml`
+- Adopt: `tools/cli.toml` (and `tools/cli_surface.py` if the adopt changes it) at the
+  ops commit Task 0.1 recorded as `inventory: Task 1.6 = <sha>`
 - Test: `src/needs.rs` (unit), `tests/cli.rs`, `src/surface.rs`
+
+**Ops rows (landed by Task 0.1):** the edit to ops `cli.toml` for this task only. Add the
+following line directly after the `--max-complexity` line of the `tasks ready` row and of
+the `tasks next` row, and a third time directly after
+`{ names = ["--closed"], value = "none" },` in the `tasks prime` row:
+
+```toml
+  { names = ["--without"], value = "string", repeatable = true },
+```
+
+**Where a withheld name hides (spec §4.3).** A need means what the task's own project
+declares, so hiding is decided per task against that project's vocabulary, never against
+the union of the scope's. The two sources differ only at resolution:
+
+- `TASKS_WITHOUT` names are lenient: any name is accepted.
+- `--without` names are strict: one that no project in scope declares is refused with
+  `unknown_need`, because it is a typo.
+
+Once resolved, both behave the same way. A name hides a task only when the task needs it
+**and** the task's project declares it. So a flag name hides in the projects that declare
+it, and nowhere else. A record still carrying `needs: [quiet]` in a project whose
+`[needs]` no longer declares `quiet` is not hidden by either source; `tasks check`
+already reports it as `unknown_need` (Task 1.2). Because the hiding rule is the same for
+both sources, `Without` keeps one name set; strictness lives only in `resolve`.
 
 **Interfaces:**
 - Consumes: `Vocabulary`, `Error::UnknownNeed` and `Project.needs` (Task 1.2);
-  `Task.needs`; `add --need` (Task 1.3); `task_ids`, `declare_needs`, `warnings_of`
-  and `err_kind`.
-- Produces:
+  `Task.needs`; `add --need` (Task 1.3); `task_ids`, `declare_needs`, `seed_needs`,
+  `warnings_of` and `err_kind`.
+- Produces in `src/needs.rs`:
   - `pub const WITHOUT_ENV: &str = "TASKS_WITHOUT";`
+  - `pub type Vocabularies<'a> = std::collections::HashMap<&'a str, &'a Vocabulary>;`:
+    each in-scope project's vocabulary, by prefix.
+  - `pub fn vocabulary_of<'a>(vocabs: &Vocabularies<'a>, task: &Task) -> &'a Vocabulary`.
+    It panics when the task's prefix is not in the map. Every task a view filters was
+    scanned from a project in scope, and `Project::scan` refuses a record whose prefix
+    differs from its project's, so a miss is a caller bug.
   - `#[derive(Debug, Default, Clone, PartialEq, Eq)] pub struct Without { names: BTreeSet<String> }`
     with these methods:
-    - `pub fn resolve(flag: &[String], env: Option<&str>, vocabs: &[&Vocabulary]) -> Result<Without>`.
-      Flag names are strict: a name that no vocabulary declares is `unknown_need`. Env
-      names are lenient: the value is split on `,`, trimmed, and empty entries dropped.
-      The result is the union of the two.
-    - `pub fn from_env(flag: &[String], vocabs: &[&Vocabulary]) -> Result<Without>`.
+    - `pub fn resolve(flag: &[String], env: Option<&str>, vocabs: &Vocabularies<'_>) -> Result<Without>`.
+      Flag names are strict: one that no vocabulary in `vocabs` declares is
+      `unknown_need`. Env names are lenient: the value is split on `,`, trimmed, and empty
+      entries dropped. The result is the union of the two.
+    - `pub fn from_env(flag: &[String], vocabs: &Vocabularies<'_>) -> Result<Without>`.
       It reads `TASKS_WITHOUT`; non-UTF-8 is `validation`.
-    - `pub fn hides(&self, task: &Task) -> bool`
+    - `pub fn hides(&self, task: &Task, vocab: &Vocabulary) -> bool`, where `vocab` is
+      the vocabulary of the task's own project. True when the task needs a withheld name
+      that `vocab` declares.
     - `pub fn is_empty(&self) -> bool`
     - `pub fn names(&self) -> impl Iterator<Item = &str>`
-    - `pub fn retain(&self, tasks: &mut Vec<Task>) -> usize`
+    - `pub fn retain(&self, tasks: &mut Vec<Task>, vocabs: &Vocabularies<'_>) -> usize`. It
+      looks up each task's vocabulary with `vocabulary_of`, drops the hidden tasks, and
+      returns how many went.
     - `pub fn warning(&self, hidden: usize) -> Option<String>`. The text is
       `without <names>: <n> task(s) hidden`.
-  - `pub struct WithoutArgs { #[arg(long = "without")] pub without: Vec<String> }` in
-    `src/cli.rs`.
-  - In `src/commands/list.rs`:
-    `pub(super) fn vocabularies(ctx: &ReadCtx) -> Vec<&crate::needs::Vocabulary>`
-    (the lanes view in Slice 3 reuses it), and these new signatures:
+- Produces in `src/cli.rs`:
+  `pub struct WithoutArgs { #[arg(long = "without")] pub without: Vec<String> }`.
+- Produces in `src/commands/list.rs`:
+  - `pub(super) fn vocabularies(scope: &Scope) -> crate::needs::Vocabularies<'_>`. It
+    takes the scope, not the `ReadCtx`, so a caller can hold the map while it pushes to
+    `ctx.warnings`. The lanes view in Slice 3 reuses it.
+  - These new signatures:
     - `ready(ctx, filter, limit, max_complexity, without: Vec<String>)`
     - `next(ctx, max_complexity, without: Vec<String>)`
     - `prime(ctx, closed, without: Vec<String>)`
@@ -1453,10 +1591,10 @@ git commit -m "feat(list): filter list and ready by need"
 Add to `src/needs.rs`'s `tests` module:
 
 ```rust
-    fn task_needing(needs: &str) -> Task {
+    fn task_needing(id: &str, needs: &str) -> Task {
         crate::format::parse_task(
             &format!(
-                "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\nneeds: [{needs}]\n\
+                "---\nid: {id}\ntitle: T\nstatus: todo\npriority: 2\nneeds: [{needs}]\n\
                  created: 2026-10-03T00:00:00Z\nupdated: 2026-10-03T00:00:00Z\n\
                  depends: []\ntags: []\n---\n"
             ),
@@ -1472,35 +1610,42 @@ Add to `src/needs.rs`'s `tests` module:
     #[test]
     fn the_variable_is_trimmed_lenient_and_joins_the_strict_flag() {
         let declared = vocab(&[("quiet", true), ("owner", false)]);
-        let without = Without::resolve(&[], Some(",quiet, "), &[&declared]).unwrap();
+        let sci = Vocabularies::from([("sci", &declared)]);
+        let without = Without::resolve(&[], Some(",quiet, "), &sci).unwrap();
         assert_eq!(names(&without), ["quiet"], "whitespace and empty entries drop");
-        let without = Without::resolve(&[], Some(""), &[&declared]).unwrap();
+        let without = Without::resolve(&[], Some(""), &sci).unwrap();
         assert!(without.is_empty(), "an empty variable contributes nothing");
-        assert!(Without::resolve(&[], None, &[&declared]).unwrap().is_empty());
-        let without = Without::resolve(&[], Some("gpu"), &[&declared]).unwrap();
+        assert!(Without::resolve(&[], None, &sci).unwrap().is_empty());
+        let without = Without::resolve(&[], Some("gpu"), &sci).unwrap();
         assert_eq!(names(&without), ["gpu"], "an undeclared variable name is no error");
-        let without = Without::resolve(&["owner".into()], Some("quiet"), &[&declared]).unwrap();
+        let without = Without::resolve(&["owner".into()], Some("quiet"), &sci).unwrap();
         assert_eq!(names(&without), ["owner", "quiet"], "the flag adds to the variable");
 
-        let error = Without::resolve(&["gpu".into()], Some("quiet"), &[&declared]).unwrap_err();
+        let error = Without::resolve(&["gpu".into()], Some("quiet"), &sci).unwrap_err();
         assert_eq!(error.kind(), "unknown_need", "the flag is strict");
         let none = Vocabulary::new();
+        let both = Vocabularies::from([("fam", &none), ("sci", &declared)]);
         assert!(
-            Without::resolve(&["quiet".into()], None, &[&none, &declared]).is_ok(),
+            Without::resolve(&["quiet".into()], None, &both).is_ok(),
             "one project in scope declaring it is enough"
         );
-        let error = Without::resolve(&["quiet".into()], None, &[&none]).unwrap_err();
+        let fam = Vocabularies::from([("fam", &none)]);
+        let error = Without::resolve(&["quiet".into()], None, &fam).unwrap_err();
         assert_eq!(error.kind(), "unknown_need");
     }
 
     #[test]
     fn without_hides_a_task_needing_any_withheld_name_and_counts_it() {
         let declared = vocab(&[("quiet", true), ("owner", false)]);
-        let without = Without::resolve(&["quiet".into()], None, &[&declared]).unwrap();
-        assert!(without.hides(&task_needing("owner, quiet")));
-        assert!(!without.hides(&task_needing("owner")));
-        let mut tasks = vec![task_needing("quiet"), task_needing("owner")];
-        assert_eq!(without.retain(&mut tasks), 1);
+        let sci = Vocabularies::from([("sci", &declared)]);
+        let without = Without::resolve(&["quiet".into()], None, &sci).unwrap();
+        assert!(without.hides(&task_needing("sci-000001", "owner, quiet"), &declared));
+        assert!(!without.hides(&task_needing("sci-000001", "owner"), &declared));
+        let mut tasks = vec![
+            task_needing("sci-000001", "quiet"),
+            task_needing("sci-000002", "owner"),
+        ];
+        assert_eq!(without.retain(&mut tasks, &sci), 1);
         assert_eq!(tasks[0].needs, ["owner"]);
         assert_eq!(
             without.warning(1).as_deref(),
@@ -1508,23 +1653,76 @@ Add to `src/needs.rs`'s `tests` module:
         );
         assert_eq!(without.warning(0), None);
     }
+
+    #[test]
+    fn without_hides_only_where_the_owning_project_declares_the_name() {
+        // sci declares quiet; fam declares nothing but keeps a record naming quiet. The
+        // union of the two vocabularies declares quiet, so a union check would hide both.
+        let declared = vocab(&[("quiet", true)]);
+        let none = Vocabulary::new();
+        let scope = Vocabularies::from([("sci", &declared), ("fam", &none)]);
+        let needy = task_needing("sci-000001", "quiet");
+        let stale = task_needing("fam-000001", "quiet");
+        for (source, without) in [
+            ("variable", Without::resolve(&[], Some("quiet"), &scope).unwrap()),
+            ("flag", Without::resolve(&["quiet".into()], None, &scope).unwrap()),
+        ] {
+            assert!(without.hides(&needy, &declared), "{source}");
+            assert!(!without.hides(&stale, &none), "{source}: fam never declared quiet");
+            assert!(
+                std::ptr::eq(vocabulary_of(&scope, &stale), &none),
+                "{source}: the task's own project supplies the vocabulary"
+            );
+            let mut tasks = vec![needy.clone(), stale.clone()];
+            assert_eq!(without.retain(&mut tasks, &scope), 1, "{source}");
+            assert_eq!(tasks.len(), 1, "{source}");
+            assert_eq!(tasks[0].id, stale.id, "{source}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "not in the vocabularies in scope")]
+    fn a_task_from_outside_the_scope_is_a_caller_bug() {
+        let declared = vocab(&[("quiet", true)]);
+        let scope = Vocabularies::from([("sci", &declared)]);
+        let without = Without::resolve(&[], Some("quiet"), &scope).unwrap();
+        let _ = without.retain(&mut vec![task_needing("fam-000001", "quiet")], &scope);
+    }
 ```
 
 - [ ] **Step 2: Run them to see them fail**
 
 Run: `just test-one needs::`
-Expected: compile failure, `cannot find type Without`.
+Expected: compile failure, `cannot find type Without` and `cannot find type Vocabularies`.
 
 - [ ] **Step 3: Implement `Without`**
 
-In `src/needs.rs`, add `use crate::model::Task;` to the imports, and add:
+In `src/needs.rs`, replace `use std::collections::{BTreeMap, BTreeSet};` with
+`use std::collections::{BTreeMap, BTreeSet, HashMap};`, add `use crate::model::Task;`
+to the imports, and add:
 
 ```rust
 /// The variable a session sets for the needs it cannot meet (spec §4.3).
 pub const WITHOUT_ENV: &str = "TASKS_WITHOUT";
 
+/// Each in-scope project's vocabulary, by prefix. A task's needs mean what its own
+/// project declares, so a view looks a task's vocabulary up here rather than in the
+/// union of the scope's.
+pub type Vocabularies<'a> = HashMap<&'a str, &'a Vocabulary>;
+
+/// The vocabulary of the project `task` belongs to. Every task a view filters was scanned
+/// from a project in scope, and `Project::scan` refuses a record whose prefix is not its
+/// project's, so a miss is a bug in the caller, not a state to tolerate.
+pub fn vocabulary_of<'a>(vocabs: &Vocabularies<'a>, task: &Task) -> &'a Vocabulary {
+    vocabs
+        .get(task.id.prefix.as_str())
+        .copied()
+        .unwrap_or_else(|| panic!("{}: project {} is not in the vocabularies in scope", task.id, task.id.prefix))
+}
+
 /// The needs a session cannot meet: the union of `--without` and `TASKS_WITHOUT`. A task
-/// needing any of them is hidden from `ready`, `next`, and `prime`.
+/// is hidden from `ready`, `next`, and `prime` when it needs one of them that its own
+/// project declares.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Without {
     names: BTreeSet<String>,
@@ -1532,13 +1730,14 @@ pub struct Without {
 
 impl Without {
     /// `flag` is strict: a name no vocabulary in scope declares is a typo, refused with
-    /// `unknown_need`. `env` is lenient: set once per host for every project, so a name
-    /// a project never declares simply hides nothing there. Entries are comma-separated,
-    /// trimmed, and empty ones dropped; an empty variable contributes nothing.
-    pub fn resolve(flag: &[String], env: Option<&str>, vocabs: &[&Vocabulary]) -> Result<Without> {
+    /// `unknown_need`. `env` is lenient: set once per host for every project, so any name
+    /// is accepted. Entries are comma-separated, trimmed, and empty ones dropped; an
+    /// empty variable contributes nothing. Strictness ends here: `hides` treats every
+    /// name alike, hiding only in the projects that declare it.
+    pub fn resolve(flag: &[String], env: Option<&str>, vocabs: &Vocabularies<'_>) -> Result<Without> {
         let mut names = BTreeSet::new();
         for name in flag {
-            if !vocabs.iter().any(|vocab| vocab.contains_key(name)) {
+            if !vocabs.values().any(|vocab| vocab.contains_key(name)) {
                 return Err(Error::UnknownNeed(format!(
                     "--without {name:?}: no project in scope declares this need in {}'s [needs]",
                     crate::repo::CONFIG_REL
@@ -1558,7 +1757,7 @@ impl Without {
     }
 
     /// `resolve` with the variable read from the process environment.
-    pub fn from_env(flag: &[String], vocabs: &[&Vocabulary]) -> Result<Without> {
+    pub fn from_env(flag: &[String], vocabs: &Vocabularies<'_>) -> Result<Without> {
         let env = match std::env::var(WITHOUT_ENV) {
             Ok(value) => Some(value),
             Err(std::env::VarError::NotPresent) => None,
@@ -1571,8 +1770,13 @@ impl Without {
         Self::resolve(flag, env.as_deref(), vocabs)
     }
 
-    pub fn hides(&self, task: &Task) -> bool {
-        task.needs.iter().any(|need| self.names.contains(need))
+    /// `vocab` is the vocabulary of `task`'s own project. A name that project does not
+    /// declare hides nothing there (spec §4.3), even when another project in scope
+    /// declares it.
+    pub fn hides(&self, task: &Task, vocab: &Vocabulary) -> bool {
+        task.needs
+            .iter()
+            .any(|need| self.names.contains(need) && vocab.contains_key(need))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1583,10 +1787,11 @@ impl Without {
         self.names.iter().map(String::as_str)
     }
 
-    /// Drops the hidden tasks and returns how many went.
-    pub fn retain(&self, tasks: &mut Vec<Task>) -> usize {
+    /// Drops the hidden tasks, each judged by its own project's vocabulary, and returns
+    /// how many went.
+    pub fn retain(&self, tasks: &mut Vec<Task>, vocabs: &Vocabularies<'_>) -> usize {
         let before = tasks.len();
-        tasks.retain(|task| !self.hides(task));
+        tasks.retain(|task| !self.hides(task, vocabulary_of(vocabs, task)));
         before - tasks.len()
     }
 
@@ -1769,6 +1974,84 @@ fn needs_without_variable_is_lenient_trimmed_and_joins_the_flag() {
         .unwrap();
     assert_eq!(err_kind(&out), "unknown_need");
 }
+
+#[test]
+fn needs_without_hides_only_where_the_owning_project_declares_the_name() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let capture = id_of(env.json(&sci, &["add", "Capture", "-p", "0", "--need", "quiet"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+    // fam declares no needs, yet its record still names quiet (say, from a vocabulary
+    // since dropped). The union of the scope's vocabularies declares quiet; fam's does not.
+    let stale = id_of(env.json(&fam, &["add", "Stale", "-p", "1"]));
+    seed_needs(&fam, &stale, "quiet");
+    let run = |variable: Option<&str>, args: &[&str]| -> serde_json::Value {
+        let mut cmd = env.cmd(&fam);
+        if let Some(value) = variable {
+            cmd.env("TASKS_WITHOUT", value);
+        }
+        let out = cmd.args(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+
+    // In fam alone the variable hides nothing, on every view.
+    assert_eq!(task_ids(&run(Some("quiet"), &["ready"])), [stale.clone()]);
+    assert_eq!(
+        run(Some("quiet"), &["next"])["next"]["task"]["id"],
+        stale.as_str()
+    );
+    let prime = run(Some("quiet"), &["prime"]);
+    assert!(
+        prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == stale.as_str()),
+        "{prime}"
+    );
+
+    // Across both projects the variable and the flag each hide sci's capture, and only it.
+    assert_eq!(
+        run(None, &["next", "--all-projects"])["next"]["task"]["id"],
+        capture.as_str()
+    );
+    let mut expected = vec![plain.clone(), stale.clone()];
+    expected.sort();
+    for (source, variable, args) in [
+        ("variable", Some("quiet"), &["--all-projects"][..]),
+        ("flag", None, &["--all-projects", "--without", "quiet"][..]),
+    ] {
+        let v = run(variable, &[&["ready"][..], args].concat());
+        let mut ids = task_ids(&v);
+        ids.sort();
+        assert_eq!(ids, expected, "{source}: {v}");
+        assert!(
+            warnings_of(&v).contains(&"without quiet: 1 task(s) hidden".to_string()),
+            "{source}: {v}"
+        );
+        assert_eq!(
+            run(variable, &[&["next"][..], args].concat())["next"]["task"]["id"],
+            stale.as_str(),
+            "{source}"
+        );
+        let prime = run(variable, &[&["prime"][..], args].concat());
+        let ready: Vec<&str> = prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        assert!(!ready.contains(&capture.as_str()), "{source}: {prime}");
+        assert!(ready.contains(&stale.as_str()), "{source}: {prime}");
+    }
+}
 ```
 
 - [ ] **Step 6: Run them to see them fail**
@@ -1784,8 +2067,8 @@ In `src/cli.rs`, directly after `FilterArgs`:
 /// The needs this session cannot meet, shared by the pickers (lanes-needs spec §4.3).
 #[derive(Args, Debug, Default, Clone)]
 pub struct WithoutArgs {
-    /// Hide tasks that need this (repeatable); adds to TASKS_WITHOUT. Refused when no
-    /// project in scope declares it.
+    /// Hide tasks that need this (repeatable), in the projects that declare it; adds to
+    /// TASKS_WITHOUT. Refused when no project in scope declares it.
     #[arg(long = "without", value_name = "NEED")]
     pub without: Vec<String>,
 }
@@ -1830,16 +2113,18 @@ In `src/commands/mod.rs`, replace the three dispatch arms:
         } => list::prime(open_read_ctx(dir, &scope)?, closed, without.without),
 ```
 
-In `src/commands/list.rs`, add `use crate::needs::Without;` to the imports, and
-directly after `warn_hidden`:
+In `src/commands/list.rs`, add `use crate::needs::{Vocabularies, Without};` to the
+imports, and directly after `warn_hidden`:
 
 ```rust
-/// Every in-scope project's vocabulary: the names `--without` may use (spec §4.3).
-pub(super) fn vocabularies(ctx: &ReadCtx) -> Vec<&crate::needs::Vocabulary> {
-    ctx.scope
+/// Every in-scope project's vocabulary, by prefix: the names `--without` may use, and
+/// the vocabulary each task's needs are judged by (spec §4.3). It borrows the scope
+/// alone, so a caller may hold it while pushing to `ctx.warnings`.
+pub(super) fn vocabularies(scope: &Scope) -> Vocabularies<'_> {
+    scope
         .projects()
         .iter()
-        .map(|project| &project.needs)
+        .map(|project| (project.prefix.as_str(), &project.needs))
         .collect()
 }
 ```
@@ -1848,7 +2133,7 @@ pub(super) fn vocabularies(ctx: &ReadCtx) -> Vec<&crate::needs::Vocabulary> {
 `let cutoff = ...;`, add:
 
 ```rust
-    let without = Without::from_env(&without, &vocabularies(&ctx))?;
+    let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
 ```
 
 Then, directly after `warn_hidden(&mut ctx, hidden);` and before
@@ -1856,24 +2141,27 @@ Then, directly after `warn_hidden(&mut ctx, hidden);` and before
 
 ```rust
     if !without.is_empty() {
-        let hidden = without.retain(&mut picked.tasks);
+        let vocabs = vocabularies(&ctx.scope);
+        let hidden = without.retain(&mut picked.tasks, &vocabs);
+        let _ = without.retain(&mut picked.deferred, &vocabs);
         ctx.warnings.extend(without.warning(hidden));
-        let _ = without.retain(&mut picked.deferred);
     }
 ```
 
 `next`: the signature becomes
 `pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>, without: Vec<String>) -> Result<Output>`.
-After `let cutoff = ...;`, add the same `let without = Without::from_env(...)?;` line.
-After the `for task in ready.deferred { ... }` loop that fills `omitted`, and before
+After `let cutoff = ...;`, add the same
+`let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;` line. After the
+`for task in ready.deferred { ... }` loop that fills `omitted`, and before
 `if let Some(cutoff) = cutoff {`, add the following. The pool holds the parked
 candidates too, so they pass the same gate.
 
 ```rust
     if !without.is_empty() {
-        let hidden = without.retain(&mut pool);
+        let vocabs = vocabularies(&ctx.scope);
+        let hidden = without.retain(&mut pool, &vocabs);
+        let _ = without.retain(&mut omitted, &vocabs);
         ctx.warnings.extend(without.warning(hidden));
-        let _ = without.retain(&mut omitted);
     }
 ```
 
@@ -1884,36 +2172,36 @@ Directly after `warn_hidden(&mut ctx, hidden);`, add:
 
 ```rust
     if !without.is_empty() {
-        let hidden = without.retain(&mut ready);
+        let hidden = without.retain(&mut ready, &vocabularies(&ctx.scope));
         ctx.warnings.extend(without.warning(hidden));
     }
 ```
 
-- [ ] **Step 8: Change the ops inventory, then copy it**
+Each block takes the map inside it: `halt_snapshots`, `ready_tasks` and `warn_hidden`
+borrow `ctx` mutably, so the map cannot be held across them.
 
-In `$OPS/.worktrees/ece1e2-cli/cli.toml`, add the following line in two places: directly
-after the `--max-complexity` line of the `tasks ready` row and of the `tasks next` row.
-Add it a third time directly after `{ names = ["--closed"], value = "none" },` in the
-`tasks prime` row.
+- [ ] **Step 8: Adopt this task's rows**
 
-```toml
-  { names = ["--without"], value = "string", repeatable = true },
-```
-
-In the ops worktree, run `just test-one tests.test_cli`. Expected: PASS. Then
-`cp "$OPS/.worktrees/ece1e2-cli/cli.toml" tools/cli.toml`.
+In .worktrees/ece1e2-work-selection, run
+`python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`, where `<sha>` is the value of
+the `inventory: Task 1.6 = <sha>` note on tasks-ece1e2 (`tasks show tasks-ece1e2`). It
+adopts the **Ops rows** above on top of Tasks 1.3 and 1.5's, and refreshes
+`tools/cli_surface.py` when the pair changed. Then run
+`just test-one parser_surface_equals_table`. Expected: PASS.
 
 - [ ] **Step 9: Run the focused tests to see them pass**
 
 Run `just test-one needs::`, `just test-one --test cli needs_without_` and
 `just test-one surface`. Then run `just test-one --test cli cutoff` to confirm the
 cutoff tests are unchanged.
-Expected: PASS for all.
+Expected: PASS for all. A surface difference is handled as in Task 1.3 Step 5: never by
+editing `tools/cli.toml`.
 
 - [ ] **Step 10: Run the fast suite and the check, then commit**
 
 Run `cargo fmt`, then `just test-fast` and `just check`. Expected: both pass. All
-existing picker, park, halt and filter tests pass unchanged.
+existing picker, park, halt and filter tests pass unchanged. Run `git status`; when it
+shows `tools/cli_surface.py` new or modified, add it as well.
 
 ```bash
 git add src/needs.rs src/cli.rs src/commands/mod.rs src/commands/list.rs \
@@ -1968,9 +2256,11 @@ Append this paragraph:
 ```text
     --without N (repeatable) hides tasks needing N, as does each comma-separated name
     in TASKS_WITHOUT; the two are a union. The flag is strict: a name no project in
-    scope declares is unknown_need. The variable is lenient: an undeclared name hides
-    nothing and raises nothing, since a host sets it once for every project. One
-    warning, "without <names>: <n> task(s) hidden", counts what was hidden.
+    scope declares is unknown_need. The variable is lenient: any name is accepted,
+    since a host sets it once for every project. Either way a name hides a task only
+    when the task's own project declares it, so a name hides nothing in a project
+    that does not declare it, even a record still naming it. One warning,
+    "without <names>: <n> task(s) hidden", counts what was hidden.
 ```
 
 §5 `next` and `prime`: add `[--without N]...` to each usage line, with the sentence
@@ -2082,7 +2372,8 @@ After the `TASKS_MAX_COMPLEXITY` paragraph (ending
 
 ```markdown
 `TASKS_WITHOUT` (comma-separated need names) is the other half of a session's envelope:
-`ready`, `next`, and `prime` hide tasks needing any of them and say how many.
+`ready`, `next`, and `prime` hide tasks needing any of them, in the projects that declare
+the name, and say how many.
 `--without` adds to it for one call and refuses a name no project in scope declares; the
 variable never errors, so a host in ordinary use can set `TASKS_WITHOUT=quiet` once for
 every project. Needs are declared per project in `[needs]` (see the design's §6). Design:
@@ -2108,7 +2399,7 @@ task (`need_held`), and `start --force --reason` overrides with audit notes. A n
 is refused under another session's live claim, and under the caller's own claim it
 recomputes `holds`. `ready`, `next` and `prime` hide held-back work with aggregated
 warnings. A host-wide `claims/.holds.lock` makes the check-and-save atomic across
-projects. Spec: `docs/specs/2026-10-03-lanes-needs-groups-design.md` §4.4, §4.5, and the
+projects, and it covers every change to `holds` through `save`'s rollback. Spec: `docs/specs/2026-10-03-lanes-needs-groups-design.md` §4.4, §4.5, and the
 holds parts of §8, §9 and §10.
 
 **Starts from:** Slice 1's end state. This slice consumes these Slice 1 symbols exactly as
@@ -2134,11 +2425,35 @@ session for every call, so two `env.json` calls are the *same* session. Every te
 needs two sessions uses the `as_agent`-based helpers below (`TASKS_SESSION` plus the
 runner's live pid).
 
+**"This session" is the claim-ownership rule.** Whether a hold is the caller's own is
+decided by the rule every claim check already uses (work-claims §6.2.2): the resolved
+identity equals the claim's session, or, in relay mode without an explicit
+`TASKS_SESSION`, the claim's recorded process proof names the caller's harness. Task 2.2
+moves that rule out of `Ctx` into the free function `commands::ownership`, so the read
+views can apply it too. A session that moved from native identity `c1` to relay identity
+`claude-code:c1` therefore keeps its holds (Task 2.2 extends the existing acceptance test
+for that move).
+
+**CLI inventory.** The rows live in ops `cli.toml` and land there first. The only
+CLI-touching task in this slice is Task 2.4 (`edit --reason`). It keeps its exact row
+edit in a block titled **Ops rows (landed by Task 0.1)**. Task 0.1 applies that block in
+ops as its own commit, in execution order after Slice 1's, and records it as the note
+`inventory: Task 2.4 = <sha>` on tasks-ece1e2. Task 2.4 never edits ops. Its inventory
+step adopts the rows with `python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`, where
+`$OPS` is the `ops` root from `tasks projects`. Never write `tools/cli.toml` by hand or
+with `cp`.
+
+**Clippy and Slice 1's lint attribute.** Slice 1 gives `needs::exclusive_of` the
+attribute `#[cfg_attr(not(test), expect(dead_code, …))]`. Task 2.1 is its first caller,
+so Task 2.1 deletes the attribute in the same commit. Otherwise the expectation goes
+unfulfilled and clippy fails.
+
 ### File Structure
 
 - `src/holds.rs`: **new.** It contains:
   - `Holder`;
-  - `HoldSnapshot`, with `load`, `load_from_paths`, `holder` and `is_empty`;
+  - `Mine`, the caller's own holding claims;
+  - `HoldSnapshot`, with `load`, `load_from_paths`, `mine`, `holder` and `is_empty`;
   - `held_back`;
   - `HeldWarnings`;
   - `lock_path_with` and `lock`.
@@ -2146,20 +2461,26 @@ runner's live pid).
   It is the read model of holds across every registered claim store, plus the host-wide
   lock.
 - `src/main.rs`: `mod holds;`.
+- `src/needs.rs`: Task 2.1 deletes the `expect(dead_code)` attribute on `exclusive_of`.
 - `src/claims.rs`: `Claim.holds`, and the test fixtures that build `Claim` literals.
 - `src/output.rs`: `ClaimInfo.holds` (sparse).
 - `src/error.rs`: `Error::NeedHeld`, kind `need_held`.
 - `src/commands/mod.rs`:
+  - `ownership`, moved out of `impl Ctx` into a free function, and `own_holds`;
   - new `Ctx` fields `holds_lock`, `need_reason` and `need_overrides`;
   - `Ctx::guard_holds`, called from `transition` on every move to `doing`;
   - `Ctx::update_holds`, the needs save under one's own claim;
-  - `record_need_overrides`, which writes the audit notes.
+  - `Ctx::take_holds_lock`, and the holds-lock check in `save`;
+  - `record_need_overrides` and `note_need_holders`, the audit notes. The notes on a
+    holder are written only after the acquiring save has landed.
 - `src/commands/status.rs`: `start` passes `--reason` to the hold guard and writes the
-  override notes.
+  override notes. The `note` command's ownership call site.
+- `src/commands/park.rs`: the ownership call site.
 - `src/commands/edit.rs`: the `--force`/`--reason` rules, and the needs-change claim
   check plus holds update on the flag and editor paths.
 - `src/cli.rs`: `EditArgs.reason`.
-- `tools/cli.toml`: the `edit --reason` row.
+- `tools/cli.toml` (and `tools/cli_surface.py` when the adopt refreshes it): adopted from
+  ops at Task 2.4's inventory commit, never edited here.
 - `src/commands/list.rs`: `retain_unheld` in `ready`, `next` and `prime`.
 - `tests/cli.rs`: the holds helpers and end-to-end tests, appended at the end of the file.
 - `docs/specs/2026-08-29-tasks-design.md`, `docs/specs/2026-09-05-work-claims-design.md`,
@@ -2180,6 +2501,8 @@ runner's live pid).
   - the `Claim` literal in `claim_guard` (322-356, anchor `seen: now,`);
   - a new `Ctx::guard_holds` in `impl Ctx` (before `claim_guard`, line 267);
   - `transition` (930-971, anchor `ctx.claim_guard(&task.id, to, force)?;`).
+- Modify `src/needs.rs`: delete Slice 1's `expect(dead_code)` attribute on `exclusive_of`
+  (anchor `reason = "exclusive holds (slice 2) are its first caller"`).
 - Modify `tests/cli.rs`: append the helpers and the test.
 
 **Interfaces**
@@ -2442,16 +2765,32 @@ fn every_acquire_path_records_the_tasks_exclusive_needs_as_holds() {
     }
 ```
 
+- [ ] **Retire Slice 1's lint attribute on `exclusive_of`.** `guard_holds` is its first
+  non-test caller, so the `expect(dead_code)` that Slice 1 put on it is now unfulfilled,
+  and clippy's `-D warnings` fails on an unfulfilled expectation. In `src/needs.rs`,
+  delete these four lines directly above `pub fn exclusive_of(`:
+
+```rust
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "exclusive holds (slice 2) are its first caller")
+)]
+```
+
+  The doc comment above them stays. Then run
+  `grep -n 'expect(dead_code' src/needs.rs`. Expected: no output.
+
 - [ ] **Run the tests and confirm they pass.**
   - `just test-one --bin tasks holds_round_trip_on_a_claim_entry`
   - `just test-one --bin tasks a_claim_written_before_holds`
   - `just test-one --bin tasks claim_info_carries_holds`
   - `just test-one --test cli every_acquire_path_records_the_tasks_exclusive_needs_as_holds`
 
-- [ ] Run `just test-fast` (every existing test still passes) and `tasks check`.
+- [ ] Run `just test-fast` (every existing test still passes), then `just check`. It runs
+  clippy with `-D warnings`, which would fail on a leftover `expect(dead_code)`.
 
 - [ ] **Commit.**
-  `git add src/claims.rs src/output.rs src/commands/mod.rs tests/cli.rs`
+  `git add src/needs.rs src/claims.rs src/output.rs src/commands/mod.rs tests/cli.rs`
   `git commit -m "feat(claims): record a task's exclusive needs as holds on every acquire"`
 
 ---
@@ -2465,23 +2804,49 @@ fn every_acquire_path_records_the_tasks_exclusive_needs_as_holds() {
   - the variant list (lines 3-55, after `Halted`);
   - `with_suffix` (line 89 area, after the `Halted` arm);
   - `kind` (line 121 area, after `"halted"`).
-- Modify `src/commands/mod.rs`: `Ctx::guard_holds` (from Task 2.1).
-- Modify `tests/cli.rs`: append the tests.
+- Modify `src/commands/mod.rs`:
+  - `impl Ctx`: remove the method `ownership` (173-206, with its doc comment from line
+    170), and re-add it as a free function after the `impl Ctx` block (before
+    `pub fn open_ctx`, line 374), next to the new `own_holds`;
+  - its call sites: `refuse_foreign_live_claim` (line 214), `claim_guard` (line 274),
+    `occupants` (line 773) and `follow_holder` (line 825), plus the two doc comments that
+    name `Ctx::ownership` (lines 762 and 791);
+  - `Ctx::guard_holds` (from Task 2.1).
+- Modify `src/commands/status.rs:179` and `src/commands/park.rs:42`: the `ctx.ownership`
+  call sites.
+- Modify `tests/cli.rs`:
+  - append the tests;
+  - extend `an_acceptance_mode_change_continues_a_natively_held_claim` (line 19975);
+  - the two comments that name `Ctx::ownership` (lines 19379 and 19952).
 
 **Interfaces**
 - Consumes:
-  - `claims::{ClaimStore::{path_for, load_from, iter}, liveness_with, boot_id, proc_stat, ProcStat, Liveness}`;
+  - `claims::{Claim, ClaimStore::{path_for, load_from, iter}, liveness_with, boot_id, proc_stat, ProcStat, Liveness, Resolution, continuation_identity}`;
   - `Registry.projects`;
-  - `needs::{Vocabulary, exclusive_of}`.
+  - `needs::{Vocabulary, exclusive_of}`;
+  - the body of today's `Ctx::ownership(&mut self, claim: &Claim, me: &Resolution) -> Result<Ownership>`.
+    It never reads `self`.
 - Produces:
+  - `pub(crate) fn ownership(claim: &claims::Claim, me: &claims::Resolution) -> Result<Ownership>`
+    in `commands`. This is the same rule with `&mut self` dropped. `Ctx::ownership` no
+    longer exists.
+  - `pub(crate) fn own_holds(snapshot: &holds::HoldSnapshot, me: &claims::Resolution) -> Result<holds::Mine>`
+    in `commands`.
   - `pub struct Holder { pub task: TaskId, pub session: String, pub prefix: String }`,
-    deriving Debug, Clone, PartialEq and Eq;
+    deriving Debug, Clone, PartialEq and Eq.
+  - `#[derive(Debug, Default)] pub struct Mine`: the caller's own live holding claims.
+    `Mine::default()` owns nothing, which is the unresolved-identity case: every hold
+    counts as another session's.
   - `pub struct HoldSnapshot`, with:
     - `pub fn load(registry: &Registry, now: OffsetDateTime) -> (HoldSnapshot, Vec<String>)`;
     - `pub fn load_from_paths(stores: impl IntoIterator<Item = (String, PathBuf)>, now: OffsetDateTime, boot_id: Option<&str>, stat: impl Fn(u32) -> ProcStat) -> (HoldSnapshot, Vec<String>)`;
-    - `pub fn holder(&self, need: &str, task: &TaskId, session: Option<&str>) -> Option<&Holder>`;
-  - `pub fn held_back(snapshot: &HoldSnapshot, vocab: &Vocabulary, task: &Task, session: Option<&str>) -> Option<(String, Holder)>`;
-  - `Error::NeedHeld(String)`, with kind `"need_held"`;
+    - `pub fn mine(&self, owns: impl FnMut(&Claim) -> Result<bool>) -> Result<Mine>`;
+    - `pub fn holder(&self, need: &str, task: &TaskId, mine: &Mine) -> Option<&Holder>`.
+      **This changes the contract's** `session: Option<&str>` to `mine: &Mine`. `None`
+      becomes `&Mine::default()`, and a session string becomes `own_holds(&snapshot, &me)?`.
+  - `pub fn held_back(snapshot: &HoldSnapshot, vocab: &Vocabulary, task: &Task, mine: &Mine) -> Option<(String, Holder)>`.
+    The last parameter changes the same way.
+  - `Error::NeedHeld(String)`, with kind `"need_held"`.
   - `Ctx::guard_holds`, which now refuses.
 
 **Steps**
@@ -2508,6 +2873,17 @@ mod tests {
 
     fn gone(_: u32) -> ProcStat {
         ProcStat::NotFound
+    }
+
+    /// An unresolved identity: no hold is the caller's.
+    fn nobody() -> Mine {
+        Mine::default()
+    }
+
+    /// The holds a caller owns by session equality alone, as an explicit
+    /// `TASKS_SESSION` caller does under `commands::ownership`.
+    fn session(snapshot: &HoldSnapshot, name: &str) -> Mine {
+        snapshot.mine(|claim| Ok(claim.session == name)).unwrap()
     }
 
     /// One claim entry seen at 10:00. With a pid, its liveness is the process's; without
@@ -2552,7 +2928,7 @@ mod tests {
             HoldSnapshot::load_from_paths(stores.clone(), now, Some("boot"), alive);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(
-            live.holder("quiet", &id("sci-000002"), None),
+            live.holder("quiet", &id("sci-000002"), &nobody()),
             Some(&Holder {
                 task: id("sci-000001"),
                 session: "a".into(),
@@ -2560,7 +2936,7 @@ mod tests {
             })
         );
         let (dead, _) = HoldSnapshot::load_from_paths(stores, now, Some("boot"), gone);
-        assert!(dead.holder("quiet", &id("sci-000002"), None).is_none());
+        assert!(dead.holder("quiet", &id("sci-000002"), &nobody()).is_none());
     }
 
     #[test]
@@ -2577,14 +2953,14 @@ mod tests {
             Some("boot"),
             alive,
         );
-        assert!(within.holder("quiet", &id("sci-000002"), None).is_some());
+        assert!(within.holder("quiet", &id("sci-000002"), &nobody()).is_some());
         let (past, _) = HoldSnapshot::load_from_paths(
             stores,
             at("2026-10-03T15:00:00Z"),
             Some("boot"),
             alive,
         );
-        assert!(past.holder("quiet", &id("sci-000002"), None).is_none());
+        assert!(past.holder("quiet", &id("sci-000002"), &nobody()).is_none());
     }
 
     #[test]
@@ -2598,7 +2974,7 @@ mod tests {
             alive,
         );
         assert!(warnings.is_empty());
-        assert!(snapshot.holder("quiet", &id("sci-000002"), None).is_none());
+        assert!(snapshot.holder("quiet", &id("sci-000002"), &nobody()).is_none());
     }
 
     #[test]
@@ -2618,7 +2994,7 @@ mod tests {
         );
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].starts_with("hold state unknown for fam ("), "{warnings:?}");
-        assert!(snapshot.holder("quiet", &id("sci-000002"), None).is_some());
+        assert!(snapshot.holder("quiet", &id("sci-000002"), &nobody()).is_some());
     }
 
     #[test]
@@ -2633,7 +3009,7 @@ mod tests {
         );
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].starts_with("hold state unknown for sci:"), "{warnings:?}");
-        assert!(snapshot.holder("quiet", &id("sci-000002"), None).is_none());
+        assert!(snapshot.holder("quiet", &id("sci-000002"), &nobody()).is_none());
     }
 
     #[test]
@@ -2651,14 +3027,39 @@ mod tests {
             alive,
         );
         // A claim on the target itself: a takeover, never a hold.
-        assert!(snapshot.holder("quiet", &id("sci-000001"), None).is_none());
+        assert!(snapshot.holder("quiet", &id("sci-000001"), &nobody()).is_none());
         // The holding session may take more work that needs what it holds.
-        assert!(snapshot.holder("quiet", &id("sci-000002"), Some("a")).is_none());
-        assert!(snapshot.holder("quiet", &id("sci-000002"), Some("b")).is_some());
+        assert!(snapshot.holder("quiet", &id("sci-000002"), &session(&snapshot, "a")).is_none());
+        assert!(snapshot.holder("quiet", &id("sci-000002"), &session(&snapshot, "b")).is_some());
         // Unresolved identity: every hold is someone else's.
-        assert!(snapshot.holder("quiet", &id("sci-000002"), None).is_some());
+        assert!(snapshot.holder("quiet", &id("sci-000002"), &nobody()).is_some());
         // A need nobody holds.
-        assert!(snapshot.holder("gpu", &id("sci-000002"), None).is_none());
+        assert!(snapshot.holder("gpu", &id("sci-000002"), &nobody()).is_none());
+    }
+
+    #[test]
+    fn whose_hold_it_is_follows_the_ownership_rule_not_the_session_string() {
+        let dir = tempfile::tempdir().unwrap();
+        let stores = vec![store(
+            dir.path(),
+            "sci",
+            &entry("sci-000001", "c1", Some(42), &["quiet"]),
+        )];
+        let (snapshot, _) = HoldSnapshot::load_from_paths(
+            stores,
+            at("2026-10-03T11:00:00Z"),
+            Some("boot"),
+            alive,
+        );
+        // A rule that owns the claim by its process (as relay proof does) makes the hold
+        // the caller's own, though the caller's session string is not `c1`.
+        let proved = snapshot.mine(|claim| Ok(claim.pid == Some(42))).unwrap();
+        assert!(snapshot.holder("quiet", &id("sci-000002"), &proved).is_none());
+        // The rule's error is the caller's error, never a silent "not mine".
+        let error = snapshot
+            .mine(|_| Err(crate::error::Error::Io("relay config unreadable".into())))
+            .unwrap_err();
+        assert!(error.to_string().contains("relay config unreadable"), "{error}");
     }
 }
 ```
@@ -2817,9 +3218,73 @@ fn claims_that_cannot_hold_do_not_hold_back_an_acquire() {
 }
 ```
 
+- [ ] **Extend the native-to-relay acceptance test.** A session that moves from native
+  identity `c1` to relay identity `claude-code:c1` keeps its claim by process proof. It
+  must keep its holds the same way. In
+  `an_acceptance_mode_change_continues_a_natively_held_claim` in `tests/cli.rs`, make
+  three edits.
+
+  First, replace
+
+```rust
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    let state = env.home.path().join("relay-state");
+    let after_start = env.home.path().join("after-start.toml");
+```
+
+  with
+
+```rust
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    // Lanes/needs §4.4: both tasks need the exclusive `quiet`. The first claim's hold is
+    // this session's only by proof once relay re-keys its identity, so the second start
+    // passes the hold gate only if the gate uses the ownership rule, not session strings.
+    hold_vocab(&dir);
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&dir, &["add", "Second", "-p", "2", "--need", "quiet"]));
+    let state = env.home.path().join("relay-state");
+    let after_start = env.home.path().join("after-start.toml");
+```
+
+  Second, in the script, replace
+
+```rust
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
+```
+
+  with
+
+```rust
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {second}\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
+```
+
+  The script runs under `set -e`, so a `need_held` refusal of the second start fails the
+  shim's exit-code assertion. The `after-start.toml` copy is taken before the second
+  start, so its one-claim assertion is unchanged.
+
+  Third, append at the end of the test, after
+  `assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");`:
+
+```rust
+    // The second start passed the hold gate: the first claim's hold was this session's by
+    // proof, although its session string `c1` differs from the resolved `claude-code:c1`.
+    let shown = env.json(&dir, &["show", &second]);
+    assert_eq!(shown["task"]["status"], "doing", "{shown}");
+    assert_eq!(shown["claim"]["holds"], serde_json::json!(["quiet"]), "{shown}");
+```
+
 - [ ] **Run the tests and confirm they fail.**
-  - `just test-one --bin tasks holds::tests` fails to compile: `HoldSnapshot`, `Holder` and
-    `OffsetDateTime` are unresolved.
+  - `just test-one --bin tasks holds::tests` fails to compile: `HoldSnapshot`, `Holder`,
+    `Mine` and `OffsetDateTime` are unresolved.
+  - `just test-one --test cli an_acceptance_mode_change_continues_a_natively_held_claim`
+    passes before the gate exists. It is the regression check for the gate below: a gate
+    that compared session strings would refuse the second start with `need_held`.
   - `just test-one --test cli every_acquire_path_refuses_a_need_another_session_holds` fails
     because `start` succeeds (`tasks ["start", …] as agent-b: … should exit 1`).
   - `a_park_releases_the_hold` and `a_claim_without_a_pid_holds_until_its_ttl` fail at their
@@ -2832,11 +3297,12 @@ fn claims_that_cannot_hold_do_not_hold_back_an_acquire() {
 //! every registered project, hold which exclusive needs. Read without any project's lock;
 //! an acquire that would record a hold reads it under the host-wide holds lock.
 
-use crate::claims::{ClaimStore, Liveness, ProcStat};
+use crate::claims::{Claim, ClaimStore, Liveness, ProcStat};
+use crate::error::Result;
 use crate::model::{Task, TaskId};
 use crate::needs::Vocabulary;
 use crate::registry::Registry;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use time::OffsetDateTime;
 
@@ -2849,12 +3315,32 @@ pub struct Holder {
     pub prefix: String,
 }
 
+/// The live holding claims that are the caller's own (§4.4 "Blocks other sessions
+/// only"), by store prefix and task. Built by `HoldSnapshot::mine` with the claim
+/// ownership rule (`commands::ownership`), never by comparing session strings. The
+/// default owns nothing: with no resolved identity and no proof, every hold is another
+/// session's.
+#[derive(Debug, Default)]
+pub struct Mine {
+    claims: BTreeSet<(String, TaskId)>,
+}
+
+impl Mine {
+    fn owns(&self, holder: &Holder) -> bool {
+        self.claims
+            .contains(&(holder.prefix.clone(), holder.task.clone()))
+    }
+}
+
 /// Every live hold on the host, by need name. Exclusive need names are one namespace
 /// across projects (§4.1), so a hold recorded in any project counts in every project that
 /// declares the same name exclusive.
 #[derive(Debug, Default)]
 pub struct HoldSnapshot {
     by_need: BTreeMap<String, Vec<Holder>>,
+    /// The full claim behind every holder: ownership by process proof reads its pid,
+    /// start time, boot and host, not only its session.
+    claims: BTreeMap<(String, TaskId), Claim>,
 }
 
 fn unknown(prefix: &str, error: &crate::error::Error) -> String {
@@ -2927,19 +3413,37 @@ impl HoldSnapshot {
                         prefix: prefix.clone(),
                     });
                 }
+                snapshot
+                    .claims
+                    .insert((prefix.clone(), task), claim.clone());
             }
         }
         (snapshot, warnings)
     }
 
+    /// Which live holding claims are the caller's own, decided once per command. `owns`
+    /// is the claim ownership rule (`commands::own_holds` passes `commands::ownership`:
+    /// the resolved identity, else the claim's process proof). Its error is returned, never
+    /// read as "not mine".
+    pub fn mine(&self, mut owns: impl FnMut(&Claim) -> Result<bool>) -> Result<Mine> {
+        let mut mine = Mine::default();
+        for (key, claim) in &self.claims {
+            if owns(claim)? {
+                mine.claims.insert(key.clone());
+            }
+        }
+        Ok(mine)
+    }
+
     /// The first live claim holding `need` that is neither on `task` itself (a takeover is
-    /// never a hold) nor `session`'s own (the holding session may take more work needing
-    /// it). `None` for `session` means the caller's identity is unknown, and every hold
-    /// counts as another session's.
-    pub fn holder(&self, need: &str, task: &TaskId, session: Option<&str>) -> Option<&Holder> {
-        self.by_need.get(need)?.iter().find(|holder| {
-            holder.task != *task && session.is_none_or(|session| holder.session != session)
-        })
+    /// never a hold) nor the caller's own (the holding session may take more work needing
+    /// it). `Mine::default()` means the caller owns nothing, and every hold counts as
+    /// another session's.
+    pub fn holder(&self, need: &str, task: &TaskId, mine: &Mine) -> Option<&Holder> {
+        self.by_need
+            .get(need)?
+            .iter()
+            .find(|holder| holder.task != *task && !mine.owns(holder))
     }
 }
 
@@ -2950,13 +3454,13 @@ pub fn held_back(
     snapshot: &HoldSnapshot,
     vocab: &Vocabulary,
     task: &Task,
-    session: Option<&str>,
+    mine: &Mine,
 ) -> Option<(String, Holder)> {
     crate::needs::exclusive_of(vocab, &task.needs)
         .into_iter()
         .find_map(|need| {
             snapshot
-                .holder(&need, &task.id, session)
+                .holder(&need, &task.id, mine)
                 .cloned()
                 .map(|holder| (need, holder))
         })
@@ -2985,8 +3489,89 @@ pub fn held_back(
             Error::NeedHeld(_) => "need_held",
 ```
 
-  In `src/commands/mod.rs`, replace the body of `Ctx::guard_holds` (Task 2.1) and update
-  its doc comment:
+  In `src/commands/mod.rs`, move the ownership rule out of `Ctx`, so a read view (which
+  has a `ReadCtx`, not a `Ctx`) applies the same rule as every claim check. Today's
+  method body never reads `self`.
+  - Delete the method `pub(crate) fn ownership(&mut self, claim: &crate::claims::Claim,
+    me: &crate::claims::Resolution) -> Result<Ownership>` from `impl Ctx`, with its doc
+    comment ("Spec §6.2.2 steps 2 and 3. …").
+  - Add it back as a free function directly after the closing `}` of `impl Ctx` (above
+    `pub fn open_ctx`). Its body is unchanged; only `&mut self,` is dropped. Below it, add
+    `own_holds`:
+
+```rust
+/// Spec §6.2.2 steps 2 and 3. Which of the two established the caller's right to act
+/// matters: only proof-only ownership records the claim's own identity, because only
+/// then is there no resolved identity that already agrees.
+pub(crate) fn ownership(
+    claim: &crate::claims::Claim,
+    me: &crate::claims::Resolution,
+) -> Result<Ownership> {
+    if let Some(identity) = me.identity()
+        && claim.session == identity.session
+    {
+        return Ok(Ownership::ByIdentity);
+    }
+    // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
+    // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
+    // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
+    let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
+    if explicit || !crate::relay::enabled()? {
+        return Ok(Ownership::Foreign);
+    }
+    let proved = crate::claims::proves_ownership(
+        claim,
+        &crate::relay::ancestry::current_scope(),
+        &crate::claims::hostname(),
+        crate::claims::boot_id().as_deref(),
+        &|key| {
+            std::env::var_os(key)
+                .and_then(|value| value.into_string().ok())
+                .filter(|value| !value.is_empty())
+        },
+    );
+    Ok(if proved {
+        Ownership::ByProof
+    } else {
+        Ownership::Foreign
+    })
+}
+
+/// Lanes/needs design §4.4 "Blocks other sessions only": the live holding claims in
+/// `snapshot` that are the caller's own, by the rule every claim check uses (`ownership`:
+/// the resolved identity, else the claim's process proof). A session that moved from
+/// native to relay identity therefore keeps its holds as it keeps its claims.
+pub(crate) fn own_holds(
+    snapshot: &crate::holds::HoldSnapshot,
+    me: &crate::claims::Resolution,
+) -> Result<crate::holds::Mine> {
+    snapshot.mine(|claim| Ok(ownership(claim, me)? != Ownership::Foreign))
+}
+```
+
+  - Update the call sites. In `src/commands/mod.rs`:
+    - `if self.ownership(&existing, &me)? != Ownership::Foreign {` becomes
+      `if ownership(&existing, &me)? != Ownership::Foreign {`;
+    - `Some(claim) => self.ownership(claim, &resolution)?,` becomes
+      `Some(claim) => ownership(claim, &resolution)?,`. This line is in `claim_guard`,
+      inside the initializer of `let ownership = …`. A `let` binding is not in scope in
+      its own initializer, so the call resolves to the function;
+    - `&& ctx.ownership(claim, &me)? == Ownership::Foreign` becomes
+      `&& ownership(claim, &me)? == Ownership::Foreign`;
+    - `match ctx.ownership(&claim, me) {` becomes `match ownership(&claim, me) {`.
+
+    In `src/commands/status.rs`,
+    `Some(claim) => ctx.ownership(claim, &me)? != crate::commands::Ownership::Foreign,`
+    becomes
+    `Some(claim) => crate::commands::ownership(claim, &me)? != crate::commands::Ownership::Foreign,`.
+
+    In `src/commands/park.rs`, `Some(claim) => match ctx.ownership(claim, &resolution)? {`
+    becomes `Some(claim) => match crate::commands::ownership(claim, &resolution)? {`.
+  - In the comments, replace `` `Ctx::ownership` `` with `` `ownership` ``. Run
+    `grep -rn 'Ctx::ownership' src tests`. It lists `src/commands/mod.rs` (2) and
+    `tests/cli.rs` (2) before the edit, and nothing after.
+
+  Replace the body of `Ctx::guard_holds` (Task 2.1) and update its doc comment:
 
 ```rust
     /// Lanes/needs design §4.4–§4.5: every acquire records the task's needs that this
@@ -2994,12 +3579,17 @@ pub fn held_back(
     /// refused with `need_held` while another session's live claim on another task holds
     /// one of them. Status and needs never change in one operation, so this always reads
     /// the needs on the record, and `start --force --reason` acquires the same ones.
+    ///
+    /// "Another session" is decided by `ownership`, as for the claim itself. The caller is
+    /// the identity this acquire records: the resolved one, or the claim's own on a
+    /// proof-only continuation. A hold whose session string differs but whose process
+    /// proof names this caller's harness is therefore its own.
     fn guard_holds(&mut self, task: &Task) -> Result<()> {
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
-        let session = match self.pending_claim.as_mut() {
+        let me = match self.pending_claim.as_mut() {
             Some((_, ClaimIntent::Acquire(claim))) => {
                 claim.holds = holds.clone();
-                claim.session.clone()
+                crate::claims::Resolution::Resolved(crate::claims::continuation_identity(claim))
             }
             _ => unreachable!("claim_guard records an acquire for every move to doing"),
         };
@@ -3011,8 +3601,9 @@ pub fn held_back(
             time::OffsetDateTime::now_utc(),
         );
         self.warnings.extend(warnings);
+        let mine = own_holds(&snapshot, &me)?;
         if let Some((need, holder)) =
-            crate::holds::held_back(&snapshot, &self.project.needs, task, Some(&session))
+            crate::holds::held_back(&snapshot, &self.project.needs, task, &mine)
         {
             return Err(Error::NeedHeld(format!(
                 "{id} needs {need}, held by {} ({}); override with `tasks start {id} --force \
@@ -3026,6 +3617,11 @@ pub fn held_back(
     }
 ```
 
+  `continuation_identity` builds an `Identity` from a claim's own fields. Here it is
+  applied to the pending claim, so its session is exactly the session this acquire
+  records. `ownership` reads only that session and, for proof, the other claim and the
+  process ancestry.
+
   `edit --status doing` and the editor move to `doing` pass through `transition`, so they
   are covered with no edit-side change. The editor's `.map_err(keep)` appends the kept-file
   suffix through `with_suffix`.
@@ -3037,11 +3633,14 @@ pub fn held_back(
   - `just test-one --test cli a_park_releases_the_hold`
   - `just test-one --test cli a_claim_without_a_pid_holds_until_its_ttl`
   - `just test-one --test cli claims_that_cannot_hold_do_not_hold_back_an_acquire`
+  - `just test-one --test cli an_acceptance_mode_change_continues_a_natively_held_claim`
+  - `just test-one --test cli an_acceptance_explicit_mismatch_stays_foreign_under_one_harness`
+    (the moved `ownership` still honours the explicit pair)
 
 - [ ] Run `just test-fast` and `tasks check`.
 
 - [ ] **Commit.**
-  `git add src/holds.rs src/main.rs src/error.rs src/commands/mod.rs tests/cli.rs`
+  `git add src/holds.rs src/main.rs src/error.rs src/commands/mod.rs src/commands/status.rs src/commands/park.rs tests/cli.rs`
   `git commit -m "feat(holds): refuse an acquire whose exclusive need another session holds"`
 
 ---
@@ -3054,25 +3653,35 @@ pub fn held_back(
   - `Ctx::new` (96-110);
   - `Ctx::guard_holds`;
   - `transition` (the `guard_holds` call);
-  - a new free fn `record_need_overrides`, placed after `append_stamped_note` (around line
-    880).
+  - new free items `HolderNotes`, `record_need_overrides` and `note_need_holders`,
+    placed after `append_stamped_note` (around line 880).
 - Modify `src/commands/status.rs:9-102` (`start`).
 - Modify `tests/cli.rs`: append the tests.
 
 **Interfaces**
-- Consumes: `holds::{Holder, HoldSnapshot::holder, held_back}`, and
+- Consumes: `holds::{Holder, Mine, HoldSnapshot::holder, held_back}`, `own_holds`, and
   `Error::NeedHeld`.
 - Produces:
   - the `Ctx` fields `need_reason: Option<String>` and
     `need_overrides: Vec<(String, holds::Holder)>`;
   - `fn guard_holds(&mut self, task: &Task, force: bool) -> Result<()>`;
-  - `pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<bool>`.
+  - `pub(crate) struct HolderNotes`: the notes owed to same-project holders;
+  - `pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<Option<HolderNotes>>`.
+    It appends the acquired task's notes, which land with that task's own save. It
+    returns `Some` when any held need was overridden.
+  - `pub(crate) fn note_need_holders(ctx: &mut Ctx, notes: HolderNotes)`, called only
+    after `save` has returned `Ok`. A failure there becomes a warning, because the
+    acquisition has already landed.
 
   The notes have these exact forms:
   - on the acquired task: `need override: acquired while <need> held by <holder id>
     (<holder session>): <reason>`;
   - on a same-project holder: `need override: <task id> acquired <need> by <acquiring
     session> while this task held it: <reason>`.
+
+  No holder note is written before the acquiring save succeeds. A refused or rolled-back
+  acquire (a validation failure in `save`, a failed record write) therefore never leaves
+  "acquired" on a holder.
 
   `--force` alone, on a held-back task, is a `validation` error.
 
@@ -3220,7 +3829,8 @@ fn a_refused_status_and_needs_change_leaves_the_record_and_start_resolves_the_ho
     /// design §4.5). Set by the command before the hold guard runs.
     need_reason: Option<String>,
     /// The held needs this command acquires past, with their holders: recorded by the hold
-    /// guard, turned into notes by `record_need_overrides` before `save`.
+    /// guard, turned into the acquired task's notes by `record_need_overrides` before
+    /// `save`. The holders' notes wait for `note_need_holders`, after `save` has landed.
     need_overrides: Vec<(String, crate::holds::Holder)>,
 ```
 
@@ -3243,12 +3853,13 @@ fn a_refused_status_and_needs_change_leaves_the_record_and_start_resolves_the_ho
     /// `force` comes only from `start` here (`edit --force` never reaches a move to doing).
     /// It overrides only with a reason; every held need is recorded for the audit notes.
     /// A claim on the task itself never holds it back, so a plain takeover needs none.
+    /// "Another session" is decided by `ownership`, as in Task 2.2.
     fn guard_holds(&mut self, task: &Task, force: bool) -> Result<()> {
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
-        let session = match self.pending_claim.as_mut() {
+        let me = match self.pending_claim.as_mut() {
             Some((_, ClaimIntent::Acquire(claim))) => {
                 claim.holds = holds.clone();
-                claim.session.clone()
+                crate::claims::Resolution::Resolved(crate::claims::continuation_identity(claim))
             }
             _ => unreachable!("claim_guard records an acquire for every move to doing"),
         };
@@ -3260,8 +3871,9 @@ fn a_refused_status_and_needs_change_leaves_the_record_and_start_resolves_the_ho
             time::OffsetDateTime::now_utc(),
         );
         self.warnings.extend(warnings);
+        let mine = own_holds(&snapshot, &me)?;
         let Some((need, holder)) =
-            crate::holds::held_back(&snapshot, &self.project.needs, task, Some(&session))
+            crate::holds::held_back(&snapshot, &self.project.needs, task, &mine)
         else {
             return Ok(());
         };
@@ -3288,7 +3900,7 @@ fn a_refused_status_and_needs_change_leaves_the_record_and_start_resolves_the_ho
             .iter()
             .filter_map(|need| {
                 snapshot
-                    .holder(need, &task.id, Some(&session))
+                    .holder(need, &task.id, &mine)
                     .map(|holder| (need.clone(), holder.clone()))
             })
             .collect();
@@ -3298,17 +3910,31 @@ fn a_refused_status_and_needs_change_leaves_the_record_and_start_resolves_the_ho
 
   In `transition`, change `ctx.guard_holds(task)?;` to `ctx.guard_holds(task, force)?;`.
 
-  Add a free fn after `append_stamped_note`:
+  Add after `append_stamped_note`:
 
 ```rust
-/// Lanes/needs design §4.5: the notes a need override leaves. The acquired task always
-/// gets one per held need. The holder gets a matching one only when it is in this
-/// project, the only one whose lock this command holds; a holder whose record is not in
-/// this checkout gets a warning instead. Returns whether any override was recorded.
-pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<bool> {
+/// The notes a need override owes to holders in this project, written by
+/// `note_need_holders` only once the acquiring save has landed. A note saying a task
+/// acquired a need must never outlive a refused or rolled-back acquire.
+pub(crate) struct HolderNotes {
+    owner: String,
+    /// Holder task, need, note text.
+    notes: Vec<(TaskId, String, String)>,
+}
+
+/// Lanes/needs design §4.5: the notes a need override leaves. The acquired task gets one
+/// per held need now, so they land with its own save or not at all. A holder gets a
+/// matching one only when it is in this project, the only one whose lock this command
+/// holds. Those are returned, not written: the caller passes them to `note_need_holders`
+/// after `save` succeeds. Both texts are validated here, before anything is saved.
+/// `None` when no held need was overridden.
+pub(crate) fn record_need_overrides(
+    ctx: &mut Ctx,
+    task: &mut Task,
+) -> Result<Option<HolderNotes>> {
     let overrides = std::mem::take(&mut ctx.need_overrides);
     if overrides.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let reason = ctx
         .need_reason
@@ -3319,6 +3945,10 @@ pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<bo
         _ => unreachable!("a need override is recorded only on an acquire"),
     };
     let owner = owner_name(&ctx.project)?;
+    let mut holders = HolderNotes {
+        owner: owner.clone(),
+        notes: Vec::new(),
+    };
     for (need, holder) in &overrides {
         let target_note = format!(
             "need override: acquired while {need} held by {} ({}): {reason}",
@@ -3326,34 +3956,46 @@ pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<bo
         );
         crate::format::validate_note_text(&target_note)?;
         if holder.prefix == ctx.project.prefix {
-            match ctx.project.read_task(&holder.task) {
-                Ok(mut held) => {
-                    append_note(
-                        &mut held,
-                        &owner,
-                        &format!(
-                            "need override: {} acquired {need} by {session} while this task \
-                             held it: {reason}",
-                            task.id
-                        ),
-                    )?;
-                    held.updated = crate::time::after(&held.updated)?;
-                    validate_task(&held)?;
-                    ctx.project.validate_docs(&held)?;
-                    // Append-only audit note, as halt's: it skips load's stale-copy guard.
-                    ctx.project.write_task(&ctx.registry, &held)?;
-                }
-                Err(Error::TaskNotFound(_)) => ctx.warnings.push(format!(
-                    "{} holds {need} but its record is not in this checkout; no override \
-                     note was written on it",
-                    holder.task
-                )),
-                Err(error) => return Err(error),
-            }
+            let holder_note = format!(
+                "need override: {} acquired {need} by {session} while this task held it: \
+                 {reason}",
+                task.id
+            );
+            crate::format::validate_note_text(&holder_note)?;
+            holders
+                .notes
+                .push((holder.task.clone(), need.clone(), holder_note));
         }
         append_note(task, &owner, &target_note)?;
     }
-    Ok(true)
+    Ok(Some(holders))
+}
+
+/// Writes the holder notes `record_need_overrides` returned. Call it only after the
+/// acquiring `save` returned `Ok`, still under the project lock. The acquisition has
+/// landed by then, so a holder that cannot be noted is a warning, never the command's
+/// failure.
+pub(crate) fn note_need_holders(ctx: &mut Ctx, holders: HolderNotes) {
+    for (holder, need, text) in holders.notes {
+        let written = ctx.project.read_task(&holder).and_then(|mut held| {
+            append_note(&mut held, &holders.owner, &text)?;
+            held.updated = crate::time::after(&held.updated)?;
+            validate_task(&held)?;
+            ctx.project.validate_docs(&held)?;
+            // Append-only audit note, as halt's: it skips load's stale-copy guard.
+            ctx.project.write_task(&ctx.registry, &held)
+        });
+        match written {
+            Ok(()) => {}
+            Err(Error::TaskNotFound(_)) => ctx.warnings.push(format!(
+                "{holder} holds {need} but its record is not in this checkout; no override \
+                 note was written on it"
+            )),
+            Err(error) => ctx.warnings.push(format!(
+                "the need override landed, but its note on {holder} was not written ({error})"
+            )),
+        }
+    }
 }
 ```
 
@@ -3369,13 +4011,32 @@ pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<bo
   `if !blockers.is_empty() { … }`) and above `// Persist the redacted takeover summary`:
 
 ```rust
-    let overriding_need = super::record_need_overrides(&mut ctx, &mut task)?;
+    let holder_notes = super::record_need_overrides(&mut ctx, &mut task)?;
+    let overriding_need = holder_notes.is_some();
 ```
 
   Change `if reason.is_some() && !reason_used && !overriding_halt {` to:
 
 ```rust
     if reason.is_some() && !reason_used && !overriding_halt && !overriding_need {
+```
+
+  Replace
+
+```rust
+    save(&mut ctx, &mut task)?;
+    warn_if_uncommitted_with_worktrees(&mut ctx, &task);
+```
+
+  with
+
+```rust
+    save(&mut ctx, &mut task)?;
+    // Only now that the acquire has landed may a holder be told it happened.
+    if let Some(notes) = holder_notes {
+        super::note_need_holders(&mut ctx, notes);
+    }
+    warn_if_uncommitted_with_worktrees(&mut ctx, &task);
 ```
 
 - [ ] **Run the tests and confirm they pass.**
@@ -3397,21 +4058,31 @@ pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<bo
 
 **Files**
 - Modify `src/cli.rs:191-256` (`EditArgs`): add `reason` after `force` (line 206).
-- Modify `tools/cli.toml:381-420` (the `[[cli.tasks.commands]]` row with
-  `path = ["edit"]`).
+- Adopt: `tools/cli.toml` (and `tools/cli_surface.py` if the adopt changes it) at the ops
+  commit Task 0.1 recorded as `inventory: Task 2.4 = <sha>`.
 - Modify `src/commands/edit.rs`:
-  - `run` (80-222): the `--force` check at 81-83, then after `load` (123) and after
-    `apply_fields` (197);
+  - `run` (80-222): the `--force` check at 81-83, then after `load` (123), after
+    `apply_fields` (197), and after `save` (219-220);
   - `editor` (332-334, the equal-status branch).
 - Modify `src/commands/mod.rs`: add `Ctx::update_holds` after `refuse_foreign_live_claim`
   (line 232).
 - Modify `tests/cli.rs`: append the tests.
+- Test: `src/surface.rs` (`parser_surface_equals_table`, the conformance test).
+
+**Ops rows (landed by Task 0.1):** the edit to ops `cli.toml` for this task only. In the
+`tasks edit` row's `options` (`path = ["edit"]` under `cli.tasks`), directly after
+`{ shared = "force", value = "none" },`:
+
+```toml
+  { names = ["--reason"], value = "string" },
+```
 
 **Interfaces**
 - Consumes:
-  - `Ctx::{refuse_foreign_live_claim, resolve_for_guard, ownership, claims_mut}`;
-  - `holds::HoldSnapshot`;
-  - `record_need_overrides`;
+  - `Ctx::{refuse_foreign_live_claim, resolve_for_guard, claims_mut}`;
+  - `ownership` and `own_holds` (Task 2.2);
+  - `holds::{HoldSnapshot, Mine}`;
+  - `record_need_overrides` and `note_need_holders` (Task 2.3);
   - `Ctx.need_reason` and `Ctx.need_overrides`;
   - Slice 1's `FieldArgs.needs`.
 - Produces:
@@ -3573,6 +4244,37 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
     assert_eq!(shown["task"]["needs"], serde_json::json!(["quiet"]));
     assert!(shown["claim"].is_null());
 }
+
+#[test]
+fn a_need_override_that_save_refuses_leaves_both_records_and_the_claim_store_unchanged() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let mine = id_of(env.json(&sci, &["add", "Mine", "-p", "2", "--need", "owner"]));
+    let theirs = id_of(env.json(&sci, &["add", "Theirs", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    json_as(&env, &sci, "agent-b", &["start", &theirs]);
+    let records: Vec<(String, String)> = [&mine, &theirs]
+        .iter()
+        .map(|id| (id.to_string(), env.read(&sci, &format!("tasks/{id}.md"))))
+        .collect();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+
+    // Every hold check passes (--force --reason under agent-a's own claim). Only `save`
+    // refuses, on a parent check no earlier step makes: a task cannot be its own parent.
+    let error = error_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &mine, "--need", "quiet", "--force", "--reason", "share", "--parent", &mine],
+    );
+    assert_eq!(error["error"]["kind"], "cycle", "{error}");
+    // No "acquired quiet" note on the holder, no note on the target, no claim change.
+    for (id, before) in &records {
+        assert_eq!(&env.read(&sci, &format!("tasks/{id}.md")), before, "{id}");
+    }
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+}
 ```
 
 - [ ] **Run the tests and confirm they fail.**
@@ -3583,6 +4285,18 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
     succeeds instead of returning `need_held`.
   - `edit_force_and_reason_are_only_for_adding_a_held_need` fails with `unexpected argument
     '--reason'`, a usage error (exit 2).
+  - `a_need_override_that_save_refuses_leaves_both_records` fails the same way, with
+    `--reason` unknown. Once the parser has `--reason`, it guards the order: holder notes
+    written before `save` would leave `theirs` changed after the `cycle` refusal.
+
+- [ ] **Adopt this task's rows.** In .worktrees/ece1e2-work-selection, run
+  `python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`, where `<sha>` is the value of
+  the `inventory: Task 2.4 = <sha>` note on tasks-ece1e2 (`tasks show tasks-ece1e2`).
+  `--at` adopts every row landed up to that commit: Slice 1's rows and the **Ops rows**
+  above. It also refreshes `tools/cli_surface.py` when the pair changed. Then run
+  `just test-one parser_surface_equals_table`. Expected: FAIL. The table has
+  `edit --reason` and the parser does not yet. It passes after the `EditArgs` change
+  below.
 
 - [ ] **Implement.**
 
@@ -3594,17 +4308,6 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
     #[arg(long)]
     pub reason: Option<String>,
 ```
-
-  In `tools/cli.toml`, in the `path = ["edit"]` row of `cli.tasks`, add after
-  `{ shared = "force", value = "none" },`:
-
-```toml
-  { names = ["--reason"], value = "string" },
-```
-
-  `tools/cli.toml` is vendored from ops. The same row must land in ops's authority copy;
-  see "Spec ambiguities resolved". The local copy is what `surface.rs`'s conformance test
-  reads.
 
   In `src/commands/mod.rs`, add to `impl Ctx` after `refuse_foreign_live_claim`:
 
@@ -3624,7 +4327,7 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
             return Ok(());
         }
         let me = self.resolve_for_guard()?;
-        if self.ownership(&existing, &me)? == Ownership::Foreign {
+        if ownership(&existing, &me)? == Ownership::Foreign {
             return Ok(());
         }
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
@@ -3642,11 +4345,13 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
                 time::OffsetDateTime::now_utc(),
             );
             self.warnings.extend(warnings);
+            // "Another session" by the ownership rule, as in `guard_holds`.
+            let mine = own_holds(&snapshot, &me)?;
             let held: Vec<(String, crate::holds::Holder)> = added
                 .iter()
                 .filter_map(|need| {
                     snapshot
-                        .holder(need, &task.id, Some(&existing.session))
+                        .holder(need, &task.id, &mine)
                         .map(|holder| (need.clone(), holder.clone()))
                 })
                 .collect();
@@ -3721,17 +4426,38 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
 ```rust
     // Lanes/needs design §4.4: needs change under no live claim or the caller's own, and
     // under the caller's own the claim's holds follow in the same save.
-    let mut reason_used = false;
+    // The target's override notes are appended here and land with its save. The
+    // holders' notes are held in `holder_notes` until that save has succeeded.
+    let mut holder_notes = None;
     if task.needs != original_needs {
         ctx.refuse_foreign_live_claim(&task.id)?;
         ctx.need_reason = args.reason.clone();
         ctx.update_holds(&task, args.force)?;
-        reason_used = super::record_need_overrides(&mut ctx, &mut task)?;
+        holder_notes = super::record_need_overrides(&mut ctx, &mut task)?;
     }
-    if args.reason.is_some() && !reason_used {
+    if args.reason.is_some() && holder_notes.is_none() {
         ctx.warnings
             .push("--reason was unused because no held need was added".into());
     }
+```
+
+  At the end of `run`, replace
+
+```rust
+    save(&mut ctx, &mut task)?;
+    super::follow_holder(&mut ctx, &task.id, None, "the edit landed");
+```
+
+  with
+
+```rust
+    save(&mut ctx, &mut task)?;
+    // Lanes/needs design §4.5: a holder learns of the override only once it has landed.
+    // A save refused by its own validation (a parent cycle, say) writes no note anywhere.
+    if let Some(notes) = holder_notes {
+        super::note_need_holders(&mut ctx, notes);
+    }
+    super::follow_holder(&mut ctx, &task.id, None, "the edit landed");
 ```
 
   In `editor`, replace the equal-status branch
@@ -3766,14 +4492,20 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
   - `just test-one --test cli removing_a_need_under_ones_own_claim`
   - `just test-one --test cli adding_an_exclusive_need_under_ones_own_claim`
   - `just test-one --test cli edit_force_and_reason_are_only_for_adding_a_held_need`
+  - `just test-one --test cli a_need_override_that_save_refuses_leaves_both_records`
   - `just test-one --test cli halt_edit_status_doing` (`--status doing --force` is still
     `validation`)
-  - `just test-one --bin tasks surface` (the parser surface matches `tools/cli.toml`)
+  - `just test-one parser_surface_equals_table` (the parser surface matches the adopted
+    `tools/cli.toml`). If it reports a difference, change the parser to match the adopted
+    row. If the row itself is wrong, stop and report it. The correction lands in ops
+    through Task 0.1's procedure and is adopted again. Never edit `tools/cli.toml`.
 
-- [ ] Run `just test-fast` and `tasks check`.
+- [ ] Run `cargo fmt`, then `just test-fast` and `just check`. Run `git status`; when it
+  shows `tools/cli_surface.py` new or modified, add it to the commit as well.
 
 - [ ] **Commit.**
   `git add src/cli.rs tools/cli.toml src/commands/edit.rs src/commands/mod.rs tests/cli.rs`
+  (plus `tools/cli_surface.py` when `git status` showed it changed)
   `git commit -m "feat(holds): guard needs changes by the claim and recompute holds under one's own"`
 
 ---
@@ -3786,11 +4518,15 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
   - a new `retain_unheld`, after `warn_hidden` (294-299);
   - a call after `warn_hidden(&mut ctx, hidden);` in `ready` (316), `next` (368) and
     `prime` (507).
-- Modify `tests/cli.rs`: append the tests.
+- Modify `tests/cli.rs`:
+  - append the tests;
+  - extend `an_acceptance_mode_change_continues_a_natively_held_claim` again, with a
+    `ready` under relay identity.
 
 **Interfaces**
 - Consumes:
-  - `holds::{HoldSnapshot::load, held_back}`;
+  - `holds::{HoldSnapshot::load, held_back, Mine}`;
+  - `commands::own_holds` (Task 2.2);
   - `claims::resolve_identity`;
   - `Project.needs`;
   - `NeedDecl.exclusive`.
@@ -3800,8 +4536,9 @@ fn edit_force_and_reason_are_only_for_adding_a_held_need() {
     `pub fn add(&mut self, need: &str, holder: &Holder)` and
     `pub fn into_warnings(self) -> Vec<String>`. Each warning reads `<n> task(s) wait for
     <need>, held by <holder id> (<session>)`;
-  - `fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime)` in
-    `list.rs`.
+  - `fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) -> Result<()>`
+    in `list.rs`. Its error is the ownership rule's own, such as an unreadable relay host
+    config, which every claim check also raises.
 
   The gate runs in the three views, after `ready_tasks` and the halt filter. It does not
   run inside `ready_tasks`, so Slice 3's lanes builder can collect steps before holds apply
@@ -3935,6 +4672,46 @@ fn an_unreadable_claim_store_leaves_hold_state_unknown_without_failing() {
 }
 ```
 
+- [ ] **Extend the native-to-relay acceptance test with a view.** In
+  `an_acceptance_mode_change_continues_a_natively_held_claim` (as Task 2.2 left it),
+  replace
+
+```rust
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {second}\n\
+```
+
+  with
+
+```rust
+         cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" ready > \"$HOME/ready.json\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {second}\n\
+```
+
+  and append at the end of the test, after Task 2.2's `holds` assertion on `second`:
+
+```rust
+    // `ready` under relay identity applies the same rule: the second task is listed, not
+    // hidden behind this session's own hold.
+    let ready: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(env.home.path().join("ready.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == second.as_str()),
+        "{ready}"
+    );
+    assert!(
+        !warnings_of(&ready).iter().any(|w| w.contains("wait for")),
+        "{ready}"
+    );
+```
+
 - [ ] **Run the tests and confirm they fail.**
   - `just test-one --bin tasks held_warnings_aggregate` fails to compile: `HeldWarnings` is
     unresolved.
@@ -3942,6 +4719,9 @@ fn an_unreadable_claim_store_leaves_hold_state_unknown_without_failing() {
     `first`, `second` and `free`.
   - `an_unreadable_claim_store_leaves_hold_state_unknown` fails on `ready`, which has no
     `hold state unknown for fam` warning.
+  - `an_acceptance_mode_change_continues_a_natively_held_claim` passes before the view
+    gate exists. It is the regression check for the gate: a view that compared session
+    strings would hide `second` from `claude-code:c1` behind `c1`'s hold.
 
 - [ ] **Implement.**
 
@@ -3986,11 +4766,12 @@ impl HeldWarnings {
 
 ```rust
 /// Lanes/needs design §4.5: drop tasks held back by another session's exclusive hold,
-/// with one warning per need and holder; order is unchanged. "This session" is resolved
-/// as `occupants` resolves it, and when it cannot be, every hold counts as another
+/// with one warning per need and holder; order is unchanged. Whether a hold is this
+/// session's is decided as `occupants` decides a claim: by `ownership`, the resolved
+/// identity or else the claim's process proof. With neither, every hold counts as another
 /// session's. A scope whose projects declare no exclusive need reads no claim store and
 /// resolves no identity, so its output is exactly what it was before holds existed.
-fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) {
+fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) -> Result<()> {
     let vocabularies: HashMap<String, crate::needs::Vocabulary> = ctx
         .scope
         .projects()
@@ -3999,22 +4780,21 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
         .map(|project| (project.prefix.clone(), project.needs.clone()))
         .collect();
     if vocabularies.is_empty() {
-        return;
+        return Ok(());
     }
     let (snapshot, warnings) = crate::holds::HoldSnapshot::load(&ctx.registry, now);
     ctx.warnings.extend(warnings);
     if snapshot.is_empty() {
-        return;
+        return Ok(());
     }
-    let session = crate::claims::resolve_identity(&mut ctx.warnings)
-        .identity()
-        .map(|identity| identity.session.clone());
+    let me = crate::claims::resolve_identity(&mut ctx.warnings);
+    let mine = super::own_holds(&snapshot, &me)?;
     let mut held = crate::holds::HeldWarnings::default();
     tasks.retain(|task| {
         let Some(vocabulary) = vocabularies.get(&task.id.prefix) else {
             return true;
         };
-        match crate::holds::held_back(&snapshot, vocabulary, task, session.as_deref()) {
+        match crate::holds::held_back(&snapshot, vocabulary, task, &mine) {
             Some((need, holder)) => {
                 held.add(&need, &holder);
                 false
@@ -4023,26 +4803,27 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
         }
     });
     ctx.warnings.extend(held.into_warnings());
+    Ok(())
 }
 ```
 
   In `ready`, after `warn_hidden(&mut ctx, hidden);`:
 
 ```rust
-    retain_unheld(&mut ctx, &mut picked.tasks, now);
+    retain_unheld(&mut ctx, &mut picked.tasks, now)?;
 ```
 
   In `next`, after `warn_hidden(&mut ctx, hidden);`. This runs on the pool, so
   parked-agent candidates go through the same gate.
 
 ```rust
-    retain_unheld(&mut ctx, &mut pool, now);
+    retain_unheld(&mut ctx, &mut pool, now)?;
 ```
 
   In `prime`, after `warn_hidden(&mut ctx, hidden);`:
 
 ```rust
-    retain_unheld(&mut ctx, &mut ready, now);
+    retain_unheld(&mut ctx, &mut ready, now)?;
 ```
 
   `ready --limit` truncates after this, so the limit counts only eligible rows.
@@ -4051,6 +4832,7 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
   - `just test-one --bin tasks held_warnings_aggregate`
   - `just test-one --test cli views_hide_work_held_back`
   - `just test-one --test cli an_unreadable_claim_store_leaves_hold_state_unknown`
+  - `just test-one --test cli an_acceptance_mode_change_continues_a_natively_held_claim`
 
 - [ ] Run `just test-fast` (every existing picker, park, halt and filter test still passes)
   and `tasks check`.
@@ -4068,8 +4850,11 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
 - Modify `src/commands/mod.rs`:
   - `pub struct Ctx` (a `holds_lock` field right after `pub lock: Option<MutationLock>,`);
   - `Ctx::new`;
+  - a new `Ctx::take_holds_lock`, directly above `fn guard_holds`;
   - `Ctx::guard_holds`;
-  - `Ctx::update_holds`.
+  - `Ctx::update_holds`;
+  - `save`, the `ClaimIntent::Acquire` arm (1062-1110, anchor
+    `Some((id, ClaimIntent::Acquire(claim))) => {`).
 - Modify `tests/cli.rs`: append the helpers and the tests.
 
 **Interfaces**
@@ -4078,11 +4863,25 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
   - `pub fn lock_path_with(get: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf>`,
     returning `<state>/tasks/claims/.holds.lock`;
   - `pub fn lock() -> Result<claims::MutationLock>`;
-  - `Ctx.holds_lock: Option<MutationLock>`.
+  - `Ctx.holds_lock: Option<MutationLock>`;
+  - `fn take_holds_lock(&mut self) -> Result<()>` on `Ctx`. It is idempotent, and it
+    refuses with `io` when the project lock is not held.
 
   The lock order is fixed: the project lock first, the holds lock second. The holds lock
-  is taken only by an acquire or needs save that would record new holds, and it is held
-  until `save` has written the claim.
+  is taken by **every claim replacement that changes `holds`**, and by every acquire that
+  records any. That covers an acquire with holds, an acquire replacing a claim that held
+  something, and a needs save that adds, reduces or removes the last hold.
+
+  It lives on `Ctx`, so it is released only when the command ends. That is after `save`
+  has published the claim, written the record, and, when that write fails, restored the
+  previous claim. The rollback restores a hold that the publish had released. Without
+  the lock, another project's acquire could take the need in that window and leave two
+  holders. `save` refuses a holds-changing `Acquire` made without the lock, so a future
+  path that forgets it fails at once instead of racing.
+
+  A release (`done`, `drop`, `park`, `shelve`, a status change away from `doing`) needs
+  no holds lock. It writes the record first and removes the claim after. A failed
+  removal leaves the hold in place, which errs toward held.
 
 **Steps**
 
@@ -4112,6 +4911,24 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
   is not. An implementation without the lock lets both pass the check. The blocking test
   states that directly: while the test holds the lock, a start that records holds stays
   blocked and one that records none finishes.
+
+  The rollback test uses the same handshake. The record write is made to fail as
+  `a_failed_task_write_leaves_no_claim_behind` makes it fail: the tasks directory is
+  `0o500`, so reads work and `atomic_write` cannot create its temp file. The test holds
+  `.holds.lock`. It makes `sci`'s tasks directory read-only and spawns `edit --rm-need
+  quiet` on agent-a's claimed task in `sci`. It also spawns agent-b's `start` of a `quiet`
+  task in `fam`. Then it waits until both project locks are held and checks that the
+  removal has not finished. That check is the deterministic proof that a removal takes the
+  holds lock before `save` publishes the reduced claim. Without the lock, the removal
+  publishes `holds = []`, fails its write and rolls back while the test still holds the
+  lock. After the release, either order gives one outcome:
+  - the acquire runs first and sees agent-a's hold;
+  - the removal runs first. It publishes, fails, restores the hold, and only then releases
+    the lock, which is kept on `Ctx` until the command ends. The acquire then sees the
+    restored hold.
+
+  Both ways, the acquire gets `need_held`. The removal fails with `io` and leaves the
+  store byte-identical. No order lets the acquire see the instant in between.
 
 ```rust
 /// Holds the host-wide holds lock, as a concurrent acquire in another project would.
@@ -4148,14 +4965,15 @@ fn wait_for_project_lock_holder(env: &TestEnv, prefix: &str, limit: Duration) {
     }
 }
 
-fn spawn_start_as(
+/// `tasks <args>` spawned as `session` (with the runner's live pid), output piped.
+fn spawn_as(
     env: &TestEnv,
     dir: &std::path::Path,
-    id: &str,
     session: &str,
+    args: &[&str],
 ) -> std::process::Child {
     let mut cmd = env.raw(dir);
-    cmd.args(["start", id])
+    cmd.args(args)
         .env("TASKS_SESSION", session)
         .env("TASKS_SESSION_PID", std::process::id().to_string());
     cmd.spawn().unwrap()
@@ -4172,8 +4990,8 @@ fn an_acquire_that_records_holds_waits_for_the_holds_lock_and_one_that_does_not_
     let plain = id_of(env.json(&fam, &["add", "Docs", "-p", "2"]));
 
     let held = hold_holds_lock(&env);
-    let mut holding = spawn_start_as(&env, &sci, &quiet, "agent-a");
-    let mut free = spawn_start_as(&env, &fam, &plain, "agent-b");
+    let mut holding = spawn_as(&env, &sci, "agent-a", &["start", &quiet]);
+    let mut free = spawn_as(&env, &fam, "agent-b", &["start", &plain]);
     // Observations only while the lock is held.
     let free_finished = wait_bounded(&mut free, Duration::from_secs(10));
     let holding_still_blocked = !wait_bounded(&mut holding, Duration::from_millis(300));
@@ -4203,8 +5021,8 @@ fn concurrent_starts_in_two_projects_contending_for_one_need_have_one_winner() {
     let in_fam = id_of(env.json(&fam, &["add", "Fam capture", "-p", "2", "--need", "quiet"]));
 
     let held = hold_holds_lock(&env);
-    let sci_start = spawn_start_as(&env, &sci, &in_sci, "agent-a");
-    let fam_start = spawn_start_as(&env, &fam, &in_fam, "agent-b");
+    let sci_start = spawn_as(&env, &sci, "agent-a", &["start", &in_sci]);
+    let fam_start = spawn_as(&env, &fam, "agent-b", &["start", &in_fam]);
     wait_for_project_lock_holder(&env, "sci", Duration::from_secs(10));
     wait_for_project_lock_holder(&env, "fam", Duration::from_secs(10));
     drop(held);
@@ -4235,10 +5053,77 @@ fn a_project_whose_prefix_is_holds_can_start_a_task_that_needs_an_exclusive_reso
     let id = id_of(env.json(&holds, &["add", "Capture", "-p", "2", "--need", "quiet"]));
     // Its project lock is `holds.lock`. Were the host-wide lock that same file, this start
     // would wait on itself forever; `reap` kills it instead of hanging the suite.
-    let out = reap(spawn_start_as(&env, &holds, &id, "agent-a"), Duration::from_secs(30));
+    let out = reap(spawn_as(&env, &holds, "agent-a", &["start", &id]), Duration::from_secs(30));
     let out = out.expect("start waited on its own lock");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(holds_of(&env, &holds, &id), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_hold_removal_whose_record_write_fails_keeps_the_holds_lock_through_its_rollback() {
+    use std::os::unix::fs::PermissionsExt;
+    struct Restore(std::path::PathBuf, std::fs::Permissions);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let mine = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let theirs = id_of(env.json(&fam, &["add", "Fam capture", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    let store_before = std::fs::read(env.claim_store("sci")).unwrap();
+    let record_before = env.read(&sci, &format!("tasks/{mine}.md"));
+
+    // The removal's record write fails: reads still work, `atomic_write` cannot create its
+    // temp file.
+    let tasks_dir = sci.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let restore = Restore(tasks_dir, original);
+
+    let held = hold_holds_lock(&env);
+    let mut removal = spawn_as(&env, &sci, "agent-a", &["edit", &mine, "--rm-need", "quiet"]);
+    let acquire = spawn_as(&env, &fam, "agent-b", &["start", &theirs]);
+    // Observations only while the lock is held: both children are past their project
+    // lock, and the removal has not published, failed and rolled back on its own.
+    wait_for_project_lock_holder(&env, "sci", Duration::from_secs(10));
+    wait_for_project_lock_holder(&env, "fam", Duration::from_secs(10));
+    let removal_waited = !wait_bounded(&mut removal, Duration::from_millis(300));
+    drop(held);
+
+    // Reap both, and restore the directory, before asserting anything.
+    let [removal, acquire] = [reap(removal, REAP), reap(acquire, REAP)];
+    drop(restore);
+    assert!(
+        removal_waited,
+        "removing a hold must take the holds lock before save publishes the reduced claim"
+    );
+    let removal = removal.expect("the removal never exited after the release");
+    let acquire = acquire.expect("the acquire never exited after the release");
+    assert_eq!(
+        removal.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&removal.stderr)
+    );
+    assert_eq!(err_kind(&removal), "io");
+    // Before the removal, or after its rollback restored the hold: never in between.
+    assert_eq!(
+        acquire.status.code(),
+        Some(1),
+        "the acquire saw quiet released: {}",
+        String::from_utf8_lossy(&acquire.stdout)
+    );
+    assert_eq!(err_kind(&acquire), "need_held");
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store_before);
+    assert_eq!(env.read(&sci, &format!("tasks/{mine}.md")), record_before);
+    assert!(env.json(&fam, &["show", &theirs])["claim"].is_null());
 }
 ```
 
@@ -4253,11 +5138,16 @@ fn a_project_whose_prefix_is_holds_can_start_a_task_that_needs_an_exclusive_reso
     right: 1`. It is deterministic only once the lock exists.
   - `a_project_whose_prefix_is_holds` passes before and after. It guards the lock's file
     name.
+  - `a_hold_removal_whose_record_write_fails_keeps_the_holds_lock_through_its_rollback`
+    fails at `removal_waited`. Without the lock the removal never blocks: it publishes
+    `holds = []`, fails its record write, and restores the claim while the test still
+    holds the lock. That is the window in which another project's acquire could win the
+    need.
 
 - [ ] **Implement.**
 
-  In `src/holds.rs`, add `use crate::claims::MutationLock;`, `use crate::error::Result;`
-  and `use std::ffi::OsString;` to the imports. Add after `HeldWarnings`:
+  In `src/holds.rs`, add `use crate::claims::MutationLock;` and `use std::ffi::OsString;`
+  to the imports (`Result` is imported since Task 2.2). Add after `HeldWarnings`:
 
 ```rust
 /// `claims/.holds.lock`: one host-wide lock beside the per-prefix stores (§4.4 "Atomic
@@ -4267,9 +5157,11 @@ pub fn lock_path_with(get: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf>
     Ok(ClaimStore::path_with(".holds", get)?.with_file_name(".holds.lock"))
 }
 
-/// Taken after the project's mutation lock, never before, by an acquire or needs save
-/// that would record new holds. It is held around the hold check and the claim save, so
-/// two acquires in different projects cannot both win one need.
+/// Taken after the project's mutation lock, never before, by every acquire that records
+/// holds and every claim replacement that changes them (`Ctx::take_holds_lock`). It is
+/// held around the hold check, the claim save, the record write and any rollback, so two
+/// acquires in different projects cannot both win one need, and none sees a hold that a
+/// failed write is about to restore.
 pub fn lock() -> Result<MutationLock> {
     MutationLock::acquire_at(&lock_path_with(|key| std::env::var_os(key))?)
 }
@@ -4279,8 +5171,9 @@ pub fn lock() -> Result<MutationLock> {
   `pub lock: Option<MutationLock>,`:
 
 ```rust
-    /// The host-wide holds lock, taken after `lock` by an acquire that records holds and
-    /// held until the command ends, past `save` (lanes/needs design §4.4).
+    /// The host-wide holds lock, taken after `lock` by every acquire that records holds
+    /// and every claim replacement that changes them. Held until the command ends: past
+    /// `save`'s publish, record write, and rollback (lanes/needs design §4.4).
     holds_lock: Option<MutationLock>,
 ```
 
@@ -4290,16 +5183,112 @@ pub fn lock() -> Result<MutationLock> {
             holds_lock: None,
 ```
 
-  In `Ctx::guard_holds`, insert directly above
-  `let (snapshot, warnings) = crate::holds::HoldSnapshot::load(`:
+  Add to `impl Ctx`, directly above `fn guard_holds`:
 
 ```rust
-        // The project lock is already held (every write command takes it first).
-        self.holds_lock = Some(crate::holds::lock()?);
+    /// Lanes/needs design §4.4 "Atomic across projects": the host-wide holds lock, after
+    /// the project lock and never before. Kept on `Ctx` until the command ends, so it
+    /// spans the hold check, `save`'s publish of the claim, the record write, and the
+    /// restore of the previous claim when that write fails.
+    fn take_holds_lock(&mut self) -> Result<()> {
+        if self.lock.is_none() {
+            return Err(Error::Io(
+                "the holds lock was requested without the project lock".into(),
+            ));
+        }
+        if self.holds_lock.is_none() {
+            self.holds_lock = Some(crate::holds::lock()?);
+        }
+        Ok(())
+    }
 ```
 
-  In `Ctx::update_holds`, insert the same two lines as the first statements inside
-  `if !added.is_empty() {`.
+  In `Ctx::guard_holds`, directly after its first line
+  `let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);`, insert:
+
+```rust
+        // What the claim this acquire replaces holds: a repeated start's, a takeover's, or
+        // a dead entry's. `save` publishes the new claim before writing the record and
+        // restores this one if the write fails, so a change either way needs the lock.
+        let replaced = self
+            .claims_mut()?
+            .get(&task.id)
+            .map(|claim| claim.holds.clone())
+            .unwrap_or_default();
+```
+
+  Then, still in `Ctx::guard_holds`, replace
+
+```rust
+        if holds.is_empty() {
+            return Ok(());
+        }
+        let (snapshot, warnings) = crate::holds::HoldSnapshot::load(
+```
+
+  with
+
+```rust
+        if holds.is_empty() && replaced.is_empty() {
+            return Ok(());
+        }
+        // The project lock is already held (every write command takes it first).
+        self.take_holds_lock()?;
+        if holds.is_empty() {
+            // Dropping a hold checks nothing; only its publish and rollback need the lock.
+            return Ok(());
+        }
+        let (snapshot, warnings) = crate::holds::HoldSnapshot::load(
+```
+
+  In `Ctx::update_holds`, replace
+
+```rust
+        if holds == existing.holds {
+            return Ok(());
+        }
+```
+
+  with
+
+```rust
+        if holds == existing.holds {
+            return Ok(());
+        }
+        // Any change, whether a hold is added, reduced, or the last one removed, is
+        // published by `save` before the record write and restored if that write fails.
+        // The lock spans both, so no other project's acquire sees a need released for the
+        // instant in between and takes it.
+        self.take_holds_lock()?;
+```
+
+  In `save`, replace the opening of the `Acquire` arm
+
+```rust
+        Some((id, ClaimIntent::Acquire(claim))) => {
+            let store = ctx.claims_mut()?;
+```
+
+  with
+
+```rust
+        Some((id, ClaimIntent::Acquire(claim))) => {
+            // Lanes/needs design §4.4: a claim whose holds differ from the one it replaces
+            // is published, and on a failed record write rolled back, only under the holds
+            // lock. A path that changed holds without taking it is a bug, refused here
+            // before anything is written.
+            let replaced = ctx
+                .claims_mut()?
+                .get(&id)
+                .map(|claim| claim.holds.clone())
+                .unwrap_or_default();
+            if claim.holds != replaced && ctx.holds_lock.is_none() {
+                return Err(Error::Io(format!(
+                    "the claim on {id} changes its holds without the holds lock"
+                )));
+            }
+            let store = ctx.claims_mut()?;
+```
 
   The interactive editor clears `ctx.lock` before opening the editor, and `holds_lock` is
   still `None` at that point. Both are retaken in order after the editor exits, since
@@ -4310,6 +5299,12 @@ pub fn lock() -> Result<MutationLock> {
   - `just test-one --test cli an_acquire_that_records_holds_waits_for_the_holds_lock`
   - `just test-one --test cli concurrent_starts_in_two_projects`
   - `just test-one --test cli a_project_whose_prefix_is_holds`
+  - `just test-one --test cli a_hold_removal_whose_record_write_fails_keeps_the_holds_lock`
+  - `just test-one --test cli removing_a_need_under_ones_own_claim` (a reduction now takes
+    the lock and still lands)
+  - `just test-one --test cli a_failed_takeover_restores_the_previous_owners_claim` and
+    `just test-one --test cli a_failed_task_write_leaves_no_claim_behind` (the rollback
+    is unchanged for claims without holds)
   - `just test-one --test cli simultaneous_starts_produce_exactly_one_winner` (the
     project-lock behaviour is unchanged)
 
@@ -4317,7 +5312,7 @@ pub fn lock() -> Result<MutationLock> {
 
 - [ ] **Commit.**
   `git add src/holds.rs src/commands/mod.rs tests/cli.rs`
-  `git commit -m "feat(holds): take a host-wide holds lock around the hold check and claim save"`
+  `git commit -m "feat(holds): hold a host-wide lock across every holds change, through rollback"`
 
 ---
 
@@ -4374,10 +5369,14 @@ and never blocks falsely.
   At the end of "Locking", insert:
 
 ```markdown
-An acquire that would record a non-empty `holds` also takes the host-wide
-`claims/.holds.lock`, after the project lock and never before. It holds it around the hold
-check and the claim save, so two projects cannot both acquire one exclusive need. A prefix
-cannot start with `.`, so no project lock can be that file.
+An acquire that records a non-empty `holds`, and any claim replacement that changes
+`holds` (a needs save that adds, reduces or removes one), also takes the host-wide
+`claims/.holds.lock`, after the project lock and never before. It holds the lock until the
+command ends: across the hold check, the claim save, the record write, and the restore of
+the previous claim when that write fails. Two projects therefore cannot both acquire one
+exclusive need, and no acquire can see a hold that a failed write is about to restore. A
+release takes no holds lock, because it removes the claim only after the record is
+written. A prefix cannot start with `.`, so no project lock can be that file.
 ```
 
 - [ ] **Edit `skills/tasks/SKILL.md`.** After the halt paragraph, insert, indented like it:
@@ -4439,6 +5438,9 @@ note on both tasks. A park or a dead session releases the hold.
 | A claim in an unregistered leftover store | `claims_that_cannot_hold_…` (2.2) |
 | An unreadable store warns and does not fail | `an_unreadable_claim_store_leaves_hold_state_unknown_without_failing` (2.5) and `an_unreadable_store_warns_…` (unit) |
 | Two concurrent cross-project `start`s have exactly one winner | `concurrent_starts_in_two_projects_…` and `an_acquire_that_records_holds_waits_for_the_holds_lock_…` (2.6) |
+| A hold removal whose record write fails never lets a concurrent acquire take the need | `a_hold_removal_whose_record_write_fails_keeps_the_holds_lock_through_its_rollback` (2.6) |
+| A session that moved from native to relay identity keeps its holds, in `start` and in `ready` | `an_acceptance_mode_change_continues_a_natively_held_claim` (extended in 2.2 and 2.5) and `whose_hold_it_is_follows_the_ownership_rule_…` (unit) |
+| An override that `save` refuses leaves no note on either task and no claim change | `a_need_override_that_save_refuses_leaves_both_records_and_the_claim_store_unchanged` (2.4) |
 | A TTL-only claim holds until its TTL | `a_claim_without_a_pid_holds_until_its_ttl` (2.2, end-to-end and unit) |
 | An older entry without `holds` holds nothing | `claims_that_cannot_hold_…` (2.2), `an_entry_written_before_holds_existed_holds_nothing` (unit), and `a_claim_written_before_holds_loads_holding_nothing_…` (2.1 unit) |
 
@@ -4454,16 +5456,26 @@ note on both tasks. A park or a dead session releases the hold.
    `<holder id> (<session>)`, the same form as the view warning.
 4. **The error kind for `--force` without `--reason` on a held-back task.** It is
    `validation`, as halt's "--force under a halt requires --reason" is.
-5. **How a read view resolves "this session".** It uses the resolved identity's `session`
-   only, with no relay proof. The contract's `holder(…, session: Option<&str>)` takes a
-   session string, so the proof path of `occupants` does not apply.
+5. **How "this session" is decided, in views and on acquire.** By the claim ownership
+   rule (`commands::ownership`, moved out of `Ctx` in Task 2.2). That is the resolved
+   identity's session, or, in relay mode without an explicit `TASKS_SESSION`, the
+   holding claim's process proof. Session strings are not compared directly: the
+   supported move from `c1` to `claude-code:c1` would otherwise hold a session back
+   behind its own hold. This changes the contract's `holder(…, session: Option<&str>)`
+   and `held_back(…, session: Option<&str>)` to take `&Mine`, which
+   `HoldSnapshot::mine`/`own_holds` build once per command. `None` becomes
+   `&Mine::default()`.
 6. **When views read the stores.** A view reads the claim stores and resolves identity only
    when a project in scope declares an exclusive need. This keeps every existing view's
    output and warnings unchanged (§10 "existing tests pass unchanged").
-7. **Which record the holder note goes on.** It is written to this checkout's copy of the
-   holder's record, under the project lock this command already holds. If the record is
-   not in this checkout, a warning replaces the note. Halt writes to its registered
-   authority checkout instead.
+7. **Which record the holder note goes on, and when.** It is written to this checkout's
+   copy of the holder's record, under the project lock this command already holds. It is
+   written only after the acquiring `save` has returned `Ok`, so a refused or rolled-back
+   acquire never leaves "acquired" on a holder. Once the acquire has landed, a holder
+   note that cannot be written is a warning, never the command's failure. If the record
+   is not in this checkout, a warning replaces the note. Halt writes its "attempted" note
+   before the save, to its registered authority checkout. Its text records an attempt,
+   so that order is right for halt and wrong here.
 8. **What a needs save checks.** A needs save under one's own claim checks only the
    *added* exclusive needs. Holds the claim already has were checked, or overridden, when
    they were acquired.
@@ -4472,10 +5484,15 @@ note on both tasks. A park or a dead session releases the hold.
 10. **`edit --force` is widened.** It is valid with `--status done`, or with `--need`.
     `edit --reason` requires both `--force` and `--need`. Given with no held need to
     override, it warns "unused", as `start` does.
-11. **`tools/cli.toml` is vendored from ops**, and ops holds the authority copy. The local
-    `edit --reason` row is what this repo's surface test reads. The same row must be added
-    to ops's copy, which is an action outside this repository for the controller to route.
-12. **Assumed Slice 1 names.**
+11. **`tools/cli.toml` is vendored from ops**, and ops holds the authority copy. Task 0.1
+    lands Task 2.4's **Ops rows** block in ops. Task 2.4 adopts it with
+    `vendored adopt cli.toml --at <sha>` and never edits `tools/cli.toml`.
+12. **The holds lock's scope.** It is taken by every claim replacement that changes
+    `holds` (added, reduced, or emptied) and by every acquire that records any. It is
+    held on `Ctx` through `save`'s publish, record write and rollback. `save` refuses a
+    holds-changing `Acquire` made without it. A release takes no lock, because it removes
+    the claim only after the record write.
+13. **Assumed Slice 1 names.**
     - `FieldArgs.needs`, `EditArgs.rm_needs` and `EditArgs.no_needs`.
     - The flow-list frontmatter `needs: [a, b]`, which the editor scripts `sed` against.
     - The editor refusal's kind is not asserted, only its "cannot also change needs" text.
@@ -4487,10 +5504,24 @@ note on both tasks. A park or a dead session releases the hold.
 Spec: `docs/specs/2026-10-03-lanes-needs-groups-design.md` §3, §5, and the lane parts of
 §7–§10. This slice starts from the end state of Slices 1 (Needs) and 2 (Exclusive holds)
 and uses their symbols exactly as the interface contract names them:
-`crate::needs::{NeedDecl, Vocabulary, Without, WITHOUT_ENV, exclusive_of}`,
-`Project.needs`, `Task.needs`, `crate::cli::WithoutArgs`,
+`crate::needs::{NeedDecl, Vocabulary, Without, exclusive_of}`,
+`Project.needs`, `Task.needs`, `crate::cli::WithoutArgs`, `commands::list::vocabularies`,
 `crate::holds::{HoldSnapshot, Holder, held_back}`, and the error kinds `unknown_need` and
 `need_held`.
+
+`Without` hides a task only where the task's own project declares the need (Slice 1 Task
+1.6). It is built with `Without::from_env(&flag, &list::vocabularies(&ctx.scope))` and applied with
+`hides(task, needs::vocabulary_of(vocabs, task))` or `retain(&mut tasks, &vocabs)`.
+
+CLI inventory: Tasks 3.1, 3.6, and 3.7 change the parser. Each carries its exact ops
+`cli.toml` edit in a block titled **"Ops rows (landed by Task 0.1)"**, which Task 0.1
+lands as its own ops commit; the task itself never edits ops and never writes
+`tools/cli.toml` by hand or with `cp`. It adopts its rows with
+`python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`, run in
+`.worktrees/ece1e2-work-selection`, where `<sha>` is read from the task's
+`inventory: Task 3.<n> = <sha>` note on tasks-ece1e2 (the step gives the command).
+Because `--at` adopts every row landed up to that commit, these tasks run in the order of
+their ops commits: 3.1, then 3.6, then 3.7.
 
 Line numbers below are from `ce51d81` (spec approval). Slices 1–2 shift them, so every
 edit also quotes the code it anchors on. Where Slices 1–2 added parameters or lines to a
@@ -4527,7 +5558,7 @@ caller in the same commit.
   `nested_lane` error; `childless_lane` warning.
 - `src/query.rs` — `Picked.paused`, `paused_omissions`.
 - `src/commands/list.rs` — `ready_tasks` through `is_goal` and the paused gate; `ready`
-  and `next` warn; `--under` on `list`, `list --parked`, `ready`, `next`;
+  and `next` warn through `warn_paused`; `--under` on `list`, `list --parked`, `ready`, `next`;
   `halt_snapshots` becomes `pub(super)`; `prime` builds `lanes`.
 - `src/commands/parked.rs` — `candidates` through `is_goal`, the paused gate, and the
   filter.
@@ -4540,6 +5571,8 @@ caller in the same commit.
 - `src/main.rs` — `mod lanes;`.
 - `src/commands/lanes.rs` (new) — `tasks lanes` and the shared `rows` used by `prime`.
 - `tests/cli.rs` — end-to-end tests for every lanes and lanes-view case of spec §10.
+- `tools/cli.toml` (and `tools/cli_surface.py` when `vendored adopt` refreshes it) —
+  adopted from ops in Tasks 3.1, 3.6, and 3.7; never edited in this repository.
 - `docs/specs/2026-08-29-tasks-design.md` — §3.1 field row, §5 usage, §5.1 `+=` lines.
 - `docs/specs/2026-09-03-task-hierarchy-design.md` — §4.3 paused-lane addendum.
 - `skills/tasks/SKILL.md`, `skills/scope/SKILL.md`, `README.md` — §9 lanes guidance.
@@ -4574,6 +5607,26 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 - Modify `docs/specs/2026-08-29-tasks-design.md` (§3.1 table line 120, §5 add line 259,
   edit line 331, §5.1 block), `skills/tasks/SKILL.md` (line 161), `README.md` (Use block,
   after line 274).
+- Adopt `tools/cli.toml` (and `tools/cli_surface.py` if refreshed) with `vendored adopt`
+  at the Task 3.1 ops commit.
+
+**Ops rows (landed by Task 0.1)** — the edit to ops `cli.toml` for this task only, in the
+`tasks` CLI section:
+
+- `[[cli.tasks.commands]] path = ["add"]`: after
+  `  { names = ["--parallel"], value = "none" },` insert
+  ```toml
+    { names = ["--lane"], value = "none" },
+  ```
+- `[[cli.tasks.commands]] path = ["edit"]` (the `tasks` row with `verb = "edit"`, not the
+  `wali` one): after `  { names = ["--no-parallel"], value = "none" },` insert
+  ```toml
+    { names = ["--no-lane"], value = "none" },
+  ```
+  and after `  { names = ["--parallel"], value = "none" },` insert
+  ```toml
+    { names = ["--lane"], value = "none" },
+  ```
 
 **Interfaces**
 - Consumes: `Task.needs` and `KEYS` entry `"needs"` (Slice 1).
@@ -4845,23 +5898,36 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
       tasks edit <id> --no-lane        # clear the lane marker
   ```
 
-- [ ] **Step 4: Run the tests and see them pass.**
+- [ ] **Step 4: Adopt this task's rows.** In `.worktrees/ece1e2-work-selection`:
+
+  ```bash
+  SHA=$(tasks show tasks-ece1e2 | grep -o 'inventory: Task 3\.1 = [0-9a-f]*' | awk '{print $NF}')
+  test -n "$SHA" && python3 "$OPS/bin/vendored" adopt cli.toml --at "$SHA"
+  ```
+
+  It also refreshes `tools/cli_surface.py` when the pair changed. Run
+  `just test-one parser_surface_equals_table`. Expected: PASS (the `--lane` and
+  `--no-lane` rows match the parser).
+
+- [ ] **Step 5: Run the tests and see them pass.**
 
   `just test-one lane_round_trips_after_parallel` and
   `just test-one a_lane_row_carries_the_lane_mark` pass;
   `just test-one --test cli lane_field_round_trips` passes.
 
-- [ ] **Step 5: Gate.** `cargo fmt`, then `just test-fast` (all green; existing `parallel`
+- [ ] **Step 6: Gate.** `cargo fmt`, then `just test-fast` (all green; existing `parallel`
   and type-column tests unchanged), then `tasks check`.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 7: Commit.**
 
   ```bash
   git add src/model.rs src/format.rs src/defer.rs src/halt.rs src/complexity.rs \
     src/repo.rs src/query.rs src/hierarchy.rs src/periodic.rs src/similarity.rs \
     src/commands/add.rs src/cli.rs src/commands/mod.rs src/commands/edit.rs \
     src/output.rs tests/cli.rs docs/specs/2026-08-29-tasks-design.md \
-    skills/tasks/SKILL.md README.md
+    skills/tasks/SKILL.md README.md tools/cli.toml
+  # tools/cli_surface.py too, when the adopt changed it:
+  git add $(git ls-files --modified --others --exclude-standard tools/cli_surface.py)
   git commit -m "feat(lanes): add the lane field with --lane and --no-lane (tasks-ece1e2)"
   ```
 
@@ -5605,8 +6671,9 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 - Modify `src/hierarchy.rs`: new `paused_lane` (after `lane_of`).
 - Modify `src/query.rs`: `Picked` (lines 171–176), new `paused_omissions` (after
   `deferred_omission`), new test.
-- Modify `src/commands/list.rs`: `ready_tasks` (the 3.2 loop and the return), `ready`
-  (after line 325), `next` (after line 383).
+- Modify `src/commands/list.rs`: `ready_tasks` (after `sort_ready(&mut ready);`, and the
+  return), new `warn_paused` (after `warn_hidden`), `ready` (after its
+  `deferred_omission` block), `next` (after its `deferred_omission` block).
 - Modify `src/commands/parked.rs`: `candidates` (lines 181–216).
 - Modify `src/commands/edit.rs`: `run` (after line 123, before line 218), `editor` (before
   its `save`), new `pause_warning`.
@@ -5615,10 +6682,18 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 
 **Interfaces**
 - Produces: `pub fn paused_lane<'a>(all: &'a [Task], task: &Task, registry: &Registry) -> Option<&'a Task>`;
-  `Picked.paused: BTreeMap<TaskId, BTreeSet<TaskId>>`;
+  `Picked.paused: Vec<Task>` (work a paused lane set aside after the picker's own
+  dependency, defer, claim, and park checks);
   `pub fn paused_omissions(paused: &BTreeMap<TaskId, BTreeSet<TaskId>>) -> Vec<String>`;
-  warning text `<n> task(s) hidden by paused lane <id>`.
-- Consumes: `enclosing_lane` (3.3).
+  `fn warn_paused(ctx, all, paused: Vec<Task>, snapshots, without: &Without, cutoff, claims)`
+  in `src/commands/list.rs`; warning text `<n> task(s) hidden by paused lane <id>`.
+- Consumes: `enclosing_lane` (3.3); `retain_allowed`, `complexity::apply`; Slice 1's
+  resolved `without` binding in `ready` and `next` and its `Without::retain` (Task 1.6).
+
+The warning counts a paused-lane task only when every other gate would offer it: it has
+passed the dependency, defer, claim, and user-park checks inside the picker, and the halt,
+`--without`, and complexity-cutoff gates the caller applies to its own list. A deferred
+task in a paused lane is in neither the deferred count nor the paused one.
 
 - [ ] **Step 1: Write the failing tests.**
 
@@ -5658,6 +6733,16 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
           .args(["park", &resumed, "rerun"])
           .assert()
           .success();
+      // Neither of these would be offered with the lane unpaused, so neither is counted.
+      let later = id_of(env.json(
+          &sci,
+          &["add", "Later", "--parent", &lane, "-p", "0", "--defer", "2099-01-01"],
+      ));
+      let asks = id_of(env.json(&sci, &["add", "Ask", "--parent", &lane, "-p", "0"]));
+      as_agent(&env, &sci, "agent-a")
+          .args(["park", &asks, "which host?", "--waiting-on", "user"])
+          .assert()
+          .success();
       let goal = id_of(env.json(&sci, &["add", "Plain goal", "-p", "2"]));
       let under_goal = id_of(env.json(&sci, &["add", "Under goal", "--parent", &goal, "-p", "2"]));
       let loose = id_of(env.json(&sci, &["add", "Loose", "-p", "3"]));
@@ -5682,7 +6767,18 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
           ready["warnings"]
               .to_string()
               .contains(&format!("2 task(s) hidden by paused lane {lane}")),
-          "{ready}"
+          "Capture and Resume only; Later is deferred and Ask waits on the user: {ready}"
+      );
+      let warnings = ready["warnings"].to_string();
+      assert!(
+          !warnings.contains("deferred task") && !warnings.contains(&later),
+          "a deferred task in a paused lane is in neither count: {ready}"
+      );
+      assert!(!warnings.contains(&asks), "{ready}");
+      let cut = env.json(&sci, &["ready", "--max-complexity", "low"]);
+      assert!(
+          !cut["warnings"].to_string().contains("paused lane"),
+          "unrated steps the cutoff hides are not counted as paused: {cut}"
       );
       let next = env.json(&sci, &["next"]);
       assert_eq!(next["next"]["task"]["id"], under_goal, "the parked step is paused too");
@@ -5754,12 +6850,14 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 
   ```rust
   /// What a picker found: the tasks it may hand out, the ones a deferral held back, and the
-  /// ones a paused lane kept out, by lane (lanes design §3.4).
+  /// ones a paused lane kept out (lanes design §3.4). `paused` holds only work that passed
+  /// the picker's own dependency, defer, claim, and park checks; the caller applies its
+  /// session gates to it before counting.
   #[derive(Default)]
   pub struct Picked {
       pub tasks: Vec<Task>,
       pub deferred: Vec<Task>,
-      pub paused: BTreeMap<TaskId, BTreeSet<TaskId>>,
+      pub paused: Vec<Task>,
   }
   ```
 
@@ -5776,74 +6874,106 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   ```
 
   `src/commands/list.rs`: imports become `use std::collections::{BTreeMap, BTreeSet, HashMap};`.
-  In `ready_tasks`, before `for task in selected {` add
+  The 3.2 readiness loop in `ready_tasks` is unchanged: dependencies and deferral are
+  judged there for every candidate, paused or not. In `ready_tasks`, directly after
+  `sort_ready(&mut ready);` and before the `ready.retain(...)` that drops live claims:
 
   ```rust
-      let mut paused: BTreeMap<TaskId, BTreeSet<TaskId>> = BTreeMap::new();
-  ```
-
-  and replace the 3.2 `match readiness(task, goal, &lookup, now) { ... }` with:
-
-  ```rust
-          let state = readiness(task, goal, &lookup, now);
-          // Lanes design §3.4: a paused lane keeps its subtree out of every picker. Only work
-          // that would otherwise be offered is counted, so the warning never overstates.
-          if state != Readiness::Not
-              && let Some(lane) = crate::hierarchy::paused_lane(all, task, &ctx.registry)
-          {
-              if state == Readiness::Ready {
-                  paused
-                      .entry(lane.id.clone())
-                      .or_default()
-                      .insert(task.id.clone());
-              }
-              continue;
-          }
-          match state {
-              Readiness::Ready => ready.push(task.clone()),
-              Readiness::Deferred => deferred.push(task.clone()),
-              Readiness::Not => {}
-          }
+      // Lanes design §3.4: a paused lane keeps its subtree out of every picker. Its work
+      // leaves here, before the claim and park checks that warn about what they drop, and
+      // passes those same checks silently, so the paused count holds only work that would
+      // otherwise be offered. A deferred task in a paused lane is in neither count.
+      let (mut paused, mut ready): (Vec<Task>, Vec<Task>) = ready
+          .into_iter()
+          .partition(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some());
+      paused.retain(|task| {
+          claims.live(&task.id).is_none()
+              && !claims
+                  .park(&task.id)
+                  .is_some_and(|park| park.waiting_on == WaitingOn::User)
+      });
+      deferred.retain(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_none());
   ```
 
   and return `Ok(Picked { tasks: ready, deferred, paused })`.
 
-  `ready`, after the `if let Some(warning) = deferred_omission(&picked.deferred) { ... }`
-  block:
+  After `warn_hidden` (and Slice 1's `vocabularies` and Slice 2's `retain_unheld` beside
+  it), add the one place the paused warning is built:
 
   ```rust
-      ctx.warnings
-          .extend(crate::query::paused_omissions(&picked.paused));
-  ```
-
-  `next`, after the `if let Some(warning) = deferred_omission(&omitted) { ... }` block (a
-  parked todo is both a candidate and ready, so the sets are merged before counting):
-
-  ```rust
-      let mut paused = candidates.paused;
-      for (lane, hidden) in ready.paused {
-          paused.entry(lane).or_default().extend(hidden);
+  /// Lanes design §3.4: one `<n> task(s) hidden by paused lane <id>` warning per lane,
+  /// counting only work every other gate would offer. The pickers already applied the
+  /// dependency, defer, claim, and park checks to `paused`; this applies the halt,
+  /// `--without`, and cutoff gates the caller applies to its own list, without their
+  /// warnings, then counts each task once under its lane.
+  fn warn_paused(
+      ctx: &mut ReadCtx,
+      all: &[Task],
+      mut paused: Vec<Task>,
+      snapshots: &HashMap<String, HaltSnapshot>,
+      without: &Without,
+      cutoff: Option<crate::model::Complexity>,
+      claims: &crate::claims::ClaimSnapshot,
+  ) {
+      let _ = retain_allowed(&mut paused, snapshots);
+      {
+          // Each task is hidden only where its own project declares the need (Task 1.6).
+          let vocabularies = vocabularies(&ctx.scope);
+          let _ = without.retain(&mut paused, &vocabularies);
       }
-      ctx.warnings
-          .extend(crate::query::paused_omissions(&paused));
-  ```
-
-  `src/commands/parked.rs`, `candidates`: add
-  `use std::collections::{BTreeMap, BTreeSet};` to the imports; before the loop
-
-  ```rust
-      let mut paused: BTreeMap<TaskId, BTreeSet<TaskId>> = BTreeMap::new();
-  ```
-
-  after the status/goal `continue` block, before the dependency loop:
-
-  ```rust
+      if let Some(cutoff) = cutoff {
+          let _ = crate::complexity::apply(&mut paused, cutoff, claims);
+      }
+      let mut by_lane: BTreeMap<TaskId, BTreeSet<TaskId>> = BTreeMap::new();
+      for task in &paused {
           if let Some(lane) = crate::hierarchy::paused_lane(all, task, &ctx.registry) {
-              paused
+              by_lane
                   .entry(lane.id.clone())
                   .or_default()
                   .insert(task.id.clone());
+          }
+      }
+      ctx.warnings
+          .extend(crate::query::paused_omissions(&by_lane));
+  }
+  ```
+
+  `ready`, after the `if let Some(warning) = deferred_omission(&picked.deferred) { ... }`
+  block (`without` is the `Without` Slice 1 binds at the top of `ready`):
+
+  ```rust
+     
+      warn_paused(&mut ctx, &all, picked.paused, &snapshots, &without, cutoff, &claims);
+  ```
+
+  `next`, after the `if let Some(warning) = deferred_omission(&omitted) { ... }` block. A
+  parked todo is both a candidate and a ready row; `warn_paused` counts ids in a set, so
+  it is counted once:
+
+  ```rust
+      let mut paused = candidates.paused;
+      paused.extend(ready.paused);
+     
+      warn_paused(&mut ctx, &all, paused, &snapshots, &without, cutoff, &claims);
+  ```
+
+  `src/commands/parked.rs`, `candidates`: before the loop add
+  `let mut paused = Vec::new();`, and replace the `if !held { ... }` block at the end of
+  the loop body with:
+
+  ```rust
+          if held {
               continue;
+          }
+          // Lanes design §3.4: a candidate in a paused lane is set aside once it has passed
+          // the dependency check; a deferred one is in neither the deferred nor the paused
+          // count.
+          let in_paused_lane = crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some();
+          match (crate::defer::is_deferred(task, now), in_paused_lane) {
+              (true, true) => {}
+              (true, false) => deferred.push(task.clone()),
+              (false, true) => paused.push(task.clone()),
+              (false, false) => found.push((park.at.clone(), task.clone())),
           }
   ```
 
@@ -5924,13 +7054,31 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 - Modify `src/commands/parked.rs`: `candidates` signature and loop.
 - Modify `src/commands/mod.rs`: `Command::Next` dispatch (lines 1338–1341).
 - Modify `tests/cli.rs`: new test.
+- Adopt `tools/cli.toml` (and `tools/cli_surface.py` if refreshed) with `vendored adopt`
+  at the Task 3.6 ops commit.
+
+**Ops rows (landed by Task 0.1)** — the edit to ops `cli.toml` for this task only, in the
+`tasks` CLI section:
+
+- `[[cli.tasks.commands]] path = ["list"]` and `[[cli.tasks.commands]] path = ["ready"]`:
+  in each, after `  { names = ["--parent"], value = "ref" },` insert
+  ```toml
+    { names = ["--under"], value = "ref" },
+  ```
+- `[[cli.tasks.commands]] path = ["next"]`: after Slice 1's
+  `  { names = ["--without"], value = "string", repeatable = true },` (which follows
+  `--max-complexity`) insert
+  ```toml
+    { names = ["--under"], value = "ref" },
+  ```
 
 **Interfaces**
 - Produces: `FilterArgs.under: Option<String>`; `Command::Next { under: Option<String>, .. }`;
   `TaskFilter::resolve_under(&mut self, all: &[Task], registry: &Registry) -> Result<()>`;
   `Fields.id: TaskId` (canonical);
   `parked::candidates(ctx, all, claims, filter: &TaskFilter, now)`;
-  `list::next(ctx, max_complexity, <Slice 1's without>, under: Option<String>)`.
+  `list::next(ctx, max_complexity, without: Vec<String>, under: Option<String>)` (Slice 1's
+  `without` parameter as Task 1.6 lands it, then `under`).
 
 - [ ] **Step 1: Write the failing test.**
 
@@ -6105,10 +7253,12 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   pub fn next(
       mut ctx: ReadCtx,
       max_complexity: Option<String>,
-      // Slice 1's `--without` parameter stays here, unchanged.
+      without: Vec<String>,
       under: Option<String>,
   ) -> Result<Output> {
       let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
+      // Slice 1's line, unchanged by this task.
+      let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
       let mut filter = TaskFilter::parse(
           &FilterArgs {
               under,
@@ -6142,27 +7292,43 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   ```rust
           Command::Next {
               max_complexity,
-              // Slice 1's `without` binding, unchanged
+              without,
               under,
               scope,
-          } => list::next(open_read_ctx(dir, &scope)?, max_complexity, /* without, */ under),
+          } => list::next(
+              open_read_ctx(dir, &scope)?,
+              max_complexity,
+              without.without,
+              under,
+          ),
   ```
 
-  (Write the arm with Slice 1's actual binding in place of the comment.)
+- [ ] **Step 4: Adopt this task's rows.** In `.worktrees/ece1e2-work-selection`:
 
-- [ ] **Step 4: Run the test and see it pass.**
+  ```bash
+  SHA=$(tasks show tasks-ece1e2 | grep -o 'inventory: Task 3\.6 = [0-9a-f]*' | awk '{print $NF}')
+  test -n "$SHA" && python3 "$OPS/bin/vendored" adopt cli.toml --at "$SHA"
+  ```
+
+  It also refreshes `tools/cli_surface.py` when the pair changed. Run
+  `just test-one parser_surface_equals_table`. Expected: PASS (the three `--under` rows
+  match the parser).
+
+- [ ] **Step 5: Run the test and see it pass.**
 
   `just test-one --test cli under_selects_descendants`; the filter unit tests
   (`just test-one filter::`) and `just test-one --test cli show_reports_parent_and_children`
   stay green.
 
-- [ ] **Step 5: Gate.** `cargo fmt`, `just test-fast`, `tasks check`.
+- [ ] **Step 6: Gate.** `cargo fmt`, `just test-fast`, `tasks check`.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 7: Commit.**
 
   ```bash
   git add src/cli.rs src/filter.rs src/commands/list.rs src/commands/parked.rs \
-    src/commands/mod.rs tests/cli.rs
+    src/commands/mod.rs tests/cli.rs tools/cli.toml
+  # tools/cli_surface.py too, when the adopt changed it:
+  git add $(git ls-files --modified --others --exclude-standard tools/cli_surface.py)
   git commit -m "feat(filter): select descendants with --under on list, ready, and next (tasks-ece1e2)"
   ```
 
@@ -6182,15 +7348,39 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   `waiting_text`, `needs_theme`, `shows_priority`, `warnings_of`.
 - Modify `tests/cli.rs`: helpers and five new tests; add `"lanes"` to
   `project_and_all_projects_conflict_on_every_read_command`.
+- Adopt `tools/cli.toml` (and `tools/cli_surface.py` if refreshed) with `vendored adopt`
+  at the Task 3.7 ops commit.
+
+**Ops rows (landed by Task 0.1)** — the edit to ops `cli.toml` for this task only, in the
+`tasks` CLI section. After the whole `[[cli.tasks.commands]] path = ["prime"]` row (the
+summary is the `Lanes` doc comment without its final period, as the surface test reads it):
+
+```toml
+
+[[cli.tasks.commands]]
+path = ["lanes"]
+summary = "Each open lane: its guidance, its state, and the step it could take now"
+options = [
+  { names = ["--without"], value = "string", repeatable = true },
+  { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+```
+
+The `--without` row is spelled as Slice 1 spells it on `ready`, `next`, and `prime`
+(Task 1.6); if Slice 1 lands a different row there, this one matches it.
 
 **Interfaces**
 - Consumes: `held_back(&HoldSnapshot, &Vocabulary, &Task, Option<&str>) -> Option<(String, Holder)>`,
   `HoldSnapshot::load(&Registry, OffsetDateTime) -> (HoldSnapshot, Vec<String>)`,
   `exclusive_of(&Vocabulary, &[String]) -> Vec<String>`, `Without::hides(&Task) -> bool`,
-  `Without::resolve(&[String], Option<&str>, &[&Vocabulary]) -> Result<Without>`,
-  `WithoutArgs { without: Vec<String> }`, `Project.needs`, `is_goal`, and the existing
-  readiness predicates (`query::is_candidate`, `defer::is_deferred`, `periodic::is_due`,
-  `complexity::effective`, `HaltSnapshot::allows`).
+  `Without::resolve(&[String], Option<&str>, &[&Vocabulary]) -> Result<Without>` (unit
+  tests), `Without::from_env(&[String], &[&Vocabulary]) -> Result<Without>` with
+  `commands::list::vocabularies(&ReadCtx)` (the command), all as Slice 1 Task 1.6 lands
+  them; `WithoutArgs { without: Vec<String> }`, `Project.needs`, `is_goal`, and the
+  existing readiness predicates (`query::is_candidate`, `defer::is_deferred`,
+  `periodic::is_due`, `complexity::effective`, `HaltSnapshot::allows`).
 - Produces (`src/lanes.rs`):
   `pub enum LaneState { Paused, Ready, Held, Waiting, Empty }`,
   `pub enum HeldBy { Claim, Pick }`,
@@ -6199,7 +7389,10 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   with `pub fn entries(&self) -> Vec<(&'static str, usize)>`, `pub fn is_empty(&self) -> bool`,
   `pub struct LaneRow { pub lane: TaskSummary, pub guidance: Option<String>, pub state: LaneState, pub pick: Option<TaskSummary>, pub steps: usize, pub active: Vec<TaskSummary>, pub held: Vec<HeldStep>, pub causes: Causes }`,
   `pub struct Inputs<'a> { .. }`, `pub fn build(inputs: &Inputs) -> Vec<LaneRow>`,
-  `pub fn guidance(body: &str) -> Option<String>`.
+  `pub fn guidance(body: &str) -> Option<String>`,
+  `pub fn dependency_readers<'a>(all: &'a [Task], claims: &ClaimSnapshot, registry: &Registry, now: OffsetDateTime) -> Vec<&'a Task>`
+  (the only records whose dependencies the view reads: live descendants of open, unpaused
+  lanes that could be a step).
   (`src/commands/lanes.rs`): `pub fn run(ctx: ReadCtx, without: WithoutArgs, max_complexity: Option<String>) -> Result<Output>`,
   `pub(super) fn rows(ctx: &mut ReadCtx, all: &[Task], claims: &ClaimSnapshot, halts: &HashMap<String, HaltSnapshot>, cutoff: Option<Complexity>, without: &Without, now: OffsetDateTime) -> Result<Vec<LaneRow>>`.
   CLI: `tasks lanes [--without <n>]... [--max-complexity <c>] [--project P | --all-projects]`.
@@ -6307,7 +7500,7 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
                       exclusive: true,
                   },
               )]),
-              without: Without::resolve(&[], None, &[]).unwrap(),
+              without: Without::default(),
               holds,
               registry,
           }
@@ -6321,6 +7514,8 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
           };
           let halts = HashMap::new();
           let vocabularies = HashMap::from([("xx", &world.vocabulary)]);
+          // The fixture's own session is "me": its claims are this caller's holds.
+          let mine = world.holds.mine(|claim| Ok(claim.session == "me")).unwrap();
           build(&Inputs {
               all,
               claims: &world.claims,
@@ -6331,7 +7526,7 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
               without: &world.without,
               holds: &world.holds,
               vocabularies: &vocabularies,
-              session: Some("me"),
+              mine: &mine,
               now: at(NOW),
           })
       }
@@ -6495,6 +7690,43 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
           assert_eq!(rows[1].state, LaneState::Held);
           assert!(rows[1].pick.is_none());
       }
+
+      #[test]
+      fn dependencies_are_read_only_for_work_that_could_be_a_step() {
+          let mut paused = lane("xx-0000a2", 1);
+          paused.status = Status::Blocked;
+          let mut due = task("xx-000005", Some("xx-0000a1"), Status::Done, 2);
+          due.every = Some(crate::periodic::Interval::parse("30d").unwrap());
+          let all = vec![
+              lane("xx-0000a1", 0),
+              task("xx-000001", Some("xx-0000a1"), Status::Todo, 2),
+              task("xx-000002", Some("xx-0000a1"), Status::Done, 2),
+              task("xx-000003", Some("xx-0000a1"), Status::Shelved, 2),
+              task("xx-000004", Some("xx-0000a1"), Status::Idea, 2),
+              due,
+              task("xx-000006", Some("xx-0000a1"), Status::Idea, 2),
+              paused,
+              task("xx-000007", Some("xx-0000a2"), Status::Todo, 2),
+              task("xx-000008", None, Status::Todo, 2),
+          ];
+          let claims = ClaimSnapshot::from_parts(
+              BTreeMap::new(),
+              BTreeMap::from([("xx-000006".to_string(), agent_park())]),
+              BTreeMap::new(),
+          );
+          let mut readers: Vec<String> =
+              dependency_readers(&all, &claims, &Registry::default(), at(NOW))
+                  .iter()
+                  .map(|task| task.id.to_string())
+                  .collect();
+          readers.sort();
+          assert_eq!(
+              readers,
+              ["xx-000001", "xx-000005", "xx-000006"],
+              "a todo, a due recurrence, and an agent-parked idea; never closed, shelved, \
+               an unparked idea, a paused lane's work, or work outside every lane"
+          );
+      }
   }
   ```
 
@@ -6502,7 +7734,7 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 
   `just test-one lanes::tests` — fails to compile: `cannot find function 'build'`,
   `cannot find struct 'Inputs'`, `cannot find type 'LaneRow'`, `cannot find function
-  'guidance'`.
+  'guidance'`, `cannot find function 'dependency_readers'`.
 
 - [ ] **Step 3: Implement the builder.** Put this above the test module in `src/lanes.rs`:
 
@@ -6514,7 +7746,7 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 
   use crate::claims::{ClaimSnapshot, WaitingOn};
   use crate::halt::HaltSnapshot;
-  use crate::holds::HoldSnapshot;
+  use crate::holds::{HoldSnapshot, Mine};
   use crate::model::{Complexity, Status, Task, TaskId};
   use crate::needs::{Vocabulary, Without};
   use crate::output::TaskSummary;
@@ -6676,7 +7908,8 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
       pub all: &'a [Task],
       pub claims: &'a ClaimSnapshot,
       pub registry: &'a Registry,
-      /// `Some(closed?)` for a reachable dependency, `None` for an unreachable one.
+      /// `Some(closed?)` for a reachable dependency, `None` for an unreachable one. Only
+      /// the dependencies of `dependency_readers` are ever asked for.
       pub dependency: &'a dyn Fn(&TaskId) -> Option<bool>,
       /// Per prefix; a prefix without one gates nothing.
       pub halts: &'a HashMap<String, HaltSnapshot>,
@@ -6685,8 +7918,9 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
       pub holds: &'a HoldSnapshot,
       /// Each scanned project's need vocabulary, by prefix.
       pub vocabularies: &'a HashMap<&'a str, &'a Vocabulary>,
-      /// This session, for the hold gate; `None` counts every hold as another session's.
-      pub session: Option<&'a str>,
+      /// The caller's own live holds (`commands::own_holds`, Slice 2), for the hold gate;
+      /// `Mine::default()` counts every hold as another session's.
+      pub mine: &'a Mine,
       pub now: OffsetDateTime,
   }
 
@@ -6731,6 +7965,38 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
       crate::hierarchy::is_active(task) || (task.status == Status::Done && task.every.is_some())
   }
 
+  /// Work `next` could hand out once its other gates pass: a `ready_tasks` candidate (todo,
+  /// or a due recurrence) or an open, unblocked, unshelved parked-agent candidate. These
+  /// are the records `ready_tasks` and `parked::candidates` read dependencies for, and the
+  /// only ones the view reads them for.
+  fn could_step(task: &Task, claims: &ClaimSnapshot, now: OffsetDateTime) -> bool {
+      crate::query::is_candidate(task, now)
+          || claims.park(&task.id).is_some_and(|park| {
+              park.waiting_on == WaitingOn::Agent
+                  && task.status.is_open()
+                  && !matches!(task.status, Status::Blocked | Status::Shelved)
+          })
+  }
+
+  /// The records whose dependencies the view resolves: live descendants of open, unpaused
+  /// lanes that `could_step`. Closed and shelved descendants, an unparked `idea`, and all
+  /// work under a paused lane are never read, so a dependency only such work names (a
+  /// foreign record since garbled or gone) cannot fail `tasks lanes` or `prime`.
+  pub fn dependency_readers<'a>(
+      all: &'a [Task],
+      claims: &ClaimSnapshot,
+      registry: &Registry,
+      now: OffsetDateTime,
+  ) -> Vec<&'a Task> {
+      all.iter()
+          .filter(|lane| {
+              lane.lane && crate::hierarchy::is_active(lane) && lane.status != Status::Blocked
+          })
+          .flat_map(|lane| crate::hierarchy::descendants(all, &lane.id, registry))
+          .filter(|task| is_live(task) && could_step(task, claims, now))
+          .collect()
+  }
+
   /// Where one live descendant lands: a cause, or a step `next` would consider.
   enum Class<'a> {
       Cause(Cause),
@@ -6747,7 +8013,10 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
       let park = claims.park(&task.id);
       let cause = if claims.live(&task.id).is_some() {
           Some(Cause::Active)
-      } else if inputs.without.hides(task) {
+      } else if inputs
+          .without
+          .hides(task, crate::needs::vocabulary_of(inputs.vocabularies, task))
+      {
           Some(Cause::Without)
       } else if inputs.cutoff.is_some_and(|cutoff| {
           crate::complexity::effective(task, claims).is_none_or(|level| level > cutoff)
@@ -6767,11 +8036,15 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
           Some(Cause::User)
       } else if task.status == Status::Blocked {
           Some(Cause::Blocked)
-      } else if !task
-          .depends
-          .iter()
-          .all(|dependency| (inputs.dependency)(dependency) == Some(true))
+      } else if could_step(task, claims, inputs.now)
+          && !task
+              .depends
+              .iter()
+              .all(|dependency| (inputs.dependency)(dependency) == Some(true))
       {
+          // Asked only of `dependency_readers` records, the ones whose dependencies were
+          // resolved; a record that could never be a step falls through to `goal` or
+          // `other`.
           Some(Cause::Depends)
       } else if crate::hierarchy::is_goal(
           task,
@@ -6868,7 +8141,7 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   fn held_by(inputs: &Inputs, step: &Task, picked: &BTreeMap<String, TaskId>) -> Option<HeldStep> {
       let vocabulary = inputs.vocabularies.get(step.id.prefix.as_str())?;
       if let Some((need, holder)) =
-          crate::holds::held_back(inputs.holds, vocabulary, step, inputs.session)
+          crate::holds::held_back(inputs.holds, vocabulary, step, inputs.mine)
       {
           return Some(HeldStep {
               id: step.id.clone(),
@@ -7248,16 +8521,8 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
       max_complexity: Option<String>,
   ) -> Result<Output> {
       let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
-      let without = {
-          let vocabularies: Vec<&Vocabulary> = ctx
-              .scope
-              .projects()
-              .iter()
-              .map(|project| &project.needs)
-              .collect();
-          let env = std::env::var(crate::needs::WITHOUT_ENV).ok();
-          Without::resolve(&without.without, env.as_deref(), &vocabularies)?
-      };
+      // The strict-flag, lenient-variable union `ready`, `next`, and `prime` build.
+      let without = Without::from_env(&without.without, &super::list::vocabularies(&ctx.scope))?;
       let (all, claims) = ctx.scan_with_claims()?;
       let now = crate::time::parse(&crate::time::now())?;
       let halts = super::list::halt_snapshots(&mut ctx, &all);
@@ -7271,6 +8536,9 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   /// Every open, unshelved lane in scope as a `LaneRow`. Holds and this session's identity
   /// are read only when a lane exists, and a warning another section of the same command
   /// already gave (the hold-store warnings `ready` and `prime` also raise) is not repeated.
+  /// Dependencies are resolved only for `dependency_readers`, as `ready_tasks` resolves
+  /// only its candidates' (lanes design §5.1 step 1), so a dependency that only closed,
+  /// shelved, or paused work names can never fail the view or `prime`.
   pub(super) fn rows(
       ctx: &mut ReadCtx,
       all: &[Task],
@@ -7280,24 +8548,21 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
       without: &Without,
       now: OffsetDateTime,
   ) -> Result<Vec<LaneRow>> {
-      let lanes: Vec<&Task> = all
+      if !all
           .iter()
-          .filter(|task| task.lane && crate::hierarchy::is_active(task))
-          .collect();
-      if lanes.is_empty() {
+          .any(|task| task.lane && crate::hierarchy::is_active(task))
+      {
           return Ok(Vec::new());
       }
       let mut closed: HashMap<TaskId, Option<bool>> = HashMap::new();
-      for lane in &lanes {
-          for task in crate::hierarchy::descendants(all, &lane.id, &ctx.registry) {
-              for dependency in &task.depends {
-                  if closed.contains_key(dependency) {
-                      continue;
-                  }
-                  let value = super::list::resolve_dependency(ctx, all, dependency)?
-                      .map(|found| !found.status.is_open());
-                  closed.insert(dependency.clone(), value);
+      for task in crate::lanes::dependency_readers(all, claims, &ctx.registry, now) {
+          for dependency in &task.depends {
+              if closed.contains_key(dependency) {
+                  continue;
               }
+              let value = super::list::resolve_dependency(ctx, all, dependency)?
+                  .map(|found| !found.status.is_open());
+              closed.insert(dependency.clone(), value);
           }
       }
       let (holds, mut fresh) = crate::holds::HoldSnapshot::load(&ctx.registry, now);
@@ -7307,7 +8572,9 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
               ctx.warnings.push(warning);
           }
       }
-      let session = me.identity().map(|identity| identity.session.clone());
+      // Same-session holds follow the claim ownership rule, including process proof
+      // across a native-to-relay identity change (Slice 2 Task 2.2).
+      let mine = super::own_holds(&holds, &me)?;
       let vocabularies: HashMap<&str, &Vocabulary> = ctx
           .scope
           .projects()
@@ -7325,15 +8592,11 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
           without,
           holds: &holds,
           vocabularies: &vocabularies,
-          session: session.as_deref(),
+          mine: &mine,
           now,
       }))
   }
   ```
-
-  Slice 1 exposes the resolution: build the `Without` in `run` with
-  `Without::from_env(&args.without.without, &super::list::vocabularies(ctx))?` (Task 1.6)
-  instead of an inline block. It is the strict-flag, lenient-variable union.
 
   `src/output.rs`: add `use crate::lanes::{Causes, LaneRow, LaneState};`. After `PrimeOut`:
 
@@ -7428,7 +8691,18 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   `needs_theme` and `shows_priority` each gain `| Output::Lanes(_)`; `warnings_of` gains
   `Output::Lanes(o) => o.warnings.clone(),`.
 
-- [ ] **Step 8: Run the tests and see them pass.**
+- [ ] **Step 8: Adopt this task's rows.** In `.worktrees/ece1e2-work-selection`:
+
+  ```bash
+  SHA=$(tasks show tasks-ece1e2 | grep -o 'inventory: Task 3\.7 = [0-9a-f]*' | awk '{print $NF}')
+  test -n "$SHA" && python3 "$OPS/bin/vendored" adopt cli.toml --at "$SHA"
+  ```
+
+  It also refreshes `tools/cli_surface.py` when the pair changed. Run
+  `just test-one parser_surface_equals_table`. Expected: PASS (the `lanes` command row and
+  its four options match the parser).
+
+- [ ] **Step 9: Run the tests and see them pass.**
 
   `just test-one lanes::tests`;
   `just test-one --test cli lanes_view_reports_every_state`;
@@ -7438,14 +8712,17 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   `just test-one --test cli lanes_across_projects`;
   `just test-one --test cli project_and_all_projects_conflict`.
 
-- [ ] **Step 9: Gate.** `cargo fmt`, `just test-fast`, `tasks check`.
+- [ ] **Step 10: Gate.** `cargo fmt`, `just test-fast`, `tasks check`.
 
-- [ ] **Step 10: Commit.**
+- [ ] **Step 11: Commit.**
 
   ```bash
   git add src/lanes.rs src/main.rs src/commands/lanes.rs src/commands/mod.rs \
-    src/commands/list.rs src/cli.rs src/output.rs tests/cli.rs
-  git add tests/common/mod.rs   # only if Step 5 had to clear TASKS_WITHOUT there
+    src/commands/list.rs src/cli.rs src/output.rs tests/cli.rs tools/cli.toml
+  # tools/cli_surface.py when the adopt changed it, and tests/common/mod.rs when Step 5
+  # had to clear TASKS_WITHOUT there:
+  git add $(git ls-files --modified --others --exclude-standard \
+    tools/cli_surface.py tests/common/mod.rs)
   git commit -m "feat(lanes): tasks lanes shows each lane's pick, held steps, and causes (tasks-ece1e2)"
   ```
 
@@ -7458,16 +8735,16 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   arm (between the closeout table and the `roadmap:` header, lines 1058–1068).
 - Modify `src/commands/list.rs`: `prime` (after `ctx.warnings.extend(held);`, line 568;
   the `PrimeOut` literal, line 615).
-- Modify `tests/cli.rs`: new test.
+- Modify `tests/cli.rs`: two new tests.
 
 **Interfaces**
-- Consumes: `commands::lanes::rows` (3.7); Slice 1's `Without` already resolved in
-  `prime` (from its `--without` and `TASKS_WITHOUT`); `prime`'s `cutoff`, `snapshots`,
-  `claims`, `all`, `now`.
+- Consumes: `commands::lanes::rows` (3.7); Slice 1's `without` binding, the `Without`
+  Task 1.6 resolves at the top of `prime` from its `--without` and `TASKS_WITHOUT`;
+  `prime`'s `cutoff`, `snapshots`, `claims`, `all`, `now`.
 - Produces: `PrimeOut.lanes: Vec<LaneRow>` (always present, `[]` with no lanes); pretty
   `lanes:` block before `roadmap:`.
 
-- [ ] **Step 1: Write the failing test.**
+- [ ] **Step 1: Write the failing tests.**
 
   ```rust
   #[test]
@@ -7499,12 +8776,51 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
       let all = env.json(&sci, &["prime", "--all-projects"]);
       assert_eq!(all["lanes"][0]["lane"]["id"], lane, "{all}");
   }
+
+  #[test]
+  fn prime_and_lanes_never_read_the_dependencies_of_closed_or_shelved_lane_work() {
+      let mut env = TestEnv::new();
+      let sci = env.init("sci");
+      let fam = env.init("fam");
+      let far = id_of(env.json(&fam, &["add", "Far"]));
+      env.json(&fam, &["done", &far, "landed"]);
+      let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+      let step = id_of(env.json(&sci, &["add", "Take one", "--parent", &lane]));
+      let closed = id_of(env.json(&sci, &["add", "Closed", "--parent", &lane, "--depends", &far]));
+      env.json(&sci, &["done", &closed, "landed"]);
+      let shelved = id_of(env.json(
+          &sci,
+          &["add", "Shelved", "--parent", &lane, "--status", "idea", "--depends", &far],
+      ));
+      env.json(&sci, &["shelve", &shelved, "later"]);
+      // Garble the one record both depend on, as
+      // check_reports_unparsable_foreign_dependency_as_warning does: resolving it is now a
+      // parse error, so any read of these two records' dependencies fails the command.
+      std::fs::write(fam.join(format!("tasks/{far}.md")), "garbage").unwrap();
+
+      let prime = env.json(&sci, &["prime"]);
+      let row = &prime["lanes"][0];
+      assert_eq!(row["lane"]["id"], lane, "{prime}");
+      assert_eq!(row["state"], "ready", "{row}");
+      assert_eq!(row["pick"]["id"], step);
+      assert_eq!(row["steps"], 0);
+      assert!(
+          row.get("causes").is_none() && row.get("held").is_none(),
+          "a closed child and a shelved child are not live: {row}"
+      );
+      let view = env.json(&sci, &["lanes"]);
+      assert_eq!(view["lanes"][0]["pick"]["id"], step, "{view}");
+  }
   ```
 
-- [ ] **Step 2: Run it and see it fail.**
+- [ ] **Step 2: Run them and see them fail.**
 
   `just test-one --test cli prime_always_carries_lanes` — `prime["lanes"]` is `Null`, not
-  `[]`.
+  `[]`. `just test-one --test cli prime_and_lanes_never_read` — `prime` succeeds without a
+  `lanes` key, so `row["lane"]["id"]` is `Null` and the first assertion fails. (`tasks lanes`
+  already passes here, because Task 3.7's `rows` reads only `dependency_readers`; a `rows`
+  that read every descendant's dependencies would fail both commands on the garbled
+  record.)
 
 - [ ] **Step 3: Implement.**
 
@@ -7533,17 +8849,17 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 
   ```rust
       // Lanes design §5: the same builder as `tasks lanes`, under this session's cutoff and
-      // `--without`.
+      // `--without` (`without` is the `Without` Slice 1 binds at the top of `prime`).
+     
       let lanes = super::lanes::rows(&mut ctx, &all, &claims, &snapshots, cutoff, &without, now)?;
   ```
 
-  where `without` is the `crate::needs::Without` Slice 1 resolved at the top of `prime`
-  (use that binding's name). In the `PrimeOut` literal, after the `doing: ...` field, add
-  `lanes,`.
+  In the `PrimeOut` literal, after the `doing: ...` field, add `lanes,`.
 
-- [ ] **Step 4: Run the test and see it pass.**
+- [ ] **Step 4: Run the tests and see them pass.**
 
-  `just test-one --test cli prime_always_carries_lanes`, and the existing
+  `just test-one --test cli prime_always_carries_lanes`,
+  `just test-one --test cli prime_and_lanes_never_read`, and the existing
   `just test-one --test cli prime_shows_roadmap_and_closeout` (no lanes, so its pretty text
   is unchanged).
 
@@ -7730,9 +9046,25 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
   `lanes`. This keeps every existing pretty `prime` output byte-identical.
 - **The waiting line lists every cause, largest count first**, matching §5.3's example
   (`waiting: 2 user, 1 deferred`), with table order breaking ties.
-- **The paused warning counts work that would otherwise be ready.** It covers `ready` rows
-  and parked candidates, merged by id in `next`. A deferred step in a paused lane leaves
-  the deferred count rather than being counted twice.
+- **The paused warning counts only work that would be offered if the lane were
+  unpaused.** A paused-lane task is counted once it passes every other gate the command
+  applies: the dependency and defer checks, the live-claim and user-park checks (inside
+  `ready_tasks`, silently for paused work), and the halt, `--without`, and cutoff gates
+  (in `warn_paused`, silently). It covers `ready` rows and parked candidates, counted once
+  by id in `next`. A deferred step in a paused lane is in neither the deferred count nor
+  the paused one. The exclusive-hold gate (Slice 2's `retain_unheld`) is not applied to
+  paused work: a hold is another session's live, transient claim, and running that gate
+  would read every registered claim store and repeat its warnings for work nobody can take
+  anyway; a held step in a paused lane is still counted.
+- **`depends` is judged only for work that could be a step.** The view resolves
+  dependencies only for `dependency_readers` (live descendants of unpaused lanes that are
+  todo, a due recurrence, or an open parked-agent candidate), the same records
+  `ready_tasks` and `parked::candidates` read them for. A closed or shelved descendant, or
+  anything under a paused lane, is never read, so a garbled or vanished foreign record that
+  only such work depends on cannot fail `tasks lanes` or `prime`. The cost is one cause
+  shift: an unparked `idea`, or a `doing` record without a live claim, that has an open
+  dependency counts under `other` (or `goal`) rather than `depends`; neither could be a
+  step either way.
 - **`childless_lane` applies to open, unshelved lanes**, and `nested_lane` is reported at
   the inner lane.
 
@@ -7742,8 +9074,12 @@ round-trip test), output.rs (`TaskSummary::of`, `ParkedRow::resolved`,
 
 Spec: `docs/specs/2026-10-03-lanes-needs-groups-design.md` §6, with the groups parts of §7
 (tasks-77dbc6), §8 (`prime.group`, the `groups` and `group set|rm` payloads, the
-`unknown_group` kind), §9 (skill, README, main design) and §10 (**Groups**). This slice is
-independent of Slices 1–3 and uses none of their symbols. It may land first.
+`unknown_group` kind), §9 (skill, README, main design) and §10 (**Groups**). This slice
+executes **after Slice 3**, in the plan's fixed order 1 → 2 → 3 → 4, so each task's
+`vendored adopt --at` commit is at or after the previous task's. Its code uses none of the
+other slices' symbols. Its one cross-slice contact is `tasks lanes` (Slice 3). That command
+flattens `ScopeArgs`, so it gains `--group` with no code change; Task 4.4 adds the `lanes`
+row's `--group` option to its own ops rows and tests `lanes --group`.
 
 **Goal:** a host can name a set of registered projects (`tasks group set vf nodes atoms`)
 and read it with `--group vf` wherever `--project` and `--all-projects` are accepted, plus
@@ -7770,9 +9106,32 @@ to its members. Views that warn about missing projects (`open_all`'s walk,
   - `prime.group`, present only under `--group`;
   - `unregister` warnings;
   - the new `groups` and `group set|rm` payloads.
-- Every new command and option is a row in `tools/cli.toml`. `surface::tests::parser_surface_equals_table` fails until the row
-  matches the parser. The copy in ops (`cli.toml`, the authority) gets the same rows after
-  the slice lands; that is an ops-side edit, outside this repository.
+- Every new command and option is a row in the CLI inventory, and
+  `surface::tests::parser_surface_equals_table` fails until the adopted rows match the
+  parser. The rows land in ops first. Each CLI-touching task (4.2, 4.4, 4.5) keeps its
+  exact edit to ops `cli.toml` in a block titled **"Ops rows (landed by Task 0.1)"**. Task 0.1
+  lands that edit as one ops commit per task, in execution order, and records
+  `inventory: Task <n> = <sha>` on tasks-ece1e2. The task itself never edits ops. It adopts
+  with `python3 "$OPS/bin/vendored" adopt cli.toml --at <sha>`, run in
+  `.worktrees/ece1e2-work-selection`. `vendored` also refreshes `tools/cli_surface.py` when
+  the pair changed. The task then commits `tools/cli.toml` (and `tools/cli_surface.py`, if
+  `git status` shows it changed) with its implementation. Never write `tools/cli.toml` by
+  hand or with `cp`. `$OPS` is the `ops` root from `tasks projects`. The adopt step reads
+  both values with the same three lines in every task:
+
+  ```bash
+  OPS=$(tasks projects | jq -r '.projects[] | select(.prefix == "ops") | .root')
+  SHA=$(tasks show tasks-ece1e2 | jq -r '.task.notes[].text | capture("^inventory: Task 4\\.2 = (?<sha>[0-9a-f]{7,40})$").sha' | tail -n 1)
+  test -n "$OPS" && test -n "$SHA" && python3 "$OPS/bin/vendored" adopt cli.toml --at "$SHA"
+  ```
+
+  Each task's copy of these lines names its own task number in the `capture` pattern.
+  `--at` adopts every row landed up to that commit, so the tasks run in the ops commits'
+  order: Slice 3's last CLI task, then 4.2, 4.4, 4.5.
+- Line numbers in this slice's **Files** lists and steps are from the tree before Slice 1.
+  Slices 1–3 shift them, so find each edit by the symbol named beside it. No Slice 1–3 code
+  matches `Scope::All` by its tuple form, so the variant change in Task 4.4 reaches only the
+  sites listed there.
 - Group names use the tag grammar: non-empty, only `a-z`, `0-9`, `-`. This is the same
   character rule as Slice 1's need names. Each slice has its own predicate, so neither
   depends on the other.
@@ -7785,9 +9144,20 @@ to its members. Views that warn about missing projects (`open_all`'s walk,
 - **`group set` errors.** Bad or colliding names are `validation`. An unknown member is
   `config`, as `--project <unknown>` is.
 - **Rename and adopt targets.** `rename` and `rename --adopt` refuse a target prefix equal
-  to a group name: `config` from `rename`, and `validation` from adopt's pre-write
-  classification, adopt's existing refusal kind. A name must never mean two things, so
-  `is_taken` now includes group names.
+  to a group name. From `rename` this is refusal **R12** of its recovery classification.
+  R12 applies with or without an inventory, as R7–R8 do, so `--explain` reports `refuse`
+  exactly when execution refuses. Execution refuses with `config`, as for a retired target,
+  at any stage and before any write. From adopt it is `validation`, raised by its pre-write
+  classification, which is adopt's existing refusal kind. A name must never mean two things,
+  so `is_taken` now includes group names too.
+- **Rename reservations.** `group set` refuses a name that an unfinished rename reserves.
+  That is the source or target of any pending inventory, the same pair `rename` refuses for
+  a second rename. The check reads the inventories under the registry lock, as `init`'s
+  check does. A rename writes its inventory while it holds that lock, so no reservation can
+  appear between the check and the save. The refusal is `validation`, because `group set`
+  makes every name collision `validation`. Rejected alternative: `config`, which is what
+  `init` returns. A group name colliding with a reservation is the same mistake as one
+  colliding with a prefix, so it gets the same kind.
 - **Stored members.** Members are stored sorted and distinct. Scope order is registry
   (prefix) order, so nothing depends on the declared order.
 
@@ -7802,6 +9172,11 @@ to its members. Views that warn about missing projects (`open_all`'s walk,
   `open_id_read_ctx` accept `--group`, `quiet --group`.
 - `src/commands/unregister.rs` — modify: warn per deleted group.
 - `src/rename/adopt.rs` — modify: `classify_registry` refuses a group-named target.
+- `src/rename/snapshot.rs` — modify: `RegistryState.target_group`, observed by `observe`;
+  unit test.
+- `src/rename/classify.rs` — modify: refusal R12 (target names a group); its unit tests
+  and the independent transcription `expected`.
+- `src/rename/mod.rs` — modify: an R12 refusal is `config`.
 - `src/cli.rs` — modify: `ScopeArgs.group`, `Command::Group`/`GroupAction`,
   `Command::Groups`, `Tree` id conflict, `Quiet.group`.
 - `src/scope.rs` — modify: `Scope::All { projects, members, group }`, `open_group`,
@@ -7812,10 +9187,13 @@ to its members. Views that warn about missing projects (`open_all`'s walk,
 - `src/output.rs` — modify: `GroupOut`, `GroupRow`, `GroupMember`, `GroupsOut`,
   `PrimeOut.group`, pretty rendering, `warnings_of`.
 - `src/complete.rs` — modify: `groups()` candidates, `Line.group`, `scoped` under `--group`.
-- `tools/cli.toml` — modify: rows for `group`, `group set`, `group rm`, `groups`, and
-  `--group` on list, ready, next, sample, prime, tree, tags, quiet.
+- `tools/cli.toml` (and `tools/cli_surface.py` when `vendored` refreshes it) — adopted with
+  `vendored adopt --at`, never edited. The rows are landed in ops by Task 0.1: `group`,
+  `group set`, `group rm` and `groups` (Task 4.2); `--group` on list, ready, next, sample,
+  prime, tree, tags and lanes (Task 4.4); and `--group` on quiet (Task 4.5).
 - `tests/cli.rs` — modify: append the end-to-end group tests.
-- `skills/tasks/SKILL.md`, `README.md`, `docs/specs/2026-08-29-tasks-design.md` — modify (Task 4.6).
+- `skills/tasks/SKILL.md`, `README.md`, `docs/specs/2026-08-29-tasks-design.md`,
+  `docs/specs/2026-09-08-prefix-rename-design.md` — modify (Task 4.6).
 
 ---
 
@@ -8013,12 +9391,15 @@ git commit -m "feat(registry): declare project groups in a validated [groups] ta
 - Modify: `src/cli.rs:284-310` (new variants after `Projects`), and a new `GroupAction` enum after `Command`.
 - Modify: `src/output.rs` (structs after `ProjectsOut` at line 117; `Output` enum 831-852; `pretty` 884-890; `warnings_of` 1895-1920).
 - Modify: `src/complete.rs:205-211` (add `groups()` after `prefixes()`).
-- Modify: `tools/cli.toml` (rows after the `projects` row, line ~279).
+- Adopt: `tools/cli.toml` (and `tools/cli_surface.py` if it changes), through
+  `vendored adopt --at` the Task 4.2 inventory commit. Never edit it.
 - Modify: `tests/cli.rs` (append).
 
 **Interfaces:**
 - Consumes: `Registry::{load, lock, save, canonical_prefix, group_name_problem}`,
-  `scope::{is_reachable, registry_warnings}`, `commands::start_dir`.
+  `scope::{is_reachable, registry_warnings}`, `commands::start_dir`,
+  `rename::inventory::Inventory::pending() -> Result<Vec<Inventory>>` (its `source` and
+  `target` fields).
 - Produces:
   - `Registry::set_group(&mut self, name: &str, members: &[String]) -> Result<Vec<String>>`
   - `Registry::remove_group(&mut self, name: &str) -> Result<Vec<String>>`
@@ -8027,6 +9408,32 @@ git commit -m "feat(registry): declare project groups in a validated [groups] ta
   - `output::{GroupOut { name, members: Vec<String>, warnings }, GroupMember { prefix, reachable: bool }, GroupRow { name, members: Vec<GroupMember> }, GroupsOut { groups: Vec<GroupRow>, warnings }}`, `Output::Group`, `Output::Groups`
   - `cli::GroupAction::{Set { name, prefixes }, Rm { name }}`, `Command::Group { action }`, `Command::Groups`
   - `complete::groups() -> Vec<CompletionCandidate>`
+  - `fn reject_rename_reservation(name: &str) -> Result<()>`, private to `commands/group.rs`
+
+**Ops rows (landed by Task 0.1):** in ops `cli.toml`, table `cli.tasks`, insert these rows
+directly after the `[[cli.tasks.commands]]` row whose `path = ["projects"]`. Other CLIs
+have a `projects` row too, so match the one under `cli.tasks`. Insert after the `]` that
+closes its `options`.
+
+```toml
+[[cli.tasks.commands]]
+path = ["group"]
+summary = "Named sets of registered projects, read together with --group"
+
+[[cli.tasks.commands]]
+path = ["group", "set"]
+summary = "Create or replace a group; a retired prefix resolves to its live one"
+args = [{ name = "name", value = "string", required = true }, { name = "prefixes", value = "string", required = true, variadic = true }]
+
+[[cli.tasks.commands]]
+path = ["group", "rm"]
+summary = "Delete a group. Its projects stay registered"
+args = [{ name = "name", value = "string", required = true }]
+
+[[cli.tasks.commands]]
+path = ["groups"]
+summary = "Every group with its members and whether each is reachable"
+```
 
 - [ ] **Step 1: Write the failing unit tests** (append in `src/registry.rs` `mod tests`)
 
@@ -8168,13 +9575,57 @@ fn group_set_refuses_bad_or_colliding_names_and_unknown_members() {
     assert_eq!(env.json(&sci, &["groups"])["groups"], serde_json::json!([]));
     env.json(&sci, &["group", "set", "data-2", "sci"]);
 }
+
+#[test]
+fn group_set_refuses_a_name_an_unfinished_rename_reserves() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&sci, &["add", "S", "-p", "2"]));
+    let stopped = env
+        .raw(&sci)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "sci", "lab"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+
+    // `lab` is not yet a prefix, so only the reservation stands between it and a group.
+    // A group there would make the resume rewrite files and config, then fail at the
+    // registry step on the collision.
+    let error = error_of(&env, &fam, &["group", "set", "lab", "fam"]);
+    assert_eq!(error["error"]["kind"], "validation");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("reserved by unfinished rename sci -> lab"),
+        "{detail}"
+    );
+    assert_eq!(env.json(&fam, &["groups"])["groups"], serde_json::json!([]));
+
+    // The name stayed free, so the rename resumes and finishes.
+    assert_eq!(
+        env.json(&sci, &["rename", "sci", "lab"])["recovery"],
+        "resume_files"
+    );
+    assert!(sci.join(format!("tasks/lab-{}.md", &id[4..])).is_file());
+    // Finished, `lab` is a live prefix and `sci` a retired one: still refused, now as
+    // prefixes rather than reservations.
+    for name in ["lab", "sci"] {
+        assert_eq!(
+            env.fail(&fam, &["group", "set", name, "fam"]),
+            "validation",
+            "{name}"
+        );
+    }
+    env.json(&fam, &["group", "set", "vf", "lab", "fam"]);
+}
 ```
 
 - [ ] **Step 3: Run them to verify they fail**
 
 Run: `just test-one registry::tests::set_group` — expected: compile error, `no method named
 set_group`.
-Run: `just test-one --test cli group_set_` — expected: FAIL, `groups`/`group` are
+Run: `just test-one --test cli group_set_` — expected: the three tests FAIL, `groups`/`group` are
 unrecognized subcommands (exit 2).
 
 - [ ] **Step 4: Implement the registry methods and the error kind**
@@ -8320,12 +9771,14 @@ Create `src/commands/group.rs`:
 use crate::error::{Error, Result};
 use crate::output::{GroupMember, GroupOut, GroupRow, GroupsOut, Output};
 use crate::registry::Registry;
+use crate::rename::inventory::Inventory;
 use crate::scope::{is_reachable, registry_warnings};
 use std::path::Path;
 
 pub fn set(name: String, prefixes: Vec<String>) -> Result<Output> {
     let _lock = Registry::lock()?;
     let mut registry = Registry::load()?;
+    reject_rename_reservation(&name)?;
     let members = registry.set_group(&name, &prefixes)?;
     registry.save()?;
     Ok(Output::Group(GroupOut {
@@ -8333,6 +9786,24 @@ pub fn set(name: String, prefixes: Vec<String>) -> Result<Output> {
         members,
         warnings: Vec::new(),
     }))
+}
+
+/// A name an unfinished rename reserves (its source or its target) stays free until that
+/// rename finishes, as `init` and `rename` keep it. A group under the target would let the
+/// resume rewrite files and config, then fail at the registry step. The caller holds the
+/// registry lock, and a rename writes its inventory under that lock, so no reservation can
+/// appear between this check and the save. `validation`, as every colliding group name is.
+fn reject_rename_reservation(name: &str) -> Result<()> {
+    for pending in Inventory::pending()? {
+        if pending.source == name || pending.target == name {
+            return Err(Error::Validation(format!(
+                "group name {name:?} is reserved by unfinished rename {} -> {}; \
+                 finish it with `tasks rename {} {}` first",
+                pending.source, pending.target, pending.source, pending.target
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn rm(name: String) -> Result<Output> {
@@ -8433,45 +9904,36 @@ pub fn groups() -> Vec<CompletionCandidate> {
 }
 ```
 
-`tools/cli.toml`, after the `[[cli.tasks.commands]] path = ["projects"]` row (its
-`options = [...]` closes at line ~279):
+- [ ] **Step 8: Adopt this task's rows**
 
-```toml
-[[cli.tasks.commands]]
-path = ["group"]
-summary = "Named sets of registered projects, read together with --group"
+In `.worktrees/ece1e2-work-selection` (this also refreshes `tools/cli_surface.py` when the
+pair changed):
 
-[[cli.tasks.commands]]
-path = ["group", "set"]
-summary = "Create or replace a group; a retired prefix resolves to its live one"
-args = [{ name = "name", value = "string", required = true }, { name = "prefixes", value = "string", required = true, variadic = true }]
-
-[[cli.tasks.commands]]
-path = ["group", "rm"]
-summary = "Delete a group. Its projects stay registered"
-args = [{ name = "name", value = "string", required = true }]
-
-[[cli.tasks.commands]]
-path = ["groups"]
-summary = "Every group with its members and whether each is reachable"
+```bash
+OPS=$(tasks projects | jq -r '.projects[] | select(.prefix == "ops") | .root')
+SHA=$(tasks show tasks-ece1e2 | jq -r '.task.notes[].text | capture("^inventory: Task 4\\.2 = (?<sha>[0-9a-f]{7,40})$").sha' | tail -n 1)
+test -n "$OPS" && test -n "$SHA" && python3 "$OPS/bin/vendored" adopt cli.toml --at "$SHA"
 ```
 
-- [ ] **Step 8: Run the tests to verify they pass**
+Run: `just test-one parser_surface_equals_table` — expected: PASS. A mismatch means the
+parser disagrees with the landed rows. Fix the parser to match. Never edit
+`tools/cli.toml`: a row that is wrong goes back to Task 0.1 as a new ops commit.
+
+- [ ] **Step 9: Run the tests to verify they pass**
 
 Run: `just test-one registry::tests` — expected: PASS.
-Run: `just test-one surface::tests::parser_surface_equals_table` — expected: PASS (a
-mismatch prints the differing rows; align `tools/cli.toml` with the printed live row).
-Run: `just test-one --test cli group_set_` — expected: both PASS.
+Run: `just test-one --test cli group_set_` — expected: all three PASS.
 
-- [ ] **Step 9: Gate**
+- [ ] **Step 10: Gate**
 
 Run: `cargo fmt && just check && just test-fast` — expected: clean, all pass.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add src/registry.rs src/error.rs src/commands/group.rs src/commands/mod.rs src/cli.rs \
   src/output.rs src/complete.rs tools/cli.toml tests/cli.rs
+git status --short tools/cli_surface.py | grep -q . && git add tools/cli_surface.py
 git commit -m "feat(group): tasks group set|rm and tasks groups manage project groups"
 ```
 
@@ -8488,6 +9950,12 @@ git commit -m "feat(group): tasks group set|rm and tasks groups manage project g
   - new tests.
 - Modify: `src/commands/unregister.rs:1-20`.
 - Modify: `src/rename/adopt.rs:194-204` (`classify_registry`, after the retired-target refusal).
+- Modify: `src/rename/snapshot.rs:39-44` (`RegistryState`), `:195-207` (`observe`), tests
+  module (new test after `observes_registry_config_and_absent_config_explicitly`).
+- Modify: `src/rename/classify.rs:192-210` (`refusal`, after R8), tests `:276-280`
+  (`inventory_only`), `:328-332`, `:350-390` (`each_refusal_fires_on_its_own_before_the_table`),
+  `:436` (`expected`), `:584-588` (`enumerate_snapshots`).
+- Modify: `src/rename/mod.rs:48-55` (the error kind of a refusal).
 - Modify: `tests/cli.rs` (append).
 
 **Interfaces:**
@@ -8498,7 +9966,12 @@ git commit -m "feat(group): tasks group set|rm and tasks groups manage project g
     replaces the `(PathBuf, Vec<String>)` return;
   - `fn refuse_group_name(&self, prefix: &str) -> Result<()>`, private;
   - `fn retarget_groups(&mut self, from: &str, to: &str)`, private;
-  - `is_taken` now true for a group name.
+  - `is_taken` now true for a group name;
+  - `pub target_group: bool` on `rename::snapshot::RegistryState`, true when the rename
+    target names a group;
+  - refusal `R12` from `rename::classify::classify` whenever `target_group` holds, with or
+    without an inventory. `rename` turns it into `config`, and `--explain` reports
+    `recovery: "refuse"` with the R12 reason as its first warning.
 
 - [ ] **Step 1: Write the failing unit tests** (append in `src/registry.rs` `mod tests`)
 
@@ -8579,6 +10052,55 @@ Update the existing `unregister_removes_once_and_then_reports_the_prefix_is_abse
                 emptied_groups: Vec::new(),
             }
         );
+```
+
+In `src/rename/snapshot.rs` `mod tests`, after
+`observes_registry_config_and_absent_config_explicitly`:
+
+```rust
+    #[test]
+    fn observes_whether_the_target_names_a_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let mut registry = crate::registry::Registry::default();
+        registry.projects.insert("dot".into(), project.root.clone());
+        let observed = |registry: &crate::registry::Registry| {
+            observe(registry, &invocation(&project), None)
+                .unwrap()
+                .registry
+                .target_group
+        };
+        assert!(!observed(&registry));
+        registry.groups.insert("dot-set".into(), vec!["dot".into()]);
+        assert!(!observed(&registry), "only a group named like the target counts");
+        registry.groups.insert("dots".into(), vec!["dot".into()]);
+        assert!(observed(&registry));
+    }
+```
+
+In `src/rename/classify.rs` `mod tests`, extend
+`each_refusal_fires_on_its_own_before_the_table`. Change `for rule in 1..=11 {` to
+`for rule in 1..=12 {`, and add the arm before `_ => unreachable!(),`:
+
+```rust
+                12 => snap.registry.target_group = true,
+```
+
+R12 reads the registry alone, like R7 and R8. So change the no-inventory recheck's guard
+`if (7..=8).contains(&rule) {` to:
+
+```rust
+            if matches!(rule, 7 | 8 | 12) {
+```
+
+In the same module, give each of the three `RegistryState { .. }` literals (in
+`inventory_only`, in `every_phase_boundary_resumes_rather_than_refusing`, and in
+`enumerate_snapshots`) the field `target_group: false,` after `alias`. The enumeration
+keeps `false`, so its 1,572,480 count is unchanged. The independent transcription
+`expected` must still model R12. Change its first `excluded` line to:
+
+```rust
+        let mut excluded = two_roots || foreign_target || registry.target_group;
 ```
 
 - [ ] **Step 2: Write the failing end-to-end tests** (append to `tests/cli.rs`)
@@ -8669,15 +10191,75 @@ fn adopt_carries_group_membership_and_refuses_a_group_named_target() {
         serde_json::json!([{"name": "vf", "members": [{"prefix": "new", "reachable": true}]}])
     );
 }
+
+#[test]
+fn rename_explain_and_execution_both_refuse_a_group_named_target() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&sci, &["add", "S", "-p", "2"]));
+    env.json(&fam, &["group", "set", "vf", "fam"]);
+    let state = env.home.path().join(".local/state/tasks/rename");
+
+    // Fresh: explain predicts the refusal execution gives.
+    let explained = env.json(&sci, &["rename", "sci", "vf", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse", "{explained}");
+    assert!(
+        explained["warnings"][0].as_str().unwrap().starts_with("R12:"),
+        "{explained}"
+    );
+    assert_eq!(env.fail(&sci, &["rename", "sci", "vf"]), "config");
+    assert!(!state.join("sci.toml").exists(), "refused before the inventory");
+
+    // Mid-rename: a group that appears under the pending target blocks the resume before
+    // any file moves. `group set` refuses the reserved name (Task 4.2), so only a hand
+    // edit of the registry gets there.
+    let stopped = env
+        .raw(&sci)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "sci", "lab"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("[groups]\n"), "{text}");
+    std::fs::write(
+        &path,
+        text.replace("[groups]\n", "[groups]\nlab = [\"fam\"]\n"),
+    )
+    .unwrap();
+    let explained = env.json(&sci, &["rename", "sci", "lab", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse", "{explained}");
+    assert!(
+        explained["warnings"][0].as_str().unwrap().starts_with("R12:"),
+        "{explained}"
+    );
+    assert_eq!(env.fail(&sci, &["rename", "sci", "lab"]), "config");
+    assert!(sci.join(format!("tasks/{id}.md")).is_file(), "no task file moved");
+    assert!(!sci.join(format!("tasks/lab-{}.md", &id[4..])).exists());
+    assert!(state.join("sci.toml").is_file(), "the inventory waits for the resume");
+
+    env.json(&fam, &["group", "rm", "lab"]);
+    assert_eq!(
+        env.json(&sci, &["rename", "sci", "lab"])["recovery"],
+        "resume_files"
+    );
+}
 ```
 
 - [ ] **Step 3: Run them to verify they fail**
 
 Run: `just test-one registry::tests` — expected: compile error, `cannot find struct
 Unregistered`.
-Run: `just test-one --test cli group` — expected: the four new tests FAIL. `init --prefix vf`
+Run: `just test-one rename::` — expected: compile error, `no field target_group on type
+RegistryState`.
+Run: `just test-one --test cli group` — expected: the four new group tests FAIL. `init --prefix vf`
 succeeds. `rename sci science` succeeds. `unregister` reports no warning, and the next
 `list` is a `config` error naming `"fam"`. `adopt` refuses nothing.
+Run: `just test-one --test cli rename_explain_and_execution_both_refuse_a_group_named_target`
+— expected: FAIL at the first `recovery` assertion: `--explain` reports `"fresh"`, because
+the group check (`is_taken`) runs only on the execution path, after explain has returned.
 
 - [ ] **Step 4: Implement in `src/registry.rs`**
 
@@ -8844,25 +10426,70 @@ refusal (line 202-204). Adopt refuses here, before any store is written, rather 
     }
 ```
 
-`rename` needs no change in `src/rename/mod.rs`. Its fresh-path check
-`registry.is_taken(&invocation.target)` (line 127) now covers group names and runs before
-any write.
+- [ ] **Step 6: Classify a group-named rename target (R12)**
 
-- [ ] **Step 6: Run the tests to verify they pass**
+The fresh-path check `registry.is_taken(&invocation.target)` in `src/rename/mod.rs`
+(line 127) now covers group names. It runs only on the execution path, though, and only
+for `Fresh`. `--explain` returns before it, and a resume never reaches it. So the group
+collision becomes a classification refusal that both paths see.
+
+`src/rename/snapshot.rs`, `RegistryState`, after `alias`:
+
+```rust
+    /// The target names a group in the registry: refusal R12, in every stage.
+    pub target_group: bool,
+```
+
+In `observe`, the `RegistryState` literal gains, after `alias: …,`:
+
+```rust
+            target_group: registry.groups.contains_key(&invocation.target),
+```
+
+`src/rename/classify.rs`, in `refusal`, after the R8 block and before the final `None`:
+
+```rust
+    if snap.registry.target_group {
+        return Some(format!(
+            "R12: target prefix {:?} is the name of a group; remove it with \
+             `tasks group rm {}` first",
+            snap.invocation.target, snap.invocation.target
+        ));
+    }
+```
+
+`src/rename/mod.rs`: a refusal's kind becomes `config` when the target is a group, as it
+already is for a retired target. Replace the condition at lines 49-51:
+
+```rust
+                    if registry.aliases.contains_key(&invocation.target)
+                        || registry.groups.contains_key(&invocation.target)
+                        || !(registry_old || registry_new)
+```
+
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `just test-one registry::tests` — expected: PASS.
-Run: `just test-one --test cli group` — expected: PASS.
+Run: `just test-one rename::` — expected: PASS, including
+`rename::classify::tests::each_refusal_fires_on_its_own_before_the_table` (R12 with and
+without an inventory) and `rename::snapshot::tests::observes_whether_the_target_names_a_group`.
+Run: `just test-one --bin tasks every_enumerated_snapshot_gets_the_verdict_the_spec_names -- --include-ignored`
+— expected: PASS with the 1,572,480 count unchanged (about 7 s).
+Run: `just test-one --test cli group` and
+`just test-one --test cli rename_explain_and_execution_both_refuse_a_group_named_target` —
+expected: PASS.
 Run: `just test-one --test cli unregister` and `just test-one --test cli adopt` and
 `just test-one --test cli rename` — expected: the existing tests still PASS.
 
-- [ ] **Step 7: Gate**
+- [ ] **Step 8: Gate**
 
 Run: `cargo fmt && just check && just test-fast` — expected: clean, all pass.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/registry.rs src/commands/unregister.rs src/rename/adopt.rs tests/cli.rs
+git add src/registry.rs src/commands/unregister.rs src/rename/adopt.rs \
+  src/rename/snapshot.rs src/rename/classify.rs src/rename/mod.rs tests/cli.rs
 git commit -m "feat(registry): keep project groups consistent through init, rename, adopt, and unregister"
 ```
 
@@ -8880,11 +10507,13 @@ git commit -m "feat(registry): keep project groups consistent through init, rena
 - Modify: `src/commands/tags.rs:10-13`.
 - Modify: `src/output.rs:777-797` (`PrimeOut.group`), `:1005-1008` (pretty header).
 - Modify: `src/complete.rs:221-230` (`Line.group`), `:375-390` (`record`), `:535-563` (`scoped`), tests `:776-790`.
-- Modify: `tools/cli.toml` (`--group` rows on list, ready, next, sample, prime, tree, tags).
+- Adopt: `tools/cli.toml` (and `tools/cli_surface.py` if it changes), through
+  `vendored adopt --at` the Task 4.4 inventory commit. Never edit it.
 - Modify: `tests/cli.rs` (append).
 
 **Interfaces:**
-- Consumes: `Registry.groups`, `unknown_group` (Task 4.2), `scope::registry_warnings`.
+- Consumes: `Registry.groups`, `unknown_group` (Task 4.2), `scope::registry_warnings`,
+  `tasks lanes` and its flattened `ScopeArgs` (Slice 3, Task 3.7).
 - Produces:
   - `Registry::group(&self, name: &str) -> Result<&[String]>` (`unknown_group` when undeclared)
   - `Scope::All { projects: Vec<Project>, members: Vec<String>, group: Option<String> }`
@@ -8894,10 +10523,21 @@ git commit -m "feat(registry): keep project groups consistent through init, rena
   - `PrimeOut.group: Option<String>` (JSON `group`, omitted when `None`)
   - `complete::Line.group: Option<String>`
 
-Cross-slice note: `tasks lanes` (Slice 3) flattens `ScopeArgs`, so it gets `--group` with no
-code change. Whichever of Slices 3 and 4 lands second adds
-`{ names = ["--group"], value = "string" },` to the `lanes` row of `tools/cli.toml`. The
-surface test fails until it is there.
+Cross-slice note: Slice 3 has landed, and `tasks lanes` flattens `ScopeArgs`. It gains
+`--group` from this task's `ScopeArgs` change with no code of its own, so its row is one of
+this task's eight. The end-to-end tests below cover `lanes --group` beside the other read
+views.
+
+**Ops rows (landed by Task 0.1):** in ops `cli.toml`, table `cli.tasks`, edit each of the
+eight `[[cli.tasks.commands]]` rows `list`, `ready`, `next`, `sample`, `prime`, `tree`,
+`tags` and `lanes`. In each row, directly after the line
+`  { shared = "all_projects", value = "none" },`, add:
+
+```toml
+  { names = ["--group"], value = "string" },
+```
+
+Leave `quiet` for Task 4.5, and leave `claims` unchanged.
 
 - [ ] **Step 1: Write the failing unit tests**
 
@@ -9000,13 +10640,25 @@ fn group_scopes_the_read_views_to_its_members() {
     }
     let tags = env.json(nowhere.path(), &["tags", "--group", "vf"]);
     assert!(!tags.to_string().contains("only-ops"), "{tags}");
+
+    // `lanes` (Slice 3) flattens the same scope arguments.
+    let lane = id_of(env.json(&ops, &["add", "Ops effort", "--lane"]));
+    assert_eq!(
+        env.json(nowhere.path(), &["lanes", "--group", "vf"])["lanes"],
+        serde_json::json!([])
+    );
+    assert!(
+        env.json(nowhere.path(), &["lanes", "--all-projects"])["lanes"]
+            .to_string()
+            .contains(&lane)
+    );
 }
 
 #[test]
 fn group_conflicts_with_the_other_scopes_and_an_unknown_name_is_unknown_group() {
     let mut env = TestEnv::new();
     let (sci, _, _) = grouped_projects(&mut env);
-    for command in ["list", "ready", "next", "prime", "tree", "tags", "sample"] {
+    for command in ["list", "ready", "next", "prime", "tree", "tags", "sample", "lanes"] {
         env.usage(&sci, &[command, "--group", "vf", "--project", "sci"]);
         env.usage(&sci, &[command, "--group", "vf", "--all-projects"]);
         assert_eq!(
@@ -9028,7 +10680,7 @@ fn a_group_whose_members_are_all_unreachable_warns_and_reads_empty() {
     env.json(&sci, &["group", "set", "away", "fam"]);
     std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
     let nowhere = tempfile::tempdir().unwrap();
-    for command in ["list", "ready", "next", "prime", "tree", "tags", "sample"] {
+    for command in ["list", "ready", "next", "prime", "tree", "tags", "sample", "lanes"] {
         let out = env.json(nowhere.path(), &[command, "--group", "away"]);
         let warnings = warnings_of(&out);
         assert!(
@@ -9336,24 +10988,28 @@ In `scoped`, replace the `if line.all_projects { … }` head (lines 548-553):
 
 and add "`--group` narrows it to the group's members" to `scoped`'s doc comment.
 
-- [ ] **Step 8: Add the surface rows**
+- [ ] **Step 8: Adopt this task's rows**
 
-In `tools/cli.toml`, in each of the seven `[[cli.tasks.commands]]` rows `list`, `ready`,
-`next`, `sample`, `prime`, `tree` and `tags`, add a line directly after
-`  { shared = "all_projects", value = "none" },`:
+In `.worktrees/ece1e2-work-selection` (this also refreshes `tools/cli_surface.py` when the
+pair changed):
 
-```toml
-  { names = ["--group"], value = "string" },
+```bash
+OPS=$(tasks projects | jq -r '.projects[] | select(.prefix == "ops") | .root')
+SHA=$(tasks show tasks-ece1e2 | jq -r '.task.notes[].text | capture("^inventory: Task 4\\.4 = (?<sha>[0-9a-f]{7,40})$").sha' | tail -n 1)
+test -n "$OPS" && test -n "$SHA" && python3 "$OPS/bin/vendored" adopt cli.toml --at "$SHA"
 ```
 
-Leave `quiet` for Task 4.5, and leave `claims` unchanged.
+Run: `just test-one parser_surface_equals_table` — expected: PASS. The adopted `lanes`
+row now carries `--group`, and so does the parser's (from the flattened `ScopeArgs`).
+A mismatch means the parser disagrees with the landed rows. Fix the parser to match.
+Never edit `tools/cli.toml`.
 
 - [ ] **Step 9: Run the tests to verify they pass**
 
 Run: `just test-one scope::tests` and `just test-one complete::tests` — expected: PASS.
-Run: `just test-one surface::tests::parser_surface_equals_table` — expected: PASS.
 Run: `just test-one --test cli group_` and `just test-one --test cli a_group_whose_members` — expected: PASS.
-Run: `just test-one --test cli all_projects` and `just test-one --test cli halt_views` — expected: the existing tests PASS unchanged.
+Run: `just test-one --test cli all_projects`, `just test-one --test cli halt_views` and
+`just test-one --test cli lanes` — expected: the existing tests PASS unchanged.
 
 - [ ] **Step 10: Gate**
 
@@ -9364,6 +11020,7 @@ Run: `cargo fmt && just check && just test-fast` — expected: clean, all pass.
 ```bash
 git add src/registry.rs src/scope.rs src/cli.rs src/commands/mod.rs src/commands/list.rs \
   src/commands/tags.rs src/output.rs src/complete.rs tools/cli.toml tests/cli.rs
+git status --short tools/cli_surface.py | grep -q . && git add tools/cli_surface.py
 git commit -m "feat(scope): --group reads a project group's members in the read views"
 ```
 
@@ -9374,12 +11031,23 @@ git commit -m "feat(scope): --group reads a project group's members in the read 
 **Files:**
 - Modify: `src/cli.rs:686-701` (`Quiet`).
 - Modify: `src/commands/mod.rs:1416-1426` (quiet dispatch).
-- Modify: `tools/cli.toml` (quiet row, line ~562).
+- Adopt: `tools/cli.toml` (and `tools/cli_surface.py` if it changes), through
+  `vendored adopt --at` the Task 4.5 inventory commit. Never edit it.
 - Modify: `tests/cli.rs` (append).
 
 **Interfaces:**
 - Consumes: `ScopeArgs.group`, `open_read_ctx` (Task 4.4), `complete::groups` (Task 4.2).
 - Produces: `Command::Quiet { limit, project, all_projects, group: Option<String> }`.
+
+**Ops rows (landed by Task 0.1):** in ops `cli.toml`, table `cli.tasks`, in the
+`[[cli.tasks.commands]]` row `path = ["quiet"]`, directly after its line
+`  { shared = "all_projects", value = "none" },`, add:
+
+```toml
+  { names = ["--group"], value = "string" },
+```
+
+The `claims` row is unchanged.
 
 - [ ] **Step 1: Write the failing test** (append to `tests/cli.rs`)
 
@@ -9475,22 +11143,33 @@ place of `conflicts_with = "all_projects"`. Then add after `all_projects`:
         }
 ```
 
-`tools/cli.toml`, the `quiet` row: after its `{ shared = "all_projects", value = "none" },`
-line add `  { names = ["--group"], value = "string" },`. The `claims` row is unchanged.
+- [ ] **Step 4: Adopt this task's rows**
 
-- [ ] **Step 4: Run the tests to verify they pass**
+In `.worktrees/ece1e2-work-selection` (this also refreshes `tools/cli_surface.py` when the
+pair changed):
+
+```bash
+OPS=$(tasks projects | jq -r '.projects[] | select(.prefix == "ops") | .root')
+SHA=$(tasks show tasks-ece1e2 | jq -r '.task.notes[].text | capture("^inventory: Task 4\\.5 = (?<sha>[0-9a-f]{7,40})$").sha' | tail -n 1)
+test -n "$OPS" && test -n "$SHA" && python3 "$OPS/bin/vendored" adopt cli.toml --at "$SHA"
+```
+
+Run: `just test-one parser_surface_equals_table` — expected: PASS. Never edit
+`tools/cli.toml`; a mismatch is fixed in the parser.
+
+- [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `just test-one --test cli quiet_` — expected: PASS (new and existing quiet tests).
-Run: `just test-one surface::tests::parser_surface_equals_table` — expected: PASS.
 
-- [ ] **Step 5: Gate**
+- [ ] **Step 6: Gate**
 
 Run: `cargo fmt && just check && just test-fast` — expected: clean, all pass.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/cli.rs src/commands/mod.rs tools/cli.toml tests/cli.rs
+git status --short tools/cli_surface.py | grep -q . && git add tools/cli_surface.py
 git commit -m "feat(quiet): --group narrows the quiet queue to a project group"
 ```
 
@@ -9501,7 +11180,8 @@ git commit -m "feat(quiet): --group narrows the quiet queue to a project group"
 **Files:**
 - Modify: `skills/tasks/SKILL.md:50-54` (quiet line), `:196-203` (read-scope paragraph and a new groups paragraph after it).
 - Modify: `README.md:286-288` (Use block), `:336-341` (registry paragraph), `:550` (Layout).
-- Modify: `docs/specs/2026-08-29-tasks-design.md:576-579` (§5.1 addenda at the end of the shapes block), `:627-640` and `:652-660` (§6).
+- Modify: `docs/specs/2026-08-29-tasks-design.md:576-579` (§5.1 addenda at the end of the shapes block), `:627-640` and `:652-660` (§6), and the §5 usage lines `[--project P | --all-projects]`.
+- Modify: `docs/specs/2026-09-08-prefix-rename-design.md:316-330` (refusal R12).
 
 **Interfaces:** none (documentation only).
 
@@ -9525,8 +11205,8 @@ and not synced. Each host declares its own groups.
   and a retired prefix resolves to its live name. `tasks group rm <name>` deletes a group.
   `tasks groups` lists each group with whether each member is reachable.
 - **Names.** Names use the tag grammar (lowercase letters, digits, `-`). A name cannot be
-  a live or retired prefix, and `init` refuses a prefix that names a group. Groups may
-  overlap.
+  a live or retired prefix, or a prefix an unfinished rename reserves. `init` and `rename`
+  refuse a prefix that names a group. Groups may overlap.
 - **Membership changes.** `rename` carries membership to the new prefix. `unregister`
   drops the prefix from every group, and deletes, with a warning, any group it leaves
   empty.
@@ -9544,7 +11224,7 @@ In the Use block, after `    tasks projects                   # the registry: re
 ```text
     tasks group set vf nodes atoms   # a named set of registered projects (this host only)
     tasks ready --group vf           # read a group; also list, next, prime, tree, tags,
-                                     #   sample, quiet. Needs no local project.
+                                     #   sample, lanes, quiet. Needs no local project.
     tasks groups                     # each group, its members, and whether they are reachable
     tasks group rm vf                # delete the group; its projects stay registered
 ```
@@ -9588,7 +11268,7 @@ verifiably = ["atoms", "nodes"]
 
 Replace "The same seven read commands (list, ready, prime, tree, next, tags, sample) take
 `--project <p>` and `--all-projects`, which conflict. Both locate no local project." with
-"The same seven read commands (list, ready, prime, tree, next, tags, sample) take
+"The same eight read commands (list, ready, prime, tree, next, tags, sample, lanes) take
 `--project <p>`, `--group <name>`, and `--all-projects`, which conflict pairwise. None
 locates a local project." Add a paragraph after the `--all-projects` paragraph (the one
 ending "is a config error."):
@@ -9602,26 +11282,61 @@ ending "is a config error."):
   only, and an undeclared name is `unknown_group`.
 - **Commands.** `quiet` takes it too; `claims` keeps its single registry-wide scope.
 - **Names and members.** Group names use the tag grammar and never equal a live or retired
-  prefix. Members are live prefixes, kept so by `rename` and `unregister`; a registry
+  prefix, and `group set` refuses one an unfinished rename reserves. Members are live prefixes, kept so by `rename` and `unregister`; a registry
   naming any other is a `config` error that names the group and the prefix.
 
 See docs/specs/2026-10-03-lanes-needs-groups-design.md §6.
 ```
 
-- [ ] **Step 4: Record the idea's outcome**
+In §5, every usage line naming the two scopes gains the third. These are the lines for
+list, tree, ready, sample, next, prime and tags, plus the `tasks lanes` entry Task 3.9
+added:
+
+```bash
+sed -i 's/\[--project P | --all-projects\]/[--project P | --group NAME | --all-projects]/' \
+  docs/specs/2026-08-29-tasks-design.md
+grep -c -- '--project P | --group NAME | --all-projects' docs/specs/2026-08-29-tasks-design.md
+grep -c -- '--project P | --all-projects\]' docs/specs/2026-08-29-tasks-design.md
+```
+
+Expected: the first count is at least 8 (seven before Slice 3, plus `lanes`). The second
+prints `0`.
+
+- [ ] **Step 4: The rename design (refusal R12)**
+
+In `docs/specs/2026-09-08-prefix-rename-design.md`, "Refusals, evaluated before the table":
+replace "**R7–R8 always apply**: they read the registry alone." with "**R7, R8 and R12 always
+apply**: they read the registry alone." Then add a row to the table after the R8 row:
+
+```markdown
+| R12 | always | the target prefix is the name of a project group (docs/specs/2026-10-03-lanes-needs-groups-design.md §6) |
+```
+
+After the sentence "R9–R11 (attachment directories) are defined in
+docs/specs/2026-09-28-task-attachments-design.md, "Rename".", add:
+
+```markdown
+R12 is the group collision that `is_taken` also refuses on a fresh rename. As a refusal
+it is decided before the table, so `--explain` reports it, and a rename interrupted
+before a group took its target refuses to resume rather than failing at the registry
+step. `rename` reports it as `config`, as it reports a retired target.
+```
+
+- [ ] **Step 5: Record the idea's outcome**
 
 Run: `tasks note tasks-77dbc6 "implemented by tasks-ece1e2 slice 4 (spec 2026-10-03 §6); close with the slice"`.
 The plan controller closes the idea when the slice lands (spec §7).
 
-- [ ] **Step 5: Gate**
+- [ ] **Step 6: Gate**
 
 Run: `just check && just test-fast` — expected: clean, all pass. The README and design
 documents are on the full check.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add skills/tasks/SKILL.md README.md docs/specs/2026-08-29-tasks-design.md tasks/tasks-77dbc6.md
+git add skills/tasks/SKILL.md README.md docs/specs/2026-08-29-tasks-design.md \
+  docs/specs/2026-09-08-prefix-rename-design.md tasks/tasks-77dbc6.md
 git commit -m "docs(groups): document project groups in the skill, README, and main design"
 ```
 
@@ -9633,10 +11348,12 @@ git commit -m "docs(groups): document project groups in the skill, README, and m
 | tag grammar; collision with a prefix or a retired alias; an unknown member | `group_set_refuses_bad_or_colliding_names_and_unknown_members`, `load_rejects_an_invalid_group` |
 | `init`/`register` refuse a group name | `init_refuses_a_prefix_that_names_a_group`, `a_group_name_cannot_become_a_prefix` |
 | `rename` rewrites members; refuses a group-named target | `rename_rewrites_group_members_and_refuses_a_group_name_as_target`, `rename_and_adopt_carry_group_membership` |
+| `rename --explain` and execution agree on a group-named target, fresh and mid-rename (R12) | `rename_explain_and_execution_both_refuse_a_group_named_target`, `each_refusal_fires_on_its_own_before_the_table`, `observes_whether_the_target_names_a_group` |
+| `group set` cannot take a name an unfinished rename reserves | `group_set_refuses_a_name_an_unfinished_rename_reserves` |
 | `adopt` keeps groups consistent | `adopt_carries_group_membership_and_refuses_a_group_named_target` |
 | `unregister` prunes, deletes emptied groups, and warns | `unregister_removes_the_prefix_from_groups_and_deletes_emptied_ones`, `unregister_prunes_groups_and_deletes_the_ones_it_empties` |
 | dangling member → `config` naming group and prefix | `a_registry_naming_an_unregistered_group_member_fails_to_load`, `load_rejects_an_invalid_group` |
-| `--group` scopes prime, ready, and the other views; `prime.group`, null `prefix` | `group_scopes_the_read_views_to_its_members` |
+| `--group` scopes prime, ready, `lanes`, and the other views; `prime.group`, null `prefix` | `group_scopes_the_read_views_to_its_members` |
 | `--group` conflicts with `--project`/`--all-projects`; unknown name → `unknown_group` | `group_conflicts_with_the_other_scopes_and_an_unknown_name_is_unknown_group` |
 | halt warnings name only members | `group_halt_views_filter_members_and_warn_only_about_members`, `open_group_opens_and_warns_about_members_only` |
 | every member unreachable → warnings and empty results | `a_group_whose_members_are_all_unreachable_warns_and_reads_empty` |
@@ -9652,19 +11369,17 @@ git commit -m "docs(groups): document project groups in the skill, README, and m
 ### Task 5.1: Integrate, install, and close the waiting ideas
 
 **Files:**
-- Modify (ops): `cli.toml` in `$OPS/.worktrees/ece1e2-cli`, already changed by earlier tasks.
 - Modify: `docs/notes/2026-09-30-work-selection-brief.md`, `tasks/*.md` (task records only, through the CLI).
 
 - [ ] **Step 1: Run the full gate in the worktree.**
   Run `just gate`. Expected: check plus the full suite, including the `#[ignore]`d enumeration, all pass.
 
-- [ ] **Step 2: Confirm the inventory copy is exact.**
-  Run `cmp $OPS/.worktrees/ece1e2-cli/cli.toml tools/cli.toml`. Expected: no output, exit 0.
+- [ ] **Step 2: Confirm the adopted inventory is the landed head of Task 0.1.**
+  Run `python3 "$OPS/bin/vendored" status`. Expected: the `tasks` project's `cli.toml` is `current`, or stale only at a commit that includes the last inventory commit.
 
-- [ ] **Step 3: Publish the ops inventory (gated on the user).**
-  Ops is shared tooling, so ask before this step. Commit in the ops worktree with
-  `git add cli.toml && git commit -m "feat(cli): inventory lanes, needs, holds, and groups for tasks"`,
-  then integrate it per ops's own guide.
+- [ ] **Step 3: Close the ops side.**
+  Run `tasks done <ops task from Task 0.1> "tasks adopted its rows at <last sha>"` in the ops checkout.
+  Ops closes its task when its pieces close (ops vendoring design, closeout), and tasks-ece1e2 is that piece. So run this after Step 5.
 
 - [ ] **Step 4: Record the decisions on the waiting ideas,** in the worktree, in one commit with the brief update:
   ```bash
@@ -9702,4 +11417,3 @@ git commit -m "docs(groups): document project groups in the skill, README, and m
   git worktree unlock .worktrees/ece1e2-work-selection
   git worktree remove .worktrees/ece1e2-work-selection
   ```
-  Remove the ops worktree the same way once its commit is integrated.
