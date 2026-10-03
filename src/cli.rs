@@ -111,6 +111,9 @@ pub struct FilterArgs {
     /// Only direct children of this task.
     #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
     pub parent: Option<String>,
+    /// Only descendants of this task, at any depth (`--parent` is direct children only).
+    #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
+    pub under: Option<String>,
     /// Only tasks marked safe to run beside each other.
     #[arg(long)]
     pub parallel: bool,
@@ -449,6 +452,10 @@ pub enum Command {
         max_complexity: Option<String>,
         #[command(flatten)]
         without: WithoutArgs,
+        /// Pick only among descendants of this task, at any depth: how a session
+        /// committed to one lane takes its next step.
+        #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
+        under: Option<String>,
         #[command(flatten)]
         scope: ScopeArgs,
     },

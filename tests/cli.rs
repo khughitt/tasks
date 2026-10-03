@@ -23950,3 +23950,83 @@ fn marking_a_blocked_goal_as_a_lane_warns_that_it_pauses_the_subtree() {
     let out = env.json(&sci, &["edit", &open, "--lane"]);
     assert_eq!(out["warnings"], serde_json::json!([]), "{out}");
 }
+
+#[test]
+fn under_selects_descendants_at_any_depth_on_list_ready_and_next() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "2"]));
+    let sub = id_of(env.json(&sci, &["add", "Sub", "--parent", &lane, "-p", "2"]));
+    let deep = id_of(env.json(&sci, &["add", "Deep", "--parent", &sub, "-p", "3"]));
+    let direct = id_of(env.json(&sci, &["add", "Direct", "--parent", &lane, "-p", "4"]));
+    let urgent = id_of(env.json(&sci, &["add", "Urgent outside", "-p", "0"]));
+    let ids = |value: &serde_json::Value| -> Vec<String> {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let mut listed = ids(&env.json(&sci, &["list", "--under", &lane]));
+    listed.sort();
+    let mut expected = vec![sub.clone(), deep.clone(), direct.clone()];
+    expected.sort();
+    assert_eq!(listed, expected, "any depth, never the root itself");
+    assert_eq!(
+        ids(&env.json(&sci, &["list", "--parent", &lane])).len(),
+        2,
+        "--parent keeps its direct-child meaning"
+    );
+    assert_eq!(
+        ids(&env.json(&sci, &["ready", "--under", &lane])),
+        [deep.clone(), direct.clone()]
+    );
+    assert_eq!(
+        ids(&env.json(&sci, &["ready", "--under", &lane, "-p", "4"])),
+        std::slice::from_ref(&direct),
+        "--under narrows with the other filters"
+    );
+
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        urgent,
+        "without --under, priority still wins"
+    );
+    assert_eq!(
+        env.json(&sci, &["next", "--under", &lane])["next"]["task"]["id"],
+        deep
+    );
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &urgent, "resume it"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["next", "--under", &lane])["next"]["task"]["id"],
+        deep,
+        "a parked candidate outside the subtree is not taken"
+    );
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &deep, "ask", "--waiting-on", "user"])
+        .assert()
+        .success();
+    assert_eq!(
+        ids(&env.json(&sci, &["list", "--parked", "--under", &lane])),
+        std::slice::from_ref(&deep)
+    );
+
+    assert_eq!(
+        env.fail(&sci, &["next", "--under", "sci-ffffff"]),
+        "task_not_found"
+    );
+    assert_eq!(
+        env.fail(&sci, &["list", "--under", "sci-ffffff"]),
+        "task_not_found"
+    );
+    assert_eq!(
+        env.fail(&sci, &["ready", "--under", "sci-ffffff"]),
+        "task_not_found"
+    );
+}

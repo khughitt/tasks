@@ -3,6 +3,8 @@
 //! them); different fields narrow (all of them); `--tag` and `--need` are all-of. Each command
 //! keeps its own default status pool; an explicit `--status` replaces it here.
 
+use std::collections::HashSet;
+
 use crate::claims::ClaimSnapshot;
 use crate::cli::FilterArgs;
 use crate::error::{Error, Result};
@@ -27,10 +29,15 @@ pub struct TaskFilter {
     source: Option<String>,
     parent: Option<TaskId>,
     parallel: bool,
+    under: Option<TaskId>,
+    /// `under`'s descendants, filled from the scan by `resolve_under`.
+    subtree: Option<HashSet<TaskId>>,
 }
 
 /// What the filter reads from a record, whichever row type carries it.
 pub struct Fields<'a> {
+    /// Canonical, so `--under` matches a retired spelling too.
+    pub id: TaskId,
     pub status: Status,
     pub priority: u8,
     pub size: Option<Size>,
@@ -98,12 +105,37 @@ impl TaskFilter {
                 .map(|id| crate::commands::parse_id(registry, shorthand, id))
                 .transpose()?,
             parallel: args.parallel,
+            under: args
+                .under
+                .as_deref()
+                .map(|id| crate::commands::parse_id(registry, shorthand, id))
+                .transpose()?,
+            subtree: None,
         })
     }
 
     /// The explicit `--status` set; empty means the command's default pool applies.
     pub fn statuses(&self) -> &[Status] {
         &self.statuses
+    }
+
+    /// `--under` names a task in scope; its descendants at any depth, never itself, are
+    /// what the filter keeps. Runs once the scan exists, before any `matches`; a no-op
+    /// without `--under`.
+    pub fn resolve_under(&mut self, all: &[Task], registry: &Registry) -> Result<()> {
+        let Some(under) = &self.under else {
+            return Ok(());
+        };
+        if !all.iter().any(|task| task.id == *under) {
+            return Err(Error::TaskNotFound(under.to_string()));
+        }
+        self.subtree = Some(
+            crate::hierarchy::descendants(all, under, registry)
+                .into_iter()
+                .map(|task| registry.canonical_id(&task.id))
+                .collect(),
+        );
+        Ok(())
     }
 
     /// No field is constrained.
@@ -119,6 +151,7 @@ impl TaskFilter {
             && self.source.is_none()
             && self.parent.is_none()
             && !self.parallel
+            && self.under.is_none()
     }
 
     pub fn matches(&self, fields: &Fields) -> bool {
@@ -142,12 +175,20 @@ impl TaskFilter {
                 .as_ref()
                 .is_none_or(|parent| fields.parent.as_ref() == Some(parent))
             && (!self.parallel || fields.parallel)
+            && match (&self.under, &self.subtree) {
+                (None, _) => true,
+                (Some(_), Some(subtree)) => subtree.contains(&fields.id),
+                (Some(under), None) => {
+                    unreachable!("--under {under} is resolved against the scan before matching")
+                }
+            }
     }
 }
 
 impl<'a> Fields<'a> {
     pub fn of_task(task: &'a Task, claims: &ClaimSnapshot, registry: &Registry) -> Fields<'a> {
         Fields {
+            id: registry.canonical_id(&task.id),
             status: task.status,
             priority: task.priority,
             size: task.size,
@@ -168,6 +209,7 @@ impl<'a> Fields<'a> {
     /// None for an unresolved park: it has no record to match.
     pub fn of_row(row: &'a ParkedRow, registry: &Registry) -> Option<Fields<'a>> {
         Some(Fields {
+            id: registry.canonical_id(&TaskId::parse(&row.id).ok()?),
             status: row.status?,
             priority: row.priority?,
             size: row.size,
@@ -213,6 +255,7 @@ mod tests {
 
     fn fields() -> Fields<'static> {
         Fields {
+            id: TaskId::parse("xx-000001").unwrap(),
             status: Status::Todo,
             priority: 2,
             size: Some(Size::S),

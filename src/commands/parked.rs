@@ -3,6 +3,7 @@
 use super::ReadCtx;
 use crate::claims::{ClaimSnapshot, Park, Reason, WaitingOn};
 use crate::error::Result;
+use crate::filter::{Fields, TaskFilter};
 use crate::model::{Phase, Status, Task, TaskId};
 use crate::output::{ParkedRow, TaskSummary};
 use crate::registry::Registry;
@@ -176,12 +177,16 @@ pub fn candidates(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &ClaimSnapshot,
+    filter: &TaskFilter,
     now: time::OffsetDateTime,
 ) -> Result<crate::query::Picked> {
     let mut found = Vec::new();
     let mut deferred = Vec::new();
     let mut paused = Vec::new();
     for task in all {
+        if !filter.matches(&Fields::of_task(task, claims, &ctx.registry)) {
+            continue;
+        }
         let Some(park) = claims.park(&task.id) else {
             continue;
         };

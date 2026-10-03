@@ -1687,8 +1687,14 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Next {
             max_complexity,
             without,
+            under,
             scope,
-        } => list::next(open_read_ctx(dir, &scope)?, max_complexity, without.without),
+        } => list::next(
+            open_read_ctx(dir, &scope)?,
+            max_complexity,
+            without.without,
+            under,
+        ),
         Command::Sample {
             limit,
             older_than,

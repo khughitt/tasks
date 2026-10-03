@@ -38,13 +38,14 @@ pub fn list(
     deferred: bool,
 ) -> Result<Output> {
     let sort = SortKey::parse(&sort)?;
-    let filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
+    let mut filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
     if parked {
         return list_parked(ctx, filter);
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
+    filter.resolve_under(&all, &ctx.registry)?;
     let mut tasks = all.clone();
     tasks.retain(|task| {
         let periodic_ok = !periodic || task.every.is_some();
@@ -104,7 +105,7 @@ pub fn list(
     }))
 }
 
-fn list_parked(mut ctx: ReadCtx, filter: TaskFilter) -> Result<Output> {
+fn list_parked(mut ctx: ReadCtx, mut filter: TaskFilter) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let rows = super::parked::rows(&mut ctx, &all, &claims, now)?;
@@ -115,6 +116,7 @@ fn list_parked(mut ctx: ReadCtx, filter: TaskFilter) -> Result<Output> {
                 .is_some_and(|fields| fields.parent.as_ref() == Some(parent))
         })
     })?;
+    filter.resolve_under(&all, &ctx.registry)?;
     let tasks = rows
         .into_iter()
         .filter(|row| match Fields::of_row(row, &ctx.registry) {
@@ -414,10 +416,11 @@ pub fn ready(
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
-    let filter = TaskFilter::parse(&filter, &[], &ctx.registry, &ctx.shorthand)?;
+    let mut filter = TaskFilter::parse(&filter, &[], &ctx.registry, &ctx.shorthand)?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
+    filter.resolve_under(&all, &ctx.registry)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
     let mut picked = ready_tasks(&mut ctx, &all, &claims, &snapshots, &filter, now)?;
     let halts = halt_rows(&snapshots, &all);
@@ -469,22 +472,26 @@ pub fn next(
     mut ctx: ReadCtx,
     max_complexity: Option<String>,
     without: Vec<String>,
+    under: Option<String>,
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
+    let mut filter = TaskFilter::parse(
+        &FilterArgs {
+            under,
+            ..FilterArgs::default()
+        },
+        &[],
+        &ctx.registry,
+        &ctx.shorthand,
+    )?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    filter.resolve_under(&all, &ctx.registry)?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let candidates = super::parked::candidates(&mut ctx, &all, &claims, now)?;
+    let candidates = super::parked::candidates(&mut ctx, &all, &claims, &filter, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let ready = ready_tasks(
-        &mut ctx,
-        &all,
-        &claims,
-        &snapshots,
-        &TaskFilter::default(),
-        now,
-    )?;
+    let ready = ready_tasks(&mut ctx, &all, &claims, &snapshots, &filter, now)?;
     // One pool in pick order — parked candidates first, then the ready list — with each
     // task once, so a parked todo that is also ready is hidden and counted once.
     let mut pool = candidates.tasks;

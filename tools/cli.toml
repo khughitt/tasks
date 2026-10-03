@@ -332,6 +332,7 @@ options = [
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--parent"], value = "ref" },
+  { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
   { shared = "sort", role = "select", value = "enum", values = ["priority", "updated", "created"], default = "priority" },
   { shared = "reverse", value = "none" },
@@ -355,6 +356,7 @@ options = [
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--parent"], value = "ref" },
+  { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
   { shared = "limit", value = "int" },
   { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
@@ -369,6 +371,7 @@ summary = "The first ready task, in the show shape; null when nothing is ready"
 options = [
   { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
   { names = ["--without"], value = "string", repeatable = true },
+  { names = ["--under"], value = "ref" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
 ]
