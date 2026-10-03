@@ -6,6 +6,8 @@ could be a step. Task: tasks-ece1e2.
 Amended 2026-10-03 after the holds implementation: §4.4 "Atomic across projects" (the
 holds lock covers every holds change, through rollback), the read-view warning for an
 unresolved identity, and §4.5 gate order.
+Amended 2026-10-03 after the final branch review: §5.1 the session gates (`without`,
+`cutoff`, `halt`) count only descendants that could be a step.
 Waiting ideas: tasks-9bdd68 (focus marker), tasks-77dbc6 (project groups),
 tasks-e02860 (lanes and shared resources). Brief:
 `docs/notes/2026-09-30-work-selection-brief.md`.
@@ -440,6 +442,10 @@ nothing else.
    descendant's dependencies are never read, so a garbled foreign record that only such
    work depends on cannot fail the view. An unparked idea with an open dependency
    therefore counts under `other` (or `goal`), not `depends`.
+
+   The session gates (`without`, `cutoff`, `halt`), like `depends`, are judged only for
+   descendants that could be a step and are not sub-goals; a sub-goal, an idea, a blocked
+   task, or other non-step falls through to its own cause (`goal`, `other`, `blocked`, …).
 
    A descendant matching several causes counts once, under the first cause in table order.
 

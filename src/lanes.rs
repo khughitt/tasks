@@ -274,21 +274,33 @@ enum Class<'a> {
 fn classify<'a>(inputs: &Inputs<'a>, task: &Task) -> Class<'a> {
     let claims = inputs.claims;
     let park = claims.park(&task.id);
+    let goal = crate::hierarchy::is_goal(
+        task,
+        !crate::hierarchy::children(inputs.all, &task.id, inputs.registry).is_empty(),
+    );
+    // The session gates (`without`, `cutoff`, `halt`) stop steps, so, like `depends`, they
+    // judge only work that could be a step. A sub-goal is never a step; it and every other
+    // non-step fall through to their own cause.
+    let gated = !goal && could_step(task, claims, inputs.now);
     let cause = if claims.live(&task.id).is_some() {
         Some(Cause::Active)
-    } else if inputs
-        .without
-        .hides(task, crate::needs::vocabulary_of(inputs.vocabularies, task))
+    } else if gated
+        && inputs
+            .without
+            .hides(task, crate::needs::vocabulary_of(inputs.vocabularies, task))
     {
         Some(Cause::Without)
-    } else if inputs.cutoff.is_some_and(|cutoff| {
-        crate::complexity::effective(task, claims).is_none_or(|level| level > cutoff)
-    }) {
+    } else if gated
+        && inputs.cutoff.is_some_and(|cutoff| {
+            crate::complexity::effective(task, claims).is_none_or(|level| level > cutoff)
+        })
+    {
         Some(Cause::Cutoff)
-    } else if inputs
-        .halts
-        .get(&task.id.prefix)
-        .is_some_and(|halt| !halt.allows(task))
+    } else if gated
+        && inputs
+            .halts
+            .get(&task.id.prefix)
+            .is_some_and(|halt| !halt.allows(task))
     {
         Some(Cause::Halt)
     } else if crate::defer::is_deferred(task, inputs.now) {
@@ -309,10 +321,7 @@ fn classify<'a>(inputs: &Inputs<'a>, task: &Task) -> Class<'a> {
         // resolved; a record that could never be a step falls through to `goal` or
         // `other`.
         Some(Cause::Depends)
-    } else if crate::hierarchy::is_goal(
-        task,
-        !crate::hierarchy::children(inputs.all, &task.id, inputs.registry).is_empty(),
-    ) {
+    } else if goal {
         Some(Cause::Goal)
     } else {
         None
@@ -536,6 +545,10 @@ mod tests {
     }
 
     fn run(all: &[Task], world: &World) -> Vec<LaneRow> {
+        run_with_cutoff(all, world, None)
+    }
+
+    fn run_with_cutoff(all: &[Task], world: &World, cutoff: Option<Complexity>) -> Vec<LaneRow> {
         let dependency = |id: &TaskId| {
             all.iter()
                 .find(|task| task.id == *id)
@@ -551,7 +564,7 @@ mod tests {
             registry: &world.registry,
             dependency: &dependency,
             halts: &halts,
-            cutoff: None,
+            cutoff,
             without: &world.without,
             holds: &world.holds,
             vocabularies: &vocabularies,
@@ -683,6 +696,52 @@ mod tests {
         let counted: usize =
             1 + row.steps + row.causes.entries().iter().map(|(_, n)| n).sum::<usize>();
         assert_eq!(counted, 7, "seven live descendants, each once");
+    }
+
+    #[test]
+    fn session_gates_count_only_work_that_could_be_a_step() {
+        let rated = |mut task: Task| {
+            task.complexity = Some(Complexity::Low);
+            task
+        };
+        let mut deferred = rated(task("xx-000004", Some("xx-0000b1"), Status::Todo, 2));
+        deferred.defer = Some(crate::defer::Defer::parse("2099-01-01").unwrap());
+        let all = vec![
+            lane("xx-0000a1", 0),
+            task("xx-000001", Some("xx-0000a1"), Status::Idea, 2),
+            rated(task("xx-000002", Some("xx-0000a1"), Status::Blocked, 2)),
+            task("xx-0000b1", Some("xx-0000a1"), Status::Todo, 2),
+            deferred,
+            task("xx-000005", Some("xx-0000a1"), Status::Todo, 2),
+        ];
+        let world = world(ClaimSnapshot::default());
+
+        let open = run(&all, &world);
+        assert_eq!(pick(&open[0]), "xx-000005");
+        assert_eq!(
+            open[0].causes.entries(),
+            vec![("deferred", 1), ("blocked", 1), ("goal", 1), ("other", 1)]
+        );
+
+        let cut = run_with_cutoff(&all, &world, Some(Complexity::Mid));
+        let row = &cut[0];
+        assert_eq!(row.state, LaneState::Waiting);
+        assert_eq!(
+            row.causes.entries(),
+            vec![
+                ("cutoff", 1),
+                ("deferred", 1),
+                ("blocked", 1),
+                ("goal", 1),
+                ("other", 1)
+            ],
+            "only the unrated step counts under cutoff; the unrated idea and sub-goal keep \
+             their own causes"
+        );
+        let counted: usize = row.pick.iter().count()
+            + row.steps
+            + row.causes.entries().iter().map(|(_, n)| n).sum::<usize>();
+        assert_eq!(counted, 5, "five live descendants, each once");
     }
 
     #[test]
