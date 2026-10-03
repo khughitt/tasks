@@ -13,6 +13,7 @@ mod format;
 mod frontmatter;
 mod halt;
 mod hierarchy;
+mod holds;
 mod model;
 mod needs;
 mod output;

@@ -37,6 +37,8 @@ pub enum Error {
     #[error("{0}")]
     Halted(String),
     #[error("{0}")]
+    NeedHeld(String),
+    #[error("{0}")]
     UnknownNeed(String),
     #[error("{0}")]
     Editor(String),
@@ -89,6 +91,7 @@ impl Error {
             Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
             Error::StaleCopy(detail) => Error::StaleCopy(detail + suffix),
             Error::Halted(detail) => Error::Halted(detail + suffix),
+            Error::NeedHeld(detail) => Error::NeedHeld(detail + suffix),
             Error::UnknownNeed(detail) => Error::UnknownNeed(detail + suffix),
             Error::Editor(detail) => Error::Editor(detail + suffix),
             Error::InvalidAttachmentName(detail) => Error::InvalidAttachmentName(detail + suffix),
@@ -122,6 +125,7 @@ impl Error {
             Error::Claimed(..) => "claimed",
             Error::StaleCopy(_) => "stale_copy",
             Error::Halted(_) => "halted",
+            Error::NeedHeld(_) => "need_held",
             Error::UnknownNeed(_) => "unknown_need",
             Error::Editor(_) => "editor",
             Error::InvalidAttachmentName(_) => "invalid_attachment_name",

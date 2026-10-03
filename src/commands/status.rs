@@ -176,7 +176,9 @@ pub fn note(mut ctx: Ctx, id: String, text: String, stamp: bool) -> Result<Outpu
     // Use the pruned store so a note cannot revive a stale claim.
     let existing = ctx.claims_mut()?.get(&task.id).cloned();
     let mine = match &existing {
-        Some(claim) => ctx.ownership(claim, &me)? != crate::commands::Ownership::Foreign,
+        Some(claim) => {
+            crate::commands::ownership(claim, &me)? != crate::commands::Ownership::Foreign
+        }
         None => false,
     };
 

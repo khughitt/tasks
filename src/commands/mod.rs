@@ -167,51 +167,13 @@ impl Ctx {
         }
     }
 
-    /// Spec §6.2.2 steps 2 and 3. Which of the two established the caller's right to act
-    /// matters: only proof-only ownership records the claim's own identity, because only
-    /// then is there no resolved identity that already agrees.
-    pub(crate) fn ownership(
-        &mut self,
-        claim: &crate::claims::Claim,
-        me: &crate::claims::Resolution,
-    ) -> Result<Ownership> {
-        if let Some(identity) = me.identity()
-            && claim.session == identity.session
-        {
-            return Ok(Ownership::ByIdentity);
-        }
-        // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
-        // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
-        // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
-        let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
-        if explicit || !crate::relay::enabled()? {
-            return Ok(Ownership::Foreign);
-        }
-        let proved = crate::claims::proves_ownership(
-            claim,
-            &crate::relay::ancestry::current_scope(),
-            &crate::claims::hostname(),
-            crate::claims::boot_id().as_deref(),
-            &|key| {
-                std::env::var_os(key)
-                    .and_then(|value| value.into_string().ok())
-                    .filter(|value| !value.is_empty())
-            },
-        );
-        Ok(if proved {
-            Ownership::ByProof
-        } else {
-            Ownership::Foreign
-        })
-    }
-
     pub fn refuse_foreign_live_claim(&mut self, id: &TaskId) -> Result<()> {
         let me = self.resolve_for_guard()?;
         let existing = self.claims_mut()?.get(id).cloned();
         let Some(existing) = existing else {
             return me.require().map(|_| ());
         };
-        if self.ownership(&existing, &me)? != Ownership::Foreign {
+        if ownership(&existing, &me)? != Ownership::Foreign {
             return Ok(());
         }
         // Not the owner. Today's behaviour resolved an identity here whatever the verdict,
@@ -256,14 +218,42 @@ impl Ctx {
         Ok(())
     }
 
-    /// Lanes/needs design §4.4: every acquire records the task's needs that this project
-    /// declares exclusive (undeclared names ignored) as the claim's `holds`. Status and
-    /// needs never change in one operation, so this always reads the needs on the record.
+    /// Lanes/needs design §4.4–§4.5: every acquire records the task's needs that this
+    /// project declares exclusive (undeclared names ignored) as the claim's `holds`, and is
+    /// refused with `need_held` while another session's live claim on another task holds
+    /// one of them. Status and needs never change in one operation, so this always reads
+    /// the needs on the record, and `start --force --reason` acquires the same ones.
+    ///
+    /// "Another session" is decided by `ownership`, as for the claim itself. The caller is
+    /// the identity this acquire records: the resolved one, or the claim's own on a
+    /// proof-only continuation. A hold whose session string differs but whose process
+    /// proof names this caller's harness is therefore its own.
     fn guard_holds(&mut self, task: &Task) -> Result<()> {
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
-        match self.pending_claim.as_mut() {
-            Some((_, ClaimIntent::Acquire(claim))) => claim.holds = holds,
+        let me = match self.pending_claim.as_mut() {
+            Some((_, ClaimIntent::Acquire(claim))) => {
+                claim.holds = holds.clone();
+                crate::claims::Resolution::Resolved(crate::claims::continuation_identity(claim))
+            }
             _ => unreachable!("claim_guard records an acquire for every move to doing"),
+        };
+        if holds.is_empty() {
+            return Ok(());
+        }
+        let (snapshot, warnings) =
+            crate::holds::HoldSnapshot::load(&self.registry, time::OffsetDateTime::now_utc());
+        self.warnings.extend(warnings);
+        let mine = own_holds(&snapshot, &me)?;
+        if let Some((need, holder)) =
+            crate::holds::held_back(&snapshot, &self.project.needs, task, &mine)
+        {
+            return Err(Error::NeedHeld(format!(
+                "{id} needs {need}, held by {} ({}); override with `tasks start {id} --force \
+                 --reason \"...\"`",
+                holder.task,
+                holder.session,
+                id = task.id
+            )));
         }
         Ok(())
     }
@@ -283,7 +273,7 @@ impl Ctx {
 
         let existing = self.claims_mut()?.get(id).cloned();
         let ownership = match &existing {
-            Some(claim) => self.ownership(claim, &resolution)?,
+            Some(claim) => ownership(claim, &resolution)?,
             None => Ownership::Foreign,
         };
         let mine = ownership != Ownership::Foreign;
@@ -383,6 +373,54 @@ impl Ctx {
         }
         Ok(())
     }
+}
+
+/// Spec §6.2.2 steps 2 and 3. Which of the two established the caller's right to act
+/// matters: only proof-only ownership records the claim's own identity, because only
+/// then is there no resolved identity that already agrees.
+pub(crate) fn ownership(
+    claim: &crate::claims::Claim,
+    me: &crate::claims::Resolution,
+) -> Result<Ownership> {
+    if let Some(identity) = me.identity()
+        && claim.session == identity.session
+    {
+        return Ok(Ownership::ByIdentity);
+    }
+    // Proof is a relay-mode fallback, and it never overrides the explicit pair: agents
+    // sharing one process are distinguished by TASKS_SESSION and by nothing else, so an
+    // explicit mismatch is foreign however the ancestry looks. Spec constraint §2.1.
+    let explicit = std::env::var_os("TASKS_SESSION").is_some_and(|value| !value.is_empty());
+    if explicit || !crate::relay::enabled()? {
+        return Ok(Ownership::Foreign);
+    }
+    let proved = crate::claims::proves_ownership(
+        claim,
+        &crate::relay::ancestry::current_scope(),
+        &crate::claims::hostname(),
+        crate::claims::boot_id().as_deref(),
+        &|key| {
+            std::env::var_os(key)
+                .and_then(|value| value.into_string().ok())
+                .filter(|value| !value.is_empty())
+        },
+    );
+    Ok(if proved {
+        Ownership::ByProof
+    } else {
+        Ownership::Foreign
+    })
+}
+
+/// Lanes/needs design §4.4 "Blocks other sessions only": the live holding claims in
+/// `snapshot` that are the caller's own, by the rule every claim check uses (`ownership`:
+/// the resolved identity, else the claim's process proof). A session that moved from
+/// native to relay identity therefore keeps its holds as it keeps its claims.
+pub(crate) fn own_holds(
+    snapshot: &crate::holds::HoldSnapshot,
+    me: &crate::claims::Resolution,
+) -> Result<crate::holds::Mine> {
+    snapshot.mine(|claim| Ok(ownership(claim, me)? != Ownership::Foreign))
 }
 
 pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
@@ -785,7 +823,7 @@ struct Occupants {
 }
 
 /// Spec §3.2 rule 1: every task that a session other than the caller holds live in `root`,
-/// or parked there. Claims are compared by `Ctx::ownership`, parks by their tagged session.
+/// or parked there. Claims are compared by `ownership`, parks by their tagged session.
 /// An unresolvable identity makes every park someone else's.
 fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
     let snapshot =
@@ -796,7 +834,7 @@ fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
     for (task, (claim, liveness)) in snapshot.iter() {
         if *liveness == crate::claims::Liveness::Live
             && Path::new(&claim.worktree) == root
-            && ctx.ownership(claim, &me)? == Ownership::Foreign
+            && ownership(claim, &me)? == Ownership::Foreign
         {
             work.push((task.clone(), claim.session.clone()));
         }
@@ -814,7 +852,7 @@ fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
 }
 
 /// Record-home spec §4: a write by the holder of a live claim moves the claim to this
-/// checkout and refreshes its heartbeat. Holder means `Ctx::ownership` is not `Foreign`,
+/// checkout and refreshes its heartbeat. Holder means `ownership` is not `Foreign`,
 /// by identity or by proof. It runs after the record is saved and never fails the command.
 /// `me` is the caller's identity when the command already resolved it; otherwise it is
 /// resolved here, and only when a claim exists to follow.
@@ -848,7 +886,7 @@ pub(crate) fn follow_holder(
             &resolved
         }
     };
-    match ctx.ownership(&claim, me) {
+    match ownership(&claim, me) {
         Ok(Ownership::Foreign) => return,
         Ok(Ownership::ByIdentity | Ownership::ByProof) => {}
         Err(error) => {

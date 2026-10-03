@@ -19376,7 +19376,7 @@ fn a_continuity_repeated_start_by_the_owner_keeps_one_claim() {
 
 // NOTE: the explicit-mismatch case lives in Task 8 as an acceptance test. It has to run
 // under a harness shim with relay enabled and a matching boundary, or removing the
-// explicit-identity guard from `Ctx::ownership` would leave it passing — proof would never
+// explicit-identity guard from `ownership` would leave it passing — proof would never
 // have been consulted in the first place.
 
 #[test]
@@ -19949,7 +19949,7 @@ fn an_acceptance_explicit_pair_works_under_a_harness_with_no_registry() {
 fn an_acceptance_explicit_mismatch_stays_foreign_under_one_harness() {
     // Two workers beneath the *same* shim, so the ancestry, host and boot all agree and
     // the claim's proof names their shared harness process. Only TASKS_SESSION tells them
-    // apart. If `Ctx::ownership` stopped honouring the explicit pair, worker-b's proof
+    // apart. If `ownership` stopped honouring the explicit pair, worker-b's proof
     // would succeed and this close would land — which is exactly the bypass to catch.
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -19979,7 +19979,12 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
     // ordinary stale takeover and the test would pass with proof-based continuity broken.
     let mut env = TestEnv::new();
     let dir = env.init("sci");
-    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2"]));
+    // Lanes/needs §4.4: both tasks need the exclusive `quiet`. The first claim's hold is
+    // this session's only by proof once relay re-keys its identity, so the second start
+    // passes the hold gate only if the gate uses the ownership rule, not session strings.
+    hold_vocab(&dir);
+    let id = id_of(env.json(&dir, &["add", "Thing", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&dir, &["add", "Second", "-p", "2", "--need", "quiet"]));
     let state = env.home.path().join("relay-state");
     let after_start = env.home.path().join("after-start.toml");
 
@@ -19996,6 +20001,7 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
          printf '[identity]\\nrelay = true\\n' > \"$HOME/.config/tasks/config.toml\"\n\
          CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {id}\n\
          cp \"$HOME/.local/state/tasks/claims/sci.toml\" \"{}\"\n\
+         CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" start {second}\n\
          CLAUDE_CODE_SESSION_ID=c1 \"$TASKS_BIN\" done {id} landed\n",
         shim_env(&state, "claude-code", "c1"),
         after_start.display()
@@ -20034,6 +20040,15 @@ fn an_acceptance_mode_change_continues_a_natively_held_claim() {
         "continuation must not take over: {text}"
     );
     assert_eq!(env.json(&dir, &["show", &id])["task"]["status"], "done");
+    // The second start passed the hold gate: the first claim's hold was this session's by
+    // proof, although its session string `c1` differs from the resolved `claude-code:c1`.
+    let shown = env.json(&dir, &["show", &second]);
+    assert_eq!(shown["task"]["status"], "doing", "{shown}");
+    assert_eq!(
+        shown["claim"]["holds"],
+        serde_json::json!(["quiet"]),
+        "{shown}"
+    );
 }
 
 #[test]
@@ -22397,10 +22412,6 @@ fn json_as(
 }
 
 /// The `{"error": …}` of `tasks <args>` run as `session`; it must exit 1.
-#[expect(
-    dead_code,
-    reason = "used by the later exclusive-holds tests (slice 2)"
-)]
 fn error_as(
     env: &TestEnv,
     dir: &std::path::Path,
@@ -22424,10 +22435,6 @@ fn holds_of(env: &TestEnv, dir: &std::path::Path, id: &str) -> serde_json::Value
 }
 
 /// A claim written straight into `prefix`'s store, holding `holds`.
-#[expect(
-    dead_code,
-    reason = "used by the later exclusive-holds tests (slice 2)"
-)]
 fn write_hold(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool, holds: &[&str]) {
     write_claim(env, prefix, id, session, live);
     let path = env.claim_store(prefix);
@@ -22488,4 +22495,176 @@ fn every_acquire_path_records_the_tasks_exclusive_needs_as_holds() {
     assert!(holds_of(&env, &sci, &plain).is_null());
     let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
     assert_eq!(store.matches("holds = [\"quiet\"]").count(), 3, "{store}");
+}
+
+#[test]
+fn every_acquire_path_refuses_a_need_another_session_holds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let holding = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let started = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    let flagged = id_of(env.json(&sci, &["add", "Sweep", "-p", "2", "--need", "quiet"]));
+    let edited = id_of(env.json(&sci, &["add", "Trace", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &holding]);
+    let records: Vec<(String, String)> = [&started, &flagged, &edited]
+        .iter()
+        .map(|id| (id.to_string(), env.read(&sci, &format!("tasks/{id}.md"))))
+        .collect();
+
+    let error = error_as(&env, &sci, "agent-b", &["start", &started]);
+    assert_eq!(error["error"]["kind"], "need_held", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&format!("held by {holding} (agent-a)")),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("tasks start {started} --force --reason")),
+        "{detail}"
+    );
+
+    let error = error_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["edit", &flagged, "--status", "doing"],
+    );
+    assert_eq!(error["error"]["kind"], "need_held", "{error}");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("tasks start {flagged} --force --reason")),
+        "{error}"
+    );
+
+    let editor = editor_script(&sci, "sed -i 's/status: todo/status: doing/' \"$1\"");
+    let out = as_agent(&env, &sci, "agent-b")
+        .env("EDITOR", editor)
+        .args(["edit", &edited])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(err_kind(&out), "need_held");
+    assert!(err_detail(&out).contains(&format!("tasks start {edited} --force --reason")));
+
+    for (id, before) in &records {
+        assert_eq!(&env.read(&sci, &format!("tasks/{id}.md")), before, "{id}");
+        assert!(env.json(&sci, &["show", id])["claim"].is_null(), "{id}");
+    }
+}
+
+#[test]
+fn a_holding_session_takes_more_and_a_takeover_of_the_held_task_is_not_held_back() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+
+    // A claim on the target itself never holds it back: --force alone takes it over.
+    json_as(&env, &sci, "agent-b", &["start", &first, "--force"]);
+    let shown = env.json(&sci, &["show", &first]);
+    assert_eq!(shown["claim"]["session"], "agent-b");
+    assert_eq!(shown["claim"]["holds"], serde_json::json!(["quiet"]));
+
+    // The session that now holds quiet may start more work that needs it.
+    json_as(&env, &sci, "agent-b", &["start", &second]);
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_park_releases_the_hold() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &second])["error"]["kind"],
+        "need_held"
+    );
+    json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["park", &first, "wait for the idle host"],
+    );
+    json_as(&env, &sci, "agent-b", &["start", &second]);
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_claim_without_a_pid_holds_until_its_ttl() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    // TASKS_SESSION without TASKS_SESSION_PID: the claim lives by its TTL alone.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "ttl-agent")
+        .args(["start", &first])
+        .assert()
+        .success();
+    assert!(env.json(&sci, &["show", &first])["claim"]["pid"].is_null());
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &second])["error"]["kind"],
+        "need_held"
+    );
+
+    // Past the TTL the claim is stale, and a stale claim holds nothing.
+    let store = env.claim_store("sci");
+    let aged: String = std::fs::read_to_string(&store)
+        .unwrap()
+        .lines()
+        .map(|line| {
+            if line.starts_with("seen = ") {
+                "seen = \"2026-01-01T00:00:00Z\"\n".to_string()
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect();
+    std::fs::write(&store, aged).unwrap();
+    json_as(&env, &sci, "agent-b", &["start", &second]);
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+}
+
+/// These pass before the gate exists; they keep it from over-reaching.
+#[test]
+fn claims_that_cannot_hold_do_not_hold_back_an_acquire() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let dead = id_of(env.json(&sci, &["add", "Dead", "-p", "2", "--need", "quiet"]));
+    let older = id_of(env.json(&sci, &["add", "Older", "-p", "2", "--need", "quiet"]));
+    let targets: Vec<String> = (0..3)
+        .map(|n| {
+            id_of(env.json(
+                &sci,
+                &["add", &format!("T{n}"), "-p", "2", "--need", "quiet"],
+            ))
+        })
+        .collect();
+
+    // A dead claim holds nothing.
+    write_hold(&env, "sci", &dead, "ghost", false, &["quiet"]);
+    json_as(&env, &sci, "agent-b", &["start", &targets[0]]);
+    // A live entry written before holds existed holds nothing.
+    write_claim(&env, "sci", &older, "agent-old", true);
+    json_as(&env, &sci, "agent-b", &["start", &targets[1]]);
+    // A store left behind by an unregistered prefix is never read.
+    write_hold(&env, "old", "old-a00001", "ghost", true, &["quiet"]);
+    json_as(&env, &sci, "agent-b", &["start", &targets[2]]);
+    for id in &targets {
+        assert_eq!(
+            holds_of(&env, &sci, id),
+            serde_json::json!(["quiet"]),
+            "{id}"
+        );
+    }
 }

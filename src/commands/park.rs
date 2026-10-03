@@ -39,7 +39,7 @@ pub fn run(
     let existing = ctx.claims_mut()?.get(&task.id).cloned();
     let held = existing.as_ref().map(|claim| claim.session.clone());
     let me = match &existing {
-        Some(claim) => match ctx.ownership(claim, &resolution)? {
+        Some(claim) => match crate::commands::ownership(claim, &resolution)? {
             crate::commands::Ownership::ByIdentity => resolution.require()?,
             crate::commands::Ownership::ByProof => crate::claims::continuation_identity(claim),
             crate::commands::Ownership::Foreign => resolution
