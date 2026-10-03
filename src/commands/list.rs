@@ -303,17 +303,14 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
 /// with one warning per need and holder; order is unchanged. Whether a hold is this
 /// session's is the read views' rule, `read_holds`: with a resolved identity, as
 /// `occupants` decides a claim (the identity, or else the claim's process proof); with
-/// none, every hold counts as another session's. A scope whose projects declare no
-/// exclusive need reads no claim store and resolves no identity, so its output is exactly
-/// what it was before holds existed.
+/// none, every hold counts as another session's, and a warning names the resolution error.
+/// Callers run it after every other gate, the complexity cutoff included, so a task those
+/// hide is never counted as waiting. A scope whose projects declare no exclusive need
+/// reads no claim store and resolves no identity, so its output is exactly what it was
+/// before holds existed.
 fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) -> Result<()> {
-    let vocabularies: HashMap<String, crate::needs::Vocabulary> = ctx
-        .scope
-        .projects()
-        .iter()
-        .filter(|project| project.needs.values().any(|need| need.exclusive))
-        .map(|project| (project.prefix.clone(), project.needs.clone()))
-        .collect();
+    let mut vocabularies = vocabularies(&ctx.scope);
+    vocabularies.retain(|_, vocabulary| vocabulary.values().any(|need| need.exclusive));
     if vocabularies.is_empty() {
         return Ok(());
     }
@@ -323,10 +320,15 @@ fn retain_unheld(ctx: &mut ReadCtx, tasks: &mut Vec<Task>, now: OffsetDateTime) 
         return Ok(());
     }
     let me = crate::claims::resolve_identity(&mut ctx.warnings);
+    if let crate::claims::Resolution::Failed(error) = &me {
+        ctx.warnings.push(format!(
+            "session identity unresolved ({error}); every hold counts as another session's"
+        ));
+    }
     let mine = super::read_holds(&snapshot, &me)?;
     let mut held = crate::holds::HeldWarnings::default();
     tasks.retain(|task| {
-        let Some(vocabulary) = vocabularies.get(&task.id.prefix) else {
+        let Some(vocabulary) = vocabularies.get(task.id.prefix.as_str()) else {
             return true;
         };
         match crate::holds::held_back(&snapshot, vocabulary, task, &mine) {
@@ -376,13 +378,13 @@ pub fn ready(
         let _ = without.retain(&mut picked.deferred, &vocabs);
         ctx.warnings.extend(without.warning(hidden));
     }
-    retain_unheld(&mut ctx, &mut picked.tasks, now)?;
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut picked.tasks, cutoff, &claims);
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
         let _ = crate::complexity::apply(&mut picked.deferred, cutoff, &claims);
     }
+    retain_unheld(&mut ctx, &mut picked.tasks, now)?;
     if let Some(warning) = deferred_omission(&picked.deferred) {
         ctx.warnings.push(warning);
     }
@@ -446,14 +448,14 @@ pub fn next(
         let _ = without.retain(&mut omitted, &vocabs);
         ctx.warnings.extend(without.warning(hidden));
     }
-    // On the whole pool, so parked-agent candidates pass the same gate.
-    retain_unheld(&mut ctx, &mut pool, now)?;
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut pool, cutoff, &claims);
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
         let _ = crate::complexity::apply(&mut omitted, cutoff, &claims);
     }
+    // On the whole pool, so parked-agent candidates pass the same gate.
+    retain_unheld(&mut ctx, &mut pool, now)?;
     if let Some(warning) = deferred_omission(&omitted) {
         ctx.warnings.push(warning);
     }
@@ -586,7 +588,6 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
         let hidden = without.retain(&mut ready, &vocabularies(&ctx.scope));
         ctx.warnings.extend(without.warning(hidden));
     }
-    retain_unheld(&mut ctx, &mut ready, now)?;
     let mut doing: Vec<Task> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
@@ -647,6 +648,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
         ctx.warnings
             .extend(crate::complexity::warnings(cutoff, &hidden));
     }
+    retain_unheld(&mut ctx, &mut ready, now)?;
     ctx.warnings.extend(held);
     let wide = matches!(ctx.scope, Scope::All(_));
     for project in ctx.scope.projects() {

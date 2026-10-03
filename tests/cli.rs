@@ -23241,4 +23241,11 @@ fn a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign() {
             .any(|w| w.contains("wait for quiet") && w.contains(first.as_str())),
         "{ready}"
     );
+    assert!(
+        warnings_of(&ready).iter().any(|w| {
+            w.starts_with("session identity unresolved (")
+                && w.ends_with("); every hold counts as another session's")
+        }),
+        "the view must say why its own hold counts as foreign: {ready}"
+    );
 }
