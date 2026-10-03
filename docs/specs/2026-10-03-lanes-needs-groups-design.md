@@ -1,6 +1,6 @@
 # Lanes, needs, and project groups — design
 
-**Status:** draft, revised after review round 1, 2026-10-03. Task: tasks-ece1e2.
+**Status:** draft, revised after review round 2, 2026-10-03. Task: tasks-ece1e2.
 Waiting ideas: tasks-9bdd68 (focus marker), tasks-77dbc6 (project groups),
 tasks-e02860 (lanes and shared resources). Brief:
 `docs/notes/2026-09-30-work-selection-brief.md`.
@@ -22,7 +22,7 @@ Three additions, each usable alone:
   at a time. A session can also say which needs it cannot meet (`TASKS_WITHOUT=quiet` on a
   host in ordinary use), and the picker hides those steps.
 - **Project groups:** a named set of registered projects, accepted by `--group <name>`
-  wherever `--all-projects` is accepted today.
+  by the views that select across projects (§6.4).
 
 ## 2. Problem
 
@@ -81,9 +81,10 @@ added field: hosts run the same installed build.
 One helper, `is_goal(task) = has_children || task.lane`, replaces the bare
 `has_children` test at every site that treats goals specially:
 
-- readiness (`query.rs`);
+- the `has_children` value that `ready_tasks` passes to readiness (`list.rs`);
 - parked candidates (`parked.rs`);
-- the defer and recurrence validation (`hierarchy.rs`).
+- the defer and recurrence validation (`hierarchy.rs`);
+- `check`'s `periodic_goal` and `deferred_goal` checks (`check.rs`).
 
 A lane is therefore:
 
@@ -96,16 +97,18 @@ Closeout is unchanged: a lane closes when it has at least one child and no open 
 ### 3.3 Validation
 
 **No nested lanes.** No lane may have a lane as an ancestor. A lane inside a lane would
-make "one pick per lane" ambiguous; sub-efforts inside a lane are ordinary child goals. The
-check runs on every write that can create nesting:
+make "one pick per lane" ambiguous; sub-efforts inside a lane are ordinary child goals.
 
-- `add --lane --parent <p>`;
-- `edit --lane` on a task that has a lane ancestor or a lane descendant;
-- `add --parent` and `edit --parent` moving a lane, or a subtree containing one, under a
-  lane;
-- `check`, for records written by hand or merged.
+The check sits beside `hierarchy::validate_parent`, which `save()` runs on every write, so
+every path that can create nesting is covered:
 
-Every refusal uses the error kind `nested_lane`.
+- `add --lane --parent`;
+- `edit --lane` on a task with a lane above or below it;
+- re-parenting a subtree that contains a lane under a lane;
+- editor saves.
+
+`check` reports nesting in records that were merged or written by hand. Every refusal uses
+the error kind `nested_lane`.
 
 **A childless lane** is a warning from `check`, not an error. A lane is often filed before
 its steps exist.
@@ -118,7 +121,16 @@ as `paused`. `tasks block <lane> "<reason>"` pauses it and `unblock` resumes it.
 existing commands, and the reason records why.
 
 This is the one place an ancestor's status gates a descendant. It applies to lanes only;
-an ordinary blocked goal keeps today's behaviour.
+an ordinary blocked goal keeps today's behaviour. The hierarchy design says "a `blocked`
+parent does not block its children" (`2026-09-03-task-hierarchy-design.md` §4), so it
+gains an addendum naming this exception.
+
+- **Warnings.** `ready` and `next` warn about tasks hidden by a paused lane, as they
+  already do for deferred tasks: `<n> task(s) hidden by paused lane <id>`.
+- **Marking a blocked goal.** `edit --lane` on a goal that is already `blocked` warns,
+  because it hides the whole subtree at once.
+- **Starting a task in a paused lane** is not refused. Unlike halt, a pause is guidance
+  about what to pick, not a stop, and a person who names a task directly gets it.
 
 `shelve` is not the pause mechanism. It refuses a goal with unshelved descendants, and
 `unshelve` returns tasks to `idea`. A shelved lane is gone from every view, as any shelved
@@ -135,12 +147,15 @@ tells authors to lead with that paragraph (§9).
 
 ### 3.6 Lane membership on every row
 
-`TaskSummary` and the `show` shape gain `lane: "<id>"`: the nearest lane ancestor, or the
-task's own id when it is a lane. The key is omitted when there is none. Every `ready`,
-`next` or `list` row then says which effort it belongs to, without opening the lanes view.
+`TaskSummary`, `ParkedRow` and the `show` shape's computed fields gain
+`in_lane: "<id>"`: the nearest lane ancestor, or the task's own id when it is a lane. The
+key is omitted when there is none. Every `ready`, `next`, `list` or parked row then says
+which effort it belongs to, without opening the lanes view. `in_lane` is computed, so it is
+never a field of `Task`.
 
-The boolean field is visible as `lane_goal: true` on the lane's own row. It is always
-present, like `parallel`. Pretty tables mark lane rows with `≡`.
+The frontmatter field keeps its name in JSON: `lane` is a bool, always present like
+`parallel`, on `Task`, `TaskSummary` and `ParkedRow`. Pretty tables mark lane rows with
+`≡`.
 
 ### 3.7 Order
 
@@ -237,9 +252,16 @@ them without opening another checkout.
 
 **Recorded on every acquire.** `holds` is computed whenever a claim is acquired: on
 `start`, and on `edit --status doing` or an editor save that moves to `doing`. These are
-every path that builds `ClaimIntent::Acquire`. It is also recomputed when a save changes
-the `needs` of a task its saver claims. A change to the vocabulary takes effect at the
-next acquire or `needs` save.
+every path that builds `ClaimIntent::Acquire`. It is also recomputed when a save changes the `needs`
+of a task its saver claims:
+
+- **Removing a need** drops it from `holds`.
+- **Adding an exclusive need** to a claimed task is treated as an acquire. The save takes
+  the holds lock and runs the hold check. If the need is held, it refuses with `need_held`
+  and points to `tasks start <id> --force --reason`. Otherwise one session could add
+  `quiet` to a task it already claims while another session holds it.
+
+A change to the vocabulary takes effect at the next acquire or `needs` save.
 
 **Held only while live.** A hold exists only while its claim is live, by the claims
 design's liveness rule. A `doing` status alone does not hold, and neither does a park: a
@@ -250,19 +272,34 @@ heartbeat with `tasks note`.
 **Blocks other sessions only.** A task is held back when:
 
 - its own project declares the need exclusive, and
-- a live claim belonging to **another session** holds a need of that name.
+- a live claim on **another task**, belonging to **another session**, holds a need of
+  that name.
 
-A session that holds `quiet` can start a second task needing `quiet`; it is already using
-the idle host.
+Two consequences:
 
-**Which stores are read.** The gate reads every claim store in the state directory
-(`claims/*.toml`), not only those in scope, so that a capture claimed in another project
-holds the host here too. A store that cannot be read gives the warning
-`hold state unknown for <prefix>` and contributes no holds, following the halt pattern.
-It does not fail the command.
+- A session that holds `quiet` can start a second task needing `quiet`; it is already
+  using the idle host.
+- A claim on the target task itself never blocks. A `--force` takeover of a `quiet` task
+  is therefore an ordinary takeover, not a `need_held` refusal. The takeover note already
+  records it.
+
+Read views (`ready`, `next`, `prime`, `lanes`) resolve "this session" the way
+`occupants` does. When the identity cannot be resolved, every hold counts as another
+session's.
+
+**Which stores are read.** The gate reads the claim store of every registered project,
+not only those in scope, so that a capture claimed in another project holds the host here
+too. That is the same set `tasks claims` reads. Stores left behind by unregistered or
+renamed prefixes are not read; their claims appear in no view that could explain a block.
+
+A store that cannot be read gives the warning `hold state unknown for <prefix>` and
+contributes no holds, following the halt pattern. It does not fail the command.
+`ClaimSnapshot::load_from_paths` stops at the first bad store, so this needs a new loader
+that tolerates each store separately.
 
 **Atomic across projects.** An acquire that would record a non-empty `holds` takes one
-host-wide lock, `claims/holds.lock`, around the hold check and the claim save. Two `start`s
+host-wide lock, `claims/.holds.lock`, around the hold check and the claim save. A prefix
+cannot start with `.`, so no project's `claims/<prefix>.lock` can take that name. Two `start`s
 in different projects then cannot both win the same need. The project's mutation lock is
 taken first and the holds lock second, everywhere, so the order is fixed.
 
@@ -278,10 +315,12 @@ block. This is documented, not engineered around.
   `<n> task(s) wait for <need>, held by <holder id> (<session>)`.
 - **Acquire** refuses a held-back task with the error kind `need_held`, on every acquire
   path. This mirrors halt's `guard_new_start`:
-  - `--force --reason "<why>"` overrides;
-  - `--force` without `--reason` is refused, as under halt;
+  - `start --force --reason "<why>"` overrides. When the task is held back, `--force`
+    without `--reason` is refused.
+  - `edit --status doing` and editor saves have no override, as under halt. They refuse
+    and name `tasks start <id> --force --reason`.
   - `--force` keeps its existing meaning of taking over another session's claim on the
-    same task.
+    same task, which never raises `need_held` (§4.4).
 
   The override writes a note on the acquired task:
   `need override: acquired while <need> held by <holder>: <reason>`. A matching note goes
@@ -322,13 +361,19 @@ nothing else.
    The picks across lanes form a set of steps that can run at the same time, as far as
    declared needs can tell. Earlier lanes win contested needs because lane order is the
    person's ranking.
-4. **Classify** each open descendant that is not a step into exactly one cause, so the row
-   explains itself:
+4. **Classify** the lane's open, unshelved descendants. Shelved descendants are left out
+   of the view entirely. The partition is:
+
+   > descendants = the pick + unpicked steps + Σ causes
+
+   An unpicked step counts under `steps` unless it was skipped for a held need, in which
+   case it counts under `held` and not under `steps`. Every other descendant takes exactly
+   one cause, so the row explains itself:
 
    | Cause | Descendant |
    |---|---|
    | `active` | has a live claim |
-   | `held` | a step not picked because its exclusive need is held (counted, and listed in `held`) |
+   | `held` | a step skipped because its exclusive need is held (also listed in `held`) |
    | `without` | hidden by `--without` / `TASKS_WITHOUT` |
    | `cutoff` | above the complexity cutoff |
    | `halt` | stopped by a halt |
@@ -427,8 +472,9 @@ groups. An older binary that saves the registry drops `groups`, for the same rea
 ### 6.4 Scope
 
 `--group <name>` joins `--project` and `--all-projects` in `ScopeArgs` and conflicts with
-both. It is accepted by list, ready, next, prime, tree, tags, sample, lanes and claims.
-`quiet`, which has its own scope flags, gains `--group` as well.
+both. It is accepted by list, ready, next, prime, tree, tags, sample and lanes. `quiet`, which
+has its own scope flags, gains `--group` as well. `claims` keeps its single all-projects
+scope: by contract it fails rather than giving a partial answer.
 
 The scope records the requested members, so `Scope::All` carries a member set. Views that
 warn about projects that are absent or unreachable (`halt_snapshots`, the scope
@@ -460,8 +506,10 @@ In JSON, `prime` adds `group: "<name>"` when scoped by group, and `prefix` is nu
 
 All changes are additive. The main design §5.1 gains `+=` lines:
 
-- `Task`, `TaskSummary` and the `show` shape += `lane_goal` (bool, always present),
-  `lane` (nearest lane id, sparse) and `needs` (list, sparse).
+- `Task`, `TaskSummary` and `ParkedRow` += `lane` (bool, always present) and `needs`
+  (list, sparse).
+- `TaskSummary`, `ParkedRow` and the `show` shape's computed fields += `in_lane` (the
+  nearest lane id, sparse).
 - `ClaimInfo` += `holds` (list, sparse). This reaches `TaskSummary.claim`, the rows of
   `prime.doing`, and `tasks claims`.
 - `prime` += `lanes` (always present) and `group` (only under `--group`).
@@ -470,6 +518,7 @@ All changes are additive. The main design §5.1 gains `+=` lines:
 
 ## 9. Documentation and skills
 
+- **Hierarchy design addendum:** the paused-lane exception (§3.4).
 - **`skills/tasks/SKILL.md`:**
   - lanes: when to make one, leading the body with the guidance paragraph, pausing with
     `block`/`unblock`, and `next --under`;
@@ -497,13 +546,17 @@ park and halt tests.
 - A `blocked` lane hides its descendants from `ready` and `next` and shows as `paused`;
   `unblock` restores them.
 - A shelved lane is absent from the view.
-- `lane` names the nearest lane ancestor on `ready` and `next` rows.
+- `in_lane` names the nearest lane ancestor on `ready`, `next` and parked rows.
+- `ready` warns about tasks hidden by a paused lane. `start` on a task inside a paused lane
+  succeeds.
+- An editor save that creates nesting is refused.
 - Guidance skips blank and heading lines; an empty body gives `null`.
 
 **Lanes view**
 - The pick follows `next`'s order inside the lane, with parked candidates first.
 - Each state appears: `paused`, `ready`, `held`, `waiting`, `empty`.
-- The causes partition counts every open descendant once.
+- The partition counts every open, unshelved descendant exactly once, with held steps
+  only under `held`. Shelved descendants are absent.
 - Two lanes whose heads need the same exclusive resource: the earlier lane picks it, and
   the later lane picks its next step without it or is `held` with `by: "pick"`.
 
@@ -524,7 +577,11 @@ park and halt tests.
   aggregated warning, across two registered projects.
 - The holding session itself can start a second task with the same need.
 - A park releases the hold. A dead claim holds nothing.
-- `edit --rm-need` on a claimed task updates `holds`.
+- `edit --rm-need` on a claimed task updates `holds`. `edit --need quiet` on a claimed
+  task, while another session holds `quiet`, is refused with `need_held`.
+- A `start --force` takeover of a `quiet` task succeeds without `--reason`.
+- A project whose prefix is `holds` can start a task that needs `quiet`.
+- A claim in an unregistered leftover store does not hold.
 - An unreadable claim store warns and does not fail `ready`.
 - Two concurrent `start`s in different projects contending for one need: exactly one
   succeeds.
