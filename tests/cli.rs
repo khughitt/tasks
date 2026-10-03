@@ -21981,3 +21981,80 @@ fn needs_flags_a_need_dropped_from_the_vocabulary_still_lists_but_fails_check() 
     let report = env.check(&sci);
     assert!(report["errors"].as_array().unwrap().is_empty(), "{report}");
 }
+
+#[test]
+fn needs_status_flags_conflict_with_every_needs_flag_on_edit() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let id = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet"]));
+    let path = format!("tasks/{id}.md");
+    let before = env.read(&sci, &path);
+    let needs_flags: [&[&str]; 3] = [
+        &["--need", "quiet"],
+        &["--rm-need", "quiet"],
+        &["--no-needs"],
+    ];
+    for needs in needs_flags {
+        let mut args = vec!["edit", id.as_str(), "--status", "doing"];
+        args.extend_from_slice(needs);
+        let err = env.usage(&sci, &args);
+        assert!(err.contains("--status"), "{needs:?}: {err}");
+        assert_eq!(env.read(&sci, &path), before, "{needs:?} wrote nothing");
+    }
+    // Separately, each lands.
+    env.json(&sci, &["edit", &id, "--status", "blocked"]);
+    env.json(&sci, &["edit", &id, "--no-needs"]);
+    let task = env.json(&sci, &["show", &id])["task"].clone();
+    assert_eq!(task["status"], "blocked");
+    assert!(task.get("needs").is_none());
+}
+
+#[test]
+fn needs_status_editor_save_cannot_change_status_and_needs_together() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let id = id_of(env.json(&sci, &["add", "Capture", "--status", "idea"]));
+    let path = format!("tasks/{id}.md");
+    let before = env.read(&sci, &path);
+
+    let both = editor_script(
+        &sci,
+        "sed -i -e 's/^status: idea$/status: todo/' -e 's/^priority: 2$/priority: 2\\nneeds: [quiet]/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &both)
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "validation");
+    assert!(
+        err_detail(&out).contains(
+            "a save that changes the status cannot also change needs; change the status first, then the needs"
+        ),
+        "{}",
+        err_detail(&out)
+    );
+    assert_eq!(env.read(&sci, &path), before, "the record is unchanged");
+
+    let status = editor_script(&sci, "sed -i 's/^status: idea$/status: todo/' \"$1\"");
+    env.cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &status)
+        .assert()
+        .success();
+    let needs = editor_script(
+        &sci,
+        "sed -i 's/^priority: 2$/priority: 2\\nneeds: [quiet]/' \"$1\"",
+    );
+    env.cmd(&sci)
+        .args(["edit", &id])
+        .env("EDITOR", &needs)
+        .assert()
+        .success();
+    let task = env.json(&sci, &["show", &id])["task"].clone();
+    assert_eq!(task["status"], "todo");
+    assert_eq!(task["needs"], serde_json::json!(["quiet"]));
+}

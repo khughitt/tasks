@@ -335,6 +335,15 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
                 .into(),
         )));
     }
+    // Lanes-needs spec §4.4: status and needs change in separate operations, as status
+    // and defer do, so every acquire reads the needs already on the record.
+    if status != original.status && edited.needs != original.needs {
+        return Err(keep(Error::Validation(
+            "a save that changes the status cannot also change needs; change the status \
+             first, then the needs"
+                .into(),
+        )));
+    }
     // spec §3.2: the status rule is the writers' to enforce. A status-changing save
     // reaches `transition`, which clears the field; an equal-status save must not leave
     // a deferral on a status that cannot carry one.

@@ -198,9 +198,10 @@ pub struct EditArgs {
     pub title: Option<String>,
     /// Move to a status: idea, todo, doing, blocked, done, or dropped. Shelved is
     /// entered with `shelve`, never here.
+    /// Status, defer, and needs change in separate operations.
     #[arg(
         long,
-        conflicts_with = "defer",
+        conflicts_with_all = ["defer", "needs", "rm_needs", "no_needs"],
         add = ArgValueCandidates::new(crate::complete::edit_statuses),
         add = ValueSet,
         value_parser = ValueSet
