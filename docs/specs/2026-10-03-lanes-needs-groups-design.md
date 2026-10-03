@@ -1,6 +1,6 @@
 # Lanes, needs, and project groups — design
 
-**Status:** draft, revised after review round 4, 2026-10-03. Task: tasks-ece1e2.
+**Status:** approved for implementation planning, 2026-10-03 (review round 5, at 8a7accd). Task: tasks-ece1e2.
 Waiting ideas: tasks-9bdd68 (focus marker), tasks-77dbc6 (project groups),
 tasks-e02860 (lanes and shared resources). Brief:
 `docs/notes/2026-09-30-work-selection-brief.md`.
