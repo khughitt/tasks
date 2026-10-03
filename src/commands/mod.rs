@@ -60,6 +60,10 @@ pub struct Ctx {
     pub warnings: Vec<String>,
     /// Held for a write command; absent from reads and during an interactive edit.
     pub lock: Option<MutationLock>,
+    /// The host-wide holds lock, taken after `lock` by every acquire that records holds
+    /// and every claim replacement that changes them. Held until the command ends: past
+    /// `save`'s publish, record write, and rollback (lanes/needs design §4.4).
+    holds_lock: Option<MutationLock>,
     routing: Routing,
     claims: Option<ClaimStore>,
     pending_claim: Option<(TaskId, ClaimIntent)>,
@@ -107,6 +111,7 @@ impl Ctx {
             shorthand,
             warnings: Vec::new(),
             lock: None,
+            holds_lock: None,
             routing,
             claims: None,
             pending_claim: None,
@@ -224,6 +229,11 @@ impl Ctx {
         if holds == existing.holds {
             return Ok(());
         }
+        // Any change, whether a hold is added, reduced, or the last one removed, is
+        // published by `save` before the record write and restored if that write fails.
+        // The lock spans both, so no other project's acquire sees a need released for the
+        // instant in between and takes it.
+        self.take_holds_lock()?;
         let added: Vec<String> = holds
             .iter()
             .filter(|need| !existing.holds.contains(*need))
@@ -300,6 +310,22 @@ impl Ctx {
         Ok(())
     }
 
+    /// Lanes/needs design §4.4 "Atomic across projects": the host-wide holds lock, after
+    /// the project lock and never before. Kept on `Ctx` until the command ends, so it
+    /// spans the hold check, `save`'s publish of the claim, the record write, and the
+    /// restore of the previous claim when that write fails.
+    fn take_holds_lock(&mut self) -> Result<()> {
+        if self.lock.is_none() {
+            return Err(Error::Io(
+                "the holds lock was requested without the project lock".into(),
+            ));
+        }
+        if self.holds_lock.is_none() {
+            self.holds_lock = Some(crate::holds::lock()?);
+        }
+        Ok(())
+    }
+
     /// Lanes/needs design §4.4–§4.5: every acquire records the task's needs that this
     /// project declares exclusive (undeclared names ignored) as the claim's `holds`, and is
     /// refused with `need_held` while another session's live claim on another task holds
@@ -318,6 +344,14 @@ impl Ctx {
     /// proof names this caller's harness is therefore its own.
     fn guard_holds(&mut self, task: &Task, force: bool) -> Result<()> {
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
+        // What the claim this acquire replaces holds: a repeated start's, a takeover's, or
+        // a dead entry's. `save` publishes the new claim before writing the record and
+        // restores this one if the write fails, so a change either way needs the lock.
+        let replaced = self
+            .claims_mut()?
+            .get(&task.id)
+            .map(|claim| claim.holds.clone())
+            .unwrap_or_default();
         let me = match self.pending_claim.as_mut() {
             Some((_, ClaimIntent::Acquire(claim))) => {
                 claim.holds = holds.clone();
@@ -325,7 +359,13 @@ impl Ctx {
             }
             _ => unreachable!("claim_guard records an acquire for every move to doing"),
         };
+        if holds.is_empty() && replaced.is_empty() {
+            return Ok(());
+        }
+        // The project lock is already held (every write command takes it first).
+        self.take_holds_lock()?;
         if holds.is_empty() {
+            // Dropping a hold checks nothing; only its publish and rollback need the lock.
             return Ok(());
         }
         // A re-start that continues the caller's own live claim, which already holds every
@@ -1343,6 +1383,20 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
 
     match ctx.pending_claim.take() {
         Some((id, ClaimIntent::Acquire(claim))) => {
+            // Lanes/needs design §4.4: a claim whose holds differ from the one it replaces
+            // is published, and on a failed record write rolled back, only under the holds
+            // lock. A path that changed holds without taking it is a bug, refused here
+            // before anything is written.
+            let replaced = ctx
+                .claims_mut()?
+                .get(&id)
+                .map(|claim| claim.holds.clone())
+                .unwrap_or_default();
+            if claim.holds != replaced && ctx.holds_lock.is_none() {
+                return Err(Error::Io(format!(
+                    "the claim on {id} changes its holds without the holds lock"
+                )));
+            }
             let store = ctx.claims_mut()?;
             // Captured, never assumed absent: a repeated `start` by the owner and a forced
             // takeover both write over an existing claim, and a blanket removal on failure

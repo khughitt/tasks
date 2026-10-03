@@ -2,12 +2,13 @@
 //! every registered project, hold which exclusive needs. Read without any project's lock;
 //! an acquire that would record a hold reads it under the host-wide holds lock.
 
-use crate::claims::{Claim, ClaimStore, Liveness, ProcStat};
+use crate::claims::{Claim, ClaimStore, Liveness, MutationLock, ProcStat};
 use crate::error::Result;
 use crate::model::{Task, TaskId};
 use crate::needs::Vocabulary;
 use crate::registry::Registry;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::path::PathBuf;
 use time::OffsetDateTime;
 
@@ -206,6 +207,22 @@ impl HeldWarnings {
             })
             .collect()
     }
+}
+
+/// `claims/.holds.lock`: one host-wide lock beside the per-prefix stores (§4.4 "Atomic
+/// across projects"). A prefix cannot start with `.`, so no project's `<prefix>.lock` is
+/// this file, including the lock of a project whose prefix is `holds`.
+pub fn lock_path_with(get: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf> {
+    Ok(ClaimStore::path_with(".holds", get)?.with_file_name(".holds.lock"))
+}
+
+/// Taken after the project's mutation lock, never before, by every acquire that records
+/// holds and every claim replacement that changes them (`Ctx::take_holds_lock`). It is
+/// held around the hold check, the claim save, the record write and any rollback, so two
+/// acquires in different projects cannot both win one need, and none sees a hold that a
+/// failed write is about to restore.
+pub fn lock() -> Result<MutationLock> {
+    MutationLock::acquire_at(&lock_path_with(|key| std::env::var_os(key))?)
 }
 
 #[cfg(test)]
@@ -474,6 +491,17 @@ mod tests {
                 "1 task(s) wait for gpu, held by fam-000002 (b)",
                 "2 task(s) wait for quiet, held by sci-000001 (a)",
             ]
+        );
+    }
+
+    #[test]
+    fn the_holds_lock_is_its_own_file_even_beside_a_holds_prefix() {
+        let get = |key: &str| (key == "XDG_STATE_HOME").then(|| std::ffi::OsString::from("/xdg"));
+        let lock = lock_path_with(get).unwrap();
+        assert_eq!(lock, PathBuf::from("/xdg/tasks/claims/.holds.lock"));
+        assert_ne!(
+            lock,
+            crate::claims::MutationLock::path_with("holds", get).unwrap()
         );
     }
 }

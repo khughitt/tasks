@@ -23249,3 +23249,222 @@ fn a_view_whose_identity_cannot_resolve_counts_every_hold_as_foreign() {
         "the view must say why its own hold counts as foreign: {ready}"
     );
 }
+
+/// Holds the host-wide holds lock, as a concurrent acquire in another project would.
+fn hold_holds_lock(env: &TestEnv) -> File {
+    let path = env.claim_store("sci").with_file_name(".holds.lock");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let file = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    file.lock().unwrap();
+    file
+}
+
+/// Waits, bounded, until another process holds `prefix`'s project lock. A probe that gets
+/// the lock drops it at once and tries again. It observes only and never asserts, so no
+/// child is stranded by a panic here.
+fn wait_for_project_lock_holder(env: &TestEnv, prefix: &str, limit: Duration) {
+    let path = env
+        .claim_store(prefix)
+        .with_file_name(format!("{prefix}.lock"));
+    let deadline = Instant::now() + limit;
+    while Instant::now() < deadline {
+        if let Ok(probe) = File::options()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            && let Err(std::fs::TryLockError::WouldBlock) = probe.try_lock()
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `tasks <args>` spawned as `session` (with the runner's live pid), output piped.
+fn spawn_as(
+    env: &TestEnv,
+    dir: &std::path::Path,
+    session: &str,
+    args: &[&str],
+) -> std::process::Child {
+    let mut cmd = env.raw(dir);
+    cmd.args(args)
+        .env("TASKS_SESSION", session)
+        .env("TASKS_SESSION_PID", std::process::id().to_string());
+    cmd.spawn().unwrap()
+}
+
+#[test]
+fn an_acquire_that_records_holds_waits_for_the_holds_lock_and_one_that_does_not_never_does() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    let quiet = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    // In another project: the blocked start above holds sci's project lock.
+    let plain = id_of(env.json(&fam, &["add", "Docs", "-p", "2"]));
+
+    let held = hold_holds_lock(&env);
+    let mut holding = spawn_as(&env, &sci, "agent-a", &["start", &quiet]);
+    let mut free = spawn_as(&env, &fam, "agent-b", &["start", &plain]);
+    // Observations only while the lock is held.
+    let free_finished = wait_bounded(&mut free, Duration::from_secs(10));
+    let holding_still_blocked = !wait_bounded(&mut holding, Duration::from_millis(300));
+    drop(held);
+
+    let free = reap(free, REAP);
+    let holding = reap(holding, REAP);
+    assert!(
+        free_finished,
+        "a start that records no holds must not take the holds lock"
+    );
+    assert!(
+        holding_still_blocked,
+        "a start that records holds must wait for the holds lock"
+    );
+    assert!(free.expect("the plain start never exited").status.success());
+    let holding = holding.expect("the holding start never exited after the release");
+    assert!(
+        holding.status.success(),
+        "{}",
+        String::from_utf8_lossy(&holding.stderr)
+    );
+    assert_eq!(holds_of(&env, &sci, &quiet), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn concurrent_starts_in_two_projects_contending_for_one_need_have_one_winner() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let in_sci = id_of(env.json(&sci, &["add", "Sci capture", "-p", "2", "--need", "quiet"]));
+    let in_fam = id_of(env.json(&fam, &["add", "Fam capture", "-p", "2", "--need", "quiet"]));
+
+    let held = hold_holds_lock(&env);
+    let sci_start = spawn_as(&env, &sci, "agent-a", &["start", &in_sci]);
+    let fam_start = spawn_as(&env, &fam, "agent-b", &["start", &in_fam]);
+    wait_for_project_lock_holder(&env, "sci", Duration::from_secs(10));
+    wait_for_project_lock_holder(&env, "fam", Duration::from_secs(10));
+    drop(held);
+
+    // Reap both before asserting anything.
+    let reaped = [reap(sci_start, REAP), reap(fam_start, REAP)];
+    assert!(
+        reaped.iter().all(Option::is_some),
+        "a queued start never exited"
+    );
+    let outs: Vec<_> = reaped.into_iter().flatten().collect();
+    assert_eq!(
+        outs.iter().filter(|out| out.status.success()).count(),
+        1,
+        "exactly one session may take the idle host: {outs:?}"
+    );
+    let loser = outs.iter().find(|out| !out.status.success()).unwrap();
+    assert_eq!(err_kind(loser), "need_held");
+    let holding = [(&sci, &in_sci), (&fam, &in_fam)]
+        .into_iter()
+        .filter(|(dir, id)| holds_of(&env, dir, id) == serde_json::json!(["quiet"]))
+        .count();
+    assert_eq!(holding, 1);
+}
+
+#[test]
+fn a_project_whose_prefix_is_holds_can_start_a_task_that_needs_an_exclusive_resource() {
+    let mut env = TestEnv::new();
+    let holds = env.init("holds");
+    hold_vocab(&holds);
+    let id = id_of(env.json(&holds, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    // Its project lock is `holds.lock`. Were the host-wide lock that same file, this start
+    // would wait on itself forever; `reap` kills it instead of hanging the suite.
+    let out = reap(
+        spawn_as(&env, &holds, "agent-a", &["start", &id]),
+        Duration::from_secs(30),
+    );
+    let out = out.expect("start waited on its own lock");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(holds_of(&env, &holds, &id), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_hold_removal_whose_record_write_fails_keeps_the_holds_lock_through_its_rollback() {
+    use std::os::unix::fs::PermissionsExt;
+    struct Restore(std::path::PathBuf, std::fs::Permissions);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            std::fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let mine = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let theirs = id_of(env.json(&fam, &["add", "Fam capture", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    let store_before = std::fs::read(env.claim_store("sci")).unwrap();
+    let record_before = env.read(&sci, &format!("tasks/{mine}.md"));
+
+    // The removal's record write fails: reads still work, `atomic_write` cannot create its
+    // temp file.
+    let tasks_dir = sci.join("tasks");
+    let original = std::fs::metadata(&tasks_dir).unwrap().permissions();
+    std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let restore = Restore(tasks_dir, original);
+
+    let held = hold_holds_lock(&env);
+    let mut removal = spawn_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &mine, "--rm-need", "quiet"],
+    );
+    let acquire = spawn_as(&env, &fam, "agent-b", &["start", &theirs]);
+    // Observations only while the lock is held: both children are past their project
+    // lock, and the removal has not published, failed and rolled back on its own.
+    wait_for_project_lock_holder(&env, "sci", Duration::from_secs(10));
+    wait_for_project_lock_holder(&env, "fam", Duration::from_secs(10));
+    let removal_waited = !wait_bounded(&mut removal, Duration::from_millis(300));
+    drop(held);
+
+    // Reap both, and restore the directory, before asserting anything.
+    let [removal, acquire] = [reap(removal, REAP), reap(acquire, REAP)];
+    drop(restore);
+    assert!(
+        removal_waited,
+        "removing a hold must take the holds lock before save publishes the reduced claim"
+    );
+    let removal = removal.expect("the removal never exited after the release");
+    let acquire = acquire.expect("the acquire never exited after the release");
+    assert_eq!(
+        removal.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&removal.stderr)
+    );
+    assert_eq!(err_kind(&removal), "io");
+    // Before the removal, or after its rollback restored the hold: never in between.
+    assert_eq!(
+        acquire.status.code(),
+        Some(1),
+        "the acquire saw quiet released: {}",
+        String::from_utf8_lossy(&acquire.stdout)
+    );
+    assert_eq!(err_kind(&acquire), "need_held");
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store_before);
+    assert_eq!(env.read(&sci, &format!("tasks/{mine}.md")), record_before);
+    assert!(env.json(&fam, &["show", &theirs])["claim"].is_null());
+}
