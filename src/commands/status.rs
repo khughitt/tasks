@@ -54,6 +54,7 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, &task)?;
     crate::hierarchy::validate_periodic(&ctx.project, &ctx.registry, &task)?;
     crate::hierarchy::validate_defer(&ctx.project, &ctx.registry, &task)?;
+    crate::hierarchy::validate_lanes(&ctx.project, &ctx.registry, &task)?;
     let session = match &ctx.pending_claim {
         Some((_, ClaimIntent::Acquire(claim))) => claim.session.clone(),
         _ => unreachable!("start prepared an acquire claim"),

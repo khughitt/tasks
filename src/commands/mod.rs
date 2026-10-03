@@ -1383,6 +1383,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     validate_task(task)?;
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
+    crate::hierarchy::validate_lanes(&ctx.project, &ctx.registry, task)?;
     let clear_escalation = std::mem::take(&mut ctx.clear_escalation);
 
     match ctx.pending_claim.take() {

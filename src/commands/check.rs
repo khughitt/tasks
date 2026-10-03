@@ -270,6 +270,21 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ));
             }
         }
+        // A merge or a hand edit can leave a lane inside a lane.
+        if task.lane
+            && let Some(outer) = crate::hierarchy::enclosing_lane(&tasks, task, &ctx.registry)
+        {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "nested_lane",
+                format!(
+                    "is a lane inside lane {}; a sub-effort inside a lane is an ordinary \
+                     child goal",
+                    outer.id
+                ),
+            ));
+        }
         // A lane is often filed before its steps exist, so a childless one is a reminder,
         // not an error.
         if task.lane

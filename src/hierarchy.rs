@@ -4,7 +4,7 @@ use crate::output::{TaskSummary, TreeNode};
 use crate::query::ready_order;
 use crate::registry::Registry;
 use crate::repo::Project;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use time::OffsetDateTime;
 
 /// Rejects a `parent` that is foreign, missing, or would make `task` its own ancestor.
@@ -62,6 +62,79 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
             .map(|parent| registry.canonical_id(parent));
     }
     Ok(())
+}
+
+/// No lane may have a lane as an ancestor. Covers both directions for the record being
+/// written: a lane above it when it is a lane, and a lane below it when it becomes a lane
+/// or moves under one. Ancestors are read from disk, as in `validate_parent`, which runs
+/// first and has already refused a parent loop. The project is scanned only when the
+/// record's subtree could newly meet a lane, so ordinary writes inside a lane stay cheap;
+/// nesting that was already on disk is `check`'s to report.
+pub fn validate_lanes(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
+    let task_id = registry.canonical_id(&task.id);
+    let above = lane_above(project, registry, task)?;
+    if task.lane
+        && let Some(outer) = &above
+    {
+        return Err(Error::NestedLane(format!(
+            "{task_id} cannot be a lane inside lane {outer}; a sub-effort inside a lane is an \
+             ordinary child goal"
+        )));
+    }
+    // A record not yet on disk has no children, so nothing can sit below it.
+    let stored = match project.read_task(&task_id) {
+        Ok(stored) => stored,
+        Err(Error::TaskNotFound(_)) => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let canonical = |parent: &Option<TaskId>| parent.as_ref().map(|id| registry.canonical_id(id));
+    let moved = canonical(&stored.parent) != canonical(&task.parent);
+    let became_lane = task.lane && !stored.lane;
+    let moved_under_a_lane = !task.lane && above.is_some() && moved;
+    if !became_lane && !moved_under_a_lane {
+        return Ok(());
+    }
+    let all = project.scan()?;
+    let Some(inner) = descendants(&all, &task_id, registry)
+        .into_iter()
+        .find(|descendant| descendant.lane)
+    else {
+        return Ok(());
+    };
+    Err(Error::NestedLane(match above {
+        Some(outer) => format!(
+            "moving {task_id} under lane {outer} would put lane {} inside it",
+            inner.id
+        ),
+        None => format!("{task_id} cannot be a lane: lane {} is below it", inner.id),
+    }))
+}
+
+/// The nearest lane above `task` on disk. A loop or a missing parent ends the walk.
+fn lane_above(project: &Project, registry: &Registry, task: &Task) -> Result<Option<TaskId>> {
+    let mut seen = HashSet::new();
+    let mut current = task
+        .parent
+        .as_ref()
+        .map(|parent| registry.canonical_id(parent));
+    while let Some(id) = current {
+        if !seen.insert(id.clone()) {
+            break;
+        }
+        let ancestor = match project.read_task(&id) {
+            Ok(ancestor) => ancestor,
+            Err(Error::TaskNotFound(_)) => break,
+            Err(error) => return Err(error),
+        };
+        if ancestor.lane {
+            return Ok(Some(id));
+        }
+        current = ancestor
+            .parent
+            .as_ref()
+            .map(|parent| registry.canonical_id(parent));
+    }
+    Ok(None)
 }
 
 /// Walks the parent chain upward from `start` and returns the loop it runs into, if any,

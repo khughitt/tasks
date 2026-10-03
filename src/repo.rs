@@ -435,6 +435,7 @@ impl Project {
 
     pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
         crate::hierarchy::validate_parent(self, registry, task)?;
+        crate::hierarchy::validate_lanes(self, registry, task)?;
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
         atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
@@ -669,6 +670,7 @@ impl Project {
         mut candidate: impl FnMut() -> u32,
     ) -> Result<()> {
         crate::hierarchy::validate_parent(self, registry, task)?;
+        crate::hierarchy::validate_lanes(self, registry, task)?;
         // A new record has no children, so these refuse only a lane.
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;

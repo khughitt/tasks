@@ -23667,3 +23667,80 @@ fn in_lane_names_the_nearest_lane_on_ready_next_show_and_parked_rows() {
     let wide = env.json(&sci, &["ready", "--all-projects"]);
     assert_eq!(row(&wide, &fam_step)["in_lane"], fam_lane, "{wide}");
 }
+
+#[test]
+fn nested_lanes_are_refused_on_every_write_path_and_reported_by_check() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let outer = id_of(env.json(&sci, &["add", "Outer", "--lane"]));
+    let child = id_of(env.json(&sci, &["add", "Child", "--parent", &outer]));
+
+    // add --lane --parent, directly and further down
+    assert_eq!(
+        env.fail(&sci, &["add", "Inner", "--lane", "--parent", &outer]),
+        "nested_lane"
+    );
+    assert_eq!(
+        env.fail(&sci, &["add", "Deeper", "--lane", "--parent", &child]),
+        "nested_lane"
+    );
+    // edit --lane with a lane above
+    assert_eq!(env.fail(&sci, &["edit", &child, "--lane"]), "nested_lane");
+    // edit --lane with a lane below
+    let top = id_of(env.json(&sci, &["add", "Top"]));
+    env.json(&sci, &["edit", &outer, "--parent", &top]);
+    assert_eq!(env.fail(&sci, &["edit", &top, "--lane"]), "nested_lane");
+    // re-parenting a subtree that contains a lane under a lane
+    let other = id_of(env.json(&sci, &["add", "Other", "--lane"]));
+    assert_eq!(
+        env.fail(&sci, &["edit", &top, "--parent", &other]),
+        "nested_lane"
+    );
+    assert_eq!(
+        env.fail(&sci, &["edit", &outer, "--parent", &other]),
+        "nested_lane"
+    );
+    // ordinary writes inside a lane still land
+    env.json(&sci, &["note", &child, "still writable"]);
+    env.json(&sci, &["edit", &child, "-p", "1"]);
+
+    // an editor save
+    let set = editor_script(
+        &sci,
+        "sed -i 's/^depends: \\[\\]$/lane: true\\ndepends: []/' \"$1\"",
+    );
+    let out = env
+        .cmd(&sci)
+        .env("EDITOR", &set)
+        .args(["edit", &child])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(err["error"]["kind"], "nested_lane", "{err}");
+    assert_eq!(
+        env.json(&sci, &["show", &child])["task"]["lane"],
+        false,
+        "nothing written"
+    );
+
+    // check reports nesting written by hand
+    let path = sci.join(format!("tasks/{child}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", "lane: true\ndepends: []\n"),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        check["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "nested_lane" && f["id"] == child),
+        "{check}"
+    );
+}
