@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: ece1e2-work-selection
 created: 2026-09-30T10:04:57Z
-updated: 2026-10-03T11:51:01Z
+updated: 2026-10-03T13:22:33Z
 started: 2026-10-03T09:53:20Z
 depends: []
 parent: tasks-46d207
@@ -61,3 +61,17 @@ Ideas it wakes: record the resulting decisions on tasks-77dbc6 and tasks-9bdd68 
 - 2026-10-03T11:48:32Z (ece1e2-work-selection): execution: subagent-driven (user choice, plan round 2); ops merge approval boundary at Task 0.1 Step 4 kept
 - 2026-10-03T11:51:01Z (ece1e2-work-selection): resumed
   provenance: {"harness_session":"claude-code:83185704-f448-42a6-ac20-8857595bdb59","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-03T12:17:58Z (ece1e2-work-selection): parked (waiting on user, approval): User approves merging the ten ops cli.toml commits (feat/ece1e2-cli in ops .worktrees/ece1e2-cli, 268b882) into ops main; then Task 0.1 Step 5 (commit the ops start stamp, ff-merge, push, record inventory notes), Step 6, and Task 1.1
+  provenance: {"harness_session":"claude-code:83185704-f448-42a6-ac20-8857595bdb59","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): resumed
+  provenance: {"harness_session":"claude-code:83185704-f448-42a6-ac20-8857595bdb59","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 1.3 = a6907be5ddf92e588be72dda75f7ecda4b11d8e5
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 1.5 = be2844b8a8c4a1a5028820de4a73bc4fee0bec61
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 1.6 = b546558571c5447e5b1f81eb39c22d585e3d198c
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 2.4 = 9e6f9f75175787456acca837d004037480c32cb3
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 3.1 = 1e94a67fcdc8315c92c9305c16e5afc80da5df69
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 3.6 = 719e0f5f60f86ff7309d9909a5d9072e7e45306b
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 3.7 = 41f18901ed63076a4fdacdda82b6d445692027f2
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 4.2 = 34f711bbe625820ae5ba499f9328f614b095a246
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 4.4 = 8547a851d4bab11d85ce541af15a12f7e2ae8f2c
+- 2026-10-03T13:22:23Z (ece1e2-work-selection): inventory: Task 4.5 = 55daece7e7b57a8f57791ba6d757d25d221ef4f9
