@@ -1345,12 +1345,20 @@ pub fn run(cli: Cli) -> Result<Output> {
             filter,
             limit,
             max_complexity,
+            without,
             scope,
-        } => list::ready(open_read_ctx(dir, &scope)?, filter, limit, max_complexity),
+        } => list::ready(
+            open_read_ctx(dir, &scope)?,
+            filter,
+            limit,
+            max_complexity,
+            without.without,
+        ),
         Command::Next {
             max_complexity,
+            without,
             scope,
-        } => list::next(open_read_ctx(dir, &scope)?, max_complexity),
+        } => list::next(open_read_ctx(dir, &scope)?, max_complexity, without.without),
         Command::Sample {
             limit,
             older_than,
@@ -1358,7 +1366,11 @@ pub fn run(cli: Cli) -> Result<Output> {
             scope,
         } => sample::sample(open_read_ctx(dir, &scope)?, limit, older_than, seed),
         Command::Edit { id, args } => edit::run(open_id_write_ctx(dir, &id)?, id, args),
-        Command::Prime { scope, closed } => list::prime(open_read_ctx(dir, &scope)?, closed),
+        Command::Prime {
+            scope,
+            closed,
+            without,
+        } => list::prime(open_read_ctx(dir, &scope)?, closed, without.without),
         Command::Note { id, text, stamp } => {
             status::note(open_id_write_ctx(dir, &id)?, id, text, stamp)
         }

@@ -116,6 +116,15 @@ pub struct FilterArgs {
     pub parallel: bool,
 }
 
+/// The needs this session cannot meet, shared by the pickers (lanes-needs spec §4.3).
+#[derive(Args, Debug, Default, Clone)]
+pub struct WithoutArgs {
+    /// Hide tasks that need this (repeatable), in the projects that declare it; adds to
+    /// TASKS_WITHOUT. Refused when no project in scope declares it.
+    #[arg(long = "without", value_name = "NEED")]
+    pub without: Vec<String>,
+}
+
 #[derive(Args, Debug, Default, Clone)]
 pub struct FieldArgs {
     #[arg(short = 'b', long)]
@@ -411,6 +420,8 @@ pub enum Command {
         )]
         max_complexity: Option<String>,
         #[command(flatten)]
+        without: WithoutArgs,
+        #[command(flatten)]
         scope: ScopeArgs,
     },
     /// The first ready task, in the show shape; null when nothing is ready.
@@ -425,6 +436,8 @@ pub enum Command {
             value_parser = ValueSet
         )]
         max_complexity: Option<String>,
+        #[command(flatten)]
+        without: WithoutArgs,
         #[command(flatten)]
         scope: ScopeArgs,
     },
@@ -640,6 +653,8 @@ pub enum Command {
         /// Also show the done and dropped counts.
         #[arg(long)]
         closed: bool,
+        #[command(flatten)]
+        without: WithoutArgs,
     },
     /// File feedback about a project's tooling into that project.
     Feedback {

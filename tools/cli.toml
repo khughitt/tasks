@@ -357,6 +357,7 @@ options = [
   { names = ["--parallel"], value = "none" },
   { shared = "limit", value = "int" },
   { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { names = ["--without"], value = "string", repeatable = true },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
 ]
@@ -366,6 +367,7 @@ path = ["next"]
 summary = "The first ready task, in the show shape; null when nothing is ready"
 options = [
   { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { names = ["--without"], value = "string", repeatable = true },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
 ]
@@ -531,6 +533,7 @@ options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--closed"], value = "none" },
+  { names = ["--without"], value = "string", repeatable = true },
 ]
 
 [[cli.tasks.commands]]

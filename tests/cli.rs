@@ -22111,3 +22111,258 @@ fn needs_filter_list_ready_and_parked_select_all_of() {
         std::slice::from_ref(&both)
     );
 }
+
+#[test]
+fn needs_without_hides_needy_steps_from_ready_next_and_prime() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(
+        &sci,
+        &[
+            ("quiet", "an idle host", true),
+            ("owner", "the owner judges", false),
+        ],
+    );
+    let quiet = id_of(env.json(&sci, &["add", "Capture", "-p", "0", "--need", "quiet"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+
+    assert_eq!(
+        task_ids(&env.json(&sci, &["ready"])),
+        [quiet.clone(), plain.clone()]
+    );
+    let v = env.json(&sci, &["ready", "--without", "quiet"]);
+    assert_eq!(task_ids(&v), [plain.as_str()]);
+    assert!(
+        warnings_of(&v).contains(&"without quiet: 1 task(s) hidden".to_string()),
+        "{v}"
+    );
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        quiet.as_str()
+    );
+    assert_eq!(
+        env.json(&sci, &["next", "--without", "quiet"])["next"]["task"]["id"],
+        plain.as_str()
+    );
+    let prime = env.json(&sci, &["prime", "--without", "quiet"]);
+    let ready: Vec<&str> = prime["ready"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ready, [plain.as_str()], "{prime}");
+
+    // A parked candidate goes through the same gate: next takes it first until hidden.
+    let parked = id_of(env.json(&sci, &["add", "Recapture", "-p", "3", "--need", "quiet"]));
+    env.json(&sci, &["park", &parked, "Rerun the capture"]);
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        parked.as_str()
+    );
+    assert_eq!(
+        env.json(&sci, &["next", "--without", "quiet"])["next"]["task"]["id"],
+        plain.as_str()
+    );
+    // Withholding a need nothing ready uses hides nothing, and says nothing.
+    let v = env.json(&sci, &["ready", "--without", "owner"]);
+    assert_eq!(task_ids(&v).len(), 3);
+    assert!(
+        !warnings_of(&v).iter().any(|w| w.starts_with("without ")),
+        "{v}"
+    );
+}
+
+#[test]
+fn needs_without_refuses_a_name_no_project_in_scope_declares() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    env.json(&sci, &["add", "Capture", "--need", "quiet"]);
+    let fam_task = id_of(env.json(&fam, &["add", "Fam work"]));
+
+    for command in ["ready", "next", "prime"] {
+        assert_eq!(
+            env.fail(&fam, &[command, "--without", "quiet"]),
+            "unknown_need",
+            "{command}: fam declares no needs"
+        );
+        assert_eq!(
+            env.fail(&sci, &[command, "--without", "gpu"]),
+            "unknown_need",
+            "{command}: a typo"
+        );
+        assert_eq!(
+            env.fail(&sci, &[command, "--project", "fam", "--without", "quiet"]),
+            "unknown_need",
+            "{command}: the scope, not the cwd, supplies the vocabulary"
+        );
+    }
+    // Under --all-projects one declaring project is enough; only its task is hidden.
+    let v = env.json(&fam, &["ready", "--all-projects", "--without", "quiet"]);
+    assert_eq!(task_ids(&v), [fam_task.as_str()]);
+    assert_eq!(
+        env.json(&fam, &["next", "--all-projects", "--without", "quiet"])["next"]["task"]["id"],
+        fam_task.as_str()
+    );
+    env.json(&fam, &["prime", "--all-projects", "--without", "quiet"]);
+}
+
+#[test]
+fn needs_without_variable_is_lenient_trimmed_and_joins_the_flag() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    declare_needs(
+        &sci,
+        &[
+            ("quiet", "an idle host", true),
+            ("owner", "the owner judges", false),
+        ],
+    );
+    let quiet = id_of(env.json(&sci, &["add", "Capture", "--need", "quiet"]));
+    let owner = id_of(env.json(&sci, &["add", "Review", "--need", "owner"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain"]));
+    let fam_task = id_of(env.json(&fam, &["add", "Fam work"]));
+    let with_env = |dir: &std::path::Path, value: &str, args: &[&str]| -> serde_json::Value {
+        let out = env
+            .cmd(dir)
+            .env("TASKS_WITHOUT", value)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let sorted = |v: serde_json::Value| {
+        let mut ids = task_ids(&v);
+        ids.sort();
+        ids
+    };
+
+    let mut expected = vec![owner.clone(), plain.clone()];
+    expected.sort();
+    assert_eq!(sorted(with_env(&sci, ",quiet, ", &["ready"])), expected);
+    let prime = with_env(&sci, "quiet", &["prime"]);
+    assert!(
+        !prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == quiet.as_str()),
+        "{prime}"
+    );
+    assert_eq!(
+        sorted(with_env(&sci, "", &["ready"])).len(),
+        3,
+        "empty hides nothing"
+    );
+
+    // A project that never declares the name: nothing hidden, no error, on every view.
+    assert_eq!(
+        sorted(with_env(&fam, "quiet", &["ready"])),
+        [fam_task.as_str()]
+    );
+    assert_eq!(
+        with_env(&fam, "quiet", &["next"])["next"]["task"]["id"],
+        fam_task.as_str()
+    );
+    with_env(&fam, "quiet", &["prime"]);
+
+    // The union: the variable withholds owner, the flag adds quiet.
+    assert_eq!(
+        sorted(with_env(&sci, "owner", &["ready", "--without", "quiet"])),
+        [plain.as_str()]
+    );
+    // The flag stays strict under the variable.
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_WITHOUT", "quiet")
+        .args(["ready", "--without", "gpu"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unknown_need");
+}
+
+#[test]
+fn needs_without_hides_only_where_the_owning_project_declares_the_name() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let capture = id_of(env.json(&sci, &["add", "Capture", "-p", "0", "--need", "quiet"]));
+    let plain = id_of(env.json(&sci, &["add", "Plain", "-p", "2"]));
+    // fam declares no needs, yet its record still names quiet (say, from a vocabulary
+    // since dropped). The union of the scope's vocabularies declares quiet; fam's does not.
+    let stale = id_of(env.json(&fam, &["add", "Stale", "-p", "1"]));
+    seed_needs(&fam, &stale, "quiet");
+    let run = |variable: Option<&str>, args: &[&str]| -> serde_json::Value {
+        let mut cmd = env.cmd(&fam);
+        if let Some(value) = variable {
+            cmd.env("TASKS_WITHOUT", value);
+        }
+        let out = cmd.args(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+
+    // In fam alone the variable hides nothing, on every view.
+    assert_eq!(task_ids(&run(Some("quiet"), &["ready"])), [stale.as_str()]);
+    assert_eq!(
+        run(Some("quiet"), &["next"])["next"]["task"]["id"],
+        stale.as_str()
+    );
+    let prime = run(Some("quiet"), &["prime"]);
+    assert!(
+        prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == stale.as_str()),
+        "{prime}"
+    );
+
+    // Across both projects the variable and the flag each hide sci's capture, and only it.
+    assert_eq!(
+        run(None, &["next", "--all-projects"])["next"]["task"]["id"],
+        capture.as_str()
+    );
+    let mut expected = vec![plain.clone(), stale.clone()];
+    expected.sort();
+    for (source, variable, args) in [
+        ("variable", Some("quiet"), &["--all-projects"][..]),
+        ("flag", None, &["--all-projects", "--without", "quiet"][..]),
+    ] {
+        let v = run(variable, &[&["ready"][..], args].concat());
+        let mut ids = task_ids(&v);
+        ids.sort();
+        assert_eq!(ids, expected, "{source}: {v}");
+        assert!(
+            warnings_of(&v).contains(&"without quiet: 1 task(s) hidden".to_string()),
+            "{source}: {v}"
+        );
+        assert_eq!(
+            run(variable, &[&["next"][..], args].concat())["next"]["task"]["id"],
+            stale.as_str(),
+            "{source}"
+        );
+        let prime = run(variable, &[&["prime"][..], args].concat());
+        let ready: Vec<&str> = prime["ready"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        assert!(!ready.contains(&capture.as_str()), "{source}: {prime}");
+        assert!(ready.contains(&stale.as_str()), "{source}: {prime}");
+    }
+}

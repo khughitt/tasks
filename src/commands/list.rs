@@ -5,6 +5,7 @@ use crate::error::Result;
 use crate::filter::{Fields, TaskFilter, check_parent};
 use crate::halt::{self, HaltSnapshot};
 use crate::model::{Status, Task, TaskId};
+use crate::needs::{Vocabularies, Without};
 use crate::output::{
     Counts, DateColumn, DeferredSummary, HaltRow, ListOut, NextOut, Output, ParkedOut,
     PeriodicSummary, PrimeOut, TaskSummary,
@@ -298,13 +299,26 @@ fn warn_hidden(ctx: &mut ReadCtx, hidden: usize) {
     }
 }
 
+/// Every in-scope project's vocabulary, by prefix: the names `--without` may use, and
+/// the vocabulary each task's needs are judged by (spec §4.3). It borrows the scope
+/// alone, so a caller may hold it while pushing to `ctx.warnings`.
+pub(super) fn vocabularies(scope: &Scope) -> Vocabularies<'_> {
+    scope
+        .projects()
+        .iter()
+        .map(|project| (project.prefix.as_str(), &project.needs))
+        .collect()
+}
+
 pub fn ready(
     mut ctx: ReadCtx,
     filter: FilterArgs,
     limit: Option<usize>,
     max_complexity: Option<String>,
+    without: Vec<String>,
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
+    let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let filter = TaskFilter::parse(&filter, &[], &ctx.registry, &ctx.shorthand)?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -314,6 +328,12 @@ pub fn ready(
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut picked.tasks, &snapshots);
     warn_hidden(&mut ctx, hidden);
+    if !without.is_empty() {
+        let vocabs = vocabularies(&ctx.scope);
+        let hidden = without.retain(&mut picked.tasks, &vocabs);
+        let _ = without.retain(&mut picked.deferred, &vocabs);
+        ctx.warnings.extend(without.warning(hidden));
+    }
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut picked.tasks, cutoff, &claims);
         ctx.warnings
@@ -340,8 +360,13 @@ pub fn ready(
 
 /// The head of `ready` in the show shape, so a caller can start on it without a second
 /// lookup. Nothing ready is a normal state: null, warnings, exit 0.
-pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> {
+pub fn next(
+    mut ctx: ReadCtx,
+    max_complexity: Option<String>,
+    without: Vec<String>,
+) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
+    let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
@@ -371,6 +396,12 @@ pub fn next(mut ctx: ReadCtx, max_complexity: Option<String>) -> Result<Output> 
         if !omitted.iter().any(|held| held.id == task.id) {
             omitted.push(task);
         }
+    }
+    if !without.is_empty() {
+        let vocabs = vocabularies(&ctx.scope);
+        let hidden = without.retain(&mut pool, &vocabs);
+        let _ = without.retain(&mut omitted, &vocabs);
+        ctx.warnings.extend(without.warning(hidden));
     }
     if let Some(cutoff) = cutoff {
         let hidden = crate::complexity::apply(&mut pool, cutoff, &claims);
@@ -460,8 +491,9 @@ fn claimed_elsewhere(
     found
 }
 
-pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
+pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(None)?;
+    let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let upcoming: Vec<OffsetDateTime> = all
@@ -505,6 +537,10 @@ pub fn prime(mut ctx: ReadCtx, closed: bool) -> Result<Output> {
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut ready, &snapshots);
     warn_hidden(&mut ctx, hidden);
+    if !without.is_empty() {
+        let hidden = without.retain(&mut ready, &vocabularies(&ctx.scope));
+        ctx.warnings.extend(without.warning(hidden));
+    }
     let mut doing: Vec<Task> = all
         .iter()
         .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
