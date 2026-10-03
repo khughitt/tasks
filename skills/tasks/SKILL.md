@@ -34,7 +34,8 @@ nothing is eligible.
    form; the flag is for a person at a terminal.
    A session that cannot meet a shared resource says so: `TASKS_WITHOUT=quiet` (comma-
    separated) in a host's ordinary session environment, or `--without <need>` on
-   `ready`/`next`/`prime`, hides tasks that need it, with one warning counting them.
+   `ready`/`next`/`prime`/`lanes`, hides tasks that need it: `ready`, `next`, and `prime`
+   with one warning counting them, `lanes` under its `without` cause.
    The flag refuses a name no project in scope declares; the variable never errors.
    A TTY session handed the idle host runs without the variable.
    The one exception: an idea `next` hands you because it is parked waiting on the agent,
@@ -231,9 +232,9 @@ always means this checkout; without a local project, the registry supplies the r
 Malformed local configuration still fails. `feedback` needs a local project for its `from:` tag.
 
 The read commands say where to look instead of inferring it from an id: `list`, `ready`,
-`next`, `prime`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one registered
-project, `--group <name>` for the members of a project group, or `--all-projects` for every
-reachable one. Each works from anywhere, including
+`next`, `prime`, `lanes`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one
+registered project, `--group <name>` for the members of a project group, or
+`--all-projects` for every reachable one. Each works from anywhere, including
 outside every project. `--project` reads that project's *registered* root, so from a
 worktree it is how you ask for the main checkout. `tree <id>` is the exception that needs
 no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
@@ -247,8 +248,9 @@ and not synced. Each host declares its own groups.
   and a retired prefix resolves to its live name. `tasks group rm <name>` deletes a group.
   `tasks groups` lists each group with whether each member is reachable.
 - **Names.** Names use the tag grammar (lowercase letters, digits, `-`). A name cannot be
-  a live or retired prefix, or a prefix an unfinished rename reserves. `init` and `rename`
-  refuse a prefix that names a group. Groups may overlap.
+  a live or retired prefix, or a prefix an unfinished rename reserves. Registering a
+  prefix (`init`, and `init --force` re-pointing one) and `rename` refuse a prefix that
+  names a group. Groups may overlap.
 - **Membership changes.** `rename` carries membership to the new prefix. `unregister`
   drops the prefix from every group, and deletes, with a warning, any group it leaves
   empty.
@@ -404,7 +406,8 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   A lane's priority ranks it in the lanes view and decides which lane wins a contested
   exclusive need; it never reorders `ready` or `next`. Pause a lane with
   `tasks block <lane> "<why>"`: its subtree leaves `ready`, `next`, and `prime`'s ready
-  list, with a warning, until `tasks unblock <lane>`. `start` on a task inside a paused
+  list until `tasks unblock <lane>`. `ready` and `next` warn about the paused work;
+  `prime` shows the lane as `paused` in its lanes block. `start` on a task inside a paused
   lane still works. Never pause with `shelve`, which hides the lane from every view and
   needs its subtree shelved first. `check` warns about a lane with no steps yet.
 - Dispatching several agents at once: mark each self-contained task with

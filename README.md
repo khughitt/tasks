@@ -368,6 +368,7 @@ live name. `tasks rename <old> <new>` updates the project's filenames, ids, loca
 prose need no edits: retired names keep resolving **for as long as the project stays
 registered**. `unregister` removes that project's aliases too; retired names cannot be
 reused while registered.
+
 The registry can also declare project groups (`[groups]`), named sets of live prefixes
 that `--group <name>` reads together. `rename` carries a member to its new prefix.
 `unregister` removes the prefix from every group and deletes, with a warning, any group it

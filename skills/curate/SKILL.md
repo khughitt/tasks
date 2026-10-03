@@ -8,13 +8,13 @@ description: Use when asked to curate, review, tidy, or audit the task corpus (`
 One pass improves the tasks it draws. It creates no tasks, drops none, and changes no
 priority; those are proposals for the human at the end. Invoke deliberately:
 
-    /curate [n] [--project <prefix> | --all-projects]
+    /curate [n] [--project <prefix> | --group <name> | --all-projects]
 
 Default: three tasks from the current project.
 
 ## 1. Sample
 
-    tasks sample --limit <n> [--project <prefix> | --all-projects]
+    tasks sample --limit <n> [--project <prefix> | --group <name> | --all-projects]
 
 The pool is already the right one: `idea`, `todo`, or `blocked`; no live claim; no
 proposal still awaiting the human; not updated in the last 7 days. Read the warnings: a
@@ -24,17 +24,17 @@ summary; do not open the task).
 
 ## 2. One root per task
 
-`sample --project` and `--all-projects` read registered roots, but `show`, `edit`, and
-`note` prefer the current checkout when the id's prefix matches it. From a worktree you
-could sample one copy of a task and rewrite another. So, before touching a sampled task,
-fix its root and run **every** later command for it as `tasks -C <root> ...`:
+`sample --project`, `--group`, and `--all-projects` read registered roots, but `show`,
+`edit`, and `note` prefer the current checkout when the id's prefix matches it. From a
+worktree you could sample one copy of a task and rewrite another. So, before touching a
+sampled task, fix its root and run **every** later command for it as `tasks -C <root> ...`:
 
 - `sample` ran unscoped: the root is the nearest ancestor of the current directory that
   contains `tasks/.config.toml`. That is the project an unscoped `tasks` command locates;
   from a subdirectory it is not the current directory, and running grep there would miss
   the specs and history the verdict depends on.
-- `sample` ran with `--project` or `--all-projects`: the root is the path that
-  `tasks --pretty root <id>` prints. The default JSON form is an object; its `root`
+- `sample` ran with `--project`, `--group`, or `--all-projects`: the root is the path
+  that `tasks --pretty root <id>` prints. The default JSON form is an object; its `root`
   field is the same path. Never pass the JSON to `-C`.
 
 Grep, `git log`, and every other piece of evidence gathering run in that same root.
