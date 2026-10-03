@@ -24770,3 +24770,165 @@ fn group_set_refuses_a_name_an_unfinished_rename_reserves() {
     }
     env.json(&fam, &["group", "set", "vf", "lab", "fam"]);
 }
+
+#[test]
+fn init_refuses_a_prefix_that_names_a_group() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["group", "set", "vf", "sci"]);
+    let fresh = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.fail(fresh.path(), &["init", "--prefix", "vf"]),
+        "config"
+    );
+    assert_eq!(
+        env.fail(fresh.path(), &["init", "--prefix", "vf", "--force"]),
+        "config"
+    );
+    assert!(
+        !fresh.path().join("tasks").exists(),
+        "a refused init writes nothing"
+    );
+}
+
+#[test]
+fn rename_rewrites_group_members_and_refuses_a_group_name_as_target() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+    env.json(&sci, &["group", "set", "vf", "sci", "fam"]);
+    env.json(&sci, &["group", "set", "science", "fam"]);
+    assert_eq!(env.fail(&sci, &["rename", "sci", "science"]), "config");
+    env.json(&sci, &["rename", "sci", "lab"]);
+    assert_eq!(
+        env.json(&sci, &["groups"])["groups"][1],
+        serde_json::json!({"name": "vf", "members": [
+            {"prefix": "fam", "reachable": true},
+            {"prefix": "lab", "reachable": true},
+        ]})
+    );
+    // The retired name resolves on set, as any alias does.
+    assert_eq!(
+        env.json(&sci, &["group", "set", "vf", "sci"])["members"],
+        serde_json::json!(["lab"])
+    );
+}
+
+#[test]
+fn unregister_removes_the_prefix_from_groups_and_deletes_emptied_ones() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.init("fam");
+    env.json(&sci, &["group", "set", "pair", "sci", "fam"]);
+    env.json(&sci, &["group", "set", "solo", "fam"]);
+    let out = env.json(&sci, &["unregister", "fam"]);
+    assert_eq!(
+        out["warnings"],
+        serde_json::json!(["group solo lost its last member fam and was deleted"])
+    );
+    assert_eq!(
+        env.json(&sci, &["groups"])["groups"],
+        serde_json::json!([{"name": "pair", "members": [{"prefix": "sci", "reachable": true}]}])
+    );
+    // The saved registry loads: no dangling member.
+    assert_eq!(env.json(&sci, &["list"])["tasks"], serde_json::json!([]));
+}
+
+#[test]
+fn adopt_carries_group_membership_and_refuses_a_group_named_target() {
+    let env = TestEnv::new();
+    let (dir, _) = adopt_fixture(&env);
+    adopt_json(&env, &dir, &["group", "set", "new", "old"]);
+    let refused = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+    let error: serde_json::Value = serde_json::from_slice(&refused.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    assert!(
+        error["error"]["detail"].as_str().unwrap().contains("group"),
+        "{error}"
+    );
+
+    adopt_json(&env, &dir, &["group", "rm", "new"]);
+    adopt_json(&env, &dir, &["group", "set", "vf", "old"]);
+    assert_eq!(
+        adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+        "fresh"
+    );
+    assert_eq!(
+        adopt_json(&env, &dir, &["groups"])["groups"],
+        serde_json::json!([{"name": "vf", "members": [{"prefix": "new", "reachable": true}]}])
+    );
+}
+
+#[test]
+fn rename_explain_and_execution_both_refuse_a_group_named_target() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let id = id_of(env.json(&sci, &["add", "S", "-p", "2"]));
+    env.json(&fam, &["group", "set", "vf", "fam"]);
+    let state = env.home.path().join(".local/state/tasks/rename");
+
+    // Fresh: explain predicts the refusal execution gives.
+    let explained = env.json(&sci, &["rename", "sci", "vf", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse", "{explained}");
+    assert!(
+        explained["warnings"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("R12:"),
+        "{explained}"
+    );
+    assert_eq!(env.fail(&sci, &["rename", "sci", "vf"]), "config");
+    assert!(
+        !state.join("sci.toml").exists(),
+        "refused before the inventory"
+    );
+
+    // Mid-rename: a group that appears under the pending target blocks the resume before
+    // any file moves. `group set` refuses the reserved name, so only a hand edit of the
+    // registry gets there.
+    let stopped = env
+        .raw(&sci)
+        .env("TASKS_RENAME_STOP_AFTER", "inventory")
+        .args(["rename", "sci", "lab"])
+        .output()
+        .unwrap();
+    assert!(stopped.status.success(), "{stopped:?}");
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("[groups]\n"), "{text}");
+    std::fs::write(
+        &path,
+        text.replace("[groups]\n", "[groups]\nlab = [\"fam\"]\n"),
+    )
+    .unwrap();
+    let explained = env.json(&sci, &["rename", "sci", "lab", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse", "{explained}");
+    assert!(
+        explained["warnings"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("R12:"),
+        "{explained}"
+    );
+    assert_eq!(env.fail(&sci, &["rename", "sci", "lab"]), "config");
+    assert!(
+        sci.join(format!("tasks/{id}.md")).is_file(),
+        "no task file moved"
+    );
+    assert!(!sci.join(format!("tasks/lab-{}.md", &id[4..])).exists());
+    assert!(
+        state.join("sci.toml").is_file(),
+        "the inventory waits for the resume"
+    );
+
+    env.json(&fam, &["group", "rm", "lab"]);
+    assert_eq!(
+        env.json(&sci, &["rename", "sci", "lab"])["recovery"],
+        "resume_files"
+    );
+}

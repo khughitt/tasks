@@ -41,6 +41,8 @@ pub struct RegistryState {
     pub old_key: Option<PathBuf>,
     pub new_key: Option<PathBuf>,
     pub alias: Option<String>,
+    /// The target names a group in the registry: refusal R12, in every stage.
+    pub target_group: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,6 +206,7 @@ pub fn observe(
                 .map(|root| super::root_identity(root))
                 .transpose()?,
             alias: registry.aliases.get(&invocation.source).cloned(),
+            target_group: registry.groups.contains_key(&invocation.target),
         },
         config: observe_config(invocation)?,
         inventory,
@@ -364,6 +367,28 @@ parent: dot-b11111\ntags: []\n---\n";
                 .config
                 .is_none()
         );
+    }
+
+    #[test]
+    fn observes_whether_the_target_names_a_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let mut registry = crate::registry::Registry::default();
+        registry.projects.insert("dot".into(), project.root.clone());
+        let observed = |registry: &crate::registry::Registry| {
+            observe(registry, &invocation(&project), None)
+                .unwrap()
+                .registry
+                .target_group
+        };
+        assert!(!observed(&registry));
+        registry.groups.insert("dot-set".into(), vec!["dot".into()]);
+        assert!(
+            !observed(&registry),
+            "only a group named like the target counts"
+        );
+        registry.groups.insert("dots".into(), vec!["dot".into()]);
+        assert!(observed(&registry));
     }
 
     #[test]

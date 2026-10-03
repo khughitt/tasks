@@ -20,6 +20,16 @@ pub struct Registry {
     pub groups: BTreeMap<String, Vec<String>>,
 }
 
+/// What `unregister` removed with the project.
+#[derive(Debug, PartialEq)]
+pub struct Unregistered {
+    pub root: PathBuf,
+    /// Retired prefixes that resolved to the project.
+    pub aliases: Vec<String>,
+    /// Groups the project was the last member of, deleted with it.
+    pub emptied_groups: Vec<String>,
+}
+
 impl Registry {
     pub fn path() -> Result<PathBuf> {
         if let Some(config_home) = std::env::var_os("XDG_CONFIG_HOME") {
@@ -119,6 +129,7 @@ impl Registry {
     /// Claims `prefix` for `root`. A prefix already pointing somewhere else is a conflict,
     /// never a silent takeover; the message names both ways out.
     pub fn register(&mut self, prefix: &str, root: &Path) -> Result<()> {
+        self.refuse_group_name(prefix)?;
         if let Some(target) = self.aliases.get(prefix) {
             return Err(Error::Config(format!(
                 "prefix {prefix:?} is retired; it resolves to {target:?}"
@@ -141,6 +152,7 @@ impl Registry {
     /// Points `prefix` at `root` whatever it pointed at before, returning the displaced
     /// root when that changed anything. The deliberate override behind `init --force`.
     pub fn repoint(&mut self, prefix: &str, root: &Path) -> Result<Option<PathBuf>> {
+        self.refuse_group_name(prefix)?;
         if let Some(target) = self.aliases.get(prefix) {
             return Err(Error::Config(format!(
                 "prefix {prefix:?} is retired; it resolves to {target:?}"
@@ -152,10 +164,11 @@ impl Registry {
         })
     }
 
-    /// Removes a project and every alias that targeted it. Leaving an alias behind would
-    /// dangle the load invariant and fail every later command; and once the project is
-    /// gone its ids cannot resolve anyway, alias or not.
-    pub fn unregister(&mut self, prefix: &str) -> Result<(PathBuf, Vec<String>)> {
+    /// Removes a project, every alias that targeted it, and its membership in every group.
+    /// A group it leaves empty is deleted with it and reported. Leaving an alias or a
+    /// member behind would break the load invariants and fail every later command. Once
+    /// the project is gone its ids cannot resolve anyway, alias or not.
+    pub fn unregister(&mut self, prefix: &str) -> Result<Unregistered> {
         if let Some(target) = self.aliases.get(prefix) {
             return Err(Error::Config(format!(
                 "{prefix:?} is a retired prefix of {target:?}; unregister {target:?} to remove the project"
@@ -165,16 +178,28 @@ impl Registry {
             .projects
             .remove(prefix)
             .ok_or_else(|| Error::Config(format!("no project registered as {prefix:?}")))?;
-        let dropped: Vec<String> = self
+        let aliases: Vec<String> = self
             .aliases
             .iter()
             .filter(|(_, target)| target.as_str() == prefix)
             .map(|(alias, _)| alias.clone())
             .collect();
-        for alias in &dropped {
+        for alias in &aliases {
             self.aliases.remove(alias);
         }
-        Ok((root, dropped))
+        let mut emptied_groups = Vec::new();
+        self.groups.retain(|name, members| {
+            members.retain(|member| member != prefix);
+            if members.is_empty() {
+                emptied_groups.push(name.clone());
+            }
+            !members.is_empty()
+        });
+        Ok(Unregistered {
+            root,
+            aliases,
+            emptied_groups,
+        })
     }
 
     /// Move the live key and flatten every retired name directly to the new key.
@@ -194,6 +219,7 @@ impl Registry {
                 *live = target.into();
             }
         }
+        self.retarget_groups(source, target);
         self.aliases.insert(source.into(), target.into());
         Ok(())
     }
@@ -211,6 +237,12 @@ impl Registry {
         if self.aliases.contains_key(target) {
             return Err(Error::Config(format!(
                 "target prefix {target:?} is retired"
+            )));
+        }
+        if self.groups.contains_key(target) {
+            return Err(Error::Config(format!(
+                "target prefix {target:?} is the name of a group; remove it with \
+                 `tasks group rm {target}` first"
             )));
         }
         let root = crate::rename::root_identity(root)?;
@@ -233,6 +265,7 @@ impl Registry {
                     *live = target.into();
                 }
             }
+            self.retarget_groups(source, target);
             self.aliases.insert(source.into(), target.into());
         } else {
             self.rename(source, target)?;
@@ -263,10 +296,12 @@ impl Registry {
         }
     }
 
-    /// Whether a prefix may be claimed: a live prefix and a retired one are both taken,
-    /// because an id must never mean two projects.
+    /// Whether a prefix may be claimed. A live prefix, a retired one and a group's name
+    /// are all taken, because a name must never mean two things.
     pub fn is_taken(&self, prefix: &str) -> bool {
-        self.projects.contains_key(prefix) || self.aliases.contains_key(prefix)
+        self.projects.contains_key(prefix)
+            || self.aliases.contains_key(prefix)
+            || self.groups.contains_key(prefix)
     }
 
     /// Why `name` cannot name a group, if anything. The grammar is checked first. Then the
@@ -319,6 +354,30 @@ impl Registry {
     /// Deletes group `name`, returning the members it had. Its projects stay registered.
     pub fn remove_group(&mut self, name: &str) -> Result<Vec<String>> {
         self.groups.remove(name).ok_or_else(|| unknown_group(name))
+    }
+
+    /// `init` and `register` never claim a group's name as a prefix.
+    fn refuse_group_name(&self, prefix: &str) -> Result<()> {
+        if self.groups.contains_key(prefix) {
+            return Err(Error::Config(format!(
+                "prefix {prefix:?} is the name of a group; remove it with \
+                 `tasks group rm {prefix}` or choose another prefix"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Points every group's `from` member at `to`, keeping each member once and in order.
+    fn retarget_groups(&mut self, from: &str, to: &str) {
+        for members in self.groups.values_mut() {
+            for member in members.iter_mut() {
+                if member.as_str() == from {
+                    *member = to.into();
+                }
+            }
+            members.sort();
+            members.dedup();
+        }
     }
 }
 
@@ -429,7 +488,11 @@ mod tests {
         r.register("sci", Path::new("/tmp/a")).unwrap();
         assert_eq!(
             r.unregister("sci").unwrap(),
-            (PathBuf::from("/tmp/a"), Vec::new())
+            Unregistered {
+                root: PathBuf::from("/tmp/a"),
+                aliases: Vec::new(),
+                emptied_groups: Vec::new(),
+            }
         );
         assert!(r.project_root("sci").is_none());
         assert_eq!(r.unregister("sci").unwrap_err().kind(), "config");
@@ -599,5 +662,71 @@ mod tests {
         assert_eq!(r.remove_group("vf").unwrap(), ["sci"]);
         assert!(r.groups.is_empty());
         assert_eq!(r.remove_group("vf").unwrap_err().kind(), "unknown_group");
+    }
+
+    #[test]
+    fn a_group_name_cannot_become_a_prefix() {
+        let mut r = Registry::default();
+        r.register("sci", Path::new("/tmp/a")).unwrap();
+        r.set_group("vf", &["sci".into()]).unwrap();
+        for error in [
+            r.register("vf", Path::new("/tmp/b")).unwrap_err(),
+            r.repoint("vf", Path::new("/tmp/b")).unwrap_err(),
+        ] {
+            assert_eq!(error.kind(), "config");
+            assert!(error.to_string().contains("tasks group rm vf"), "{error}");
+        }
+        assert!(r.is_taken("vf"), "a group's name is taken");
+        assert_eq!(r.rename("sci", "vf").unwrap_err().kind(), "config");
+        assert!(r.project_root("vf").is_none());
+        assert_eq!(r.groups["vf"], ["sci"]);
+    }
+
+    #[test]
+    fn rename_and_adopt_carry_group_membership() {
+        let mut r = Registry::default();
+        r.register("dot", Path::new("/tmp/d")).unwrap();
+        r.register("ops", Path::new("/tmp/o")).unwrap();
+        r.set_group("vf", &["dot".into(), "ops".into()]).unwrap();
+        r.rename("dot", "dots").unwrap();
+        assert_eq!(r.groups["vf"], ["dots", "ops"]);
+
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("new");
+        std::fs::create_dir(&root).unwrap();
+        for partial_init in [false, true] {
+            let mut r = Registry::default();
+            r.register("old", &home.path().join("missing")).unwrap();
+            let mut members = vec!["old".to_string()];
+            if partial_init {
+                r.register("new", &root.join(".")).unwrap();
+                members.push("new".into());
+            }
+            r.set_group("vf", &members).unwrap();
+            r.adopt("old", "new", &root).unwrap();
+            assert_eq!(r.groups["vf"], ["new"], "partial_init={partial_init}");
+        }
+
+        let mut r = Registry::default();
+        r.register("old", &home.path().join("missing")).unwrap();
+        r.set_group("new", &["old".into()]).unwrap();
+        assert_eq!(r.adopt("old", "new", &root).unwrap_err().kind(), "config");
+        assert!(
+            r.project_root("old").is_some(),
+            "a refused adopt changes nothing"
+        );
+    }
+
+    #[test]
+    fn unregister_prunes_groups_and_deletes_the_ones_it_empties() {
+        let mut r = Registry::default();
+        r.register("sci", Path::new("/tmp/a")).unwrap();
+        r.register("fam", Path::new("/tmp/b")).unwrap();
+        r.set_group("pair", &["sci".into(), "fam".into()]).unwrap();
+        r.set_group("solo", &["fam".into()]).unwrap();
+        let removed = r.unregister("fam").unwrap();
+        assert_eq!(removed.emptied_groups, ["solo"]);
+        assert_eq!(r.groups.keys().collect::<Vec<_>>(), ["pair"]);
+        assert_eq!(r.groups["pair"], ["sci"]);
     }
 }
