@@ -21762,3 +21762,69 @@ fn needs_record_reaches_show_ready_and_parked_rows_and_stays_sparse() {
         "{parked}"
     );
 }
+
+/// Appends one `[needs.<name>]` table per entry to a test project's config.
+fn declare_needs(dir: &std::path::Path, entries: &[(&str, &str, bool)]) {
+    let path = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    for (name, meaning, exclusive) in entries {
+        text.push_str(&format!(
+            "\n[needs.{name}]\nmeaning = \"{meaning}\"\nexclusive = {exclusive}\n"
+        ));
+    }
+    std::fs::write(path, text).unwrap();
+}
+
+#[test]
+fn needs_check_errors_on_an_undeclared_need_on_every_record() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    declare_needs(&sci, &[("quiet", "an idle host", true)]);
+    let declared = id_of(env.json(&sci, &["add", "Declared"]));
+    let stale = id_of(env.json(&sci, &["add", "Stale"]));
+    let closed = id_of(env.json(&sci, &["add", "Closed"]));
+    env.json(&sci, &["done", &closed, "landed"]);
+    seed_needs(&sci, &declared, "quiet");
+    seed_needs(&sci, &stale, "quiet, gpu");
+    seed_needs(&sci, &closed, "gpu");
+
+    // Reads stay lenient: the record lists with its undeclared need.
+    let listed = env.json(&sci, &["list"]);
+    let row = listed["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == stale.as_str())
+        .unwrap();
+    assert_eq!(row["needs"], serde_json::json!(["quiet", "gpu"]));
+
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let mut errors: Vec<(String, String)> = report["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["kind"].as_str().unwrap().to_string(),
+                f["id"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    errors.sort();
+    let mut expected = vec![
+        ("unknown_need".to_string(), stale.clone()),
+        ("unknown_need".to_string(), closed.clone()),
+    ];
+    expected.sort();
+    assert_eq!(errors, expected, "{report}");
+    assert!(
+        report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["detail"].as_str().unwrap().contains("\"gpu\"")),
+        "{report}"
+    );
+}

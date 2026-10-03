@@ -182,6 +182,7 @@ mod tests {
             plan_dirs: vec![],
             tags: None,
             feedback: None,
+            needs: crate::needs::Vocabulary::new(),
             attachments_max_bytes: crate::attachments::DEFAULT_MAX_BYTES,
         };
         let target = task("000002");
@@ -205,6 +206,7 @@ mod tests {
             plan_dirs: vec![],
             tags: None,
             feedback: None,
+            needs: crate::needs::Vocabulary::new(),
             attachments_max_bytes: crate::attachments::DEFAULT_MAX_BYTES,
         };
         let mut halt = task("000001");

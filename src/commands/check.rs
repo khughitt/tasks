@@ -86,6 +86,20 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ));
             }
         }
+        // Lanes-needs spec §4.2: reads carry an undeclared need as-is; `check` refuses
+        // it on every record, open or closed, since a reopen or an acquire reads it again.
+        for need in &task.needs {
+            if let Err(error) =
+                crate::needs::require_declared(&ctx.project.needs, std::slice::from_ref(need))
+            {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "unknown_need",
+                    error.to_string(),
+                ));
+            }
+        }
         if let Some(completed) = &task.completed
             && task.status != Status::Done
         {
