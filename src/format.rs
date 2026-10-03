@@ -3,7 +3,7 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Complexity, HarnessProvenance, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 26] = [
+const KEYS: [&str; 27] = [
     "id",
     "title",
     "status",
@@ -12,6 +12,7 @@ const KEYS: [&str; 26] = [
     "complexity",
     "process",
     "parallel",
+    "lane",
     "needs",
     "every",
     "defer",
@@ -130,6 +131,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
         parallel: boolean("parallel")?,
+        lane: boolean("lane")?,
         needs: optional_list("needs")?,
         every: scalar("every")?
             .map(|value| crate::periodic::Interval::parse(&value))
@@ -434,6 +436,11 @@ pub fn serialize_task(t: &Task) -> String {
     // `parallel: "true"` — readable back, but out of step with every other scalar.
     if t.parallel {
         pairs.push(("parallel".into(), Value::Raw("true".into())));
+    }
+    // Raw for the same reason as `parallel`: a quoted `"true"` would read back but sit
+    // out of step with every other scalar.
+    if t.lane {
+        pairs.push(("lane".into(), Value::Raw("true".into())));
     }
     if !t.needs.is_empty() {
         pairs.push(("needs".into(), Value::List(t.needs.clone())));
@@ -783,6 +790,29 @@ mod tests {
         let t = parse_task(&text, "x").unwrap();
         assert!(!t.parallel);
         assert!(!serialize_task(&t).contains("parallel"));
+    }
+
+    #[test]
+    fn lane_round_trips_after_parallel_and_is_omitted_when_false() {
+        let mut t = parse_task(MINIMAL, "x").unwrap();
+        assert!(!t.lane, "absent key reads as false");
+        assert!(
+            !serialize_task(&t).contains("lane"),
+            "false is never written"
+        );
+
+        t.parallel = true;
+        t.lane = true;
+        let text = serialize_task(&t);
+        assert!(
+            text.contains("\nparallel: true\nlane: true\n"),
+            "unquoted, right after parallel: {text}"
+        );
+        assert!(parse_task(&text, "x").unwrap().lane);
+
+        let bad = MINIMAL.replace("depends: []", "lane: yes\ndepends: []");
+        let err = parse_task(&bad, "x").unwrap_err().to_string();
+        assert!(err.contains("lane must be true or false"), "{err}");
     }
 
     #[test]

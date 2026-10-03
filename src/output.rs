@@ -205,6 +205,8 @@ pub struct TaskSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     pub parallel: bool,
+    /// Marked as a lane; always present, like `parallel`.
+    pub lane: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -413,6 +415,7 @@ impl TaskSummary {
             complexity: task.complexity,
             process: task.process,
             parallel: task.parallel,
+            lane: task.lane,
             needs: task.needs.clone(),
             owner: task.owner.clone(),
             created: task.created.clone(),
@@ -458,6 +461,8 @@ pub struct ParkedRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process: Option<Process>,
     pub parallel: bool,
+    /// Marked as a lane; always present, like `parallel`.
+    pub lane: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -509,6 +514,7 @@ impl ParkedRow {
             complexity: summary.complexity,
             process: summary.process,
             parallel: summary.parallel,
+            lane: summary.lane,
             needs: summary.needs,
             owner: summary.owner,
             created: Some(summary.created),
@@ -540,6 +546,7 @@ impl ParkedRow {
             complexity: None,
             process: None,
             parallel: false,
+            lane: false,
             needs: Vec::new(),
             owner: None,
             created: None,
@@ -1378,10 +1385,15 @@ pub fn any_parallel_tree(nodes: &[TreeNode]) -> bool {
         .any(|node| node.summary.parallel || any_parallel_tree(&node.children))
 }
 
-/// The one-letter type marker for a summary row: `p` for a record carrying a cadence, and
-/// nothing otherwise. A future type is another arm here, another letter in the same slot;
-/// the column is reserved once per output (see `any_type`), so it is never a layout change.
+/// The one-letter type marker for a summary row: `≡` for a lane, `p` for a record
+/// carrying a cadence, and nothing otherwise. A lane is a goal and never recurs, so the
+/// two never compete for the slot. A future type is another arm here, another letter in
+/// the same slot; the column is reserved once per output (see `any_type`), so it is never
+/// a layout change.
 fn type_letter(row: &TaskSummary) -> Option<char> {
+    if row.lane {
+        return Some('≡');
+    }
     row.periodic.as_ref().map(|_| 'p')
 }
 
@@ -1966,6 +1978,7 @@ mod tests {
             deferred: None,
             needs: vec![],
             parallel,
+            lane: false,
         }
     }
 
@@ -2098,6 +2111,26 @@ mod tests {
             }],
         }];
         assert!(any_type_tree(&nodes));
+    }
+
+    #[test]
+    fn a_lane_row_carries_the_lane_mark_in_the_type_column() {
+        let mut lane = row("xx-000001", false);
+        lane.lane = true;
+        let rows = [lane, row("xx-000002", false)];
+        assert!(any_type(&rows));
+        let text = table(
+            &rows,
+            DateColumn::Updated,
+            &plain(),
+            0,
+            false,
+            true,
+            Wrap::NONE,
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[0].contains("todo    ≡ 2026-09-06"), "{}", lines[0]);
+        assert!(lines[1].contains("todo      2026-09-06"), "{}", lines[1]);
     }
 
     #[test]

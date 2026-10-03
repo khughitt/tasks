@@ -118,6 +118,7 @@ Free-form markdown body.
 | `size`     | enum                | no       | `xs`, `s`, `m`, `l`, `xl`. |
 | `process`  | enum                | no       | `direct` or `planned`; absent means unassessed. Explicitly chosen, never inferred or inherited. See `2026-09-13-task-process-design.md`. |
 | `parallel` | bool                | no       | Safe to run beside other tasks marked `parallel`. Omitted when false. |
+| `lane`     | bool                | no       | A goal meant to proceed alongside other lanes; its members are the `parent` tree below it. Set by `add`/`edit --lane`, cleared by `--no-lane`. Omitted when false; written after `parallel`. No lane may sit below another (`nested_lane`). See `2026-10-03-lanes-needs-groups-design.md`. |
 | `needs`    | list of names       | no       | Shared resources the work uses, each declared in the project's `[needs]` vocabulary (§6); names use lowercase letters, digits, and `-`, and do not start with `-`. Set by `add --need`; `edit --need` appends, `--rm-need` and `--no-needs` remove. Omitted when empty; written after `parallel`. An undeclared name is refused on write and is a `check` error, but is carried as-is on read. See `2026-10-03-lanes-needs-groups-design.md` §4. |
 | `defer`    | `YYYY-MM-DD`        | no       | One-shot calendar date; the pickers skip the task until it arrives. Set by `add`/`edit --defer`, cleared by `--no-defer` and by every status transition. Never beside `every`. Written after `every`. See `2026-09-15-defer-design.md`. |
 | `owner`    | string              | no       | Advisory tracked-file owner; set by `start`; `[A-Za-z0-9._/@+-]+`. Session identity and liveness live outside git — see `2026-09-05-work-claims-design.md`. |
@@ -257,7 +258,7 @@ tasks unregister <prefix>
     an unregistered prefix is an error, not a no-op. Project files are untouched; only
     ~/.config/tasks/projects.toml changes.
 
-tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel] [--defer DATE|<n>d|<n>w]
+tasks add <title> [-b|--body TEXT] [--status idea|todo] [-p N] [--size S] [--parallel] [--lane] [--defer DATE|<n>d|<n>w]
           [--process direct|planned]
           [--need N]...
           [--tag T]... [--depends ID]... [--spec NAME] [--plan NAME] [--step TEXT]
@@ -341,7 +342,7 @@ tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-pr
     (docs/specs/2026-09-08-task-curation-design.md).
 
 tasks edit <id> [same field flags as add] [--status S] [--body -] [--force]
-           [--parent ID | --no-parent] [--parallel|--no-parallel] [--rm-tag T]... [--no-tags]
+           [--parent ID | --no-parent] [--parallel|--no-parallel] [--lane|--no-lane] [--rm-tag T]... [--no-tags]
            [--no-depends]
            [--need N]... [--rm-need N]... [--no-needs]
            [--no-defer]
@@ -626,6 +627,9 @@ edit        += --reason (only with --force --need under the caller's own claim; 
                "--reason was unused" when no held need was added); a needs change under
                another session's live claim fails claimed
 errors      += need_held
+Task        += lane: bool                     always present, like parallel; written after parallel
+TaskSummary += lane: bool
+ParkedRow   += lane: bool                     false when unresolved
 ```
 
 Pretty summary and parked rows include a process column, using `-` for unassessed;

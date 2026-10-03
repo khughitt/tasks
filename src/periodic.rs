@@ -73,6 +73,7 @@ mod tests {
             complexity: None,
             process: None,
             parallel: false,
+            lane: false,
             needs: vec![],
             every: every.map(|e| Interval::parse(e).unwrap()),
             defer: None,

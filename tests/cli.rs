@@ -4030,6 +4030,58 @@ fn prime_shows_roadmap_and_closeout() {
     );
 }
 
+#[test]
+fn lane_field_round_trips_through_add_edit_and_every_row() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "--parallel"]));
+    let raw = env.read(&sci, &format!("tasks/{lane}.md"));
+    assert!(raw.contains("\nparallel: true\nlane: true\n"), "{raw}");
+    assert_eq!(env.json(&sci, &["show", &lane])["task"]["lane"], true);
+
+    let plain = id_of(env.json(&sci, &["add", "Plain"]));
+    assert_eq!(
+        env.json(&sci, &["show", &plain])["task"]["lane"],
+        false,
+        "always present, like parallel"
+    );
+    let list = env.json(&sci, &["list"]);
+    let row = |id: &str| {
+        list["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(row(&lane)["lane"], true);
+    assert_eq!(row(&plain)["lane"], false);
+
+    env.json(&sci, &["edit", &plain, "--lane"]);
+    assert_eq!(env.json(&sci, &["show", &plain])["task"]["lane"], true);
+    env.json(&sci, &["edit", &plain, "--no-lane"]);
+    assert!(
+        !env.read(&sci, &format!("tasks/{plain}.md"))
+            .contains("lane"),
+        "false is never written"
+    );
+    env.usage(&sci, &["edit", &plain, "--lane", "--no-lane"]);
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &lane, "split it"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["list", "--parked"])["tasks"][0]["lane"],
+        true
+    );
+
+    let text = env.pretty(&sci, &["list"]);
+    let line = text.lines().find(|line| line.contains(&lane)).unwrap();
+    assert!(line.contains("≡ "), "lane rows carry the mark: {text}");
+}
+
 /// An EDITOR value that has sh read the script rather than exec it: executing a file this
 /// process just wrote races sibling test threads, whose forks can still hold the write
 /// descriptor, into ETXTBSY.

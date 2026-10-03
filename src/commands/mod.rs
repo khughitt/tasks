@@ -865,6 +865,10 @@ pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs) -> Resul
     if fields.parallel {
         task.parallel = true;
     }
+    // Setting only. `edit --no-lane` clears it before this runs, like --no-parallel.
+    if fields.lane {
+        task.lane = true;
+    }
     // Additive, never a replacement: a triage `--tag` must not silently drop the tags a
     // task already carries. `edit` removes with `--rm-tag` / `--no-tags`.
     for tag in &fields.tags {

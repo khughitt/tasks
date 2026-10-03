@@ -105,6 +105,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_process
         || fields.parallel
         || args.no_parallel
+        || fields.lane
+        || args.no_lane
         || fields.every.is_some()
         || args.no_every
         || fields.defer.is_some()
@@ -150,6 +152,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     if args.no_parallel {
         task.parallel = false;
+    }
+    if args.no_lane {
+        task.lane = false;
     }
     if args.no_every {
         task.every = None;

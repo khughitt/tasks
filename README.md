@@ -286,6 +286,8 @@ from a clone):
     tasks ready --complexity none             # ready work nobody has rated yet
     tasks ready                      # what can be worked on now (JSON)
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
+    tasks add "Capture lane" --lane -p 1 -b "Why it runs; first milestone"  # an effort beside the others
+    tasks edit <id> --no-lane        # clear the lane marker
     tasks add "Capture the trace" --need quiet  # a shared resource from [needs] in tasks/.config.toml
     tasks edit <id> --rm-need quiet  # --need adds; --rm-need/--no-needs remove
     tasks list --need quiet          # tasks that need it (all-of, like --tag)

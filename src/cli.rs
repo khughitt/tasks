@@ -166,6 +166,10 @@ pub struct FieldArgs {
     /// flag; see `--no-parallel` to clear it.
     #[arg(long)]
     pub parallel: bool,
+    /// Mark this goal as a lane: an effort meant to proceed alongside other lanes. On
+    /// `edit` this sets the flag; see `--no-lane` to clear it.
+    #[arg(long)]
+    pub lane: bool,
     /// Make this a recurrence: `<n>d` or `<n>w`, measured from each completion.
     #[arg(long, value_name = "AGE", add = ArgValueCandidates::new(crate::complete::intervals))]
     pub every: Option<String>,
@@ -231,6 +235,9 @@ pub struct EditArgs {
     /// Clear the parallel marker.
     #[arg(long, conflicts_with = "parallel")]
     pub no_parallel: bool,
+    /// Clear the lane marker.
+    #[arg(long, conflicts_with = "lane")]
+    pub no_lane: bool,
     /// Stop the recurrence, clearing both the cadence and its anchor.
     #[arg(long, conflicts_with = "every")]
     pub no_every: bool,
