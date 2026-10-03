@@ -74,6 +74,13 @@ pub struct Ctx {
     /// task record may keep. Host, pid, and worktree stay in the warning and the claim
     /// store, which never reach git.
     pub takeover: Option<String>,
+    /// `start --reason` / `edit --reason`: what lets `--force` past a held need (lanes/needs
+    /// design §4.5). Set by the command before the hold guard runs.
+    need_reason: Option<String>,
+    /// The held needs this command acquires past, with their holders: recorded by the hold
+    /// guard, turned into the acquired task's notes by `record_need_overrides` before
+    /// `save`. The holders' notes wait for `note_need_holders`, after `save` has landed.
+    need_overrides: Vec<(String, crate::holds::Holder)>,
     /// What a bare id suffix means in this invocation: the caller's project, not the one
     /// the command routed to.
     pub shorthand: Shorthand,
@@ -106,6 +113,8 @@ impl Ctx {
             recovered: false,
             clear_escalation: None,
             takeover: None,
+            need_reason: None,
+            need_overrides: Vec::new(),
         }
     }
 
@@ -224,11 +233,11 @@ impl Ctx {
     /// one of them. Status and needs never change in one operation, so this always reads
     /// the needs on the record, and `start --force --reason` acquires the same ones.
     ///
-    /// "Another session" is decided by `ownership`, as for the claim itself. The caller is
-    /// the identity this acquire records: the resolved one, or the claim's own on a
-    /// proof-only continuation. A hold whose session string differs but whose process
-    /// proof names this caller's harness is therefore its own.
-    fn guard_holds(&mut self, task: &Task) -> Result<()> {
+    /// `force` comes only from `start` here (`edit --force` never reaches a move to doing).
+    /// It overrides only with a reason; every held need is recorded for the audit notes.
+    /// A claim on the task itself never holds it back, so a plain takeover needs none.
+    /// "Another session" is decided by `ownership`, as in Task 2.2.
+    fn guard_holds(&mut self, task: &Task, force: bool) -> Result<()> {
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
         let me = match self.pending_claim.as_mut() {
             Some((_, ClaimIntent::Acquire(claim))) => {
@@ -240,13 +249,26 @@ impl Ctx {
         if holds.is_empty() {
             return Ok(());
         }
+        // A re-start that continues the caller's own live claim, which already holds every
+        // one of these needs, acquires nothing new: another session's hold, even one taken
+        // by override, never refuses it.
+        if let Some(existing) = self.claims_mut()?.get(&task.id).cloned()
+            && crate::claims::liveness(&existing) == Liveness::Live
+            && holds.iter().all(|need| existing.holds.contains(need))
+            && ownership(&existing, &me)? != Ownership::Foreign
+        {
+            return Ok(());
+        }
         let (snapshot, warnings) =
             crate::holds::HoldSnapshot::load(&self.registry, time::OffsetDateTime::now_utc());
         self.warnings.extend(warnings);
         let mine = own_holds(&snapshot, &me)?;
-        if let Some((need, holder)) =
+        let Some((need, holder)) =
             crate::holds::held_back(&snapshot, &self.project.needs, task, &mine)
-        {
+        else {
+            return Ok(());
+        };
+        if !force {
             return Err(Error::NeedHeld(format!(
                 "{id} needs {need}, held by {} ({}); override with `tasks start {id} --force \
                  --reason \"...\"`",
@@ -255,6 +277,24 @@ impl Ctx {
                 id = task.id
             )));
         }
+        if self
+            .need_reason
+            .as_deref()
+            .is_none_or(|reason| reason.trim().is_empty())
+        {
+            return Err(Error::Validation(format!(
+                "--force past a held need requires --reason: {} needs {need}, held by {} ({})",
+                task.id, holder.task, holder.session
+            )));
+        }
+        self.need_overrides = holds
+            .iter()
+            .filter_map(|need| {
+                snapshot
+                    .holder(need, &task.id, &mine)
+                    .map(|holder| (need.clone(), holder.clone()))
+            })
+            .collect();
         Ok(())
     }
 
@@ -942,6 +982,88 @@ pub fn append_stamped_note(ctx: &mut Ctx, task: &mut Task, by: &str, text: &str)
     Ok(())
 }
 
+/// The notes a need override owes to holders in this project, written by
+/// `note_need_holders` only once the acquiring save has landed. A note saying a task
+/// acquired a need must never outlive a refused or rolled-back acquire.
+pub(crate) struct HolderNotes {
+    owner: String,
+    /// Holder task, need, note text.
+    notes: Vec<(TaskId, String, String)>,
+}
+
+/// Lanes/needs design §4.5: the notes a need override leaves. The acquired task gets one
+/// per held need now, so they land with its own save or not at all. A holder gets a
+/// matching one only when it is in this project, the only one whose lock this command
+/// holds. Those are returned, not written: the caller passes them to `note_need_holders`
+/// after `save` succeeds. Both texts are validated here, before anything is saved.
+/// `None` when no held need was overridden.
+pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<Option<HolderNotes>> {
+    let overrides = std::mem::take(&mut ctx.need_overrides);
+    if overrides.is_empty() {
+        return Ok(None);
+    }
+    let reason = ctx
+        .need_reason
+        .clone()
+        .expect("the hold guard records an override only with a reason");
+    let session = match &ctx.pending_claim {
+        Some((_, ClaimIntent::Acquire(claim))) => claim.session.clone(),
+        _ => unreachable!("a need override is recorded only on an acquire"),
+    };
+    let owner = owner_name(&ctx.project)?;
+    let mut holders = HolderNotes {
+        owner: owner.clone(),
+        notes: Vec::new(),
+    };
+    for (need, holder) in &overrides {
+        let target_note = format!(
+            "need override: acquired while {need} held by {} ({}): {reason}",
+            holder.task, holder.session
+        );
+        crate::format::validate_note_text(&target_note)?;
+        if holder.prefix == ctx.project.prefix {
+            let holder_note = format!(
+                "need override: {} acquired {need} by {session} while this task held it: \
+                 {reason}",
+                task.id
+            );
+            crate::format::validate_note_text(&holder_note)?;
+            holders
+                .notes
+                .push((holder.task.clone(), need.clone(), holder_note));
+        }
+        append_note(task, &owner, &target_note)?;
+    }
+    Ok(Some(holders))
+}
+
+/// Writes the holder notes `record_need_overrides` returned. Call it only after the
+/// acquiring `save` returned `Ok`, still under the project lock. The acquisition has
+/// landed by then, so a holder that cannot be noted is a warning, never the command's
+/// failure.
+pub(crate) fn note_need_holders(ctx: &mut Ctx, holders: HolderNotes) {
+    for (holder, need, text) in holders.notes {
+        let written = ctx.project.read_task(&holder).and_then(|mut held| {
+            append_note(&mut held, &holders.owner, &text)?;
+            held.updated = crate::time::after(&held.updated)?;
+            validate_task(&held)?;
+            ctx.project.validate_docs(&held)?;
+            // Append-only audit note, as halt's: it skips load's stale-copy guard.
+            ctx.project.write_task(&ctx.registry, &held)
+        });
+        match written {
+            Ok(()) => {}
+            Err(Error::TaskNotFound(_)) => ctx.warnings.push(format!(
+                "{holder} holds {need} but its record is not in this checkout; no override \
+                 note was written on it"
+            )),
+            Err(error) => ctx.warnings.push(format!(
+                "the need override landed, but its note on {holder} was not written ({error})"
+            )),
+        }
+    }
+}
+
 /// Ids of dependencies that are open or unreachable.
 pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
@@ -1033,7 +1155,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     // the task is told *that* rather than something incidental.
     ctx.claim_guard(&task.id, to, force)?;
     if to == Status::Doing {
-        ctx.guard_holds(task)?;
+        ctx.guard_holds(task, force)?;
     }
     if to == Status::Done && task.status != Status::Done && !force {
         let open = open_deps(ctx, task)?;

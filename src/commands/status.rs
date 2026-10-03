@@ -44,6 +44,8 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
             "{id} is stopped by halt {ids}; override with `tasks start {id} --force --reason \"...\"`"
         )));
     }
+    // Lanes/needs design §4.5: the same reason lets --force past a held need.
+    ctx.need_reason = reason.clone();
     transition(&mut ctx, &mut task, Status::Doing, force)?;
     let owner = owner_name(&ctx.project)?;
     task.owner = Some(owner.clone());
@@ -82,6 +84,8 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
         }
         append_note(&mut task, &owner, &target_note)?;
     }
+    let holder_notes = super::record_need_overrides(&mut ctx, &mut task)?;
+    let overriding_need = holder_notes.is_some();
     // Persist the redacted takeover summary, adding the reason when supplied.
     let mut reason_used = false;
     if let Some(takeover) = ctx.takeover.take() {
@@ -93,11 +97,15 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
         };
         append_note(&mut task, &owner, &note)?;
     }
-    if reason.is_some() && !reason_used && !overriding_halt {
+    if reason.is_some() && !reason_used && !overriding_halt && !overriding_need {
         ctx.warnings
             .push("--reason was unused because no override or takeover was needed".into());
     }
     save(&mut ctx, &mut task)?;
+    // Only now that the acquire has landed may a holder be told it happened.
+    if let Some(notes) = holder_notes {
+        super::note_need_holders(&mut ctx, notes);
+    }
     warn_if_uncommitted_with_worktrees(&mut ctx, &task);
     Ok(id_out(ctx, &task))
 }

@@ -22668,3 +22668,170 @@ fn claims_that_cannot_hold_do_not_hold_back_an_acquire() {
         );
     }
 }
+
+#[test]
+fn a_forced_start_past_a_held_need_needs_a_reason_and_notes_both_tasks() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    let path = format!("tasks/{second}.md");
+    let before = env.read(&sci, &path);
+
+    // --force without --reason is refused when the task is held back.
+    let error = error_as(&env, &sci, "agent-b", &["start", &second, "--force"]);
+    assert_eq!(error["error"]["kind"], "validation", "{error}");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("requires --reason"),
+        "{error}"
+    );
+    assert_eq!(env.read(&sci, &path), before);
+    assert!(env.json(&sci, &["show", &second])["claim"].is_null());
+
+    let out = json_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["start", &second, "--force", "--reason", "capture window"],
+    );
+    assert!(
+        !warnings_of(&out)
+            .iter()
+            .any(|w| w.contains("--reason was unused")),
+        "{out}"
+    );
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+    let target = env.read(&sci, &path);
+    assert!(
+        target.contains(&format!(
+            "need override: acquired while quiet held by {first} (agent-a): capture window"
+        )),
+        "{target}"
+    );
+    let holder = env.read(&sci, &format!("tasks/{first}.md"));
+    assert!(
+        holder.contains(&format!(
+            "need override: {second} acquired quiet by agent-b while this task held it: \
+             capture window"
+        )),
+        "{holder}"
+    );
+}
+
+#[test]
+fn a_need_override_notes_a_holder_only_in_the_same_project() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    hold_vocab(&sci);
+    hold_vocab(&fam);
+    let holding = id_of(env.json(&fam, &["add", "Fam capture", "-p", "2", "--need", "quiet"]));
+    let target = id_of(env.json(&sci, &["add", "Sci capture", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &fam, "agent-a", &["start", &holding]);
+    let holder_path = format!("tasks/{holding}.md");
+    let holder_before = env.read(&fam, &holder_path);
+
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &target])["error"]["kind"],
+        "need_held"
+    );
+    json_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["start", &target, "--force", "--reason", "owner asked"],
+    );
+    assert!(
+        env.read(&sci, &format!("tasks/{target}.md"))
+            .contains(&format!(
+                "need override: acquired while quiet held by {holding} (agent-a): owner asked"
+            ))
+    );
+    // A cross-project write would need fam's lock, so fam's record is untouched.
+    assert_eq!(env.read(&fam, &holder_path), holder_before);
+}
+
+#[test]
+fn a_refused_status_and_needs_change_leaves_the_record_and_start_resolves_the_hold() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    let path = format!("tasks/{second}.md");
+    let before = env.read(&sci, &path);
+
+    env.usage(
+        &sci,
+        &["edit", &second, "--status", "doing", "--need", "owner"],
+    );
+    assert_eq!(env.read(&sci, &path), before);
+
+    let editor = editor_script(
+        &sci,
+        "sed -i -e 's/status: todo/status: doing/' \
+         -e 's/^needs: \\[quiet\\]/needs: [owner, quiet]/' \"$1\"",
+    );
+    let out = as_agent(&env, &sci, "agent-b")
+        .env("EDITOR", editor)
+        .args(["edit", &second])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(
+        err_detail(&out).contains("cannot also change needs"),
+        "{out:?}"
+    );
+    assert_eq!(env.read(&sci, &path), before);
+
+    // The recorded needs are what the recovery acquires.
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &second])["error"]["kind"],
+        "need_held"
+    );
+    json_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["start", &second, "--force", "--reason", "capture window"],
+    );
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+}
+
+#[test]
+fn a_restart_of_an_own_live_claim_is_not_held_back_by_an_override_holder() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let first = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let second = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    json_as(
+        &env,
+        &sci,
+        "agent-b",
+        &["start", &second, "--force", "--reason", "capture window"],
+    );
+
+    // Both sessions now hold quiet. A re-start continues the caller's own claim and
+    // acquires nothing new, so neither is held back by the other's hold.
+    json_as(&env, &sci, "agent-b", &["start", &second]);
+    json_as(&env, &sci, "agent-a", &["start", &first]);
+    assert_eq!(holds_of(&env, &sci, &second), serde_json::json!(["quiet"]));
+    assert_eq!(holds_of(&env, &sci, &first), serde_json::json!(["quiet"]));
+    // Only the forced start's pair of notes: one on each task.
+    for id in [&second, &first] {
+        let record = env.read(&sci, &format!("tasks/{id}.md"));
+        assert_eq!(
+            record.matches("need override:").count(),
+            1,
+            "a continuation records no new override: {record}"
+        );
+    }
+}
