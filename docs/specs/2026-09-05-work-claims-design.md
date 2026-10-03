@@ -112,7 +112,8 @@ Three exceptions, all deliberate:
   lock. Its source `Ctx` stays unlocked, so only one lock is ever held — which also keeps
   this correct when source and target are the same project, as they are in this repository,
   since a second `flock` on the same file from the same process would deadlock. No command
-  holding two locks means there is no lock ordering to reason about.
+  holds two project locks, so there is no project-lock ordering to reason about (a
+  second, host-wide lock is taken only after the project lock; see below).
 
 One command may hold a second lock, with a fixed order. Any claim replacement that
 changes `holds` (an acquire that records one, or a needs save that adds, reduces or

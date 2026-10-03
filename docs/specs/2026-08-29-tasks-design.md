@@ -289,7 +289,7 @@ tasks show <id>
     unresolvable_id.
 
 tasks list [--status S]... [--tag T]... [--need N]... [--owner O] [--source REF]
-           [--project P | --all-projects]
+           [--project P | --group NAME | --all-projects]
            [--parent ID] [--under ID] [--sort priority|updated|created] [--reverse]
     Default: open tasks, sorted by priority then updated desc, then id. --under keeps
     descendants of ID at any depth; --parent keeps direct children. --source keeps
@@ -303,7 +303,7 @@ tasks list [--status S]... [--tag T]... [--need N]... [--owner O] [--source REF]
     on, or updated (last activity) when the order is not a date. Every command that
     prints summary rows (ready, prime, tree, sample) shows the updated day.
 
-tasks tree [<id>] [--all] [--project P | --all-projects]
+tasks tree [<id>] [--all] [--project P | --group NAME | --all-projects]
     The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
     the read side of parent, as graph is of depends. Without --all the forest is pruned
     to nodes that are open or have an open descendant, so a closed ancestor of open work
@@ -315,7 +315,7 @@ tasks tree [<id>] [--all] [--project P | --all-projects]
     a subtree of another project: <id> is still looked up in the scope, not routed by its
     own prefix.
 
-tasks ready [--size S] [--parallel] [--need N]... [--without N]... [--under ID] [-n N] [--project P | --all-projects]
+tasks ready [--size S] [--parallel] [--need N]... [--without N]... [--under ID] [-n N] [--project P | --group NAME | --all-projects]
     Actionable tasks: todo, no children, and all dependencies closed. Sorted by
     priority, then size (xs first, unsized last), then created, then id.
     --all-projects: the same order over every reachable registered project; no project
@@ -334,7 +334,7 @@ tasks ready [--size S] [--parallel] [--need N]... [--without N]... [--under ID] 
     goal pauses nothing, and `start` inside a paused lane is not refused. `edit --lane`
     on a blocked goal warns that it now pauses its subtree.
 
-tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --all-projects]
+tasks sample [--limit N] [--older-than AGE] [--seed U64] [--project P | --group NAME | --all-projects]
     N tasks (default 3) drawn uniformly without replacement from the curable pool: status
     idea, todo, or blocked; no live claim; updated longer ago than AGE, an `<n>d`/`<n>w`
     age (default 7d, at most 36500 days; 0d skips the age check, so even a future-dated
@@ -424,7 +424,7 @@ tasks check
     prefix) are warnings. process_missing warns only for doing records without a
     process choice, including goals and plan steps; unassessed todos are not findings.
 
-tasks next [--without N]... [--under ID] [--project P | --all-projects]
+tasks next [--without N]... [--under ID] [--project P | --group NAME | --all-projects]
     The most recently parked task waiting on the agent that is open, unblocked,
     with all dependencies resolved and closed, and childless, else the first ready task,
     in the show shape. --without and TASKS_WITHOUT as for ready; next applies them to
@@ -432,7 +432,7 @@ tasks next [--without N]... [--under ID] [--project P | --all-projects]
     descendants of ID at any depth: how a session committed to one lane takes its next
     step. Without it, lanes never reorder the pick.
 
-tasks prime [--without N]... [--project P | --all-projects] [--closed]
+tasks prime [--without N]... [--project P | --group NAME | --all-projects] [--closed]
     Agent session context: prefix, counts by status, the ready list, doing tasks
     with owners, the roadmap (open forest) and closeout list. Intended to be run at
     the start of every agent session. Warns about uncommitted files under tasks/
@@ -447,7 +447,7 @@ tasks prime [--without N]... [--project P | --all-projects] [--closed]
     pick, as `tasks lanes` does; it is always present and empty without lanes. Pretty
     output prints a `lanes:` block before `roadmap:` when there is a lane.
 
-tasks lanes [--without NEED]... [--max-complexity LEVEL] [--project P | --all-projects]
+tasks lanes [--without NEED]... [--max-complexity LEVEL] [--project P | --group NAME | --all-projects]
     Every open, unshelved lane in lane order (priority, size, created, id), with its
     guidance (the first body paragraph after headings), its state (paused, ready, held,
     waiting, empty), the step it could take now, its active claims, the steps held for
@@ -455,7 +455,7 @@ tasks lanes [--without NEED]... [--max-complexity LEVEL] [--project P | --all-pr
     causes for the rest of its live descendants. See
     2026-10-03-lanes-needs-groups-design.md §5.
 
-tasks tags [--status S]... [--project P | --all-projects]
+tasks tags [--status S]... [--project P | --group NAME | --all-projects]
     Tag frequencies over open tasks (or the given statuses), with a count per project.
 
 tasks projects [--sort prefix|size|activity] [--reverse] [--closed] [--paths]
@@ -663,6 +663,14 @@ list/ready/next += --under ID: descendants at any depth; an ID not in scope is t
 errors      += nested_lane
 check       += kinds nested_lane (error), childless_lane (warning); periodic_goal and
                deferred_goal also cover a lane with no children
+
+prime       += group: string                  only under --group; prefix is null there
+groups      -> { groups: [{ name, members: [{ prefix, reachable: bool }] }], warnings }
+group set, group rm
+            -> { name, members: [string], warnings }
+               set: the members stored (live prefixes, sorted, distinct); rm: those it had
+unregister  += warnings: one per group it emptied and deleted
+errors      += unknown_group                  a --group or group rm name not declared
 ```
 
 Pretty summary and parked rows include a process column, using `-` for unassessed;
@@ -735,6 +743,9 @@ host's projects: two projects using the same name mean the same machine resource
 [projects]
 sci = "~/d/science"
 fam = "~/d/familiar"
+
+[groups]
+verifiably = ["atoms", "nodes"]
 ```
 
 A registry path may start with `~/`; it expands to the user's home directory. A foreign id
@@ -760,8 +771,9 @@ through the registry: the prefix already supplies the target. Only `no_project` 
 this route; invalid local configuration still fails. `feedback` requires a local project
 for its provenance tag.
 
-The same seven read commands (list, ready, prime, tree, next, tags, sample) take
-`--project <p>` and `--all-projects`, which conflict. Both locate no local project.
+The same eight read commands (list, ready, prime, tree, next, tags, sample, lanes) take
+`--project <p>`, `--group <name>`, and `--all-projects`, which conflict pairwise. None
+locates a local project.
 
 `--project <p>` reads that one registered project through the rule `add --project` uses:
 the *registered root*, so a worktree sharing the prefix does not displace it, and the
@@ -773,6 +785,20 @@ a project that cannot be read is a failure, not an entry to skip.
 `--all-projects` reads the registry: a missing root or config is a warning and the entry
 is skipped; a malformed config or a prefix that disagrees with the registry key is a
 config error.
+
+`--group <name>` reads the members of a project group declared in the registry's
+`[groups]` table:
+
+- **Each member** is handled by `--all-projects`' rules.
+- **Warnings.** Warnings about unreachable projects and unknown halt state name members
+  only, and an undeclared name is `unknown_group`.
+- **Commands.** `quiet` takes it too; `claims` keeps its single registry-wide scope.
+- **Names and members.** Group names use the tag grammar and never equal a live or retired
+  prefix, and `group set` refuses one an unfinished rename reserves. Members are live
+  prefixes, kept so by `rename` and `unregister`; a registry naming any other is a
+  `config` error that names the group and the prefix.
+
+See docs/specs/2026-10-03-lanes-needs-groups-design.md §6.
 `projects` applies the same test but reports an unreachable entry as a row with
 reachable=false rather than a warning, since the row is the report; a malformed entry is
 still a config error and emits the two wide-scope warnings (empty registry; current

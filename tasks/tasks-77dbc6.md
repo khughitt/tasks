@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-09-07T21:48:27Z
-updated: 2026-09-30T10:04:57Z
+updated: 2026-10-03T15:25:46Z
 depends: []
 parent: tasks-46d207
 tags: [quick-add]
@@ -36,3 +36,4 @@ Related: tasks-3029be (done) added the registry-wide views this would narrow.
 ## Notes
 
 - 2026-09-30T10:04:57Z (main): scope: briefed; group membership, storage, and rename behavior need a design contract; captured source retained but mindful lookup is unavailable; waits on tasks-ece1e2; brief: docs/notes/2026-09-30-work-selection-brief.md
+- 2026-10-03T15:25:46Z (ece1e2-work-selection): implemented by tasks-ece1e2 slice 4 (spec 2026-10-03 §6); close with the slice

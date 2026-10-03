@@ -63,7 +63,8 @@ nothing is eligible.
    --project <prefix>` reads one of them.
    `tasks quiet` lists work parked waiting for an idle host across every registered
    project, priority first, as resume briefs with the checkout to open; `-n 1` is the
-   top of the queue and `--project <prefix>` narrows it. It is the person's bedtime
+   top of the queue, and `--project <prefix>`
+   or `--group <name>` narrows it. It is the person's bedtime
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
 3. Read the task's `process` and follow **Process and workspace** below before
@@ -231,12 +232,31 @@ Malformed local configuration still fails. `feedback` needs a local project for 
 
 The read commands say where to look instead of inferring it from an id: `list`, `ready`,
 `next`, `prime`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one registered
-project or `--all-projects` for every reachable one. Either works from anywhere, including
+project, `--group <name>` for the members of a project group, or `--all-projects` for every
+reachable one. Each works from anywhere, including
 outside every project. `--project` reads that project's *registered* root, so from a
 worktree it is how you ask for the main checkout. `tree <id>` is the exception that needs
 no flag: like `show`, `dep`, and `note`, it routes by the id's prefix, so
 `tasks tree <other-prefix>-<hex>` reads that subtree from wherever you are. Passing
 `--project` alongside an id names the scope explicitly and wins over the prefix.
+
+A project group is a named set of registered projects, declared in this host's registry
+and not synced. Each host declares its own groups.
+
+- **Managing groups.** `tasks group set <name> <prefix>...` creates or replaces a group,
+  and a retired prefix resolves to its live name. `tasks group rm <name>` deletes a group.
+  `tasks groups` lists each group with whether each member is reachable.
+- **Names.** Names use the tag grammar (lowercase letters, digits, `-`). A name cannot be
+  a live or retired prefix, or a prefix an unfinished rename reserves. `init` and `rename`
+  refuse a prefix that names a group. Groups may overlap.
+- **Membership changes.** `rename` carries membership to the new prefix. `unregister`
+  drops the prefix from every group, and deletes, with a warning, any group it leaves
+  empty.
+- **Reading a group.** Under `--group`, `prime` adds `group` and its `prefix` is null.
+  Warnings about unreachable projects or unknown halt state name members only. A group
+  whose members are all unreachable gives those warnings and empty results.
+- **Errors and limits.** A misspelled name is `unknown_group`. `tasks claims` always reads
+  every store.
 
 ## Process and workspace
 

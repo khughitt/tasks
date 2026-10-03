@@ -309,6 +309,11 @@ from a clone):
     tasks prime --project fam        # read another registered project; also list, ready,
                                      #   next, tree, tags, sample. Needs no local project.
     tasks projects                   # the registry: reachable? counts?
+    tasks group set vf nodes atoms   # a named set of registered projects (this host only)
+    tasks ready --group vf           # read a group; also list, next, prime, tree, tags,
+                                     #   sample, lanes, quiet. Needs no local project.
+    tasks groups                     # each group, its members, and whether they are reachable
+    tasks group rm vf                # delete the group; its projects stay registered
     tasks add "Piece" --project fam  # create in another registered project
     tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
     tasks show 4f2a9c                # a bare suffix means the current project's task (sci-4f2a9c)
@@ -363,6 +368,10 @@ live name. `tasks rename <old> <new>` updates the project's filenames, ids, loca
 prose need no edits: retired names keep resolving **for as long as the project stays
 registered**. `unregister` removes that project's aliases too; retired names cannot be
 reused while registered.
+The registry can also declare project groups (`[groups]`), named sets of live prefixes
+that `--group <name>` reads together. `rename` carries a member to its new prefix.
+`unregister` removes the prefix from every group and deletes, with a warning, any group it
+leaves empty. A group name is never a live or retired prefix.
 
 A live id and its retired spelling are one task. `tasks dep <id> --on <x>` when the task
 already depends on `x` under any spelling changes nothing, keeps the stored spelling, and
@@ -571,4 +580,4 @@ public.
 
     tasks/.config.toml               prefix = "sci"; optional color / spec_dirs / plan_dirs / [tags]
     tasks/sci-4f2a9c.md              one task
-    ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live
+    ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live; [groups] name -> prefixes
