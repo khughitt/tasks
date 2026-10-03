@@ -7,7 +7,8 @@ Amended 2026-10-03 after the holds implementation: §4.4 "Atomic across projects
 holds lock covers every holds change, through rollback), the read-view warning for an
 unresolved identity, and §4.5 gate order.
 Amended 2026-10-03 after the final branch review: §5.1 the session gates (`without`,
-`cutoff`, `halt`) count only descendants that could be a step.
+`cutoff`, `halt`) and `depends` count only descendants that could be a step, never a
+sub-goal or work parked on a person.
 Waiting ideas: tasks-9bdd68 (focus marker), tasks-77dbc6 (project groups),
 tasks-e02860 (lanes and shared resources). Brief:
 `docs/notes/2026-09-30-work-selection-brief.md`.
@@ -443,9 +444,11 @@ nothing else.
    work depends on cannot fail the view. An unparked idea with an open dependency
    therefore counts under `other` (or `goal`), not `depends`.
 
-   The session gates (`without`, `cutoff`, `halt`), like `depends`, are judged only for
-   descendants that could be a step and are not sub-goals; a sub-goal, an idea, a blocked
-   task, or other non-step falls through to its own cause (`goal`, `other`, `blocked`, …).
+   The session gates (`without`, `cutoff`, `halt`) and `depends` are judged only for
+   descendants that could be a step. Non-steps fall through to their own cause in table
+   order: an idea or `doing` without a live claim (`other`), a blocked task (`blocked`), a
+   sub-goal (`goal`), and work parked waiting on a person (`user`), even when its status is
+   `todo`.
 
    A descendant matching several causes counts once, under the first cause in table order.
 

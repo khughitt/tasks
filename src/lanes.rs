@@ -278,10 +278,12 @@ fn classify<'a>(inputs: &Inputs<'a>, task: &Task) -> Class<'a> {
         task,
         !crate::hierarchy::children(inputs.all, &task.id, inputs.registry).is_empty(),
     );
-    // The session gates (`without`, `cutoff`, `halt`) stop steps, so, like `depends`, they
-    // judge only work that could be a step. A sub-goal is never a step; it and every other
-    // non-step fall through to their own cause.
-    let gated = !goal && could_step(task, claims, inputs.now);
+    // The session gates (`without`, `cutoff`, `halt`) and `depends` stop steps, so they
+    // judge only work that could be a step. A sub-goal and work parked on a person are
+    // never steps, though a todo of either is a candidate; they and every other non-step
+    // fall through to their own cause, keeping the table order.
+    let user_parked = park.is_some_and(|park| park.waiting_on == WaitingOn::User);
+    let gated = !goal && !user_parked && could_step(task, claims, inputs.now);
     let cause = if claims.live(&task.id).is_some() {
         Some(Cause::Active)
     } else if gated
@@ -307,19 +309,19 @@ fn classify<'a>(inputs: &Inputs<'a>, task: &Task) -> Class<'a> {
         Some(Cause::Deferred)
     } else if task.status == Status::Done && !crate::periodic::is_due(task, inputs.now) {
         Some(Cause::Periodic)
-    } else if park.is_some_and(|park| park.waiting_on == WaitingOn::User) {
+    } else if user_parked {
         Some(Cause::User)
     } else if task.status == Status::Blocked {
         Some(Cause::Blocked)
-    } else if could_step(task, claims, inputs.now)
+    } else if gated
         && !task
             .depends
             .iter()
             .all(|dependency| (inputs.dependency)(dependency) == Some(true))
     {
-        // Asked only of `dependency_readers` records, the ones whose dependencies were
-        // resolved; a record that could never be a step falls through to `goal` or
-        // `other`.
+        // Asked only of `gated` records, all among `dependency_readers`, whose
+        // dependencies were resolved; a sub-goal or any other non-step falls through to
+        // `goal` or `other`.
         Some(Cause::Depends)
     } else if goal {
         Some(Cause::Goal)
@@ -706,6 +708,9 @@ mod tests {
         };
         let mut deferred = rated(task("xx-000004", Some("xx-0000b1"), Status::Todo, 2));
         deferred.defer = Some(crate::defer::Defer::parse("2099-01-01").unwrap());
+        // A sub-goal with an open dependency is a goal, not `depends`.
+        let mut waiting_goal = task("xx-0000b2", Some("xx-0000a1"), Status::Todo, 2);
+        waiting_goal.depends = vec![TaskId::parse("xx-000002").unwrap()];
         let all = vec![
             lane("xx-0000a1", 0),
             task("xx-000001", Some("xx-0000a1"), Status::Idea, 2),
@@ -713,14 +718,30 @@ mod tests {
             task("xx-0000b1", Some("xx-0000a1"), Status::Todo, 2),
             deferred,
             task("xx-000005", Some("xx-0000a1"), Status::Todo, 2),
+            task("xx-000006", Some("xx-0000a1"), Status::Todo, 2),
+            waiting_goal,
+            rated(task("xx-000007", Some("xx-0000b2"), Status::Blocked, 2)),
         ];
-        let world = world(ClaimSnapshot::default());
+        // An unrated todo parked waiting on a person counts under `user`, never `cutoff`.
+        let mut user_park = agent_park();
+        user_park.waiting_on = WaitingOn::User;
+        let world = world(ClaimSnapshot::from_parts(
+            BTreeMap::new(),
+            BTreeMap::from([("xx-000006".to_string(), user_park)]),
+            BTreeMap::new(),
+        ));
 
         let open = run(&all, &world);
         assert_eq!(pick(&open[0]), "xx-000005");
         assert_eq!(
             open[0].causes.entries(),
-            vec![("deferred", 1), ("blocked", 1), ("goal", 1), ("other", 1)]
+            vec![
+                ("deferred", 1),
+                ("user", 1),
+                ("blocked", 2),
+                ("goal", 2),
+                ("other", 1)
+            ]
         );
 
         let cut = run_with_cutoff(&all, &world, Some(Complexity::Mid));
@@ -731,17 +752,18 @@ mod tests {
             vec![
                 ("cutoff", 1),
                 ("deferred", 1),
-                ("blocked", 1),
-                ("goal", 1),
+                ("user", 1),
+                ("blocked", 2),
+                ("goal", 2),
                 ("other", 1)
             ],
-            "only the unrated step counts under cutoff; the unrated idea and sub-goal keep \
-             their own causes"
+            "only the unrated step counts under cutoff; the unrated idea, sub-goals, and \
+             user-parked todo keep their own causes"
         );
         let counted: usize = row.pick.iter().count()
             + row.steps
             + row.causes.entries().iter().map(|(_, n)| n).sum::<usize>();
-        assert_eq!(counted, 5, "five live descendants, each once");
+        assert_eq!(counted, 8, "eight live descendants, each once");
     }
 
     #[test]
