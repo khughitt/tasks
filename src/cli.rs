@@ -510,10 +510,10 @@ pub enum Command {
     Start {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
-        /// Take over a claim another live session holds.
+        /// Take over a claim another live session holds, or acquire past a held need.
         #[arg(long)]
         force: bool,
-        /// Explain an audited halt override or forced takeover.
+        /// Explain an audited halt override, need override, or forced takeover.
         #[arg(long)]
         reason: Option<String>,
     },

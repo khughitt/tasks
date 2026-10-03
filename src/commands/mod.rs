@@ -236,7 +236,13 @@ impl Ctx {
     /// `force` comes only from `start` here (`edit --force` never reaches a move to doing).
     /// It overrides only with a reason; every held need is recorded for the audit notes.
     /// A claim on the task itself never holds it back, so a plain takeover needs none.
-    /// "Another session" is decided by `ownership`, as in Task 2.2.
+    /// A re-start that continues the caller's own live claim, already holding every one of
+    /// these needs, acquires nothing new and is never held back.
+    ///
+    /// "Another session" is decided by `ownership`, as for the claim itself. The caller is
+    /// the identity this acquire records: the resolved one, or the claim's own on a
+    /// proof-only continuation. A hold whose session string differs but whose process
+    /// proof names this caller's harness is therefore its own.
     fn guard_holds(&mut self, task: &Task, force: bool) -> Result<()> {
         let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
         let me = match self.pending_claim.as_mut() {
