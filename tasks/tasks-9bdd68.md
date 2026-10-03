@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-09-11T01:03:10Z
-updated: 2026-09-30T10:05:31Z
+updated: 2026-10-03T15:52:54Z
 depends: []
 parent: tasks-46d207
 tags: [picker, hierarchy]
@@ -30,3 +30,4 @@ Origin: a "dynamics sprint" filed as a goal in another project; the goal did eve
 ## Notes
 
 - 2026-09-30T10:05:31Z (main): scope: briefed; focus must settle ordering against parked-agent resumes and priority while preserving eligibility; waits on tasks-ece1e2; brief: docs/notes/2026-09-30-work-selection-brief.md
+- 2026-10-03T15:52:54Z (ece1e2-work-selection): scope: drop; proposal: drop as superseded by lanes (spec docs/specs/2026-10-03-lanes-needs-groups-design.md §7): lane priority orders the lanes view, next --under selects within one effort, and the committed lane field replaces the host-local focus

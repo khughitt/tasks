@@ -1,13 +1,14 @@
 ---
 id: tasks-77dbc6
 title: "Project groups: a named set of projects between one project and --all-projects"
-status: idea
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 created: 2026-09-07T21:48:27Z
-updated: 2026-10-03T15:25:46Z
+updated: 2026-10-03T15:52:55Z
+completed: 2026-10-03T15:52:54Z
 depends: []
 parent: tasks-46d207
 tags: [quick-add]
@@ -37,3 +38,8 @@ Related: tasks-3029be (done) added the registry-wide views this would narrow.
 
 - 2026-09-30T10:04:57Z (main): scope: briefed; group membership, storage, and rename behavior need a design contract; captured source retained but mindful lookup is unavailable; waits on tasks-ece1e2; brief: docs/notes/2026-09-30-work-selection-brief.md
 - 2026-10-03T15:25:46Z (ece1e2-work-selection): implemented by tasks-ece1e2 slice 4 (spec 2026-10-03 §6); close with the slice
+- 2026-10-03T15:52:54Z (ece1e2-work-selection): implemented by tasks-ece1e2 (spec §6)
+- 2026-10-03T15:52:54Z (ece1e2-work-selection): done
+  provenance: {"harness_session":"claude-code:83185704-f448-42a6-ac20-8857595bdb59","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-03T15:52:54Z (ece1e2-work-selection): Project groups: registry [groups], tasks group set|rm, tasks groups, --group scope on the read views and quiet (spec §6)
+  provenance: {"harness_session":"claude-code:83185704-f448-42a6-ac20-8857595bdb59","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
