@@ -4,8 +4,9 @@ use unicode_width::UnicodeWidthChar;
 use crate::error::{Error, Result};
 use crate::lanes::{Causes, LaneRow, LaneState};
 use crate::model::{Complexity, Process, Size, Status, Task, TaskId};
+use crate::present;
 use crate::registry::Registry;
-use crate::style::{Painter, Style, When};
+use crate::style::{Painter, Style};
 use serde::Serialize;
 use time::OffsetDateTime;
 
@@ -736,16 +737,11 @@ pub fn count_columns(counts: &Counts, closed: bool) -> Vec<CountColumn> {
     columns
 }
 
-/// A zero is dimmed whatever its status: a red `0` under `blocked` reads as an alarm.
 fn count_column(label: &'static str, value: usize, status: Status) -> CountColumn {
     CountColumn {
         label,
         value,
-        style: Some(if value == 0 {
-            Style::Chrome
-        } else {
-            Style::Status(status)
-        }),
+        style: present::count(status, value).style,
     }
 }
 
@@ -994,11 +990,8 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             }
             let mut grid = vec![header];
             for row in &o.projects {
-                let mut cells = vec![cell(
-                    &row.prefix,
-                    Align::Left,
-                    Some(row.color.map(Style::Project).unwrap_or(Style::Chrome)),
-                )];
+                let prefix = present::project(&row.prefix, row.color);
+                let mut cells = vec![cell(prefix.text, Align::Left, prefix.style)];
                 match &row.counts {
                     Some(counts) => {
                         cells.extend(count_columns(counts, o.closed).into_iter().map(|column| {
@@ -1016,7 +1009,8 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                 cells.push(match (&row.counts, &row.last_activity) {
                     (None, _) => cell("unreachable", Align::Left, Some(Style::Error)),
                     (Some(_), Some(at)) => {
-                        cell(crate::time::day(at), Align::Left, Some(date_role(at)))
+                        let at = present::date(at);
+                        cell(at.text, Align::Left, at.style)
                     }
                     (Some(_), None) => cell("-", Align::Left, Some(Style::Chrome)),
                 });
@@ -1330,8 +1324,12 @@ fn paint_field(line: &str, task: &Task, painter: &Painter) -> String {
         // an id is chrome wherever it appears, including `show`'s own footers below
         "id" | "parent" | "depends" => Style::Chrome,
         "owner" | "tags" => Style::Chrome,
-        "status" => Style::Status(task.status),
-        "priority" => Style::Priority(task.priority),
+        "status" => present::status(task.status)
+            .style
+            .expect("a status has a role"),
+        "priority" => present::priority(task.priority)
+            .style
+            .expect("a priority has a role"),
         _ => return line.into(),
     };
     format!("{key}: {}", painter.paint(style, value))
@@ -1359,7 +1357,7 @@ fn show_text(o: &ShowFields, painter: &Painter) -> String {
     }
     let related_row = |id: &str, status: Option<Status>, title: &str| {
         let status = match status {
-            Some(status) => painter.paint(Style::Status(status), status.as_str()),
+            Some(status) => present::status(status).paint(painter),
             None => "?".into(),
         };
         format!(
@@ -1470,11 +1468,8 @@ fn tree_text(
 fn lane_lines(rows: &[LaneRow], painter: &Painter, id_width: usize, detail: bool) -> String {
     let mut rendered = String::new();
     for row in rows {
-        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.lane.id));
-        let priority = painter.paint(
-            Style::Priority(row.lane.priority),
-            &format!("P{}", row.lane.priority),
-        );
+        let id = present::id(&row.lane.id).left(id_width).paint(painter); // `TaskSummary.id` is a `String`
+        let priority = present::priority(row.lane.priority).paint(painter);
         let state = match row.state {
             LaneState::Ready => {
                 let pick = row.pick.as_ref().expect("a ready lane has a pick");
@@ -1581,13 +1576,6 @@ fn id_width_tree(nodes: &[TreeNode]) -> usize {
         .map(|node| node.summary.id.len().max(id_width_tree(&node.children)))
         .max()
         .unwrap_or(0)
-}
-
-/// The date role for a validated timestamp or `YYYY-MM-DD` day.
-fn date_role(timestamp: &str) -> Style {
-    let day = crate::time::calendar_day(crate::time::day(timestamp))
-        .expect("records and park entries carry validated dates");
-    Style::Date(When::On(day))
 }
 
 /// Whether a pretty rendering of `out` paints from the theme's colors, and so whether
@@ -1874,44 +1862,32 @@ pub fn table(
 ) -> String {
     let mut rendered = String::new();
     for row in rows {
-        let (date, role) = match date {
-            DateColumn::Updated => (
-                crate::time::day(&row.updated).to_string(),
-                Some(date_role(&row.updated)),
-            ),
-            DateColumn::Created => (
-                crate::time::day(&row.created).to_string(),
-                Some(date_role(&row.created)),
-            ),
+        let date = match date {
+            DateColumn::Updated => Some(present::date(&row.updated)),
+            DateColumn::Created => Some(present::date(&row.created)),
             DateColumn::Due => match (&row.periodic, &row.deferred) {
                 (Some(periodic), _) => match (&periodic.due, periodic.due_now) {
-                    (Some(due), _) => (crate::time::day(due).to_string(), Some(date_role(due))),
-                    (None, true) => ("now".into(), Some(Style::Date(When::Today))),
-                    (None, false) => ("-".into(), None),
+                    (Some(due), _) => Some(present::date(due)),
+                    (None, true) => Some(present::today()),
+                    (None, false) => None,
                 },
-                (None, Some(deferred)) => {
-                    (deferred.until.clone(), Some(date_role(&deferred.until)))
-                }
-                (None, None) => ("-".into(), None),
+                (None, Some(deferred)) => Some(present::date(&deferred.until)),
+                (None, None) => None,
             },
         };
-        let date = match role {
-            Some(role) => painter.paint(role, &date),
-            None => date,
-        };
-        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
-        let priority = painter.paint(Style::Priority(row.priority), &format!("P{}", row.priority));
-        let size = row.size.map(Size::as_str).unwrap_or("-");
-        let complexity = row.complexity.map(Complexity::as_str).unwrap_or("-");
-        let process = row.process.map(Process::as_str).unwrap_or("-");
-        let status = painter.paint(
-            Style::Status(row.status),
-            &format!("{:<7}", row.status.as_str()),
-        );
+        let date = date
+            .map(|span| span.paint(painter))
+            .unwrap_or_else(|| "-".into());
+        let id = present::id(&row.id).left(id_width).paint(painter);
+        let priority = present::priority(row.priority).paint(painter);
+        let size = present::size(row.size).left(2).paint(painter);
+        let complexity = present::complexity(row.complexity).left(4).paint(painter);
+        let process = present::process(row.process, "-").left(7).paint(painter);
+        let status = present::status(row.status).left(7).paint(painter);
         let tags = if row.tags.is_empty() {
             String::new()
         } else {
-            format!(" [{}]", row.tags.join(", "))
+            format!(" [{}]", present::tags(&row.tags).text)
         };
         // A due row's status column reads `done`, which is true; the marker is what says why
         // it is here (spec §5.1). Not-yet-due rows never reach `ready`, and carry their date
@@ -1948,14 +1924,13 @@ pub fn table(
             _ => String::new(),
         };
         let owner = match &row.claim {
-            Some(claim) if claim.live => format!(" @{} [{}]", claim.owner, claim.session),
-            Some(claim) => format!(" @{} [{} stale]", claim.owner, claim.session),
-            None => row
-                .owner
-                .as_ref()
-                .map(|owner| format!(" @{owner}"))
-                .unwrap_or_default(),
+            Some(claim) => Some(present::claim(claim)),
+            None => row.owner.as_deref().map(present::owner),
         };
+        let owner_text = owner
+            .as_ref()
+            .map(|span| format!(" @{}", span.text))
+            .unwrap_or_default();
         // Unpainted: it is already distinct, and painting the blank spacer would wrap
         // whitespace in ANSI for no gain.
         let mark = match (parallel_column, row.parallel) {
@@ -1973,18 +1948,23 @@ pub fn table(
             }
             (true, None) => "  ".into(),
         };
-        let prefix = format!(
-            "{id}  {priority} {size:<2} {complexity:<4} {process:<7} {status} {mark}{kind}{date}  "
-        );
+        let prefix =
+            format!("{id}  {priority} {size} {complexity} {process} {status} {mark}{kind}{date}  ");
         rendered.push_str(&render_row(
             &prefix,
             &[
-                (row.title.as_str(), row.project_color.map(Style::Project)),
-                (tags.as_str(), Some(Style::Chrome)),
+                (
+                    row.title.as_str(),
+                    present::title(&row.title, row.project_color).style,
+                ),
+                (tags.as_str(), present::tags(&row.tags).style),
                 (cadence.as_str(), Some(Style::Emphasis)),
                 (deferral.as_str(), Some(Style::Emphasis)),
                 (quiet.as_str(), Some(Style::Emphasis)),
-                (owner.as_str(), Some(Style::Chrome)),
+                (
+                    owner_text.as_str(),
+                    owner.as_ref().and_then(|span| span.style),
+                ),
             ],
             painter,
             wrap,
@@ -1999,21 +1979,16 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap
         let Some(park) = &row.park else {
             continue;
         };
-        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
-        let status = match row.status {
-            Some(status) => {
-                painter.paint(Style::Status(status), &format!("{:<7}", status.as_str()))
-            }
-            None => painter.paint(Style::Chrome, &format!("{:<7}", "?")),
-        };
+        let id = present::id(&row.id).left(id_width).paint(painter);
+        let status = present::status_of(row.status).left(7).paint(painter);
         let phase = format!(
             "{:<13}",
             row.phase.map(crate::model::Phase::as_str).unwrap_or("-")
         );
-        let process = row.process.map(Process::as_str).unwrap_or("-");
-        let parked = painter.paint(date_role(&park.at), crate::time::day(&park.at));
+        let process = present::process(row.process, "-").left(7).paint(painter);
+        let parked = present::date(&park.at).paint(painter);
         let prefix = format!(
-            "{id}  {status} {process:<7} {phase} waits on {:<18} {parked}  ",
+            "{id}  {status} {process} {phase} waits on {:<18} {parked}  ",
             crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)
         );
         rendered.push_str(&render_row(
@@ -2038,9 +2013,9 @@ pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> S
         if index > 0 {
             rendered.push('\n');
         }
-        let id = painter.paint(Style::Chrome, &format!("{:<id_width$}", row.id));
+        let id = present::id(&row.id).left(id_width).paint(painter);
         let priority = match row.priority {
-            Some(priority) => painter.paint(Style::Priority(priority), &format!("P{priority}")),
+            Some(priority) => present::priority(priority).paint(painter),
             None => "P-".into(),
         };
         let needs = park.needs.map(crate::claims::Needs::as_str).unwrap_or("-");
@@ -2048,7 +2023,7 @@ pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> S
             Some(minutes) => format!("{minutes} min"),
             None => "-".into(),
         };
-        let parked = painter.paint(date_role(&park.at), crate::time::day(&park.at));
+        let parked = present::date(&park.at).paint(painter);
         rendered.push_str(&format!(
             "{id}  {priority}  {needs:<8}  {minutes:>8}  parked {parked}  {}\n",
             row.title

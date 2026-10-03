@@ -20,6 +20,7 @@ mod needs;
 mod output;
 mod palette;
 mod periodic;
+mod present;
 mod provenance;
 mod query;
 mod registry;
