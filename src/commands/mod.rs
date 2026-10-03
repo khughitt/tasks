@@ -202,6 +202,79 @@ impl Ctx {
         Ok(())
     }
 
+    /// Lanes/needs design §4.4: a save that changes `needs` under the caller's own live
+    /// claim recomputes the claim's `holds` in the same save. A removed need drops out. An
+    /// added exclusive need is an acquire: refused with `need_held` while another session's
+    /// live claim on another task holds it, unless `force` and `need_reason` override. Only
+    /// added needs are checked; what the claim already holds was checked when acquired.
+    /// With no live claim of the caller's there is nothing to recompute. Runs after
+    /// `refuse_foreign_live_claim`, under the project lock.
+    pub(crate) fn update_holds(&mut self, task: &Task, force: bool) -> Result<()> {
+        let Some(existing) = self.claims_mut()?.get(&task.id).cloned() else {
+            return Ok(());
+        };
+        if crate::claims::liveness(&existing) != Liveness::Live {
+            return Ok(());
+        }
+        let me = self.resolve_for_guard()?;
+        if ownership(&existing, &me)? == Ownership::Foreign {
+            return Ok(());
+        }
+        let holds = crate::needs::exclusive_of(&self.project.needs, &task.needs);
+        if holds == existing.holds {
+            return Ok(());
+        }
+        let added: Vec<String> = holds
+            .iter()
+            .filter(|need| !existing.holds.contains(*need))
+            .cloned()
+            .collect();
+        if !added.is_empty() {
+            let (snapshot, warnings) =
+                crate::holds::HoldSnapshot::load(&self.registry, time::OffsetDateTime::now_utc());
+            self.warnings.extend(warnings);
+            // "Another session" by the ownership rule, as in `guard_holds`.
+            let mine = own_holds(&snapshot, &me)?;
+            let held: Vec<(String, crate::holds::Holder)> = added
+                .iter()
+                .filter_map(|need| {
+                    snapshot
+                        .holder(need, &task.id, &mine)
+                        .map(|holder| (need.clone(), holder.clone()))
+                })
+                .collect();
+            if let Some((need, holder)) = held.first() {
+                if !force {
+                    return Err(Error::NeedHeld(format!(
+                        "{id} needs {need}, held by {} ({}); add it past the hold with \
+                         `tasks edit {id} --need {need} --force --reason \"...\"`",
+                        holder.task,
+                        holder.session,
+                        id = task.id
+                    )));
+                }
+                if self
+                    .need_reason
+                    .as_deref()
+                    .is_none_or(|reason| reason.trim().is_empty())
+                {
+                    return Err(Error::Validation(format!(
+                        "--force past a held need requires --reason: {} needs {need}, held \
+                         by {} ({})",
+                        task.id, holder.task, holder.session
+                    )));
+                }
+                self.need_overrides = held;
+            }
+        }
+        // `save` treats this as an acquire: store first, restored if the record write fails.
+        self.pending_claim = Some((
+            task.id.clone(),
+            ClaimIntent::Acquire(crate::claims::Claim { holds, ..existing }),
+        ));
+        Ok(())
+    }
+
     pub fn preserve_claim_store(&mut self, id: &TaskId) {
         self.pending_claim = Some((id.clone(), ClaimIntent::PreserveStore));
     }

@@ -392,6 +392,7 @@ options = [
   { names = ["--title"], value = "string" },
   { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped"], repeatable = false },
   { shared = "force", value = "none" },
+  { names = ["--reason"], value = "string" },
   { names = ["--no-parent"], value = "none" },
   { names = ["--no-parallel"], value = "none" },
   { names = ["--no-every"], value = "none" },

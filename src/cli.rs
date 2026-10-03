@@ -221,6 +221,10 @@ pub struct EditArgs {
     pub status: Option<String>,
     #[arg(long)]
     pub force: bool,
+    /// With --force and --need: why the need is added while another session holds it.
+    /// Noted on the task, and on the holder when it is in this project.
+    #[arg(long)]
+    pub reason: Option<String>,
     /// Detach from the parent.
     #[arg(long, conflicts_with = "parent")]
     pub no_parent: bool,

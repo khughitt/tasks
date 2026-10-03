@@ -78,8 +78,20 @@ fn notes_unchanged_or_trimmed(original: &[Note], edited: &[Note]) -> bool {
 }
 
 pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
-    if args.force && args.status.as_deref() != Some("done") {
-        return Err(Error::Validation("--force requires --status done".into()));
+    // `--status` conflicts with `--need` at the CLI, so the two uses never meet.
+    let adds_needs = !args.fields.needs.is_empty();
+    if args.force && args.status.as_deref() != Some("done") && !adds_needs {
+        return Err(Error::Validation(
+            "--force requires --status done, or --need to add a need another session holds".into(),
+        ));
+    }
+    if args.reason.is_some() && !(args.force && adds_needs) {
+        return Err(Error::Validation(
+            "--reason requires --force and --need".into(),
+        ));
+    }
+    if let Some(reason) = args.reason.as_deref() {
+        crate::format::validate_line("reason", reason)?;
     }
     let fields = &args.fields;
     let has_flags = args.title.is_some()
@@ -124,6 +136,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
 
     let mut task = load(&mut ctx, &id)?;
+    let original_needs = task.needs.clone();
     if args.fields.body.as_deref() == Some("-") {
         let mut body = String::new();
         std::io::stdin().read_to_string(&mut body)?;
@@ -212,6 +225,21 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         }
     }
     apply_fields(&mut ctx, &mut task, &args.fields)?;
+    // Lanes/needs design §4.4: needs change under no live claim or the caller's own, and
+    // under the caller's own the claim's holds follow in the same save.
+    // The target's override notes are appended here and land with its save. The
+    // holders' notes are held in `holder_notes` until that save has succeeded.
+    let mut holder_notes = None;
+    if task.needs != original_needs {
+        ctx.refuse_foreign_live_claim(&task.id)?;
+        ctx.need_reason = args.reason.clone();
+        ctx.update_holds(&task, args.force)?;
+        holder_notes = super::record_need_overrides(&mut ctx, &mut task)?;
+    }
+    if args.reason.is_some() && holder_notes.is_none() {
+        ctx.warnings
+            .push("--reason was unused because no held need was added".into());
+    }
     if let Some(status) = args.status {
         let to = Status::parse(&status)?;
         if to == task.status {
@@ -234,6 +262,11 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         ctx.reassess(&task.id, task.complexity)?;
     }
     save(&mut ctx, &mut task)?;
+    // Lanes/needs design §4.5: a holder learns of the override only once it has landed.
+    // A save refused by its own validation (a parent cycle, say) writes no note anywhere.
+    if let Some(notes) = holder_notes {
+        super::note_need_holders(&mut ctx, notes);
+    }
     super::follow_holder(&mut ctx, &task.id, None, "the edit landed");
     Ok(id_out(ctx, &task))
 }
@@ -367,6 +400,11 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     if status == original.status {
         ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;
         ctx.preserve_claim_store(&original.id);
+        // Lanes/needs design §4.4: no flags here, so a held need refuses and names
+        // `tasks edit <id> --need <n> --force --reason`.
+        if edited.needs != original.needs {
+            ctx.update_holds(&edited, false).map_err(keep)?;
+        }
     } else {
         if status == Status::Shelved {
             refuse_shelving(&original.id).map_err(keep)?;

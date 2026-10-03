@@ -22835,3 +22835,238 @@ fn a_restart_of_an_own_live_claim_is_not_held_back_by_an_override_holder() {
         );
     }
 }
+
+#[test]
+fn needs_changes_under_another_sessions_live_claim_are_refused_and_other_edits_are_not() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let id = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "owner"]));
+    json_as(&env, &sci, "agent-b", &["start", &id]);
+    let path = format!("tasks/{id}.md");
+    let before = env.read(&sci, &path);
+
+    for args in [
+        vec!["edit", id.as_str(), "--need", "quiet"],
+        vec!["edit", id.as_str(), "--rm-need", "owner"],
+        vec!["edit", id.as_str(), "--no-needs"],
+    ] {
+        assert_eq!(
+            error_as(&env, &sci, "agent-a", &args)["error"]["kind"],
+            "claimed",
+            "{args:?}"
+        );
+    }
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^needs: \\[owner\\]/needs: [owner, quiet]/' \"$1\"",
+    );
+    let out = as_agent(&env, &sci, "agent-a")
+        .env("EDITOR", editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(err_kind(&out), "claimed");
+    assert_eq!(env.read(&sci, &path), before);
+
+    // A field edit that leaves needs alone keeps today's behaviour: no claim check.
+    json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &id, "-p", "1", "--tag", "capture"],
+    );
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["priority"], 1);
+    assert_eq!(shown["task"]["needs"], serde_json::json!(["owner"]));
+    assert_eq!(shown["claim"]["session"], "agent-b");
+}
+
+#[test]
+fn removing_a_need_under_ones_own_claim_drops_it_from_holds() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let mine = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let theirs = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    assert_eq!(
+        error_as(&env, &sci, "agent-b", &["start", &theirs])["error"]["kind"],
+        "need_held"
+    );
+
+    json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &["edit", &mine, "--rm-need", "quiet"],
+    );
+    assert!(holds_of(&env, &sci, &mine).is_null());
+    assert_eq!(
+        env.json(&sci, &["show", &mine])["claim"]["session"],
+        "agent-a"
+    );
+    json_as(&env, &sci, "agent-b", &["start", &theirs]);
+}
+
+#[test]
+fn adding_an_exclusive_need_under_ones_own_claim_is_an_acquire() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let mine = id_of(env.json(&sci, &["add", "Mine", "-p", "2", "--need", "owner"]));
+    let other = id_of(env.json(&sci, &["add", "Other", "-p", "2", "--need", "owner"]));
+    let theirs = id_of(env.json(&sci, &["add", "Theirs", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    json_as(&env, &sci, "agent-a", &["start", &other]);
+    json_as(&env, &sci, "agent-b", &["start", &theirs]);
+    let path = format!("tasks/{mine}.md");
+    let before = env.read(&sci, &path);
+
+    let error = error_as(&env, &sci, "agent-a", &["edit", &mine, "--need", "quiet"]);
+    assert_eq!(error["error"]["kind"], "need_held", "{error}");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("tasks edit {mine} --need quiet --force --reason")),
+        "{error}"
+    );
+    assert_eq!(env.read(&sci, &path), before);
+    assert_eq!(
+        error_as(
+            &env,
+            &sci,
+            "agent-a",
+            &["edit", &mine, "--need", "quiet", "--force"]
+        )["error"]["kind"],
+        "validation"
+    );
+    assert_eq!(env.read(&sci, &path), before);
+    assert!(holds_of(&env, &sci, &mine).is_null());
+
+    let out = json_as(
+        &env,
+        &sci,
+        "agent-a",
+        &[
+            "edit",
+            &mine,
+            "--need",
+            "quiet",
+            "--force",
+            "--reason",
+            "share the capture",
+        ],
+    );
+    assert!(
+        !warnings_of(&out)
+            .iter()
+            .any(|w| w.contains("--reason was unused"))
+    );
+    assert_eq!(holds_of(&env, &sci, &mine), serde_json::json!(["quiet"]));
+    assert!(env.read(&sci, &path).contains(&format!(
+        "need override: acquired while quiet held by {theirs} (agent-b): share the capture"
+    )));
+    assert!(env.read(&sci, &format!("tasks/{theirs}.md")).contains(&format!(
+        "need override: {mine} acquired quiet by agent-a while this task held it: share the \
+         capture"
+    )));
+
+    // An editor save has no flags: it refuses and names the edit form.
+    let editor = editor_script(
+        &sci,
+        "sed -i 's/^needs: \\[owner\\]/needs: [owner, quiet]/' \"$1\"",
+    );
+    let out = as_agent(&env, &sci, "agent-a")
+        .env("EDITOR", editor)
+        .args(["edit", &other])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(err_kind(&out), "need_held");
+    assert!(
+        err_detail(&out).contains(&format!("tasks edit {other} --need quiet --force --reason"))
+    );
+    assert!(holds_of(&env, &sci, &other).is_null());
+}
+
+#[test]
+fn edit_force_and_reason_are_only_for_adding_a_held_need() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let id = id_of(env.json(&sci, &["add", "Capture", "-p", "2"]));
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--reason", "why", "-p", "1"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(&sci, &["edit", &id, "--force", "-p", "1"]),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(
+            &sci,
+            &["edit", &id, "--force", "--reason", "why", "-p", "1"]
+        ),
+        "validation"
+    );
+    assert_eq!(
+        env.fail(
+            &sci,
+            &[
+                "edit", &id, "--need", "quiet", "--force", "--reason", "a\nb"
+            ]
+        ),
+        "validation"
+    );
+    // No claim: adding the need acquires nothing, so the reason goes unused.
+    let out = env.json(
+        &sci,
+        &["edit", &id, "--need", "quiet", "--force", "--reason", "why"],
+    );
+    assert!(
+        warnings_of(&out)
+            .iter()
+            .any(|w| w.contains("--reason was unused")),
+        "{out}"
+    );
+    let shown = env.json(&sci, &["show", &id]);
+    assert_eq!(shown["task"]["needs"], serde_json::json!(["quiet"]));
+    assert!(shown["claim"].is_null());
+}
+
+#[test]
+fn a_need_override_that_save_refuses_leaves_both_records_and_the_claim_store_unchanged() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let mine = id_of(env.json(&sci, &["add", "Mine", "-p", "2", "--need", "owner"]));
+    let theirs = id_of(env.json(&sci, &["add", "Theirs", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "agent-a", &["start", &mine]);
+    json_as(&env, &sci, "agent-b", &["start", &theirs]);
+    let records: Vec<(String, String)> = [&mine, &theirs]
+        .iter()
+        .map(|id| (id.to_string(), env.read(&sci, &format!("tasks/{id}.md"))))
+        .collect();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+
+    // Every hold check passes (--force --reason under agent-a's own claim). Only `save`
+    // refuses, on a parent check no earlier step makes: a task cannot be its own parent.
+    let error = error_as(
+        &env,
+        &sci,
+        "agent-a",
+        &[
+            "edit", &mine, "--need", "quiet", "--force", "--reason", "share", "--parent", &mine,
+        ],
+    );
+    assert_eq!(error["error"]["kind"], "cycle", "{error}");
+    // No "acquired quiet" note on the holder, no note on the target, no claim change.
+    for (id, before) in &records {
+        assert_eq!(&env.read(&sci, &format!("tasks/{id}.md")), before, "{id}");
+    }
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+}
