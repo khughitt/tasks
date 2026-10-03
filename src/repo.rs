@@ -669,6 +669,9 @@ impl Project {
         mut candidate: impl FnMut() -> u32,
     ) -> Result<()> {
         crate::hierarchy::validate_parent(self, registry, task)?;
+        // A new record has no children, so these refuse only a lane.
+        crate::hierarchy::validate_periodic(self, registry, task)?;
+        crate::hierarchy::validate_defer(self, registry, task)?;
         for _ in 0..16 {
             task.id = TaskId {
                 prefix: self.prefix.clone(),

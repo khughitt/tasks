@@ -222,30 +222,40 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
         if task.every.is_some() {
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
-            if !kids.is_empty() {
-                errors.push(finding(
-                    Some(task),
-                    file.clone(),
-                    "periodic_goal",
+            if crate::hierarchy::is_goal(task, !kids.is_empty()) {
+                let detail = if kids.is_empty() {
+                    "is a lane and has a cadence; a goal is never ready, so the cadence can \
+                     never fire"
+                        .to_string()
+                } else {
                     format!(
                         "has a cadence and children ({}); a goal is never ready, so the cadence can never fire",
-                        kids.iter().map(|kid| kid.id.to_string()).collect::<Vec<_>>().join(", ")
-                    ),
-                ));
+                        kids.iter()
+                            .map(|kid| kid.id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                errors.push(finding(Some(task), file.clone(), "periodic_goal", detail));
             }
         }
         if task.defer.is_some() {
             let kids = crate::hierarchy::children(&tasks, &task.id, &ctx.registry);
-            if !kids.is_empty() {
-                errors.push(finding(
-                    Some(task),
-                    file.clone(),
-                    "deferred_goal",
+            if crate::hierarchy::is_goal(task, !kids.is_empty()) {
+                let detail = if kids.is_empty() {
+                    "is a lane and is deferred; a goal is never ready, so the deferral hides \
+                     nothing"
+                        .to_string()
+                } else {
                     format!(
                         "is deferred and has children ({}); a goal is never ready, so the deferral hides nothing",
-                        kids.iter().map(|kid| kid.id.to_string()).collect::<Vec<_>>().join(", ")
-                    ),
-                ));
+                        kids.iter()
+                            .map(|kid| kid.id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                errors.push(finding(Some(task), file.clone(), "deferred_goal", detail));
             }
             // spec §3.2: the status rule lives here and in the writers, not in parsing.
             if !crate::defer::can_carry(task.status) {
@@ -259,6 +269,22 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     ),
                 ));
             }
+        }
+        // A lane is often filed before its steps exist, so a childless one is a reminder,
+        // not an error.
+        if task.lane
+            && crate::hierarchy::is_active(task)
+            && crate::hierarchy::children(&tasks, &task.id, &ctx.registry).is_empty()
+        {
+            warnings.push(finding(
+                Some(task),
+                file.clone(),
+                "childless_lane",
+                format!(
+                    "is a lane with no steps yet; add them with `tasks add \"<step>\" --parent {}`",
+                    task.id
+                ),
+            ));
         }
         // Spec §7: link drift is held against open work only. A closed record's links are
         // history, and a later plan revision that merges its heading away is not an error.

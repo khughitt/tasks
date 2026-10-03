@@ -136,6 +136,12 @@ pub fn is_active(task: &Task) -> bool {
     task.status.is_open() && task.status != Status::Shelved
 }
 
+/// The one test for "this task is a goal", used wherever a goal is treated specially. A
+/// lane is a goal even before its first child exists.
+pub fn is_goal(task: &Task, has_children: bool) -> bool {
+    has_children || task.lane
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Shelved {
     Hidden,
@@ -149,48 +155,51 @@ enum Visibility {
     UnderShownParent,
 }
 
-/// spec §4.7: `readiness` excludes any task with children, so a cadence on a goal could
-/// never fire. Refuse it at the write rather than leave a silent dead end. Scans only when
-/// a cadence is actually set, which is rare.
+/// spec §4.7: `readiness` excludes a goal, so a cadence on one could never fire. Refuse it
+/// at the write rather than leave a silent dead end.
 pub fn validate_periodic(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
     if task.every.is_none() {
         return Ok(());
     }
-    let all = project.scan()?;
-    let kids = children(&all, &task.id, registry);
-    if !kids.is_empty() {
-        return Err(Error::Validation(format!(
-            "{} has children ({}) and cannot be a recurrence; a task with children is a \
-             goal, and a goal is never ready",
-            task.id,
-            kids.iter()
-                .map(|kid| kid.id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
-    }
-    Ok(())
+    refuse_goal(project, registry, task, "be a recurrence")
 }
 
-/// A deferred task with children would never appear in a picker.
+/// A deferred goal would never appear in a picker.
 pub fn validate_defer(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
     if task.defer.is_none() {
         return Ok(());
     }
-    let all = project.scan()?;
-    let kids = children(&all, &task.id, registry);
-    if !kids.is_empty() {
-        return Err(Error::Validation(format!(
-            "{} has children ({}) and cannot be deferred; a task with children is a \
-             goal, and a goal is never ready",
-            task.id,
-            kids.iter()
-                .map(|kid| kid.id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
+    refuse_goal(project, registry, task, "be deferred")
+}
+
+/// Refuses `task` when it is a goal. A lane is refused without a scan, and a record not yet
+/// on disk has no children, so the project is scanned only when the field is set on an
+/// existing record that is not a lane, which is rare.
+fn refuse_goal(project: &Project, registry: &Registry, task: &Task, what: &str) -> Result<()> {
+    let kids: Vec<String> = if task.lane || !project.task_path(&task.id).is_file() {
+        Vec::new()
+    } else {
+        children(&project.scan()?, &task.id, registry)
+            .iter()
+            .map(|kid| kid.id.to_string())
+            .collect()
+    };
+    if !is_goal(task, !kids.is_empty()) {
+        return Ok(());
     }
-    Ok(())
+    Err(Error::Validation(if kids.is_empty() {
+        format!(
+            "{} is a lane and cannot {what}; a lane is a goal, and a goal is never ready",
+            task.id
+        )
+    } else {
+        format!(
+            "{} has children ({}) and cannot {what}; a task with children is a goal, and a \
+             goal is never ready",
+            task.id,
+            kids.join(", ")
+        )
+    }))
 }
 
 /// The forest under `root` (or every root when `None`). Without `include_closed`, a node
@@ -388,6 +397,18 @@ mod tests {
             .map(|t| t.id.to_string())
             .collect();
         assert_eq!(open, ["xx-000003"]);
+    }
+
+    #[test]
+    fn a_lane_is_a_goal_with_or_without_children() {
+        let mut lane = task("xx-000001", None, Status::Todo);
+        assert!(!is_goal(&lane, false));
+        assert!(is_goal(&lane, true));
+        lane.lane = true;
+        assert!(
+            is_goal(&lane, false),
+            "a lane is a goal before its first child"
+        );
     }
 
     #[test]

@@ -4031,6 +4031,103 @@ fn prime_shows_roadmap_and_closeout() {
 }
 
 #[test]
+fn a_childless_lane_is_never_ready_never_parked_and_never_deferred_or_recurring() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let kind = |env: &TestEnv, args: &[&str]| {
+        error_of(env, &sci, args)["error"]["kind"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "0"]));
+    let other = id_of(env.json(&sci, &["add", "Other", "-p", "3"]));
+    let ready: Vec<String> = env.json(&sci, &["ready"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        ready,
+        std::slice::from_ref(&other),
+        "a lane is a goal even with no children"
+    );
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &lane, "split it"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&sci, &["next"])["next"]["task"]["id"],
+        other,
+        "a lane is never a parked candidate"
+    );
+
+    assert_eq!(
+        kind(&env, &["edit", &lane, "--defer", "2099-01-01"]),
+        "validation"
+    );
+    assert_eq!(kind(&env, &["edit", &lane, "--every", "7d"]), "validation");
+    assert_eq!(
+        kind(&env, &["add", "Sweep lane", "--lane", "--every", "7d"]),
+        "validation"
+    );
+    assert_eq!(
+        kind(
+            &env,
+            &["add", "Later lane", "--lane", "--defer", "2099-01-01"]
+        ),
+        "validation"
+    );
+    let plain = id_of(env.json(&sci, &["add", "Plain"]));
+    env.json(&sci, &["edit", &plain, "--every", "7d"]);
+    assert_eq!(
+        kind(&env, &["edit", &plain, "--lane"]),
+        "validation",
+        "a recurrence cannot become a lane"
+    );
+
+    let check = env.check(&sci);
+    assert!(
+        check["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "childless_lane" && f["id"] == lane),
+        "{check}"
+    );
+    assert!(check["errors"].as_array().unwrap().is_empty(), "{check}");
+    env.json(&sci, &["add", "Step", "--parent", &lane]);
+    assert!(
+        !env.check(&sci)["warnings"]
+            .to_string()
+            .contains("childless_lane"),
+        "a lane with a step is not childless"
+    );
+
+    // A cadence written onto a lane by hand is a periodic goal.
+    let path = sci.join(format!("tasks/{lane}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("depends: []\n", "every: 7d\ndepends: []\n"),
+    )
+    .unwrap();
+    let out = env.cmd(&sci).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let check: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        check["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "periodic_goal" && f["id"] == lane),
+        "{check}"
+    );
+}
+
+#[test]
 fn lane_field_round_trips_through_add_edit_and_every_row() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

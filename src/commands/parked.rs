@@ -187,7 +187,10 @@ pub fn candidates(
         if park.waiting_on != WaitingOn::Agent
             || !task.status.is_open()
             || matches!(task.status, Status::Blocked | Status::Shelved)
-            || !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty()
+            || crate::hierarchy::is_goal(
+                task,
+                !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty(),
+            )
         {
             continue;
         }

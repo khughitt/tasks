@@ -192,8 +192,12 @@ pub fn ready_tasks(
                 ));
             }
         }
-        let has_children = !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty();
-        match readiness(task, has_children, &lookup, now) {
+        // A lane is a goal even before its first child exists.
+        let goal = crate::hierarchy::is_goal(
+            task,
+            !crate::hierarchy::children(all, &task.id, &ctx.registry).is_empty(),
+        );
+        match readiness(task, goal, &lookup, now) {
             Readiness::Ready => ready.push(task.clone()),
             Readiness::Deferred => deferred.push(task.clone()),
             Readiness::Not => {}
