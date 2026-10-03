@@ -1,6 +1,6 @@
 # A reading layout for pretty `show` — design
 
-**Status:** draft (2026-10-03), tasks-606552. Amends docs/specs/2026-09-03-color-output-design.md
+**Status:** approved (2026-10-03), tasks-606552. Amends docs/specs/2026-09-03-color-output-design.md
 §3 (`show`'s frontmatter values; the body and notes left plain),
 docs/specs/2026-09-25-date-recency-color-design.md §2.3 (`show` not painted) and
 docs/specs/2026-09-25-priority-color-design.md §2.1–§2.2 (`show` never queries).
@@ -242,7 +242,7 @@ with the 100-column cap applied in the show renderer.
   - an invalid `COLUMNS` (`0`, or not a positive integer) now fails a pretty `show` or
     `next` with the config error `list` gives, where it was ignored before.
 
-  JSON output computes no width and reads no theme, so neither exception reaches it.
+  JSON output computes no width and does not query the terminal theme (it still reads and validates `TASKS_THEME` and `TASKS_PALETTE`, as today), so neither exception reaches it.
 
 ## 7. Testing
 
