@@ -142,6 +142,39 @@ pub fn is_goal(task: &Task, has_children: bool) -> bool {
     has_children || task.lane
 }
 
+/// The nearest lane strictly above `task` in `all`, walking `parent` links. A visited set
+/// ends a corrupt loop, and a parent missing from `all` ends the walk.
+pub fn enclosing_lane<'a>(all: &'a [Task], task: &Task, registry: &Registry) -> Option<&'a Task> {
+    let mut seen = std::collections::HashSet::new();
+    let mut current = task
+        .parent
+        .as_ref()
+        .map(|parent| registry.canonical_id(parent));
+    while let Some(id) = current {
+        if !seen.insert(id.clone()) {
+            return None;
+        }
+        let ancestor = all.iter().find(|candidate| candidate.id == id)?;
+        if ancestor.lane {
+            return Some(ancestor);
+        }
+        current = ancestor
+            .parent
+            .as_ref()
+            .map(|parent| registry.canonical_id(parent));
+    }
+    None
+}
+
+/// The lane a row belongs to: the task itself when it is a lane, else its nearest lane
+/// ancestor. Computed from the scan, never stored.
+pub fn lane_of(all: &[Task], task: &Task, registry: &Registry) -> Option<TaskId> {
+    if task.lane {
+        return Some(registry.canonical_id(&task.id));
+    }
+    enclosing_lane(all, task, registry).map(|lane| lane.id.clone())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Shelved {
     Hidden,
@@ -334,6 +367,31 @@ mod tests {
             body: String::new(),
             notes: vec![],
         }
+    }
+
+    #[test]
+    fn lane_of_is_the_task_itself_or_its_nearest_lane_ancestor() {
+        let registry = Registry::default();
+        let mut lane = task("xx-000001", None, Status::Todo);
+        lane.lane = true;
+        let goal = task("xx-000002", Some("xx-000001"), Status::Todo);
+        let step = task("xx-000003", Some("xx-000002"), Status::Todo);
+        let loose = task("xx-000004", None, Status::Todo);
+        let all = [lane.clone(), goal, step.clone(), loose.clone()];
+        assert_eq!(lane_of(&all, &step, &registry), Some(lane.id.clone()));
+        assert_eq!(lane_of(&all, &lane, &registry), Some(lane.id.clone()));
+        assert!(
+            enclosing_lane(&all, &lane, &registry).is_none(),
+            "strictly above"
+        );
+        assert_eq!(lane_of(&all, &loose, &registry), None);
+        let a = task("xx-000005", Some("xx-000006"), Status::Todo);
+        let b = task("xx-000006", Some("xx-000005"), Status::Todo);
+        assert_eq!(
+            lane_of(&[a.clone(), b], &a, &registry),
+            None,
+            "a parent loop ends the walk"
+        );
     }
 
     #[test]

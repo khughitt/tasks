@@ -23617,3 +23617,53 @@ fn a_hold_removal_whose_record_write_fails_keeps_the_holds_lock_through_its_roll
     assert_eq!(env.read(&sci, &format!("tasks/{mine}.md")), record_before);
     assert!(env.json(&fam, &["show", &theirs])["claim"].is_null());
 }
+
+#[test]
+fn in_lane_names_the_nearest_lane_on_ready_next_show_and_parked_rows() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let lane = id_of(env.json(&sci, &["add", "Captures", "--lane", "-p", "1"]));
+    let sub = id_of(env.json(&sci, &["add", "Sub-goal", "--parent", &lane]));
+    let step = id_of(env.json(&sci, &["add", "Step", "--parent", &sub, "-p", "0"]));
+    let loose = id_of(env.json(&sci, &["add", "Loose", "-p", "1"]));
+    let row = |value: &serde_json::Value, id: &str| {
+        value["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .unwrap()
+            .clone()
+    };
+
+    let ready = env.json(&sci, &["ready"]);
+    assert_eq!(row(&ready, &step)["in_lane"], lane, "{ready}");
+    assert!(
+        row(&ready, &loose).get("in_lane").is_none(),
+        "sparse: {ready}"
+    );
+    let list = env.json(&sci, &["list"]);
+    assert_eq!(row(&list, &lane)["in_lane"], lane, "a lane names itself");
+    assert_eq!(row(&list, &sub)["in_lane"], lane);
+
+    let next = env.json(&sci, &["next"]);
+    assert_eq!(next["next"]["task"]["id"], step);
+    assert_eq!(next["next"]["in_lane"], lane, "{next}");
+    assert_eq!(env.json(&sci, &["show", &sub])["in_lane"], lane);
+    assert!(env.json(&sci, &["show", &loose]).get("in_lane").is_none());
+
+    as_agent(&env, &sci, "agent-a")
+        .args(["park", &step, "ask", "--waiting-on", "user"])
+        .assert()
+        .success();
+    let parked = env.json(&sci, &["list", "--parked"]);
+    assert_eq!(parked["tasks"][0]["in_lane"], lane, "{parked}");
+    assert_eq!(env.json(&sci, &["prime"])["parked"][0]["in_lane"], lane);
+
+    // Another project's lane, read across the registry, names its own lane.
+    let fam_lane = id_of(env.json(&fam, &["add", "Fam lane", "--lane"]));
+    let fam_step = id_of(env.json(&fam, &["add", "Fam step", "--parent", &fam_lane]));
+    let wide = env.json(&sci, &["ready", "--all-projects"]);
+    assert_eq!(row(&wide, &fam_step)["in_lane"], fam_lane, "{wide}");
+}

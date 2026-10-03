@@ -2,7 +2,7 @@ use std::io::IsTerminal;
 use unicode_width::UnicodeWidthChar;
 
 use crate::error::{Error, Result};
-use crate::model::{Complexity, Process, Size, Status, Task};
+use crate::model::{Complexity, Process, Size, Status, Task, TaskId};
 use crate::registry::Registry;
 use crate::style::{Painter, Style, When};
 use serde::Serialize;
@@ -149,6 +149,9 @@ pub struct ShowFields {
     pub depends_on: Vec<DepInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<Related>,
+    /// The nearest lane at or above the task; omitted when none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_lane: Option<TaskId>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Related>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -229,6 +232,10 @@ pub struct TaskSummary {
     pub depends: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// The nearest lane at or above this task: its own id when it is a lane. Computed
+    /// from the scan, never stored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_lane: Option<TaskId>,
     pub child_count: usize,
     pub open_descendant_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -428,6 +435,7 @@ impl TaskSummary {
             agent: task.agent.clone(),
             depends: task.depends.iter().map(ToString::to_string).collect(),
             parent: task.parent.as_ref().map(ToString::to_string),
+            in_lane: crate::hierarchy::lane_of(all, task, registry),
             child_count: crate::hierarchy::children(all, &task.id, registry).len(),
             open_descendant_count: crate::hierarchy::open_descendants(all, &task.id, registry)
                 .len(),
@@ -488,6 +496,8 @@ pub struct ParkedRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_lane: Option<TaskId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub child_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_descendant_count: Option<usize>,
@@ -527,6 +537,7 @@ impl ParkedRow {
             agent: summary.agent,
             depends: summary.depends,
             parent: summary.parent,
+            in_lane: summary.in_lane,
             child_count: Some(summary.child_count),
             open_descendant_count: Some(summary.open_descendant_count),
             claim: summary.claim,
@@ -559,6 +570,7 @@ impl ParkedRow {
             agent: None,
             depends: Vec::new(),
             parent: None,
+            in_lane: None,
             child_count: None,
             open_descendant_count: None,
             claim: None,
@@ -1969,6 +1981,7 @@ mod tests {
             agent: None,
             depends: vec![],
             parent: None,
+            in_lane: None,
             child_count: 0,
             open_descendant_count: 0,
             claim: None,

@@ -149,17 +149,14 @@ pub enum Readiness {
 }
 
 /// `lookup` returns Some(closed?) for a reachable dependency, None if unreachable.
-/// A task with children is a goal, not work, and is never ready.
+/// A goal (a task with children, or a lane) is not work, and is never ready.
 pub fn readiness(
     task: &Task,
-    has_children: bool,
+    goal: bool,
     lookup: &dyn Fn(&TaskId) -> Option<bool>,
     now: OffsetDateTime,
 ) -> Readiness {
-    if !is_candidate(task, now)
-        || has_children
-        || !task.depends.iter().all(|d| lookup(d) == Some(true))
-    {
+    if !is_candidate(task, now) || goal || !task.depends.iter().all(|d| lookup(d) == Some(true)) {
         Readiness::Not
     } else if is_actionable(task, now) {
         Readiness::Ready
