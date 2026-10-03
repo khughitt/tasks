@@ -35,8 +35,8 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// The three read scopes: the current project (neither flag), one named registered
-/// project, or every reachable one. `--project` opens the registered root through the
+/// The four read scopes: the current project (no flag), one named registered project,
+/// the members of a project group, or every reachable one. `--project` opens the registered root through the
 /// same path `add --project` uses, so a worktree of that prefix does not displace it.
 #[derive(Args, Debug)]
 pub struct ScopeArgs {
@@ -50,6 +50,14 @@ pub struct ScopeArgs {
     /// Every reachable registered project; needs no local project.
     #[arg(long)]
     pub all_projects: bool,
+    /// The members of this project group (`tasks groups`); needs no local project.
+    #[arg(
+        long,
+        value_name = "NAME",
+        conflicts_with_all = ["project", "all_projects"],
+        add = ArgValueCandidates::new(crate::complete::groups)
+    )]
+    pub group: Option<String>,
 }
 
 /// Selection over record fields, shared by `list` and `ready`. Repeats of one flag widen
@@ -730,9 +738,9 @@ pub enum Command {
     },
     /// The task hierarchy as nested nodes (open work only unless --all).
     Tree {
-        /// One forest per project in scope, so `--all-projects` and an id conflict.
+        /// One forest per project in scope, so a registry-wide scope and an id conflict.
         #[arg(
-            conflicts_with = "all_projects",
+            conflicts_with_all = ["all_projects", "group"],
             add = ArgValueCompleter::new(crate::complete::scoped)
         )]
         id: Option<String>,

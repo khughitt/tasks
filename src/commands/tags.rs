@@ -5,11 +5,12 @@ use crate::output::{Output, TagRow, TagsOut};
 use crate::scope::Scope;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The local project's entry, or the first registered project's under `--all-projects`.
+/// The local project's entry, or the first registered project's under a registry-wide
+/// scope.
 fn meaning_of(scope: &Scope, tag: &str) -> Option<String> {
     let projects: Vec<&crate::repo::Project> = match scope {
         Scope::Local(project) => vec![project],
-        Scope::All(projects) => projects.iter().collect(),
+        Scope::All { projects, .. } => projects.iter().collect(),
     };
     projects
         .into_iter()

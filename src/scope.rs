@@ -81,10 +81,18 @@ pub fn registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>>
     Ok(warnings)
 }
 
-/// What a read command looks at: one project, or every reachable registered project.
+/// What a read command looks at: one project, or a registry-wide read. The wide read can
+/// cover every registered project or the members of one group.
 pub enum Scope {
     Local(Project),
-    All(Vec<Project>),
+    /// `projects` are the reachable ones among `members`, opened. `members` is what was
+    /// asked for: every registered prefix under `--all-projects`, a group's members under
+    /// `--group`. Warnings about absent projects name `members` only.
+    All {
+        projects: Vec<Project>,
+        members: Vec<String>,
+        group: Option<String>,
+    },
 }
 
 impl Scope {
@@ -92,9 +100,31 @@ impl Scope {
     /// warnings the walk produced. Never locates a local project; the only look at `cwd`
     /// is to warn when it lies inside a project the registry does not know.
     pub fn open_all(registry: &Registry, cwd: &Path) -> Result<(Scope, Vec<String>)> {
+        let members = registry.projects.keys().cloned().collect();
+        Self::open_members(registry, cwd, members, None)
+    }
+
+    /// `--group <name>`: the group's members, walked as `open_all` walks the registry.
+    /// A member that is unreachable is a warning, as it is under `--all-projects`. An
+    /// undeclared name is `unknown_group`.
+    pub fn open_group(registry: &Registry, cwd: &Path, name: &str) -> Result<(Scope, Vec<String>)> {
+        let members = registry.group(name)?.to_vec();
+        Self::open_members(registry, cwd, members, Some(name.to_string()))
+    }
+
+    fn open_members(
+        registry: &Registry,
+        cwd: &Path,
+        members: Vec<String>,
+        group: Option<String>,
+    ) -> Result<(Scope, Vec<String>)> {
         let mut warnings = registry_warnings(registry, cwd)?;
         let mut projects = Vec::new();
-        for (prefix, root) in &registry.projects {
+        for (prefix, root) in registry
+            .projects
+            .iter()
+            .filter(|(prefix, _)| members.contains(prefix))
+        {
             if !is_reachable(root)? {
                 warnings.push(format!(
                     "project {prefix} at {} is unreachable",
@@ -104,13 +134,28 @@ impl Scope {
             }
             projects.push(open_registered(registry, prefix, Origin::Prefix)?);
         }
-        Ok((Scope::All(projects), warnings))
+        Ok((
+            Scope::All {
+                projects,
+                members,
+                group,
+            },
+            warnings,
+        ))
     }
 
     pub fn projects(&self) -> &[Project] {
         match self {
             Scope::Local(project) => std::slice::from_ref(project),
-            Scope::All(projects) => projects,
+            Scope::All { projects, .. } => projects,
+        }
+    }
+
+    /// The group named on the command line, under `--group`.
+    pub fn group(&self) -> Option<&str> {
+        match self {
+            Scope::All { group, .. } => group.as_deref(),
+            Scope::Local(_) => None,
         }
     }
 
@@ -286,5 +331,34 @@ mod tests {
             warnings,
             ["registry is empty", "current project lon is not registered"]
         );
+    }
+
+    #[test]
+    fn open_group_opens_and_warns_about_members_only() {
+        let sci = tempfile::tempdir().unwrap();
+        write_config(sci.path(), "sci");
+        let gone = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let mut registry = registry_with("sci", sci.path());
+        registry.register("fam", gone.path()).unwrap();
+        registry.register("ops", other.path()).unwrap();
+        registry
+            .set_group("vf", &["sci".into(), "fam".into()])
+            .unwrap();
+        let (scope, warnings) = Scope::open_group(&registry, sci.path(), "vf").unwrap();
+        assert_eq!(scope.prefixes(), ["sci"]);
+        assert_eq!(scope.group(), Some("vf"));
+        assert_eq!(
+            warnings.len(),
+            1,
+            "ops is unreachable but not asked for: {warnings:?}"
+        );
+        assert!(warnings[0].starts_with("project fam at "), "{warnings:?}");
+        assert!(matches!(
+            Scope::open_group(&registry, sci.path(), "nope"),
+            Err(Error::UnknownGroup(_))
+        ));
+        let (all, _) = Scope::open_all(&registry, sci.path()).unwrap();
+        assert_eq!(all.group(), None);
     }
 }

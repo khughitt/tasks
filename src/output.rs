@@ -833,8 +833,11 @@ pub struct DeferredSummary {
 
 #[derive(Serialize)]
 pub struct PrimeOut {
-    /// The local project; null under --all-projects.
+    /// The local project; null under --all-projects and --group.
     pub prefix: Option<String>,
+    /// The group under --group; absent otherwise. `prefix` is then null.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     /// Every prefix in scope; one entry locally.
     pub projects: Vec<String>,
     pub counts: Counts,
@@ -1091,9 +1094,10 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                     .chain(o.parked.iter().map(|row| row.id.as_str())),
             )
             .max(id_width_tree(&o.roadmap));
-            let header = match &o.prefix {
-                Some(prefix) => format!("project {prefix}"),
-                None => format!("projects {}", o.projects.join(", ")),
+            let header = match (&o.prefix, &o.group) {
+                (Some(prefix), _) => format!("project {prefix}"),
+                (None, Some(group)) => format!("group {group}: projects {}", o.projects.join(", ")),
+                (None, None) => format!("projects {}", o.projects.join(", ")),
             };
             // One row, so labels stay beside their values instead of over them - but the
             // columns and their colors are the same definition `projects` renders.

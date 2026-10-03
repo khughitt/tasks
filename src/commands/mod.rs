@@ -720,14 +720,14 @@ pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()>
 /// `open_registered` is the same call `show` makes, so a prefix naming no project gives
 /// `show`'s error rather than a misleading `task_not_found`.
 ///
-/// An explicit `--project` or `--all-projects` is the caller naming the scope and wins
-/// over the prefix.
+/// An explicit `--project`, `--group` or `--all-projects` is the caller naming the scope
+/// and wins over the prefix.
 pub fn open_id_read_ctx(
     dir: Option<&Path>,
     scope: &ScopeArgs,
     id: Option<&str>,
 ) -> Result<ReadCtx> {
-    if scope.project.is_some() || scope.all_projects {
+    if scope.project.is_some() || scope.all_projects || scope.group.is_some() {
         return open_read_ctx(dir, scope);
     }
     let Some(id) = id else {
@@ -778,16 +778,20 @@ pub fn start_dir(dir: Option<&Path>) -> Result<PathBuf> {
 }
 
 /// Read commands: the local project, one named registered project, or with
-/// `all_projects` every reachable one. Both flags skip the local lookup entirely
+/// `all_projects` every reachable one, or with `group` the reachable members of that
+/// group. All three flags skip the local lookup entirely
 /// (spec §3.2), so either works from a directory inside no project at all. A named
 /// project is a `Local` scope like any other, so every command's output is what it
 /// would be run inside that project's registered root — a worktree sharing the prefix
 /// does not displace it, matching `add --project`.
 pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
     let start = start_dir(dir)?;
-    if scope.all_projects {
+    if scope.all_projects || scope.group.is_some() {
         let registry = Registry::load()?;
-        let (scope, warnings) = Scope::open_all(&registry, &start)?;
+        let (scope, warnings) = match &scope.group {
+            Some(name) => Scope::open_group(&registry, &start, name)?,
+            None => Scope::open_all(&registry, &start)?,
+        };
         return Ok(ReadCtx {
             scope,
             registry,
@@ -1793,6 +1797,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             let scope = ScopeArgs {
                 all_projects: project.is_none(),
                 project,
+                group: None,
             };
             quiet::run(open_read_ctx(dir, &scope)?, limit)
         }

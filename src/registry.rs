@@ -356,6 +356,14 @@ impl Registry {
         self.groups.remove(name).ok_or_else(|| unknown_group(name))
     }
 
+    /// The members of group `name`, or `unknown_group` for a name not declared here.
+    pub fn group(&self, name: &str) -> Result<&[String]> {
+        self.groups
+            .get(name)
+            .map(Vec::as_slice)
+            .ok_or_else(|| unknown_group(name))
+    }
+
     /// `init` and `register` never claim a group's name as a prefix.
     fn refuse_group_name(&self, prefix: &str) -> Result<()> {
         if self.groups.contains_key(prefix) {

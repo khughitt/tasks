@@ -273,9 +273,10 @@ pub(super) fn halt_snapshots(ctx: &mut ReadCtx, all: &[Task]) -> HashMap<String,
             )),
         }
     }
-    if matches!(ctx.scope, Scope::All(_)) {
+    // Only what the scope asked for: under --group a non-member's checkout is no gap.
+    if let Scope::All { members, .. } = &ctx.scope {
         let scoped = ctx.scope.prefixes();
-        for prefix in ctx.registry.projects.keys() {
+        for prefix in members {
             if !scoped.contains(prefix) {
                 ctx.warnings.push(format!(
                     "{prefix}: halt state unknown (registered checkout unreachable)"
@@ -736,7 +737,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
     ctx.warnings.extend(held);
     // The same builder as `tasks lanes`, under this session's cutoff and `--without`.
     let lanes = super::lanes::rows(&mut ctx, &all, &claims, &snapshots, cutoff, &without, now)?;
-    let wide = matches!(ctx.scope, Scope::All(_));
+    let wide = matches!(ctx.scope, Scope::All { .. });
     for project in ctx.scope.projects() {
         if let Some(files) = project.uncommitted_task_files()?
             && !files.is_empty()
@@ -771,8 +772,9 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
     Ok(Output::Prime(Box::new(PrimeOut {
         prefix: match &ctx.scope {
             Scope::Local(project) => Some(project.prefix.clone()),
-            Scope::All(_) => None,
+            Scope::All { .. } => None,
         },
+        group: ctx.scope.group().map(str::to_string),
         projects: ctx.scope.prefixes(),
         counts,
         periodic,
@@ -818,7 +820,11 @@ mod tests {
         let mut registry = crate::registry::Registry::default();
         registry.register("sci", &project.root).unwrap();
         let ctx = ReadCtx {
-            scope: Scope::All(vec![]),
+            scope: Scope::All {
+                projects: vec![],
+                members: vec![],
+                group: None,
+            },
             registry,
             warnings: vec![],
             shorthand: crate::shorthand::Shorthand::new(dir.path().to_path_buf()),

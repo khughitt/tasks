@@ -24932,3 +24932,168 @@ fn rename_explain_and_execution_both_refuse_a_group_named_target() {
         "resume_files"
     );
 }
+
+/// Three registered projects; group `vf` holds the first two.
+fn grouped_projects(
+    env: &mut TestEnv,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let ops = env.init("ops");
+    env.json(&sci, &["group", "set", "vf", "sci", "fam"]);
+    (sci, fam, ops)
+}
+
+#[test]
+fn group_scopes_the_read_views_to_its_members() {
+    let mut env = TestEnv::new();
+    let (sci, fam, ops) = grouped_projects(&mut env);
+    let s = id_of(env.json(&sci, &["add", "S", "-p", "1"]));
+    let f = id_of(env.json(&fam, &["add", "F", "-p", "2"]));
+    let o = id_of(env.json(&ops, &["add", "O", "-p", "0", "--tag", "only-ops"]));
+    let nowhere = tempfile::tempdir().unwrap();
+
+    let ready = env.json(nowhere.path(), &["ready", "--group", "vf"]);
+    let ids: Vec<&str> = ready["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [s.as_str(), f.as_str()]);
+    assert_eq!(
+        env.json(nowhere.path(), &["next", "--group", "vf"])["next"]["task"]["id"],
+        s,
+        "ops's P0 is outside the group"
+    );
+
+    let prime = env.json(nowhere.path(), &["prime", "--group", "vf"]);
+    assert_eq!(prime["group"], "vf");
+    assert_eq!(prime["prefix"], serde_json::Value::Null);
+    assert_eq!(prime["projects"], serde_json::json!(["fam", "sci"]));
+    assert!(!prime["ready"].to_string().contains(&o), "{prime}");
+    assert!(
+        env.json(nowhere.path(), &["prime", "--all-projects"])
+            .get("group")
+            .is_none()
+    );
+    assert!(env.json(&sci, &["prime"]).get("group").is_none());
+    let text = env.pretty(nowhere.path(), &["prime", "--group", "vf"]);
+    assert!(text.starts_with("group vf: projects fam, sci\n"), "{text}");
+
+    let tree = env.json(nowhere.path(), &["tree", "--group", "vf"]);
+    assert_eq!(tree["nodes"].as_array().unwrap().len(), 2, "{tree}");
+    for command in ["list", "sample", "tree"] {
+        let out = env.json(nowhere.path(), &[command, "--group", "vf"]);
+        assert!(!out.to_string().contains(&o), "{command}: {out}");
+    }
+    let tags = env.json(nowhere.path(), &["tags", "--group", "vf"]);
+    assert!(!tags.to_string().contains("only-ops"), "{tags}");
+
+    // `lanes` flattens the same scope arguments.
+    let lane = id_of(env.json(&ops, &["add", "Ops effort", "--lane"]));
+    assert_eq!(
+        env.json(nowhere.path(), &["lanes", "--group", "vf"])["lanes"],
+        serde_json::json!([])
+    );
+    assert!(
+        env.json(nowhere.path(), &["lanes", "--all-projects"])["lanes"]
+            .to_string()
+            .contains(&lane)
+    );
+}
+
+#[test]
+fn group_conflicts_with_the_other_scopes_and_an_unknown_name_is_unknown_group() {
+    let mut env = TestEnv::new();
+    let (sci, _, _) = grouped_projects(&mut env);
+    for command in [
+        "list", "ready", "next", "prime", "tree", "tags", "sample", "lanes",
+    ] {
+        env.usage(&sci, &[command, "--group", "vf", "--project", "sci"]);
+        env.usage(&sci, &[command, "--group", "vf", "--all-projects"]);
+        assert_eq!(
+            env.fail(&sci, &[command, "--group", "nope"]),
+            "unknown_group",
+            "{command}"
+        );
+    }
+    let id = id_of(env.json(&sci, &["add", "Goal"]));
+    env.usage(&sci, &["tree", id.as_str(), "--group", "vf"]);
+}
+
+#[test]
+fn a_group_whose_members_are_all_unreachable_warns_and_reads_empty() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    env.json(&sci, &["add", "S"]);
+    env.json(&sci, &["group", "set", "away", "fam"]);
+    std::fs::remove_file(fam.join("tasks/.config.toml")).unwrap();
+    let nowhere = tempfile::tempdir().unwrap();
+    for command in [
+        "list", "ready", "next", "prime", "tree", "tags", "sample", "lanes",
+    ] {
+        let out = env.json(nowhere.path(), &[command, "--group", "away"]);
+        let warnings = warnings_of(&out);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.starts_with("project fam at ") && w.ends_with(" is unreachable")),
+            "{command}: {warnings:?}"
+        );
+        assert!(
+            !warnings
+                .iter()
+                .any(|w| w.starts_with("sci") || w.contains("project sci ")),
+            "{command}: {warnings:?}"
+        );
+    }
+    assert_eq!(
+        env.json(nowhere.path(), &["ready", "--group", "away"])["tasks"],
+        serde_json::json!([])
+    );
+    assert!(env.json(nowhere.path(), &["next", "--group", "away"])["next"].is_null());
+    let prime = env.json(nowhere.path(), &["prime", "--group", "away"]);
+    assert_eq!(prime["projects"], serde_json::json!([]));
+    assert!(
+        warnings_of(&prime)
+            .iter()
+            .any(|w| w == "fam: halt state unknown (registered checkout unreachable)"),
+        "{prime}"
+    );
+}
+
+#[test]
+fn group_halt_views_filter_members_and_warn_only_about_members() {
+    let mut env = TestEnv::new();
+    let (sci, fam, ops) = grouped_projects(&mut env);
+    let sci_task = id_of(env.json(&sci, &["add", "Sci work", "-p", "2"]));
+    let fam_task = id_of(env.json(&fam, &["add", "Fam work", "-p", "2"]));
+    let halt = id_of(env.json(&sci, &["add", "Incident", "-p", "0", "--tag", "halt"]));
+    env.json(&sci, &["shelve", &halt, "pending"]);
+    std::fs::remove_file(ops.join("tasks/.config.toml")).unwrap();
+    let about_ops = |w: &String| w.starts_with("ops:") || w.starts_with("project ops ");
+    for command in ["ready", "prime", "next"] {
+        let output = env.json(&fam, &[command, "--group", "vf"]);
+        assert_eq!(output["halts"][0]["id"], halt, "{output}");
+        let rows = match command {
+            "prime" => &output["ready"],
+            "ready" => &output["tasks"],
+            _ => &output["next"],
+        };
+        assert!(rows.to_string().contains(&fam_task), "{output}");
+        assert!(!rows.to_string().contains(&sci_task), "{output}");
+        assert!(
+            !warnings_of(&output).iter().any(about_ops),
+            "{command}: {output}"
+        );
+        let wide = env.json(&fam, &[command, "--all-projects"]);
+        assert!(
+            warnings_of(&wide)
+                .iter()
+                .any(|w| w == "ops: halt state unknown (registered checkout unreachable)"),
+            "{command}: {wide}"
+        );
+    }
+}

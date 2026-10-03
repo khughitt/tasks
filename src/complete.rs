@@ -235,6 +235,7 @@ pub struct Line {
     pub project: Option<String>,
     pub subject: Option<TaskId>,
     pub all_projects: bool,
+    pub group: Option<String>,
 }
 
 /// The user's command line, from this process's own argv.
@@ -392,6 +393,11 @@ fn record(line: &mut Line, arg: &clap::Arg, values: &[&str]) {
                 line.project = Some((*value).to_string());
             }
         }
+        "group" => {
+            if let Some(value) = values.last() {
+                line.group = Some((*value).to_string());
+            }
+        }
         "all_projects" => line.all_projects = true,
         _ => {}
     }
@@ -542,10 +548,10 @@ fn destination(registry: &Registry, line: &Line) -> Option<Project> {
 }
 
 /// `tree <id>` and `list --parent`: the scope the command itself scans, which
-/// `--all-projects` widens to the registry (`list.rs` validates the parent against it)
-/// and `--project` moves to one registered root. The three arms mirror
-/// `open_read_ctx`; unlike `destination`, a named project wins over a worktree of the
-/// same prefix, because the read scope is the registered root.
+/// `--all-projects` widens to the registry (`list.rs` validates the parent against it),
+/// `--group` narrows it to the group's members, and `--project` moves to one registered
+/// root. The three arms mirror `open_read_ctx`; unlike `destination`, a named project
+/// wins over a worktree of the same prefix, because the read scope is the registered root.
 pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(current) = current.to_str() else {
         return Vec::new();
@@ -553,8 +559,13 @@ pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
     let line = line();
     let registry = Registry::load().unwrap_or_default();
     let mut tasks = Vec::new();
-    if line.all_projects {
-        for prefix in registry.projects.keys() {
+    if line.all_projects || line.group.is_some() {
+        // Best effort, like every completion: an undeclared group offers nothing.
+        let members: Vec<String> = match &line.group {
+            Some(name) => registry.groups.get(name).cloned().unwrap_or_default(),
+            None => registry.projects.keys().cloned().collect(),
+        };
+        for prefix in &members {
             if let Some(project) = open_prefix(&registry, prefix) {
                 tasks.extend(project.scan_lenient().0);
             }
@@ -795,6 +806,13 @@ mod tests {
         let line = walked(&["tasks", "list", "--all-projects", "--parent", ""], 4);
         assert!(line.all_projects);
         assert!(!walked(&["tasks", "list", "--parent", ""], 3).all_projects);
+    }
+
+    #[test]
+    fn group_is_recorded() {
+        let line = walked(&["tasks", "list", "--group", "vf", "--parent", ""], 5);
+        assert_eq!(line.group.as_deref(), Some("vf"));
+        assert_eq!(walked(&["tasks", "list", "--parent", ""], 3).group, None);
     }
 
     #[test]
