@@ -14169,8 +14169,10 @@ fn rename_explain_never_creates_locks_or_inventory_and_skips_authorization() {
     let registry_path = env.home.path().join(".config/tasks/projects.toml");
     let registry = std::fs::read(&registry_path).unwrap();
     let config = std::fs::read(dir.join("tasks/.config.toml")).unwrap();
-    // init creates only the registry lock; remove it so explain must prove no lock creation.
+    // init creates the registry lock and, taking the project lock first, the state
+    // directory with dot's lock; remove both so explain must prove no lock creation.
     std::fs::remove_file(registry_path.with_file_name("projects.lock")).unwrap();
+    std::fs::remove_dir_all(env.home.path().join(".local/state/tasks")).unwrap();
     let value = env.json(&dir, &["rename", "dot", "dots", "--explain"]);
     assert_eq!(value["recovery"], "fresh");
     assert!(!registry_path.with_file_name("projects.lock").exists());
@@ -25458,4 +25460,55 @@ fn retired_write_editor_save_is_refused_after_retirement_lands() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("retired_project"));
     let record = std::fs::read_to_string(old.join(format!("tasks/{id}.md"))).unwrap();
     assert!(!record.contains("title: changed"));
+}
+
+#[test]
+fn retired_lock_init_waits_for_the_project_lock() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let held = hold_project_lock(&env, "old");
+    let mut command = env.raw(&old);
+    command
+        .args(["init", "--prefix", "old", "--force"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    let finished_early = wait_bounded(&mut child, Duration::from_millis(500));
+    drop(held);
+    let out = reap(child, REAP);
+    assert!(
+        !finished_early,
+        "init --force must wait for the project lock"
+    );
+    assert!(out.expect("reaped").status.success());
+}
+
+#[test]
+fn retired_lock_init_force_and_rename_refuse() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    declare_retired(&old, None);
+    assert_eq!(
+        env.fail(&old, &["init", "--prefix", "old", "--force"]),
+        "retired_project"
+    );
+    // Re-pointing the prefix at a fresh root is refused while the registered one is retired.
+    let elsewhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.fail(elsewhere.path(), &["init", "--prefix", "old", "--force"]),
+        "retired_project"
+    );
+    assert_eq!(
+        env.fail(&old, &["rename", "old", "older"]),
+        "retired_project"
+    );
+}
+
+#[test]
+fn retired_lock_unregister_still_works() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    declare_retired(&old, None);
+    let here = env.init("here");
+    env.json(&here, &["unregister", "old"]);
 }

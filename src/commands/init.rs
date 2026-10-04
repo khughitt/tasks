@@ -16,6 +16,9 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
         Some(prefix) => prefix,
         None => default_prefix(&root)?,
     };
+    // Lock order (retired-projects plan): the project lock, then the registry lock, as
+    // rename takes them. `init --force` repoints the root `retire` and every writer consult.
+    let _project_lock = crate::claims::MutationLock::acquire(&prefix)?;
     let _lock = Registry::lock()?;
     let mut registry = Registry::load()?;
     for inventory in crate::rename::inventory::Inventory::pending()? {
@@ -29,6 +32,9 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
     super::reject_pending_rename_at(Some(&root), &prefix)?;
     // The registry is only mutated in memory here: `save` runs after `Project::init`, so
     // an init that fails leaves the registry exactly as it was.
+    if force {
+        reject_repointing_a_retired_project(&registry, &prefix, &root)?;
+    }
     let displaced = if force {
         registry.repoint(&prefix, &root)?
     } else {
@@ -87,4 +93,33 @@ fn skill_installed(root: &Path) -> bool {
         candidates.push(home.join(".agents").join(SKILL_REL));
     }
     candidates.iter().any(|path| path.is_file())
+}
+
+/// `init --force` moves the authority that `retire` and every writer consult, so it is
+/// not done for a retired project: refused when the new root's config declares
+/// `[retired]`, or when the currently registered root opens and declares it. An old root
+/// that does not open does not block: repointing away from a moved or broken checkout is
+/// what `--force` is for, and the new root is read either way.
+fn reject_repointing_a_retired_project(
+    registry: &Registry,
+    prefix: &str,
+    root: &Path,
+) -> Result<()> {
+    let refuse = |where_: &Path| {
+        Err(Error::RetiredProject(format!(
+            "{prefix} is retired (declared in {}); run `tasks unretire` there before re-pointing it",
+            where_.display()
+        )))
+    };
+    if root.join(crate::repo::CONFIG_REL).exists() && Project::open(root)?.retired.is_some() {
+        return refuse(root);
+    }
+    if let Some(current) = registry.project_root(prefix)
+        && current != root
+        && let Ok(project) = Project::open(current)
+        && project.retired.is_some()
+    {
+        return refuse(current);
+    }
+    Ok(())
 }
