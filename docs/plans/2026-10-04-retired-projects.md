@@ -21,6 +21,8 @@
 - `--all-projects` and `--group` reads skip a retired project silently. Single-project reads add the warning `<prefix> is retired (<date>)` plus `; successor <s>` when stored.
 - Internal naming: the rename feature already owns "retired prefix" (`Registry.aliases`, check kind `retired_prefix`). Name the new type `Retirement` and the field `Project.retired`; never reuse rename's alias vocabulary for it.
 - Do not bump the crate version; host evidence is the install source commit (spec §9).
+- `just test-one` takes one Cargo filter. Every new test's name starts with its task's marker (`retired_table_`, `retired_write_`, `retired_lock_`, `retire_cmd_`, `retired_read_`), so one filter runs a task's tests.
+- A failure to read a retirement declaration never means "active": the error propagates, and the write it guards does not happen.
 
 ## Lock acquisition order
 
@@ -42,9 +44,10 @@ Every command that takes more than one lock takes them in this order, and no com
 
 1. A worktree created before `retire`, whose own config has no `[retired]`, attempting writes → refused (Task 2 tests every write command from such a worktree).
 2. An open task that exists only in a linked worktree, with no claim → `retire` refused naming the task and that checkout (Task 4).
-3. A writer and `retire` racing → either the write lands and `retire` sees it and refuses, or `retire` lands and the write is refused; never a written open task in a retired project (Task 4 concurrent test).
+3. A writer and `retire` racing → either the write lands and `retire` sees it and refuses, or `retire` lands and the write is refused; never a written open task in a retired project (Task 4: one test per order, each with a single child behind the test's lock, plus `retire` waiting for the lock).
 4. A stored successor that is unregistered on this host, or itself retired → every read still works and shows the string (Task 1 and Task 5 tests).
 5. `edit` with no flags (the `$EDITOR` path) drops and re-takes the lock → refused at the re-take if retirement landed meanwhile (Task 2 test with a scripted editor).
+6. A registered checkout whose config is unparsable or names another prefix → a worktree write is refused with `config` and changes nothing; `retire` given an invalid reason writes nothing (Task 2, Task 4).
 
 ---
 
@@ -53,7 +56,7 @@ Every command that takes more than one lock takes them in this order, and no com
 **Files:**
 - Modify: `src/repo.rs` (`Config` :106-123, a new `RetiredConfig`, a validator beside `feedback_scope` :183-194, `Project` :68-89, `Project::open` :259-288)
 - Modify: `src/commands/check.rs` (per-task loop from :64)
-- Test: unit tests in `src/repo.rs`'s `#[cfg(test)]` module; `tests/cli.rs`
+- Test: unit tests in `src/repo.rs`'s `#[cfg(test)]` module (named `retired_table_*`, so one filter runs them with the CLI tests); `tests/cli.rs`
 
 **Interfaces:**
 - Produces: `pub struct Retirement { pub date: String, pub successor: Option<String>, pub reason: String }` (derive `Clone, Debug, PartialEq, serde::Serialize`); `Project.retired: Option<Retirement>`. Warning text is Task 5's.
@@ -64,7 +67,7 @@ In `src/repo.rs` tests:
 
 ```rust
 #[test]
-fn a_retired_table_is_read_with_and_without_a_successor() {
+fn retired_table_is_read_with_and_without_a_successor() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
     std::fs::write(
@@ -86,11 +89,12 @@ fn a_retired_table_is_read_with_and_without_a_successor() {
 }
 
 #[test]
-fn a_bad_retired_table_is_a_config_error() {
+fn retired_table_bad_is_a_config_error() {
     for body in [
         "[retired]\nreason = \"r\"\n",                                  // no date
         "[retired]\ndate = \"2026-10-04\"\n",                           // no reason
         "[retired]\ndate = \"04/10/2026\"\nreason = \"r\"\n",           // not ISO
+        "[retired]\ndate = \"2026-02-30\"\nreason = \"r\"\n",           // no such day
         "[retired]\ndate = \"2026-10-04\"\nreason = \"two\\nlines\"\n", // control char
         "[retired]\ndate = \"2026-10-04\"\nreason = \"  \"\n",          // blank
         "[retired]\ndate = \"2026-10-04\"\nreason = \"r\"\nextra = 1\n",// unknown key
@@ -109,7 +113,7 @@ In `tests/cli.rs`:
 
 ```rust
 #[test]
-fn check_reports_an_open_task_in_a_retired_project_as_an_error() {
+fn retired_table_check_reports_an_open_task() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     env.json(&old, &["add", "T", "-p", "2"]);
@@ -125,7 +129,7 @@ fn check_reports_an_open_task_in_a_retired_project_as_an_error() {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `just test-one a_retired_table a_bad_retired_table check_reports_an_open_task_in_a_retired`
+Run: `just test-one retired_table_`
 Expected: compile error, `Retirement` not found.
 
 - [ ] **Step 3: Implement**
@@ -154,28 +158,50 @@ pub struct Retirement {
 
 /// The project's own retirement declaration (ops lifecycle spec §3). The successor is
 /// checked for prefix grammar only: whether it is registered is `tasks retire`'s question,
-/// asked once, so a host without the successor still reads the table.
+/// asked once, so a host without the successor still reads the table. `tasks retire`
+/// calls this too, before it writes, so it never writes a table the next command would
+/// refuse to read.
+pub fn validate_retirement(r: &Retirement) -> Result<()> {
+    let bad = |what: String| Err(Error::Config(format!("{CONFIG_REL}: [retired] {what}")));
+    if !is_iso_date(&r.date) {
+        return bad("date must be YYYY-MM-DD".into());
+    }
+    if r.reason.chars().any(char::is_control) || r.reason.chars().all(char::is_whitespace) {
+        return bad("reason must be one line of text with no control characters".into());
+    }
+    if let Some(successor) = &r.successor {
+        if !is_valid_prefix(successor) {
+            return bad(format!("successor {successor:?} is not a prefix"));
+        }
+    }
+    Ok(())
+}
+
+/// `YYYY-MM-DD` naming a real calendar day, with the `time` crate the project already uses.
+fn is_iso_date(text: &str) -> bool {
+    let b = text.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let (Ok(y), Ok(m), Ok(d)) =
+        (text[0..4].parse::<i32>(), text[5..7].parse::<u8>(), text[8..10].parse::<u8>())
+    else {
+        return false;
+    };
+    time::Month::try_from(m).is_ok_and(|m| time::Date::from_calendar_date(y, m, d).is_ok())
+}
+
 fn retirement(raw: Option<RetiredConfig>) -> Result<Option<Retirement>> {
     let Some(table) = raw else {
         return Ok(None);
     };
-    let bad = |what: &str| Err(Error::Config(format!("{CONFIG_REL}: [retired] {what}")));
-    if chrono::NaiveDate::parse_from_str(&table.date, "%Y-%m-%d").is_err() || table.date.len() != 10 {
-        return bad("date must be YYYY-MM-DD");
-    }
-    if table.reason.chars().any(char::is_control) || table.reason.chars().all(char::is_whitespace) {
-        return bad("reason must be one line of text with no control characters");
-    }
-    if let Some(successor) = &table.successor {
-        if !is_valid_prefix(successor) {
-            return bad(&format!("successor {successor:?} is not a prefix"));
-        }
-    }
-    Ok(Some(Retirement { date: table.date, successor: table.successor, reason: table.reason }))
+    let r = Retirement { date: table.date, successor: table.successor, reason: table.reason };
+    validate_retirement(&r)?;
+    Ok(Some(r))
 }
 ```
 
-Use whichever date crate `src/` already depends on (check `Cargo.toml`; the `defer` parser parses `YYYY-MM-DD` — reuse its function rather than adding chrono if chrono is absent). Add `pub retired: Option<Retirement>` to `Project` and `retired: retirement(config.retired)?,` in `Project::open`. Every other `Project { .. }` literal (grep `Project {`) gets `retired: None`.
+If `src/` already has a `YYYY-MM-DD` validator (the `defer` parser), use it in place of `is_iso_date`. Add `pub retired: Option<Retirement>` to `Project` and `retired: retirement(config.retired)?,` in `Project::open`. Every other `Project { .. }` literal (grep `Project {`) gets `retired: None`.
 
 In `check.rs`, inside the per-task loop:
 
@@ -190,7 +216,7 @@ if ctx.project.retired.is_some() && task.status.is_open() {
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `just test-one a_retired_table a_bad_retired_table check_reports_an_open_task_in_a_retired`
+Run: `just test-one retired_table_`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -243,7 +269,7 @@ const WRITES: &[&[&str]] = &[
 ];
 
 #[test]
-fn every_write_is_refused_in_a_retired_project_from_the_registered_checkout() {
+fn retired_write_every_command_is_refused_in_the_registered_checkout() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
@@ -257,7 +283,7 @@ fn every_write_is_refused_in_a_retired_project_from_the_registered_checkout() {
 }
 
 #[test]
-fn a_worktree_made_before_retirement_cannot_write() {
+fn retired_write_a_worktree_made_before_retirement_cannot_write() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree_as(&mut env, "old");
     declare_retired(&main, None); // only the registered checkout knows
@@ -268,7 +294,36 @@ fn a_worktree_made_before_retirement_cannot_write() {
 }
 
 #[test]
-fn a_worktree_that_declares_retirement_refuses_even_if_main_does_not() {
+fn retired_write_attach_and_detach_are_refused() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    let file = old.join("shot.txt");
+    std::fs::write(&file, "x").unwrap();
+    env.json(&old, &["attach", &id, file.to_str().unwrap()]);
+    declare_retired(&old, None);
+    assert_eq!(env.fail(&old, &["attach", &id, file.to_str().unwrap()]), "retired_project");
+    assert_eq!(env.fail(&old, &["detach", &id, "shot.txt", "why"]), "retired_project");
+}
+
+#[test]
+fn retired_write_an_unreadable_registered_checkout_refuses_a_worktree_write() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree_as(&mut env, "old");
+    let config = main.join("tasks/.config.toml");
+    let good = std::fs::read(&config).unwrap();
+    let before = std::fs::read(side.join(format!("tasks/{id}.md"))).unwrap();
+    for broken in [&b"prefix = \"old\"\n[retired]\nreason = 3\n"[..], &b"prefix = \"other\"\n"[..]] {
+        std::fs::write(&config, broken).unwrap();
+        assert_eq!(env.fail(&side, &["note", &id, "x"]), "config");
+        assert_eq!(std::fs::read(side.join(format!("tasks/{id}.md"))).unwrap(), before);
+    }
+    std::fs::write(&config, &good).unwrap();
+    env.json(&side, &["note", &id, "x"]);
+}
+
+#[test]
+fn retired_write_a_worktree_that_declares_it_refuses() {
     let mut env = TestEnv::new();
     let (_main, side, _id) = repo_with_worktree_as(&mut env, "old");
     declare_retired(&side, None);
@@ -276,7 +331,7 @@ fn a_worktree_that_declares_retirement_refuses_even_if_main_does_not() {
 }
 
 #[test]
-fn feedback_into_a_retired_project_is_refused() {
+fn retired_write_feedback_is_refused() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let config = old.join("tasks/.config.toml");
@@ -291,7 +346,7 @@ fn feedback_into_a_retired_project_is_refused() {
 }
 
 #[test]
-fn the_refusal_names_the_successor_and_the_way_back() {
+fn retired_write_refusal_names_the_successor_and_the_way_back() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     declare_retired(&old, Some("new"));
@@ -302,7 +357,7 @@ fn the_refusal_names_the_successor_and_the_way_back() {
 }
 
 #[test]
-fn an_editor_save_is_refused_when_retirement_landed_while_it_was_open() {
+fn retired_write_editor_save_is_refused_after_retirement_lands() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
@@ -327,7 +382,7 @@ the state that command expects before declaring retirement, so the test reaches 
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `just test-one every_write_is_refused a_worktree_made_before a_worktree_that_declares feedback_into_a_retired the_refusal_names an_editor_save_is_refused`
+Run: `just test-one retired_write_`
 Expected: FAIL — writes succeed.
 
 - [ ] **Step 3: Implement**
@@ -346,24 +401,44 @@ Expected: FAIL — writes succeed.
 ```rust
 /// A retired project takes no writes (ops lifecycle spec §4). The registered checkout is
 /// the authority, but a worktree made before the retirement has no `[retired]` of its own
-/// until a merge, so either declaring it is enough.
+/// until a merge, so either declaring it is enough. A registered checkout that cannot be
+/// opened, or whose config names another prefix, is an error, never "not retired": the
+/// write it would have guarded does not happen.
 pub fn reject_retired(registry: &Registry, project: &Project) -> Result<()> {
-    let registered = registry
-        .project_root(&project.prefix)
-        .filter(|root| *root != project.root.as_path())
-        .and_then(|root| Project::open(root).ok());
-    let declared = project.retired.as_ref().or(registered.as_ref().and_then(|p| p.retired.as_ref()));
+    let registered = match registry.project_root(&project.prefix) {
+        Some(root) if root != project.root.as_path() => Some(
+            crate::scope::open_registered(registry, &project.prefix, Origin::Prefix).map_err(|error| {
+                Error::Config(format!(
+                    "cannot tell whether {} is retired: its registered checkout {} did not open ({error}); \
+                     fix that checkout, then retry",
+                    project.prefix,
+                    root.display()
+                ))
+            })?,
+        ),
+        _ => None,
+    };
+    let declared = project
+        .retired
+        .as_ref()
+        .or(registered.as_ref().and_then(|p| p.retired.as_ref()));
     let Some(retirement) = declared else { return Ok(()) };
     let authority = registry.project_root(&project.prefix).unwrap_or(&project.root);
-    let successor = retirement.successor.as_ref().map(|s| format!("; its successor is {s}")).unwrap_or_default();
+    let successor = retirement
+        .successor
+        .as_ref()
+        .map(|s| format!("; its successor is {s}"))
+        .unwrap_or_default();
     Err(Error::RetiredProject(format!(
         "{} was retired on {}{successor}; run `tasks unretire` in {} to write here again",
-        project.prefix, retirement.date, authority.display()
+        project.prefix,
+        retirement.date,
+        authority.display()
     )))
 }
 ```
 
-In `lock_and_revalidate`, after `reject_stale_local(&registry, &project)?;` add `reject_retired(&registry, &project)?;`. An unreadable registered root is not a reason to refuse a write here: `reject_stale_local` already owns that case.
+In `lock_and_revalidate`, after `reject_stale_local(&registry, &project)?;` add `reject_retired(&registry, &project)?;`. `reject_stale_local` only compares the prefix with the registry's aliases; it says nothing about whether the registered root can be read, so that case is `reject_retired`'s, and it refuses. `open_registered` already checks that the registered config exists and names this prefix, which is the identity check.
 
 Then audit the writes that bypass `save`/`create` (research list): `status.rs:84` halt-override audit note writes into the registered authority — it runs inside a command that already passed `lock_and_revalidate`, and the halt task is in the same project, so it inherits the refusal; `note_need_holders` (mod.rs:1196) writes notes on *other* projects' holder tasks — a retired project holds no claims (Task 4 guarantees none at retirement, and `start` is refused afterwards), so no holder can be retired; `feedback::guarded_update` (feedback.rs:306) — make sure the target project passes `reject_retired` under the lock at feedback.rs:121 before either the create or the recurrence update. Add a one-line comment at each of the first two saying why no check is needed.
 
@@ -392,7 +467,7 @@ git commit -m "feat(write): refuse writes to a retired project from every checko
 
 ```rust
 #[test]
-fn init_waits_for_the_project_lock() {
+fn retired_lock_init_waits_for_the_project_lock() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let held = hold_project_lock(&env, "old");
@@ -405,7 +480,7 @@ fn init_waits_for_the_project_lock() {
 }
 
 #[test]
-fn init_force_and_rename_refuse_a_retired_project() {
+fn retired_lock_init_force_and_rename_refuse() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     declare_retired(&old, None);
@@ -414,7 +489,7 @@ fn init_force_and_rename_refuse_a_retired_project() {
 }
 
 #[test]
-fn unregister_still_works_on_a_retired_project() {
+fn retired_lock_unregister_still_works() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     declare_retired(&old, None);
@@ -427,7 +502,7 @@ fn unregister_still_works_on_a_retired_project() {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `just test-one init_waits_for_the_project_lock init_force_and_rename_refuse unregister_still_works_on_a_retired`
+Run: `just test-one retired_lock_`
 Expected: FAIL — init does not wait; init --force and rename succeed.
 
 - [ ] **Step 3: Implement**
@@ -440,7 +515,7 @@ Expected: FAIL — init does not wait; init --force and rename succeed.
     let _project_lock = crate::claims::MutationLock::acquire(&prefix)?;
 ```
 
-and when `force` is set, before `registry.repoint`: if a config exists at the currently registered root, open it and `reject_retired(&registry, &project)?` (so re-pointing a retired prefix is refused). A plain `init` that registers an existing retired checkout on a new host is allowed: it writes no record.
+and when `force` is set, before `registry.repoint`: refuse with `retired_project` when the new root's config declares `[retired]`, or when the currently registered root opens and declares it. Re-pointing moves the authority `retire` and every writer consult, so it is not done for a retired project. An old root that does not open does not block: repointing away from a moved or broken checkout is what `init --force` is for, and the new root is read either way. A plain `init` that registers an existing retired checkout on a new host is allowed: it writes no record.
 
 `rename.rs`: after both `MutationLock`s and the registry lock are held on each path, open the source project and call `super::reject_retired(&registry, &project)?`.
 
@@ -460,23 +535,51 @@ git commit -m "feat(init): take the project lock first; init --force and rename 
 **Prerequisite:** ops-d0ef34 has landed on ops main (the `cli.toml` rows). Adopt them first: `python3 "$OPS/bin/vendored" adopt cli.toml` with `OPS` the ops checkout, which rewrites `tools/cli.toml`.
 
 **Files:**
-- Modify: `Cargo.toml` (add `toml_edit = "0.25"`), `tools/cli.toml` (adopted), `src/cli.rs` (variants beside `Unregister` :330), `src/commands/mod.rs` (dispatch arms in `run` :1620-1814, `pub mod retire;`), `src/output.rs` (`Output::Retire`, pretty arm, `warnings_of` arm)
-- Modify: `src/repo.rs` (expose `worktree_roots` as `pub fn checkout_roots(&self) -> Result<Vec<PathBuf>>`)
+- Modify: `Cargo.toml` (add `toml_edit = "0.25"`; the local cargo cache holds 0.25.x), `tools/cli.toml` (adopted), `src/cli.rs` (variants beside `Unregister` :330), `src/commands/mod.rs` (dispatch arms in `run` :1620-1814, `pub mod retire;`), `src/output.rs` (`Output::Retire`, pretty arm, `warnings_of` arm), `src/error.rs` (new kinds)
+- Modify: `src/repo.rs` (expose the private `worktree_roots` :507-554 as `pub fn checkout_roots(&self) -> Result<Vec<PathBuf>>`)
 - Create: `src/commands/retire.rs`
 - Test: `tests/cli.rs`; `surface::tests::parser_surface_equals_table` covers the rows
 
 **Interfaces:**
-- Consumes: `Retirement`, `Project.retired` (Task 1); `Error::RetiredProject` (Task 2); `ClaimStore::load`, `claims::liveness`, `Ctx::describe_claim`; `Status::is_open`.
-- Produces: `Command::Retire { successor: Option<String>, reason: String }`, `Command::Unretire`; JSON output `{"prefix": "...", "retired": {date, successor?, reason} | null, "warnings": []}`.
+- Consumes: `Retirement`, `Project.retired`, `validate_retirement` (Task 1); `Error::RetiredProject`, `reject_retired` (Task 2); `ClaimStore::load(prefix)` and `ClaimStore::iter() -> impl Iterator<Item = (&String, &Claim)>` (claims.rs:374, :510); `claims::liveness(&Claim) -> Liveness` (:798); `Ctx::describe_claim(&Claim, &Liveness) -> String` (mod.rs:156); `reject_pending_rename(&Project)` (mod.rs:699); `crate::format::parse_task(&str, &str) -> Result<Task>`; `crate::repo::atomic_write(&Path, &[u8])` (`pub(crate)`, repo.rs:12); `Status::is_open`.
+- Produces: `Command::Retire { successor: Option<String>, reason: String }`, `Command::Unretire`; JSON `{"prefix": "...", "retired": {date, successor?, reason} | null, "warnings": []}`; error kinds `open_tasks`, `unreadable_checkout`, `not_registered_checkout` (reuse an existing kind only if its meaning matches exactly).
 
 - [ ] **Step 1: Write the failing tests**
 
 ```rust
+/// A project that is its own git repository with one *closed* task committed, plus a
+/// linked worktree branched after the close, so every checkout's copy is closed.
+fn closed_repo_with_worktree(env: &mut TestEnv, prefix: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let main = env.init(prefix);
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    env.json(&main, &["drop", &id, "seed"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(&main, &["worktree", "add", "-q", "-b", "side", side.to_str().unwrap()]);
+    (main, side)
+}
+
+fn spawn_piped(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> std::process::Child {
+    let mut command = env.raw(dir);
+    command
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command.spawn().unwrap()
+}
+
+fn kind_of(output: &std::process::Output) -> String {
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    error["error"]["kind"].as_str().unwrap().to_string()
+}
+
 #[test]
-fn retire_writes_the_table_and_unretire_removes_it_keeping_comments() {
+fn retire_cmd_writes_the_table_and_unretire_removes_it_keeping_comments() {
     let mut env = TestEnv::new();
     let old = env.init("old");
-    let new = env.init("new");
+    env.init("new");
     let config = old.join("tasks/.config.toml");
     let text = std::fs::read_to_string(&config).unwrap();
     std::fs::write(&config, format!("# keep me\n{text}")).unwrap();
@@ -489,11 +592,33 @@ fn retire_writes_the_table_and_unretire_removes_it_keeping_comments() {
     let restored = std::fs::read_to_string(&config).unwrap();
     assert!(restored.contains("# keep me") && !restored.contains("[retired]"));
     env.json(&old, &["add", "N", "-p", "2"]);
-    let _ = new;
 }
 
 #[test]
-fn retire_refuses_an_open_task() {
+fn retire_cmd_unretire_on_an_active_project_changes_nothing() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let before = std::fs::read(old.join("tasks/.config.toml")).unwrap();
+    let out = env.json(&old, &["unretire"]);
+    assert!(out["retired"].is_null());
+    assert_eq!(std::fs::read(old.join("tasks/.config.toml")).unwrap(), before);
+}
+
+#[test]
+fn retire_cmd_an_invalid_reason_leaves_the_config_unchanged() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let config = old.join("tasks/.config.toml");
+    let before = std::fs::read(&config).unwrap();
+    for reason in ["", "   ", "two\nlines", "tab\there"] {
+        assert_eq!(env.fail(&old, &["retire", "--reason", reason]), "config", "{reason:?}");
+        assert_eq!(std::fs::read(&config).unwrap(), before, "{reason:?}");
+    }
+    env.json(&old, &["add", "still writable", "-p", "2"]);
+}
+
+#[test]
+fn retire_cmd_refuses_an_open_task() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
@@ -503,31 +628,23 @@ fn retire_refuses_an_open_task() {
 }
 
 #[test]
-fn retire_refuses_its_own_prefix_or_an_unregistered_successor() {
+fn retire_cmd_refuses_its_own_prefix_an_unregistered_or_a_retired_successor() {
     let mut env = TestEnv::new();
     let old = env.init("old");
-    for bad in ["old", "nowhere"] {
+    let mid = env.init("mid");
+    env.json(&mid, &["retire", "--reason", "r"]);
+    for bad in ["old", "nowhere", "mid"] {
         assert_eq!(env.fail(&old, &["retire", "--successor", bad, "--reason", "r"]), "config", "{bad}");
     }
 }
 
 #[test]
-fn retire_refuses_a_successor_that_is_itself_retired() {
-    let mut env = TestEnv::new();
-    let old = env.init("old");
-    let mid = env.init("mid");
-    env.json(&mid, &["retire", "--reason", "r"]);
-    assert_eq!(env.fail(&old, &["retire", "--successor", "mid", "--reason", "r"]), "config");
-}
-
-#[test]
-fn retire_refuses_a_live_claim_on_the_prefix() {
+fn retire_cmd_refuses_a_live_claim_on_the_prefix() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
     env.json(&old, &["start", &id]);
-    // Close the record without releasing the claim by editing the file directly, the way a
-    // sync could leave it.
+    // Close the record without releasing the claim, the way a sync can leave it.
     let path = old.join(format!("tasks/{id}.md"));
     let text = std::fs::read_to_string(&path).unwrap().replace("status: doing", "status: done");
     std::fs::write(&path, text).unwrap();
@@ -535,80 +652,117 @@ fn retire_refuses_a_live_claim_on_the_prefix() {
 }
 
 #[test]
-fn retire_refuses_an_open_task_that_exists_only_in_a_linked_worktree() {
+fn retire_cmd_refuses_an_open_task_that_exists_only_in_a_linked_worktree() {
     let mut env = TestEnv::new();
-    let (main, side, id) = repo_with_worktree_as(&mut env, "old");
-    env.json(&main, &["drop", &id, "m"]);
-    let only_here = id_of(env.json(&side, &["add", "W", "-p", "2"]));
-    // No claim: `add` takes none.
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    let only_here = id_of(env.json(&side, &["add", "W", "-p", "2"])); // `add` takes no claim
     let out = env.cmd(&main).args(["retire", "--reason", "r"]).output().unwrap();
+    assert_eq!(kind_of(&out), "open_tasks");
     let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    assert_eq!(error["error"]["kind"], "open_tasks");
     let detail = error["error"]["detail"].as_str().unwrap();
     assert!(detail.contains(&only_here) && detail.contains(side.to_str().unwrap()), "{detail}");
 }
 
 #[test]
-fn retire_refuses_an_unreadable_linked_worktree() {
+fn retire_cmd_refuses_an_unreadable_linked_worktree() {
     let mut env = TestEnv::new();
-    let (main, side, id) = repo_with_worktree_as(&mut env, "old");
-    env.json(&main, &["drop", &id, "m"]);
-    std::fs::set_permissions(side.join("tasks"), std::os::unix::fs::PermissionsExt::from_mode(0o000)).unwrap();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(side.join("tasks"), std::fs::Permissions::from_mode(0o000)).unwrap();
     let kind = env.fail(&main, &["retire", "--reason", "r"]);
-    std::fs::set_permissions(side.join("tasks"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    std::fs::set_permissions(side.join("tasks"), std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(kind, "unreadable_checkout");
+    assert!(!std::fs::read_to_string(main.join("tasks/.config.toml")).unwrap().contains("[retired]"));
 }
 
 #[test]
-fn retire_and_unretire_refuse_in_a_linked_worktree() {
+fn retire_cmd_and_unretire_refuse_in_a_linked_worktree() {
     let mut env = TestEnv::new();
-    let (main, side, id) = repo_with_worktree_as(&mut env, "old");
-    env.json(&main, &["drop", &id, "m"]);
+    let (_main, side) = closed_repo_with_worktree(&mut env, "old");
     assert_eq!(env.fail(&side, &["retire", "--reason", "r"]), "not_registered_checkout");
     assert_eq!(env.fail(&side, &["unretire"]), "not_registered_checkout");
 }
 
 #[test]
-fn a_writer_and_retire_racing_never_leave_an_open_task_in_a_retired_project() {
+fn retire_cmd_and_unretire_respect_a_pending_rename() {
     let mut env = TestEnv::new();
-    let (main, side, id) = repo_with_worktree_as(&mut env, "old");
-    env.json(&main, &["drop", &id, "m"]);
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    env.json(&dir, &["drop", &id, "m"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    env.raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "config")
+        .args(["rename", "dot", "dots"])
+        .status()
+        .unwrap();
+    let config = dir.join("tasks/.config.toml");
+    let before = std::fs::read(&config).unwrap();
+    // Same kind a write gets during the freeze (a_pending_rename_freezes_the_project_*).
+    assert_eq!(env.fail(&dir, &["retire", "--reason", "r"]), "validation");
+    assert_eq!(env.fail(&dir, &["unretire"]), "validation");
+    assert_eq!(std::fs::read(&config).unwrap(), before);
+}
 
-    // Order 1: the writer holds the lock first. Retire waits, then sees the new task.
+/// Retire takes the project lock: it waits behind a holder and finishes after release.
+#[test]
+fn retire_cmd_waits_for_the_project_lock() {
+    let mut env = TestEnv::new();
+    let (main, _side) = closed_repo_with_worktree(&mut env, "old");
     let held = hold_project_lock(&env, "old");
-    let mut writer = env.raw(&side);
-    writer.args(["add", "W", "-p", "2"]).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-    let writer = writer.spawn().unwrap();
-    let mut retire = env.raw(&main);
-    retire.args(["retire", "--reason", "r"]).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-    let mut retire = retire.spawn().unwrap();
+    let mut retire = spawn_piped(&env, &main, &["retire", "--reason", "r"]);
+    let finished_early = wait_bounded(&mut retire, Duration::from_millis(500));
+    drop(held);
+    let out = reap(retire, REAP);
+    assert!(!finished_early, "retire must wait for the project lock");
+    assert!(out.expect("reaped").status.success());
+}
+
+/// Writer first: a stale-worktree write that holds the lock lands, and the retire that
+/// follows it through the lock sees the new task and refuses.
+#[test]
+fn retire_cmd_after_a_worktree_writer_sees_its_task() {
+    let mut env = TestEnv::new();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    let held = hold_project_lock(&env, "old");
+    let mut writer = spawn_piped(&env, &side, &["add", "W", "-p", "2"]);
+    let writer_waited = !wait_bounded(&mut writer, Duration::from_millis(300));
+    drop(held);
+    let writer = reap(writer, REAP).expect("writer reaped");
+    assert!(writer_waited && writer.status.success());
+    let retire = env.cmd(&main).args(["retire", "--reason", "r"]).output().unwrap();
+    assert_eq!(kind_of(&retire), "open_tasks");
+}
+
+/// Retire first: once it holds the lock and lands, a writer queued behind it in a stale
+/// worktree (whose own config has no [retired]) is refused.
+#[test]
+fn retire_cmd_before_a_worktree_writer_refuses_it() {
+    let mut env = TestEnv::new();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    let held = hold_project_lock(&env, "old");
+    let mut retire = spawn_piped(&env, &main, &["retire", "--reason", "r"]);
     let retire_waited = !wait_bounded(&mut retire, Duration::from_millis(300));
     drop(held);
-    let (w, r) = (reap(writer, REAP), reap(retire, REAP));
-    assert!(retire_waited, "retire must wait for the project lock");
-    let (w, r) = (w.expect("writer reaped"), r.expect("retire reaped"));
-    if w.status.success() {
-        assert!(!r.status.success(), "retire must refuse once the writer's task exists");
-        assert!(String::from_utf8_lossy(&r.stderr).contains("open_tasks"));
-    } else {
-        assert!(String::from_utf8_lossy(&w.stderr).contains("retired_project"));
-    }
-
-    // Whichever won, the end state holds: either old is retired with no open task in any
-    // checkout, or it is not retired.
-    let rows = env.json(&main, &["projects"]);
-    let row = rows["projects"].as_array().unwrap().iter().find(|r| r["prefix"] == "old").unwrap();
-    if !row["retired"].is_null() {
-        assert_eq!(env.fail(&side, &["add", "X", "-p", "2"]), "retired_project");
-    }
+    let retire = reap(retire, REAP).expect("retire reaped");
+    assert!(retire_waited && retire.status.success());
+    assert!(!std::fs::read_to_string(side.join("tasks/.config.toml")).unwrap().contains("[retired]"));
+    let writer = env.cmd(&side).args(["add", "W", "-p", "2"]).output().unwrap();
+    assert_eq!(kind_of(&writer), "retired_project");
+    assert!(std::fs::read_dir(side.join("tasks")).unwrap().all(|e| {
+        let path = e.unwrap().path();
+        path.extension().is_none_or(|x| x != "md")
+            || !std::fs::read_to_string(&path).unwrap().contains("title: W")
+    }));
 }
 ```
 
-Error kinds: reuse `claimed` (from `rename::authorize`'s `Error::Claimed`); add `open_tasks`, `unreadable_checkout`, `not_registered_checkout` as new variants in `src/error.rs` if no existing kind fits (grep `kind()` first: rename's dirty-tree and second-worktree refusals may already have suitable kinds — reuse one if its meaning matches exactly). A bad successor is `Error::Config`.
+The two ordered tests are deterministic: each has one child behind the test's own lock, and the other side runs after that child has finished. Together with `retire_cmd_waits_for_the_project_lock` and the existing `a_write_command_waits_for_the_project_lock_and_a_read_command_does_not`, they show that `retire`'s scan-then-write and every writer's check-then-write run under the same lock, which is what excludes the interleaving. Check the record's `title:` line form against an existing record before relying on the last assertion.
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `just test-one retire_ a_writer_and_retire_racing`
+Run: `just test-one retire_cmd_`
 Expected: FAIL — `retire` is an unknown subcommand.
 
 - [ ] **Step 3: Implement**
@@ -620,86 +774,103 @@ Expected: FAIL — `retire` is an unknown subcommand.
 //! project's MutationLock only; the registry is read, never locked, because every command
 //! that changes this prefix's root (`init --force`, `rename`) takes this lock first.
 
-use crate::claims::{ClaimStore, MutationLock};
+use crate::claims::{ClaimStore, Liveness, MutationLock};
 use crate::error::{Error, Result};
 use crate::registry::Registry;
-use crate::repo::{Project, Retirement, CONFIG_REL};
+use crate::repo::{validate_retirement, Project, Retirement, CONFIG_REL};
+use crate::scope::Origin;
 
-pub fn retire(project: Project, successor: Option<String>, reason: String) -> Result<Retirement> {
-    let _lock = MutationLock::acquire(&project.prefix)?;
+pub fn retire(here: Project, successor: Option<String>, reason: String) -> Result<Retirement> {
+    let _lock = MutationLock::acquire(&here.prefix)?;
     let registry = Registry::load()?;
-    let project = authority(&registry, &project)?;
-    if let Some(s) = &successor {
+    let project = authority(&registry, &here)?;
+    let date = time::OffsetDateTime::now_utc().date().to_string(); // Date's Display is YYYY-MM-DD
+    let retirement = Retirement { date, successor, reason };
+    validate_retirement(&retirement)?;
+    if let Some(s) = &retirement.successor {
         let live = registry.canonical_prefix(s);
-        let ok = live != project.prefix
+        let usable = live != project.prefix
             && registry.project_root(live).is_some()
-            && crate::scope::open_registered(&registry, live, crate::scope::Origin::Prefix)
-                .map(|p| p.retired.is_none())
-                .unwrap_or(false);
-        if !ok {
+            && crate::scope::open_registered(&registry, live, Origin::Prefix)?.retired.is_none();
+        if !usable {
             return Err(Error::Config(format!(
-                "successor {s:?} must be a registered, unretired prefix other than {}", project.prefix
+                "successor {s:?} must be a registered, unretired prefix other than {}",
+                project.prefix
             )));
         }
     }
     reject_live_claims(&project)?;
     reject_open_copies(&project)?;
-    let retirement = Retirement { date: crate::time::today(), successor, reason };
     write_table(&project, Some(&retirement))?;
     Ok(retirement)
 }
 
-pub fn unretire(project: Project) -> Result<()> {
-    let _lock = MutationLock::acquire(&project.prefix)?;
+pub fn unretire(here: Project) -> Result<Option<Retirement>> {
+    let _lock = MutationLock::acquire(&here.prefix)?;
     let registry = Registry::load()?;
-    let project = authority(&registry, &project)?;
-    write_table(&project, None)
+    let project = authority(&registry, &here)?;
+    let was = project.retired.clone();
+    if was.is_some() {
+        write_table(&project, None)?;
+    }
+    Ok(None)
 }
 
-/// The registered checkout, re-opened under the lock; a linked worktree is refused.
+/// The registered checkout, re-opened under the lock, with the pending-rename freeze
+/// applied as every writer applies it; a linked worktree is refused.
 fn authority(registry: &Registry, here: &Project) -> Result<Project> {
-    let root = registry.project_root(&here.prefix).ok_or_else(|| {
-        Error::Config(format!("{} is not registered on this host", here.prefix))
-    })?;
+    super::reject_pending_rename(here)?;
+    let root = registry
+        .project_root(&here.prefix)
+        .ok_or_else(|| Error::Config(format!("{} is not registered on this host", here.prefix)))?;
     if root != here.root.as_path() {
         return Err(Error::NotRegisteredCheckout(format!(
-            "run this in the registered checkout of {}: {}", here.prefix, root.display()
+            "run this in the registered checkout of {}: {}",
+            here.prefix,
+            root.display()
         )));
     }
-    Project::open(root)
+    let project = Project::open(root)?;
+    super::reject_stale_local(registry, &project)?;
+    Ok(project)
 }
 
 fn reject_live_claims(project: &Project) -> Result<()> {
     let store = ClaimStore::load(&project.prefix)?;
-    for claim in store.iter() {
-        if matches!(crate::claims::liveness(claim), crate::claims::Liveness::Live) {
-            return Err(Error::Claimed(claim.id.clone(), super::Ctx::describe_claim(claim)));
+    for (id, claim) in store.iter() {
+        let live = crate::claims::liveness(claim);
+        if matches!(live, Liveness::Live) {
+            return Err(Error::Claimed(id.clone(), super::Ctx::describe_claim(claim, &live)));
         }
     }
     Ok(())
 }
 
-/// Every checkout's copy of tasks/, the registered one included: a todo filed in a worktree
-/// and never merged is open work too.
+/// Every checkout's tasks/, the registered one included: a todo filed in a worktree and
+/// never merged is open work too. Anything that cannot be read stops the retirement.
 fn reject_open_copies(project: &Project) -> Result<()> {
+    let unreadable = |what: &std::path::Path, e: &dyn std::fmt::Display| {
+        Error::UnreadableCheckout(format!("{}: {e}", what.display()))
+    };
     let mut open = Vec::new();
     for root in project.checkout_roots()? {
         let dir = root.join("tasks");
-        let entries = std::fs::read_dir(&dir).map_err(|e| {
-            Error::UnreadableCheckout(format!("{}: {e}", dir.display()))
-        })?;
-        for entry in entries {
-            let path = entry.map_err(|e| Error::UnreadableCheckout(format!("{}: {e}", dir.display())))?.path();
-            if path.extension().is_some_and(|x| x == "md") {
-                let task = crate::repo::read_task_file(&path)
-                    .map_err(|e| Error::UnreadableCheckout(format!("{}: {e}", path.display())))?;
-                if task.status.is_open() {
-                    open.push(format!("{} ({}) in {}", task.id, task.status, root.display()));
-                }
+        for entry in std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))? {
+            let path = entry.map_err(|e| unreadable(&dir, &e))?.path();
+            if path.extension().is_none_or(|x| x != "md") {
+                continue;
+            }
+            let raw = std::fs::read_to_string(&path).map_err(|e| unreadable(&path, &e))?;
+            let file = format!("tasks/{}", path.file_name().unwrap().to_string_lossy());
+            let task = crate::format::parse_task(&raw, &file).map_err(|e| unreadable(&path, &e))?;
+            if task.status.is_open() {
+                open.push(format!("{} ({}) in {}", task.id, task.status, root.display()));
             }
         }
     }
-    if open.is_empty() { Ok(()) } else {
+    if open.is_empty() {
+        Ok(())
+    } else {
         Err(Error::OpenTasks(format!("close these first: {}", open.join(", "))))
     }
 }
@@ -707,26 +878,30 @@ fn reject_open_copies(project: &Project) -> Result<()> {
 fn write_table(project: &Project, retirement: Option<&Retirement>) -> Result<()> {
     let path = project.root.join(CONFIG_REL);
     let text = std::fs::read_to_string(&path)?;
-    let mut doc: toml_edit::DocumentMut = text.parse()
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
         .map_err(|e| Error::Config(format!("{CONFIG_REL}: {e}")))?;
     match retirement {
         Some(r) => {
             let mut table = toml_edit::Table::new();
             table["date"] = toml_edit::value(&r.date);
-            if let Some(s) = &r.successor { table["successor"] = toml_edit::value(s); }
+            if let Some(s) = &r.successor {
+                table["successor"] = toml_edit::value(s);
+            }
             table["reason"] = toml_edit::value(&r.reason);
             doc["retired"] = toml_edit::Item::Table(table);
         }
-        None => { doc.remove("retired"); }
+        None => {
+            doc.remove("retired");
+        }
     }
-    crate::repo::atomic_write(&path, doc.to_string().as_bytes())?;
-    Ok(())
+    crate::repo::atomic_write(&path, doc.to_string().as_bytes())
 }
 ```
 
-Names to confirm against the code and use as they are: `crate::time::today()` (whatever `defer` uses for today's date), `crate::repo::read_task_file` (the parser `sibling_task_copies` uses per file), `crate::repo::atomic_write` (rename uses one), `claim.id`. `checkout_roots` wraps the private `worktree_roots` (repo.rs:507-554), which already returns the main root first and keeps a missing worktree's raw path — a missing path then fails `read_dir` and is reported as unreadable, as the spec requires.
+`checkout_roots` wraps `worktree_roots`, which returns the main root first and keeps a missing worktree's raw path; a missing path then fails `read_dir` and is reported as unreadable, as the spec requires. `TaskId` and `Status` must implement `Display` for the `format!` above; use their existing string forms if they do not. The pending-rename kind is whatever `reject_pending_rename` returns today (`validation` in the existing freeze test); keep it.
 
-`unretire` on a project that is not retired succeeds and changes nothing (idempotent; the output's `retired` is null).
+`src/error.rs`: `OpenTasks(String) => "open_tasks"`, `UnreadableCheckout(String) => "unreadable_checkout"`, `NotRegisteredCheckout(String) => "not_registered_checkout"`, each with its `with_suffix` arm.
 
 `cli.rs`:
 
@@ -742,11 +917,12 @@ Names to confirm against the code and use as they are: `crate::time::today()` (w
     Unretire,
 ```
 
-Dispatch: `Command::Retire { successor, reason } => retire::retire(open_ctx(dir)?.project, successor, reason).map(...)` into a new `Output::Retire(RetireOut { prefix, retired: Option<Retirement>, warnings })`; pretty: `old retired 2026-10-04 → new: superseded` / `old is not retired`.
+Dispatch: `Command::Retire { successor, reason }` → `retire::retire(open_ctx(dir)?.project, successor, reason)` into `Output::Retire(RetireOut { prefix, retired: Some(r), warnings: vec![] })`; `Command::Unretire` → `RetireOut { retired: None, .. }`. Pretty: `old retired 2026-10-04 → new: superseded` / `old is not retired`.
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `just test-one retire_ a_writer_and_retire_racing parser_surface_equals_table`, then `just test-fast`. Expected: PASS.
+Run, one at a time: `just test-one retire_cmd_`, then `just test-one parser_surface_equals_table`, then `just test-fast`.
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -772,7 +948,7 @@ git commit -m "feat(retire): tasks retire and unretire, scanning every checkout 
 
 ```rust
 #[test]
-fn wide_reads_skip_a_retired_project_without_a_warning() {
+fn retired_read_wide_reads_skip_it_without_a_warning() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let live = env.init("live");
@@ -798,7 +974,41 @@ fn wide_reads_skip_a_retired_project_without_a_warning() {
 }
 
 #[test]
-fn single_project_reads_and_show_work_and_warn() {
+fn retired_read_a_group_made_before_retirement_skips_the_member() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let live = env.init("live");
+    env.json(&live, &["group", "set", "pair", "live", "old"]);
+    let closed = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    env.json(&old, &["drop", &closed, "m"]);
+    env.json(&old, &["retire", "--reason", "r"]);
+    env.json(&live, &["add", "L", "-p", "2"]);
+    for args in [vec!["ready", "--group", "pair"], vec!["list", "--group", "pair", "--status", "dropped"]] {
+        let out = env.json(&live, &args);
+        assert!(!out.to_string().contains("\"old-"), "{args:?}");
+        assert!(warnings_of(&out).iter().all(|w| !w.contains("old")), "{args:?}");
+    }
+}
+
+#[test]
+fn retired_read_a_dependency_on_a_retired_task_resolves_and_never_blocks() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let live = env.init("live");
+    let dep = id_of(env.json(&old, &["add", "D", "-p", "2"]));
+    let waiter = id_of(env.json(&live, &["add", "W", "-p", "2"]));
+    env.json(&live, &["dep", &waiter, "--on", &dep]);
+    env.json(&old, &["done", &dep, "m"]);
+    env.json(&old, &["retire", "--reason", "r"]);
+    let ready = env.json(&live, &["ready"]);
+    assert!(ready["tasks"].as_array().unwrap().iter().any(|t| t["id"] == waiter.as_str()));
+    let report = env.check(&live);
+    assert!(report.as_object().is_none_or(|r| r.get("warnings").and_then(|w| w.as_array())
+        .is_none_or(|w| w.iter().all(|f| f["kind"] != "unreachable_dep"))));
+}
+
+#[test]
+fn retired_read_single_project_reads_and_show_warn() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let live = env.init("live");
@@ -814,7 +1024,7 @@ fn single_project_reads_and_show_work_and_warn() {
 }
 
 #[test]
-fn a_successor_that_is_gone_or_retired_does_not_break_reads() {
+fn retired_read_a_gone_or_retired_successor_does_not_break_reads() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let mid = env.init("mid");
@@ -829,7 +1039,7 @@ fn a_successor_that_is_gone_or_retired_does_not_break_reads() {
 }
 
 #[test]
-fn projects_reports_retirement_and_keeps_counts() {
+fn retired_read_projects_reports_retirement_and_keeps_counts() {
     let mut env = TestEnv::new();
     let old = env.init("old");
     let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
@@ -845,7 +1055,7 @@ fn projects_reports_retirement_and_keeps_counts() {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `just test-one wide_reads_skip single_project_reads a_successor_that_is_gone projects_reports_retirement`
+Run: `just test-one retired_read_`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
