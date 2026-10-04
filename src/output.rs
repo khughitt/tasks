@@ -104,6 +104,9 @@ pub struct ProjectRow {
     /// is activity. Absent when nothing was scanned, and when a scanned project holds no
     /// tasks at all.
     pub last_activity: Option<String>,
+    /// The project's `[retired]` table, when it has one. Its counts stay in the row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retired: Option<crate::repo::Retirement>,
 }
 
 /// `group set` and `group rm`: the group, and the members it now has (set) or had (rm).
@@ -1031,6 +1034,9 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                 // why instead of printing a dash the eye would skip.
                 cells.push(match (&row.counts, &row.last_activity) {
                     (None, _) => cell("unreachable", Align::Left, Some(Style::Error)),
+                    (Some(_), _) if row.retired.is_some() => {
+                        cell("retired", Align::Left, Some(Style::Chrome))
+                    }
                     (Some(_), Some(at)) => {
                         let at = present::date(at);
                         cell(at.text, Align::Left, at.style)

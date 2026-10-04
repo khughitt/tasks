@@ -14,12 +14,35 @@ pub fn set(name: String, prefixes: Vec<String>) -> Result<Output> {
     let mut registry = Registry::load()?;
     reject_rename_reservation(&name)?;
     let members = registry.set_group(&name, &prefixes)?;
+    reject_retired_members(&registry, &members)?;
     registry.save()?;
     Ok(Output::Group(GroupOut {
         name,
         members,
         warnings: Vec::new(),
     }))
+}
+
+/// A group lists active projects: a retired member is refused. An unreachable member is
+/// kept as before, since a host that does not hold it cannot read its declaration; a
+/// reachable one whose config does not parse is an error, never "not retired".
+fn reject_retired_members(registry: &Registry, members: &[String]) -> Result<()> {
+    for member in members {
+        let Some(root) = registry.project_root(member) else {
+            continue;
+        };
+        if !is_reachable(root)? {
+            continue;
+        }
+        // Read without the prefix check: a member mid-adoption (registered under its old
+        // prefix, its config already renamed) is still a member to judge.
+        if crate::repo::Project::open(root)?.retired.is_some() {
+            return Err(Error::RetiredProject(format!(
+                "{member} is retired; a group lists active projects"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// A name an unfinished rename reserves (its source or its target) stays free until that

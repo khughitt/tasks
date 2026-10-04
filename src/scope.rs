@@ -120,6 +120,7 @@ impl Scope {
     ) -> Result<(Scope, Vec<String>)> {
         let mut warnings = registry_warnings(registry, cwd)?;
         let mut projects = Vec::new();
+        let mut retired = Vec::new();
         for (prefix, root) in registry
             .projects
             .iter()
@@ -132,8 +133,20 @@ impl Scope {
                 ));
                 continue;
             }
-            projects.push(open_registered(registry, prefix, Origin::Prefix)?);
+            let project = open_registered(registry, prefix, Origin::Prefix)?;
+            // A retired project is over (ops lifecycle spec §4): wide reads leave it out
+            // without a warning, so it leaves `members` too, which the warnings about
+            // absent projects read; `--project` still reads it.
+            if project.retired.is_some() {
+                retired.push(prefix.clone());
+            } else {
+                projects.push(project);
+            }
         }
+        let members = members
+            .into_iter()
+            .filter(|prefix| !retired.contains(prefix))
+            .collect();
         Ok((
             Scope::All {
                 projects,

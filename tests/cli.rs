@@ -25777,3 +25777,154 @@ fn retire_cmd_before_a_worktree_writer_refuses_it() {
             || !std::fs::read_to_string(&path).unwrap().contains("title: W")
     }));
 }
+
+#[test]
+fn retired_read_wide_reads_skip_it_without_a_warning() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let live = env.init("live");
+    let closed = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    env.json(&old, &["drop", &closed, "m"]);
+    env.json(&old, &["retire", "--reason", "r"]);
+    env.json(&live, &["add", "L", "-p", "2"]);
+    for args in [
+        vec!["list", "--all-projects", "--status", "dropped"],
+        vec!["ready", "--all-projects"],
+        vec!["prime", "--all-projects"],
+        vec!["tags", "--all-projects"],
+        vec!["sample", "--all-projects"],
+        vec!["quiet"],
+    ] {
+        let out = env.json(&live, &args);
+        let text = out.to_string();
+        assert!(!text.contains("\"old"), "{args:?}: {text}");
+        assert!(
+            warnings_of(&out).iter().all(|w| !names_word(w, "old")),
+            "{args:?}"
+        );
+    }
+    env.json(&live, &["group", "set", "pair", "live"]);
+    assert_eq!(
+        env.fail(&live, &["group", "set", "both", "live", "old"]),
+        "retired_project"
+    );
+}
+
+#[test]
+fn retired_read_a_group_made_before_retirement_skips_the_member() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let live = env.init("live");
+    env.json(&live, &["group", "set", "pair", "live", "old"]);
+    let closed = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    env.json(&old, &["drop", &closed, "m"]);
+    env.json(&old, &["retire", "--reason", "r"]);
+    env.json(&live, &["add", "L", "-p", "2"]);
+    for args in [
+        vec!["ready", "--group", "pair"],
+        vec!["list", "--group", "pair", "--status", "dropped"],
+    ] {
+        let out = env.json(&live, &args);
+        assert!(!out.to_string().contains("\"old-"), "{args:?}");
+        assert!(
+            warnings_of(&out).iter().all(|w| !names_word(w, "old")),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn retired_read_a_dependency_on_a_retired_task_resolves_and_never_blocks() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let live = env.init("live");
+    let dep = id_of(env.json(&old, &["add", "D", "-p", "2"]));
+    let waiter = id_of(env.json(&live, &["add", "W", "-p", "2"]));
+    env.json(&live, &["dep", &waiter, "--on", &dep]);
+    env.json(&old, &["done", &dep, "m"]);
+    env.json(&old, &["retire", "--reason", "r"]);
+    let ready = env.json(&live, &["ready"]);
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == waiter.as_str())
+    );
+    let report = env.check(&live);
+    assert!(report.as_object().is_none_or(|r| {
+        r.get("warnings")
+            .and_then(|w| w.as_array())
+            .is_none_or(|w| w.iter().all(|f| f["kind"] != "unreachable_dep"))
+    }));
+}
+
+#[test]
+fn retired_read_single_project_reads_and_show_warn() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let live = env.init("live");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    env.json(&old, &["drop", &id, "m"]);
+    env.json(&old, &["retire", "--successor", "live", "--reason", "r"]);
+    let shown = env.json(&live, &["show", &id]);
+    assert_eq!(shown["task"]["id"], id.as_str());
+    assert!(
+        warnings_of(&shown)
+            .iter()
+            .any(|w| w.contains("old is retired") && w.contains("successor live"))
+    );
+    let listed = env.json(&live, &["list", "--project", "old", "--status", "dropped"]);
+    assert_eq!(listed["tasks"].as_array().unwrap().len(), 1);
+    assert!(
+        warnings_of(&listed)
+            .iter()
+            .any(|w| w.contains("old is retired"))
+    );
+}
+
+#[test]
+fn retired_read_a_gone_or_retired_successor_does_not_break_reads() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let mid = env.init("mid");
+    env.json(&old, &["retire", "--successor", "mid", "--reason", "r"]);
+    env.json(&mid, &["retire", "--reason", "r"]);
+    let here = env.init("here");
+    env.json(&here, &["projects"]);
+    env.json(&here, &["unregister", "mid"]);
+    let rows = env.json(&here, &["projects"]);
+    let row = rows["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["prefix"] == "old")
+        .unwrap();
+    assert_eq!(row["retired"]["successor"], "mid");
+}
+
+#[test]
+fn retired_read_projects_reports_retirement_and_keeps_counts() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    env.json(&old, &["done", &id, "m"]);
+    env.json(&old, &["retire", "--reason", "r"]);
+    let rows = env.json(&old, &["projects"]);
+    let row = rows["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["prefix"] == "old")
+        .unwrap();
+    assert_eq!(row["retired"]["reason"], "r");
+    assert_eq!(row["counts"]["done"], 1);
+    assert!(env.pretty(&old, &["projects"]).contains("retired"));
+}
+
+/// Whether `text` contains `word` as a whole word: "old" is in "old-1a2b3c" and
+/// "old is retired", not in "holds".
+fn names_word(text: &str, word: &str) -> bool {
+    text.split(|c: char| !c.is_alphanumeric())
+        .any(|w| w == word)
+}

@@ -627,7 +627,25 @@ pub fn reject_stale_local(registry: &Registry, project: &Project) -> Result<()> 
 /// The context for the project an id names. A prefix matching the local project
 /// keeps that checkout, so `-C` and worktrees still win; any other prefix is followed
 /// through the registry. With no local project, the registry is the only target.
+/// The warning a single-project read carries for a retired project, or None.
+pub fn retired_warning(project: &Project) -> Option<String> {
+    project.retired.as_ref().map(|r| {
+        let successor = r
+            .successor
+            .as_ref()
+            .map(|s| format!("; successor {s}"))
+            .unwrap_or_default();
+        format!("{} is retired ({}){successor}", project.prefix, r.date)
+    })
+}
+
 fn open_id_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
+    let mut ctx = open_id_ctx_unwarned(dir, id)?;
+    ctx.warnings.extend(retired_warning(&ctx.project));
+    Ok(ctx)
+}
+
+fn open_id_ctx_unwarned(dir: Option<&Path>, id: &str) -> Result<Ctx> {
     let mut ctx = match open_ctx(dir) {
         Ok(ctx) => ctx,
         Err(Error::NoProject(_)) => {
@@ -862,10 +880,11 @@ pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
             (project, registry, shorthand)
         }
     };
+    let warnings = retired_warning(&project).into_iter().collect();
     Ok(ReadCtx {
         scope: Scope::Local(project),
         registry,
-        warnings: Vec::new(),
+        warnings,
         shorthand,
     })
 }
