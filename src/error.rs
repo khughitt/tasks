@@ -35,6 +35,8 @@ pub enum Error {
     #[error("{0}")]
     StaleCopy(String),
     #[error("{0}")]
+    RetiredProject(String),
+    #[error("{0}")]
     Halted(String),
     #[error("{0}")]
     NestedLane(String),
@@ -94,6 +96,7 @@ impl Error {
             }
             Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
             Error::StaleCopy(detail) => Error::StaleCopy(detail + suffix),
+            Error::RetiredProject(detail) => Error::RetiredProject(detail + suffix),
             Error::Halted(detail) => Error::Halted(detail + suffix),
             Error::NestedLane(detail) => Error::NestedLane(detail + suffix),
             Error::NeedHeld(detail) => Error::NeedHeld(detail + suffix),
@@ -130,6 +133,7 @@ impl Error {
             Error::ConcurrentModification(..) => "concurrent_modification",
             Error::Claimed(..) => "claimed",
             Error::StaleCopy(_) => "stale_copy",
+            Error::RetiredProject(_) => "retired_project",
             Error::Halted(_) => "halted",
             Error::NestedLane(_) => "nested_lane",
             Error::NeedHeld(_) => "need_held",

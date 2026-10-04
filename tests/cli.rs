@@ -25275,3 +25275,187 @@ fn retired_table_check_reports_an_open_task() {
         "{report}"
     );
 }
+
+/// Declare `[retired]` in a checkout's config by hand (before `tasks retire` exists).
+fn declare_retired(root: &std::path::Path, successor: Option<&str>) {
+    let config = root.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[retired]\ndate = \"2026-10-04\"\nreason = \"superseded\"\n");
+    if let Some(s) = successor {
+        text.push_str(&format!("successor = \"{s}\"\n"));
+    }
+    std::fs::write(&config, text).unwrap();
+}
+
+#[test]
+fn retired_write_every_command_is_refused_in_the_registered_checkout() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    let id2 = id_of(env.json(&old, &["add", "U", "-p", "2"]));
+    let blocked = id_of(env.json(&old, &["add", "B", "-p", "2"]));
+    env.json(&old, &["block", &blocked, "why"]);
+    let shelved = id_of(env.json(&old, &["add", "S", "-p", "2"]));
+    env.json(&old, &["shelve", &shelved, "later"]);
+    let claimed = id_of(env.json(&old, &["add", "C", "-p", "2"]));
+    env.json(&old, &["start", &claimed]);
+    declare_retired(&old, Some("new"));
+    let writes: Vec<Vec<&str>> = vec![
+        vec!["add", "N", "-p", "2"],
+        vec!["note", &id, "x"],
+        vec!["edit", &id, "--title", "y"],
+        vec!["start", &id],
+        vec!["park", &claimed, "next"],
+        vec!["done", &id, "m"],
+        vec!["drop", &id, "m"],
+        vec!["block", &id, "m"],
+        vec!["unblock", &blocked],
+        vec!["shelve", &id, "m"],
+        vec!["unshelve", &shelved],
+        vec!["dep", &id, "--on", &id2],
+    ];
+    for args in &writes {
+        assert_eq!(env.fail(&old, args), "retired_project", "{args:?}");
+    }
+}
+
+#[test]
+fn retired_write_attach_and_detach_are_refused() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    let file = old.join("shot.txt");
+    std::fs::write(&file, "x").unwrap();
+    env.json(&old, &["attach", &id, file.to_str().unwrap()]);
+    declare_retired(&old, None);
+    // A second name: re-attaching the same one fails `attachment_exists` before the lock.
+    let second = old.join("shot2.txt");
+    std::fs::write(&second, "y").unwrap();
+    assert_eq!(
+        env.fail(&old, &["attach", &id, second.to_str().unwrap()]),
+        "retired_project"
+    );
+    assert_eq!(
+        env.fail(&old, &["detach", &id, "shot.txt", "why"]),
+        "retired_project"
+    );
+}
+
+#[test]
+fn retired_write_a_worktree_made_before_retirement_cannot_write() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree_as(&mut env, "old");
+    declare_retired(&main, None); // only the registered checkout knows
+    assert!(
+        !std::fs::read_to_string(side.join("tasks/.config.toml"))
+            .unwrap()
+            .contains("[retired]")
+    );
+    for args in [
+        vec!["add", "N", "-p", "2"],
+        vec!["note", &id, "x"],
+        vec!["done", &id, "m"],
+    ] {
+        assert_eq!(env.fail(&side, &args), "retired_project", "{args:?}");
+    }
+}
+
+#[test]
+fn retired_write_an_unreadable_registered_checkout_refuses_a_worktree_write() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree_as(&mut env, "old");
+    let config = main.join("tasks/.config.toml");
+    let good = std::fs::read(&config).unwrap();
+    let record = side.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&record).unwrap();
+    for broken in [
+        &b"prefix = \"old\"\n[retired]\nreason = 3\n"[..],
+        &b"prefix = \"other\"\n"[..],
+    ] {
+        std::fs::write(&config, broken).unwrap();
+        assert_eq!(env.fail(&side, &["note", &id, "x"]), "config");
+        assert_eq!(std::fs::read(&record).unwrap(), before);
+    }
+    std::fs::write(&config, &good).unwrap();
+    env.json(&side, &["note", &id, "x"]);
+}
+
+#[test]
+fn retired_write_a_worktree_that_declares_it_refuses() {
+    let mut env = TestEnv::new();
+    let (_main, side, _id) = repo_with_worktree_as(&mut env, "old");
+    declare_retired(&side, None);
+    assert_eq!(env.fail(&side, &["add", "N", "-p", "2"]), "retired_project");
+}
+
+#[test]
+fn retired_write_feedback_is_refused() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let config = old.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{text}\n[feedback]\nscope = \"s\"\n")).unwrap();
+    declare_retired(&old, None);
+    let here = env.init("here");
+    assert_eq!(
+        env.fail(
+            &here,
+            &[
+                "feedback",
+                "--project",
+                "old",
+                "the tool line could be clearer",
+                "--category",
+                "gap"
+            ]
+        ),
+        "retired_project"
+    );
+}
+
+#[test]
+fn retired_write_refusal_names_the_successor_and_the_way_back() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    declare_retired(&old, Some("new"));
+    let out = env
+        .cmd(&old)
+        .args(["add", "N", "-p", "2"])
+        .output()
+        .unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("new") && detail.contains("tasks unretire"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn retired_write_editor_save_is_refused_after_retirement_lands() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    // The editor declares retirement, then changes the title, so the re-lock sees it.
+    let script = old.join("editor.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nprintf '\\n[retired]\\ndate = \"2026-10-04\"\\nreason = \"r\"\\n' >> {}\nsed -i 's/^title: .*/title: changed/' \"$1\"\n",
+            old.join("tasks/.config.toml").display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = env
+        .cmd(&old)
+        .env("EDITOR", &script)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("retired_project"));
+    let record = std::fs::read_to_string(old.join(format!("tasks/{id}.md"))).unwrap();
+    assert!(!record.contains("title: changed"));
+}
