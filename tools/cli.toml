@@ -238,6 +238,12 @@ tier = "automation"
 default_output = "pretty"
 env = "PILOT"
 
+[cli.survey]
+project = "ns"
+tier = "automation"
+default_output = "pretty"
+env = "SURVEY"
+
 # ---- tasks
 
 [[cli.tasks.commands]]
@@ -267,6 +273,18 @@ options = [
 path = ["unregister"]
 summary = "Remove a prefix from the registry. Project files are left untouched"
 args = [{ name = "prefix", value = "string", required = true }]
+
+[[cli.tasks.commands]]
+path = ["retire"]
+summary = "Declare this project retired: no task may be open, no claim live, in any checkout"
+options = [
+  { names = ["--successor"], value = "string" },
+  { names = ["--reason"], value = "string", required = true },
+]
+
+[[cli.tasks.commands]]
+path = ["unretire"]
+summary = "Remove this project's retirement declaration"
 
 [[cli.tasks.commands]]
 path = ["projects"]
@@ -1036,6 +1054,7 @@ options = [
   { names = ["--years"], value = "string" },
   { names = ["--span"], value = "int", default = "10" },
   { names = ["--head"], value = "int", default = "12" },
+  { names = ["--anchor"], value = "string", default = "0" },
   { names = ["--top-papers"], value = "int", default = "5" },
   { names = ["--top-exemplars"], value = "int", default = "3" },
   { names = ["--allow-dirty"], value = "none" },
@@ -1403,6 +1422,250 @@ path = ["prereg"]
 summary = "Render the preregistration document"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
+]
+
+[[cli.pilot.commands]]
+path = ["catalogue-freeze"]
+summary = "Freeze the period catalogue and comb"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+  { names = ["--periods"], value = "string", default = "data/catalogue/periods.csv" },
+  { names = ["--comb"], value = "string", default = "data/catalogue/comb.csv" },
+]
+
+[[cli.pilot.commands]]
+path = ["catalogue-describe"]
+summary = "Describe the period catalogue against the comb"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+  { names = ["--periods"], value = "string", default = "data/catalogue/periods.csv" },
+  { names = ["--comb"], value = "string", default = "data/catalogue/comb.csv" },
+]
+
+[[cli.pilot.commands]]
+path = ["nested-freeze"]
+summary = "Freeze the nested manifest with its size settings"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+  { names = ["--realizations"], value = "int", default = "16" },
+  { names = ["--estimator-pairs"], value = "int", default = "32" },
+  { names = ["--sizepower-realizations"], value = "int", default = "16" },
+  { names = ["--sizepower-b"], value = "int", default = "199" },
+]
+
+[[cli.pilot.commands]]
+path = ["nested-check"]
+summary = "Check the nested manifest against the frozen one"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+]
+
+[[cli.pilot.commands]]
+path = ["nested-generate"]
+summary = "Generate one nested partition's trajectories"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+  { names = ["--partition"], value = "enum", values = ["nested-development", "nested-fresh", "nested-new", "nested-estimator"], required = true },
+]
+
+[[cli.pilot.commands]]
+path = ["nested-compute"]
+summary = "Compute both panels on every view for one nested partition"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+  { names = ["--partition"], value = "enum", values = ["nested-development", "nested-fresh", "nested-new", "nested-estimator"], required = true },
+  { names = ["--workers"], value = "int", default = "1" },
+]
+
+[[cli.pilot.commands]]
+path = ["nested-calibrate"]
+summary = "Calibrate the depth estimator on noisy and noiseless pairs"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+  { names = ["--workers"], value = "int", default = "1" },
+]
+
+[[cli.pilot.commands]]
+path = ["nested-sizepower"]
+summary = "Run the surrogate size-and-power check"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+  { names = ["--workers"], value = "int", default = "1" },
+  { names = ["--surrogate"], value = "enum", values = ["time_shift", "epoch_shuffle_Ps", "epoch_shuffle_frac", "phase_randomize"], repeatable = true },
+]
+
+[[cli.pilot.commands]]
+path = ["nested-report"]
+summary = "Render the nested run report"
+options = [
+  { names = ["--run"], value = "string", default = "nc1" },
+]
+
+# ---- survey
+
+[[cli.survey.commands]]
+path = ["freeze-protocol"]
+summary = "Freeze the survey protocol and its binding to a calibration run"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--calibration"], value = "string", default = "r1" },
+  { names = ["--successor-of"], value = "string" },
+  { names = ["--carry-through"], value = "enum", values = ["harvest", "frame", "calibration", "rubric", "draw", "pins", "inventory", "files", "dossiers", "readings", "adjudication", "series", "rows", "outputs"] },
+]
+
+[[cli.survey.commands]]
+path = ["check-protocol"]
+summary = "Check the running protocol and code against the frozen protocol"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["status"]
+summary = "Show the run's freezes, stages and human-work budget"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["harvest"]
+summary = "Harvest the dataset listing in one new attempt"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["resolve-conflicts"]
+summary = "Read each dataset the listing showed in two versions once more"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["freeze-frame"]
+summary = "Freeze the frame of the latest completed harvest"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["calibration-set"]
+summary = "Rank the records the rubric is calibrated on"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["pin"]
+summary = "Pin the version of each record of a cohort"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--cohort"], value = "enum", values = ["calibration", "sample"], default = "sample" },
+  { names = ["--final"], value = "none" },
+]
+
+[[cli.survey.commands]]
+path = ["inventory"]
+summary = "List and select the files of each pinned record"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--cohort"], value = "enum", values = ["calibration", "sample"], default = "sample" },
+  { names = ["--final"], value = "none" },
+]
+
+[[cli.survey.commands]]
+path = ["acquire"]
+summary = "Download the selected files under the byte budget"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--cohort"], value = "enum", values = ["calibration", "sample"], default = "sample" },
+  { names = ["--final"], value = "none" },
+]
+
+[[cli.survey.commands]]
+path = ["dossiers"]
+summary = "Parse the tables and build the dossier of each record"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--cohort"], value = "enum", values = ["calibration", "sample"], default = "sample" },
+]
+
+[[cli.survey.commands]]
+path = ["assist"]
+summary = "Set parser options for refused tables, as timed technical assistance"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--human"], value = "string", required = true },
+]
+
+[[cli.survey.commands]]
+path = ["read"]
+summary = "Make one reader's initial eligibility readings"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--cohort"], value = "enum", values = ["calibration", "sample"], default = "sample" },
+  { names = ["--reader"], value = "enum", values = ["human", "model"], required = true },
+  { names = ["--human"], value = "string" },
+]
+
+[[cli.survey.commands]]
+path = ["freeze-rubric"]
+summary = "Freeze the calibrated rubric and name the two readers"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--human"], value = "string", required = true },
+]
+
+[[cli.survey.commands]]
+path = ["draw"]
+summary = "Draw the sample from the frozen frame"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["adjudicate"]
+summary = "Decide the disagreements between the two readers"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--human"], value = "string", required = true },
+]
+
+[[cli.survey.commands]]
+path = ["extract"]
+summary = "Extract the candidate series and freeze the selection"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["compute"]
+summary = "Compute the panel and the dependence statistics"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["evaluate"]
+summary = "Evaluate the frozen reduction on the public series"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["report"]
+summary = "Render the run report"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+]
+
+[[cli.survey.commands]]
+path = ["clock"]
+summary = "Time a spell of rubric preparation or audit work"
+options = [
+  { names = ["--run"], value = "string", default = "p1" },
+  { names = ["--human"], value = "string", required = true },
+  { names = ["--activity"], value = "enum", values = ["rubric", "audit"], required = true },
 ]
 
 # ---- mindful

@@ -87,6 +87,8 @@ pub struct Project {
     pub needs: crate::needs::Vocabulary,
     /// The per-file cap from `[attachments] max_bytes`; `attachments::DEFAULT_MAX_BYTES` when unset.
     pub attachments_max_bytes: u64,
+    /// The `[retired]` table: `Some` means the project is over and takes no writes.
+    pub retired: Option<Retirement>,
 }
 
 /// One other checkout's copy of a record, as `sibling_task_copies` found it.
@@ -120,6 +122,27 @@ struct Config {
     attachments: Option<AttachmentsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     needs: Option<crate::needs::Vocabulary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retired: Option<RetiredConfig>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetiredConfig {
+    date: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    successor: Option<String>,
+    reason: String,
+}
+
+/// A project's own retirement declaration, the `[retired]` table (ops lifecycle spec §3).
+/// Named apart from the rename feature's retired *prefixes* (registry aliases).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Retirement {
+    pub date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub successor: Option<String>,
+    pub reason: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -192,6 +215,55 @@ fn feedback_scope(raw: Option<FeedbackConfig>) -> Result<Option<String>> {
     Ok(Some(table.scope))
 }
 
+/// Validates a retirement declaration. The successor is checked for prefix grammar only:
+/// whether it is registered is `tasks retire`'s question, asked once, so a host without
+/// the successor still reads the table. `tasks retire` calls this before it writes, so it
+/// never writes a table the next command would refuse to read.
+pub fn validate_retirement(r: &Retirement) -> Result<()> {
+    let bad = |what: String| Err(Error::Config(format!("{CONFIG_REL}: [retired] {what}")));
+    if !is_iso_date(&r.date) {
+        return bad("date must be YYYY-MM-DD".into());
+    }
+    if r.reason.chars().any(char::is_control) || r.reason.chars().all(char::is_whitespace) {
+        return bad("reason must be one line of text with no control characters".into());
+    }
+    if let Some(successor) = &r.successor
+        && !is_valid_prefix(successor)
+    {
+        return bad(format!("successor {successor:?} is not a prefix"));
+    }
+    Ok(())
+}
+
+/// `YYYY-MM-DD` naming a real calendar day.
+fn is_iso_date(text: &str) -> bool {
+    let b = text.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !text.is_ascii() {
+        return false;
+    }
+    let (Ok(y), Ok(m), Ok(d)) = (
+        text[0..4].parse::<i32>(),
+        text[5..7].parse::<u8>(),
+        text[8..10].parse::<u8>(),
+    ) else {
+        return false;
+    };
+    time::Month::try_from(m).is_ok_and(|m| time::Date::from_calendar_date(y, m, d).is_ok())
+}
+
+fn retirement(raw: Option<RetiredConfig>) -> Result<Option<Retirement>> {
+    let Some(table) = raw else {
+        return Ok(None);
+    };
+    let r = Retirement {
+        date: table.date,
+        successor: table.successor,
+        reason: table.reason,
+    };
+    validate_retirement(&r)?;
+    Ok(Some(r))
+}
+
 /// Normalizes a configured doc root: one trailing slash is dropped; anything that is not a
 /// plain relative path (`a/b`, no `.`/`..`/empty segments) is a config error.
 fn doc_root(key: &str, raw: &str) -> Result<String> {
@@ -249,6 +321,7 @@ impl Project {
                 feedback: None,
                 attachments: None,
                 needs: None,
+                retired: None,
             })
             .expect("config serializes");
             atomic_write(&config, text.as_bytes())?;
@@ -287,6 +360,7 @@ impl Project {
             feedback: feedback_scope(config.feedback)?,
             needs: need_vocabulary(config.needs)?,
             attachments_max_bytes: attachments_max_bytes(config.attachments)?,
+            retired: retirement(config.retired)?,
         })
     }
 
@@ -500,6 +574,15 @@ impl Project {
                 .filter(|field| field.starts_with(b"worktree "))
                 .count(),
         ))
+    }
+
+    /// This project's root in every checkout: each linked worktree's, in git's order with
+    /// the main one first, or this root alone outside git. A worktree missing from disk
+    /// keeps its listed path, so reading it fails rather than skipping it.
+    pub fn checkout_roots(&self) -> Result<Vec<PathBuf>> {
+        Ok(self
+            .worktree_roots()?
+            .unwrap_or_else(|| vec![self.root.clone()]))
     }
 
     /// This project's root in every worktree of the repository, in git's order, so the
@@ -732,6 +815,53 @@ impl Project {
 mod tests {
     use super::*;
     use crate::model::*;
+
+    fn project_with_config(text: &str) -> (tempfile::TempDir, Result<Project>) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        std::fs::write(dir.path().join(CONFIG_REL), text).unwrap();
+        let project = Project::open(dir.path());
+        (dir, project)
+    }
+
+    #[test]
+    fn retired_table_is_read_with_and_without_a_successor() {
+        let (_dir, project) = project_with_config(
+            "prefix = \"old\"\n\n[retired]\ndate = \"2026-10-04\"\nsuccessor = \"new\"\nreason = \"superseded\"\n",
+        );
+        assert_eq!(
+            project.unwrap().retired,
+            Some(Retirement {
+                date: "2026-10-04".into(),
+                successor: Some("new".into()),
+                reason: "superseded".into()
+            })
+        );
+        let (_dir, project) = project_with_config(
+            "prefix = \"old\"\n\n[retired]\ndate = \"2026-10-04\"\nreason = \"ended\"\n",
+        );
+        assert_eq!(project.unwrap().retired.unwrap().successor, None);
+        let (_dir, project) = project_with_config("prefix = \"old\"\n");
+        assert_eq!(project.unwrap().retired, None);
+    }
+
+    #[test]
+    fn retired_table_bad_is_a_config_error() {
+        for body in [
+            "[retired]\nreason = \"r\"\n",
+            "[retired]\ndate = \"2026-10-04\"\n",
+            "[retired]\ndate = \"04/10/2026\"\nreason = \"r\"\n",
+            "[retired]\ndate = \"2026-02-30\"\nreason = \"r\"\n",
+            "[retired]\ndate = \"2026-10-04\"\nreason = \"two\\nlines\"\n",
+            "[retired]\ndate = \"2026-10-04\"\nreason = \"  \"\n",
+            "[retired]\ndate = \"2026-10-04\"\nreason = \"r\"\nextra = 1\n",
+            "[retired]\ndate = \"2026-10-04\"\nreason = \"r\"\nsuccessor = \"Bad Prefix\"\n",
+        ] {
+            let (_dir, project) = project_with_config(&format!("prefix = \"old\"\n\n{body}"));
+            let error = project.err().unwrap_or_else(|| panic!("accepted: {body}"));
+            assert_eq!(error.kind(), "config", "{body}");
+        }
+    }
 
     fn temp_project() -> (tempfile::TempDir, Project) {
         let dir = tempfile::tempdir().unwrap();

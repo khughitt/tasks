@@ -15,6 +15,7 @@ pub mod parked;
 pub mod projects;
 pub mod quiet;
 pub mod rename;
+pub mod retire;
 pub mod root;
 pub mod sample;
 pub mod show;
@@ -626,7 +627,25 @@ pub fn reject_stale_local(registry: &Registry, project: &Project) -> Result<()> 
 /// The context for the project an id names. A prefix matching the local project
 /// keeps that checkout, so `-C` and worktrees still win; any other prefix is followed
 /// through the registry. With no local project, the registry is the only target.
+/// The warning a single-project read carries for a retired project, or None.
+pub fn retired_warning(project: &Project) -> Option<String> {
+    project.retired.as_ref().map(|r| {
+        let successor = r
+            .successor
+            .as_ref()
+            .map(|s| format!("; successor {s}"))
+            .unwrap_or_default();
+        format!("{} is retired ({}){successor}", project.prefix, r.date)
+    })
+}
+
 fn open_id_ctx(dir: Option<&Path>, id: &str) -> Result<Ctx> {
+    let mut ctx = open_id_ctx_unwarned(dir, id)?;
+    ctx.warnings.extend(retired_warning(&ctx.project));
+    Ok(ctx)
+}
+
+fn open_id_ctx_unwarned(dir: Option<&Path>, id: &str) -> Result<Ctx> {
     let mut ctx = match open_ctx(dir) {
         Ok(ctx) => ctx,
         Err(Error::NoProject(_)) => {
@@ -679,6 +698,7 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
         };
         if project.prefix == ctx.project.prefix && project.root == ctx.project.root {
             reject_stale_local(&registry, &project)?;
+            reject_retired(&registry, &project)?;
             ctx.project = project;
             ctx.registry = registry;
             ctx.routing = routing.clone();
@@ -690,6 +710,51 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
     Err(Error::Io(
         "the project's identity kept changing while acquiring its lock; retry".into(),
     ))
+}
+
+/// A retired project takes no writes (ops lifecycle spec §4). The registered checkout is
+/// the authority, but a worktree made before the retirement has no `[retired]` of its own
+/// until a merge, so either declaring it is enough. `reject_stale_local` only compares the
+/// prefix with the registry's aliases; a registered checkout that does not open, or whose
+/// config names another prefix, is an error here, never "not retired": the write it would
+/// have guarded does not happen.
+pub fn reject_retired(registry: &Registry, project: &Project) -> Result<()> {
+    let registered = match registry.project_root(&project.prefix) {
+        Some(root) if root != project.root.as_path() => Some(
+            crate::scope::open_registered(registry, &project.prefix, Origin::Prefix).map_err(
+                |error| {
+                    Error::Config(format!(
+                        "cannot tell whether {} is retired: its registered checkout {} did not \
+                         open ({error}); fix that checkout, then retry",
+                        project.prefix,
+                        root.display()
+                    ))
+                },
+            )?,
+        ),
+        _ => None,
+    };
+    let declared = project
+        .retired
+        .as_ref()
+        .or(registered.as_ref().and_then(|p| p.retired.as_ref()));
+    let Some(retirement) = declared else {
+        return Ok(());
+    };
+    let authority = registry
+        .project_root(&project.prefix)
+        .unwrap_or(&project.root);
+    let successor = retirement
+        .successor
+        .as_ref()
+        .map(|s| format!("; its successor is {s}"))
+        .unwrap_or_default();
+    Err(Error::RetiredProject(format!(
+        "{} was retired on {}{successor}; run `tasks unretire` in {} to write here again",
+        project.prefix,
+        retirement.date,
+        authority.display()
+    )))
 }
 
 /// Recorded names and root remain stable through the config/registry transition.
@@ -815,10 +880,11 @@ pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
             (project, registry, shorthand)
         }
     };
+    let warnings = retired_warning(&project).into_iter().collect();
     Ok(ReadCtx {
         scope: Scope::Local(project),
         registry,
-        warnings: Vec::new(),
+        warnings,
         shorthand,
     })
 }
@@ -1185,6 +1251,8 @@ pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<Op
 /// acquiring `save` returned `Ok`, still under the project lock. The acquisition has
 /// landed by then, so a holder that cannot be noted is a warning, never the command's
 /// failure.
+/// No retired check: a holder holds a claim, and a retired project has none (`retire`
+/// refuses while one is live, and `start` is refused afterwards).
 pub(crate) fn note_need_holders(ctx: &mut Ctx, holders: HolderNotes) {
     for (holder, need, text) in holders.notes {
         let written = ctx.project.read_task(&holder).and_then(|mut held| {
@@ -1628,6 +1696,26 @@ pub fn run(cli: Cli) -> Result<Output> {
             adopt,
         } => rename::run(dir, old, new, explain, adopt),
         Command::Unregister { prefix } => unregister::run(prefix),
+        Command::Retire { successor, reason } => {
+            let project = open_ctx(dir)?.project;
+            let prefix = project.prefix.clone();
+            let retired = retire::retire(project, successor, reason)?;
+            Ok(Output::Retire(crate::output::RetireOut {
+                prefix,
+                retired: Some(retired),
+                warnings: Vec::new(),
+            }))
+        }
+        Command::Unretire => {
+            let project = open_ctx(dir)?.project;
+            let prefix = project.prefix.clone();
+            retire::unretire(project)?;
+            Ok(Output::Retire(crate::output::RetireOut {
+                prefix,
+                retired: None,
+                warnings: Vec::new(),
+            }))
+        }
         Command::Projects {
             sort,
             reverse,

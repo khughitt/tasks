@@ -87,6 +87,12 @@ pub fn run(
         let _registry_lock = Registry::lock()?;
         let mut registry = Registry::load()?;
         let project = crate::repo::Project::locate(&super::start_dir(dir)?)?;
+        if project.retired.is_some() {
+            return Err(Error::RetiredProject(format!(
+                "{} is retired; a retired project is not renamed",
+                project.prefix
+            )));
+        }
         return crate::rename::adopt::run(&mut registry, &project, &old, &new, false)
             .map(Output::Rename);
     }
@@ -108,6 +114,7 @@ pub fn run(
         registry = Registry::load()?;
         let refreshed = invocation(&registry, &old, &new)?;
         if refreshed == requested {
+            reject_renaming_a_retired_project(&registry, &requested.source)?;
             return crate::rename::run(&mut registry, &requested, false).map(Output::Rename);
         }
         requested = refreshed;
@@ -115,4 +122,20 @@ pub fn run(
     Err(Error::Io(
         "the project's identity kept changing while acquiring rename locks; retry".into(),
     ))
+}
+
+/// A retired project is not renamed (ops lifecycle spec §4). Read without the prefix
+/// check, so a pending rename whose config already carries the new prefix still resumes;
+/// a config that does not parse fails here as it would in the rename itself.
+fn reject_renaming_a_retired_project(registry: &Registry, source: &str) -> Result<()> {
+    if let Some(root) = registry.project_root(source)
+        && root.join(crate::repo::CONFIG_REL).exists()
+        && crate::repo::Project::open(root)?.retired.is_some()
+    {
+        return Err(Error::RetiredProject(format!(
+            "{source} is retired; a retired project is not renamed (`tasks unretire` in {} first)",
+            root.display()
+        )));
+    }
+    Ok(())
 }

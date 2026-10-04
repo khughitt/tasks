@@ -81,6 +81,8 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
             crate::format::validate_task(&halt)?;
             snapshot.authority().validate_docs(&halt)?;
             // Append-only audit note: this authority write skips load's sibling stale-copy guard.
+            // No retired check here: the halt is in this project, which already passed
+            // `reject_retired` under the lock, so a retired project never reaches this write.
             snapshot.authority().write_task(&ctx.registry, &halt)?;
         }
         append_note(&mut task, &owner, &target_note)?;
