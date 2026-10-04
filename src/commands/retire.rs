@@ -94,7 +94,13 @@ fn reject_open_copies(project: &Project) -> Result<()> {
         let dir = root.join("tasks");
         for entry in std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))? {
             let path = entry.map_err(|e| unreadable(&dir, &e))?.path();
-            if path.extension().is_none_or(|x| x != "md") {
+            // Records only, as `Project::task_files` reads them: a dot-prefixed stem is a
+            // kept edit temp (`.<id>.<hex>.edit.md`), not a task.
+            if path.extension().is_none_or(|x| x != "md")
+                || path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+            {
                 continue;
             }
             let raw = std::fs::read_to_string(&path).map_err(|e| unreadable(&path, &e))?;

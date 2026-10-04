@@ -97,9 +97,9 @@ fn skill_installed(root: &Path) -> bool {
 
 /// `init --force` moves the authority that `retire` and every writer consult, so it is
 /// not done for a retired project: refused when the new root's config declares
-/// `[retired]`, or when the currently registered root opens and declares it. An old root
-/// that does not open does not block: repointing away from a moved or broken checkout is
-/// what `--force` is for, and the new root is read either way.
+/// `[retired]`, or when the currently registered root declares it. An old root that is
+/// gone or holds no config does not block: repointing away from a moved checkout is what
+/// `--force` is for. One whose config exists but does not parse is an error.
 fn reject_repointing_a_retired_project(
     registry: &Registry,
     prefix: &str,
@@ -114,10 +114,13 @@ fn reject_repointing_a_retired_project(
     if root.join(crate::repo::CONFIG_REL).exists() && Project::open(root)?.retired.is_some() {
         return refuse(root);
     }
+    // Only an old root that is gone, or holds no config, may be passed over unread; a
+    // config that exists and does not parse is an error, never "not retired".
     if let Some(current) = registry.project_root(prefix)
         && current != root
-        && let Ok(project) = Project::open(current)
-        && project.retired.is_some()
+        && crate::scope::is_reachable(current)?
+        && current.join(crate::repo::CONFIG_REL).exists()
+        && Project::open(current)?.retired.is_some()
     {
         return refuse(current);
     }

@@ -25928,3 +25928,131 @@ fn names_word(text: &str, word: &str) -> bool {
     text.split(|c: char| !c.is_alphanumeric())
         .any(|w| w == word)
 }
+
+#[test]
+fn retire_cmd_ignores_a_kept_edit_temp_file() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    // A failed edit keeps tasks/.<id>.<hex>.edit.md holding the record as it was (open).
+    let out = env
+        .cmd(&old)
+        .env("EDITOR", "false")
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        std::fs::read_dir(old.join("tasks")).unwrap().any(|e| e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with('.'))
+    );
+    env.json(&old, &["done", &id, "m"]);
+    env.json(&old, &["retire", "--reason", "r"]);
+}
+
+#[test]
+fn retired_lock_init_force_refuses_when_the_retired_root_config_does_not_parse() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    env.json(&old, &["retire", "--reason", "r"]);
+    let config = old.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{text}\ngarbage = [\n")).unwrap();
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let before = std::fs::read(&registry_path).unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        env.fail(elsewhere.path(), &["init", "--prefix", "old", "--force"]),
+        "config"
+    );
+    assert_eq!(std::fs::read(&registry_path).unwrap(), before);
+}
+
+#[test]
+fn retired_write_every_command_is_refused_from_a_worktree_made_before_retirement() {
+    let mut env = TestEnv::new();
+    let main = env.init("old");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    let id2 = id_of(env.json(&main, &["add", "U", "-p", "2"]));
+    let blocked = id_of(env.json(&main, &["add", "B", "-p", "2"]));
+    env.json(&main, &["block", &blocked, "why"]);
+    let shelved = id_of(env.json(&main, &["add", "S", "-p", "2"]));
+    env.json(&main, &["shelve", &shelved, "later"]);
+    let attached = id_of(env.json(&main, &["add", "A", "-p", "2"]));
+    let file = main.join("shot.txt");
+    std::fs::write(&file, "x").unwrap();
+    env.json(&main, &["attach", &attached, file.to_str().unwrap()]);
+    let config = main.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{text}\n[feedback]\nscope = \"s\"\n")).unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    declare_retired(&main, None); // only the registered checkout knows
+    let second = side.join("shot2.txt");
+    std::fs::write(&second, "y").unwrap();
+    let editor = side.join("editor.sh");
+    std::fs::write(
+        &editor,
+        "#!/bin/sh\nsed -i 's/^title: .*/title: changed/' \"$1\"\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let writes: Vec<Vec<&str>> = vec![
+        vec!["add", "N", "-p", "2"],
+        vec!["note", &id, "x"],
+        vec!["edit", &id, "--title", "y"],
+        vec!["start", &id],
+        vec!["done", &id, "m"],
+        vec!["drop", &id, "m"],
+        vec!["block", &id, "m"],
+        vec!["unblock", &blocked],
+        vec!["shelve", &id, "m"],
+        vec!["unshelve", &shelved],
+        vec!["dep", &id, "--on", &id2],
+        vec!["attach", &attached, second.to_str().unwrap()],
+        vec!["detach", &attached, "shot.txt", "why"],
+    ];
+    for args in &writes {
+        assert_eq!(env.fail(&side, args), "retired_project", "{args:?}");
+    }
+    let edited = env
+        .cmd(&side)
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .output()
+        .unwrap();
+    assert_eq!(edited.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&edited.stderr).contains("retired_project"));
+    let here = env.init("here");
+    assert_eq!(
+        env.fail(
+            &here,
+            &[
+                "feedback",
+                "--project",
+                "old",
+                "the tool line could be clearer",
+                "--category",
+                "gap"
+            ]
+        ),
+        "retired_project"
+    );
+}
