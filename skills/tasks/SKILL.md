@@ -483,6 +483,15 @@ when rollback is needed: restore and verify each source before deleting its dest
 keep the destination and stop if restoration fails, restore config and registry (including
 all moved aliases), and remove the inventory last.
 
+## Retiring a project
+
+A project that is over declares it: close every task (drop, or re-file in the successor
+with `--source <old id>`), then `tasks retire [--successor <prefix>] --reason "<one line>"`
+in its registered checkout. Every write to it is refused afterwards with `retired_project`,
+from every checkout; its ids keep resolving, `--all-projects` and `--group` reads leave it
+out, and `--project` reads warn. `tasks unretire` there undoes it. The project lifecycle
+runbook in ops has the whole procedure.
+
 ## With superpowers
 
 - **brainstorming**, when selected by planned process, runs against an existing task

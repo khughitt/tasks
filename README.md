@@ -267,6 +267,7 @@ from a clone):
     tasks init --prefix sci          # creates tasks/ and the doc roots; registers the project
     tasks init --prefix sci --force  # re-point the prefix here after moving the repo
     tasks unregister sci             # drop a stale prefix and its aliases; files are untouched
+    tasks retire --successor mind6 --reason "superseded"  # declare this project over; unretire undoes it
     tasks rename dot dots            # rename a registered prefix; old ids still resolve
     tasks rename dot dots --explain  # diagnose an interruption without locks or writes
     tasks add "Bank the ledger" -p 1 --size m --complexity low --process direct --tag ledger --agent codex/gpt-6
@@ -368,6 +369,18 @@ live name. `tasks rename <old> <new>` updates the project's filenames, ids, loca
 prose need no edits: retired names keep resolving **for as long as the project stays
 registered**. `unregister` removes that project's aliases too; retired names cannot be
 reused while registered.
+
+A project that is over declares it in its own `tasks/.config.toml` with `tasks retire
+[--successor <prefix>] --reason "<one line>"`, run in its registered checkout. It refuses
+while any task is open in any checkout, while a claim is live, or while a linked worktree
+cannot be read, and writes a `[retired]` table (`date`, `reason`, optional `successor`).
+From then on every write to the project is refused with `retired_project`, from every
+checkout, a worktree made before the retirement included; its ids keep resolving and
+satisfy other projects' dependencies; `--all-projects` and `--group` reads leave it out,
+while `--project` reads and `show` warn; `tasks projects` keeps its row with `retired`;
+`group set` refuses it as a member; `init --force` and `rename` refuse it. `tasks
+unretire` in the registered checkout removes the table. The project lifecycle runbook in
+ops has the whole procedure.
 
 The registry can also declare project groups (`[groups]`), named sets of live prefixes
 that `--group <name>` reads together. `rename` carries a member to its new prefix.
