@@ -576,6 +576,15 @@ impl Project {
         ))
     }
 
+    /// This project's root in every checkout: each linked worktree's, in git's order with
+    /// the main one first, or this root alone outside git. A worktree missing from disk
+    /// keeps its listed path, so reading it fails rather than skipping it.
+    pub fn checkout_roots(&self) -> Result<Vec<PathBuf>> {
+        Ok(self
+            .worktree_roots()?
+            .unwrap_or_else(|| vec![self.root.clone()]))
+    }
+
     /// This project's root in every worktree of the repository, in git's order, so the
     /// main worktree comes first; this checkout is included. `None` in the two cases
     /// `git_toplevel` documents.

@@ -37,6 +37,12 @@ pub enum Error {
     #[error("{0}")]
     RetiredProject(String),
     #[error("{0}")]
+    OpenTasks(String),
+    #[error("{0}")]
+    UnreadableCheckout(String),
+    #[error("{0}")]
+    NotRegisteredCheckout(String),
+    #[error("{0}")]
     Halted(String),
     #[error("{0}")]
     NestedLane(String),
@@ -97,6 +103,9 @@ impl Error {
             Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
             Error::StaleCopy(detail) => Error::StaleCopy(detail + suffix),
             Error::RetiredProject(detail) => Error::RetiredProject(detail + suffix),
+            Error::OpenTasks(detail) => Error::OpenTasks(detail + suffix),
+            Error::UnreadableCheckout(detail) => Error::UnreadableCheckout(detail + suffix),
+            Error::NotRegisteredCheckout(detail) => Error::NotRegisteredCheckout(detail + suffix),
             Error::Halted(detail) => Error::Halted(detail + suffix),
             Error::NestedLane(detail) => Error::NestedLane(detail + suffix),
             Error::NeedHeld(detail) => Error::NeedHeld(detail + suffix),
@@ -134,6 +143,9 @@ impl Error {
             Error::Claimed(..) => "claimed",
             Error::StaleCopy(_) => "stale_copy",
             Error::RetiredProject(_) => "retired_project",
+            Error::OpenTasks(_) => "open_tasks",
+            Error::UnreadableCheckout(_) => "unreadable_checkout",
+            Error::NotRegisteredCheckout(_) => "not_registered_checkout",
             Error::Halted(_) => "halted",
             Error::NestedLane(_) => "nested_lane",
             Error::NeedHeld(_) => "need_held",

@@ -25512,3 +25512,268 @@ fn retired_lock_unregister_still_works() {
     let here = env.init("here");
     env.json(&here, &["unregister", "old"]);
 }
+
+/// A project that is its own git repository with one *closed* task committed, plus a
+/// linked worktree branched after the close, so every checkout's copy is closed.
+fn closed_repo_with_worktree(
+    env: &mut TestEnv,
+    prefix: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let main = env.init(prefix);
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2"]));
+    env.json(&main, &["drop", &id, "seed"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    (main, side)
+}
+
+fn spawn_piped(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> std::process::Child {
+    let mut command = env.raw(dir);
+    command
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command.spawn().unwrap()
+}
+
+fn kind_of(output: &std::process::Output) -> String {
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    error["error"]["kind"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn retire_cmd_writes_the_table_and_unretire_removes_it_keeping_comments() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    env.init("new");
+    let config = old.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("# keep me\n{text}")).unwrap();
+    let out = env.json(
+        &old,
+        &["retire", "--successor", "new", "--reason", "superseded"],
+    );
+    assert_eq!(out["retired"]["successor"], "new");
+    let written = std::fs::read_to_string(&config).unwrap();
+    assert!(written.contains("# keep me") && written.contains("[retired]"));
+    assert_eq!(env.fail(&old, &["add", "N", "-p", "2"]), "retired_project");
+    env.json(&old, &["unretire"]);
+    let restored = std::fs::read_to_string(&config).unwrap();
+    assert!(restored.contains("# keep me") && !restored.contains("[retired]"));
+    env.json(&old, &["add", "N", "-p", "2"]);
+}
+
+#[test]
+fn retire_cmd_unretire_on_an_active_project_changes_nothing() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let before = std::fs::read(old.join("tasks/.config.toml")).unwrap();
+    let out = env.json(&old, &["unretire"]);
+    assert!(out["retired"].is_null());
+    assert_eq!(
+        std::fs::read(old.join("tasks/.config.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn retire_cmd_an_invalid_reason_leaves_the_config_unchanged() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let config = old.join("tasks/.config.toml");
+    let before = std::fs::read(&config).unwrap();
+    for reason in ["", "   ", "two\nlines", "tab\there"] {
+        assert_eq!(
+            env.fail(&old, &["retire", "--reason", reason]),
+            "config",
+            "{reason:?}"
+        );
+        assert_eq!(std::fs::read(&config).unwrap(), before, "{reason:?}");
+    }
+    env.json(&old, &["add", "still writable", "-p", "2"]);
+}
+
+#[test]
+fn retire_cmd_refuses_an_open_task() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    assert_eq!(env.fail(&old, &["retire", "--reason", "r"]), "open_tasks");
+    env.json(&old, &["drop", &id, "m"]);
+    env.json(&old, &["retire", "--reason", "r"]);
+}
+
+#[test]
+fn retire_cmd_refuses_its_own_prefix_an_unregistered_or_a_retired_successor() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let mid = env.init("mid");
+    env.json(&mid, &["retire", "--reason", "r"]);
+    for bad in ["old", "nowhere", "mid"] {
+        assert_eq!(
+            env.fail(&old, &["retire", "--successor", bad, "--reason", "r"]),
+            "config",
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn retire_cmd_refuses_a_live_claim_on_the_prefix() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    let id = id_of(env.json(&old, &["add", "T", "-p", "2"]));
+    env.json(&old, &["start", &id]);
+    // Close the record without releasing the claim, the way a sync can leave it.
+    let path = old.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("status: doing", "status: done");
+    std::fs::write(&path, text).unwrap();
+    assert_eq!(env.fail(&old, &["retire", "--reason", "r"]), "claimed");
+}
+
+#[test]
+fn retire_cmd_refuses_an_open_task_that_exists_only_in_a_linked_worktree() {
+    let mut env = TestEnv::new();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    let only_here = id_of(env.json(&side, &["add", "W", "-p", "2"])); // `add` takes no claim
+    let out = env
+        .cmd(&main)
+        .args(["retire", "--reason", "r"])
+        .output()
+        .unwrap();
+    assert_eq!(kind_of(&out), "open_tasks");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains(&only_here) && detail.contains(side.to_str().unwrap()),
+        "{detail}"
+    );
+}
+
+#[test]
+fn retire_cmd_refuses_an_unreadable_linked_worktree() {
+    let mut env = TestEnv::new();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(side.join("tasks"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    let kind = env.fail(&main, &["retire", "--reason", "r"]);
+    std::fs::set_permissions(side.join("tasks"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(kind, "unreadable_checkout");
+    assert!(
+        !std::fs::read_to_string(main.join("tasks/.config.toml"))
+            .unwrap()
+            .contains("[retired]")
+    );
+}
+
+#[test]
+fn retire_cmd_and_unretire_refuse_in_a_linked_worktree() {
+    let mut env = TestEnv::new();
+    let (_main, side) = closed_repo_with_worktree(&mut env, "old");
+    assert_eq!(
+        env.fail(&side, &["retire", "--reason", "r"]),
+        "not_registered_checkout"
+    );
+    assert_eq!(env.fail(&side, &["unretire"]), "not_registered_checkout");
+}
+
+#[test]
+fn retire_cmd_and_unretire_respect_a_pending_rename() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dot");
+    git(&dir, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&dir, &["add", "T", "-p", "2"]));
+    env.json(&dir, &["drop", &id, "m"]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "seed"]);
+    env.raw(&dir)
+        .env("TASKS_RENAME_STOP_AFTER", "config")
+        .args(["rename", "dot", "dots"])
+        .status()
+        .unwrap();
+    let config = dir.join("tasks/.config.toml");
+    let before = std::fs::read(&config).unwrap();
+    // Same kind a write gets during the freeze (a_pending_rename_freezes_the_project_*).
+    assert_eq!(env.fail(&dir, &["retire", "--reason", "r"]), "validation");
+    assert_eq!(env.fail(&dir, &["unretire"]), "validation");
+    assert_eq!(std::fs::read(&config).unwrap(), before);
+}
+
+/// Retire takes the project lock: it waits behind a holder and finishes after release.
+#[test]
+fn retire_cmd_waits_for_the_project_lock() {
+    let mut env = TestEnv::new();
+    let (main, _side) = closed_repo_with_worktree(&mut env, "old");
+    let held = hold_project_lock(&env, "old");
+    let mut retire = spawn_piped(&env, &main, &["retire", "--reason", "r"]);
+    let finished_early = wait_bounded(&mut retire, Duration::from_millis(500));
+    drop(held);
+    let out = reap(retire, REAP);
+    assert!(!finished_early, "retire must wait for the project lock");
+    assert!(out.expect("reaped").status.success());
+}
+
+/// Writer first: a stale-worktree write that holds the lock lands, and the retire that
+/// follows it through the lock sees the new task and refuses.
+#[test]
+fn retire_cmd_after_a_worktree_writer_sees_its_task() {
+    let mut env = TestEnv::new();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    let held = hold_project_lock(&env, "old");
+    let mut writer = spawn_piped(&env, &side, &["add", "W", "-p", "2"]);
+    let writer_waited = !wait_bounded(&mut writer, Duration::from_millis(300));
+    drop(held);
+    let writer = reap(writer, REAP).expect("writer reaped");
+    assert!(writer_waited && writer.status.success());
+    let retire = env
+        .cmd(&main)
+        .args(["retire", "--reason", "r"])
+        .output()
+        .unwrap();
+    assert_eq!(kind_of(&retire), "open_tasks");
+}
+
+/// Retire first: once it holds the lock and lands, a writer queued behind it in a stale
+/// worktree (whose own config has no [retired]) is refused.
+#[test]
+fn retire_cmd_before_a_worktree_writer_refuses_it() {
+    let mut env = TestEnv::new();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    let held = hold_project_lock(&env, "old");
+    let mut retire = spawn_piped(&env, &main, &["retire", "--reason", "r"]);
+    let retire_waited = !wait_bounded(&mut retire, Duration::from_millis(300));
+    drop(held);
+    let retire = reap(retire, REAP).expect("retire reaped");
+    assert!(retire_waited && retire.status.success());
+    assert!(
+        !std::fs::read_to_string(side.join("tasks/.config.toml"))
+            .unwrap()
+            .contains("[retired]")
+    );
+    let writer = env
+        .cmd(&side)
+        .args(["add", "W", "-p", "2"])
+        .output()
+        .unwrap();
+    assert_eq!(kind_of(&writer), "retired_project");
+    assert!(std::fs::read_dir(side.join("tasks")).unwrap().all(|e| {
+        let path = e.unwrap().path();
+        path.extension().is_none_or(|x| x != "md")
+            || !std::fs::read_to_string(&path).unwrap().contains("title: W")
+    }));
+}

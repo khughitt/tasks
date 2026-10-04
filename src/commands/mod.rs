@@ -15,6 +15,7 @@ pub mod parked;
 pub mod projects;
 pub mod quiet;
 pub mod rename;
+pub mod retire;
 pub mod root;
 pub mod sample;
 pub mod show;
@@ -1676,6 +1677,26 @@ pub fn run(cli: Cli) -> Result<Output> {
             adopt,
         } => rename::run(dir, old, new, explain, adopt),
         Command::Unregister { prefix } => unregister::run(prefix),
+        Command::Retire { successor, reason } => {
+            let project = open_ctx(dir)?.project;
+            let prefix = project.prefix.clone();
+            let retired = retire::retire(project, successor, reason)?;
+            Ok(Output::Retire(crate::output::RetireOut {
+                prefix,
+                retired: Some(retired),
+                warnings: Vec::new(),
+            }))
+        }
+        Command::Unretire => {
+            let project = open_ctx(dir)?.project;
+            let prefix = project.prefix.clone();
+            retire::unretire(project)?;
+            Ok(Output::Retire(crate::output::RetireOut {
+                prefix,
+                retired: None,
+                warnings: Vec::new(),
+            }))
+        }
         Command::Projects {
             sort,
             reverse,

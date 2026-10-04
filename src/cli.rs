@@ -331,6 +331,15 @@ pub enum Command {
         #[arg(add = ArgValueCandidates::new(crate::complete::prefixes))]
         prefix: String,
     },
+    /// Declare this project retired: no task may be open, no claim live, in any checkout
+    Retire {
+        #[arg(long, add = ArgValueCandidates::new(crate::complete::prefixes))]
+        successor: Option<String>,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Remove this project's retirement declaration
+    Unretire,
     /// The registry: every project, whether it is reachable, and its status counts.
     Projects {
         /// Order: prefix, size (most tasks first), or activity (most recent first).

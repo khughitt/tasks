@@ -879,6 +879,14 @@ pub struct Finding {
     pub detail: String,
 }
 
+/// `tasks retire` / `tasks unretire`: the project and its declaration after the command.
+#[derive(Serialize)]
+pub struct RetireOut {
+    pub prefix: String,
+    pub retired: Option<crate::repo::Retirement>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Serialize)]
 pub struct FeedbackOut {
     pub id: String,
@@ -920,6 +928,7 @@ pub enum Output {
     Feedback(FeedbackOut),
     Attach(AttachOut),
     Detach(DetachOut),
+    Retire(RetireOut),
 }
 
 pub fn render(out: &Output, format: Format, painter: &Painter, wrap: Wrap) -> String {
@@ -955,6 +964,17 @@ fn halt_line(halts: &[HaltRow]) -> String {
 fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
     match out {
         Output::Init(o) => o.prefix.clone(),
+        Output::Retire(o) => match &o.retired {
+            Some(r) => {
+                let successor = r
+                    .successor
+                    .as_ref()
+                    .map(|s| format!(" → {s}"))
+                    .unwrap_or_default();
+                format!("{} retired {}{successor}: {}", o.prefix, r.date, r.reason)
+            }
+            None => format!("{} is not retired", o.prefix),
+        },
         Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Add(o) => o.id.clone(),
@@ -1928,6 +1948,7 @@ pub fn pretty_warnings(warnings: &[String], painter: &Painter) -> String {
 pub fn warnings_of(out: &Output) -> Vec<String> {
     match out {
         Output::Init(o) => o.warnings.clone(),
+        Output::Retire(o) => o.warnings.clone(),
         Output::Rename(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
