@@ -65,6 +65,20 @@ pub fn run(ctx: Ctx) -> Result<Output> {
 
     for task in &tasks {
         let file = format!("tasks/{}.md", task.id);
+        // A retired project holds no open work (ops lifecycle spec §4); one that reappears,
+        // say from a sync conflict, is an error to close or a reason to unretire.
+        if ctx.project.retired.is_some() && task.status.is_open() {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "open_in_retired",
+                format!(
+                    "{} is {} in a retired project; close it, or run `tasks unretire`",
+                    task.id,
+                    task.status.as_str()
+                ),
+            ));
+        }
         // Only a project that keeps a dictionary is held to it, and only its open work:
         // a closed task's tags are history, not vocabulary.
         if let Some(dictionary) = &ctx.project.tags

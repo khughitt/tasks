@@ -25250,3 +25250,28 @@ fn quiet_group_lists_only_member_parks_and_claims_keeps_its_single_scope() {
     // By contract claims fails rather than answering for part of the registry.
     env.usage(nowhere.path(), &["claims", "--group", "solo"]);
 }
+
+#[test]
+fn retired_table_check_reports_an_open_task() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    env.json(&old, &["add", "T", "-p", "2"]);
+    let config = old.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        format!("{text}\n[retired]\ndate = \"2026-10-04\"\nreason = \"r\"\n"),
+    )
+    .unwrap();
+    let out = env.cmd(&old).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "open_in_retired"),
+        "{report}"
+    );
+}
