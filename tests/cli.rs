@@ -130,19 +130,10 @@ fn a_codex_claim_outlives_the_command_that_made_it() {
         String::from_utf8_lossy(&out.stderr)
     );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let warnings = v["warnings"].as_array().unwrap();
-    assert!(
-        warnings
-            .iter()
-            .any(|w| w.as_str().unwrap().contains("CODEX_SESSION_ID conflicts")),
-        "{warnings:?}"
-    );
-    assert!(
-        env.json(&sci, &["show", &id])["claim"]["session"]
-            .as_str()
-            .unwrap()
-            .starts_with("sid:"),
-        "a conflict falls to the Unix session"
+    assert!(v["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "thread-z"
     );
 }
 
@@ -218,7 +209,8 @@ fn lifecycle_provenance_conflicts_warn_without_becoming_notes() {
         let id = id_of(env.json(&dir, &["add", "Conflict"]));
         let mut cmd = env.cmd(&dir);
         cmd.env("CODEX_SESSION_ID", "secret-a")
-            .env("CODEX_THREAD_ID", "secret-b");
+            .env("CODEX_THREAD_ID", "secret-b")
+            .env("TASKS_SESSION", "codex:secret-a");
         if pretty {
             cmd.arg("--pretty");
         }
@@ -239,7 +231,11 @@ fn lifecycle_provenance_conflicts_warn_without_becoming_notes() {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0]["text"], "started");
         assert!(notes[0].get("harness_session").is_none());
-        env.json(&dir, &["park", &id, "unknown still works"]);
+        env.cmd(&dir)
+            .env("TASKS_SESSION", "codex:secret-a")
+            .args(["park", &id, "unknown still works"])
+            .assert()
+            .success();
         let shown = env.json(&dir, &["show", &id]);
         assert!(shown["task"]["notes"][1].get("harness_session").is_none());
     }
@@ -262,7 +258,7 @@ fn note_stamp_carries_native_provenance_and_nothing_else() {
                 ("CODEX_SESSION_ID", "native-a"),
                 ("CODEX_THREAD_ID", "native-a"),
             ][..],
-            Some(("codex:native-a", "CODEX_SESSION_ID")),
+            Some(("codex:native-a", "CODEX_THREAD_ID")),
         ),
         (&[][..], None),
     ] {
@@ -358,6 +354,7 @@ fn note_stamp_conflicts_warn_without_values_and_still_land() {
         .cmd(&dir)
         .env("CODEX_SESSION_ID", "secret-a")
         .env("CODEX_THREAD_ID", "secret-b")
+        .env("TASKS_SESSION", "codex:secret-a")
         .args(["note", &id, "gate: x", "--stamp"])
         .output()
         .unwrap();
@@ -19997,7 +19994,10 @@ fn an_acceptance_owner_can_park_and_close_after_the_registry_is_removed() {
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" park {parked} 'next step'\n\
          \"$TASKS_BIN\" done {closed} landed\n",
-        shim_env(&state, "codex", "s1")
+        format_args!(
+            "{}\nexport CODEX_THREAD_ID=s1",
+            shim_env(&state, "codex", "s1")
+        )
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(
@@ -20024,7 +20024,10 @@ fn an_acceptance_resuming_a_parked_task_needs_identity_again() {
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" park {id} 'next step'\n\
          \"$TASKS_BIN\" start {id} && echo RESUMED\n",
-        shim_env(&state, "codex", "s1")
+        format_args!(
+            "{}\nexport CODEX_THREAD_ID=s1",
+            shim_env(&state, "codex", "s1")
+        )
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert!(
@@ -20045,7 +20048,10 @@ fn an_acceptance_repeated_start_after_registry_loss_keeps_the_held_identity() {
         "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" start {id}\n",
-        shim_env(&state, "codex", "s1")
+        format_args!(
+            "{}\nexport CODEX_THREAD_ID=s1",
+            shim_env(&state, "codex", "s1")
+        )
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(
@@ -20110,7 +20116,9 @@ fn an_acceptance_contradicted_hint_is_refused_at_acquisition() {
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(
-        text.contains("someone-else") && text.contains("codex:s1"),
+        text.contains("native actor hint")
+            && !text.contains("someone-else")
+            && !text.contains("codex:s1"),
         "{text}"
     );
 }
@@ -20522,8 +20530,11 @@ fn an_acceptance_force_cannot_take_over_without_a_resolved_identity() {
     );
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(text.contains("TASKS_SESSION"), "{text}");
-    // The held error names the claim it was raised against, per §§5 and 6.5.
-    assert!(text.contains("departed"), "{text}");
+    // A held error directs recovery through show without exposing stored identity.
+    assert!(
+        text.contains("tasks show") && !text.contains("departed"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -20547,7 +20558,8 @@ fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
     );
     let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
     assert!(
-        store.contains("session = \"s1\"") && !store.contains("codex:s1"),
+        store.contains("session = \"s1\"")
+            && !store.lines().any(|line| line == "session = \"codex:s1\""),
         "relay off must key the claim by the native raw id: {store}"
     );
 }
@@ -21722,7 +21734,10 @@ fn a_claim_held_by_proof_moves_with_its_holder() {
          git worktree add -q -b side '{}'\n\
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" -C '{}' note {id} 'by proof'\n",
-        shim_env(&state, "codex", "s1"),
+        format_args!(
+            "{}\nexport CODEX_THREAD_ID=s1",
+            shim_env(&state, "codex", "s1")
+        ),
         side.display(),
         side.display()
     );
@@ -26932,4 +26947,616 @@ fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
             );
         }
     }
+}
+
+#[test]
+fn delegated_native_commands() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Worker identity"]));
+    for args in [
+        vec!["start", id.as_str()],
+        vec!["note", id.as_str(), "worker checkpoint", "--stamp"],
+    ] {
+        env.cmd(&dir)
+            .env("CODEX_SESSION_ID", "root")
+            .env("CODEX_THREAD_ID", "worker")
+            .args(args)
+            .assert()
+            .success();
+        let shown = env.json(&dir, &["show", &id]);
+        assert_eq!(shown["claim"]["session"], "worker");
+        assert_eq!(shown["claim"]["live"], true);
+        assert!(shown["claim"]["pid"].is_null());
+        let notes = shown["task"]["notes"].as_array().unwrap();
+        assert_eq!(notes.last().unwrap()["harness_session"], "codex:worker");
+        assert_eq!(
+            notes.last().unwrap()["harness_session_source"],
+            "CODEX_THREAD_ID"
+        );
+    }
+}
+
+#[test]
+fn delegated_native_malformed_writes_preserve_claim_and_record() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Malformed native"]));
+    env.cmd(&dir)
+        .env("CODEX_THREAD_ID", "worker")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let record = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    for name in ["CODEX_SESSION_ID", "CODEX_THREAD_ID"] {
+        for bad in ["private\nvalue", "private\tvalue", "private\u{7f}value"] {
+            for args in [
+                vec!["start", id.as_str()],
+                vec!["done", id.as_str(), "refused"],
+                vec!["park", id.as_str(), "refused"],
+                vec!["edit", id.as_str(), "--status", "done"],
+            ] {
+                let out = env
+                    .cmd(&dir)
+                    .env("CODEX_THREAD_ID", "worker")
+                    .env(name, bad)
+                    .args(args)
+                    .output()
+                    .unwrap();
+                assert!(!out.status.success());
+                let detail = err_detail(&out);
+                assert!(
+                    detail.contains(name) && detail.contains("TASKS_SESSION"),
+                    "{detail}"
+                );
+                assert!(!detail.contains("private"), "{detail}");
+                assert_eq!(
+                    std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+                    record
+                );
+                assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+            }
+            env.cmd(&dir)
+                .env("CODEX_THREAD_ID", "worker")
+                .env(name, bad)
+                .args(["show", &id])
+                .assert()
+                .success();
+        }
+    }
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "worker")
+        .env("CODEX_SESSION_ID", "private\nvalue")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["claim"]["session"], "worker");
+}
+
+#[test]
+fn delegated_root_refresh_and_recovery() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Root association"]));
+    let run = |root: Option<&str>, args: &[&str]| {
+        let mut cmd = env.cmd(&dir);
+        cmd.env("CODEX_THREAD_ID", "worker");
+        if let Some(root) = root {
+            cmd.env("CODEX_SESSION_ID", root);
+        }
+        cmd.args(args).output().unwrap()
+    };
+    assert!(run(Some("root"), &["start", &id]).status.success());
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["root_session"],
+        "codex:root"
+    );
+    assert!(run(None, &["start", &id]).status.success());
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["root_session"],
+        "codex:root"
+    );
+    let record = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    for args in [
+        vec!["start", id.as_str()],
+        vec!["start", id.as_str(), "--force", "--reason", "same owner"],
+    ] {
+        let refused = run(Some("private-other"), &args);
+        assert!(!refused.status.success());
+        let detail = err_detail(&refused);
+        assert!(
+            detail.contains("CODEX_SESSION_ID")
+                && detail.contains("tasks show")
+                && detail.contains("park"),
+            "{detail}"
+        );
+        assert!(!detail.contains("private-other") && !detail.contains("codex:root"));
+        assert_eq!(
+            std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+            record
+        );
+        assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+    }
+    assert!(
+        run(Some("other"), &["park", &id, "intentional reassociation"])
+            .status
+            .success()
+    );
+    assert!(run(Some("other"), &["start", &id]).status.success());
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["root_session"],
+        "codex:other"
+    );
+    let opaque = id_of(env.json(&dir, &["add", "Opaque root"]));
+    assert!(run(Some("codex:x"), &["start", &opaque]).status.success());
+    assert_eq!(
+        env.json(&dir, &["show", &opaque])["claim"]["root_session"],
+        "codex:codex:x"
+    );
+    env.cmd(&dir)
+        .env("CODEX_THREAD_ID", "rival")
+        .env("CODEX_SESSION_ID", "rival-root")
+        .args([
+            "start",
+            &id,
+            "--force",
+            "--reason",
+            "distinct owner takeover",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["root_session"],
+        "codex:rival-root"
+    );
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "explicit")
+        .env("CODEX_SESSION_ID", "ignored-root")
+        .args(["start", &id, "--force", "--reason", "explicit takeover"])
+        .assert()
+        .success();
+    assert!(
+        env.json(&dir, &["show", &id])["claim"]
+            .get("root_session")
+            .is_none()
+    );
+    let claims = env.json(&dir, &["claims"]);
+    assert_eq!(
+        claims["claims"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == opaque)
+            .unwrap()["root_session"],
+        "codex:codex:x"
+    );
+    let prime = env.json(&dir, &["prime"]);
+    assert_eq!(
+        prime["doing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == opaque)
+            .unwrap()["claim"]["root_session"],
+        "codex:codex:x"
+    );
+}
+
+#[test]
+fn delegated_root_invalid_read_owns_no_holds() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let holder = id_of(env.json(&dir, &["add", "Holder", "--need", "quiet"]));
+    let next = id_of(env.json(&dir, &["add", "Next", "--need", "quiet"]));
+    env.cmd(&dir)
+        .env("CODEX_SESSION_ID", "root")
+        .env("CODEX_THREAD_ID", "worker")
+        .args(["start", &holder])
+        .assert()
+        .success();
+    let record = std::fs::read(dir.join(format!("tasks/{holder}.md"))).unwrap();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    let valid = env
+        .cmd(&dir)
+        .env("CODEX_SESSION_ID", "root")
+        .env("CODEX_THREAD_ID", "worker")
+        .args(["ready"])
+        .output()
+        .unwrap();
+    let valid: serde_json::Value = serde_json::from_slice(&valid.stdout).unwrap();
+    assert!(
+        valid["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == next)
+    );
+    for args in [
+        vec!["ready"],
+        vec!["prime"],
+        vec!["next"],
+        vec!["show", holder.as_str()],
+        vec!["claims"],
+    ] {
+        let out = env
+            .cmd(&dir)
+            .env("CODEX_SESSION_ID", "private\nroot")
+            .env("CODEX_THREAD_ID", "worker")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        if args[0] == "ready" || args[0] == "prime" {
+            let rows = if args[0] == "ready" {
+                &v["tasks"]
+            } else {
+                &v["ready"]
+            };
+            assert!(
+                !rows.as_array().unwrap().iter().any(|t| t["id"] == next),
+                "{v}"
+            );
+        } else if args[0] == "next" {
+            assert!(v["next"].is_null(), "{v}");
+        }
+        assert_eq!(
+            std::fs::read(dir.join(format!("tasks/{holder}.md"))).unwrap(),
+            record
+        );
+        assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+    }
+}
+
+#[test]
+fn delegated_relay_ownership() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let id = id_of(env.json(&dir, &["add", "Worker", "--need", "quiet"]));
+    let closed = id_of(env.json(&dir, &["add", "Worker closes"]));
+    let proof_closed = id_of(env.json(&dir, &["add", "Proof closes"]));
+    let parked = id_of(env.json(&dir, &["add", "Worker parks"]));
+    let contender = id_of(env.json(&dir, &["add", "Sibling hold", "--need", "quiet"]));
+    let state = relay_on(&env);
+    let script = format!(
+        r#"set -e
+{}
+export CODEX_SESSION_ID=private-root CODEX_THREAD_ID=private-worker
+write_registry
+cp tasks/{id}.md "$HOME/before.md"
+if "$TASKS_BIN" start {id} > "$HOME/root.out" 2> "$HOME/root.err"; then exit 90; fi
+cmp tasks/{id}.md "$HOME/before.md"
+test ! -f "$HOME/.local/state/tasks/claims/sci.toml"
+SESSION=unrelated-row AGENT_ID=codex:unrelated-row
+write_registry
+if "$TASKS_BIN" start {id} > "$HOME/unrelated.out" 2> "$HOME/unrelated.err"; then exit 91; fi
+cmp tasks/{id}.md "$HOME/before.md"
+test ! -f "$HOME/.local/state/tasks/claims/sci.toml"
+SESSION=private-worker AGENT_ID=codex:private-worker
+write_registry
+"$TASKS_BIN" start {id}
+"$TASKS_BIN" start {closed}
+"$TASKS_BIN" start {proof_closed}
+"$TASKS_BIN" start {parked}
+"$TASKS_BIN" show {id} > "$HOME/acquired.json"
+SESSION=sibling AGENT_ID=codex:sibling
+write_registry
+cp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+cp tasks/{contender}.md "$HOME/before-contender.md"
+if CODEX_THREAD_ID=sibling "$TASKS_BIN" start {contender} > "$HOME/hold.out" 2> "$HOME/hold.err"; then exit 92; fi
+cmp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+cmp tasks/{contender}.md "$HOME/before-contender.md"
+rm "$RELAY_STATE_DIR/agents.json"
+refuse() {{
+    cp tasks/{id}.md "$HOME/before.md"
+    cp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+    if "$TASKS_BIN" "$@" > "$HOME/refuse.out" 2> "$HOME/refuse.err"; then exit 93; fi
+    cmp tasks/{id}.md "$HOME/before.md"
+    cmp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+}}
+for mode in sibling session-only absent invalid-root invalid-thread; do
+    unset CODEX_SESSION_ID CODEX_THREAD_ID
+    case "$mode" in
+        sibling) export CODEX_SESSION_ID=private-root CODEX_THREAD_ID=sibling ;;
+        session-only) export CODEX_SESSION_ID=private-worker ;;
+        absent) : ;;
+        invalid-root) CODEX_SESSION_ID='private
+root'; export CODEX_SESSION_ID CODEX_THREAD_ID=private-worker ;;
+        invalid-thread) CODEX_THREAD_ID='private
+thread'; export CODEX_SESSION_ID=private-root CODEX_THREAD_ID ;;
+    esac
+    refuse start {id}
+    refuse park {id} refused
+    refuse done {id} refused
+    refuse edit {id} --status done
+    refuse edit {id} --need owner
+    cp "$HOME/refuse.err" "$HOME/error-$mode.json"
+    cp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+    "$TASKS_BIN" note {id} "skipped heartbeat $mode" --stamp > "$HOME/note-$mode.json"
+    cmp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+done
+# An exact explicit owner can recover without fabricating a thread or pid.
+unset CODEX_THREAD_ID CODEX_SESSION_ID
+TASKS_SESSION=codex:private-worker "$TASKS_BIN" start {closed}
+export CODEX_THREAD_ID=private-worker CODEX_SESSION_ID=changed-proof-root
+"$TASKS_BIN" start {id}
+"$TASKS_BIN" edit {id} --need owner
+"$TASKS_BIN" edit {proof_closed} --need quiet
+"$TASKS_BIN" show {proof_closed} > "$HOME/proof-hold.json"
+"$TASKS_BIN" show {id} > "$HOME/continued.json"
+"$TASKS_BIN" note {id} 'matching proof heartbeat' --stamp > "$HOME/owner-note.json"
+TASKS_SESSION=codex:private-worker "$TASKS_BIN" done {closed} recovered
+"$TASKS_BIN" done {proof_closed} landed
+"$TASKS_BIN" park {parked} 'controller reviews' --waiting-on agent
+"$TASKS_BIN" park {id} 'release all holds' --waiting-on agent
+"$TASKS_BIN" claims > "$HOME/released.json"
+"#,
+        shim_env(&state, "codex", "private-root")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let root_error = env.read(env.home.path(), "root.err");
+    assert!(
+        root_error.contains("worker registration")
+            && root_error.contains("relay-f56e30")
+            && root_error.contains("TASKS_SESSION"),
+        "{root_error}"
+    );
+    assert!(!root_error.contains("private-root") && !root_error.contains("private-worker"));
+    let unrelated = env.read(env.home.path(), "unrelated.err");
+    assert!(unrelated.contains("native actor hint") && unrelated.contains("TASKS_SESSION"));
+    assert!(
+        !unrelated.contains("relay-f56e30")
+            && !unrelated.contains("unrelated-row")
+            && !unrelated.contains("private-worker")
+    );
+    assert!(env.read(env.home.path(), "hold.err").contains("need_held"));
+    let acquired: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "acquired.json")).unwrap();
+    assert_eq!(acquired["claim"]["session"], "codex:private-worker");
+    assert_eq!(acquired["claim"]["root_session"], "codex:private-root");
+    assert_eq!(acquired["claim"]["live"], true);
+    let continued: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "continued.json")).unwrap();
+    assert_eq!(continued["claim"]["session"], "codex:private-worker");
+    assert_eq!(continued["claim"]["root_session"], "codex:private-root");
+    assert_eq!(continued["claim"]["holds"], serde_json::json!(["quiet"]));
+    for mode in [
+        "sibling",
+        "session-only",
+        "absent",
+        "invalid-root",
+        "invalid-thread",
+    ] {
+        let note: serde_json::Value =
+            serde_json::from_str(&env.read(env.home.path(), &format!("note-{mode}.json"))).unwrap();
+        assert!(
+            warnings_of(&note)
+                .iter()
+                .any(|w| w.contains("heartbeat") && w.contains("not refreshed")),
+            "{note}"
+        );
+    }
+    for (mode, name) in [
+        ("invalid-root", "CODEX_SESSION_ID"),
+        ("invalid-thread", "CODEX_THREAD_ID"),
+    ] {
+        let error = env.read(env.home.path(), &format!("error-{mode}.json"));
+        assert!(
+            error.contains(name) && error.contains("TASKS_SESSION"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("private-worker") && !error.contains("private-root"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("private\\nroot") && !error.contains("private\\nthread"),
+            "{error}"
+        );
+    }
+    let proof_hold: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "proof-hold.json")).unwrap();
+    assert_eq!(proof_hold["claim"]["holds"], serde_json::json!(["quiet"]));
+    let own: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "owner-note.json")).unwrap();
+    assert!(
+        !warnings_of(&own).iter().any(|w| w.contains("heartbeat")),
+        "{own}"
+    );
+    let released: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "released.json")).unwrap();
+    assert!(released["claims"].as_array().unwrap().is_empty());
+    assert_eq!(env.json(&dir, &["show", &closed])["task"]["status"], "done");
+}
+
+#[test]
+fn delegated_worker_handoff_and_takeover() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let id = id_of(env.json(&dir, &["add", "Worker handoff", "--need", "quiet"]));
+    let controller = id_of(env.json(&dir, &["add", "Controller"]));
+    let contender = id_of(env.json(&dir, &["add", "Controller hold", "--need", "quiet"]));
+    let run = |thread: &str, args: &[&str]| {
+        env.cmd(&dir)
+            .env("CODEX_SESSION_ID", "root")
+            .env("CODEX_THREAD_ID", thread)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(run("worker", &["start", &id]).status.success());
+    assert!(run("root", &["start", &controller]).status.success());
+    let held = env.json(&dir, &["show", &id]);
+    assert_eq!(held["claim"]["session"], "worker");
+    assert_eq!(held["claim"]["live"], true);
+    assert_eq!(held["claim"]["root_session"], "codex:root");
+    assert_eq!(held["claim"]["holds"], serde_json::json!(["quiet"]));
+    for (actor, target) in [("root", &id), ("worker", &controller)] {
+        let record = std::fs::read(dir.join(format!("tasks/{target}.md"))).unwrap();
+        let store = std::fs::read(env.claim_store("sci")).unwrap();
+        for args in [
+            vec!["done", target, "premature"],
+            vec!["park", target, "premature"],
+            vec!["edit", target, "--status", "done"],
+            vec!["edit", target, "--need", "owner"],
+        ] {
+            let out = run(actor, &args);
+            assert!(!out.status.success());
+            assert_eq!(err_kind(&out), "claimed");
+            assert_eq!(
+                std::fs::read(dir.join(format!("tasks/{target}.md"))).unwrap(),
+                record
+            );
+            assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+        }
+    }
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    let record = std::fs::read(dir.join(format!("tasks/{contender}.md"))).unwrap();
+    assert_eq!(err_kind(&run("root", &["start", &contender])), "need_held");
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{contender}.md"))).unwrap(),
+        record
+    );
+    assert!(
+        run("root", &["note", &id, "foreign note", "--stamp"])
+            .status
+            .success()
+    );
+    assert_eq!(
+        std::fs::read(env.claim_store("sci")).unwrap(),
+        store,
+        "foreign note cannot heartbeat"
+    );
+    assert!(run("worker", &["start", &id]).status.success());
+    assert!(
+        run("worker", &["note", &id, "owner heartbeat", "--stamp"])
+            .status
+            .success()
+    );
+    assert!(
+        run(
+            "worker",
+            &["park", &id, "controller reviews", "--waiting-on", "agent"]
+        )
+        .status
+        .success()
+    );
+    assert!(env.json(&dir, &["show", &id])["claim"].is_null());
+    assert!(run("root", &["start", &id]).status.success());
+    assert!(run("root", &["done", &id, "reviewed"]).status.success());
+    assert!(
+        run("root", &["start", &contender]).status.success(),
+        "park/done released worker's hold"
+    );
+    assert!(run("root", &["done", &contender]).status.success());
+
+    let own_done = id_of(env.json(&dir, &["add", "Worker closes own work"]));
+    assert!(run("worker", &["start", &own_done]).status.success());
+    assert!(
+        run("worker", &["done", &own_done, "completed"])
+            .status
+            .success()
+    );
+    assert!(env.json(&dir, &["show", &own_done])["claim"].is_null());
+
+    let public_park = id_of(env.json(&dir, &["add", "Public handoff"]));
+    assert!(run("worker", &["start", &public_park]).status.success());
+    assert!(
+        run(
+            "worker",
+            &[
+                "park",
+                &public_park,
+                "controller starts and reviews",
+                "--waiting-on",
+                "agent"
+            ]
+        )
+        .status
+        .success()
+    );
+    let next = run("third-agent", &["next"]);
+    assert!(next.status.success());
+    let next: serde_json::Value = serde_json::from_slice(&next.stdout).unwrap();
+    assert_eq!(next["next"]["task"]["id"], public_park);
+    let parked = run("third-agent", &["list", "--parked"]);
+    assert!(parked.status.success());
+    let parked: serde_json::Value = serde_json::from_slice(&parked.stdout).unwrap();
+    assert!(
+        parked["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == public_park)
+    );
+    assert!(
+        run("third-agent", &["start", &public_park])
+            .status
+            .success()
+    );
+    assert!(run("third-agent", &["done", &public_park]).status.success());
+
+    let abandoned = id_of(env.json(&dir, &["add", "Worker left claim"]));
+    assert!(run("worker", &["start", &abandoned]).status.success());
+    let record = std::fs::read(dir.join(format!("tasks/{abandoned}.md"))).unwrap();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    assert!(
+        !run("root", &["done", &abandoned, "premature"])
+            .status
+            .success()
+    );
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{abandoned}.md"))).unwrap(),
+        record
+    );
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+    assert!(
+        run(
+            "root",
+            &[
+                "start",
+                &abandoned,
+                "--force",
+                "--reason",
+                "finished worker left a live claim"
+            ]
+        )
+        .status
+        .success()
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &abandoned])["claim"]["session"],
+        "root"
+    );
+    assert!(
+        run("root", &["done", &abandoned, "reviewed"])
+            .status
+            .success()
+    );
+    let shown = env.json(&dir, &["show", &abandoned]);
+    assert!(shown["task"]["notes"].as_array().unwrap().iter().any(|n| {
+        n["text"]
+            .as_str()
+            .unwrap()
+            .contains("finished worker left a live claim")
+    }));
+    assert!(run("root", &["done", &controller]).status.success());
+    assert!(
+        env.json(&dir, &["claims"])["claims"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }

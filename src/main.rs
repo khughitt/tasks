@@ -17,6 +17,7 @@ mod holds;
 mod lanes;
 mod locations;
 mod model;
+mod native;
 mod needs;
 mod output;
 mod palette;

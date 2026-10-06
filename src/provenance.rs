@@ -19,34 +19,17 @@ pub fn validate(provenance: &HarnessProvenance) -> Result<(), String> {
 pub fn resolve_from(
     get: impl Fn(&str) -> Option<OsString>,
 ) -> Result<Option<HarnessProvenance>, String> {
-    let var = |name: &str| -> Result<Option<String>, String> {
-        let Some(value) = get(name) else {
-            return Ok(None);
-        };
-        let value = value
-            .into_string()
-            .map_err(|_| format!("unknown harness provenance: {name} is not Unicode"))?;
-        if value.chars().any(char::is_control) {
-            return Err(format!(
-                "unknown harness provenance: {name} contains control characters"
-            ));
-        }
-        Ok((!value.is_empty()).then_some(value))
+    let var = |name: &str| {
+        crate::native::value(&get, name)
+            .map_err(|detail| format!("unknown harness provenance: {detail}"))
     };
     let claude = var("CLAUDE_CODE_SESSION_ID")?;
     let session = var("CODEX_SESSION_ID")?;
     let thread = var("CODEX_THREAD_ID")?;
     let explicit = var("TASKS_SESSION")?;
-    if let (Some(session), Some(thread)) = (&session, &thread)
-        && session != thread
-    {
-        return Err(
-            "unknown harness provenance: CODEX_SESSION_ID conflicts with CODEX_THREAD_ID".into(),
-        );
-    }
-    let codex = session
-        .map(|id| (id, "CODEX_SESSION_ID"))
-        .or_else(|| thread.map(|id| (id, "CODEX_THREAD_ID")));
+    let codex = thread
+        .map(|id| (id, "CODEX_THREAD_ID"))
+        .or_else(|| session.map(|id| (id, "CODEX_SESSION_ID")));
     let (key, source) = match (claude, codex) {
         (Some(_), Some((_, source))) => {
             return Err(format!(
@@ -95,7 +78,12 @@ mod tests {
             (
                 &[("CODEX_SESSION_ID", "a"), ("CODEX_THREAD_ID", "a")],
                 "codex:a",
-                "CODEX_SESSION_ID",
+                "CODEX_THREAD_ID",
+            ),
+            (
+                &[("CODEX_SESSION_ID", "root"), ("CODEX_THREAD_ID", "worker")],
+                "codex:worker",
+                "CODEX_THREAD_ID",
             ),
             (
                 &[("CODEX_SESSION_ID", ""), ("CODEX_THREAD_ID", "a")],
@@ -163,13 +151,6 @@ mod tests {
         let cases: &[(Vars<'_>, &[&str])] = &[
             (
                 &[
-                    ("CODEX_SESSION_ID", "private-a"),
-                    ("CODEX_THREAD_ID", "private-b"),
-                ],
-                &["CODEX_SESSION_ID", "CODEX_THREAD_ID"],
-            ),
-            (
-                &[
                     ("CLAUDE_CODE_SESSION_ID", "private-a"),
                     ("CODEX_THREAD_ID", "private-a"),
                 ],
@@ -195,7 +176,7 @@ mod tests {
                     ("CODEX_THREAD_ID", "private-b"),
                     ("TASKS_SESSION", "codex:private-a"),
                 ],
-                &["CODEX_SESSION_ID", "CODEX_THREAD_ID"],
+                &["TASKS_SESSION", "CODEX_THREAD_ID"],
             ),
         ];
         for (vars, names) in cases {
@@ -222,7 +203,16 @@ mod tests {
                 "private\tvalue",
                 "private\u{7f}value",
             ] {
-                let error = resolve_from(|key| (key == name).then(|| value.into())).unwrap_err();
+                let error = resolve_from(|key| {
+                    if key == name {
+                        Some(value.into())
+                    } else if key == "CODEX_THREAD_ID" && name == "CODEX_SESSION_ID" {
+                        Some("worker".into())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_err();
                 assert!(
                     error.contains(name) && !error.contains("private"),
                     "{error}"
@@ -235,9 +225,18 @@ mod tests {
     #[test]
     fn non_unicode_input_is_unknown_not_lossily_converted() {
         use std::os::unix::ffi::OsStringExt;
-        let error =
-            resolve_from(|key| (key == "CODEX_SESSION_ID").then(|| OsString::from_vec(vec![255])))
-                .unwrap_err();
-        assert!(error.contains("CODEX_SESSION_ID"));
+        for name in ["CODEX_SESSION_ID", "CODEX_THREAD_ID"] {
+            let error = resolve_from(|key| {
+                if key == name {
+                    Some(OsString::from_vec(vec![255]))
+                } else if key == "CODEX_THREAD_ID" {
+                    Some("worker".into())
+                } else {
+                    None
+                }
+            })
+            .unwrap_err();
+            assert!(error.contains(name));
+        }
     }
 }

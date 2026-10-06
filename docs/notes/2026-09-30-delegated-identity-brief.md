@@ -183,3 +183,19 @@ or new schema was performed or approved by this research.
 [hooks]: https://learn.chatgpt.com/docs/hooks
 [app-server]: https://learn.chatgpt.com/docs/app-server
 [env-docs]: https://learn.chatgpt.com/docs/config-file/environment-variables
+
+## Reviewed remedy and acceptance (2026-10-06)
+
+The [approved design](../specs/2026-10-06-delegated-identity-design.md) and
+[implementation plan](../plans/2026-10-06-delegated-identity.md) resolve the
+verified split-ID question: select the concrete native thread for claims and note
+provenance, retain the shared root only on claims, and require concrete Codex
+thread evidence for relay proof-only ownership. Root association does not identify
+an immediate parent or authorize closure. Session-only worker isolation and the
+historical uncaptured missing-export report remain separate limits.
+
+[Acceptance evidence](2026-10-06-delegated-identity-acceptance.md) records passing
+native controller/worker and deterministic tests, plus a genuine isolated relay
+root/worker capture with normally trusted hook delivery. Implementation remains on its branch until that gate and
+final review pass. No worker hook delivery or relay worker registration fix is
+claimed; relay-f56e30, tasks-f8c9cc and tasks-56b450 stay outside the remedy.

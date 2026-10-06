@@ -493,6 +493,22 @@ impl Ctx {
         }
 
         self.pending_claim = Some(if to == Status::Doing {
+            let root_session = if mine {
+                let old = existing
+                    .as_ref()
+                    .and_then(|claim| claim.root_session.as_ref());
+                match (old, me.root_session.as_ref()) {
+                    (Some(old), Some(new)) if old != new => {
+                        return Err(Error::Config(format!(
+                            "{id}: CODEX_SESSION_ID disagrees with the recorded root; inspect tasks show and the environment; restore the exports, or park this task and start it again to intentionally reassociate it"
+                        )));
+                    }
+                    (Some(old), None) => Some(old.clone()),
+                    _ => me.root_session.clone(),
+                }
+            } else {
+                me.root_session.clone()
+            };
             let now = crate::time::now();
             let started = match (&existing, mine) {
                 (Some(claim), true) => claim.started.clone(),
@@ -518,6 +534,7 @@ impl Ctx {
                         None => crate::claims::hostname(),
                     },
                     session: me.session,
+                    root_session,
                     pid: me.pid,
                     worktree,
                     started,
@@ -567,11 +584,7 @@ pub(crate) fn ownership(
         &crate::relay::ancestry::current_scope(),
         &crate::claims::hostname(),
         crate::claims::boot_id().as_deref(),
-        &|key| {
-            std::env::var_os(key)
-                .and_then(|value| value.into_string().ok())
-                .filter(|value| !value.is_empty())
-        },
+        &|key| std::env::var_os(key),
     );
     Ok(if proved {
         Ownership::ByProof

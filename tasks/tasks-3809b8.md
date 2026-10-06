@@ -1,15 +1,16 @@
 ---
 id: tasks-3809b8
 title: Resolve native Codex claims and provenance by thread
-status: doing
+status: done
 priority: 1
 size: m
 complexity: high
 process: direct
-owner: main
+owner: feat/delegated-identity
 created: 2026-10-06T19:09:22Z
-updated: 2026-10-06T19:09:28Z
+updated: 2026-10-06T19:12:55Z
 started: 2026-10-06T19:09:28Z
+completed: 2026-10-06T19:12:55Z
 depends: [tasks-5e2472]
 parent: tasks-2fa8c6
 tags: []
@@ -26,4 +27,10 @@ Execute Task 1 of the approved delegated identity plan, including regression, do
 
 - 2026-10-06T19:09:22Z (design/tasks-5e2472): Workspace: .worktrees/delegated-identity on feat/delegated-identity; direct approved-plan execution, final independent review and live acceptance before the sole implementation merge.
 - 2026-10-06T19:09:28Z (main): started
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T19:09:41Z (feat/delegated-identity): resumed
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T19:12:55Z (feat/delegated-identity): done
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T19:12:55Z (feat/delegated-identity): Native Codex claims and note provenance select validated concrete threads; persistent worker handoff guidance shipped. Focused regressions and test-fast pass; committed on implementation branch, not deployed.
   provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}

@@ -14,6 +14,7 @@ pub struct Identity {
     pub pid: Option<u32>,
     pub tagged: String,
     pub proof: Option<Proof>,
+    pub root_session: Option<String>,
 }
 
 /// Process proof adopted from a matched relay handle, written into the claim's existing
@@ -46,15 +47,15 @@ pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
 /// but no usable pid yields `pid: None` and falls to the TTL path; it is never welded to
 /// an unrelated fallback pid.
 ///
-/// The Codex level reads `CODEX_SESSION_ID`, or `CODEX_THREAD_ID` alone; the two agree
-/// when both are set, and a disagreement warns and skips the level, as provenance does.
+/// The Codex level validates both exports and selects the concrete `CODEX_THREAD_ID`
+/// when present, otherwise the root `CODEX_SESSION_ID`. Malformed values refuse.
 /// Codex runs each command as its own session leader, so the Unix fallback would die with
 /// the command; the level exports no pid, so a Codex claim lives by the TTL.
 pub fn identity_from(
     get: impl Fn(&str) -> Option<OsString>,
     session_pid: Option<u32>,
     relay: impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>>,
-    warnings: &mut Vec<String>,
+    _warnings: &mut Vec<String>,
 ) -> Result<Identity> {
     let var = |key: &str| {
         get(key)
@@ -68,6 +69,7 @@ pub fn identity_from(
             session,
             pid: pid_of("TASKS_SESSION_PID"),
             proof: None,
+            root_session: None,
         });
     }
     // Stage 1 of spec §7 is above: an explicit pair short-circuits, so the relay level is
@@ -77,6 +79,7 @@ pub fn identity_from(
             tagged: resolved.session.clone(),
             session: resolved.session,
             pid: Some(resolved.pid),
+            root_session: resolved.root_session,
             proof: Some(Proof {
                 pid_start: resolved.pid_start,
                 boot_id: resolved.boot_id,
@@ -90,23 +93,25 @@ pub fn identity_from(
             session,
             pid: pid_of("CLAUDE_PID"),
             proof: None,
+            root_session: None,
         });
     }
-    match (var("CODEX_SESSION_ID"), var("CODEX_THREAD_ID")) {
-        (Some(session), Some(thread)) if session != thread => warnings.push(
-            "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls \
-             to the Unix session id"
-                .into(),
-        ),
-        (Some(session), _) | (None, Some(session)) => {
-            return Ok(Identity {
-                tagged: format!("codex:{session}"),
-                session,
-                pid: None,
-                proof: None,
-            });
-        }
-        (None, None) => {}
+    let invalid_native = |detail| {
+        Error::Config(format!(
+            "{detail}; correct the native variables or set TASKS_SESSION to this session's explicit identity (use the exact held session from tasks show when recovering an existing claim)"
+        ))
+    };
+    let session = crate::native::value(&get, "CODEX_SESSION_ID").map_err(invalid_native)?;
+    let thread = crate::native::value(&get, "CODEX_THREAD_ID").map_err(invalid_native)?;
+    let root_session = session.as_ref().map(|id| format!("codex:{id}"));
+    if let Some(session) = thread.or(session) {
+        return Ok(Identity {
+            tagged: format!("codex:{session}"),
+            session,
+            pid: None,
+            proof: None,
+            root_session,
+        });
     }
     match session_pid {
         Some(pid) => Ok(Identity {
@@ -114,6 +119,7 @@ pub fn identity_from(
             tagged: format!("sid:{pid}"),
             pid: Some(pid),
             proof: None,
+            root_session: None,
         }),
         None => Err(Error::Config(
             "cannot determine a session identity: set TASKS_SESSION (no \
@@ -136,6 +142,8 @@ pub fn hostname() -> String {
 pub struct Claim {
     pub owner: String,
     pub session: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -389,6 +397,17 @@ impl ClaimStore {
             escalations,
         } = file;
         for (id, claim) in &claims {
+            if let Some(root) = &claim.root_session {
+                match root.strip_prefix("codex:") {
+                    Some(id) if !id.is_empty() && !id.chars().any(char::is_control) => {}
+                    _ => {
+                        return Err(Error::Config(format!(
+                            "{}: claim {id} has an invalid root_session",
+                            path.display()
+                        )));
+                    }
+                }
+            }
             for (field, value) in [("started", &claim.started), ("seen", &claim.seen)] {
                 crate::time::parse(value).map_err(|error| {
                     Error::Config(format!(
@@ -887,6 +906,7 @@ pub fn resolve_identity(warnings: &mut Vec<String>) -> Resolution {
 pub fn continuation_identity(claim: &Claim) -> Identity {
     Identity {
         session: claim.session.clone(),
+        root_session: claim.root_session.clone(),
         tagged: claim.session.clone(),
         pid: claim.pid,
         proof: match (claim.pid_start, &claim.boot_id) {
@@ -900,12 +920,12 @@ pub fn continuation_identity(claim: &Claim) -> Identity {
     }
 }
 
-/// Name the claim an error was raised against, so a resolution failure on a claimed task
-/// tells the operator which session to set `TASKS_SESSION` to. Spec §§5 and 6.5.
+/// Direct a held-claim resolution error to explicit owner recovery without exposing IDs.
+/// A stored session may equal the other native input in a malformed-value diagnostic.
 pub fn name_the_claim(error: Error, held: Option<&str>) -> Error {
     match held {
-        Some(session) => Error::Config(format!(
-            "{error}; the existing claim is held by session {session:?}"
+        Some(_) => Error::Config(format!(
+            "{error}; inspect tasks show for the existing claim's exact session identity"
         )),
         None => error,
     }
@@ -918,7 +938,7 @@ pub fn proves_ownership(
     scope: &crate::relay::ancestry::Scope,
     host: &str,
     boot_id: Option<&str>,
-    get: &impl Fn(&str) -> Option<String>,
+    get: &impl Fn(&str) -> Option<OsString>,
 ) -> bool {
     let crate::relay::ancestry::Scope::Harness(boundary) = scope else {
         return false;
@@ -935,6 +955,17 @@ pub fn proves_ownership(
     //    owner has the owner among its ancestors and must still be refused.
     if nearest.pid != pid || nearest.start != pid_start {
         return false;
+    }
+    if boundary.harness == "codex" {
+        if crate::relay::resolve::hint_for("codex", get).is_err() {
+            return false;
+        }
+        return match crate::native::value(get, "CODEX_THREAD_ID") {
+            Ok(Some(thread)) => {
+                crate::relay::resolve::same_session(&claim.session, "codex", &thread)
+            }
+            _ => false,
+        };
     }
     // 3. a scoped hint must not contradict the claim, so that deferring a resolution error
     //    cannot turn a contradicted session into an accepted owner.
@@ -964,6 +995,7 @@ mod tests {
             started: "2026-09-05T08:00:00Z".into(),
             seen: "2026-09-05T08:00:00Z".into(),
             holds: Vec::new(),
+            root_session: None,
         }
     }
 
@@ -996,6 +1028,7 @@ mod tests {
             started: "2026-09-22T00:00:00Z".into(),
             seen: "2026-09-22T00:00:00Z".into(),
             holds: Vec::new(),
+            root_session: None,
         }
     }
 
@@ -1016,8 +1049,53 @@ mod tests {
         Scope::Harness(boundary(comm, harness, pid, start))
     }
 
-    fn no_env() -> impl Fn(&str) -> Option<String> {
+    fn no_env() -> impl Fn(&str) -> Option<OsString> {
         |_| None
+    }
+
+    #[test]
+    fn delegated_relay_proof_requires_a_concrete_matching_thread() {
+        let claim = claim_of("codex:worker", Some(42), Some(900));
+        for (vars, expected) in [
+            (
+                vec![("CODEX_SESSION_ID", "root"), ("CODEX_THREAD_ID", "worker")],
+                true,
+            ),
+            (vec![("CODEX_THREAD_ID", "sibling")], false),
+            (vec![("CODEX_SESSION_ID", "worker")], false),
+            (vec![], false),
+            (
+                vec![
+                    ("CODEX_SESSION_ID", "private\nroot"),
+                    ("CODEX_THREAD_ID", "worker"),
+                ],
+                false,
+            ),
+        ] {
+            let get = |key: &str| {
+                vars.iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| OsString::from(v))
+            };
+            assert_eq!(
+                proves_ownership(
+                    &claim,
+                    &nearest("codex", 42, 900),
+                    "testhost",
+                    Some(PROOF_BOOT),
+                    &get
+                ),
+                expected,
+                "{vars:?}"
+            );
+        }
+        assert!(proves_ownership(
+            &claim_of("claude-code:owner", Some(42), Some(900)),
+            &nearest("claude", 42, 900),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
     }
 
     #[test]
@@ -1028,7 +1106,7 @@ mod tests {
             &nearest("codex", 42, 900),
             "testhost",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
     }
 
@@ -1043,14 +1121,14 @@ mod tests {
             &nearest("codex", 9, 900),
             "testhost",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "claude-code:c1")])
         ));
     }
 
     #[test]
     fn a_proof_is_defeated_by_a_contradicted_hint() {
         let claim = claim_of("claude-code:c1", Some(42), Some(900));
-        let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".to_string());
+        let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".into());
         assert!(!proves_ownership(
             &claim,
             &nearest("claude", 42, 900),
@@ -1064,7 +1142,7 @@ mod tests {
     fn a_proof_survives_a_known_representation_change() {
         for stored in ["c1", "claude:c1", "claude-code:c1"] {
             let claim = claim_of(stored, Some(42), Some(900));
-            let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".to_string());
+            let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".into());
             assert!(
                 proves_ownership(
                     &claim,
@@ -1086,21 +1164,21 @@ mod tests {
             &nearest("codex", 42, 901),
             "testhost",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
         assert!(!proves_ownership(
             &claim,
             &nearest("codex", 42, 900),
             "testhost",
             Some("22222222-2222-4222-8222-222222222222"),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
         assert!(!proves_ownership(
             &claim,
             &nearest("codex", 42, 900),
             "elsewhere",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
     }
 
@@ -1113,7 +1191,7 @@ mod tests {
             &nearest("codex", 42, 900),
             "testhost",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
     }
 
@@ -1156,7 +1234,7 @@ mod tests {
         // The outer claude(500) holds the claim; a nested 2.1.280(600) runs under it, with
         // the outer session's id inherited. Its boundary is 600, so it proves nothing.
         let outer = claim_of("claude-code:c1", Some(500), Some(5000));
-        let inherited = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".to_string());
+        let inherited = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".into());
         let nested = Scope::Harness(boundary("2.1.280", "claude-code", 600, 6000));
         assert!(!proves_ownership(
             &outer,
@@ -1168,7 +1246,7 @@ mod tests {
         // A claim that the version process itself holds is proved, and its hint is the
         // Claude Code variable.
         let own = claim_of("claude-code:bg1", Some(600), Some(6000));
-        let hint = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "bg1".to_string());
+        let hint = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "bg1".into());
         assert!(proves_ownership(
             &own,
             &nested,
@@ -1176,8 +1254,7 @@ mod tests {
             Some(PROOF_BOOT),
             &hint
         ));
-        let contradicted =
-            |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".to_string());
+        let contradicted = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".into());
         assert!(!proves_ownership(
             &own,
             &nested,
@@ -1218,6 +1295,7 @@ mod tests {
         move || {
             Ok(Some(crate::relay::resolve::Resolved {
                 session,
+                root_session: None,
                 pid: 42,
                 pid_start: 900,
                 boot_id: "boot".into(),
@@ -1353,31 +1431,118 @@ mod tests {
     }
 
     #[test]
-    fn disagreeing_codex_variables_warn_and_skip_the_level() {
+    fn delegated_native_identity_is_the_thread() {
         let mut warnings = Vec::new();
         let id = identity_from(
-            env_of(&[
-                ("CODEX_SESSION_ID", "private-a"),
-                ("CODEX_THREAD_ID", "private-b"),
-            ]),
+            env_of(&[("CODEX_SESSION_ID", "root"), ("CODEX_THREAD_ID", "worker")]),
             Some(11),
             relay_off(),
             &mut warnings,
         )
         .unwrap();
+        assert_eq!(id.session, "worker");
+        assert_eq!(id.tagged, "codex:worker");
+        assert_eq!(id.pid, None);
+        assert!(id.proof.is_none());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn delegated_native_values_are_validated_without_leaking() {
+        for name in ["CODEX_SESSION_ID", "CODEX_THREAD_ID"] {
+            for bad in ["private\nvalue", "private\tvalue", "private\u{7f}value"] {
+                let get = |key: &str| match key {
+                    k if k == name => Some(OsString::from(bad)),
+                    "CODEX_THREAD_ID" => Some("worker".into()),
+                    _ => None,
+                };
+                let error = identity_from(get, Some(11), relay_off(), &mut Vec::new())
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains(name) && error.contains("TASKS_SESSION"),
+                    "{error}"
+                );
+                assert!(!error.contains("private"), "{error}");
+                let overridden = |key: &str| {
+                    if key == "TASKS_SESSION" {
+                        Some("owner".into())
+                    } else {
+                        get(key)
+                    }
+                };
+                assert_eq!(
+                    identity_from(overridden, Some(11), relay_off(), &mut Vec::new())
+                        .unwrap()
+                        .session,
+                    "owner"
+                );
+                let claude = |key: &str| {
+                    if key == "CLAUDE_CODE_SESSION_ID" {
+                        Some("claude".into())
+                    } else {
+                        get(key)
+                    }
+                };
+                assert_eq!(
+                    identity_from(claude, Some(11), relay_off(), &mut Vec::new())
+                        .unwrap()
+                        .session,
+                    "claude"
+                );
+            }
+        }
+        for vars in [
+            vec![],
+            vec![("CODEX_SESSION_ID", ""), ("CODEX_THREAD_ID", "")],
+        ] {
+            assert_eq!(
+                identity_from(env_of(&vars), Some(11), relay_off(), &mut Vec::new())
+                    .unwrap()
+                    .session,
+                "sid:11"
+            );
+        }
         assert_eq!(
-            id.session, "sid:11",
-            "the conflict falls to the Unix session"
+            identity_from(
+                env_of(&[("CODEX_SESSION_ID", "root")]),
+                Some(11),
+                relay_off(),
+                &mut Vec::new()
+            )
+            .unwrap()
+            .session,
+            "root"
         );
-        assert_eq!(warnings.len(), 1);
-        assert!(
-            warnings[0].contains("CODEX_SESSION_ID") && warnings[0].contains("CODEX_THREAD_ID"),
-            "{warnings:?}"
-        );
-        assert!(
-            !warnings[0].contains("private"),
-            "the warning names the variables, not their values: {warnings:?}"
-        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delegated_native_non_unicode_refuses() {
+        use std::os::unix::ffi::OsStringExt;
+        for name in ["CODEX_SESSION_ID", "CODEX_THREAD_ID"] {
+            let error = identity_from(
+                |key| {
+                    if key == name {
+                        Some(OsString::from_vec(vec![255]))
+                    } else if key == "CODEX_THREAD_ID" {
+                        Some("worker".into())
+                    } else {
+                        None
+                    }
+                },
+                Some(11),
+                relay_off(),
+                &mut Vec::new(),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains(name)
+                    && error.contains("not Unicode")
+                    && error.contains("TASKS_SESSION")
+            );
+        }
     }
 
     #[test]
@@ -1463,6 +1628,52 @@ mod tests {
         let lock = MutationLock::path_with("sci", env_of(&[("XDG_STATE_HOME", "/xdg")])).unwrap();
         assert_ne!(store, lock);
         assert_eq!(lock, PathBuf::from("/xdg/tasks/claims/sci.lock"));
+    }
+
+    #[test]
+    fn delegated_root_store_roundtrip_and_validation() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("sci.toml");
+        let id = TaskId::parse("sci-000001").unwrap();
+        for root in [None, Some("codex:root"), Some("codex:codex:x")] {
+            let mut store = ClaimStore::load_from(&path).unwrap();
+            let mut claim = sample();
+            claim.root_session = root.map(String::from);
+            store.insert(&id, claim.clone());
+            store.save().unwrap();
+            let loaded = ClaimStore::load_from(&path).unwrap();
+            assert_eq!(loaded.get(&id), Some(&claim));
+            assert_eq!(
+                continuation_identity(loaded.get(&id).unwrap()).root_session,
+                root.map(String::from)
+            );
+            if root.is_none() {
+                assert!(
+                    !std::fs::read_to_string(&path)
+                        .unwrap()
+                        .contains("root_session")
+                );
+            }
+        }
+        for root in [
+            "codex:",
+            "claude:private-root",
+            "codex:private\nroot",
+            "codex:private\u{7f}root",
+        ] {
+            let mut store = ClaimStore::load_from(&path).unwrap();
+            let mut claim = sample();
+            claim.root_session = Some(root.into());
+            store.insert(&id, claim);
+            store.save().unwrap();
+            let error = ClaimStore::load_from(&store.path).unwrap_err().to_string();
+            assert!(
+                error.contains("root_session") && error.contains(&id.to_string()),
+                "{error}"
+            );
+            assert!(!error.contains("private"), "{error}");
+            std::fs::remove_file(&store.path).unwrap();
+        }
     }
 
     #[test]
@@ -1781,6 +1992,7 @@ mod tests {
             started: "2026-09-09T20:00:00Z".into(),
             seen: "2026-09-09T20:00:00Z".into(),
             holds: Vec::new(),
+            root_session: None,
         }
     }
 
@@ -2151,6 +2363,7 @@ mod tests {
                 started: "2026-09-09T22:00:00Z".into(),
                 seen: "2026-09-09T22:00:00Z".into(),
                 holds: Vec::new(),
+                root_session: None,
             },
         );
         assert_eq!(store.parks().count(), 0, "one entry per task");

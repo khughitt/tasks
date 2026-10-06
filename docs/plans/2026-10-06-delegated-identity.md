@@ -5,8 +5,10 @@
 > superpowers:subagent-driven-development. Steps use checkboxes for tracking.
 
 **Status:** approved on 2026-10-06 after acceptance by
-claude-code/claude-opus-5-5. Execution is paused at the user's explicit request;
-resume only when the user asks to proceed. The written spec is approved.
+claude-code/claude-opus-5-5. Execution resumed at the user's request. Tasks 1–3
+are committed on the shared implementation branch; Task 4's deterministic and
+native and real relay live checks pass. Final branch/evidence review accepted the refreshed branch.
+Integration, installation and report closeout follow the final checklist. The written spec is approved.
 
 **Goal:** Give Codex workers distinct, persistent claim identity and native note
 provenance, retaining root association without transferring ownership.
@@ -115,7 +117,7 @@ Keep `claims::identity_from` and `provenance::resolve_from` externally unchanged
 If the claims warnings argument becomes unused, rename it `_warnings` until a
 separate reason justifies changing all callers.
 
-- [ ] **Write the regression and run it red.** Replace the old
+- [x] **Write the regression and run it red.** Replace the old
   `disagreeing_codex_variables_warn_and_skip_the_level` expectation in the claims
   tests with the following case, using existing `env_of` and `relay_off`:
 
@@ -138,7 +140,7 @@ fn delegated_native_identity_is_the_thread() {
   Run `just test-one delegated_native_identity_is_the_thread`. The baseline
   fails with `sid:11` rather than `worker`, not a compilation error.
 
-- [ ] **Move the existing provenance validator into the small shared module.**
+- [x] **Move the existing provenance validator into the small shared module.**
   Declare `mod native;` in `src/main.rs`. Use this implementation:
 
 ```rust
@@ -189,7 +191,7 @@ let codex = thread.map(|id| (id, "CODEX_THREAD_ID"))
   Retain mixed-harness and qualified-override conflict handling. Do not reuse
   claim resolution to produce provenance.
 
-- [ ] **Extend existing tables, then run focused tests.** In claims and provenance
+- [x] **Extend existing tables, then run focused tests.** In claims and provenance
   cover equal IDs, unequal IDs, thread-only, session-only, empty and absent values;
   newline, tab, DEL and non-Unicode in either Codex value, including an invalid
   root with a valid thread. Existing explicit/Claude precedence controls must
@@ -210,13 +212,13 @@ let codex = thread.map(|id| (id, "CODEX_THREAD_ID"))
   show; require stable worker key, absent PID, live claim and worker note source.
   Run `just test-one --test cli delegated_native_commands` red then green.
 
-- [ ] **Ship the handoff instructions with the behavior.** Add the final Task 4
+- [x] **Ship the handoff instructions with the behavior.** Add the final Task 4
   skill wording now, before anyone uses persistent worker claims. Update README
   and the skill's provenance paragraph: thread-first source even for equal IDs,
   no pair-shape change, and session-only worker isolation remains unsupported.
   Keep the detailed relay/root documentation for the steps that implement it.
 
-- [ ] **Verify and commit.** Run `cargo fmt`, `just test-fast`, `tasks check`,
+- [x] **Verify and commit.** Run `cargo fmt`, `just test-fast`, `tasks check`,
   and `git diff --check`; mark this implementation step done with the code commit
   `fix: resolve native Codex worker identity by thread`. Do not install it yet.
 
@@ -227,7 +229,7 @@ let codex = thread.map(|id| (id, "CODEX_THREAD_ID"))
 Only Claim and ClaimInfo serialize it, with absent values omitted and Claim
 deserialization defaulting to None. No park, escalation or note field is added.
 
-- [ ] **Write a failing persistence regression.** Add this test to `tests/cli.rs`:
+- [x] **Write a failing persistence regression.** Add this test to `tests/cli.rs`:
 
 ```rust
 #[test]
@@ -260,7 +262,7 @@ fn delegated_root_refresh_and_recovery() {
   Run `just test-one --test cli delegated_root_refresh_and_recovery`; expect the
   first root assertion to fail because the field is absent.
 
-- [ ] **Add the fields and populate each constructor.** Native Codex sets
+- [x] **Add the fields and populate each constructor.** Native Codex sets
   `root_session = session.as_ref().map(|id| format!("codex:{id}"))` before moving
   the thread/session options. Explicit, Claude and Unix identity use None.
   Relay identity copies `resolved.root_session`; until Task 3 the resolver emits
@@ -272,7 +274,7 @@ fn delegated_root_refresh_and_recovery() {
   Find all literals with `rg -n 'Identity \{|Claim \{|Resolved \{' src tests`
   and update their intended root explicitly; do not add a blanket Default impl.
 
-- [ ] **Enforce refresh rules only on claim acquisition.** Inside
+- [x] **Enforce refresh rules only on claim acquisition.** Inside
   `Ctx::claim_guard`, in the `to == Status::Doing` branch before constructing
   `Claim`, compute:
 
@@ -298,7 +300,7 @@ let root_session = if mine {
   `start --force` cannot bypass it. Takeovers use the new owner's root, including
   None for an explicit override. Proof-only identity preserves the recorded root.
 
-- [ ] **Validate stored roots and cover every projection.** In
+- [x] **Validate stored roots and cover every projection.** In
   `ClaimStore::load_from`'s claim validation loop reject a present root unless
   `strip_prefix("codex:")` yields a nonempty suffix with no control characters.
   The typed error names the task and field, not the value. Use old-store and new
@@ -334,7 +336,7 @@ assert_eq!(env.json(&dir, &["show", &opaque])["claim"]["root_session"],
   `just test-one output::tests`. Update README to define optional claim-only root
   metadata, retention and reassociation recovery, and mixed-writer loss limits.
 
-- [ ] **Verify and commit.** Run `cargo fmt`, `just test-fast`, `tasks check`,
+- [x] **Verify and commit.** Run `cargo fmt`, `just test-fast`, `tasks check`,
   `git diff --check`; close the step with `feat: record Codex root association on claims`.
 
 ### Task 3: Validate relay hints and require concrete Codex ownership proof
@@ -347,7 +349,7 @@ environment closures to return OsString. The return types and non-Codex policies
 stay unchanged. `Resolved.root_session` now carries validated native root data
 only for a selected Codex registry row.
 
-- [ ] **Pin the changed acceptance before editing the resolver.** In the existing
+- [x] **Pin the changed acceptance before editing the resolver.** In the existing
   relay unit module add, using its `env` helper:
 
 ```rust
@@ -364,7 +366,7 @@ fn delegated_relay_hint_selects_thread() {
   no hints, invalid root with valid thread. Only the matching valid thread proves.
   Retain Claude's no-hint proof control. Run the affected proof test red.
 
-- [ ] **Use the shared validator without collapsing malformed values to absence.**
+- [x] **Use the shared validator without collapsing malformed values to absence.**
   The Codex hint branch becomes:
 
 ```rust
@@ -420,7 +422,7 @@ if boundary.harness == "codex" {
   Leave other harness proof behavior and explicit-override short-circuiting alone.
   Existing raw/tagged/relay key equivalence remains confined to same_session.
 
-- [ ] **Audit all callers and update meaningful controls.** Search every
+- [x] **Audit all callers and update meaningful controls.** Search every
   `hint_for`, `resolve`, `proves_ownership` and relevant environment helper call.
   Existing Codex shim tests which relied on absent hints to continue their own
   claim now export the matching thread explicitly in those tests; do not globally
@@ -447,7 +449,7 @@ if boundary.harness == "codex" {
   controls intact. Run `just test-one --test cli delegated_relay_ownership`,
   `just test-one relay::`, and `just test-one claims::tests`.
 
-- [ ] **Document the break, verify and commit.** Amend README and the relay
+- [x] **Document the break, verify and commit.** Amend README and the relay
   ancestry spec's hints/proof paragraphs, preserving historical context and
   linking the approved design. Spell out missing-thread proof loss, explicit
   legitimate-owner recovery, root-only registry refusal and relay-f56e30.
@@ -460,7 +462,7 @@ if boundary.harness == "codex" {
 `note --stamp`, `show`, `claims`, and existing takeover recording. Native live
 checks use actual exported IDs, while deterministic tests use TestEnv inputs.
 
-- [ ] **Add the reverse-direction handoff regression.** In `tests/cli.rs`:
+- [x] **Add the reverse-direction handoff regression.** In `tests/cli.rs`:
 
 ```rust
 #[test]
@@ -503,7 +505,7 @@ fn delegated_worker_handoff_and_takeover() {
   distinct agent. Check the parked task appears to that agent in next/ready and
   that its start succeeds; this is a limit, not a desired reservation feature.
 
-- [ ] **Use the final skill text below.** Task 1 must already have shipped it;
+- [x] **Use the final skill text below.** Task 1 must already have shipped it;
   here verify it agrees with tested behavior and the approved spec:
 
 > A worker releases its claims before ending its assignment: `done` if responsible
@@ -527,7 +529,7 @@ fn delegated_worker_handoff_and_takeover() {
   controller's worker-specific completion result, not a nonexistent relay worker
   row or root Stop hook. This does not change tasks-f8c9cc's authorization scope.
 
-- [ ] **Check native live-smoke preconditions.** The controller must be an actual
+- [x] **Check native live-smoke preconditions.** The controller must be an actual
   Codex session with working worker-spawn and tracked wait/completion tools, and
   native Codex IDs available to its command environment. The controller and its
   real worker must have no nonempty `CLAUDE_CODE_SESSION_ID`. A Claude Code
@@ -544,7 +546,7 @@ fn delegated_worker_handoff_and_takeover() {
   clean Codex controller session. A future clean session may resume the same
   implementation worktree; implementation need not be repeated.
 
-- [ ] **Run the native live smoke as a bounded controller/worker exchange.** Build
+- [x] **Run the native live smoke as a bounded controller/worker exchange.** Build
   the worktree debug binary through the focused test recipe. Use a temporary
   scratch directory with private XDG config/state directories and a scratch
   project initialized by that explicit binary. Keep native Codex exports exactly
@@ -573,7 +575,7 @@ fn delegated_worker_handoff_and_takeover() {
   partial verdict before cleanup; wait for the worker to stop, release remaining
   scratch claims, and remove scratch registry/state. Do not leave jobs detached.
 
-- [ ] **Capture real relay behavior separately.** Check where the installed relay
+- [x] **Capture real relay behavior separately.** Check where the installed relay
   executable resolves before using it. Inspect its supported isolated state/config
   invocation and arrange actual root hook delivery to a private registry for the
   scratch Codex session, with the user's host-use/config permissions if needed.
@@ -598,7 +600,7 @@ fn delegated_worker_handoff_and_takeover() {
   The real relay smoke likewise needs an eligible Codex controller/worker pair;
   inherited mixed-harness IDs leave its setup unverified as above.
 
-- [ ] **Record verdicts and update contracts.** Write the acceptance note with
+- [x] **Record verdicts and update contracts.** Write the acceptance note with
   columns: case, native/synthetic/live-relay evidence, expected result, observed
   result, pass/fail/unverified. Preserve the root-vs-immediate-parent distinction.
   Update the old work-claims equality premise, final README/skill guidance, and
@@ -632,12 +634,10 @@ fn delegated_worker_handoff_and_takeover() {
 
 ## Design-task handoff
 
-The approved plan is paused before execution at the user's request. Keep it
-referenced in the task note until resumption; linking its Task headings before
-filing steps would produce the known `unlinked_step` warnings. When the user
-resumes execution, file and link
-the four implementation tasks, close tasks-5e2472 as the reviewed design/plan
-deliverable, and integrate the document/task records locally. The implementation
+The user resumed execution on 2026-10-06. The document/task-only handoff was
+integrated locally and tasks-5e2472 closed as the reviewed design/plan deliverable.
+Linked direct steps are tasks-3809b8, tasks-2047cd, tasks-17c844 and tasks-a5a502.
+The first three are committed; the fourth has passed live relay acceptance and final review; local closeout follows. The implementation
 steps then proceed sequentially on the single `feat/delegated-identity` branch
 in `.worktrees/delegated-identity`, using the workspace sequence above. The
 document/task-only integration is not an intermediate implementation merge.

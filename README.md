@@ -82,8 +82,8 @@ id copied from the end of a sentence works. Embedded dots, other punctuation, an
 or trailing whitespace are not accepted; records on disk and every output stay canonical.
 
 `start` also writes a per-project claim outside git, so every worktree sees the session and
-its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
-`TASKS_SESSION` per agent when agents share a terminal or harness process; use
+its liveness. `ready` and `next` omit live claims with an explanatory warning. When concrete native identity is unavailable, set
+`TASKS_SESSION` per agent sharing a terminal or harness process; use
 `tasks start --force <id>` for an explicit, recorded takeover. A write refuses with
 `stale_copy` when another worktree holds a newer copy of the record, and says whether to
 rerun there, merge, or leave it to the session working there.
@@ -109,15 +109,33 @@ claim identity and liveness. A stamped note has one indented JSON continuation:
 
 `tasks show` exposes these optional fields directly on the note; both are absent
 when unknown. The source names only `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`,
-or `CODEX_THREAD_ID`, with a matching `claude-code:` or `codex:` key. Agreeing Codex
-variables select `CODEX_SESSION_ID`. Missing/empty native values leave both fields
+or `CODEX_THREAD_ID`, with a matching `claude-code:` or `codex:` key. Codex
+selects `CODEX_THREAD_ID` whenever present, including equal root/thread IDs;
+otherwise it selects `CODEX_SESSION_ID`. Unequal valid IDs name a worker and its
+shared root, and produce worker provenance without changing the serialized pair.
+Historical stamps retain their recorded source. Missing/empty native values leave both fields
 absent; conflicting or invalid inputs also leave them absent and emit a warning,
 without blocking an otherwise valid lifecycle operation. A qualified `TASKS_SESSION`
 override that disagrees with the native key is a conflict; a matching override never
 replaces the native source. Other claim overrides remain independent. Do not set
 `TASKS_SESSION` merely to improve observability: it is a claim override, not a
 provenance source. Claim identity reads the same Codex variables on its own: a Codex
-claim is keyed by the thread id, carries no pid, and lives by the TTL.
+claim validates both native values and selects the thread when present, carries
+no pid, and lives by the four-hour TTL. Malformed selected Codex input refuses
+claim writes with repair or exact held `TASKS_SESSION` recovery guidance. With
+only `CODEX_SESSION_ID`, workers cannot be distinguished from their controller.
+
+Codex claims expose optional `root_session` in `show`, `prime` and `claims` and
+persist it in the claim store as `codex:<root>`. It names the tree root, never an
+immediate parent, and grants no ownership or shared holds. Native Codex sets it
+from validated `CODEX_SESSION_ID`; explicit overrides and other harnesses omit it.
+A same-owner refresh without root data retains the recorded root; conflicting
+known roots refuse before mutation, including same-owner `start --force`. Inspect
+`tasks show` and the exports, restore incorrect exports, or intentionally release
+with `park` before starting under the new root. Takeovers record the new owner's
+root, including absence. Release removes the metadata; notes and parks gain no
+root field. Old claims still load, but older writers may discard this field when
+rewriting a store; participating sessions need the updated binary for retention.
 
 The generated lifecycle texts are the consumer contract (including status edits):
 
@@ -237,6 +255,33 @@ either the registry back or `TASKS_SESSION`. And from 0.2.0, a session nested in
 another harness session is a different session: its nearest boundary is its own harness
 process, so it cannot act on the outer session's claims.
 
+Codex hints validate both native exports and select `CODEX_THREAD_ID` when present,
+otherwise `CODEX_SESSION_ID`. A matching Codex actor row records native root
+association separately. A worker presented only with its registered root row
+refuses acquisition: relay worker registration remains unavailable (`relay-f56e30`).
+It cannot claim as its controller; other mismatches use a value-free diagnosis.
+No registry schema or producer behavior changes here.
+
+Codex proof-only continuation now requires a valid concrete `CODEX_THREAD_ID`
+matching the held claim, plus the existing process, host and boot evidence.
+A sibling, absent thread, session-only export, or malformed native value cannot
+prove ownership. This deliberately removes the former thread-less process-proof
+fallback. Exact resolved identity matches still work. A legitimate owner blocked
+by missing thread data can inspect `tasks show <id>` and set `TASKS_SESSION` to
+that exact held session; set `TASKS_SESSION_PID` only for an actual long-lived
+process, never the command PID. Parentage and root association do not authorize
+foreign claims. Normal workers release with `done` or `park --waiting-on agent`
+before reporting completion; controllers run `start` before review or closure.
+Agent-waiting parks are public to all agents. A controller uses forced takeover
+only after a worker-specific completion result establishes that worker and its
+checks have stopped; silence, a timeout and the shared PID do not establish it.
+
+Relay process matching also requires hooks and task commands to share a PID
+namespace. A sandbox exposing the Codex ancestor as PID 1 cannot match relay's
+published host PID; this currently refuses acquisition (tracked as tasks-b9cbe3).
+Exact legitimate-owner `TASKS_SESSION` recovery remains available. The live
+acceptance capture used a separately approved host-PID invocation.
+
 **Upgrading.** tasks 0.2.0 reads relay's registry schema 2 and no other; against an older
 registry it refuses and asks you to run `relay reap`. On a host with this switch on, every
 `tasks` that can run there must be 0.2.0 or later before relay publishes schema 2: check
@@ -248,7 +293,8 @@ Enabling relay never rewrites a claim already held: a claim keeps the identity i
 created with. The level is Linux-only — it needs `/proc` — and it sits *below*
 `TASKS_SESSION` in the ladder, which is why every relay identity error ends by telling you
 to set `TASKS_SESSION` and `TASKS_SESSION_PID`. That override is the recovery path from all
-of them, and it also remains the way to tell apart several agents sharing one process.
+of them, and distinguishes agents sharing a process when native thread identity is
+unavailable. It never supplies native note provenance.
 
 ## Install
 
