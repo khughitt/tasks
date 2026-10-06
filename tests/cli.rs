@@ -2024,6 +2024,38 @@ fn an_invalid_columns_value_fails_as_config() {
 }
 
 #[test]
+fn pretty_non_table_warnings_use_columns_and_invalid_width_prevents_init() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let out = env
+        .cmd(&sci)
+        .env("COLUMNS", "80")
+        .args(["--pretty", "init", "--prefix", "sci"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let warnings = String::from_utf8(out.stderr).unwrap();
+    let rule = warnings.lines().next().expect("missing skill warning");
+    assert!(rule.starts_with("── warnings (1) "), "{warnings}");
+    assert_eq!(rule.chars().count(), 80, "{warnings}");
+    assert!(warnings.contains("no tasks skill found"), "{warnings}");
+
+    let fresh = tempfile::tempdir().unwrap();
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let before = std::fs::read(&registry).unwrap();
+    let out = env
+        .cmd(fresh.path())
+        .env("COLUMNS", "wide")
+        .args(["--pretty", "init", "--prefix", "new"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("COLUMNS must be"));
+    assert!(!fresh.path().join("tasks").exists());
+    assert_eq!(std::fs::read(&registry).unwrap(), before);
+}
+
+#[test]
 fn pretty_warnings_follow_the_output_and_survive_an_early_exit() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

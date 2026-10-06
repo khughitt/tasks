@@ -193,6 +193,38 @@ fn main() {
     };
     let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
+    let width = if format == Format::Pretty {
+        output::terminal_width()
+    } else {
+        Ok(None)
+    };
+    // Read commands can report their warnings before a width error. Reject it before
+    // writers run, so a presentation error cannot follow a successful mutation.
+    if let Err(error) = &width
+        && !matches!(
+            &cli.command,
+            cli::Command::Projects { .. }
+                | cli::Command::Groups
+                | cli::Command::Root { .. }
+                | cli::Command::Show { .. }
+                | cli::Command::List { .. }
+                | cli::Command::Search { .. }
+                | cli::Command::Ready { .. }
+                | cli::Command::Next { .. }
+                | cli::Command::Sample { .. }
+                | cli::Command::Graph { .. }
+                | cli::Command::Check
+                | cli::Command::Prime { .. }
+                | cli::Command::Lanes { .. }
+                | cli::Command::Tree { .. }
+                | cli::Command::Tags { .. }
+                | cli::Command::Quiet { .. }
+                | cli::Command::Claims { .. }
+        )
+    {
+        to_stderr(&format!("{}\n", output::render_error(error)));
+        std::process::exit(1);
+    }
     match commands::run(cli) {
         Ok(out) => {
             // A clean `check` says nothing in JSON mode: it ends every project's pre-commit
@@ -252,21 +284,8 @@ fn main() {
             } else {
                 Vec::new()
             };
-            let layout = if format == Format::Pretty
-                && matches!(
-                    &out,
-                    output::Output::List(_)
-                        | output::Output::Prime(_)
-                        | output::Output::Parked(_)
-                        | output::Output::Quiet(_)
-                        | output::Output::Tree(_)
-                        | output::Output::Show(_)
-                        | output::Output::Next(_)
-                        | output::Output::Lanes(_)
-                        | output::Output::Projects(_)
-                        | output::Output::Claims(_)
-                ) {
-                match output::terminal_width() {
+            let layout = if format == Format::Pretty {
+                match width {
                     Ok(width) => table::Layout { width, headers },
                     Err(error) => {
                         to_stderr(&output::pretty_warnings(

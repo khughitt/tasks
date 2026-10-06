@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T15:48:23Z
+updated: 2026-10-06T15:57:46Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -67,3 +67,5 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T15:31:56Z (feat/comfy-tables): Task 6 header interpretation: claims data rows stay uncolored and checkout-independent; its optional header uses the shared chrome role required by spec section 6 and the reviewed render(...painter) snippet.
 - 2026-10-06T15:44:05Z (feat/comfy-tables): Task 8 fixture correction: real park CLI replaces a write_park helper immediately after start; the helper retained the live claim and produced a claim-plus-park config error before layout could be tested. Width and intact-text assertions remain.
 - 2026-10-06T15:48:23Z (feat/comfy-tables): Integration gate identified: skills/tasks/SKILL.md is the active global tasks skill via the installed .agents symlink. Per user Git rule for live global instructions, local merge requires user approval after Task 8 and whole-branch review; implementation remains in .worktrees/comfy-tables.
+- 2026-10-06T15:54:34Z (feat/comfy-tables): review: impl round 1 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6-astra
+- 2026-10-06T15:57:46Z (feat/comfy-tables): Final width fix decision: validate COLUMNS before pretty non-table commands can mutate state; retain warnings-before-width-error ordering for existing table/show/next reads. Valid widths reach every pretty warning divider, JSON unaffected; invalid COLUMNS now rejects pretty non-table commands even when they would emit no warnings.
