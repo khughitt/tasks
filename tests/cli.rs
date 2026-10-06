@@ -1552,7 +1552,7 @@ fn park_reason_rides_the_entry_the_note_and_every_park_view() {
     let text = env.pretty(&sci, &["show", &id]);
     assert!(text.contains("waiting on user, review since"), "{text}");
     let table = env.pretty(&sci, &["list", "--parked"]);
-    assert!(table.contains("waits on user, review"), "{table}");
+    assert!(table.contains("user, review"), "{table}");
 
     // `next` hands back agent-parked work with the same block.
     as_agent(&env, &sci, "agent-a")
@@ -1732,7 +1732,7 @@ fn a_quiet_park_records_its_recipe_in_the_entry_the_note_and_every_park_view() {
     );
     assert!(
         env.pretty(&sci, &["list", "--parked"])
-            .contains("waits on user, quiet; idle, 50 min")
+            .contains("user, quiet; idle, 50 min")
     );
 
     as_agent(&env, &sci, "agent-a")
@@ -2024,6 +2024,38 @@ fn an_invalid_columns_value_fails_as_config() {
 }
 
 #[test]
+fn pretty_non_table_warnings_use_columns_and_invalid_width_prevents_init() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let out = env
+        .cmd(&sci)
+        .env("COLUMNS", "80")
+        .args(["--pretty", "init", "--prefix", "sci"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let warnings = String::from_utf8(out.stderr).unwrap();
+    let rule = warnings.lines().next().expect("missing skill warning");
+    assert!(rule.starts_with("── warnings (1) "), "{warnings}");
+    assert_eq!(rule.chars().count(), 80, "{warnings}");
+    assert!(warnings.contains("no tasks skill found"), "{warnings}");
+
+    let fresh = tempfile::tempdir().unwrap();
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let before = std::fs::read(&registry).unwrap();
+    let out = env
+        .cmd(fresh.path())
+        .env("COLUMNS", "wide")
+        .args(["--pretty", "init", "--prefix", "new"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("COLUMNS must be"));
+    assert!(!fresh.path().join("tasks").exists());
+    assert_eq!(std::fs::read(&registry).unwrap(), before);
+}
+
+#[test]
 fn pretty_warnings_follow_the_output_and_survive_an_early_exit() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
@@ -2059,8 +2091,14 @@ fn pretty_warnings_follow_the_output_and_survive_an_early_exit() {
     std::io::Read::read_to_string(&mut reader, &mut merged).unwrap();
     assert!(child.wait().unwrap().success());
     let row = merged.find(&id).expect("the parked row");
-    let warning = merged.find("warning: sci-eeeeee").expect("the warning");
+    let warning = merged.find("── warnings (1) ").expect("the warning");
     assert!(row < warning, "warnings come after the output:\n{merged}");
+    let rule = merged.find("── warnings (1) ").unwrap();
+    assert!(
+        merged[rule..].contains("\nsci-eeeeee"),
+        "warnings follow the rule unprefixed:\n{merged}"
+    );
+    assert!(!merged.contains("warning: sci-eeeeee"), "{merged}");
 
     let out = env
         .cmd(&sci)
@@ -2071,7 +2109,7 @@ fn pretty_warnings_follow_the_output_and_survive_an_early_exit() {
     assert!(!out.status.success());
     let text = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
-        text.contains("warning: sci-eeeeee") && text.contains("COLUMNS must be"),
+        text.contains("── warnings (1) ") && text.contains("COLUMNS must be"),
         "an exit before the output still prints the warnings: {text}"
     );
 }
@@ -6094,9 +6132,9 @@ fn tree_nests_prunes_and_orders() {
 
     let out = env.cmd(&dir).args(["--pretty", "tree"]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains(&format!("{goal}  P1")), "{text}");
+    assert!(text.contains(&format!("{goal}      P1")), "{text}");
     assert!(
-        text.contains(&format!("  {big}  P2")),
+        text.contains(&format!("  {big}    P2")),
         "children are indented: {text}"
     );
 }
@@ -6320,7 +6358,7 @@ fn feedback_creates_an_idea_in_the_registered_tasks_project() {
     assert!(String::from_utf8_lossy(&out.stdout).starts_with("created tasks-"));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.starts_with("warning: ") && stderr.contains("uncommitted"),
+        stderr.starts_with("── warnings (") && stderr.contains("uncommitted"),
         "{stderr}"
     );
 }
@@ -7422,7 +7460,7 @@ fn tasks_color_is_always_validated_and_warnings_use_the_stderr_painter() {
         .output()
         .unwrap();
     assert!(warned.status.success());
-    assert!(String::from_utf8_lossy(&warned.stderr).starts_with("\x1b[33mwarning:\x1b[0m "));
+    assert!(String::from_utf8_lossy(&warned.stderr).starts_with("\x1b[1m── warnings (1) \x1b[0m"));
 }
 
 /// A pretty show overview row's value, independent of key column width.
@@ -7486,15 +7524,15 @@ fn project_colors_paint_prefixes_and_titles_without_changing_json_or_layout() {
         assert_eq!(strip_ansi(&colored), env.pretty(&sci, args));
         if args[0] == "projects" {
             assert!(
-                colored.contains("\x1b[38;2;18;52;86msci    \x1b[0m"),
+                colored.contains("\x1b[38;2;18;52;86msci\x1b[0m"),
                 "{colored:?}"
             );
             assert!(
-                colored.contains("\x1b[38;2;171;205;239mdots   \x1b[0m"),
+                colored.contains("\x1b[38;2;171;205;239mdots\x1b[0m"),
                 "{colored:?}"
             );
-            assert!(colored.contains("\x1b[2mplain  \x1b[0m"), "{colored:?}");
-            assert!(colored.contains("\x1b[2mgone   \x1b[0m"), "{colored:?}");
+            assert!(colored.contains("\x1b[2mplain\x1b[0m"), "{colored:?}");
+            assert!(colored.contains("\x1b[2mgone\x1b[0m"), "{colored:?}");
         } else {
             assert!(
                 colored.contains("\x1b[38;2;18;52;86mScience\x1b[0m"),
@@ -7504,8 +7542,8 @@ fn project_colors_paint_prefixes_and_titles_without_changing_json_or_layout() {
                 colored.contains("\x1b[38;2;171;205;239mDotfiles\x1b[0m"),
                 "{colored:?}"
             );
-            assert!(colored.contains("\x1b[2m [research]\x1b[0m"), "{colored:?}");
-            assert!(colored.contains("\x1b[34midea   \x1b[0m"), "{colored:?}");
+            assert!(colored.contains(" \x1b[2m[research]\x1b[0m"), "{colored:?}");
+            assert!(colored.contains("\x1b[34midea\x1b[0m"), "{colored:?}");
             assert!(colored.contains("  Unassigned\n"), "{colored:?}");
         }
         for mode in ["never", "auto"] {
@@ -7688,7 +7726,7 @@ fn colored_tables_use_semantic_roles_without_changing_layout() {
         colored.contains("\x1b[1;38;2;215;95;215mP0\x1b[0m"),
         "{colored:?}"
     );
-    assert!(colored.contains("\x1b[2m [now]\x1b[0m"));
+    assert!(colored.contains(" \x1b[2m[now]\x1b[0m"));
 
     let plain_ready = env.cmd(&dir).args(["--pretty", "ready"]).output().unwrap();
     let colored_ready = env
@@ -8752,9 +8790,9 @@ fn projects_pretty_paints_counts_by_status_and_dims_zeros() {
     let text = String::from_utf8_lossy(&out.stdout);
     let row = text.lines().nth(1).unwrap();
     // idea is 1: painted in the idea role, the same blue `list` and `show` use
-    assert!(row.contains("\u{1b}[34m   1\u{1b}[0m"), "{row:?}");
+    assert!(row.contains("\u{1b}[34m1\u{1b}[0m"), "{row:?}");
     // blocked is 0: dimmed whatever the column, so a red 0 does not read as an alarm
-    assert!(row.contains("\u{1b}[2m      0\u{1b}[0m"), "{row:?}");
+    assert!(row.contains("\u{1b}[2m0\u{1b}[0m"), "{row:?}");
     // total carries no status; activity is a date and takes the recency role
     assert!(row.contains("      1  \x1b[38;2;0;215;255m"), "{row:?}");
     assert!(row.ends_with("\x1b[0m"), "{row:?}");
@@ -9525,7 +9563,7 @@ fn quiet_lists_quiet_parks_across_projects_by_priority_then_park_time() {
     let explicit = env.json(&sci, &["quiet", "--all-projects"]);
     assert_eq!(explicit["tasks"].as_array().unwrap().len(), 3);
     let text = env.pretty(nowhere.path(), &["quiet"]);
-    let brief = text.lines().collect::<Vec<_>>();
+    let brief = text.trim_end().lines().collect::<Vec<_>>();
     assert!(
         brief[0].starts_with(&urgent)
             && brief[0].contains("P1")
@@ -9534,12 +9572,13 @@ fn quiet_lists_quiet_parks_across_projects_by_priority_then_park_time() {
             && brief[0].contains("Urgent sweep"),
         "{text}"
     );
-    assert!(brief[1].trim_start().starts_with("next: sweep"), "{text}");
+    assert!(brief[0].ends_with("sweep"), "{text}");
     assert!(
-        brief[2].trim_start().starts_with("in:") && brief[2].contains(&*fam.to_string_lossy()),
+        brief[1].trim_start().starts_with("in:") && brief[1].contains(&*fam.to_string_lossy()),
         "{text}"
     );
-    assert_eq!(brief[3], "", "one blank line between briefs: {text}");
+    assert!(brief[2].contains("First capture"), "{text}");
+    assert!(brief.iter().all(|line| !line.is_empty()), "{text}");
     assert!(
         text.contains("headless") && text.contains("45 min"),
         "{text}"
@@ -12346,11 +12385,11 @@ fn list_sorts_by_priority_updated_or_created_and_prints_the_date() {
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     let text = pretty(&["list"]);
-    assert!(text.contains("todo    2026-02-02  A\n"), "{text}");
+    assert!(text.contains("todo  2026-02-02  A\n"), "{text}");
     let text = pretty(&["list", "--sort", "created"]);
-    assert!(text.contains("todo    2026-01-01  A\n"), "{text}");
+    assert!(text.contains("todo  2026-01-01  A\n"), "{text}");
     let text = pretty(&["ready"]);
-    assert!(text.contains("todo    2026-02-02  A\n"), "{text}");
+    assert!(text.contains("todo  2026-02-02  A\n"), "{text}");
 }
 
 #[test]
@@ -17045,8 +17084,8 @@ fn complexity_is_set_cleared_listed_and_completed() {
     assert!(env.json(&sci, &["show", &id])["task"]["complexity"].is_null());
     let pretty = env.pretty(&sci, &["list"]);
     assert!(
-        pretty.contains(" -    "),
-        "unassessed shows a dash: {pretty}"
+        pretty.lines().next().unwrap().split_whitespace().nth(3) == Some("-"),
+        "unassessed shows a dash in the complexity column: {pretty}"
     );
 
     let err = env.usage(&sci, &["add", "Bad", "--complexity", "medium"]);
@@ -18369,7 +18408,10 @@ fn process_survives_ready_and_parked_next() {
         env.json(&dir, &["next"])["next"]["task"]["process"],
         "planned"
     );
-    assert!(env.pretty(&dir, &["list", "--parked"]).contains("planned"));
+    assert!(
+        env.pretty(&dir, &["list", "--parked"])
+            .contains("implementing")
+    );
     env.json(&dir, &["edit", &id, "--no-process"]);
     assert_eq!(
         overview_value(&env.pretty(&dir, &["show", &id]), "process").as_deref(),
@@ -24513,13 +24555,13 @@ fn lanes_view_reports_every_state_and_picks_as_next_does() {
         "{text}"
     );
     assert!(
-        text.contains("    Ship the captures. First milestone: one clean run."),
+        text.contains("        guide:  Ship the captures. First milestone: one clean run."),
         "{text}"
     );
     assert!(text.contains(&format!("held: quiet ← {capture}")), "{text}");
     assert!(text.contains("waiting: 1 user"), "{text}");
     assert!(
-        text.contains(&format!("    active: {running} Running @")),
+        text.contains(&format!("        active: {running} Running @")),
         "{text}"
     );
 
@@ -26600,4 +26642,293 @@ fn search_rows_carry_the_project_color() {
     let colored = String::from_utf8(out.stdout).unwrap();
     assert!(colored.contains("\x1b[38;2;18;52;86m"), "{colored:?}");
     assert!(strip_ansi(&colored).contains("Colored match"));
+}
+
+#[test]
+fn ready_tree_and_prime_rows_carry_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal title", "--lane", "-b", "why"]));
+    env.json(
+        &sci,
+        &["add", "Child title", "--parent", &goal, "--size", "s"],
+    );
+    write_project_color(&sci, "sci", "#123456");
+    let paint = "\x1b[38;2;18;52;86m";
+    // lanes paints its titles from Task 5, which pins it there.
+    for args in [vec!["ready"], vec!["tree"], vec!["prime"]] {
+        let mut full = vec!["--pretty", "--color", "always"];
+        full.extend(args.iter().copied());
+        let out = env.cmd(&sci).args(&full).output().unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            text.contains(&format!("{paint}Child title")),
+            "{args:?}: {text}"
+        );
+    }
+}
+
+#[test]
+fn list_ids_take_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "A task"]));
+    write_project_color(&sci, "sci", "#123456");
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--color", "always", "list"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains(&format!("\x1b[38;2;18;52;86m{id}")), "{text}");
+}
+
+#[test]
+fn prime_sections_share_every_fixed_width_when_piped() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let todo = id_of(env.json(&dir, &["add", "Ready one", "--size", "s"]));
+    let doing = id_of(env.json(&dir, &["add", "Doing one", "--size", "xl"]));
+    env.json(&dir, &["start", &doing]);
+    let text = env.pretty(&dir, &["prime"]);
+    let line = |id: &str| text.lines().find(|l| l.contains(id)).unwrap().to_string();
+    let (a, b) = (line(&todo), line(&doing));
+    assert_eq!(
+        a.find("Ready"),
+        b.find("Doing"),
+        "titles align across sections:\n{text}"
+    );
+}
+
+#[test]
+fn parked_rows_paint_ids_and_titles_with_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Parked title"]));
+    write_park(
+        &env,
+        "sci",
+        &id,
+        "agent-a",
+        "user",
+        &sci.display().to_string(),
+    );
+    let store = env.claim_store("sci");
+    let mut parks = std::fs::read_to_string(&store).unwrap();
+    parks.push_str("reason = \"quiet\"\nminutes = 40\n");
+    std::fs::write(&store, parks).unwrap();
+    write_project_color(&sci, "sci", "#123456");
+    for args in [vec!["list", "--parked"], vec!["prime"], vec!["quiet"]] {
+        let mut full = vec!["--pretty", "--color", "always"];
+        full.extend(args.iter().copied());
+        let out = env.cmd(&sci).args(&full).output().unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            text.contains(&format!("\x1b[38;2;18;52;86m{id}")),
+            "{args:?}: {text}"
+        );
+        assert!(
+            text.contains("\x1b[38;2;18;52;86mParked"),
+            "{args:?}: {text}"
+        );
+    }
+}
+
+#[test]
+fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(
+        &sci,
+        &["add", "Lane title", "--lane", "-b", "Lane guidance here."],
+    ));
+    let pick = id_of(env.json(
+        &sci,
+        &["add", "Pick step", "--parent", &lane, "--size", "s"],
+    ));
+    let running = id_of(env.json(
+        &sci,
+        &["add", "Running step", "--parent", &lane, "--size", "s"],
+    ));
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &running])
+        .assert()
+        .success();
+    let text = env.pretty(&sci, &["lanes"]);
+    assert!(text.lines().next().unwrap().starts_with(&lane), "{text}");
+    assert!(
+        text.contains("        guide:  Lane guidance here."),
+        "{text}"
+    );
+    write_project_color(&sci, "sci", "#123456");
+    let paint = "\x1b[38;2;18;52;86m";
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--color", "always", "lanes"])
+        .output()
+        .unwrap();
+    let colored = String::from_utf8(out.stdout).unwrap();
+    for span in [
+        format!("{paint}{lane}"),
+        format!("{paint}Lane title"),
+        format!("{paint}{pick}"),
+        format!("{paint}Pick step"),
+        format!("{paint}{running}"),
+        format!("{paint}Running step"),
+    ] {
+        assert!(colored.contains(&span), "{span:?} in:\n{colored}");
+    }
+}
+
+#[test]
+fn headers_label_each_table_view_and_leave_json_alone() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "Ready task", "--size", "s"]);
+    let parked = id_of(env.json(&sci, &["add", "Parked task", "--size", "s"]));
+    write_park(
+        &env,
+        "sci",
+        &parked,
+        "agent-a",
+        "user",
+        &sci.display().to_string(),
+    );
+    let store = env.claim_store("sci");
+    let mut parks = std::fs::read_to_string(&store).unwrap();
+    parks.push_str("reason = \"quiet\"\nminutes = 40\n");
+    std::fs::write(&store, parks).unwrap();
+    env.json(&sci, &["add", "Lane task", "--lane"]);
+    for args in [
+        vec!["list"],
+        vec!["ready"],
+        vec!["list", "--parked"],
+        vec!["tree"],
+        vec!["search", "task"],
+        vec!["prime"],
+        vec!["quiet"],
+        vec!["lanes"],
+    ] {
+        let mut full = vec!["--headers"];
+        full.extend(args.iter().copied());
+        let text = env.pretty(&sci, &full);
+        assert!(
+            text.lines()
+                .any(|line| line.split_whitespace().next() == Some("id")),
+            "{args:?}: {text}"
+        );
+        assert!(
+            !env.pretty(&sci, &args)
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some("id")),
+            "{args:?}"
+        );
+        assert_eq!(env.json(&sci, &full), env.json(&sci, &args), "{args:?}");
+    }
+}
+
+#[test]
+fn claims_is_a_table_and_never_coloured() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "A task"]));
+    env.json(&sci, &["start", &id]);
+    write_project_color(&sci, "sci", "#123456");
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--color", "always", "claims"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains(&id) && !text.contains("38;2;18;52;86"),
+        "{text}"
+    );
+}
+
+#[test]
+fn claims_headers_use_chrome_without_painting_claims() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "A task"]));
+    env.json(&sci, &["start", &id]);
+    write_project_color(&sci, "sci", "#123456");
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--headers", "--color", "always", "claims"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    let mut lines = text.lines();
+    assert!(
+        lines.next().unwrap().starts_with("\x1b[2mid\x1b[0m"),
+        "{text:?}"
+    );
+    let row = lines.next().unwrap();
+    assert!(row.starts_with(&id) && !row.contains('\x1b'), "{row:?}");
+    assert_eq!(
+        env.json(&sci, &["claims"]),
+        env.json(&sci, &["--headers", "claims"])
+    );
+}
+
+#[test]
+fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let title = |n: usize| {
+        format!("A realistic title number {n} that runs long enough to need wrapping in a table")
+    };
+    for n in 0..4 {
+        let id = id_of(env.json(&sci, &["add", &title(n), "--size", "m"]));
+        if n % 2 == 0 {
+            env.json(&sci, &["start", &id]);
+            env.json(&sci, &["park", &id, "finish §3", "--waiting-on", "user"]);
+        }
+    }
+    let views: [&[&str]; 5] = [
+        &["list"],
+        &["ready"],
+        &["list", "--parked"],
+        &["prime"],
+        &["tree"],
+    ];
+    let run = |width: &str, args: &[&str]| {
+        let out = env
+            .cmd(&sci)
+            .env("COLUMNS", width)
+            .arg("--pretty")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    for width in ["80", "120", "236"] {
+        let limit: usize = width.parse().unwrap();
+        for args in views {
+            let text = run(width, args);
+            for line in text.lines() {
+                assert!(
+                    line.chars().count() <= limit,
+                    "COLUMNS={width} {args:?}: {line:?}"
+                );
+            }
+        }
+    }
+    for args in views {
+        let text = run("50", args);
+        let shown: Vec<usize> = (0..4).filter(|&n| text.contains(&title(n))).collect();
+        assert!(
+            !shown.is_empty(),
+            "COLUMNS=50 {args:?} shows its titles whole:\n{text}"
+        );
+        for n in 0..4 {
+            assert!(
+                text.contains(&title(n)) || !text.contains(&format!("number {n} ")),
+                "COLUMNS=50 {args:?}: title {n} split:\n{text}"
+            );
+        }
+    }
 }

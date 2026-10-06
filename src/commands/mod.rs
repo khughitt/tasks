@@ -826,6 +826,15 @@ pub fn parse_id(registry: &Registry, shorthand: &Shorthand, id: &str) -> Result<
 }
 
 impl ReadCtx {
+    /// Every in-scope project's configured colour, keyed by prefix.
+    pub fn project_colors(&self) -> crate::output::ProjectColors {
+        self.scope
+            .projects()
+            .iter()
+            .filter_map(|project| project.color.map(|color| (project.prefix.clone(), color)))
+            .collect()
+    }
+
     /// Every task in scope plus the claim snapshot for the scope's prefixes: the prologue
     /// of each read command that reports claims.
     pub fn scan_with_claims(&self) -> Result<(Vec<Task>, crate::claims::ClaimSnapshot)> {

@@ -3,7 +3,9 @@
 # Design: docs/specs/2026-09-20-cli-conventions-design.md. This file is the authority:
 # each project vendors it byte-identical as tools/cli.toml and has one conformance test
 # that builds its live parser surface and asserts set equality with its rows here. A new
-# option or command anywhere is an edit here first, then a re-copy (`just vendor-cli`).
+# option or command anywhere is an edit here first; then each project runs
+# `python3 bin/vendored adopt cli.toml` in its checkout and commits the copy together
+# with its implementation. Never hand-copy a table.
 #
 # Row shapes (spec "The table"):
 #   option: names | shared (+ role), value, values, default, arity, repeatable, required, exception
@@ -250,6 +252,7 @@ env = "SURVEY"
 path = []
 options = [
   { shared = "chdir", value = "path" },
+  { names = ["--headers"], value = "none" },
 ]
 
 [[cli.tasks.commands]]

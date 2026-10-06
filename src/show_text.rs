@@ -4,9 +4,115 @@
 
 use crate::claims::Escalation;
 use crate::model::Note;
-use crate::output::{ParkInfo, ShowFields, paint_runs, wrap_lines};
+use crate::output::{ParkInfo, ShowFields};
 use crate::present::{self, Span};
 use crate::style::{Painter, Style};
+use unicode_width::UnicodeWidthChar;
+
+// ponytail: per-character widths can split joined emoji; use grapheme clusters if needed.
+fn columns(chars: &[(char, Option<Style>)]) -> usize {
+    chars.iter().map(|(c, _)| c.width().unwrap_or(0)).sum()
+}
+
+/// Paint runs of one style each. Adjacent pieces sharing a style merge into one run; the
+/// visible text is unchanged, so `ColorMode::Never` output matches painting each piece
+/// whole.
+fn paint_runs(chars: &[(char, Option<Style>)], painter: &Painter) -> String {
+    let mut rendered = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let style = chars[index].1;
+        let end = chars[index..]
+            .iter()
+            .take_while(|(_, s)| *s == style)
+            .count()
+            + index;
+        let text: String = chars[index..end].iter().map(|(c, _)| c).collect();
+        rendered.push_str(&match style {
+            Some(style) => painter.paint(style, &text),
+            None => text,
+        });
+        index = end;
+    }
+    rendered
+}
+
+/// Greedy word wrap over already-styled characters: a break lands on a space run, which is
+/// dropped there, and a word longer than `available` is hard-split at the width. A word
+/// keeps its style across the split.
+fn wrap_lines(
+    chars: &[(char, Option<Style>)],
+    available: usize,
+) -> Vec<Vec<(char, Option<Style>)>> {
+    let mut lines: Vec<Vec<(char, Option<Style>)>> = Vec::new();
+    let mut line: Vec<(char, Option<Style>)> = Vec::new();
+    let mut pending: Option<&[(char, Option<Style>)]> = None;
+    let mut index = 0;
+    while index < chars.len() {
+        let spaces = chars[index].0 == ' ';
+        let end = chars[index..]
+            .iter()
+            .take_while(|(c, _)| (*c == ' ') == spaces)
+            .count()
+            + index;
+        let run = &chars[index..end];
+        index = end;
+        if spaces {
+            if !line.is_empty() {
+                pending = Some(run);
+            }
+            continue;
+        }
+        let sep = pending.take().unwrap_or(&[]);
+        if columns(&line) + columns(sep) + columns(run) <= available {
+            line.extend_from_slice(sep);
+            line.extend_from_slice(run);
+        } else if columns(run) > available {
+            if !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            fill_hard_split(&mut lines, &mut line, run, available);
+        } else {
+            lines.push(std::mem::take(&mut line));
+            line.extend_from_slice(run);
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// Chunk a word longer than the width into full-width lines, leaving the tail on the
+/// current line.
+fn fill_hard_split(
+    lines: &mut Vec<Vec<(char, Option<Style>)>>,
+    line: &mut Vec<(char, Option<Style>)>,
+    word: &[(char, Option<Style>)],
+    available: usize,
+) {
+    let mut word = word;
+    while columns(word) > available {
+        let mut used = 0;
+        let split = word
+            .iter()
+            .take_while(|(c, _)| {
+                let next = used + c.width().unwrap_or(0);
+                if next > available {
+                    false
+                } else {
+                    used = next;
+                    true
+                }
+            })
+            .count()
+            .max(1);
+        let (chunk, rest) = word.split_at(split);
+        lines.push(chunk.to_vec());
+        word = rest;
+    }
+    line.extend_from_slice(word);
+}
 
 /// Prose never runs wider than this, however wide the terminal (spec §3.6).
 pub const MEASURE: usize = 100;
@@ -31,20 +137,6 @@ pub fn render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String
         sections.push(notes(&o.task.notes, painter, width));
     }
     sections.join("\n")
-}
-
-/// `── name ` in the heading role, then a dim rule out to the line width (spec §3.2).
-fn rule(name: &str, painter: &Painter, width: Option<usize>) -> String {
-    let head = format!("── {name} ");
-    let fill = width
-        .unwrap_or(MEASURE)
-        .saturating_sub(head.chars().count());
-    let mut line = present::heading(&head, None).paint(painter);
-    if fill > 0 {
-        line.push_str(&painter.paint(Style::Chrome, &"─".repeat(fill)));
-    }
-    line.push('\n');
-    line
 }
 
 /// `pieces` after `lead` (already painted, `lead_width` columns wide), wrapped at
@@ -92,7 +184,7 @@ fn spans(spans: &[Span]) -> Vec<(&str, Option<Style>)> {
 }
 
 fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
-    let mut rendered = rule("overview", painter, width);
+    let mut rendered = present::rule("overview", painter, width.unwrap_or(MEASURE));
     let title = present::heading(&o.task.title, o.project_color);
     let id = present::id(&format!("({})", o.task.id));
     rendered.push_str(&block(
@@ -224,7 +316,7 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
 fn parked(park: &ParkInfo, painter: &Painter, width: Option<usize>) -> String {
     let stop = crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes);
     let since = present::date(&park.at);
-    let mut rendered = rule("parked", painter, width);
+    let mut rendered = present::rule("parked", painter, width.unwrap_or(MEASURE));
     rendered.push_str(&block(
         "",
         0,
@@ -255,7 +347,7 @@ fn parked(park: &ParkInfo, painter: &Painter, width: Option<usize>) -> String {
 
 fn escalated(escalation: &Escalation, painter: &Painter, width: Option<usize>) -> String {
     let since = present::date(&escalation.at);
-    let mut rendered = rule("escalation", painter, width);
+    let mut rendered = present::rule("escalation", painter, width.unwrap_or(MEASURE));
     let needs = format!("needs at least {} since ", escalation.level.as_str());
     rendered.push_str(&block(
         "",
@@ -280,7 +372,7 @@ fn escalated(escalation: &Escalation, painter: &Painter, width: Option<usize>) -
 /// Spec §3.5: each body line wraps on its own; list items hang; fenced and indented
 /// lines, and blank ones, print verbatim; `#` lines are headings.
 fn description(body: &str, painter: &Painter, width: Option<usize>) -> String {
-    let mut rendered = rule("description", painter, width);
+    let mut rendered = present::rule("description", painter, width.unwrap_or(MEASURE));
     if body.trim().is_empty() {
         rendered.push_str(&painter.paint(Style::Chrome, "(no description)"));
         rendered.push('\n');
@@ -356,7 +448,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
     // The longest status names (`blocked`, `shelved`, `dropped`) are seven wide.
     let status_width = 7;
     let lead_width = label_width + 2 + id_width + 2 + status_width + 2;
-    let mut rendered = rule("related", painter, width);
+    let mut rendered = present::rule("related", painter, width.unwrap_or(MEASURE));
     for (label, id, status, title) in rows {
         let lead = format!(
             "{}  {}  {}  ",
@@ -377,7 +469,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
 }
 
 fn files(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
-    let mut rendered = rule("files", painter, width);
+    let mut rendered = present::rule("files", painter, width.unwrap_or(MEASURE));
     for file in &o.files {
         rendered.push_str(&format!(
             "- {} ({})\n",
@@ -390,7 +482,11 @@ fn files(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
 
 /// Spec §3.5: a header (date, time, owner, marker, session), then the text indented 4.
 fn notes(notes: &[Note], painter: &Painter, width: Option<usize>) -> String {
-    let mut rendered = rule(&format!("notes ({})", notes.len()), painter, width);
+    let mut rendered = present::rule(
+        &format!("notes ({})", notes.len()),
+        painter,
+        width.unwrap_or(MEASURE),
+    );
     for note in notes {
         let (marker, text) = lifecycle(&note.text);
         // Note timestamps are validated `YYYY-MM-DDTHH:MM:SSZ` when the record is read.
@@ -493,6 +589,54 @@ mod tests {
     use crate::style::ColorMode;
 
     const BARE: &str = "---\nid: sci-000001\ntitle: Phone sheet hides Save\nstatus: doing\npriority: 1\ncreated: 2026-09-25T15:47:16Z\nupdated: 2026-10-02T08:03:41Z\ndepends: []\ntags: []\n---\n";
+
+    #[test]
+    fn a_word_longer_than_the_available_width_is_hard_split() {
+        let chars: Vec<(char, Option<Style>)> = "abcdefghij".chars().map(|c| (c, None)).collect();
+        let lines = wrap_lines(&chars, 4);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.iter().map(|(c, _)| c).collect())
+            .collect();
+        assert_eq!(texts, ["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn hard_split_does_not_join_the_previous_word() {
+        let chars: Vec<(char, Option<Style>)> =
+            "abcd bbbbbbbb".chars().map(|c| (c, None)).collect();
+        let lines = wrap_lines(&chars, 5);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.iter().map(|(c, _)| c).collect())
+            .collect();
+        assert_eq!(texts, ["abcd", "bbbbb", "bbb"]);
+    }
+
+    #[test]
+    fn a_break_drops_the_space_and_keeps_words_inline() {
+        let chars: Vec<(char, Option<Style>)> = "ab cd ef".chars().map(|c| (c, None)).collect();
+        let lines = wrap_lines(&chars, 6);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| line.iter().map(|(c, _)| c).collect())
+            .collect();
+        assert_eq!(texts, ["ab cd", "ef"]);
+    }
+
+    #[test]
+    fn a_suffix_keeps_its_style_on_the_continuation_line() {
+        let colored = Painter::new(ColorMode::Always, crate::output::Format::Pretty, false);
+        let chars: Vec<(char, Option<Style>)> = "hello "
+            .chars()
+            .map(|c| (c, Some(Style::Chrome)))
+            .chain("world".chars().map(|c| (c, Some(Style::Emphasis))))
+            .collect();
+        let lines = wrap_lines(&chars, 8);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(paint_runs(&lines[0], &colored), "\x1b[2mhello\x1b[0m");
+        assert_eq!(paint_runs(&lines[1], &colored), "\x1b[1mworld\x1b[0m");
+    }
 
     fn plain() -> Painter {
         Painter::new(ColorMode::Never, crate::output::Format::Pretty, false)

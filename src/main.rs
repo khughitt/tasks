@@ -36,6 +36,7 @@ mod stale;
 mod style;
 #[cfg(test)]
 mod surface;
+mod table;
 mod time;
 
 use clap::{CommandFactory, Parser};
@@ -142,6 +143,7 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let headers = cli.headers;
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
     let color_mode =
         match style::ColorMode::resolve(cli.color.as_deref(), tasks_color.as_deref(), no_color) {
@@ -191,6 +193,38 @@ fn main() {
     };
     let stdout_painter = style::Painter::new(color_mode, format, std::io::stdout().is_terminal());
     let stderr_painter = style::Painter::new(color_mode, format, std::io::stderr().is_terminal());
+    let width = if format == Format::Pretty {
+        output::terminal_width()
+    } else {
+        Ok(None)
+    };
+    // Read commands can report their warnings before a width error. Reject it before
+    // writers run, so a presentation error cannot follow a successful mutation.
+    if let Err(error) = &width
+        && !matches!(
+            &cli.command,
+            cli::Command::Projects { .. }
+                | cli::Command::Groups
+                | cli::Command::Root { .. }
+                | cli::Command::Show { .. }
+                | cli::Command::List { .. }
+                | cli::Command::Search { .. }
+                | cli::Command::Ready { .. }
+                | cli::Command::Next { .. }
+                | cli::Command::Sample { .. }
+                | cli::Command::Graph { .. }
+                | cli::Command::Check
+                | cli::Command::Prime { .. }
+                | cli::Command::Lanes { .. }
+                | cli::Command::Tree { .. }
+                | cli::Command::Tags { .. }
+                | cli::Command::Quiet { .. }
+                | cli::Command::Claims { .. }
+        )
+    {
+        to_stderr(&format!("{}\n", output::render_error(error)));
+        std::process::exit(1);
+    }
     match commands::run(cli) {
         Ok(out) => {
             // A clean `check` says nothing in JSON mode: it ends every project's pre-commit
@@ -243,37 +277,31 @@ fn main() {
             };
             // Printed after the output, so a long list is not pushed down and the warnings
             // sit next to the prompt; an exit before the output still prints them.
-            let warnings = if format == Format::Pretty {
+            let warning_list = if format == Format::Pretty {
                 let mut warnings = output::warnings_of(&out);
                 warnings.extend(theme_warning);
-                output::pretty_warnings(&warnings, &stderr_painter)
+                warnings
             } else {
-                String::new()
+                Vec::new()
             };
-            let wrap_width = if format == Format::Pretty
-                && matches!(
-                    &out,
-                    output::Output::List(_)
-                        | output::Output::Prime(_)
-                        | output::Output::Parked(_)
-                        | output::Output::Quiet(_)
-                        | output::Output::Tree(_)
-                        | output::Output::Show(_)
-                        | output::Output::Next(_)
-                ) {
-                match output::terminal_width() {
-                    Ok(Some(width)) => output::Wrap::at(width),
-                    Ok(None) => output::Wrap::NONE,
+            let layout = if format == Format::Pretty {
+                match width {
+                    Ok(width) => table::Layout { width, headers },
                     Err(error) => {
-                        to_stderr(&warnings);
+                        to_stderr(&output::pretty_warnings(
+                            &warning_list,
+                            &stderr_painter,
+                            None,
+                        ));
                         to_stderr(&format!("{}\n", output::render_error(&error)));
                         std::process::exit(1);
                     }
                 }
             } else {
-                output::Wrap::NONE
+                table::Layout::default()
             };
-            let rendered = output::render(&out, format, &stdout_painter, wrap_width);
+            let warnings = output::pretty_warnings(&warning_list, &stderr_painter, layout.width);
+            let rendered = output::render(&out, format, &stdout_painter, &layout);
             let written = if silent {
                 Ok(())
             } else {
