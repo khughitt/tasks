@@ -15,6 +15,7 @@ mod halt;
 mod hierarchy;
 mod holds;
 mod lanes;
+mod locations;
 mod model;
 mod needs;
 mod output;

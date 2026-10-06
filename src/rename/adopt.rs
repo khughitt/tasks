@@ -166,7 +166,7 @@ pub fn run(
         }
     }
     if recovery == "fresh" || recovery == "resume_registry" {
-        registry.adopt(old, new, &project.root)?;
+        let _displaced = registry.adopt(old, new, &project.root)?;
         registry.save()?;
         if super::stop_after("registry") {
             return Ok(out);

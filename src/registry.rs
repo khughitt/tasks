@@ -18,6 +18,10 @@ pub struct Registry {
     /// shape on save.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub groups: BTreeMap<String, Vec<String>>,
+    /// Live prefix -> where the project has lived on this host
+    /// (docs/specs/2026-10-06-project-resolution-design.md §2). Not written when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub locations: BTreeMap<String, crate::locations::Locations>,
 }
 
 /// What `unregister` removed with the project.
@@ -103,6 +107,22 @@ impl Registry {
                 return Err(Error::Config(format!(
                     "{}: group {name:?} names {member:?}, which is not a registered project; \
                      edit [groups] in this file",
+                    path.display()
+                )));
+            }
+        }
+
+        for (prefix, history) in &registry.locations {
+            if !registry.projects.contains_key(prefix) {
+                return Err(Error::Config(format!(
+                    "{}: [locations] names {prefix:?}, which is not a registered project; \
+                     edit [locations] in this file",
+                    path.display()
+                )));
+            }
+            if let Some(problem) = history.problem() {
+                return Err(Error::Config(format!(
+                    "{}: locations of {prefix:?}: {problem}",
                     path.display()
                 )));
             }
@@ -195,6 +215,7 @@ impl Registry {
             }
             !members.is_empty()
         });
+        self.locations.remove(prefix);
         Ok(Unregistered {
             root,
             aliases,
@@ -220,12 +241,21 @@ impl Registry {
             }
         }
         self.retarget_groups(source, target);
+        if let Some(history) = self.locations.remove(source) {
+            self.locations.insert(target.into(), history);
+        }
+
         self.aliases.insert(source.into(), target.into());
         Ok(())
     }
 
     /// Adopt a checkout that already has `target` in its synced files.
-    pub fn adopt(&mut self, source: &str, target: &str, root: &Path) -> Result<()> {
+    pub fn adopt(
+        &mut self,
+        source: &str,
+        target: &str,
+        root: &Path,
+    ) -> Result<crate::locations::Displaced> {
         if source == target || !crate::model::is_valid_prefix(target) {
             return Err(Error::Config(format!("invalid adoption target {target:?}")));
         }
@@ -258,6 +288,8 @@ impl Registry {
                 )));
             }
         }
+        let previous = self.projects[source].clone();
+        let history = self.locations.get(source).cloned().unwrap_or_default();
         if self.projects.contains_key(target) {
             self.projects.remove(source);
             for live in self.aliases.values_mut() {
@@ -271,7 +303,24 @@ impl Registry {
             self.rename(source, target)?;
         }
         self.repoint(target, &root)?;
-        Ok(())
+        // In the rename branch the source's table already moved to the target, and the
+        // merge collapses its own pairs. In the registered-target branch it joins the
+        // target's (§2.2). The source's storage record leaves with `Displaced`, never
+        // as the target's record.
+        self.locations.remove(source);
+        let storage = history.storage.clone();
+        let merged = self
+            .locations
+            .remove(target)
+            .unwrap_or_default()
+            .merge(history);
+        if !merged.is_empty() {
+            self.locations.insert(target.into(), merged);
+        }
+        Ok(crate::locations::Displaced {
+            root: previous,
+            storage,
+        })
     }
 
     pub fn project_root(&self, prefix: &str) -> Option<&Path> {
@@ -736,5 +785,127 @@ mod tests {
         assert_eq!(removed.emptied_groups, ["solo"]);
         assert_eq!(r.groups.keys().collect::<Vec<_>>(), ["pair"]);
         assert_eq!(r.groups["pair"], ["sci"]);
+    }
+    use crate::locations::{Former, Locations};
+
+    fn history(storage: Option<&str>, former: &[(&str, Option<&str>, &str)]) -> Locations {
+        Locations {
+            storage: storage.map(PathBuf::from),
+            former: former
+                .iter()
+                .map(|(root, storage, until)| Former {
+                    root: root.into(),
+                    storage: storage.map(PathBuf::from),
+                    until: (*until).into(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn locations_round_trip_and_an_empty_table_is_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        let mut r = Registry::default();
+        r.register("tack", Path::new("/tmp/tack")).unwrap();
+        r.save_to(&path).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("locations")
+        );
+        r.locations.insert(
+            "tack".into(),
+            history(
+                Some("/w/tack/.worktrees"),
+                &[("/d/ai", Some("/w/ai/.worktrees"), "2026-09-27")],
+            ),
+        );
+        r.save_to(&path).unwrap();
+        assert_eq!(Registry::load_from(&path).unwrap().locations, r.locations);
+    }
+
+    #[test]
+    fn load_rejects_invalid_locations() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        let base = "[projects]\ntack = \"/tmp/tack\"\n\n";
+        for (table, named) in [
+            (
+                "[locations.gone]\nstorage = \"/s\"\n",
+                ["\"gone\"", "not a registered project"],
+            ),
+            (
+                "[[locations.tack.former]]\nroot = \"~/d/ai\"\nuntil = \"2026-09-27\"\n",
+                ["\"tack\"", "absolute"],
+            ),
+            (
+                "[[locations.tack.former]]\nroot = \"/d/ai\"\nuntil = \"yesterday\"\n",
+                ["\"tack\"", "YYYY-MM-DD"],
+            ),
+        ] {
+            std::fs::write(&path, format!("{base}{table}")).unwrap();
+            let error = Registry::load_from(&path).unwrap_err();
+            assert_eq!(error.kind(), "config", "{table}");
+            for word in named {
+                assert!(error.to_string().contains(word), "{table}: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn rename_and_unregister_carry_locations() {
+        let mut r = Registry::default();
+        r.register("tack", Path::new("/tmp/tack")).unwrap();
+        let h = history(None, &[("/d/ai", None, "2026-09-27")]);
+        r.locations.insert("tack".into(), h.clone());
+        r.rename("tack", "hq").unwrap();
+        assert_eq!(r.locations.get("hq"), Some(&h));
+        assert!(!r.locations.contains_key("tack"));
+        r.unregister("hq").unwrap();
+        assert!(r.locations.is_empty());
+    }
+
+    #[test]
+    fn adopt_merges_both_histories_and_returns_what_it_displaced() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("new");
+        std::fs::create_dir(&root).unwrap();
+        let old_root = home.path().join("missing");
+        for partial_init in [false, true] {
+            let mut r = Registry::default();
+            r.register("old", &old_root).unwrap();
+            r.locations.insert(
+                "old".into(),
+                history(
+                    Some("/w/old"),
+                    &[("/d/older", Some("/w/older"), "2026-01-01")],
+                ),
+            );
+            if partial_init {
+                r.register("new", &root).unwrap();
+                r.locations.insert(
+                    "new".into(),
+                    history(Some("/w/new"), &[("/d/x", None, "2026-02-01")]),
+                );
+            }
+            assert_eq!(
+                r.adopt("old", "new", &root).unwrap(),
+                crate::locations::Displaced {
+                    root: old_root.clone(),
+                    storage: Some(PathBuf::from("/w/old")),
+                }
+            );
+            assert!(!r.locations.contains_key("old"));
+            let merged = &r.locations["new"];
+            assert_eq!(merged.storage, None, "no record is copied into the merge");
+            let roots: Vec<_> = merged.former.iter().map(|f| f.root.clone()).collect();
+            let expected: Vec<PathBuf> = if partial_init {
+                vec!["/d/older".into(), "/d/x".into()]
+            } else {
+                vec!["/d/older".into()]
+            };
+            assert_eq!(roots, expected, "partial_init={partial_init}");
+        }
     }
 }
