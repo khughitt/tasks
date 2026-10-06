@@ -20,8 +20,30 @@ pub struct Registry {
     pub groups: BTreeMap<String, Vec<String>>,
     /// Live prefix -> where the project has lived on this host
     /// (docs/specs/2026-10-06-project-resolution-design.md §2). Not written when empty.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "locations_empty",
+        serialize_with = "serialize_locations"
+    )]
     pub locations: BTreeMap<String, crate::locations::Locations>,
+}
+
+fn locations_empty(locations: &BTreeMap<String, crate::locations::Locations>) -> bool {
+    locations
+        .values()
+        .all(crate::locations::Locations::is_empty)
+}
+
+fn serialize_locations<S: serde::Serializer>(
+    locations: &BTreeMap<String, crate::locations::Locations>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    use serde::Serialize;
+    locations
+        .iter()
+        .filter(|(_, history)| !history.is_empty())
+        .collect::<BTreeMap<_, _>>()
+        .serialize(serializer)
 }
 
 /// What `unregister` removed with the project.
@@ -823,6 +845,37 @@ mod tests {
         );
         r.save_to(&path).unwrap();
         assert_eq!(Registry::load_from(&path).unwrap().locations, r.locations);
+    }
+
+    #[test]
+    fn save_omits_empty_location_entries_after_load_and_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        std::fs::write(
+            &path,
+            "[projects]\ntack = \"/tmp/tack\"\n[locations.tack]\n",
+        )
+        .unwrap();
+        let mut r = Registry::load_from(&path).unwrap();
+        r.rename("tack", "hq").unwrap();
+        r.save_to(&path).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("locations")
+        );
+        assert!(Registry::load_from(&path).unwrap().locations.is_empty());
+
+        r.register("other", Path::new("/tmp/other")).unwrap();
+        r.locations
+            .insert("other".into(), history(Some("/store"), &[]));
+        r.save_to(&path).unwrap();
+        let loaded = Registry::load_from(&path).unwrap();
+        assert!(!loaded.locations.contains_key("hq"));
+        assert_eq!(
+            loaded.locations["other"].storage,
+            Some(PathBuf::from("/store"))
+        );
     }
 
     #[test]
