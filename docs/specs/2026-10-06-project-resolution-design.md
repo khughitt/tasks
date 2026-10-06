@@ -1,6 +1,6 @@
 # Former roots and project resolution
 
-Status: draft 2026-10-06, awaiting review
+Status: draft 2026-10-06; spec review round 1 (revise) incorporated, awaiting re-review
 Task: tasks-7580d2 (lane tasks-a7460c; blocks tack-8b7a28; used by obs-ff4e76, flows-44890e)
 
 ## 1. Goal
@@ -51,18 +51,22 @@ former = [
   command wrote this project's registry entry. It is a record, not a live answer: the
   resolver reads the live link first (§4.2). The record exists so that a root which has
   already moved away can still name its storage when it is displaced.
-- `former` lists roots this project lived at on this host, oldest first. Each entry has:
+- `former` lists the locations this project has left on this host, ordered by `until`
+  and then by `root`. Each entry has:
   - `root`: absolute and canonical when it was recorded;
   - `storage`: optional, absent when it was unknown at recording time;
-  - `until`: the UTC date the root was displaced.
+  - `until`: the UTC date the location was displaced.
+
+  An entry's identity is the pair (`root`, `storage`). A root can appear more than
+  once, with different storage each time. It can also equal the current root after a
+  move back (§2.1). Either way, no storage path the project ever used is dropped.
 
 Load validation fails early with `config`, as `[groups]` does:
 
 - every key must be a live prefix;
 - every `root` and `storage` must be absolute;
 - every `until` must be `YYYY-MM-DD`;
-- no former root may equal the project's current root;
-- no project may list the same former root twice.
+- no project may list the same (`root`, `storage`) pair twice.
 
 The table is not written when it is empty, so a registry without history keeps its
 shape. It is host-local and unsynced, like the rest of the registry.
@@ -82,24 +86,47 @@ All writes happen under the registry lock the command already takes.
 | `init --prefix P --force` at the same root | no | `storage` record refreshed |
 | `init --prefix P --force` at a new root | yes | old root appended to `former`; `storage` record set for the new root |
 | `rename old new` | no (prefix only) | `[locations.old]` moves to `new`; `storage` record refreshed |
-| `rename old new --adopt` | when the checkout's root differs from the registered one | `[locations.old]` moves to `new`; old root appended to `former`; `storage` record set for the new root |
+| `rename old new --adopt` | when the checkout's root differs from the registered one | `[locations.old]` merged into `[locations.new]` (§2.2); old root appended to `former`; `storage` record set for the new root |
 | `unregister P` | — | `[locations.P]` removed with the project, as aliases are |
 
 - **Appending a former root.** The entry's `storage` comes from the live realpath of
   `<old root>/.worktrees` when that is a symlink that still resolves. Otherwise it comes
   from the `storage` record. When neither is available it is left out, and the command
-  adds a warning that names the root.
+  adds a warning that names the root. If an entry with the same (`root`, `storage`)
+  pair already exists, only its `until` is updated.
 - **Refreshing the `storage` record.**
   - If the root's `.worktrees` is a symlink, the record is set to its realpath.
   - If `.worktrees` is a directory inside the root, or does not exist, the record is
     removed. An in-tree `.worktrees` is already under the root.
-- **Moving back to a former root.** That entry is removed from `former`, so a root is
-  never both current and former.
+- **Moving back to a former root.** Every `former` entry stays. Take a project that
+  moves `A` (storage `S1`) → `B` → `A` (storage `S2`). Paths under `S1` keep resolving
+  through the entry (`A`, `S1`). Paths under `A` itself match the current root, which
+  wins over the former one at equal depth (§4.3).
 
 The `rename` and `init --force` outputs add the warning described above. No JSON shape
 changes.
 
-### 2.2 Why record storage before a move
+### 2.2 Merging history on adoption
+
+A plain `rename` requires a free target, so `[locations.old]` simply becomes
+`[locations.new]`. Adoption is different: it also supports a target that is already
+registered at the checkout's root (`Registry::adopt`, the partial-init branch). That
+target can have a table of its own, recorded by the `init` that registered it. Adoption
+therefore merges the two tables and never replaces one with the other:
+
+1. **`former`** becomes the union of both lists. Entries with the same (`root`,
+   `storage`) pair collapse into one that keeps the later `until`. The result is
+   re-sorted by `until`, then by `root`.
+2. **The old project's displaced root** is then appended as in §2.1, with the old
+   table's `storage` record as its fallback storage. It is appended only when that root
+   differs from the checkout's root.
+3. **The `storage` record** is refreshed from the checkout's live `.worktrees`. Neither
+   table's record is copied.
+
+The merge is a pure function of the two tables plus the displaced root, so it is
+idempotent. A second `--adopt` run finds `old` already flattened and changes nothing.
+
+### 2.3 Why record storage before a move
 
 The worktree storage of a root that has already moved can't be read. The cutover moves
 the checkout and its storage together (tack spec §1), and on the second host Dropbox
@@ -135,15 +162,19 @@ renames and moves"), followed by `vendored adopt`.
 
 ### 3.1 Input classification
 
-Each input is classified by its spelling alone:
+Each input is classified by its spelling alone. The first rule that matches wins:
 
-- **path**: contains `/`, or starts with `.` or `~`. A relative path resolves against
-  the working directory, or against `-C` when it is given.
-- **id**: `<prefix>-<6 hex>`, by the `TaskId` grammar. The bare-hex shorthand is not
-  accepted, because a resolver's answer must not depend on the caller's cwd. It comes
-  back as `invalid`.
-- **prefix**: matches the prefix grammar with no hex part, e.g. `ai`.
-- **invalid**: anything else.
+1. **path**: contains `/`, or starts with `.` or `~`. A relative path resolves against
+   the working directory, or against `-C` when it is given.
+2. **id**: `<prefix>-<6 hex>`, by the `TaskId` grammar.
+3. **prefix**: matches the prefix grammar `[a-z][a-z0-9]{1,7}`, e.g. `ai`.
+4. **invalid**: anything else.
+
+`resolve` never expands the bare-hex task shorthand, because its answer must not depend
+on the caller's cwd. This creates an overlap: a six-hex string that starts with a
+letter, such as `abcdef` or `beef00`, is also a valid prefix. Such a string is
+classified as a prefix and resolves (or is `unregistered`) as one. A six-hex string
+that starts with a digit, such as `4f2a9c`, matches neither grammar and is `invalid`.
 
 ### 3.2 Output
 
@@ -164,6 +195,7 @@ The command prints one object. `results` follows the input order:
   {"input": "/x/y", "kind": "path", "status": "ambiguous",
    "candidates": [{"prefix": "a", "via": "former_root", "location": "/x"},
                   {"prefix": "b", "via": "former_root", "location": "/x"}]},
+  {"input": "beef00", "kind": "prefix", "status": "unregistered", "prefix": "beef00"},
   {"input": "4f2a9c", "kind": "invalid", "status": "invalid", "detail": "…"}
 ], "warnings": []}
 ```
@@ -237,10 +269,25 @@ Every registered project contributes these locations:
    registered after an old one moved away belongs to the new project.
 4. When two different projects remain tied at the same depth and currency, the result
    is `ambiguous`, listing the candidates. A tie within one project resolves normally.
-5. **On a miss, for a path that exists:** ask git for the main checkout of the path
-   (`git rev-parse --git-common-dir`) and match that against the current roots
-   (`via: "git"`). This covers a live worktree outside `.worktrees` storage. It spawns
-   a process only on a miss, so matched paths cost nothing extra.
+5. **On a miss, for a path that exists:** map the path into its main checkout, keeping
+   its offset, and match again. This covers a live worktree outside `.worktrees`
+   storage.
+   1. Ask git for the path's worktree top `T` and its common directory
+      (`git rev-parse --show-toplevel --git-common-dir`).
+   2. The main checkout `M` is the common directory's parent when the common directory
+      is a `.git` directory. With no main checkout (a bare repository, or a separate git
+      dir), stop at step 6.
+   3. If `T` equals `M`, the path is already in the main checkout, so stop at step 6.
+   4. Otherwise build the mapped path `M/<path relative to T>`, then apply steps 1–4 to
+      it.
+
+   For example, a path `T/sub/nested/x` maps to `M/sub/nested/x`. If a project is
+   registered at `M/sub/nested`, the depth rule picks it over a parent project at `M`.
+
+   A match through this step reports `via: "git"`. Its `location` is the matched
+   location under `M`, its `worktree` is `T`, and its `relpath` is the mapped path
+   relative to `location`. Git is spawned only on a miss, so matched paths cost nothing
+   extra.
 6. Anything else is `unregistered`.
 
 A storage match splits off the first component after the location as `worktree`.
@@ -330,7 +377,10 @@ through the alias.
 - `[locations]` round trip;
 - validation failures;
 - carry on rename, adopt and unregister;
-- the move-back rule.
+- the adoption merge (§2.2): union of both `former` lists, collapsing duplicate
+  (`root`, `storage`) pairs to the later `until`, plus idempotence on a second run;
+- the move back `A(S1) → B → A(S2)` keeps (`A`, `S1`), and a path under `S1` still
+  resolves.
 
 **CLI tests** in `tests/cli.rs`, with scratch `XDG_CONFIG_HOME` and `XDG_STATE_HOME`:
 
@@ -339,8 +389,17 @@ through the alias.
    under the old storage for a worktree that no longer exists. All four resolve to the
    new prefix.
 2. A second registry that adopts the same move with different storage paths gives the
-   same ids and prefixes, with its own storage.
+   same ids and prefixes, with its own storage. It is run twice: once with the target
+   unregistered, and once with the target already registered at the checkout, carrying
+   its own `[locations]` history. Neither table's entries are lost.
 3. Adoption without a prior storage record keeps the former root without storage and
    warns.
-4. Unregistered, invalid, and ambiguous items in one `--stdin` batch.
-5. A malformed `[locations]` table fails with `config` on stderr and exit 1.
+4. Unregistered, invalid, and ambiguous items in one `--stdin` batch, including the
+   prefix/hex overlap: `abcdef` is a prefix, both when registered and when
+   `unregistered`, and `4f2a9c` is `invalid`.
+5. A git worktree created outside `.worktrees` storage, holding a nested project
+   registered at `M/sub/nested`, plus a parent project registered at `M`. A path at
+   `T/sub/nested/x` resolves to the nested project with `via: "git"`, `worktree: T`,
+   and `relpath: "x"`. Without the parent registered, it still resolves to the nested
+   project.
+6. A malformed `[locations]` table fails with `config` on stderr and exit 1.

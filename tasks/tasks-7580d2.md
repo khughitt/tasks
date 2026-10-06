@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-7580d2
 created: 2026-10-06T13:23:04Z
-updated: 2026-10-06T18:48:41Z
+updated: 2026-10-06T19:06:34Z
 started: 2026-10-06T18:41:11Z
 depends: []
 parent: tasks-a7460c
@@ -34,3 +34,8 @@ Cover canonical and aliased ids, current/former roots and their worktree storage
 - 2026-10-06T18:48:16Z (design/tasks-7580d2): design: separate read-only 'tasks resolve' (registry history, existence-independent) beside 9b0a2e's live 'where', sharing a src/locations.rs index; per-host [locations] table records storage and former roots; rejected inferring storage from the work-link layout
 - 2026-10-06T18:48:41Z (design/tasks-7580d2): parked (waiting on user, review): user reviews docs/specs/2026-10-06-project-resolution-design.md; on approval the agent writes the implementation plan in .worktrees/tasks-7580d2
   provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T18:56:27Z (design/tasks-7580d2): review: spec round 1 — verdict: revise; findings: P1 1, P2 3; reviewer: codex/gpt-6
+- 2026-10-06T18:56:27Z (design/tasks-7580d2): spec review findings: P1 external-worktree git fallback loses the nested-project offset (scratch reproduction resolves parent instead of child); P2 move-back removes former storage when the returning root uses different storage; P2 adoption must merge history when the target is already registered rather than overwrite it; P2 six-hex strings overlap the valid-prefix grammar, so classification needs explicit precedence. Revise these rules and add regression cases before implementation planning.
+- 2026-10-06T19:05:27Z (design/tasks-7580d2): resumed
+  provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T19:06:34Z (design/tasks-7580d2): spec round 1 addressed: git fallback maps the path into the main checkout keeping its offset, then reapplies the depth rule; former entries keyed by (root, storage) and kept on move-back; adoption merges both [locations] tables; classification order path > id > prefix, so six-hex strings starting with a letter are prefixes
