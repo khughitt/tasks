@@ -48,17 +48,32 @@ pub enum Detail { Wrap(String), Whole(String) }  // a `label: text` line under a
 
 pub struct Row { pub cells: Vec<String>, pub details: Vec<(&'static str, Detail)> }
 
-pub struct Layout { pub width: Option<usize>, pub headers: bool, pub id_width: Option<usize> }
+pub struct Layout { pub width: Option<usize>, pub headers: bool }
 
-pub fn render(columns: &[Column], rows: &[Row], layout: &Layout, painter: &Painter) -> String;
+/// One width per column, taken across several sections that share a schema.
+pub struct Widths(Vec<usize>);
+pub fn shared_widths(columns: &[Column], sections: &[&[Row]]) -> Widths;
+
+pub fn render(
+    columns: &[Column],
+    rows: &[Row],
+    layout: &Layout,
+    widths: Option<&Widths>,
+    painter: &Painter,
+) -> String;
 ```
 
 - **Cells arrive painted.** comfy-table's `custom_styling` measures them by visible width.
   The module never colours anything except the header row (chrome role).
 - **Spacing.** No borders (`presets::NOTHING`), two spaces between columns, none after
   the last, no trailing whitespace on any line.
-- **Shared id width.** `id_width`, when given, fixes column 0 to that width so the
-  separate tables of one view (prime's sections) line up, as they do today.
+- **Shared widths.** A view that prints several sections with the same columns
+  (prime's closeout, roadmap, ready and doing) computes `shared_widths` over all of
+  them first, and each section renders with every fixed column at that width. A `todo`
+  in one section and a `doing` in another then leave the date column in one place, as
+  prime's date-alignment tests require today. A section with other columns (prime's
+  parked and lanes blocks) shares only the id column: its `Widths` carries the shared id
+  width and its own widths elsewhere.
 - **Details.** `Detail::Wrap` lines wrap under their text at the layout width;
   `Detail::Whole` lines (a worktree path) are printed whole and left to the terminal, so
   they copy intact.
@@ -96,10 +111,19 @@ full text (`user, review`).
 
 ## 5. Colour
 
-- **Ids and titles take the project colour** in every table, where the project has one:
-  `TaskSummary.project_color` already exists; `ParkedRow` and the lane and claim rows
-  gain the same serde-skipped field. This closes tasks-9b5b0a. Rows without a project
-  colour keep today's roles.
+- **Ids and titles take the project colour** in every table that renders task rows,
+  where the project has one. This closes tasks-9b5b0a. Rows without a project colour
+  keep today's roles.
+- **One place fills the colour.** Today `TaskSummary::of` leaves `project_color` unset
+  and only `list` and `search` fill it afterwards (`commands/list.rs`). A `ReadCtx`
+  helper resolves a prefix's colour from the projects in scope, and every command that
+  renders task rows applies it: `list`, `search`, `ready`, `tree`, `prime` (every
+  section, the roadmap tree included), `lanes` (whose `lane`, `pick` and `active` rows
+  are already `TaskSummary` values, so they need no new field) and the parked rows.
+  `ParkedRow` gains the one new serde-skipped `project_color` field.
+- **`claims` stays uncoloured.** It reads the claim stores without opening any checkout,
+  so a missing checkout changes nothing (`commands/claims.rs`); colours live in checkout
+  configuration, and reading them would weaken that contract.
 - No registered project sets `color` yet, so this shows nothing until tasks-8203e6
   supplies colours from familiar. That task is separate; this design only consumes the
   colour.
@@ -145,8 +169,14 @@ release binary (+3.8%), +7 s on a clean release build (tasks-8a14be).
   `in:` whole; prime's sections share the id column; tree indent.
 - **CLI tests:** `--headers` on each table command and its no-op under JSON; the
   warnings rule after the output and on the early-exit paths (tasks-517584's test kept);
-  project colour on ids and titles; every line within `COLUMNS` at 80, 120 and 236 on a
-  realistic fixture.
+  with a configured project colour, painted ids and titles in `list`, `search`, `ready`,
+  `tree`, every `prime` section, `lanes` and `list --parked`, and none in `claims`;
+  prime's existing date-alignment tests kept.
+- **Width:** on a realistic fixture at 80, 120 and 236 columns, every line fits within
+  `COLUMNS` wherever wrapping is feasible (the wrap columns reach their `min`). Where the
+  design permits overflow, the tests assert the text is intact instead: the unwrapped
+  narrow fallback (each row on one line, nothing split), `Detail::Whole` paths (whole,
+  on their own line), and fixed-only tables wider than the width.
 - Existing tests that pin today's exact padding change with their view; JSON tests do
   not change.
 

@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T13:04:17Z
+updated: 2026-10-06T13:13:49Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -31,3 +31,7 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T13:03:57Z (feat/comfy-tables): spec drafted: docs/specs/2026-10-06-comfy-tables-design.md (one table module over comfy-table; per-view columns; narrow fallback; --headers; warnings rule; project colour on ids and titles)
 - 2026-10-06T13:04:17Z (feat/comfy-tables): parked (waiting on user, review): User reviews docs/specs/2026-10-06-comfy-tables-design.md (in .worktrees/comfy-tables); on approval the agent writes the implementation plan (ops cli.toml --headers lands first)
   provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T13:10:45Z (feat/comfy-tables): review: spec round 1 — verdict: revise; findings: P2 3, P3 1; reviewer: codex/model-unreported
+- 2026-10-06T13:10:45Z (feat/comfy-tables): Spec review findings: share fixed-column widths across prime sections, not only id_width; populate project_color for ready/tree/prime/lanes as well as list/search; resolve claims colours without requiring checkout access; qualify width assertions for unwrapped fallback, fixed-only tables and Detail::Whole. Spec unchanged; review remains parked on the user.
+- 2026-10-06T13:13:48Z (feat/comfy-tables): spec round 1 reviewer was codex/gpt-6.1-sol (named by the user; the round's note says model-unreported)
+- 2026-10-06T13:13:48Z (feat/comfy-tables): spec revised for round 1, all four findings verified in code and accepted: shared widths for every fixed column across same-schema prime sections (id only across schemas); one ReadCtx colour helper applied by list, search, ready, tree, prime, lanes and parked rows (ParkedRow gains the only new field); claims exempt from colour; width tests bound lines where wrapping is feasible and assert intact text where overflow is permitted
