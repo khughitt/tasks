@@ -1,7 +1,7 @@
 //! Per-host location history and path resolution
 //! (docs/specs/2026-10-06-project-resolution-design.md §2, §4).
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One project's history on this host. `storage` is the record of where the current
 /// root's `.worktrees` resolved when a command last wrote this project's entry (§2).
@@ -144,6 +144,279 @@ pub fn storage_state(root: &std::path::Path) -> std::io::Result<StorageState> {
     }
 }
 
+/// Absolute, with the longest existing ancestor canonicalized and the rest appended
+/// lexically (§4.1). `..` after a missing component cannot be resolved and is refused.
+pub fn normalize(path: &Path, base: &Path) -> std::result::Result<PathBuf, String> {
+    use std::path::Component;
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base.join(path)
+    };
+    let mut out = PathBuf::from("/");
+    let mut missing = false;
+    for component in absolute.components() {
+        match component {
+            Component::RootDir | Component::Prefix(_) | Component::CurDir => {}
+            Component::ParentDir if missing => {
+                return Err(format!(
+                    "{}: `..` follows a component that does not exist",
+                    path.display()
+                ));
+            }
+            // `out` is canonical while nothing is missing, so its lexical parent is real.
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(name) => {
+                out.push(name);
+                if !missing {
+                    match out.canonicalize() {
+                        Ok(real) => out = real,
+                        Err(e)
+                            if matches!(
+                                e.kind(),
+                                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                            ) =>
+                        {
+                            missing = true
+                        }
+                        Err(e) => return Err(format!("{}: {e}", out.display())),
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Via {
+    Root,
+    Storage,
+    FormerRoot,
+    FormerStorage,
+    Git,
+}
+
+impl Via {
+    fn current(self) -> bool {
+        matches!(self, Via::Root | Via::Storage)
+    }
+    fn storage(self) -> bool {
+        matches!(self, Via::Storage | Via::FormerStorage)
+    }
+}
+
+#[derive(Debug)]
+struct Location {
+    prefix: String,
+    via: Via,
+    path: PathBuf,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Match {
+    pub prefix: String,
+    pub via: Via,
+    pub location: PathBuf,
+    pub worktree: Option<PathBuf>,
+    pub relpath: PathBuf,
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Candidate {
+    pub prefix: String,
+    pub via: Via,
+    pub location: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Answer {
+    Resolved(Match),
+    Ambiguous(Vec<Candidate>),
+    Unregistered,
+}
+
+/// Every registered project's locations on this host (§4.2), built once per call.
+pub struct Index {
+    locations: Vec<Location>,
+    pub warnings: Vec<String>,
+}
+
+impl Index {
+    pub fn build(registry: &crate::registry::Registry) -> Index {
+        let mut locations = Vec::new();
+        let mut warnings = Vec::new();
+        let mut add = |prefix: &str, via: Via, path: &Path, warnings: &mut Vec<String>| {
+            let path = normalize(path, Path::new("/")).unwrap_or_else(|problem| {
+                warnings.push(format!("{prefix}: {problem}; matched as written"));
+                path.to_path_buf()
+            });
+            locations.push(Location {
+                prefix: prefix.into(),
+                via,
+                path,
+            });
+        };
+        for (prefix, root) in &registry.projects {
+            add(prefix, Via::Root, root, &mut warnings);
+            let history = registry.locations.get(prefix);
+            let record = history.and_then(|h| h.storage.as_deref());
+            match storage_state(root) {
+                Ok(StorageState::Link(real)) => add(prefix, Via::Storage, &real, &mut warnings),
+                Ok(_) => {
+                    if let Some(record) = record {
+                        add(prefix, Via::Storage, record, &mut warnings);
+                    }
+                }
+                Err(e) => {
+                    warnings.push(format!(
+                        "{prefix}: cannot read {}/.worktrees ({e}); using its storage record",
+                        root.display()
+                    ));
+                    if let Some(record) = record {
+                        add(prefix, Via::Storage, record, &mut warnings);
+                    }
+                }
+            }
+            for former in history.map(|h| h.former.as_slice()).unwrap_or_default() {
+                add(prefix, Via::FormerRoot, &former.root, &mut warnings);
+                if let Some(storage) = &former.storage {
+                    add(prefix, Via::FormerStorage, storage, &mut warnings);
+                }
+            }
+        }
+        Index {
+            locations,
+            warnings,
+        }
+    }
+
+    /// The project `path` (already normalized) belongs to (§4.3).
+    pub fn resolve(&self, path: &Path, warnings: &mut Vec<String>) -> Answer {
+        match self.pick(path) {
+            Answer::Unregistered if path.exists() => self
+                .through_git(path, warnings)
+                .unwrap_or(Answer::Unregistered),
+            answer => answer,
+        }
+    }
+
+    fn pick(&self, path: &Path) -> Answer {
+        let found: Vec<&Location> = self
+            .locations
+            .iter()
+            .filter(|l| path.starts_with(&l.path))
+            .collect();
+        let Some(depth) = found.iter().map(|l| l.path.components().count()).max() else {
+            return Answer::Unregistered;
+        };
+        let deepest: Vec<&Location> = found
+            .into_iter()
+            .filter(|l| l.path.components().count() == depth)
+            .collect();
+        let pool: Vec<&Location> = if deepest.iter().any(|l| l.via.current()) {
+            deepest.into_iter().filter(|l| l.via.current()).collect()
+        } else {
+            deepest
+        };
+        let mut owners: Vec<&str> = pool.iter().map(|l| l.prefix.as_str()).collect();
+        owners.sort();
+        owners.dedup();
+        if owners.len() > 1 {
+            let mut candidates: Vec<Candidate> = pool
+                .iter()
+                .map(|l| Candidate {
+                    prefix: l.prefix.clone(),
+                    via: l.via,
+                    location: l.path.display().to_string(),
+                })
+                .collect();
+            candidates.sort_by(|a, b| (&a.prefix, a.via).cmp(&(&b.prefix, b.via)));
+            return Answer::Ambiguous(candidates);
+        }
+        let best = pool
+            .into_iter()
+            .min_by_key(|l| l.via)
+            .expect("a deepest location");
+        let rest = path
+            .strip_prefix(&best.path)
+            .expect("an ancestor")
+            .to_path_buf();
+        let (worktree, relpath) = match (best.via.storage(), rest.components().next()) {
+            (true, Some(first)) => (
+                Some(best.path.join(first)),
+                rest.strip_prefix(first)
+                    .expect("its own first component")
+                    .to_path_buf(),
+            ),
+            _ => (None, rest),
+        };
+        Answer::Resolved(Match {
+            prefix: best.prefix.clone(),
+            via: best.via,
+            location: best.path.clone(),
+            worktree,
+            relpath,
+        })
+    }
+
+    /// §4.3 step 5: map an existing path into its main checkout, keeping its offset in
+    /// the worktree, and match again.
+    fn through_git(&self, path: &Path, warnings: &mut Vec<String>) -> Option<Answer> {
+        let dir = if path.is_dir() { path } else { path.parent()? };
+        let output = match std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args([
+                "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-common-dir",
+            ])
+            .stderr(std::process::Stdio::null())
+            .output()
+        {
+            Ok(output) => output,
+            Err(e) => {
+                let warning =
+                    format!("git is unavailable ({e}); worktrees outside storage are not resolved");
+                if !warnings.contains(&warning) {
+                    warnings.push(warning);
+                }
+                return None;
+            }
+        };
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8(output.stdout).ok()?;
+        let mut lines = text.lines();
+        let top = Path::new(lines.next()?).canonicalize().ok()?;
+        let common = PathBuf::from(lines.next()?);
+        if common.file_name()? != ".git" {
+            return None;
+        }
+        let main = common.parent()?.canonicalize().ok()?;
+        if top == main {
+            return None;
+        }
+        let offset = path.strip_prefix(&top).ok()?.to_path_buf();
+        match self.pick(&main.join(&offset)) {
+            Answer::Resolved(m) => Some(Answer::Resolved(Match {
+                via: Via::Git,
+                worktree: Some(top),
+                relpath: offset,
+                ..m
+            })),
+            Answer::Ambiguous(candidates) => Some(Answer::Ambiguous(candidates)),
+            Answer::Unregistered => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,5 +522,218 @@ mod tests {
             assert!(problem.contains(word), "{problem}");
         }
         assert_eq!(Locations::default().problem(), None);
+    }
+    use crate::registry::Registry;
+    use std::path::Path;
+
+    fn reg(projects: &[(&str, &Path)], history: &[(&str, Locations)]) -> Registry {
+        let mut r = Registry::default();
+        for (prefix, root) in projects {
+            r.projects.insert((*prefix).into(), root.to_path_buf());
+        }
+        for (prefix, h) in history {
+            r.locations.insert((*prefix).into(), h.clone());
+        }
+        r
+    }
+
+    fn resolved(answer: Answer) -> Match {
+        match answer {
+            Answer::Resolved(m) => m,
+            other => panic!("expected a match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn normalize_resolves_a_symlinked_ancestor_of_a_missing_tail() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().canonicalize().unwrap().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let alias = base.path().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        assert_eq!(
+            normalize(&alias.join("gone/x"), Path::new("/")).unwrap(),
+            real.join("gone/x")
+        );
+        assert_eq!(
+            normalize(Path::new("gone/./x"), &alias).unwrap(),
+            real.join("gone/x"),
+            "relative to base, `.` dropped"
+        );
+        assert_eq!(
+            normalize(&alias.join("../real/y"), Path::new("/")).unwrap(),
+            real.join("y")
+        );
+        assert!(
+            normalize(&alias.join("gone/../x"), Path::new("/"))
+                .unwrap_err()
+                .contains("..")
+        );
+    }
+
+    #[test]
+    fn matching_is_component_wise_and_the_deepest_location_wins() {
+        let r = reg(
+            &[
+                ("parent", Path::new("/p")),
+                ("child", Path::new("/p/sub/child")),
+            ],
+            &[],
+        );
+        let index = Index::build(&r);
+        let mut w = Vec::new();
+        assert!(matches!(
+            index.resolve(Path::new("/pp/x"), &mut w),
+            Answer::Unregistered
+        ));
+        let m = resolved(index.resolve(Path::new("/p/sub/child/src/a.rs"), &mut w));
+        assert_eq!((m.prefix.as_str(), m.via), ("child", Via::Root));
+        assert_eq!(m.relpath, Path::new("src/a.rs"));
+        let m = resolved(index.resolve(Path::new("/p/sub"), &mut w));
+        assert_eq!(
+            (m.prefix.as_str(), m.relpath.as_path()),
+            ("parent", Path::new("sub"))
+        );
+    }
+
+    #[test]
+    fn current_beats_former_and_two_former_owners_are_ambiguous() {
+        let gone = |root: &str| Locations {
+            storage: None,
+            former: vec![Former {
+                root: root.into(),
+                storage: None,
+                until: "2026-01-01".into(),
+            }],
+        };
+        let r = reg(
+            &[
+                ("new", Path::new("/x")),
+                ("a", Path::new("/a")),
+                ("b", Path::new("/b")),
+            ],
+            &[("a", gone("/x")), ("b", gone("/y"))],
+        );
+        let index = Index::build(&r);
+        let mut w = Vec::new();
+        assert_eq!(
+            resolved(index.resolve(Path::new("/x/f"), &mut w)).prefix,
+            "new"
+        );
+        let r = reg(
+            &[("a", Path::new("/a")), ("b", Path::new("/b"))],
+            &[("a", gone("/y")), ("b", gone("/y"))],
+        );
+        match Index::build(&r).resolve(Path::new("/y/f"), &mut w) {
+            Answer::Ambiguous(c) => {
+                let names: Vec<_> = c.iter().map(|c| c.prefix.as_str()).collect();
+                assert_eq!(names, ["a", "b"]);
+            }
+            other => panic!("{other:?}"),
+        }
+        // One project as both current and former at the same path is not ambiguous.
+        let r = reg(&[("a", Path::new("/y"))], &[("a", gone("/y"))]);
+        assert_eq!(
+            resolved(Index::build(&r).resolve(Path::new("/y/f"), &mut w)).via,
+            Via::Root
+        );
+    }
+
+    #[test]
+    fn storage_match_splits_the_worktree() {
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let root = base.join("hq");
+        let storage = base.join("work/hq/.worktrees");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(storage.join("wt/src")).unwrap();
+        std::os::unix::fs::symlink(&storage, root.join(".worktrees")).unwrap();
+        let index = Index::build(&reg(&[("hq", &root)], &[]));
+        let mut w = Vec::new();
+        let m = resolved(index.resolve(&storage.join("wt/src/a.rs"), &mut w));
+        assert_eq!(m.via, Via::Storage);
+        assert_eq!(m.worktree, Some(storage.join("wt")));
+        assert_eq!(m.relpath, Path::new("src/a.rs"));
+        let m = resolved(index.resolve(&storage, &mut w));
+        assert_eq!((m.worktree, m.relpath), (None, PathBuf::new()));
+    }
+
+    #[test]
+    fn former_storage_resolves_a_worktree_that_no_longer_exists() {
+        let h = Locations {
+            storage: None,
+            former: vec![Former {
+                root: "/d/ai".into(),
+                storage: Some("/w/ai/.worktrees".into()),
+                until: "2026-09-27".into(),
+            }],
+        };
+        let index = Index::build(&reg(&[("tack", Path::new("/d/tack"))], &[("tack", h)]));
+        let mut w = Vec::new();
+        let m = resolved(index.resolve(Path::new("/w/ai/.worktrees/gone/f"), &mut w));
+        assert_eq!((m.prefix.as_str(), m.via), ("tack", Via::FormerStorage));
+        assert_eq!(m.worktree, Some(PathBuf::from("/w/ai/.worktrees/gone")));
+        let m = resolved(index.resolve(Path::new("/d/ai/x"), &mut w));
+        assert_eq!(m.via, Via::FormerRoot);
+    }
+
+    #[test]
+    fn index_uses_the_record_when_the_live_link_dangles() {
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let root = base.join("hq");
+        std::fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(base.join("not-yet"), root.join(".worktrees")).unwrap();
+        let h = Locations {
+            storage: Some("/w/old/.worktrees".into()),
+            former: vec![],
+        };
+        let index = Index::build(&reg(&[("hq", &root)], &[("hq", h)]));
+        let mut w = Vec::new();
+        let m = resolved(index.resolve(Path::new("/w/old/.worktrees/wt/f"), &mut w));
+        assert_eq!(m.via, Via::Storage);
+    }
+    fn git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@e")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@e")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+
+    #[test]
+    fn git_fallback_keeps_the_offset_into_a_nested_project() {
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let main = base.join("m");
+        std::fs::create_dir_all(main.join("sub/nested")).unwrap();
+        std::fs::write(main.join("sub/nested/f"), "").unwrap();
+        git(&main, &["init", "-q"]);
+        git(&main, &["add", "-A"]);
+        git(&main, &["commit", "-qm", "init"]);
+        let top = base.join("t");
+        git(&main, &["worktree", "add", "-q", top.to_str().unwrap()]);
+        std::fs::write(top.join("sub/nested/x"), "").unwrap();
+        let mut w = Vec::new();
+        for parent in [true, false] {
+            let mut projects = vec![("nested", main.join("sub/nested"))];
+            if parent {
+                projects.push(("parent", main.clone()));
+            }
+            let pairs: Vec<(&str, &Path)> =
+                projects.iter().map(|(p, r)| (*p, r.as_path())).collect();
+            let index = Index::build(&reg(&pairs, &[]));
+            let m = resolved(index.resolve(&top.join("sub/nested/x"), &mut w));
+            assert_eq!(m.prefix, "nested", "parent={parent}");
+            assert_eq!(m.via, Via::Git);
+            assert_eq!(m.location, main.join("sub/nested"));
+            assert_eq!(m.worktree, Some(top.clone()));
+            assert_eq!(m.relpath, Path::new("sub/nested/x"));
+        }
     }
 }
