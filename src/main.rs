@@ -143,6 +143,7 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let headers = cli.headers;
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
     let color_mode =
         match style::ColorMode::resolve(cli.color.as_deref(), tasks_color.as_deref(), no_color) {
@@ -262,12 +263,11 @@ fn main() {
                         | output::Output::Show(_)
                         | output::Output::Next(_)
                         | output::Output::Lanes(_)
+                        | output::Output::Projects(_)
+                        | output::Output::Claims(_)
                 ) {
                 match output::terminal_width() {
-                    Ok(width) => table::Layout {
-                        width,
-                        headers: false,
-                    },
+                    Ok(width) => table::Layout { width, headers },
                     Err(error) => {
                         to_stderr(&warnings);
                         to_stderr(&format!("{}\n", output::render_error(&error)));

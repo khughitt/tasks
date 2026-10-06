@@ -7486,15 +7486,15 @@ fn project_colors_paint_prefixes_and_titles_without_changing_json_or_layout() {
         assert_eq!(strip_ansi(&colored), env.pretty(&sci, args));
         if args[0] == "projects" {
             assert!(
-                colored.contains("\x1b[38;2;18;52;86msci    \x1b[0m"),
+                colored.contains("\x1b[38;2;18;52;86msci\x1b[0m"),
                 "{colored:?}"
             );
             assert!(
-                colored.contains("\x1b[38;2;171;205;239mdots   \x1b[0m"),
+                colored.contains("\x1b[38;2;171;205;239mdots\x1b[0m"),
                 "{colored:?}"
             );
-            assert!(colored.contains("\x1b[2mplain  \x1b[0m"), "{colored:?}");
-            assert!(colored.contains("\x1b[2mgone   \x1b[0m"), "{colored:?}");
+            assert!(colored.contains("\x1b[2mplain\x1b[0m"), "{colored:?}");
+            assert!(colored.contains("\x1b[2mgone\x1b[0m"), "{colored:?}");
         } else {
             assert!(
                 colored.contains("\x1b[38;2;18;52;86mScience\x1b[0m"),
@@ -8752,9 +8752,9 @@ fn projects_pretty_paints_counts_by_status_and_dims_zeros() {
     let text = String::from_utf8_lossy(&out.stdout);
     let row = text.lines().nth(1).unwrap();
     // idea is 1: painted in the idea role, the same blue `list` and `show` use
-    assert!(row.contains("\u{1b}[34m   1\u{1b}[0m"), "{row:?}");
+    assert!(row.contains("\u{1b}[34m1\u{1b}[0m"), "{row:?}");
     // blocked is 0: dimmed whatever the column, so a red 0 does not read as an alarm
-    assert!(row.contains("\u{1b}[2m      0\u{1b}[0m"), "{row:?}");
+    assert!(row.contains("\u{1b}[2m0\u{1b}[0m"), "{row:?}");
     // total carries no status; activity is a date and takes the recency role
     assert!(row.contains("      1  \x1b[38;2;0;215;255m"), "{row:?}");
     assert!(row.ends_with("\x1b[0m"), "{row:?}");
@@ -26740,4 +26740,82 @@ fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
     ] {
         assert!(colored.contains(&span), "{span:?} in:\n{colored}");
     }
+}
+
+#[test]
+fn headers_label_each_table_view_and_leave_json_alone() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "Ready task", "--size", "s"]);
+    let parked = id_of(env.json(&sci, &["add", "Parked task", "--size", "s"]));
+    write_park(
+        &env,
+        "sci",
+        &parked,
+        "agent-a",
+        "user",
+        &sci.display().to_string(),
+    );
+    for args in [
+        vec!["list"],
+        vec!["ready"],
+        vec!["list", "--parked"],
+        vec!["tree"],
+    ] {
+        let mut full = vec!["--headers"];
+        full.extend(args.iter().copied());
+        let text = env.pretty(&sci, &full);
+        assert!(
+            text.lines().next().unwrap().starts_with("id"),
+            "{args:?}: {text}"
+        );
+        assert!(!env.pretty(&sci, &args).starts_with("id"), "{args:?}");
+        assert_eq!(env.json(&sci, &full), env.json(&sci, &args), "{args:?}");
+    }
+}
+
+#[test]
+fn claims_is_a_table_and_never_coloured() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "A task"]));
+    env.json(&sci, &["start", &id]);
+    write_project_color(&sci, "sci", "#123456");
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--color", "always", "claims"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains(&id) && !text.contains("38;2;18;52;86"),
+        "{text}"
+    );
+}
+
+#[test]
+fn claims_headers_use_chrome_without_painting_claims() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "A task"]));
+    env.json(&sci, &["start", &id]);
+    write_project_color(&sci, "sci", "#123456");
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--headers", "--color", "always", "claims"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    let mut lines = text.lines();
+    assert!(
+        lines.next().unwrap().starts_with("\x1b[2mid\x1b[0m"),
+        "{text:?}"
+    );
+    let row = lines.next().unwrap();
+    assert!(row.starts_with(&id) && !row.contains('\x1b'), "{row:?}");
+    assert_eq!(
+        env.json(&sci, &["claims"]),
+        env.json(&sci, &["--headers", "claims"])
+    );
 }

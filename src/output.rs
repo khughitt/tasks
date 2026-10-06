@@ -824,65 +824,6 @@ fn count_column(label: &'static str, value: usize, status: Status) -> CountColum
     }
 }
 
-#[derive(Clone, Copy)]
-enum Align {
-    Left,
-    Right,
-}
-
-struct Cell {
-    text: String,
-    align: Align,
-    style: Option<Style>,
-}
-
-fn cell(text: impl Into<String>, align: Align, style: Option<Style>) -> Cell {
-    Cell {
-        text: text.into(),
-        align,
-        style,
-    }
-}
-
-/// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every cell reaches its
-/// column's visible width before the painter wraps it. The last cell of a row is never
-/// padded, so no line carries trailing whitespace.
-fn grid_text(grid: &[Vec<Cell>], painter: &Painter) -> String {
-    let columns = grid.iter().map(Vec::len).max().unwrap_or(0);
-    let widths: Vec<usize> = (0..columns)
-        .map(|index| {
-            grid.iter()
-                .filter_map(|row| row.get(index))
-                .map(|cell| cell.text.chars().count())
-                .max()
-                .unwrap_or(0)
-        })
-        .collect();
-    let mut rendered = String::new();
-    for row in grid {
-        for (index, cell) in row.iter().enumerate() {
-            if index > 0 {
-                rendered.push_str("  ");
-            }
-            let width = widths[index];
-            let padded = if index + 1 == row.len() {
-                cell.text.clone()
-            } else {
-                match cell.align {
-                    Align::Left => format!("{:<width$}", cell.text),
-                    Align::Right => format!("{:>width$}", cell.text),
-                }
-            };
-            rendered.push_str(&match cell.style {
-                Some(style) => painter.paint(style, &padded),
-                None => padded,
-            });
-        }
-        rendered.push('\n');
-    }
-    rendered
-}
-
 /// What `prime` says about the cadences that are not yet due (spec §5.3). Due records are
 /// work, not schedule, and are counted nowhere here.
 #[derive(Serialize, Default)]
@@ -1082,51 +1023,54 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             .join("\n"),
         Output::Projects(o) if o.projects.is_empty() => String::new(),
         Output::Projects(o) => {
-            // Header labels come from the same call the rows use, so a column can never
-            // appear in one and not the other.
-            let mut header = vec![cell("project", Align::Left, Some(Style::Chrome))];
+            use crate::table::{Column, Row};
+            let mut columns = vec![Column::fixed("project")];
             for column in count_columns(&Counts::default(), o.closed) {
-                header.push(cell(column.label, Align::Right, Some(Style::Chrome)));
+                columns.push(Column::right(column.label));
             }
-            header.push(cell("activity", Align::Left, Some(Style::Chrome)));
+            columns.push(Column::fixed("activity"));
             if o.paths {
-                header.push(cell("root", Align::Left, Some(Style::Chrome)));
+                columns.push(Column::fixed("root"));
             }
-            let mut grid = vec![header];
-            for row in &o.projects {
-                let prefix = present::project(&row.prefix, row.color);
-                let mut cells = vec![cell(prefix.text, Align::Left, prefix.style)];
-                match &row.counts {
-                    Some(counts) => {
-                        cells.extend(count_columns(counts, o.closed).into_iter().map(|column| {
-                            cell(column.value.to_string(), Align::Right, column.style)
-                        }))
+            let rows: Vec<Row> = o
+                .projects
+                .iter()
+                .map(|row| {
+                    let mut cells = vec![present::project(&row.prefix, row.color).paint(painter)];
+                    match &row.counts {
+                        Some(counts) => cells.extend(
+                            count_columns(counts, o.closed).into_iter().map(|column| {
+                                let value = column.value.to_string();
+                                column
+                                    .style
+                                    .map_or(value.clone(), |style| painter.paint(style, &value))
+                            }),
+                        ),
+                        None => cells.extend(
+                            count_columns(&Counts::default(), o.closed)
+                                .iter()
+                                .map(|_| painter.paint(Style::Chrome, "-")),
+                        ),
                     }
-                    None => cells.extend(
-                        count_columns(&Counts::default(), o.closed)
-                            .iter()
-                            .map(|_| cell("-", Align::Right, Some(Style::Chrome))),
-                    ),
-                }
-                // An unreachable project has no activity to report, so that column says
-                // why instead of printing a dash the eye would skip.
-                cells.push(match (&row.counts, &row.last_activity) {
-                    (None, _) => cell("unreachable", Align::Left, Some(Style::Error)),
-                    (Some(_), _) if row.retired.is_some() => {
-                        cell("retired", Align::Left, Some(Style::Chrome))
+                    cells.push(match (&row.counts, &row.last_activity) {
+                        (None, _) => painter.paint(Style::Error, "unreachable"),
+                        (Some(_), _) if row.retired.is_some() => {
+                            painter.paint(Style::Chrome, "retired")
+                        }
+                        (Some(_), Some(at)) => present::date(at).paint(painter),
+                        (Some(_), None) => painter.paint(Style::Chrome, "-"),
+                    });
+                    if o.paths {
+                        cells.push(row.root.clone());
                     }
-                    (Some(_), Some(at)) => {
-                        let at = present::date(at);
-                        cell(at.text, Align::Left, at.style)
-                    }
-                    (Some(_), None) => cell("-", Align::Left, Some(Style::Chrome)),
-                });
-                if o.paths {
-                    cells.push(cell(&row.root, Align::Left, None));
-                }
-                grid.push(cells);
-            }
-            grid_text(&grid, painter)
+                    Row::new(cells)
+                })
+                .collect();
+            let always = crate::table::Layout {
+                headers: true,
+                ..*layout
+            };
+            crate::table::render(&columns, &rows, &always, None, painter)
         }
         Output::Show(o) => crate::show_text::render(&o.fields, painter, layout.width),
         Output::Next(o) => format!(
@@ -1145,18 +1089,28 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         Output::Parked(o) => parked_table(&o.tasks, painter, layout, None),
         Output::Quiet(o) => quiet_table(&o.tasks, painter, layout),
         Output::Claims(o) => {
-            let width = id_width(o.claims.iter().map(|row| row.id.as_str()));
-            o.claims
+            use crate::table::{Column, Row};
+            let columns = [
+                Column::fixed("id"),
+                Column::fixed("session"),
+                Column::fixed("live"),
+                Column::fixed("worktree"),
+            ];
+            let rows: Vec<Row> = o
+                .claims
                 .iter()
                 .map(|row| {
-                    let live = if row.claim.live { "live" } else { "stale" };
-                    format!(
-                        "{:<width$}  {}  {}  {}",
-                        row.id, row.claim.session, live, row.claim.worktree
-                    )
+                    Row::new(vec![
+                        row.id.clone(),
+                        row.claim.session.clone(),
+                        if row.claim.live { "live" } else { "stale" }.into(),
+                        row.claim.worktree.clone(),
+                    ])
                 })
-                .collect::<Vec<_>>()
-                .join("\n")
+                .collect();
+            crate::table::render(&columns, &rows, layout, None, painter)
+                .trim_end_matches('\n')
+                .to_string()
         }
         Output::Prime(o) => {
             let parallel = any_parallel(&o.closeout)
@@ -1500,13 +1454,6 @@ pub fn any_type_tree(nodes: &[TreeNode]) -> bool {
     nodes
         .iter()
         .any(|node| type_letter(&node.summary).is_some() || any_type_tree(&node.children))
-}
-
-/// The id column's width: the longest id in the output. Same once-per-output rule as
-/// `any_parallel`. One project's ids share a length, but `--all-projects` mixes prefixes,
-/// and an unpadded id shifts every later column of its row.
-fn id_width<'a>(ids: impl IntoIterator<Item = &'a str>) -> usize {
-    ids.into_iter().map(str::len).max().unwrap_or(0)
 }
 
 /// Whether a pretty rendering of `out` paints from the theme's colors, and so whether

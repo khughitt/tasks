@@ -31,6 +31,9 @@ pub struct Cli {
         value_parser = ValueSet
     )]
     pub color: Option<String>,
+    /// Label each column of a pretty table with a header row. Never applies to JSON.
+    #[arg(long, global = true)]
+    pub headers: bool,
     #[command(subcommand)]
     pub command: Command,
 }
