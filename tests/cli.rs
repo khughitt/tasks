@@ -130,19 +130,10 @@ fn a_codex_claim_outlives_the_command_that_made_it() {
         String::from_utf8_lossy(&out.stderr)
     );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let warnings = v["warnings"].as_array().unwrap();
-    assert!(
-        warnings
-            .iter()
-            .any(|w| w.as_str().unwrap().contains("CODEX_SESSION_ID conflicts")),
-        "{warnings:?}"
-    );
-    assert!(
-        env.json(&sci, &["show", &id])["claim"]["session"]
-            .as_str()
-            .unwrap()
-            .starts_with("sid:"),
-        "a conflict falls to the Unix session"
+    assert!(v["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(
+        env.json(&sci, &["show", &id])["claim"]["session"],
+        "thread-z"
     );
 }
 
@@ -218,7 +209,8 @@ fn lifecycle_provenance_conflicts_warn_without_becoming_notes() {
         let id = id_of(env.json(&dir, &["add", "Conflict"]));
         let mut cmd = env.cmd(&dir);
         cmd.env("CODEX_SESSION_ID", "secret-a")
-            .env("CODEX_THREAD_ID", "secret-b");
+            .env("CODEX_THREAD_ID", "secret-b")
+            .env("TASKS_SESSION", "codex:secret-a");
         if pretty {
             cmd.arg("--pretty");
         }
@@ -239,7 +231,11 @@ fn lifecycle_provenance_conflicts_warn_without_becoming_notes() {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0]["text"], "started");
         assert!(notes[0].get("harness_session").is_none());
-        env.json(&dir, &["park", &id, "unknown still works"]);
+        env.cmd(&dir)
+            .env("TASKS_SESSION", "codex:secret-a")
+            .args(["park", &id, "unknown still works"])
+            .assert()
+            .success();
         let shown = env.json(&dir, &["show", &id]);
         assert!(shown["task"]["notes"][1].get("harness_session").is_none());
     }
@@ -262,7 +258,7 @@ fn note_stamp_carries_native_provenance_and_nothing_else() {
                 ("CODEX_SESSION_ID", "native-a"),
                 ("CODEX_THREAD_ID", "native-a"),
             ][..],
-            Some(("codex:native-a", "CODEX_SESSION_ID")),
+            Some(("codex:native-a", "CODEX_THREAD_ID")),
         ),
         (&[][..], None),
     ] {
@@ -358,6 +354,7 @@ fn note_stamp_conflicts_warn_without_values_and_still_land() {
         .cmd(&dir)
         .env("CODEX_SESSION_ID", "secret-a")
         .env("CODEX_THREAD_ID", "secret-b")
+        .env("TASKS_SESSION", "codex:secret-a")
         .args(["note", &id, "gate: x", "--stamp"])
         .output()
         .unwrap();
@@ -26931,4 +26928,89 @@ fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
             );
         }
     }
+}
+
+#[test]
+fn delegated_native_commands() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Worker identity"]));
+    for args in [
+        vec!["start", id.as_str()],
+        vec!["note", id.as_str(), "worker checkpoint", "--stamp"],
+    ] {
+        env.cmd(&dir)
+            .env("CODEX_SESSION_ID", "root")
+            .env("CODEX_THREAD_ID", "worker")
+            .args(args)
+            .assert()
+            .success();
+        let shown = env.json(&dir, &["show", &id]);
+        assert_eq!(shown["claim"]["session"], "worker");
+        assert_eq!(shown["claim"]["live"], true);
+        assert!(shown["claim"]["pid"].is_null());
+        let notes = shown["task"]["notes"].as_array().unwrap();
+        assert_eq!(notes.last().unwrap()["harness_session"], "codex:worker");
+        assert_eq!(
+            notes.last().unwrap()["harness_session_source"],
+            "CODEX_THREAD_ID"
+        );
+    }
+}
+
+#[test]
+fn delegated_native_malformed_writes_preserve_claim_and_record() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Malformed native"]));
+    env.cmd(&dir)
+        .env("CODEX_THREAD_ID", "worker")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let record = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    for name in ["CODEX_SESSION_ID", "CODEX_THREAD_ID"] {
+        for bad in ["private\nvalue", "private\tvalue", "private\u{7f}value"] {
+            for args in [
+                vec!["start", id.as_str()],
+                vec!["done", id.as_str(), "refused"],
+                vec!["park", id.as_str(), "refused"],
+                vec!["edit", id.as_str(), "--status", "done"],
+            ] {
+                let out = env
+                    .cmd(&dir)
+                    .env("CODEX_THREAD_ID", "worker")
+                    .env(name, bad)
+                    .args(args)
+                    .output()
+                    .unwrap();
+                assert!(!out.status.success());
+                let detail = err_detail(&out);
+                assert!(
+                    detail.contains(name) && detail.contains("TASKS_SESSION"),
+                    "{detail}"
+                );
+                assert!(!detail.contains("private"), "{detail}");
+                assert_eq!(
+                    std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+                    record
+                );
+                assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+            }
+            env.cmd(&dir)
+                .env("CODEX_THREAD_ID", "worker")
+                .env(name, bad)
+                .args(["show", &id])
+                .assert()
+                .success();
+        }
+    }
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "worker")
+        .env("CODEX_SESSION_ID", "private\nvalue")
+        .args(["start", &id])
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["claim"]["session"], "worker");
 }

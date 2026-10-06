@@ -324,6 +324,25 @@ there is no bulk backfill requirement. Parked `phase` is a link-derived resume h
 `process: planned` with `phase: implementing` on a link-less todo still requires
 the document reviews.
 
+## Worker handoff
+
+A worker releases its claims before ending its assignment: `done` if responsible
+for closing completed work, otherwise `park --waiting-on agent` naming the
+controller's next action and authoritative worktree. Verify release before
+reporting completion. The controller runs `start` before review edits or closure.
+An agent-waiting park is visible to every agent and is not reserved for the
+controller; its next-step text is a convention, not an ownership restriction.
+If a worker exited without release, the controller may use explicit `start
+--force --reason` recovery only after its own wait/completion result for that
+specific worker establishes the assignment has stopped, with no pending tool,
+check or background process. A timeout, silence, the root session's state, and
+the shared harness PID are not that evidence. If completion reports work still
+running or the state is uncertain, reconcile it with the worker and keep waiting;
+do not take over. Inspect the worker's result and claim before takeover. The
+worker may be resumable later; do not resume it on the task after taking over
+without a new ownership handoff. No worker closes a controller's live claim,
+and no controller closes a worker's live claim merely by being its parent.
+
 ## Recording work
 
 ### Lifecycle provenance
@@ -332,7 +351,9 @@ Start/resume, park and close notes automatically carry optional `harness_session
 and `harness_session_source` fields in JSON, persisted as an indented `provenance:`
 JSON continuation under the note bullet. Sources are `CLAUDE_CODE_SESSION_ID`
 (`claude-code:<id>`), `CODEX_SESSION_ID` or `CODEX_THREAD_ID` (`codex:<id>`);
-agreeing Codex variables prefer `CODEX_SESSION_ID`. Missing/empty native input
+Codex selects `CODEX_THREAD_ID` whenever present, even for equal IDs, otherwise
+`CODEX_SESSION_ID`. Unequal valid IDs are supported; historical source values
+remain unchanged and the serialized pair keeps its existing shape. Missing/empty native input
 omits both fields; invalid/conflicting input omits them and warns without preventing
 the lifecycle operation. A qualified `TASKS_SESSION` conflicting with the native
 key warns too; it never supplies or replaces the native source.

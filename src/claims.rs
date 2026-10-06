@@ -46,15 +46,15 @@ pub fn identity(warnings: &mut Vec<String>) -> Result<Identity> {
 /// but no usable pid yields `pid: None` and falls to the TTL path; it is never welded to
 /// an unrelated fallback pid.
 ///
-/// The Codex level reads `CODEX_SESSION_ID`, or `CODEX_THREAD_ID` alone; the two agree
-/// when both are set, and a disagreement warns and skips the level, as provenance does.
+/// The Codex level validates both exports and selects the concrete `CODEX_THREAD_ID`
+/// when present, otherwise the root `CODEX_SESSION_ID`. Malformed values refuse.
 /// Codex runs each command as its own session leader, so the Unix fallback would die with
 /// the command; the level exports no pid, so a Codex claim lives by the TTL.
 pub fn identity_from(
     get: impl Fn(&str) -> Option<OsString>,
     session_pid: Option<u32>,
     relay: impl FnOnce() -> Result<Option<crate::relay::resolve::Resolved>>,
-    warnings: &mut Vec<String>,
+    _warnings: &mut Vec<String>,
 ) -> Result<Identity> {
     let var = |key: &str| {
         get(key)
@@ -92,21 +92,20 @@ pub fn identity_from(
             proof: None,
         });
     }
-    match (var("CODEX_SESSION_ID"), var("CODEX_THREAD_ID")) {
-        (Some(session), Some(thread)) if session != thread => warnings.push(
-            "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls \
-             to the Unix session id"
-                .into(),
-        ),
-        (Some(session), _) | (None, Some(session)) => {
-            return Ok(Identity {
-                tagged: format!("codex:{session}"),
-                session,
-                pid: None,
-                proof: None,
-            });
-        }
-        (None, None) => {}
+    let invalid_native = |detail| {
+        Error::Config(format!(
+            "{detail}; correct the native variables or set TASKS_SESSION to this session's explicit identity (use the exact held session from tasks show when recovering an existing claim)"
+        ))
+    };
+    let session = crate::native::value(&get, "CODEX_SESSION_ID").map_err(invalid_native)?;
+    let thread = crate::native::value(&get, "CODEX_THREAD_ID").map_err(invalid_native)?;
+    if let Some(session) = thread.or(session) {
+        return Ok(Identity {
+            tagged: format!("codex:{session}"),
+            session,
+            pid: None,
+            proof: None,
+        });
     }
     match session_pid {
         Some(pid) => Ok(Identity {
@@ -1353,31 +1352,118 @@ mod tests {
     }
 
     #[test]
-    fn disagreeing_codex_variables_warn_and_skip_the_level() {
+    fn delegated_native_identity_is_the_thread() {
         let mut warnings = Vec::new();
         let id = identity_from(
-            env_of(&[
-                ("CODEX_SESSION_ID", "private-a"),
-                ("CODEX_THREAD_ID", "private-b"),
-            ]),
+            env_of(&[("CODEX_SESSION_ID", "root"), ("CODEX_THREAD_ID", "worker")]),
             Some(11),
             relay_off(),
             &mut warnings,
         )
         .unwrap();
+        assert_eq!(id.session, "worker");
+        assert_eq!(id.tagged, "codex:worker");
+        assert_eq!(id.pid, None);
+        assert!(id.proof.is_none());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn delegated_native_values_are_validated_without_leaking() {
+        for name in ["CODEX_SESSION_ID", "CODEX_THREAD_ID"] {
+            for bad in ["private\nvalue", "private\tvalue", "private\u{7f}value"] {
+                let get = |key: &str| match key {
+                    k if k == name => Some(OsString::from(bad)),
+                    "CODEX_THREAD_ID" => Some("worker".into()),
+                    _ => None,
+                };
+                let error = identity_from(get, Some(11), relay_off(), &mut Vec::new())
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains(name) && error.contains("TASKS_SESSION"),
+                    "{error}"
+                );
+                assert!(!error.contains("private"), "{error}");
+                let overridden = |key: &str| {
+                    if key == "TASKS_SESSION" {
+                        Some("owner".into())
+                    } else {
+                        get(key)
+                    }
+                };
+                assert_eq!(
+                    identity_from(overridden, Some(11), relay_off(), &mut Vec::new())
+                        .unwrap()
+                        .session,
+                    "owner"
+                );
+                let claude = |key: &str| {
+                    if key == "CLAUDE_CODE_SESSION_ID" {
+                        Some("claude".into())
+                    } else {
+                        get(key)
+                    }
+                };
+                assert_eq!(
+                    identity_from(claude, Some(11), relay_off(), &mut Vec::new())
+                        .unwrap()
+                        .session,
+                    "claude"
+                );
+            }
+        }
+        for vars in [
+            vec![],
+            vec![("CODEX_SESSION_ID", ""), ("CODEX_THREAD_ID", "")],
+        ] {
+            assert_eq!(
+                identity_from(env_of(&vars), Some(11), relay_off(), &mut Vec::new())
+                    .unwrap()
+                    .session,
+                "sid:11"
+            );
+        }
         assert_eq!(
-            id.session, "sid:11",
-            "the conflict falls to the Unix session"
+            identity_from(
+                env_of(&[("CODEX_SESSION_ID", "root")]),
+                Some(11),
+                relay_off(),
+                &mut Vec::new()
+            )
+            .unwrap()
+            .session,
+            "root"
         );
-        assert_eq!(warnings.len(), 1);
-        assert!(
-            warnings[0].contains("CODEX_SESSION_ID") && warnings[0].contains("CODEX_THREAD_ID"),
-            "{warnings:?}"
-        );
-        assert!(
-            !warnings[0].contains("private"),
-            "the warning names the variables, not their values: {warnings:?}"
-        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delegated_native_non_unicode_refuses() {
+        use std::os::unix::ffi::OsStringExt;
+        for name in ["CODEX_SESSION_ID", "CODEX_THREAD_ID"] {
+            let error = identity_from(
+                |key| {
+                    if key == name {
+                        Some(OsString::from_vec(vec![255]))
+                    } else if key == "CODEX_THREAD_ID" {
+                        Some("worker".into())
+                    } else {
+                        None
+                    }
+                },
+                Some(11),
+                relay_off(),
+                &mut Vec::new(),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains(name)
+                    && error.contains("not Unicode")
+                    && error.contains("TASKS_SESSION")
+            );
+        }
     }
 
     #[test]

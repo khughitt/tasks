@@ -16,6 +16,7 @@ mod hierarchy;
 mod holds;
 mod lanes;
 mod model;
+mod native;
 mod needs;
 mod output;
 mod palette;

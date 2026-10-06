@@ -109,15 +109,21 @@ claim identity and liveness. A stamped note has one indented JSON continuation:
 
 `tasks show` exposes these optional fields directly on the note; both are absent
 when unknown. The source names only `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`,
-or `CODEX_THREAD_ID`, with a matching `claude-code:` or `codex:` key. Agreeing Codex
-variables select `CODEX_SESSION_ID`. Missing/empty native values leave both fields
+or `CODEX_THREAD_ID`, with a matching `claude-code:` or `codex:` key. Codex
+selects `CODEX_THREAD_ID` whenever present, including equal root/thread IDs;
+otherwise it selects `CODEX_SESSION_ID`. Unequal valid IDs name a worker and its
+shared root, and produce worker provenance without changing the serialized pair.
+Historical stamps retain their recorded source. Missing/empty native values leave both fields
 absent; conflicting or invalid inputs also leave them absent and emit a warning,
 without blocking an otherwise valid lifecycle operation. A qualified `TASKS_SESSION`
 override that disagrees with the native key is a conflict; a matching override never
 replaces the native source. Other claim overrides remain independent. Do not set
 `TASKS_SESSION` merely to improve observability: it is a claim override, not a
 provenance source. Claim identity reads the same Codex variables on its own: a Codex
-claim is keyed by the thread id, carries no pid, and lives by the TTL.
+claim validates both native values and selects the thread when present, carries
+no pid, and lives by the four-hour TTL. Malformed selected Codex input refuses
+claim writes with repair or exact held `TASKS_SESSION` recovery guidance. With
+only `CODEX_SESSION_ID`, workers cannot be distinguished from their controller.
 
 The generated lifecycle texts are the consumer contract (including status edits):
 
