@@ -241,17 +241,22 @@ fn main() {
             } else {
                 stdout_painter
             };
-            if format == Format::Pretty {
+            // Printed after the output, so a long list is not pushed down and the warnings
+            // sit next to the prompt; an exit before the output still prints them.
+            let warnings = if format == Format::Pretty {
                 let mut warnings = output::warnings_of(&out);
                 warnings.extend(theme_warning);
-                to_stderr(&output::pretty_warnings(&warnings, &stderr_painter));
-            }
+                output::pretty_warnings(&warnings, &stderr_painter)
+            } else {
+                String::new()
+            };
             let wrap_width = if format == Format::Pretty
                 && matches!(
                     &out,
                     output::Output::List(_)
                         | output::Output::Prime(_)
                         | output::Output::Parked(_)
+                        | output::Output::Quiet(_)
                         | output::Output::Tree(_)
                         | output::Output::Show(_)
                         | output::Output::Next(_)
@@ -260,6 +265,7 @@ fn main() {
                     Ok(Some(width)) => output::Wrap::at(width),
                     Ok(None) => output::Wrap::NONE,
                     Err(error) => {
+                        to_stderr(&warnings);
                         to_stderr(&format!("{}\n", output::render_error(&error)));
                         std::process::exit(1);
                     }
@@ -280,6 +286,7 @@ fn main() {
                 // exiting here leaves the exit code the command earned intact below.
                 Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
                 Err(error) => {
+                    to_stderr(&warnings);
                     to_stderr(&format!(
                         "{}\n",
                         output::render_error(&error::Error::Io(format!(
@@ -289,6 +296,7 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            to_stderr(&warnings);
             if let output::Output::Check(check) = &out
                 && !check.errors.is_empty()
             {

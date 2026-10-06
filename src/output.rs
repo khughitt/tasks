@@ -1082,6 +1082,7 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             &o.tasks,
             painter,
             id_width(o.tasks.iter().map(|row| row.id.as_str())),
+            wrap,
         ),
         Output::Claims(o) => {
             let width = id_width(o.claims.iter().map(|row| row.id.as_str()));
@@ -1625,6 +1626,25 @@ fn render_row(
     painter: &Painter,
     wrap: Wrap,
 ) -> String {
+    render_wrapped(prefix, pieces, painter, wrap, LongWord::Split)
+}
+
+/// What wrapping does with a word wider than the space after the prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LongWord {
+    /// Hard-split it at the width, as a title does.
+    Split,
+    /// Give it a line of its own, whole, so a path or command copies intact.
+    Keep,
+}
+
+fn render_wrapped(
+    prefix: &str,
+    pieces: &[(&str, Option<Style>)],
+    painter: &Painter,
+    wrap: Wrap,
+    long: LongWord,
+) -> String {
     let chars: Vec<(char, Option<Style>)> = pieces
         .iter()
         .flat_map(|(text, style)| text.chars().map(move |c| (c, *style)))
@@ -1638,7 +1658,7 @@ fn render_row(
     if available < TITLE_FLOOR || columns(&chars) <= available {
         return single;
     }
-    let lines = wrap_lines(&chars, available);
+    let lines = wrap_lines_with(&chars, available, long);
     if lines.is_empty() {
         return single;
     }
@@ -1682,6 +1702,14 @@ pub(crate) fn wrap_lines(
     chars: &[(char, Option<Style>)],
     available: usize,
 ) -> Vec<Vec<(char, Option<Style>)>> {
+    wrap_lines_with(chars, available, LongWord::Split)
+}
+
+fn wrap_lines_with(
+    chars: &[(char, Option<Style>)],
+    available: usize,
+    long: LongWord,
+) -> Vec<Vec<(char, Option<Style>)>> {
     let mut lines: Vec<Vec<(char, Option<Style>)>> = Vec::new();
     let mut line: Vec<(char, Option<Style>)> = Vec::new();
     let mut pending: Option<&[(char, Option<Style>)]> = None;
@@ -1709,7 +1737,10 @@ pub(crate) fn wrap_lines(
             if !line.is_empty() {
                 lines.push(std::mem::take(&mut line));
             }
-            fill_hard_split(&mut lines, &mut line, run, available);
+            match long {
+                LongWord::Split => fill_hard_split(&mut lines, &mut line, run, available),
+                LongWord::Keep => lines.push(run.to_vec()),
+            }
         } else {
             lines.push(std::mem::take(&mut line));
             line.extend_from_slice(run);
@@ -1877,6 +1908,15 @@ pub fn table(
 }
 
 pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap: Wrap) -> String {
+    let stop = |park: &ParkInfo| {
+        crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)
+    };
+    let stop_width = rows
+        .iter()
+        .filter_map(|row| row.park.as_ref())
+        .map(|park| stop(park).chars().count())
+        .max()
+        .unwrap_or(0);
     let mut rendered = String::new();
     for row in rows {
         let Some(park) = &row.park else {
@@ -1891,8 +1931,8 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap
         let process = present::process(row.process, "-").left(7).paint(painter);
         let parked = present::date(&park.at).paint(painter);
         let prefix = format!(
-            "{id}  {status} {process} {phase} waits on {:<18} {parked}  ",
-            crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)
+            "{id}  {status} {process} {phase} waits on {:<stop_width$}  {parked}  ",
+            stop(park)
         );
         rendered.push_str(&render_row(
             &prefix,
@@ -1900,14 +1940,28 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap
             painter,
             wrap,
         ));
-        rendered
-            .push_str(&painter.paint(Style::Chrome, &format!("        next: {}", park.next_step)));
-        rendered.push('\n');
+        rendered.push_str(&detail_line("next", &park.next_step, painter, wrap));
     }
     rendered
 }
 
-pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> String {
+/// An indented `label: text` line under a row, wrapped under its text. A word wider than
+/// the line (a path, a command) keeps a line of its own rather than being cut.
+fn detail_line(label: &str, text: &str, painter: &Painter, wrap: Wrap) -> String {
+    let prefix = painter.paint(
+        Style::Chrome,
+        &format!("        {:<6}", format!("{label}:")),
+    );
+    render_wrapped(
+        &prefix,
+        &[(text, Some(Style::Chrome))],
+        painter,
+        wrap,
+        LongWord::Keep,
+    )
+}
+
+pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap: Wrap) -> String {
     let mut rendered = String::new();
     for (index, row) in rows.iter().enumerate() {
         let Some(park) = &row.park else {
@@ -1927,16 +1981,15 @@ pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> S
             None => "-".into(),
         };
         let parked = present::date(&park.at).paint(painter);
-        rendered.push_str(&format!(
-            "{id}  {priority}  {needs:<8}  {minutes:>8}  parked {parked}  {}\n",
-            row.title
+        let prefix = format!("{id}  {priority}  {needs:<8}  {minutes:>8}  parked {parked}  ");
+        rendered.push_str(&render_row(
+            &prefix,
+            &[(row.title.as_str(), None)],
+            painter,
+            wrap,
         ));
-        rendered
-            .push_str(&painter.paint(Style::Chrome, &format!("        next: {}", park.next_step)));
-        rendered.push('\n');
-        rendered
-            .push_str(&painter.paint(Style::Chrome, &format!("        in:   {}", park.worktree)));
-        rendered.push('\n');
+        rendered.push_str(&detail_line("next", &park.next_step, painter, wrap));
+        rendered.push_str(&detail_line("in", &park.worktree, painter, wrap));
     }
     rendered
 }
@@ -2607,7 +2660,7 @@ mod tests {
             host: "h".into(),
             worktree: "w".into(),
         });
-        let text = parked_table(&[parked], &plain(), 0, Wrap::at(140));
+        let text = parked_table(&[parked], &plain(), 0, Wrap::at(100));
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines.len() > 1, "{text:?}");
         let title_start = lines[0].find("alpha").expect("parked title");
@@ -2617,6 +2670,105 @@ mod tests {
             title_start,
             "{text:?}"
         );
+    }
+
+    fn parked_with(next_step: &str, reason: Option<crate::claims::Reason>) -> ParkedRow {
+        let mut parked = ParkedRow::resolved(long_row(), crate::model::Phase::Implementing);
+        let quiet = reason == Some(crate::claims::Reason::Quiet);
+        parked.park = Some(ParkInfo {
+            at: "2026-09-06T00:00:00Z".into(),
+            next_step: next_step.into(),
+            waiting_on: crate::claims::WaitingOn::User,
+            reason,
+            needs: quiet.then_some(crate::claims::Needs::Headless),
+            minutes: quiet.then_some(39),
+            session: "s".into(),
+            owner: "o".into(),
+            host: "h".into(),
+            worktree: "/a/long/checkout/path/that/runs/well/past/the/width/.worktrees/x".into(),
+        });
+        parked
+    }
+
+    const LONG_STEP: &str = "Agent: run the prepared smoke pilot and the full matrix, write and \
+        attach the evidence, then hand the contact sheet to the owner for a judgement";
+
+    fn assert_fits(text: &str, width: usize) {
+        for line in text.lines() {
+            assert!(visible_width(line) <= width, "{line:?} exceeds {width}");
+        }
+    }
+
+    #[test]
+    fn a_parked_rows_next_step_wraps_under_its_text() {
+        let text = parked_table(&[parked_with(LONG_STEP, None)], &plain(), 0, Wrap::at(120));
+        assert_fits(&text, 120);
+        let lines: Vec<&str> = text.lines().collect();
+        let next = lines
+            .iter()
+            .position(|line| line.contains("next: "))
+            .unwrap();
+        let text_start = lines[next].find("next: ").unwrap() + "next: ".len();
+        let continuation = lines[next + 1];
+        assert_eq!(
+            continuation.len() - continuation.trim_start().len(),
+            text_start,
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_parked_tables_wait_column_fits_its_longest_stop() {
+        let rows = [
+            parked_with("a", Some(crate::claims::Reason::Quiet)),
+            parked_with("b", Some(crate::claims::Reason::Review)),
+        ];
+        let text = parked_table(&rows, &plain(), 0, Wrap::NONE);
+        let dates: Vec<usize> = text
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("next:"))
+            .map(|line| line.find("2026-09-06").unwrap())
+            .collect();
+        assert_eq!(dates.len(), 2, "{text}");
+        assert_eq!(dates[0], dates[1], "{text}");
+        assert!(text.contains("39 min  2026-09-06"), "{text}");
+    }
+
+    #[test]
+    fn quiet_briefs_wrap_title_and_next_under_their_text() {
+        let text = quiet_briefs(
+            &[parked_with(LONG_STEP, Some(crate::claims::Reason::Quiet))],
+            &plain(),
+            0,
+            Wrap::at(80),
+        );
+        let lines: Vec<&str> = text.lines().collect();
+        let indent = |line: &str| line.len() - line.trim_start().len();
+        assert_eq!(indent(lines[1]), lines[0].find("alpha").unwrap(), "{text}");
+        let next = lines
+            .iter()
+            .position(|line| line.contains("next: "))
+            .unwrap();
+        assert_eq!(indent(lines[next + 1]), "        next: ".len(), "{text}");
+        for line in &lines[..lines.len() - 1] {
+            assert!(visible_width(line) <= 80, "{line:?} exceeds 80");
+        }
+    }
+
+    #[test]
+    fn a_detail_line_keeps_a_long_word_whole() {
+        let path = "/a/long/checkout/path/that/runs/well/past/the/width/.worktrees/x";
+        let text = quiet_briefs(
+            &[parked_with(
+                &format!("rerun from {path} first"),
+                Some(crate::claims::Reason::Quiet),
+            )],
+            &plain(),
+            0,
+            Wrap::at(60),
+        );
+        assert!(text.contains(&format!("in:   {path}\n")), "{text}");
+        assert!(text.contains(&format!("              {path}\n")), "{text}");
     }
 
     #[test]
