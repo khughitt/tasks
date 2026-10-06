@@ -15,6 +15,7 @@ mod halt;
 mod hierarchy;
 mod holds;
 mod lanes;
+mod locations;
 mod model;
 mod needs;
 mod output;
@@ -206,6 +207,7 @@ fn main() {
             cli::Command::Projects { .. }
                 | cli::Command::Groups
                 | cli::Command::Root { .. }
+                | cli::Command::Resolve { .. }
                 | cli::Command::Show { .. }
                 | cli::Command::List { .. }
                 | cli::Command::Search { .. }

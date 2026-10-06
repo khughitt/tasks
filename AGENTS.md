@@ -69,8 +69,9 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 
 ## Layout
 
-- `src/` — `main.rs` / `cli.rs` (clap), `src/commands/` (one module per subcommand), `model.rs`
+- `src/` — `main.rs` / `cli.rs` (clap), `src/commands/` (one module per subcommand, including `resolver.rs` for ids and paths), `model.rs`
   (task record), `frontmatter.rs`, `repo.rs` (tasks/ dir), `registry.rs` (`~/.config/tasks/projects.toml`),
+  `locations.rs` (registry location history, path normalization, and the location index behind `resolve`),
   `claims.rs` (out-of-git work claims: the per-prefix store, liveness, and mutation lock),
   `attachments.rs` (tasks/files/<id>/ storage, the attached:/detached: ledger, and the audit behind show and check),
   `clipboard.rs` (wl-paste input for attach),

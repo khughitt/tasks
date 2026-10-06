@@ -42,6 +42,11 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
         None
     };
     let project = Project::init(&root, &prefix)?;
+    let today = crate::time::day(&crate::time::now()).to_string();
+    let previous = displaced
+        .clone()
+        .map(|root| registry.displaced(&prefix, root));
+    let history = registry.note_root_change(&prefix, previous, &today)?;
     registry.save()?;
     let mut warnings = Vec::new();
     if let Some(previous) = displaced {
@@ -50,6 +55,7 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
             previous.display()
         ));
     }
+    warnings.extend(history);
     if !skill_installed(&project.root) {
         warnings.push(
             "no tasks skill found at user or project level; install skills/tasks (see README)"
