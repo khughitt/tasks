@@ -2024,6 +2024,59 @@ fn an_invalid_columns_value_fails_as_config() {
 }
 
 #[test]
+fn pretty_warnings_follow_the_output_and_survive_an_early_exit() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Parked here"]));
+    write_park(
+        &env,
+        "sci",
+        &id,
+        "agent-a",
+        "user",
+        &sci.display().to_string(),
+    );
+    // A park recorded in a checkout that no longer exists: a warning on every read.
+    write_park(
+        &env,
+        "sci",
+        "sci-eeeeee",
+        "agent-a",
+        "agent",
+        "/nonexistent/checkout",
+    );
+
+    // stdout and stderr share one pipe, so the order they were written in survives.
+    let (mut reader, writer) = std::io::pipe().unwrap();
+    let mut child = env
+        .raw(&sci)
+        .args(["--pretty", "list", "--parked"])
+        .stdout(writer.try_clone().unwrap())
+        .stderr(writer)
+        .spawn()
+        .unwrap();
+    let mut merged = String::new();
+    std::io::Read::read_to_string(&mut reader, &mut merged).unwrap();
+    assert!(child.wait().unwrap().success());
+    let row = merged.find(&id).expect("the parked row");
+    let warning = merged.find("warning: sci-eeeeee").expect("the warning");
+    assert!(row < warning, "warnings come after the output:\n{merged}");
+
+    let out = env
+        .cmd(&sci)
+        .env("COLUMNS", "wide")
+        .args(["--pretty", "list", "--parked"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let text = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        text.contains("warning: sci-eeeeee") && text.contains("COLUMNS must be"),
+        "an exit before the output still prints the warnings: {text}"
+    );
+}
+
+#[test]
 fn columns_applies_to_pretty_output_only() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

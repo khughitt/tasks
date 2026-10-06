@@ -1626,6 +1626,25 @@ fn render_row(
     painter: &Painter,
     wrap: Wrap,
 ) -> String {
+    render_wrapped(prefix, pieces, painter, wrap, LongWord::Split)
+}
+
+/// What wrapping does with a word wider than the space after the prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LongWord {
+    /// Hard-split it at the width, as a title does.
+    Split,
+    /// Give it a line of its own, whole, so a path or command copies intact.
+    Keep,
+}
+
+fn render_wrapped(
+    prefix: &str,
+    pieces: &[(&str, Option<Style>)],
+    painter: &Painter,
+    wrap: Wrap,
+    long: LongWord,
+) -> String {
     let chars: Vec<(char, Option<Style>)> = pieces
         .iter()
         .flat_map(|(text, style)| text.chars().map(move |c| (c, *style)))
@@ -1639,7 +1658,7 @@ fn render_row(
     if available < TITLE_FLOOR || columns(&chars) <= available {
         return single;
     }
-    let lines = wrap_lines(&chars, available);
+    let lines = wrap_lines_with(&chars, available, long);
     if lines.is_empty() {
         return single;
     }
@@ -1683,6 +1702,14 @@ pub(crate) fn wrap_lines(
     chars: &[(char, Option<Style>)],
     available: usize,
 ) -> Vec<Vec<(char, Option<Style>)>> {
+    wrap_lines_with(chars, available, LongWord::Split)
+}
+
+fn wrap_lines_with(
+    chars: &[(char, Option<Style>)],
+    available: usize,
+    long: LongWord,
+) -> Vec<Vec<(char, Option<Style>)>> {
     let mut lines: Vec<Vec<(char, Option<Style>)>> = Vec::new();
     let mut line: Vec<(char, Option<Style>)> = Vec::new();
     let mut pending: Option<&[(char, Option<Style>)]> = None;
@@ -1710,7 +1737,10 @@ pub(crate) fn wrap_lines(
             if !line.is_empty() {
                 lines.push(std::mem::take(&mut line));
             }
-            fill_hard_split(&mut lines, &mut line, run, available);
+            match long {
+                LongWord::Split => fill_hard_split(&mut lines, &mut line, run, available),
+                LongWord::Keep => lines.push(run.to_vec()),
+            }
         } else {
             lines.push(std::mem::take(&mut line));
             line.extend_from_slice(run);
@@ -1915,13 +1945,20 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap
     rendered
 }
 
-/// An indented `label: text` line under a row, wrapped under its text.
+/// An indented `label: text` line under a row, wrapped under its text. A word wider than
+/// the line (a path, a command) keeps a line of its own rather than being cut.
 fn detail_line(label: &str, text: &str, painter: &Painter, wrap: Wrap) -> String {
     let prefix = painter.paint(
         Style::Chrome,
         &format!("        {:<6}", format!("{label}:")),
     );
-    render_row(&prefix, &[(text, Some(Style::Chrome))], painter, wrap)
+    render_wrapped(
+        &prefix,
+        &[(text, Some(Style::Chrome))],
+        painter,
+        wrap,
+        LongWord::Keep,
+    )
 }
 
 pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap: Wrap) -> String {
@@ -2698,15 +2735,40 @@ mod tests {
     }
 
     #[test]
-    fn quiet_briefs_wrap_next_and_in_under_their_text() {
+    fn quiet_briefs_wrap_title_and_next_under_their_text() {
         let text = quiet_briefs(
             &[parked_with(LONG_STEP, Some(crate::claims::Reason::Quiet))],
             &plain(),
             0,
-            Wrap::at(100),
+            Wrap::at(80),
         );
-        assert_fits(&text, 100);
-        assert!(text.lines().count() > 4, "{text}");
+        let lines: Vec<&str> = text.lines().collect();
+        let indent = |line: &str| line.len() - line.trim_start().len();
+        assert_eq!(indent(lines[1]), lines[0].find("alpha").unwrap(), "{text}");
+        let next = lines
+            .iter()
+            .position(|line| line.contains("next: "))
+            .unwrap();
+        assert_eq!(indent(lines[next + 1]), "        next: ".len(), "{text}");
+        for line in &lines[..lines.len() - 1] {
+            assert!(visible_width(line) <= 80, "{line:?} exceeds 80");
+        }
+    }
+
+    #[test]
+    fn a_detail_line_keeps_a_long_word_whole() {
+        let path = "/a/long/checkout/path/that/runs/well/past/the/width/.worktrees/x";
+        let text = quiet_briefs(
+            &[parked_with(
+                &format!("rerun from {path} first"),
+                Some(crate::claims::Reason::Quiet),
+            )],
+            &plain(),
+            0,
+            Wrap::at(60),
+        );
+        assert!(text.contains(&format!("in:   {path}\n")), "{text}");
+        assert!(text.contains(&format!("              {path}\n")), "{text}");
     }
 
     #[test]
