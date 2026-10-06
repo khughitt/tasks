@@ -1,20 +1,22 @@
 ---
 id: tasks-5e2472
 title: Design delegated identity from verified Codex semantics
-status: doing
+status: done
 priority: 1
 size: m
 complexity: high
 process: planned
-owner: main
+owner: design/tasks-5e2472
 created: 2026-10-06T10:04:44Z
-updated: 2026-10-06T17:23:30Z
+updated: 2026-10-06T19:09:23Z
 started: 2026-10-06T17:23:30Z
+completed: 2026-10-06T19:09:22Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
 source: tasks-1ece46
 agent: codex/gpt-6.1-sol
+spec: docs/specs/2026-10-06-delegated-identity-design.md
 ---
 
 Why: tasks-1ece46 captured equal controller IDs but parent CODEX_SESSION_ID and child CODEX_THREAD_ID in the worker. This proves disagreement, not a Codex defect. Research tasks-c0bad3 must establish intended native-variable and hook semantics before design chooses the owner or remedy.
@@ -40,3 +42,46 @@ Verified prerequisite: tasks-c0bad3 traced Codex 0.160.1 commit d27764b82f7118f6
 - 2026-10-06T17:05:31Z (investigate/tasks-c0bad3): Exact Codex 0.160.1 source at d27764b82f7118f674371e6d6e76271d9d606edb deliberately writes shared root CODEX_SESSION_ID and concrete CODEX_THREAD_ID; SubagentStart/SubagentStop agent_id equals worker thread ID. Worker completion dispatches SubagentStop, not Stop; worker SessionEnd/Interrupt are excluded. Recommend tasks contract adaptation, not upstream export repair. Root grouping is not an immediate-parent link for nested workers. Findings and immutable source links: docs/notes/2026-09-30-delegated-identity-brief.md; live hook delivery remains unverified.
 - 2026-10-06T17:23:30Z (main): started
   provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:23:45Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:24:33Z (design/tasks-5e2472): Design scope: thread identity must cover claims, native provenance, relay hints and process-proof continuation together. Shared Codex process ancestry cannot establish worker ownership without a concrete thread hint; root association never grants authority. Prior spec-review notes concern the scoping record, not an existing design artifact.
+- 2026-10-06T17:27:12Z (design/tasks-5e2472): Proposed design uses native thread claims and provenance, optional claim root_session, strict Codex thread proof, and fail-closed relay root-only refusal. Relay adapter lacks worker registration; filed relay-f56e30. Native-note format stays unchanged. Written spec awaits user review; implementation plan follows approval.
+- 2026-10-06T17:27:39Z (design/tasks-5e2472): parked (waiting on user, review): User reviews .worktrees/tasks-5e2472/docs/specs/2026-10-06-delegated-identity-design.md; after approval, agent resumes here and writes the implementation plan for its separate review.
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:37:22Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:37:22Z (design/tasks-5e2472): review: spec round 3 — verdict: revise; findings: Important 3, Minor 4; reviewer: human
+- 2026-10-06T17:39:35Z (design/tasks-5e2472): Spec revision addresses all seven human findings: normal worker release before controller handoff and explicit takeover recovery with reverse-direction/live acceptance; native and relay root sources named; missing-thread relay proof compatibility break and TASKS_SESSION recovery; root-conflict release/reacquire guidance; value-free relay validation errors; top-level provenance source change; session-only worker identity-sharing limit. Plan remains gated on revised written-spec approval.
+- 2026-10-06T17:40:16Z (design/tasks-5e2472): parked (waiting on user, review): User reviews revised .worktrees/tasks-5e2472/docs/specs/2026-10-06-delegated-identity-design.md, especially interim worker handoff and recovery; after approval, agent resumes this worktree and writes the implementation plan.
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): Review bookkeeping correction: earlier review: spec rounds 1 and 2 assessed the scoped task description, not this design document. The entry labeled spec round 3 with reviewer human was design-document round 1, relayed from claude-code/claude-opus-5-5, verdict revise, findings Important 3 and Minor 4. Notes are append-only; preserve those entries as history and use the corrected document sequence below.
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): review: spec round 2 — verdict: accept; findings: none; reviewer: claude-code/claude-opus-5-5
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): review: spec round 3 — verdict: accept; findings: none; reviewer: human
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): Keith approved the revised written spec. Plan must require controller wait/completion evidence that a worker has stopped before forced takeover, and document that agent-waiting parks are visible to every agent rather than reserved for their controller.
+- 2026-10-06T18:12:49Z (design/tasks-5e2472): review: spec round 1 — verdict: revise; findings: Important 3, Minor 4; reviewer: claude-code/claude-opus-5-5
+- 2026-10-06T18:12:49Z (design/tasks-5e2472): The preceding spec round 1 entry is a retrospective corrected entry for the first design-document review; it does not reopen the accepted spec. Correct design sequence: Claude Code revise round 1, Claude Code accept round 2, Keith approval round 3.
+- 2026-10-06T18:18:56Z (design/tasks-5e2472): Implementation plan drafted at docs/plans/2026-10-06-delegated-identity.md: four sequential steps, inline execution recommended, final independent branch review, native and real-relay acceptance kept distinct. Incorporated worker-specific completion/wait evidence before takeover and globally visible agent-waiting parks. Keep plan unlinked until review to avoid premature step-task creation; known unlinked_step behavior is tasks-b2e718. Review correction limitation filed as obs-8bb397.
+- 2026-10-06T18:19:16Z (design/tasks-5e2472): parked (waiting on user, review): User reviews .worktrees/tasks-5e2472/docs/plans/2026-10-06-delegated-identity.md; after approval, agent files and links its four sequential implementation tasks, closes the design deliverable, and integrates the approved documents. Inline execution with final independent review is recommended.
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T18:39:01Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T18:39:01Z (design/tasks-5e2472): review: plan round 1 — verdict: revise; findings: Important 1, Minor 4; reviewer: claude-code/claude-opus-5-5
+- 2026-10-06T18:40:40Z (design/tasks-5e2472): Plan revision resolves round 1: all four steps share .worktrees/delegated-identity on feat/delegated-identity with one final implementation review/merge; live smoke requires a clean Codex controller/worker pair and treats inherited Claude identity as unverified setup; root-only relay mismatch is value-free and explains missing worker registration; malformed native claim errors name TASKS_SESSION recovery; opaque codex:x native roots intentionally round trip as codex:codex:x.
+- 2026-10-06T18:41:32Z (design/tasks-5e2472): parked (waiting on user, review): User reviews revised .worktrees/tasks-5e2472/docs/plans/2026-10-06-delegated-identity.md, including the single shared implementation worktree sequence; after approval, agent files the four linked steps, closes the design task, integrates the document/task records, and creates the shared implementation branch.
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T19:03:35Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T19:03:35Z (design/tasks-5e2472): review: plan round 2 — verdict: accept; findings: Minor 1; reviewer: claude-code/claude-opus-5-5
+- 2026-10-06T19:03:35Z (design/tasks-5e2472): Plan approved per user instruction; execution explicitly paused before starting. Fold in optional cleanup/install clarification without another review round. Do not file or start implementation steps until the user resumes execution.
+- 2026-10-06T19:04:09Z (design/tasks-5e2472): Optional accepted-plan clarification added: remove the design worktree after document/task integration and the shared implementation worktree after final merge/install; harvest tt-report, verify clean integrated state and no host pointers, unlock, then remove without force. Install with cargo install --path . from main after the final merge. No implementation tasks filed or started.
+- 2026-10-06T19:04:30Z (design/tasks-5e2472): parked (waiting on user, decision): User resumes execution when ready; agent then files the four linked implementation tasks, completes the approved design handoff, merges document/task records, and creates .worktrees/delegated-identity on feat/delegated-identity. Explicitly paused before execution by user request.
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T19:08:57Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T19:09:22Z (design/tasks-5e2472): User resumed approved execution. Implementation steps: tasks-3809b8, tasks-2047cd, tasks-17c844, tasks-a5a502.
+- 2026-10-06T19:09:22Z (design/tasks-5e2472): done
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T19:09:22Z (design/tasks-5e2472): Approved delegated identity design and plan handed off to four linked sequential implementation steps.
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
