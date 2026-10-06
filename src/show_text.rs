@@ -33,20 +33,6 @@ pub fn render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String
     sections.join("\n")
 }
 
-/// `── name ` in the heading role, then a dim rule out to the line width (spec §3.2).
-fn rule(name: &str, painter: &Painter, width: Option<usize>) -> String {
-    let head = format!("── {name} ");
-    let fill = width
-        .unwrap_or(MEASURE)
-        .saturating_sub(head.chars().count());
-    let mut line = present::heading(&head, None).paint(painter);
-    if fill > 0 {
-        line.push_str(&painter.paint(Style::Chrome, &"─".repeat(fill)));
-    }
-    line.push('\n');
-    line
-}
-
 /// `pieces` after `lead` (already painted, `lead_width` columns wide), wrapped at
 /// `width`; continuation lines indent `rest` columns. One line when there is no width.
 /// The available width is the line width less the wider of the two indents, so no
@@ -92,7 +78,7 @@ fn spans(spans: &[Span]) -> Vec<(&str, Option<Style>)> {
 }
 
 fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
-    let mut rendered = rule("overview", painter, width);
+    let mut rendered = present::rule("overview", painter, width.unwrap_or(MEASURE));
     let title = present::heading(&o.task.title, o.project_color);
     let id = present::id(&format!("({})", o.task.id));
     rendered.push_str(&block(
@@ -224,7 +210,7 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
 fn parked(park: &ParkInfo, painter: &Painter, width: Option<usize>) -> String {
     let stop = crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes);
     let since = present::date(&park.at);
-    let mut rendered = rule("parked", painter, width);
+    let mut rendered = present::rule("parked", painter, width.unwrap_or(MEASURE));
     rendered.push_str(&block(
         "",
         0,
@@ -255,7 +241,7 @@ fn parked(park: &ParkInfo, painter: &Painter, width: Option<usize>) -> String {
 
 fn escalated(escalation: &Escalation, painter: &Painter, width: Option<usize>) -> String {
     let since = present::date(&escalation.at);
-    let mut rendered = rule("escalation", painter, width);
+    let mut rendered = present::rule("escalation", painter, width.unwrap_or(MEASURE));
     let needs = format!("needs at least {} since ", escalation.level.as_str());
     rendered.push_str(&block(
         "",
@@ -280,7 +266,7 @@ fn escalated(escalation: &Escalation, painter: &Painter, width: Option<usize>) -
 /// Spec §3.5: each body line wraps on its own; list items hang; fenced and indented
 /// lines, and blank ones, print verbatim; `#` lines are headings.
 fn description(body: &str, painter: &Painter, width: Option<usize>) -> String {
-    let mut rendered = rule("description", painter, width);
+    let mut rendered = present::rule("description", painter, width.unwrap_or(MEASURE));
     if body.trim().is_empty() {
         rendered.push_str(&painter.paint(Style::Chrome, "(no description)"));
         rendered.push('\n');
@@ -356,7 +342,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
     // The longest status names (`blocked`, `shelved`, `dropped`) are seven wide.
     let status_width = 7;
     let lead_width = label_width + 2 + id_width + 2 + status_width + 2;
-    let mut rendered = rule("related", painter, width);
+    let mut rendered = present::rule("related", painter, width.unwrap_or(MEASURE));
     for (label, id, status, title) in rows {
         let lead = format!(
             "{}  {}  {}  ",
@@ -377,7 +363,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
 }
 
 fn files(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
-    let mut rendered = rule("files", painter, width);
+    let mut rendered = present::rule("files", painter, width.unwrap_or(MEASURE));
     for file in &o.files {
         rendered.push_str(&format!(
             "- {} ({})\n",
@@ -390,7 +376,11 @@ fn files(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
 
 /// Spec §3.5: a header (date, time, owner, marker, session), then the text indented 4.
 fn notes(notes: &[Note], painter: &Painter, width: Option<usize>) -> String {
-    let mut rendered = rule(&format!("notes ({})", notes.len()), painter, width);
+    let mut rendered = present::rule(
+        &format!("notes ({})", notes.len()),
+        painter,
+        width.unwrap_or(MEASURE),
+    );
     for note in notes {
         let (marker, text) = lifecycle(&note.text);
         // Note timestamps are validated `YYYY-MM-DDTHH:MM:SSZ` when the record is read.

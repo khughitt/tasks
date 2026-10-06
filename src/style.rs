@@ -59,7 +59,6 @@ pub enum Style {
     Emphasis,
     Error,
     Ok,
-    Warning,
     /// A date, painted by its distance from today (docs/specs/2026-09-25-date-recency-color-design.md).
     Date(When),
     /// A priority, painted on the magenta scale when the painter has one
@@ -222,7 +221,6 @@ impl Painter {
             Style::Emphasis => "1".into(),
             Style::Error => "31".into(),
             Style::Ok => "32".into(),
-            Style::Warning => "33".into(),
         };
         if self.enabled {
             format!("\x1b[{code}m{text}\x1b[0m")
@@ -274,12 +272,12 @@ mod tests {
         assert_eq!(plain.paint(Style::Error, "error"), "error");
 
         let redirected = Painter::new(ColorMode::Auto, Format::Pretty, false);
-        assert_eq!(redirected.paint(Style::Warning, "warning:"), "warning:");
+        assert_eq!(redirected.paint(Style::Heading(None), "heading"), "heading");
 
         let terminal = Painter::new(ColorMode::Auto, Format::Pretty, true);
         assert_eq!(
-            terminal.paint(Style::Warning, "warning:"),
-            "\x1b[33mwarning:\x1b[0m"
+            terminal.paint(Style::Heading(None), "heading"),
+            "\x1b[1mheading\x1b[0m"
         );
 
         let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
@@ -294,7 +292,6 @@ mod tests {
             (Style::Emphasis, "1"),
             (Style::Error, "31"),
             (Style::Ok, "32"),
-            (Style::Warning, "33"),
             (Style::Heading(None), "1"),
         ] {
             let painted = colored.paint(style, "x");

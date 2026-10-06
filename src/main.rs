@@ -245,12 +245,12 @@ fn main() {
             };
             // Printed after the output, so a long list is not pushed down and the warnings
             // sit next to the prompt; an exit before the output still prints them.
-            let warnings = if format == Format::Pretty {
+            let warning_list = if format == Format::Pretty {
                 let mut warnings = output::warnings_of(&out);
                 warnings.extend(theme_warning);
-                output::pretty_warnings(&warnings, &stderr_painter)
+                warnings
             } else {
-                String::new()
+                Vec::new()
             };
             let layout = if format == Format::Pretty
                 && matches!(
@@ -269,7 +269,11 @@ fn main() {
                 match output::terminal_width() {
                     Ok(width) => table::Layout { width, headers },
                     Err(error) => {
-                        to_stderr(&warnings);
+                        to_stderr(&output::pretty_warnings(
+                            &warning_list,
+                            &stderr_painter,
+                            None,
+                        ));
                         to_stderr(&format!("{}\n", output::render_error(&error)));
                         std::process::exit(1);
                     }
@@ -277,6 +281,7 @@ fn main() {
             } else {
                 table::Layout::default()
             };
+            let warnings = output::pretty_warnings(&warning_list, &stderr_painter, layout.width);
             let rendered = output::render(&out, format, &stdout_painter, &layout);
             let written = if silent {
                 Ok(())

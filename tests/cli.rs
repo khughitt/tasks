@@ -2059,8 +2059,14 @@ fn pretty_warnings_follow_the_output_and_survive_an_early_exit() {
     std::io::Read::read_to_string(&mut reader, &mut merged).unwrap();
     assert!(child.wait().unwrap().success());
     let row = merged.find(&id).expect("the parked row");
-    let warning = merged.find("warning: sci-eeeeee").expect("the warning");
+    let warning = merged.find("── warnings (1) ").expect("the warning");
     assert!(row < warning, "warnings come after the output:\n{merged}");
+    let rule = merged.find("── warnings (1) ").unwrap();
+    assert!(
+        merged[rule..].contains("\nsci-eeeeee"),
+        "warnings follow the rule unprefixed:\n{merged}"
+    );
+    assert!(!merged.contains("warning: sci-eeeeee"), "{merged}");
 
     let out = env
         .cmd(&sci)
@@ -2071,7 +2077,7 @@ fn pretty_warnings_follow_the_output_and_survive_an_early_exit() {
     assert!(!out.status.success());
     let text = String::from_utf8_lossy(&out.stderr).to_string();
     assert!(
-        text.contains("warning: sci-eeeeee") && text.contains("COLUMNS must be"),
+        text.contains("── warnings (1) ") && text.contains("COLUMNS must be"),
         "an exit before the output still prints the warnings: {text}"
     );
 }
@@ -6320,7 +6326,7 @@ fn feedback_creates_an_idea_in_the_registered_tasks_project() {
     assert!(String::from_utf8_lossy(&out.stdout).starts_with("created tasks-"));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.starts_with("warning: ") && stderr.contains("uncommitted"),
+        stderr.starts_with("── warnings (") && stderr.contains("uncommitted"),
         "{stderr}"
     );
 }
@@ -7422,7 +7428,7 @@ fn tasks_color_is_always_validated_and_warnings_use_the_stderr_painter() {
         .output()
         .unwrap();
     assert!(warned.status.success());
-    assert!(String::from_utf8_lossy(&warned.stderr).starts_with("\x1b[33mwarning:\x1b[0m "));
+    assert!(String::from_utf8_lossy(&warned.stderr).starts_with("\x1b[1m── warnings (1) \x1b[0m"));
 }
 
 /// A pretty show overview row's value, independent of key column width.

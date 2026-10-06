@@ -1906,10 +1906,21 @@ pub fn render_error(e: &Error) -> String {
     serde_json::json!({ "error": { "kind": e.kind(), "detail": e.to_string() } }).to_string()
 }
 
-/// stderr text for warnings in pretty mode.
-pub fn pretty_warnings(warnings: &[String], painter: &Painter) -> String {
-    let prefix = painter.paint(Style::Warning, "warning:");
-    warnings.iter().map(|w| format!("{prefix} {w}\n")).collect()
+/// stderr text for warnings in pretty mode: a `── warnings (n)` rule, then one per line.
+pub fn pretty_warnings(warnings: &[String], painter: &Painter, width: Option<usize>) -> String {
+    if warnings.is_empty() {
+        return String::new();
+    }
+    let mut rendered = present::rule(
+        &format!("warnings ({})", warnings.len()),
+        painter,
+        width.unwrap_or(crate::show_text::MEASURE),
+    );
+    for warning in warnings {
+        rendered.push_str(warning);
+        rendered.push('\n');
+    }
+    rendered
 }
 
 pub fn warnings_of(out: &Output) -> Vec<String> {

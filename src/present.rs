@@ -147,6 +147,18 @@ pub fn count(status: Status, value: usize) -> Span {
     Span::styled(value.to_string(), style)
 }
 
+/// `── name ` in the heading role, then a dim rule out to `width` (show layout §3.2).
+pub fn rule(name: &str, painter: &Painter, width: usize) -> String {
+    let head = format!("── {name} ");
+    let fill = width.saturating_sub(head.chars().count());
+    let mut line = heading(&head, None).paint(painter);
+    if fill > 0 {
+        line.push_str(&painter.paint(Style::Chrome, &"─".repeat(fill)));
+    }
+    line.push('\n');
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
