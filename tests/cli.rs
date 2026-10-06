@@ -6094,9 +6094,9 @@ fn tree_nests_prunes_and_orders() {
 
     let out = env.cmd(&dir).args(["--pretty", "tree"]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains(&format!("{goal}  P1")), "{text}");
+    assert!(text.contains(&format!("{goal}      P1")), "{text}");
     assert!(
-        text.contains(&format!("  {big}  P2")),
+        text.contains(&format!("  {big}    P2")),
         "children are indented: {text}"
     );
 }
@@ -7504,8 +7504,8 @@ fn project_colors_paint_prefixes_and_titles_without_changing_json_or_layout() {
                 colored.contains("\x1b[38;2;171;205;239mDotfiles\x1b[0m"),
                 "{colored:?}"
             );
-            assert!(colored.contains("\x1b[2m [research]\x1b[0m"), "{colored:?}");
-            assert!(colored.contains("\x1b[34midea   \x1b[0m"), "{colored:?}");
+            assert!(colored.contains(" \x1b[2m[research]\x1b[0m"), "{colored:?}");
+            assert!(colored.contains("\x1b[34midea\x1b[0m"), "{colored:?}");
             assert!(colored.contains("  Unassigned\n"), "{colored:?}");
         }
         for mode in ["never", "auto"] {
@@ -7688,7 +7688,7 @@ fn colored_tables_use_semantic_roles_without_changing_layout() {
         colored.contains("\x1b[1;38;2;215;95;215mP0\x1b[0m"),
         "{colored:?}"
     );
-    assert!(colored.contains("\x1b[2m [now]\x1b[0m"));
+    assert!(colored.contains(" \x1b[2m[now]\x1b[0m"));
 
     let plain_ready = env.cmd(&dir).args(["--pretty", "ready"]).output().unwrap();
     let colored_ready = env
@@ -12346,11 +12346,11 @@ fn list_sorts_by_priority_updated_or_created_and_prints_the_date() {
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     let text = pretty(&["list"]);
-    assert!(text.contains("todo    2026-02-02  A\n"), "{text}");
+    assert!(text.contains("todo  2026-02-02  A\n"), "{text}");
     let text = pretty(&["list", "--sort", "created"]);
-    assert!(text.contains("todo    2026-01-01  A\n"), "{text}");
+    assert!(text.contains("todo  2026-01-01  A\n"), "{text}");
     let text = pretty(&["ready"]);
-    assert!(text.contains("todo    2026-02-02  A\n"), "{text}");
+    assert!(text.contains("todo  2026-02-02  A\n"), "{text}");
 }
 
 #[test]
@@ -17045,8 +17045,8 @@ fn complexity_is_set_cleared_listed_and_completed() {
     assert!(env.json(&sci, &["show", &id])["task"]["complexity"].is_null());
     let pretty = env.pretty(&sci, &["list"]);
     assert!(
-        pretty.contains(" -    "),
-        "unassessed shows a dash: {pretty}"
+        pretty.lines().next().unwrap().split_whitespace().nth(3) == Some("-"),
+        "unassessed shows a dash in the complexity column: {pretty}"
     );
 
     let err = env.usage(&sci, &["add", "Bad", "--complexity", "medium"]);
@@ -26624,4 +26624,36 @@ fn ready_tree_and_prime_rows_carry_the_project_color() {
             "{args:?}: {text}"
         );
     }
+}
+
+#[test]
+fn list_ids_take_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "A task"]));
+    write_project_color(&sci, "sci", "#123456");
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--color", "always", "list"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains(&format!("\x1b[38;2;18;52;86m{id}")), "{text}");
+}
+
+#[test]
+fn prime_sections_share_every_fixed_width_when_piped() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let todo = id_of(env.json(&dir, &["add", "Ready one", "--size", "s"]));
+    let doing = id_of(env.json(&dir, &["add", "Doing one", "--size", "xl"]));
+    env.json(&dir, &["start", &doing]);
+    let text = env.pretty(&dir, &["prime"]);
+    let line = |id: &str| text.lines().find(|l| l.contains(id)).unwrap().to_string();
+    let (a, b) = (line(&todo), line(&doing));
+    assert_eq!(
+        a.find("Ready"),
+        b.find("Doing"),
+        "titles align across sections:\n{text}"
+    );
 }

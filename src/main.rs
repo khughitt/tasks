@@ -36,6 +36,7 @@ mod stale;
 mod style;
 #[cfg(test)]
 mod surface;
+mod table;
 mod time;
 
 use clap::{CommandFactory, Parser};
@@ -250,7 +251,7 @@ fn main() {
             } else {
                 String::new()
             };
-            let wrap_width = if format == Format::Pretty
+            let layout = if format == Format::Pretty
                 && matches!(
                     &out,
                     output::Output::List(_)
@@ -260,10 +261,13 @@ fn main() {
                         | output::Output::Tree(_)
                         | output::Output::Show(_)
                         | output::Output::Next(_)
+                        | output::Output::Lanes(_)
                 ) {
                 match output::terminal_width() {
-                    Ok(Some(width)) => output::Wrap::at(width),
-                    Ok(None) => output::Wrap::NONE,
+                    Ok(width) => table::Layout {
+                        width,
+                        headers: false,
+                    },
                     Err(error) => {
                         to_stderr(&warnings);
                         to_stderr(&format!("{}\n", output::render_error(&error)));
@@ -271,9 +275,9 @@ fn main() {
                     }
                 }
             } else {
-                output::Wrap::NONE
+                table::Layout::default()
             };
-            let rendered = output::render(&out, format, &stdout_painter, wrap_width);
+            let rendered = output::render(&out, format, &stdout_painter, &layout);
             let written = if silent {
                 Ok(())
             } else {

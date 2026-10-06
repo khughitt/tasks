@@ -1,3 +1,4 @@
+use crate::table::visible_width;
 use std::io::IsTerminal;
 use unicode_width::UnicodeWidthChar;
 
@@ -992,10 +993,15 @@ pub enum Output {
     Retire(RetireOut),
 }
 
-pub fn render(out: &Output, format: Format, painter: &Painter, wrap: Wrap) -> String {
+pub fn render(
+    out: &Output,
+    format: Format,
+    painter: &Painter,
+    layout: &crate::table::Layout,
+) -> String {
     match format {
         Format::Json => serde_json::to_string(out).expect("output serializes"),
-        Format::Pretty => pretty(out, painter, wrap),
+        Format::Pretty => pretty(out, painter, layout),
     }
 }
 
@@ -1022,7 +1028,8 @@ fn halt_line(halts: &[HaltRow]) -> String {
     format!("halt: {named}; allowed: halt work, linked work, or equally urgent priority{missing}\n")
 }
 
-fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
+fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> String {
+    let wrap = layout.width.map_or(Wrap::NONE, Wrap::at);
     match out {
         Output::Init(o) => o.prefix.clone(),
         Output::Retire(o) => match &o.retired {
@@ -1108,27 +1115,19 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             }
             grid_text(&grid, painter)
         }
-        Output::Show(o) => crate::show_text::render(&o.fields, painter, wrap.width()),
+        Output::Show(o) => crate::show_text::render(&o.fields, painter, layout.width),
         Output::Next(o) => format!(
             "{}{}",
             halt_line(&o.halts),
             match &o.next {
-                Some(fields) => crate::show_text::render(fields, painter, wrap.width()),
+                Some(fields) => crate::show_text::render(fields, painter, layout.width),
                 None => "nothing ready".into(),
             }
         ),
         Output::List(o) => format!(
             "{}{}",
             halt_line(&o.halts),
-            table(
-                &o.tasks,
-                o.date,
-                painter,
-                id_width(o.tasks.iter().map(|row| row.id.as_str())),
-                any_parallel(&o.tasks),
-                any_type(&o.tasks),
-                wrap,
-            )
+            task_table(&o.tasks, o.date, painter, layout)
         ),
         Output::Parked(o) => parked_table(
             &o.tasks,
@@ -1157,25 +1156,64 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                 .join("\n")
         }
         Output::Prime(o) => {
-            // One decision for the whole output: prime's blocks align today only because
-            // every width is fixed, and a per-section decision would break that.
-            let parallel_column = any_parallel(&o.closeout)
+            let parallel = any_parallel(&o.closeout)
                 || any_parallel_tree(&o.roadmap)
                 || any_parallel(&o.ready)
                 || any_parallel(&o.doing);
-            let type_column = any_type(&o.closeout)
+            let kind = any_type(&o.closeout)
                 || any_type_tree(&o.roadmap)
                 || any_type(&o.ready)
                 || any_type(&o.doing);
-            let id_width = id_width(
-                o.closeout
-                    .iter()
-                    .chain(&o.ready)
-                    .chain(&o.doing)
-                    .map(|row| row.id.as_str())
-                    .chain(o.parked.iter().map(|row| row.id.as_str())),
-            )
-            .max(id_width_tree(&o.roadmap));
+            let columns = task_columns(parallel, kind);
+            let rows_of = |rows: &[TaskSummary]| -> Vec<crate::table::Row> {
+                rows.iter()
+                    .map(|row| task_row(row, DateColumn::Updated, painter, parallel, kind, 0))
+                    .collect()
+            };
+            let closeout = rows_of(&o.closeout);
+            let ready_ids: std::collections::HashSet<&str> =
+                o.ready.iter().map(|row| row.id.as_str()).collect();
+            let mut roadmap = Vec::new();
+            let mut listed_under_ready = 0;
+            for node in &o.roadmap {
+                if node.summary.child_count > 0 {
+                    tree_rows(
+                        std::slice::from_ref(node),
+                        0,
+                        painter,
+                        parallel,
+                        kind,
+                        &mut roadmap,
+                    );
+                } else if ready_ids.contains(node.summary.id.as_str()) {
+                    listed_under_ready += 1;
+                } else {
+                    roadmap.push(task_row(
+                        &node.summary,
+                        DateColumn::Updated,
+                        painter,
+                        parallel,
+                        kind,
+                        0,
+                    ));
+                }
+            }
+            let ready = rows_of(&o.ready);
+            let doing = rows_of(&o.doing);
+            let mut shared = crate::table::shared_widths(
+                &columns,
+                &[&closeout, &roadmap, &ready, &doing],
+                layout.headers,
+            );
+            let id = shared
+                .id()
+                .unwrap_or(0)
+                .max(o.parked.iter().map(|row| row.id.len()).max().unwrap_or(0));
+            shared.0[0] = Some(id);
+            let section = |rows: &[crate::table::Row]| {
+                crate::table::render(&columns, rows, layout, Some(&shared), painter)
+            };
+            let wrap = layout.width.map_or(Wrap::NONE, Wrap::at);
             let header = match (&o.prefix, &o.group) {
                 (Some(prefix), _) => format!("project {prefix}"),
                 (None, Some(group)) => format!("group {group}: projects {}", o.projects.join(", ")),
@@ -1232,15 +1270,7 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "closeout:")
             ));
-            rendered.push_str(&table(
-                &o.closeout,
-                DateColumn::Updated,
-                painter,
-                id_width,
-                parallel_column,
-                type_column,
-                wrap,
-            ));
+            rendered.push_str(&section(&closeout));
             if !o.lanes.is_empty() {
                 rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "lanes:")));
                 let lane_width = o
@@ -1255,34 +1285,7 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "roadmap:")
             ));
-            let ready_ids: std::collections::HashSet<&str> =
-                o.ready.iter().map(|row| row.id.as_str()).collect();
-            let mut listed_under_ready = 0;
-            for node in &o.roadmap {
-                if node.summary.child_count > 0 {
-                    rendered.push_str(&tree_text(
-                        std::slice::from_ref(node),
-                        0,
-                        painter,
-                        id_width,
-                        parallel_column,
-                        type_column,
-                        wrap,
-                    ));
-                } else if ready_ids.contains(node.summary.id.as_str()) {
-                    listed_under_ready += 1;
-                } else {
-                    rendered.push_str(&table(
-                        std::slice::from_ref(&node.summary),
-                        DateColumn::Updated,
-                        painter,
-                        id_width,
-                        parallel_column,
-                        type_column,
-                        wrap,
-                    ));
-                }
-            }
+            rendered.push_str(&section(&roadmap));
             rendered.push_str(&format!(
                 "{listed_under_ready} childless root(s) are listed under ready\n"
             ));
@@ -1290,27 +1293,11 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
                 "\n{}\n",
                 painter.paint(Style::Emphasis, "parked:")
             ));
-            rendered.push_str(&parked_table(&o.parked, painter, id_width, wrap));
+            rendered.push_str(&parked_table(&o.parked, painter, id, wrap));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "ready:")));
-            rendered.push_str(&table(
-                &o.ready,
-                DateColumn::Updated,
-                painter,
-                id_width,
-                parallel_column,
-                type_column,
-                wrap,
-            ));
+            rendered.push_str(&section(&ready));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "doing:")));
-            rendered.push_str(&table(
-                &o.doing,
-                DateColumn::Updated,
-                painter,
-                id_width,
-                parallel_column,
-                type_column,
-                wrap,
-            ));
+            rendered.push_str(&section(&doing));
             rendered
         }
         Output::Lanes(o) => lane_lines(
@@ -1336,15 +1323,13 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             }
             rendered
         }
-        Output::Tree(o) => tree_text(
-            &o.nodes,
-            0,
-            painter,
-            id_width_tree(&o.nodes),
-            any_parallel_tree(&o.nodes),
-            any_type_tree(&o.nodes),
-            wrap,
-        ),
+        Output::Tree(o) => {
+            let parallel = any_parallel_tree(&o.nodes);
+            let kind = any_type_tree(&o.nodes);
+            let mut rows = Vec::new();
+            tree_rows(&o.nodes, 0, painter, parallel, kind, &mut rows);
+            crate::table::render(&task_columns(parallel, kind), &rows, layout, None, painter)
+        }
         Output::Tags(o) => {
             let mut rendered = String::new();
             for row in &o.tags {
@@ -1374,41 +1359,6 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
         ),
         Output::Detach(o) => format!("recorded {} as detached; no file was present", o.name),
     }
-}
-
-fn tree_text(
-    nodes: &[TreeNode],
-    depth: usize,
-    painter: &Painter,
-    id_width: usize,
-    parallel_column: bool,
-    type_column: bool,
-    wrap: Wrap,
-) -> String {
-    let mut rendered = String::new();
-    for node in nodes {
-        let row = table(
-            std::slice::from_ref(&node.summary),
-            DateColumn::Updated,
-            painter,
-            id_width,
-            parallel_column,
-            type_column,
-            wrap.indented(depth * 2),
-        );
-        rendered.push_str(&"  ".repeat(depth));
-        rendered.push_str(&row);
-        rendered.push_str(&tree_text(
-            &node.children,
-            depth + 1,
-            painter,
-            id_width,
-            parallel_column,
-            type_column,
-            wrap,
-        ));
-    }
-    rendered
 }
 
 /// One line per lane: id, priority, title, then its state with the pick or its main
@@ -1475,8 +1425,7 @@ fn waiting_text(causes: &Causes) -> String {
 }
 
 /// Whether a pretty rendering must reserve the parallel column. Decided once per command
-/// output and passed into `table`: `tree_text` and `prime`'s roadmap call `table` one row
-/// at a time, so a per-call decision would shift dates between adjacent siblings.
+/// output so a per-section decision cannot shift dates between adjacent siblings.
 pub fn any_parallel(rows: &[TaskSummary]) -> bool {
     rows.iter().any(|row| row.parallel)
 }
@@ -1500,8 +1449,7 @@ fn type_letter(row: &TaskSummary) -> Option<char> {
 }
 
 /// Whether a pretty rendering must reserve the type column. Same once-per-output rule as
-/// `any_parallel`: `tree_text` and `prime`'s roadmap call `table` one row at a time, so a
-/// per-call decision would shift dates between adjacent siblings.
+/// `any_parallel`, so dates stay aligned between adjacent siblings.
 pub fn any_type(rows: &[TaskSummary]) -> bool {
     rows.iter().any(|row| type_letter(row).is_some())
 }
@@ -1517,14 +1465,6 @@ pub fn any_type_tree(nodes: &[TreeNode]) -> bool {
 /// and an unpadded id shifts every later column of its row.
 fn id_width<'a>(ids: impl IntoIterator<Item = &'a str>) -> usize {
     ids.into_iter().map(str::len).max().unwrap_or(0)
-}
-
-fn id_width_tree(nodes: &[TreeNode]) -> usize {
-    nodes
-        .iter()
-        .map(|node| node.summary.id.len().max(id_width_tree(&node.children)))
-        .max()
-        .unwrap_or(0)
 }
 
 /// Whether a pretty rendering of `out` paints from the theme's colors, and so whether
@@ -1609,25 +1549,6 @@ fn terminal_attached_width() -> Option<usize> {
     }
 }
 
-/// The visible length of text the painter has already wrapped in SGR sequences: padding
-/// lands before painting, so ANSI bytes must not count toward a wrap width.
-fn visible_width(text: &str) -> usize {
-    let mut count = 0;
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            for terminator in chars.by_ref() {
-                if terminator.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            count += c.width().unwrap_or(0);
-        }
-    }
-    count
-}
-
 // ponytail: per-character widths can split joined emoji; use grapheme clusters if needed.
 fn columns(chars: &[(char, Option<Style>)]) -> usize {
     chars.iter().map(|(c, _)| c.width().unwrap_or(0)).sum()
@@ -1642,11 +1563,6 @@ pub struct Wrap {
 }
 
 impl Wrap {
-    /// The width rows wrap at; None keeps every row on one line.
-    pub fn width(&self) -> Option<usize> {
-        self.width
-    }
-
     /// Every row on one line, whatever its length.
     pub const NONE: Wrap = Wrap {
         width: None,
@@ -1658,14 +1574,6 @@ impl Wrap {
         Wrap {
             width: Some(width),
             indent: 0,
-        }
-    }
-
-    /// The same width under a tree node's existing indentation.
-    pub fn indented(self, indent: usize) -> Wrap {
-        Wrap {
-            indent: self.indent + indent,
-            ..self
         }
     }
 }
@@ -1841,128 +1749,180 @@ fn fill_hard_split(
     line.extend_from_slice(word);
 }
 
-/// Pad first, paint last: ANSI bytes count toward `{:<n}` widths, so every width-sensitive
-/// field is formatted to its final visible width before the painter wraps it.
-pub fn table(
+pub fn task_columns(parallel: bool, kind: bool) -> Vec<crate::table::Column> {
+    use crate::table::Column;
+    let mut columns = vec![
+        Column::fixed("id"),
+        Column::fixed("P"),
+        Column::fixed("size"),
+        Column::fixed("cx"),
+        Column::fixed("process"),
+        Column::fixed("status"),
+    ];
+    if parallel {
+        columns.push(Column::fixed("||"));
+    }
+    if kind {
+        columns.push(Column::fixed("type"));
+    }
+    columns.push(Column::fixed("date"));
+    columns.push(Column::wrap("title", 20, None));
+    columns
+}
+
+pub fn task_row(
+    row: &TaskSummary,
+    date: DateColumn,
+    painter: &Painter,
+    parallel: bool,
+    kind: bool,
+    indent: usize,
+) -> crate::table::Row {
+    let date = match date {
+        DateColumn::Updated => Some(present::date(&row.updated)),
+        DateColumn::Created => Some(present::date(&row.created)),
+        DateColumn::Due => match (&row.periodic, &row.deferred) {
+            (Some(periodic), _) => match (&periodic.due, periodic.due_now) {
+                (Some(due), _) => Some(present::date(due)),
+                (None, true) => Some(present::today()),
+                (None, false) => None,
+            },
+            (None, Some(deferred)) => Some(present::date(&deferred.until)),
+            (None, None) => None,
+        },
+    }
+    .map(|span| span.paint(painter))
+    .unwrap_or_else(|| "-".into());
+    let mut cells = vec![
+        format!(
+            "{}{}",
+            "  ".repeat(indent),
+            present::row_id(&row.id, row.project_color).paint(painter)
+        ),
+        present::priority(row.priority).paint(painter),
+        present::size(row.size).paint(painter),
+        present::complexity(row.complexity).paint(painter),
+        present::process(row.process, "-").paint(painter),
+        present::status(row.status).paint(painter),
+    ];
+    if parallel {
+        cells.push(if row.parallel {
+            "||".into()
+        } else {
+            String::new()
+        });
+    }
+    if kind {
+        cells.push(
+            type_letter(row)
+                .map(|letter| painter.paint(Style::Emphasis, &letter.to_string()))
+                .unwrap_or_default(),
+        );
+    }
+    cells.push(date);
+    cells.push(title_cell(row, painter));
+    crate::table::Row::new(cells)
+}
+
+/// The title and the suffixes that ride with it: tags, a due cadence, a deferral, a quiet
+/// recipe, the owner.
+fn title_cell(row: &TaskSummary, painter: &Painter) -> String {
+    let mut cell = present::title(&row.title, row.project_color).paint(painter);
+    if !row.tags.is_empty() {
+        let tags = present::tags(&row.tags);
+        cell.push(' ');
+        cell.push_str(
+            &present::Span {
+                text: format!("[{}]", tags.text),
+                ..tags
+            }
+            .paint(painter),
+        );
+    }
+    if let Some(periodic) = row.periodic.as_ref().filter(|periodic| periodic.due_now) {
+        let when = periodic
+            .due
+            .as_deref()
+            .map(|due| crate::time::day(due).to_string())
+            .unwrap_or_else(|| "now".into());
+        cell.push_str("  ");
+        cell.push_str(&painter.paint(
+            Style::Emphasis,
+            &format!("every {}, due {when}", periodic.every),
+        ));
+    }
+    if let Some(deferred) = &row.deferred {
+        let text = if deferred.due {
+            format!("due {}", deferred.until)
+        } else {
+            format!("defer {}", deferred.until)
+        };
+        cell.push_str("  ");
+        cell.push_str(&painter.paint(Style::Emphasis, &text));
+    }
+    if let Some(park) = row
+        .park
+        .as_ref()
+        .filter(|park| park.reason == Some(crate::claims::Reason::Quiet))
+    {
+        let text = format!(
+            "waits on {}",
+            crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)
+        );
+        cell.push_str("  ");
+        cell.push_str(&painter.paint(Style::Emphasis, &text));
+    }
+    let owner = match &row.claim {
+        Some(claim) => Some(present::claim(claim)),
+        None => row.owner.as_deref().map(present::owner),
+    };
+    if let Some(owner) = owner {
+        cell.push(' ');
+        cell.push_str(
+            &present::Span {
+                text: format!("@{}", owner.text),
+                ..owner
+            }
+            .paint(painter),
+        );
+    }
+    cell
+}
+
+pub fn tree_rows(
+    nodes: &[TreeNode],
+    depth: usize,
+    painter: &Painter,
+    parallel: bool,
+    kind: bool,
+    rows: &mut Vec<crate::table::Row>,
+) {
+    for node in nodes {
+        rows.push(task_row(
+            &node.summary,
+            DateColumn::Updated,
+            painter,
+            parallel,
+            kind,
+            depth,
+        ));
+        tree_rows(&node.children, depth + 1, painter, parallel, kind, rows);
+    }
+}
+
+fn task_table(
     rows: &[TaskSummary],
     date: DateColumn,
     painter: &Painter,
-    id_width: usize,
-    parallel_column: bool,
-    type_column: bool,
-    wrap: Wrap,
+    layout: &crate::table::Layout,
 ) -> String {
-    let mut rendered = String::new();
-    for row in rows {
-        let date = match date {
-            DateColumn::Updated => Some(present::date(&row.updated)),
-            DateColumn::Created => Some(present::date(&row.created)),
-            DateColumn::Due => match (&row.periodic, &row.deferred) {
-                (Some(periodic), _) => match (&periodic.due, periodic.due_now) {
-                    (Some(due), _) => Some(present::date(due)),
-                    (None, true) => Some(present::today()),
-                    (None, false) => None,
-                },
-                (None, Some(deferred)) => Some(present::date(&deferred.until)),
-                (None, None) => None,
-            },
-        };
-        let date = date
-            .map(|span| span.paint(painter))
-            .unwrap_or_else(|| "-".into());
-        let id = present::id(&row.id).left(id_width).paint(painter);
-        let priority = present::priority(row.priority).paint(painter);
-        let size = present::size(row.size).left(2).paint(painter);
-        let complexity = present::complexity(row.complexity).left(4).paint(painter);
-        let process = present::process(row.process, "-").left(7).paint(painter);
-        let status = present::status(row.status).left(7).paint(painter);
-        let tags = if row.tags.is_empty() {
-            String::new()
-        } else {
-            format!(" [{}]", present::tags(&row.tags).text)
-        };
-        // A due row's status column reads `done`, which is true; the marker is what says why
-        // it is here (spec §5.1). Not-yet-due rows never reach `ready`, and carry their date
-        // in the due column of `list --periodic` instead.
-        let cadence = match &row.periodic {
-            Some(periodic) if periodic.due_now => {
-                let when = periodic
-                    .due
-                    .as_deref()
-                    .map(|due| crate::time::day(due).to_string())
-                    .unwrap_or_else(|| "now".into());
-                format!("  every {}, due {when}", periodic.every)
-            }
-            _ => String::new(),
-        };
-        // A deferred row says why it is absent from `ready`; a due one says why it is back.
-        let deferral = match &row.deferred {
-            Some(deferred) if deferred.due => format!("  due {}", deferred.until),
-            Some(deferred) => format!("  defer {}", deferred.until),
-            None => String::new(),
-        };
-        // A quiet park is waiting for an idle host, which the status column cannot say; the
-        // recipe reads as it does in `list --parked` (quiet-queue spec §4).
-        let quiet = match &row.park {
-            Some(park) if park.reason == Some(crate::claims::Reason::Quiet) => format!(
-                "  waits on {}",
-                crate::claims::describe_stop(
-                    park.waiting_on,
-                    park.reason,
-                    park.needs,
-                    park.minutes
-                )
-            ),
-            _ => String::new(),
-        };
-        let owner = match &row.claim {
-            Some(claim) => Some(present::claim(claim)),
-            None => row.owner.as_deref().map(present::owner),
-        };
-        let owner_text = owner
-            .as_ref()
-            .map(|span| format!(" @{}", span.text))
-            .unwrap_or_default();
-        // Unpainted: it is already distinct, and painting the blank spacer would wrap
-        // whitespace in ANSI for no gain.
-        let mark = match (parallel_column, row.parallel) {
-            (false, _) => "",
-            (true, true) => "|| ",
-            (true, false) => "   ",
-        };
-        // A blank row still reserves the column's width so siblings stay aligned. The
-        // blank is unpainted, like the parallel spacer: the letter carries the meaning,
-        // and color is only styling, so redirected and ASCII output stay honest.
-        let kind = match (type_column, type_letter(row)) {
-            (false, _) => String::new(),
-            (true, Some(letter)) => {
-                format!("{} ", painter.paint(Style::Emphasis, &letter.to_string()))
-            }
-            (true, None) => "  ".into(),
-        };
-        let prefix =
-            format!("{id}  {priority} {size} {complexity} {process} {status} {mark}{kind}{date}  ");
-        rendered.push_str(&render_row(
-            &prefix,
-            &[
-                (
-                    row.title.as_str(),
-                    present::title(&row.title, row.project_color).style,
-                ),
-                (tags.as_str(), present::tags(&row.tags).style),
-                (cadence.as_str(), Some(Style::Emphasis)),
-                (deferral.as_str(), Some(Style::Emphasis)),
-                (quiet.as_str(), Some(Style::Emphasis)),
-                (
-                    owner_text.as_str(),
-                    owner.as_ref().and_then(|span| span.style),
-                ),
-            ],
-            painter,
-            wrap,
-        ));
-    }
-    rendered
+    let parallel = any_parallel(rows);
+    let kind = any_type(rows);
+    let built: Vec<crate::table::Row> = rows
+        .iter()
+        .map(|row| task_row(row, date, painter, parallel, kind, 0))
+        .collect();
+    crate::table::render(&task_columns(parallel, kind), &built, layout, None, painter)
 }
 
 pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap: Wrap) -> String {
@@ -2146,6 +2106,52 @@ mod tests {
         row
     }
 
+    fn layout_at(width: usize) -> crate::table::Layout {
+        crate::table::Layout {
+            width: Some(width),
+            headers: false,
+        }
+    }
+
+    fn render_tasks(
+        rows: &[TaskSummary],
+        date: DateColumn,
+        painter: &Painter,
+        parallel: bool,
+        kind: bool,
+        layout: crate::table::Layout,
+    ) -> String {
+        let built: Vec<_> = rows
+            .iter()
+            .map(|row| task_row(row, date, painter, parallel, kind, 0))
+            .collect();
+        crate::table::render(
+            &task_columns(parallel, kind),
+            &built,
+            &layout,
+            None,
+            painter,
+        )
+    }
+
+    fn render_tree(
+        nodes: &[TreeNode],
+        painter: &Painter,
+        parallel: bool,
+        kind: bool,
+        layout: crate::table::Layout,
+    ) -> String {
+        let mut built = Vec::new();
+        tree_rows(nodes, 0, painter, parallel, kind, &mut built);
+        crate::table::render(
+            &task_columns(parallel, kind),
+            &built,
+            &layout,
+            None,
+            painter,
+        )
+    }
+
     fn plain() -> Painter {
         Painter::new(ColorMode::Never, Format::Pretty, false)
     }
@@ -2184,53 +2190,50 @@ mod tests {
     fn the_marker_column_is_absent_when_nothing_is_marked() {
         let rows = [row("xx-000001", false), row("xx-000002", false)];
         assert!(!any_parallel(&rows));
-        let text = table(
+        let text = render_tasks(
             &rows,
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             false,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         assert!(!text.contains("||"), "{text}");
-        assert!(text.contains("todo    2026-09-06"), "{text}");
+        assert!(text.contains("todo  2026-09-06"), "{text}");
     }
 
     #[test]
     fn the_type_column_is_absent_when_nothing_recurs() {
         let rows = [row("xx-000001", false), row("xx-000002", false)];
         assert!(!any_type(&rows));
-        let text = table(
+        let text = render_tasks(
             &rows,
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             false,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         assert!(!text.contains(" p "), "{text}");
-        assert!(text.contains("todo    2026-09-06"), "{text}");
+        assert!(text.contains("todo  2026-09-06"), "{text}");
     }
 
     #[test]
     fn a_recurring_row_carries_the_type_letter_and_keeps_its_neighbour_aligned() {
         let rows = [recurring("xx-000001"), row("xx-000002", false)];
         assert!(any_type(&rows));
-        let text = table(
+        let text = render_tasks(
             &rows,
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             true,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
-        assert!(lines[0].contains("todo    p 2026-09-06"), "{}", lines[0]);
-        assert!(lines[1].contains("todo      2026-09-06"), "{}", lines[1]);
+        assert!(lines[0].contains("todo  p  2026-09-06"), "{}", lines[0]);
+        assert!(lines[1].contains("todo     2026-09-06"), "{}", lines[1]);
         assert_eq!(
             lines[0].find("2026-09-06"),
             lines[1].find("2026-09-06"),
@@ -2242,14 +2245,13 @@ mod tests {
     fn the_type_letter_is_painted_but_still_ascii() {
         let rows = [recurring("xx-000001")];
         let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
-        let text = table(
+        let text = render_tasks(
             &rows,
             DateColumn::Updated,
             &colored,
-            0,
             false,
             true,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         assert!(text.contains("\x1b[1mp\x1b[0m "), "{text:?}");
     }
@@ -2272,18 +2274,17 @@ mod tests {
         lane.lane = true;
         let rows = [lane, row("xx-000002", false)];
         assert!(any_type(&rows));
-        let text = table(
+        let text = render_tasks(
             &rows,
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             true,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines[0].contains("todo    ≡ 2026-09-06"), "{}", lines[0]);
-        assert!(lines[1].contains("todo      2026-09-06"), "{}", lines[1]);
+        assert!(lines[0].contains("todo  ≡  2026-09-06"), "{}", lines[0]);
+        assert!(lines[1].contains("todo     2026-09-06"), "{}", lines[1]);
     }
 
     #[test]
@@ -2302,11 +2303,17 @@ mod tests {
             },
         ];
         assert!(any_parallel_tree(&nodes));
-        let text = tree_text(&nodes, 0, &plain(), 0, true, false, Wrap::NONE);
+        let text = render_tree(
+            &nodes,
+            &plain(),
+            true,
+            false,
+            crate::table::Layout::default(),
+        );
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
-        assert!(lines[0].contains("todo    || 2026-09-06"), "{}", lines[0]);
-        assert!(lines[1].contains("todo       2026-09-06"), "{}", lines[1]);
+        assert!(lines[0].contains("todo  ||  2026-09-06"), "{}", lines[0]);
+        assert!(lines[1].contains("todo      2026-09-06"), "{}", lines[1]);
         assert_eq!(
             lines[0].find("2026-09-06"),
             lines[1].find("2026-09-06"),
@@ -2324,7 +2331,7 @@ mod tests {
             warnings: vec![],
             date: DateColumn::Updated,
         });
-        let text = pretty(&out, &plain(), Wrap::NONE);
+        let text = pretty(&out, &plain(), &crate::table::Layout::default());
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
         assert!(lines[1].starts_with("nrp-8e8fde    P2"), "{}", lines[1]);
@@ -2368,14 +2375,13 @@ mod tests {
         let mut urgent = row("xx-000001", false);
         urgent.priority = 0;
         let rows = [urgent, row("xx-000002", false)];
-        let text = table(
+        let text = render_tasks(
             &rows,
             DateColumn::Updated,
             &scaled(),
-            0,
             false,
             false,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         let lines: Vec<&str> = text.lines().collect();
         assert!(
@@ -2394,14 +2400,13 @@ mod tests {
     fn the_date_column_carries_the_recency_role() {
         // row() is updated 2026-09-06, the painter's today: full cyan.
         let rows = [row("xx-000001", false)];
-        let text = table(
+        let text = render_tasks(
             &rows,
             DateColumn::Updated,
             &dated(),
-            0,
             false,
             false,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         assert!(
             text.contains("\x1b[38;2;0;215;255m2026-09-06\x1b[0m"),
@@ -2413,14 +2418,13 @@ mod tests {
     fn a_due_column_paints_now_as_today_and_leaves_a_dash_plain() {
         let due_now = recurring("xx-000001");
         let undated = row("xx-000002", false);
-        let text = table(
+        let text = render_tasks(
             &[due_now, undated],
             DateColumn::Due,
             &dated(),
-            0,
             false,
             false,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         let lines: Vec<&str> = text.lines().collect();
         assert!(
@@ -2428,7 +2432,7 @@ mod tests {
             "{:?}",
             lines[0]
         );
-        assert!(lines[1].contains("todo    -  "), "{:?}", lines[1]);
+        assert!(lines[1].contains("todo  -    "), "{:?}", lines[1]);
         assert!(!lines[1].contains("38;2"), "{:?}", lines[1]);
     }
 
@@ -2470,44 +2474,69 @@ mod tests {
     }
 
     #[test]
-    fn a_long_title_wraps_under_itself_at_the_terminal_width() {
-        let text = table(
-            &[long_row()],
-            DateColumn::Updated,
+    fn a_list_row_lays_out_its_columns_and_wraps_its_title_in_place() {
+        let layout = crate::table::Layout {
+            width: Some(80),
+            headers: false,
+        };
+        let built: Vec<crate::table::Row> = [long_row()]
+            .iter()
+            .map(|row| task_row(row, DateColumn::Updated, &plain(), false, false, 0))
+            .collect();
+        let text =
+            crate::table::render(&task_columns(false, false), &built, &layout, None, &plain());
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines.len() > 1, "{text}");
+        let title = lines[0].find("alpha").unwrap();
+        for line in &lines[1..] {
+            assert_eq!(line.len() - line.trim_start().len(), title, "{text}");
+        }
+        assert!(
+            lines
+                .iter()
+                .all(|line| crate::table::visible_width(line) <= 80),
+            "{text}"
+        );
+        let mut words = vec![&lines[0][title..]];
+        words.extend(lines[1..].iter().map(|line| line.trim_start()));
+        assert_eq!(words.join(" "), long_row().title, "{text}");
+    }
+
+    #[test]
+    fn a_tree_indents_children_inside_the_id_column() {
+        let child = TreeNode {
+            summary: row("xx-000002", false),
+            children: vec![],
+        };
+        let root = TreeNode {
+            summary: row("xx-000001", false),
+            children: vec![child],
+        };
+        let mut built = Vec::new();
+        tree_rows(&[root], 0, &plain(), false, false, &mut built);
+        let text = crate::table::render(
+            &task_columns(false, false),
+            &built,
+            &crate::table::Layout::default(),
+            None,
             &plain(),
-            0,
-            false,
-            false,
-            Wrap::at(80),
         );
         let lines: Vec<&str> = text.lines().collect();
-        assert!(lines.len() > 1, "{text:?}");
-        let title_start = lines[0].find("alpha").expect("title on the first line");
-        for line in &lines[1..] {
-            let content = line.trim_start();
-            assert!(!content.is_empty(), "{text:?}");
-            assert_eq!(line.len() - content.len(), title_start, "{text:?}");
-        }
-        for line in &lines {
-            assert!(line.chars().count() <= 80, "{text:?}");
-        }
-        let mut words = vec![&lines[0][title_start..]];
-        words.extend(lines[1..].iter().map(|line| line.trim_start()));
-        assert_eq!(words.join(" "), long_row().title, "{text:?}");
+        assert!(lines[0].starts_with("xx-000001"), "{text}");
+        assert!(lines[1].starts_with("  xx-000002"), "{text}");
     }
 
     #[test]
     fn wide_characters_fit_the_terminal_columns() {
         let mut row = long_row();
         row.title = "界".repeat(40);
-        let text = table(
+        let text = render_tasks(
             &[row],
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             false,
-            Wrap::at(80),
+            layout_at(80),
         );
         for line in text.lines() {
             let columns: usize = line.chars().map(|c| if c == '界' { 2 } else { 1 }).sum();
@@ -2516,42 +2545,40 @@ mod tests {
     }
 
     #[test]
-    fn a_spaces_only_title_does_not_panic_or_disappear() {
+    fn a_spaces_only_title_keeps_the_row_without_trailing_whitespace() {
         let mut row = long_row();
         row.title = " ".repeat(40);
-        let text = table(
+        let text = render_tasks(
             &[row],
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             false,
-            Wrap::at(80),
+            layout_at(80),
         );
         assert_eq!(text.lines().count(), 1, "{text:?}");
-        assert!(text.contains(&" ".repeat(40)), "{text:?}");
+        assert!(text.starts_with("xx-000001"), "{text:?}");
+        assert_eq!(text.trim_end(), text.lines().next().unwrap(), "{text:?}");
     }
 
     #[test]
     fn a_row_that_fits_the_width_stays_one_line_and_byte_identical() {
         let rows = [row("xx-000001", false)];
-        let wrapped = table(
+        let wrapped = render_tasks(
             &rows,
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             false,
-            Wrap::at(80),
+            layout_at(80),
         );
-        let unwrapped = table(
+        let unwrapped = render_tasks(
             &rows,
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             false,
-            Wrap::NONE,
+            crate::table::Layout::default(),
         );
         assert_eq!(wrapped.lines().count(), 1, "{wrapped:?}");
         assert_eq!(wrapped, unwrapped);
@@ -2559,16 +2586,15 @@ mod tests {
 
     #[test]
     fn a_row_below_the_title_floor_stays_unwrapped() {
-        // The fixed columns alone take 41 columns with an empty id column, so at width 60
-        // only 19 remain for the title: below the floor, the row overflows unwrapped.
-        let text = table(
+        // Fixed cells and gaps take 42 columns, so at width 60 only 18 remain
+        // for the title: below the floor, the row overflows unwrapped.
+        let text = render_tasks(
             &[long_row()],
             DateColumn::Updated,
             &plain(),
-            0,
             false,
             false,
-            Wrap::at(60),
+            layout_at(60),
         );
         assert_eq!(text.lines().count(), 1, "{text:?}");
     }
@@ -2626,14 +2652,13 @@ mod tests {
         let mut due = recurring("xx-000001");
         due.title = long_row().title;
         let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
-        let text = table(
+        let text = render_tasks(
             &[due],
             DateColumn::Due,
             &colored,
-            0,
             false,
             true,
-            Wrap::at(80),
+            layout_at(80),
         );
         assert!(text.contains("\x1b[1m"), "{text:?}");
         assert!(!text.contains("\x1b[1m\x1b[1m"), "{text:?}");
@@ -2655,24 +2680,23 @@ mod tests {
             worktree: "w".into(),
         });
         let marker = "waits on user, quiet; idle, 40 min";
-        let render = |painter: &Painter, wrap| {
-            table(
+        let render = |painter: &Painter, layout| {
+            render_tasks(
                 std::slice::from_ref(&quiet),
                 DateColumn::Updated,
                 painter,
-                0,
                 false,
                 false,
-                wrap,
+                layout,
             )
         };
-        assert!(render(&plain(), Wrap::NONE).contains(marker));
-        let wrapped = render(&plain(), Wrap::at(80));
+        assert!(render(&plain(), crate::table::Layout::default()).contains(marker));
+        let wrapped = render(&plain(), layout_at(80));
         assert!(wrapped.lines().count() > 1, "{wrapped:?}");
         let joined: Vec<&str> = wrapped.lines().map(str::trim).collect();
         assert!(joined.join(" ").contains(marker), "{wrapped:?}");
         let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
-        let text = render(&colored, Wrap::at(80));
+        let text = render(&colored, layout_at(80));
         assert!(text.contains("\x1b[1m"), "{text:?}");
         assert!(!text.contains("\x1b[1m\x1b[1m"), "{text:?}");
     }
@@ -2688,7 +2712,7 @@ mod tests {
                 children: vec![],
             }],
         }];
-        let text = tree_text(&nodes, 0, &plain(), 0, false, false, Wrap::at(80));
+        let text = render_tree(&nodes, &plain(), false, false, layout_at(80));
         let lines: Vec<&str> = text.lines().collect();
         let child_line = lines
             .iter()

@@ -50,6 +50,14 @@ pub fn id(id: &str) -> Span {
     Span::styled(id, Style::Chrome)
 }
 
+/// A task id in a table row: its project's colour when it has one, else chrome.
+pub fn row_id(id: &str, project: Option<Rgb>) -> Span {
+    Span {
+        text: id.into(),
+        style: Some(project.map_or(Style::Chrome, Style::Project)),
+    }
+}
+
 /// A title in a row: the project's color when it has one, else plain.
 pub fn title(title: &str, project: Option<Rgb>) -> Span {
     Span {

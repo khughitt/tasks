@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T14:57:04Z
+updated: 2026-10-06T15:10:03Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -63,3 +63,4 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T14:55:43Z (feat/comfy-tables): resumed
   provenance: {"harness_session":"codex:01a111b5-34a9-7812-a601-575760678301","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-10-06T14:57:04Z (feat/comfy-tables): Execution resumed: user selected subagent-driven; Task 1 in ops .worktrees/cli-headers, then Tasks 2–8 in .worktrees/comfy-tables; accepted plan round 3 governs implementation.
+- 2026-10-06T15:10:03Z (feat/comfy-tables): Task 3 RED run exposed three plan-specified module tests that also pass with an empty renderer; strengthen shared-width, painted-cell, and CJK checks with explicit nonempty content assertions so they detect missing behavior.

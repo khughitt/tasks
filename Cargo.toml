@@ -18,6 +18,7 @@ terminal-trx = "0.2"
 xterm-color = "1"
 unicode-width = "0.2"
 toml_edit = "0.25"
+comfy-table = { version = "8", features = ["custom_styling"] }
 
 [dev-dependencies]
 assert_cmd = "2"
