@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T14:32:53Z
+updated: 2026-10-06T14:32:55Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -53,3 +53,5 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T14:24:51Z (feat/comfy-tables): review: plan round 2 — verdict: revise; findings: P2 1; reviewer: codex/gpt-6.1-sol
 - 2026-10-06T14:24:51Z (feat/comfy-tables): Focused plan re-review: all five implementation fixes addressed and tasks check clean. Remaining verification gap at Task 3 regression test: its fixed cell 40 + status 5 + gaps 6 + wrap minima 20 + 30 = 101, so width 100 stacks. Executing the proposed assertions with the old unconstrained-fixed-column logic restored still passes. Use the original three-column fixture (fixed cell, title, next) at width 100 and assert it does not stack; isolated replay then panics with old constraints and passes with ContentWidth. Plan unchanged; user review park remains.
 - 2026-10-06T14:32:53Z (feat/comfy-tables): plan revised for round 2 (finding verified: 40+5+6+20+30 = 101 > 100 took the stacked path): the fixed-cell regression test now uses a three-column table (fixed 40, title, next; 94 <= 100), asserts no stacked next: line, and keeps the detail that reaches row_blocks
+- 2026-10-06T14:32:55Z (feat/comfy-tables): parked (waiting on user, review): User reviews the plan's round 2 fix (the fixed-cell regression test, Task 3 Step 2) and picks the execution method; then Task 1 (ops-539e1a) starts
+  provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
