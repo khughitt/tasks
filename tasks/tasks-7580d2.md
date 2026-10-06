@@ -1,15 +1,16 @@
 ---
 id: tasks-7580d2
 title: Record a project's former roots and resolve ids and paths through renames
-status: doing
+status: done
 priority: 1
 size: m
 complexity: high
 process: planned
-owner: design/tasks-7580d2
+owner: main
 created: 2026-10-06T13:23:04Z
-updated: 2026-10-06T20:45:59Z
+updated: 2026-10-06T20:58:12Z
 started: 2026-10-06T18:41:11Z
+completed: 2026-10-06T20:58:12Z
 depends: []
 parent: tasks-a7460c
 tags: []
@@ -68,4 +69,10 @@ Cover canonical and aliased ids, current/former roots and their worktree storage
 - 2026-10-06T20:41:30Z (design/tasks-7580d2): parked (waiting on user, approval): User answers Task 6 continuation/backfill approval; agent resumes tasks-8028fd in .worktrees/tasks-7580d2, follows that choice, verifies history, cleans the worktree and closes the rollout and goal. Other host is user-owned: install current binary first, then pre-move init --force with clean status, then own ai backfill.
   provenance: {"harness_session":"codex:01a112bd-d779-7da0-b4f8-f19c8622a779","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-10-06T20:45:59Z (design/tasks-7580d2): resumed
+  provenance: {"harness_session":"codex:01a112bd-d779-7da0-b4f8-f19c8622a779","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T20:55:29Z (main): resumed
+  provenance: {"harness_session":"codex:01a112bd-d779-7da0-b4f8-f19c8622a779","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T20:58:12Z (main): done
+  provenance: {"harness_session":"codex:01a112bd-d779-7da0-b4f8-f19c8622a779","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T20:58:12Z (main): per-host former-root/storage history and read-only tasks resolve landed; reviewed, full gate 1110 passed, locked main install verified; tack storage and approved ai history backfilled, all forms resolve; worktrees cleaned. User owns other host: install current binary first, then pre-move init --force with clean status, then hand-add ai history using that host paths.
   provenance: {"harness_session":"codex:01a112bd-d779-7da0-b4f8-f19c8622a779","harness_session_source":"CODEX_SESSION_ID"}

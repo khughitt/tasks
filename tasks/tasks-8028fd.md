@@ -1,15 +1,16 @@
 ---
 id: tasks-8028fd
 title: "Integrate, publish the vocabulary, and roll out on this host"
-status: doing
+status: done
 priority: 1
 size: s
 complexity: low
 process: direct
-owner: design/tasks-7580d2
+owner: main
 created: 2026-10-06T19:20:06Z
-updated: 2026-10-06T20:53:19Z
+updated: 2026-10-06T20:57:07Z
 started: 2026-10-06T20:24:49Z
+completed: 2026-10-06T20:57:07Z
 depends: [tasks-86a72a]
 parent: tasks-7580d2
 tags: []
@@ -31,3 +32,9 @@ step: "Task 6: Integrate, publish the vocabulary, and roll out on this host"
 - 2026-10-06T20:45:59Z (design/tasks-7580d2): approval: user approved continuing with tack existing edits preserved and the exact ai former-root/storage/until entry; resume backfill verification and cleanup/closeout.
 - 2026-10-06T20:53:18Z (design/tasks-7580d2): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-06T20:53:18Z (design/tasks-7580d2): rollout verified: approved ai former root/storage dated 2026-09-27 saved under registry lock; alias, old root and old storage all resolve tack with no warnings. Tack config unchanged and existing edits preserved. Other-host install-first/init-clean/backfill handoff recorded; final worktree cleanup and task closeout follow.
+- 2026-10-06T20:55:29Z (main): resumed
+  provenance: {"harness_session":"codex:01a112bd-d779-7da0-b4f8-f19c8622a779","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T20:57:07Z (main): done
+  provenance: {"harness_session":"codex:01a112bd-d779-7da0-b4f8-f19c8622a779","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T20:57:07Z (main): reviewed resolver merged and locked-install verified; ops inventory landed/adopted; tack storage and approved ai former history recorded, all three forms resolve; existing tack edits preserved; both worktrees removed; other-host handoff recorded
+  provenance: {"harness_session":"codex:01a112bd-d779-7da0-b4f8-f19c8622a779","harness_session_source":"CODEX_SESSION_ID"}
