@@ -318,6 +318,17 @@ tasks list [--status S]... [--tag T]... [--need N]... [--owner O] [--source REF]
     on, or updated (last activity) when the order is not a date. Every command that
     prints summary rows (ready, prime, tree, sample) shows the updated day.
 
+tasks search <query> [every tasks list option]
+    tasks list narrowed to tasks whose title or body contains <query>: a literal
+    substring after lowercasing both, so a quoted multiword query is one phrase and
+    punctuation is not a pattern. Notes, frontmatter, and attachments are not searched;
+    tags, source, and owner stay field filters. Statuses, filters, scope, order, and the
+    --parked/--periodic/--deferred modes and their pools are list's, as are the output
+    shape and warnings; no match is an empty tasks array. Under --parked the text is
+    matched against the copy the row shows, so a task parked in another checkout is
+    searched there, and an unresolved park never matches. An empty or blank query is a
+    validation error, raised before any project is read.
+
 tasks tree [<id>] [--all] [--project P | --group NAME | --all-projects]
     The hierarchy as nested nodes: the whole forest, or the subtree under <id>. This is
     the read side of parent, as graph is of depends. Without --all the forest is pruned

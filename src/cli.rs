@@ -60,6 +60,48 @@ pub struct ScopeArgs {
     pub group: Option<String>,
 }
 
+/// Everything `list` selects by, shared with `search`: statuses, record filters, order,
+/// the parked/periodic/deferred modes, and scope.
+#[derive(Args, Debug)]
+pub struct ListArgs {
+    /// Filter by status (repeatable): idea, todo, doing, blocked, shelved, done, or dropped.
+    #[arg(
+        long = "status",
+        value_name = "STATUS",
+        add = ArgValueCandidates::new(crate::complete::statuses),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub statuses: Vec<String>,
+    #[command(flatten)]
+    pub filter: FilterArgs,
+    /// Order: priority (then last activity), updated, or created (most recent
+    /// first). Pretty rows show the date sorted on, else last activity.
+    #[arg(
+        long,
+        default_value = "priority",
+        add = ArgValueCandidates::new(crate::complete::sorts),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub sort: String,
+    /// Reverse the chosen order.
+    #[arg(long)]
+    pub reverse: bool,
+    /// Only parked tasks, most recently parked first.
+    #[arg(long, conflicts_with_all = ["sort", "reverse"])]
+    pub parked: bool,
+    /// Only tasks with a cadence, soonest due first, at any status.
+    #[arg(long, conflicts_with_all = ["sort", "reverse", "parked"])]
+    pub periodic: bool,
+    /// Only deferred tasks, soonest date first; due ones lead.
+    #[arg(long, conflicts_with_all = ["sort", "reverse", "parked", "periodic"])]
+    pub deferred: bool,
+
+    #[command(flatten)]
+    pub scope: ScopeArgs,
+}
+
 /// Selection over record fields, shared by `list` and `ready`. Repeats of one flag widen
 /// (any of them); different flags narrow (all of them); `--tag` is all-of.
 #[derive(Args, Debug, Default, Clone)]
@@ -403,42 +445,19 @@ pub enum Command {
         after_help = "Examples:\n  tasks list --sort updated\n  tasks list --status todo --tag cli\n  tasks list -p 0 -p 1 --size s --size xs"
     )]
     List {
-        /// Filter by status (repeatable): idea, todo, doing, blocked, shelved, done, or dropped.
-        #[arg(
-            long = "status",
-            value_name = "STATUS",
-            add = ArgValueCandidates::new(crate::complete::statuses),
-            add = ValueSet,
-            value_parser = ValueSet
-        )]
-        statuses: Vec<String>,
         #[command(flatten)]
-        filter: FilterArgs,
-        /// Order: priority (then last activity), updated, or created (most recent
-        /// first). Pretty rows show the date sorted on, else last activity.
-        #[arg(
-            long,
-            default_value = "priority",
-            add = ArgValueCandidates::new(crate::complete::sorts),
-            add = ValueSet,
-            value_parser = ValueSet
-        )]
-        sort: String,
-        /// Reverse the chosen order.
-        #[arg(long)]
-        reverse: bool,
-        /// Only parked tasks, most recently parked first.
-        #[arg(long, conflicts_with_all = ["sort", "reverse"])]
-        parked: bool,
-        /// Only tasks with a cadence, soonest due first, at any status.
-        #[arg(long, conflicts_with_all = ["sort", "reverse", "parked"])]
-        periodic: bool,
-        /// Only deferred tasks, soonest date first; due ones lead.
-        #[arg(long, conflicts_with_all = ["sort", "reverse", "parked", "periodic"])]
-        deferred: bool,
-
+        list: ListArgs,
+    },
+    /// List tasks whose title or body contains a phrase; takes every list option.
+    #[command(
+        after_help = "Matching is a literal, case-insensitive substring of the title or body; notes,\nfrontmatter, and attachments are not searched.\n\nExamples:\n  tasks search \"text search\"\n  tasks search claim --all-projects --status idea\n  tasks search --parked worktree"
+    )]
+    Search {
+        /// The phrase to find; quote several words to search for them together.
+        #[arg(value_name = "QUERY")]
+        query: String,
         #[command(flatten)]
-        scope: ScopeArgs,
+        list: ListArgs,
     },
     /// Actionable tasks: todo or due recurrences with all dependencies closed.
     Ready {

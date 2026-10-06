@@ -1,18 +1,20 @@
 ---
 id: tasks-af97da
 title: No text search over task titles and bodies across registered projects; quick-add's near-duplicate check had to grep tasks/*.md files in each project directly
-status: doing
+status: done
 priority: 1
 size: m
 complexity: mid
 process: direct
-owner: main
+owner: feat/task-search
 created: 2026-09-30T14:13:18Z
-updated: 2026-10-06T09:17:32Z
+updated: 2026-10-06T09:27:42Z
 started: 2026-10-06T09:17:32Z
-depends: []
+completed: 2026-10-06T09:27:42Z
+depends: [ops-c13647]
 parent: tasks-ffdbaa
 tags: [feedback, gap, "from:mind6"]
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -35,4 +37,11 @@ Original report: No text search over task titles and bodies across registered pr
 - 2026-10-05T00:22:26Z (main): Raised to P1 on 2026-10-04: a quick-add pass filed a duplicate (mind6-c2cdb6 of mind6-b81107) because its near-duplicate check is keyword grep across projects; text search over titles and bodies is the fix.
 - 2026-10-05T01:18:40Z (main): Review 2026-10-05: literal substring search helps discovery but will not reliably catch paraphrased duplicates (the mind6-c2cdb6/b81107 pair shared few words); keep the P1 for discovery and treat paraphrase detection as a separate question.
 - 2026-10-06T09:17:32Z (main): started
+  provenance: {"harness_session":"claude-code:5ea724da-a9ed-49f2-b579-b29c13ab5efd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T09:17:41Z (feat/task-search): resumed
+  provenance: {"harness_session":"claude-code:5ea724da-a9ed-49f2-b579-b29c13ab5efd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T09:27:06Z (feat/task-search): review: impl round 1 — verdict: accept; findings: Minor 8; reviewer: claude-code/claude-opus-5-5
+- 2026-10-06T09:27:42Z (feat/task-search): done
+  provenance: {"harness_session":"claude-code:5ea724da-a9ed-49f2-b579-b29c13ab5efd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T09:27:42Z (feat/task-search): tasks search <query>: literal case-insensitive title/body match over the full list pipeline (filters, scopes, modes, parked copy resolution), with docs, skill, and cli.toml row (ops-c13647)
   provenance: {"harness_session":"claude-code:5ea724da-a9ed-49f2-b579-b29c13ab5efd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

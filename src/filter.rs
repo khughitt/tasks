@@ -232,6 +232,25 @@ impl<'a> Fields<'a> {
     }
 }
 
+/// `search`'s phrase: a literal substring of a task's title or body, compared after
+/// lowercasing both. Notes, frontmatter, and attachments are never searched; metadata
+/// such as tags and source stays with the field filters.
+#[derive(Debug)]
+pub struct TextQuery(String);
+
+impl TextQuery {
+    pub fn parse(query: &str) -> Result<TextQuery> {
+        if query.trim().is_empty() {
+            return Err(Error::Validation("search query must not be empty".into()));
+        }
+        Ok(TextQuery(query.to_lowercase()))
+    }
+
+    pub fn matches(&self, task: &Task) -> bool {
+        task.title.to_lowercase().contains(&self.0) || task.body.to_lowercase().contains(&self.0)
+    }
+}
+
 /// `--parent` must name a task in scope. `named_elsewhere` admits one that only a row
 /// outside the scan names (a parked row read from another checkout).
 pub fn check_parent(
@@ -267,6 +286,14 @@ mod tests {
             source: None,
             parent: None,
             parallel: false,
+        }
+    }
+
+    #[test]
+    fn a_text_query_refuses_empty_and_blank_phrases() {
+        for query in ["", "   ", "\t\n"] {
+            let error = TextQuery::parse(query).unwrap_err();
+            assert_eq!(error.kind(), "validation", "{query:?}");
         }
     }
 

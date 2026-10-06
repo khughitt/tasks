@@ -50,6 +50,10 @@ nothing is eligible.
    and `--parallel` is a switch. `--need` is all-of, like `--tag`. `--complexity` is a selection over the effective rating,
    not the session cutoff: a session under a cutoff still picks only through `ready` and
    `next`.
+   `tasks search "<phrase>"` is `list` narrowed to tasks whose title or body contains the
+   phrase (literal, case-insensitive; notes are not searched) and takes every `list`
+   option, so `tasks search "<phrase>" --all-projects` (open work, shelved aside) is the
+   duplicate check before filing.
    Never pick a task with children; those are goals. `ready` already omits them.
    A lane (`lane: true`) is a goal too, even before it has children, and every row names
    its lane in `in_lane` (the nearest lane at or above it). A session committed to one

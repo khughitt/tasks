@@ -381,6 +381,33 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["search"]
+summary = "List tasks whose title or body contains a phrase; takes every list option"
+args = [{ name = "query", value = "string", required = true }]
+options = [
+  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped"], repeatable = true },
+  { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"], repeatable = true },
+  { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
+  { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
+  { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { names = ["--need"], value = "string", repeatable = true },
+  { names = ["--owner"], value = "string" },
+  { names = ["--source"], value = "string" },
+  { names = ["--parent"], value = "ref" },
+  { names = ["--under"], value = "ref" },
+  { names = ["--parallel"], value = "none" },
+  { shared = "sort", role = "select", value = "enum", values = ["priority", "updated", "created"], default = "priority" },
+  { shared = "reverse", value = "none" },
+  { names = ["--parked"], value = "none" },
+  { names = ["--periodic"], value = "none" },
+  { names = ["--deferred"], value = "none" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+  { names = ["--group"], value = "string" },
+]
+
+[[cli.tasks.commands]]
 path = ["ready"]
 summary = "Actionable tasks: todo or due recurrences with all dependencies closed"
 options = [

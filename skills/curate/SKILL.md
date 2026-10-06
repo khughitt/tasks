@@ -45,7 +45,8 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
    parent it links to. `tasks -C <root> tree <id>` when it has children.
 2. **Evidence.** Grep the code and docs the task names. Does the described thing already
    exist in the tree? If so, find the commit (`git log -S` or `git log --grep`). Search
-   open titles and tags for a probable duplicate: `tasks -C <root> list` and read titles.
+   for a probable duplicate with a distinctive phrase from the task:
+   `tasks -C <root> search "<phrase>"` matches open titles and bodies.
    For a goal, check that its children cover it.
 3. **Verdict**, exactly one:
    - `keep`: clear, current, correctly linked; nothing to change.

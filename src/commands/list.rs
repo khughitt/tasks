@@ -1,8 +1,8 @@
 use super::ReadCtx;
 use crate::claims::WaitingOn;
-use crate::cli::FilterArgs;
+use crate::cli::{FilterArgs, ListArgs};
 use crate::error::Result;
-use crate::filter::{Fields, TaskFilter, check_parent};
+use crate::filter::{Fields, TaskFilter, TextQuery, check_parent};
 use crate::halt::{self, HaltSnapshot};
 use crate::model::{Status, Task, TaskId};
 use crate::needs::{Vocabularies, Without};
@@ -26,21 +26,23 @@ pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Re
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn list(
-    mut ctx: ReadCtx,
-    statuses: Vec<String>,
-    filter: FilterArgs,
-    sort: String,
-    reverse: bool,
-    parked: bool,
-    periodic: bool,
-    deferred: bool,
-) -> Result<Output> {
+/// `list`, and `search` when `text` is given: the text predicate narrows the same
+/// selection, pools, order, and output.
+pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result<Output> {
+    let ListArgs {
+        statuses,
+        filter,
+        sort,
+        reverse,
+        parked,
+        periodic,
+        deferred,
+        scope: _,
+    } = args;
     let sort = SortKey::parse(&sort)?;
     let mut filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
     if parked {
-        return list_parked(ctx, filter);
+        return list_parked(ctx, filter, text.as_ref());
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -59,6 +61,7 @@ pub fn list(
             && deferred_ok
             && pool_ok
             && filter.matches(&Fields::of_task(task, &claims, &ctx.registry))
+            && text.as_ref().is_none_or(|text| text.matches(task))
     });
     for task in &tasks {
         for dependency in &task.depends {
@@ -105,13 +108,17 @@ pub fn list(
     }))
 }
 
-fn list_parked(mut ctx: ReadCtx, mut filter: TaskFilter) -> Result<Output> {
+fn list_parked(
+    mut ctx: ReadCtx,
+    mut filter: TaskFilter,
+    text: Option<&TextQuery>,
+) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let rows = super::parked::rows(&mut ctx, &all, &claims, now)?;
+    let rows = super::parked::rows_with_records(&mut ctx, &all, &claims, now)?;
     let warnings = std::mem::take(&mut ctx.warnings);
     check_parent(&filter, &all, |parent| {
-        rows.iter().any(|row| {
+        rows.iter().any(|(row, _)| {
             Fields::of_row(row, &ctx.registry)
                 .is_some_and(|fields| fields.parent.as_ref() == Some(parent))
         })
@@ -119,6 +126,13 @@ fn list_parked(mut ctx: ReadCtx, mut filter: TaskFilter) -> Result<Output> {
     filter.resolve_under(&all, &ctx.registry)?;
     let tasks = rows
         .into_iter()
+        .filter(|(_, task)| match (text, task) {
+            // The text matches the copy the row shows; an unresolved park has none.
+            (Some(text), Some(task)) => text.matches(task),
+            (Some(_), None) => false,
+            (None, _) => true,
+        })
+        .map(|(row, _)| row)
         .filter(|row| match Fields::of_row(row, &ctx.registry) {
             // An unresolved park has no record to match: shown only when nothing filters.
             None => filter.is_empty(),
