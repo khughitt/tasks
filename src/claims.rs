@@ -938,7 +938,7 @@ pub fn proves_ownership(
     scope: &crate::relay::ancestry::Scope,
     host: &str,
     boot_id: Option<&str>,
-    get: &impl Fn(&str) -> Option<String>,
+    get: &impl Fn(&str) -> Option<OsString>,
 ) -> bool {
     let crate::relay::ancestry::Scope::Harness(boundary) = scope else {
         return false;
@@ -955,6 +955,17 @@ pub fn proves_ownership(
     //    owner has the owner among its ancestors and must still be refused.
     if nearest.pid != pid || nearest.start != pid_start {
         return false;
+    }
+    if boundary.harness == "codex" {
+        if crate::relay::resolve::hint_for("codex", get).is_err() {
+            return false;
+        }
+        return match crate::native::value(get, "CODEX_THREAD_ID") {
+            Ok(Some(thread)) => {
+                crate::relay::resolve::same_session(&claim.session, "codex", &thread)
+            }
+            _ => false,
+        };
     }
     // 3. a scoped hint must not contradict the claim, so that deferring a resolution error
     //    cannot turn a contradicted session into an accepted owner.
@@ -1038,8 +1049,53 @@ mod tests {
         Scope::Harness(boundary(comm, harness, pid, start))
     }
 
-    fn no_env() -> impl Fn(&str) -> Option<String> {
+    fn no_env() -> impl Fn(&str) -> Option<OsString> {
         |_| None
+    }
+
+    #[test]
+    fn delegated_relay_proof_requires_a_concrete_matching_thread() {
+        let claim = claim_of("codex:worker", Some(42), Some(900));
+        for (vars, expected) in [
+            (
+                vec![("CODEX_SESSION_ID", "root"), ("CODEX_THREAD_ID", "worker")],
+                true,
+            ),
+            (vec![("CODEX_THREAD_ID", "sibling")], false),
+            (vec![("CODEX_SESSION_ID", "worker")], false),
+            (vec![], false),
+            (
+                vec![
+                    ("CODEX_SESSION_ID", "private\nroot"),
+                    ("CODEX_THREAD_ID", "worker"),
+                ],
+                false,
+            ),
+        ] {
+            let get = |key: &str| {
+                vars.iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| OsString::from(v))
+            };
+            assert_eq!(
+                proves_ownership(
+                    &claim,
+                    &nearest("codex", 42, 900),
+                    "testhost",
+                    Some(PROOF_BOOT),
+                    &get
+                ),
+                expected,
+                "{vars:?}"
+            );
+        }
+        assert!(proves_ownership(
+            &claim_of("claude-code:owner", Some(42), Some(900)),
+            &nearest("claude", 42, 900),
+            "testhost",
+            Some(PROOF_BOOT),
+            &no_env()
+        ));
     }
 
     #[test]
@@ -1050,7 +1106,7 @@ mod tests {
             &nearest("codex", 42, 900),
             "testhost",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
     }
 
@@ -1072,7 +1128,7 @@ mod tests {
     #[test]
     fn a_proof_is_defeated_by_a_contradicted_hint() {
         let claim = claim_of("claude-code:c1", Some(42), Some(900));
-        let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".to_string());
+        let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".into());
         assert!(!proves_ownership(
             &claim,
             &nearest("claude", 42, 900),
@@ -1086,7 +1142,7 @@ mod tests {
     fn a_proof_survives_a_known_representation_change() {
         for stored in ["c1", "claude:c1", "claude-code:c1"] {
             let claim = claim_of(stored, Some(42), Some(900));
-            let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".to_string());
+            let env = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".into());
             assert!(
                 proves_ownership(
                     &claim,
@@ -1178,7 +1234,7 @@ mod tests {
         // The outer claude(500) holds the claim; a nested 2.1.280(600) runs under it, with
         // the outer session's id inherited. Its boundary is 600, so it proves nothing.
         let outer = claim_of("claude-code:c1", Some(500), Some(5000));
-        let inherited = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".to_string());
+        let inherited = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "c1".into());
         let nested = Scope::Harness(boundary("2.1.280", "claude-code", 600, 6000));
         assert!(!proves_ownership(
             &outer,
@@ -1190,7 +1246,7 @@ mod tests {
         // A claim that the version process itself holds is proved, and its hint is the
         // Claude Code variable.
         let own = claim_of("claude-code:bg1", Some(600), Some(6000));
-        let hint = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "bg1".to_string());
+        let hint = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "bg1".into());
         assert!(proves_ownership(
             &own,
             &nested,
@@ -1198,8 +1254,7 @@ mod tests {
             Some(PROOF_BOOT),
             &hint
         ));
-        let contradicted =
-            |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".to_string());
+        let contradicted = |key: &str| (key == "CLAUDE_CODE_SESSION_ID").then(|| "other".into());
         assert!(!proves_ownership(
             &own,
             &nested,

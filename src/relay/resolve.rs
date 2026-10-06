@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::relay::ancestry::{Boundary, Scope};
 use crate::relay::snapshot::Snapshot;
+use std::ffi::OsString;
 
 /// A matched agent: its id becomes the claim session, its handle the claim's proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,16 +23,16 @@ fn refuse(detail: String) -> Error {
 
 /// The session hint belonging to `harness`, and only to it. A nested harness inherits its
 /// parent's environment, so a variable from another harness says nothing about this one.
-pub fn hint_for(harness: &str, get: &impl Fn(&str) -> Option<String>) -> Result<Option<String>> {
+pub fn hint_for(harness: &str, get: &impl Fn(&str) -> Option<OsString>) -> Result<Option<String>> {
     match harness {
-        "claude-code" => Ok(get("CLAUDE_CODE_SESSION_ID")),
-        "codex" => match (get("CODEX_SESSION_ID"), get("CODEX_THREAD_ID")) {
-            (Some(session), Some(thread)) if session != thread => Err(refuse(format!(
-                "CODEX_SESSION_ID {session:?} conflicts with CODEX_THREAD_ID {thread:?}"
-            ))),
-            (Some(value), _) | (None, Some(value)) => Ok(Some(value)),
-            (None, None) => Ok(None),
-        },
+        "claude-code" => Ok(get("CLAUDE_CODE_SESSION_ID")
+            .and_then(|v| v.into_string().ok())
+            .filter(|v| !v.is_empty())),
+        "codex" => {
+            let session = crate::native::value(get, "CODEX_SESSION_ID").map_err(refuse)?;
+            let thread = crate::native::value(get, "CODEX_THREAD_ID").map_err(refuse)?;
+            Ok(thread.or(session))
+        }
         _ => Ok(None),
     }
 }
@@ -107,7 +108,7 @@ pub fn resolve(
     load: impl FnOnce() -> Result<Snapshot>,
     host: &str,
     boot_id: Option<&str>,
-    get: &impl Fn(&str) -> Option<String>,
+    get: &impl Fn(&str) -> Option<OsString>,
 ) -> Result<Option<Resolved>> {
     let boundary: Boundary = match scope {
         Scope::Outside => return Ok(None),
@@ -128,8 +129,8 @@ pub fn resolve(
     let nearest = &boundary.entry;
     let harness = boundary.harness;
     let boot_id = boot_id.ok_or_else(|| refuse("the host boot id is unreadable".into()))?;
-    // The hint is read before the registry so a self-contradicting pair is reported as
-    // itself rather than as a match failure.
+    // Validate native inputs before reading the registry, so malformed values are
+    // diagnosed without becoming a match failure.
     let hint = hint_for(harness, get)?;
     // The loader's own errors name the cause and the path, but they are registry errors,
     // not identity errors: they must still carry the §5 recovery instruction, because a
@@ -187,12 +188,17 @@ pub fn resolve(
     if let Some(hint) = hint
         && hint != agent.session_id
     {
-        // A qualifying agent exists, so the disagreement is the environment's, not the
-        // registry's.
-        return Err(refuse(format!(
-            "the environment names session {hint:?} but the matched agent is {}",
-            agent.id
-        )));
+        let root = if harness == "codex" {
+            crate::native::value(get, "CODEX_SESSION_ID").map_err(refuse)?
+        } else {
+            None
+        };
+        let detail = if harness == "codex" && root.as_deref() == Some(agent.session_id.as_str()) {
+            "only the Codex root is registered in relay; worker registration is unavailable (relay-f56e30), so the worker cannot claim as its controller"
+        } else {
+            "the native actor hint does not match the qualifying relay row"
+        };
+        return Err(refuse(detail.into()));
     }
 
     let process = agent
@@ -201,7 +207,13 @@ pub fn resolve(
         .expect("filtered on a present handle");
     Ok(Some(Resolved {
         session: agent.id.clone(),
-        root_session: None,
+        root_session: if harness == "codex" {
+            crate::native::value(get, "CODEX_SESSION_ID")
+                .map_err(refuse)?
+                .map(|id| format!("codex:{id}"))
+        } else {
+            None
+        },
         pid: process.pid,
         pid_start: process.start,
         boot_id: boot_id.to_string(),
@@ -277,7 +289,7 @@ mod tests {
         }
     }
 
-    fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+    fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {
         let owned: Vec<(String, String)> = pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -286,17 +298,66 @@ mod tests {
             owned
                 .iter()
                 .find(|(k, _)| k == key)
-                .map(|(_, v)| v.clone())
-                .filter(|v| !v.is_empty())
+                .map(|(_, v)| OsString::from(v))
         }
     }
 
     fn go(
         scope: Scope,
         agents: Vec<Agent>,
-        e: &impl Fn(&str) -> Option<String>,
+        e: &impl Fn(&str) -> Option<OsString>,
     ) -> Result<Option<Resolved>> {
         resolve(scope, || Ok(snap(agents)), "testhost", Some(BOOT), e)
+    }
+
+    #[test]
+    fn delegated_relay_hint_selects_thread() {
+        let get = env(&[("CODEX_SESSION_ID", "root"), ("CODEX_THREAD_ID", "worker")]);
+        assert_eq!(hint_for("codex", &get).unwrap().as_deref(), Some("worker"));
+    }
+
+    #[test]
+    fn delegated_relay_malformed_values_refuse_before_registry_load() {
+        for name in ["CODEX_SESSION_ID", "CODEX_THREAD_ID"] {
+            let mut bad = vec![
+                OsString::from("private\nvalue"),
+                OsString::from("private\tvalue"),
+                OsString::from("private\u{7f}value"),
+            ];
+            #[cfg(unix)]
+            {
+                use std::os::unix::ffi::OsStringExt;
+                bad.push(OsString::from_vec(vec![255]));
+            }
+            for value in bad {
+                let get = |key: &str| {
+                    if key == name {
+                        Some(value.clone())
+                    } else if key == "CODEX_THREAD_ID" {
+                        Some("worker".into())
+                    } else {
+                        None
+                    }
+                };
+                let error = resolve(
+                    ancestor("codex", 42, 900),
+                    || panic!("malformed input must precede registry load"),
+                    "testhost",
+                    Some(BOOT),
+                    &get,
+                )
+                .unwrap_err()
+                .to_string();
+                assert!(
+                    error.contains(name) && error.contains("TASKS_SESSION"),
+                    "{error}"
+                );
+                assert!(
+                    !error.contains("private") && !error.contains("worker"),
+                    "{error}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -525,10 +586,15 @@ mod tests {
     }
 
     #[test]
-    fn a_hint_pair_for_codex_must_agree_with_itself() {
+    fn a_codex_actor_hint_must_match_the_row() {
         let agents = || vec![agent("codex", "s1", "linux", 42, 900, BOOT)];
         let split = env(&[("CODEX_SESSION_ID", "s1"), ("CODEX_THREAD_ID", "other")]);
         assert!(go(ancestor("codex", 42, 900), agents(), &split).is_err());
+        let split_match = env(&[("CODEX_SESSION_ID", "root"), ("CODEX_THREAD_ID", "s1")]);
+        let resolved = go(ancestor("codex", 42, 900), agents(), &split_match)
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.root_session.as_deref(), Some("codex:root"));
         let only_thread = env(&[("CODEX_THREAD_ID", "s1")]);
         assert!(
             go(ancestor("codex", 42, 900), agents(), &only_thread)

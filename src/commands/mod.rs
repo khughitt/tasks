@@ -583,11 +583,7 @@ pub(crate) fn ownership(
         &crate::relay::ancestry::current_scope(),
         &crate::claims::hostname(),
         crate::claims::boot_id().as_deref(),
-        &|key| {
-            std::env::var_os(key)
-                .and_then(|value| value.into_string().ok())
-                .filter(|value| !value.is_empty())
-        },
+        &|key| std::env::var_os(key),
     );
     Ok(if proved {
         Ownership::ByProof

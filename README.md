@@ -255,6 +255,27 @@ either the registry back or `TASKS_SESSION`. And from 0.2.0, a session nested in
 another harness session is a different session: its nearest boundary is its own harness
 process, so it cannot act on the outer session's claims.
 
+Codex hints validate both native exports and select `CODEX_THREAD_ID` when present,
+otherwise `CODEX_SESSION_ID`. A matching Codex actor row records native root
+association separately. A worker presented only with its registered root row
+refuses acquisition: relay worker registration remains unavailable (`relay-f56e30`).
+It cannot claim as its controller; other mismatches use a value-free diagnosis.
+No registry schema or producer behavior changes here.
+
+Codex proof-only continuation now requires a valid concrete `CODEX_THREAD_ID`
+matching the held claim, plus the existing process, host and boot evidence.
+A sibling, absent thread, session-only export, or malformed native value cannot
+prove ownership. This deliberately removes the former thread-less process-proof
+fallback. Exact resolved identity matches still work. A legitimate owner blocked
+by missing thread data can inspect `tasks show <id>` and set `TASKS_SESSION` to
+that exact held session; set `TASKS_SESSION_PID` only for an actual long-lived
+process, never the command PID. Parentage and root association do not authorize
+foreign claims. Normal workers release with `done` or `park --waiting-on agent`
+before reporting completion; controllers run `start` before review or closure.
+Agent-waiting parks are public to all agents. A controller uses forced takeover
+only after a worker-specific completion result establishes that worker and its
+checks have stopped; silence, a timeout and the shared PID do not establish it.
+
 **Upgrading.** tasks 0.2.0 reads relay's registry schema 2 and no other; against an older
 registry it refuses and asks you to run `relay reap`. On a host with this switch on, every
 `tasks` that can run there must be 0.2.0 or later before relay publishes schema 2: check

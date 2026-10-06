@@ -19993,7 +19993,10 @@ fn an_acceptance_owner_can_park_and_close_after_the_registry_is_removed() {
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" park {parked} 'next step'\n\
          \"$TASKS_BIN\" done {closed} landed\n",
-        shim_env(&state, "codex", "s1")
+        format_args!(
+            "{}\nexport CODEX_THREAD_ID=s1",
+            shim_env(&state, "codex", "s1")
+        )
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(
@@ -20020,7 +20023,10 @@ fn an_acceptance_resuming_a_parked_task_needs_identity_again() {
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" park {id} 'next step'\n\
          \"$TASKS_BIN\" start {id} && echo RESUMED\n",
-        shim_env(&state, "codex", "s1")
+        format_args!(
+            "{}\nexport CODEX_THREAD_ID=s1",
+            shim_env(&state, "codex", "s1")
+        )
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert!(
@@ -20041,7 +20047,10 @@ fn an_acceptance_repeated_start_after_registry_loss_keeps_the_held_identity() {
         "{}\nwrite_registry\n\"$TASKS_BIN\" start {id}\n\
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" start {id}\n",
-        shim_env(&state, "codex", "s1")
+        format_args!(
+            "{}\nexport CODEX_THREAD_ID=s1",
+            shim_env(&state, "codex", "s1")
+        )
     );
     let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
     assert_eq!(
@@ -20106,7 +20115,9 @@ fn an_acceptance_contradicted_hint_is_refused_at_acquisition() {
     assert_eq!(out.status.code(), Some(1));
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(
-        text.contains("someone-else") && text.contains("codex:s1"),
+        text.contains("native actor hint")
+            && !text.contains("someone-else")
+            && !text.contains("codex:s1"),
         "{text}"
     );
 }
@@ -21719,7 +21730,10 @@ fn a_claim_held_by_proof_moves_with_its_holder() {
          git worktree add -q -b side '{}'\n\
          rm \"$RELAY_STATE_DIR/agents.json\"\n\
          \"$TASKS_BIN\" -C '{}' note {id} 'by proof'\n",
-        shim_env(&state, "codex", "s1"),
+        format_args!(
+            "{}\nexport CODEX_THREAD_ID=s1",
+            shim_env(&state, "codex", "s1")
+        ),
         side.display(),
         side.display()
     );
@@ -27191,4 +27205,168 @@ fn delegated_root_invalid_read_owns_no_holds() {
         );
         assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
     }
+}
+
+#[test]
+fn delegated_relay_ownership() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let id = id_of(env.json(&dir, &["add", "Worker", "--need", "quiet"]));
+    let closed = id_of(env.json(&dir, &["add", "Worker closes"]));
+    let proof_closed = id_of(env.json(&dir, &["add", "Proof closes"]));
+    let parked = id_of(env.json(&dir, &["add", "Worker parks"]));
+    let contender = id_of(env.json(&dir, &["add", "Sibling hold", "--need", "quiet"]));
+    let state = relay_on(&env);
+    let script = format!(
+        r#"set -e
+{}
+export CODEX_SESSION_ID=private-root CODEX_THREAD_ID=private-worker
+write_registry
+cp tasks/{id}.md "$HOME/before.md"
+if "$TASKS_BIN" start {id} > "$HOME/root.out" 2> "$HOME/root.err"; then exit 90; fi
+cmp tasks/{id}.md "$HOME/before.md"
+test ! -f "$HOME/.local/state/tasks/claims/sci.toml"
+SESSION=unrelated-row AGENT_ID=codex:unrelated-row
+write_registry
+if "$TASKS_BIN" start {id} > "$HOME/unrelated.out" 2> "$HOME/unrelated.err"; then exit 91; fi
+cmp tasks/{id}.md "$HOME/before.md"
+test ! -f "$HOME/.local/state/tasks/claims/sci.toml"
+SESSION=private-worker AGENT_ID=codex:private-worker
+write_registry
+"$TASKS_BIN" start {id}
+"$TASKS_BIN" start {closed}
+"$TASKS_BIN" start {proof_closed}
+"$TASKS_BIN" start {parked}
+"$TASKS_BIN" show {id} > "$HOME/acquired.json"
+SESSION=sibling AGENT_ID=codex:sibling
+write_registry
+cp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+cp tasks/{contender}.md "$HOME/before-contender.md"
+if CODEX_THREAD_ID=sibling "$TASKS_BIN" start {contender} > "$HOME/hold.out" 2> "$HOME/hold.err"; then exit 92; fi
+cmp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+cmp tasks/{contender}.md "$HOME/before-contender.md"
+rm "$RELAY_STATE_DIR/agents.json"
+refuse() {{
+    cp tasks/{id}.md "$HOME/before.md"
+    cp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+    if "$TASKS_BIN" "$@" > "$HOME/refuse.out" 2> "$HOME/refuse.err"; then exit 93; fi
+    cmp tasks/{id}.md "$HOME/before.md"
+    cmp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+}}
+for mode in sibling session-only absent invalid-root invalid-thread; do
+    unset CODEX_SESSION_ID CODEX_THREAD_ID
+    case "$mode" in
+        sibling) export CODEX_SESSION_ID=private-root CODEX_THREAD_ID=sibling ;;
+        session-only) export CODEX_SESSION_ID=private-worker ;;
+        absent) : ;;
+        invalid-root) CODEX_SESSION_ID='private
+root'; export CODEX_SESSION_ID CODEX_THREAD_ID=private-worker ;;
+        invalid-thread) CODEX_THREAD_ID='private
+thread'; export CODEX_SESSION_ID=private-root CODEX_THREAD_ID ;;
+    esac
+    refuse start {id}
+    refuse park {id} refused
+    refuse done {id} refused
+    refuse edit {id} --status done
+    refuse edit {id} --need owner
+    cp "$HOME/refuse.err" "$HOME/error-$mode.json"
+    cp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+    "$TASKS_BIN" note {id} "skipped heartbeat $mode" --stamp > "$HOME/note-$mode.json"
+    cmp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+done
+# An exact explicit owner can recover without fabricating a thread or pid.
+unset CODEX_THREAD_ID CODEX_SESSION_ID
+TASKS_SESSION=codex:private-worker "$TASKS_BIN" start {closed}
+export CODEX_THREAD_ID=private-worker CODEX_SESSION_ID=changed-proof-root
+"$TASKS_BIN" start {id}
+"$TASKS_BIN" edit {id} --need owner
+"$TASKS_BIN" edit {proof_closed} --need quiet
+"$TASKS_BIN" show {proof_closed} > "$HOME/proof-hold.json"
+"$TASKS_BIN" show {id} > "$HOME/continued.json"
+"$TASKS_BIN" note {id} 'matching proof heartbeat' --stamp > "$HOME/owner-note.json"
+TASKS_SESSION=codex:private-worker "$TASKS_BIN" done {closed} recovered
+"$TASKS_BIN" done {proof_closed} landed
+"$TASKS_BIN" park {parked} 'controller reviews' --waiting-on agent
+"$TASKS_BIN" park {id} 'release all holds' --waiting-on agent
+"$TASKS_BIN" claims > "$HOME/released.json"
+"#,
+        shim_env(&state, "codex", "private-root")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let root_error = env.read(env.home.path(), "root.err");
+    assert!(
+        root_error.contains("worker registration")
+            && root_error.contains("relay-f56e30")
+            && root_error.contains("TASKS_SESSION"),
+        "{root_error}"
+    );
+    assert!(!root_error.contains("private-root") && !root_error.contains("private-worker"));
+    let unrelated = env.read(env.home.path(), "unrelated.err");
+    assert!(unrelated.contains("native actor hint") && unrelated.contains("TASKS_SESSION"));
+    assert!(
+        !unrelated.contains("relay-f56e30")
+            && !unrelated.contains("unrelated-row")
+            && !unrelated.contains("private-worker")
+    );
+    assert!(env.read(env.home.path(), "hold.err").contains("need_held"));
+    let acquired: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "acquired.json")).unwrap();
+    assert_eq!(acquired["claim"]["session"], "codex:private-worker");
+    assert_eq!(acquired["claim"]["root_session"], "codex:private-root");
+    assert_eq!(acquired["claim"]["live"], true);
+    let continued: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "continued.json")).unwrap();
+    assert_eq!(continued["claim"]["session"], "codex:private-worker");
+    assert_eq!(continued["claim"]["root_session"], "codex:private-root");
+    assert_eq!(continued["claim"]["holds"], serde_json::json!(["quiet"]));
+    for mode in [
+        "sibling",
+        "session-only",
+        "absent",
+        "invalid-root",
+        "invalid-thread",
+    ] {
+        let note: serde_json::Value =
+            serde_json::from_str(&env.read(env.home.path(), &format!("note-{mode}.json"))).unwrap();
+        assert!(
+            warnings_of(&note)
+                .iter()
+                .any(|w| w.contains("heartbeat") && w.contains("not refreshed")),
+            "{note}"
+        );
+    }
+    for (mode, name) in [
+        ("invalid-root", "CODEX_SESSION_ID"),
+        ("invalid-thread", "CODEX_THREAD_ID"),
+    ] {
+        let error = env.read(env.home.path(), &format!("error-{mode}.json"));
+        assert!(
+            error.contains(name) && error.contains("TASKS_SESSION"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("private\\nroot") && !error.contains("private\\nthread"),
+            "{error}"
+        );
+    }
+    let proof_hold: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "proof-hold.json")).unwrap();
+    assert_eq!(proof_hold["claim"]["holds"], serde_json::json!(["quiet"]));
+    let own: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "owner-note.json")).unwrap();
+    assert!(
+        !warnings_of(&own).iter().any(|w| w.contains("heartbeat")),
+        "{own}"
+    );
+    let released: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "released.json")).unwrap();
+    assert!(released["claims"].as_array().unwrap().is_empty());
+    assert_eq!(env.json(&dir, &["show", &closed])["task"]["status"], "done");
 }

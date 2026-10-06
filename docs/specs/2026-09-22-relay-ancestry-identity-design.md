@@ -177,7 +177,7 @@ Only the variables belonging to that harness are compared:
 | Nearest `comm` | Compared | Rule |
 |---|---|---|
 | `claude` | `CLAUDE_CODE_SESSION_ID` | must equal the matched `sessionId` |
-| `codex` | `CODEX_SESSION_ID`, `CODEX_THREAD_ID` | both must agree with each other and equal the matched `sessionId` |
+| `codex` | `CODEX_SESSION_ID`, `CODEX_THREAD_ID` | validate both; thread when present, otherwise session, must equal the matched `sessionId` |
 | `opencode` | none | no native variable exists; nothing is compared |
 
 A variable belonging to a *different* harness is ignored, because a nested harness
@@ -186,11 +186,18 @@ carries `CLAUDE_CODE_SESSION_ID` from that parent while its own proof and its ow
 `CODEX_SESSION_ID` are entirely valid. Comparing every set variable would reject that
 session despite correct evidence.
 
-An empty variable is treated as unset and compared against nothing, matching how
-`identity_from` already filters empty values at every native level. For `codex`, if
-only one of the two variables is set it is the one compared; if both are set and
-disagree with each other, that is the error of §5 rather than a warning, because unlike
-the native level there is a verified session available to contradict.
+An empty variable is treated as unset. Updated 2026-10-06 by the
+[delegated identity design](2026-10-06-delegated-identity-design.md): the original
+Codex equality premise applied only to top-level captures. The root and concrete
+worker thread intentionally differ. Validate both native values losslessly; a
+malformed value names its variable but never its value and refuses before loading
+the registry. Select the thread when present, otherwise the session. A qualifying
+root-only row refuses a worker without adopting its controller identity; its
+value-free error names unavailable worker registration (`relay-f56e30`) and
+`TASKS_SESSION` recovery. An unrelated row mismatch stays generic. Existing
+cardinality, process, host, boot, platform and harness checks remain unchanged.
+A selected Codex actor row records valid native `CODEX_SESSION_ID` separately as
+optional `root_session`; no registry schema or producer change is implied.
 
 ### 4.4 What is adopted
 
@@ -284,8 +291,13 @@ hold:
 2. The caller's **nearest harness ancestor** — the very process §4.2's scope test
    selects, not merely some ancestor — has pid `claim.pid` and `starttime`
    `claim.pid_start`.
-3. The scoped session hint for that nearest harness (§4.3) does not contradict
-   `claim.session`, under the normalization of §6.2.1.
+3. For Codex, both native values are valid and a present concrete
+   `CODEX_THREAD_ID` matches `claim.session`, under §6.2.1 normalization. A shared
+   process, root-only export, absent thread or sibling thread cannot prove a
+   concrete worker. Other harnesses retain the scoped-hint noncontradiction rule.
+   This intentionally removes the historical Codex no-hint proof fallback; a
+   legitimate owner can recover with exact held `TASKS_SESSION` from `tasks show`,
+   without fabricating a thread or command PID.
 
 Condition 2 must be the *nearest* boundary and not any ancestor, or the proof admits a
 caller it should refuse: if a Claude session owns a claim and launches a Codex session
@@ -485,7 +497,8 @@ Unit, against injected inputs:
   unrelated `CLAUDE_CODE_SESSION_ID` from an outer Claude session resolves successfully;
   a `claude` ancestor with a disagreeing `CLAUDE_CODE_SESSION_ID` fails; an `opencode`
   ancestor with either variable set compares nothing; empty variables are unset; the two
-  Codex variables disagreeing with each other is an error.
+  valid split Codex root/thread values select the thread; malformed values refuse,
+  and a root-only registry row cannot match a worker thread (2026-10-06 amendment).
 - Schema: versioned handle fixtures copied from relay-06b1da, including the oversized
   Linux `start` value, labelled as a format test.
 - The Codex case: a live `codex` ancestor with an empty registry must produce the
