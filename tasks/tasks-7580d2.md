@@ -1,13 +1,15 @@
 ---
 id: tasks-7580d2
 title: Record a project's former roots and resolve ids and paths through renames
-status: todo
+status: doing
 priority: 1
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-10-06T13:23:04Z
-updated: 2026-10-06T16:52:02Z
+updated: 2026-10-06T18:41:11Z
+started: 2026-10-06T18:41:11Z
 depends: []
 parent: tasks-a7460c
 tags: []
@@ -24,3 +26,5 @@ Cover canonical and aliased ids, current/former roots and their worktree storage
 ## Notes
 
 - 2026-10-06T16:52:01Z (main): organization: first milestone of the P1 project-location lane; coordinate the resolver boundary with tasks-9b0a2e and the existing rename consumers, without making linked-checkout delivery a prerequisite.
+- 2026-10-06T18:41:11Z (main): started
+  provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
