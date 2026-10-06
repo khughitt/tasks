@@ -1,0 +1,20 @@
+{
+  "probe": "one non-recurring record with shared files and two isolated host state stores; no git worktree in this additional check",
+  "before": {
+    "status": "done",
+    "park_present": true
+  },
+  "retry": {
+    "exit": 0,
+    "changed_task_fields": [
+      "updated"
+    ],
+    "completed_unchanged": true,
+    "model_unchanged": true,
+    "notes_unchanged": true,
+    "park_present": false,
+    "parked_rows": 0
+  },
+  "limits": "original incident, worktree removal, recurrence and foreign live ownership remain for tasks-b9b10e",
+  "cleanup": "temporary project/config/state automatically removed"
+}

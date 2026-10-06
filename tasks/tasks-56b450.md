@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: planned
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-06T10:07:12Z
+updated: 2026-10-06T10:41:53Z
 depends: []
 tags: []
 source: ops-cb9749
@@ -21,3 +21,4 @@ Done: a recorded decision whether the claim rule moves into tasks or stays in op
 ## Notes
 
 - 2026-10-06T10:07:12Z (investigate/tasks-1ece46): tasks-1ece46 capture separates worker claim identity from controller Stop aggregation: current hook matches only own live Stop session; pure injected-event check blocks controller on own claim and allows child with dead claim. Identity repair alone will not aggregate separately owned child claims; reuse this planned policy task. Evidence: docs/notes/2026-09-30-delegated-identity-brief.md.
+- 2026-10-06T10:41:53Z (main): Identity review: current official Hooks docs specify parent session_id for subagent hooks and agent_id on subagent events. tasks-c0bad3 verifies the captured release; tasks-5e2472 evaluates worker thread identity plus parent association. Use that mapping as aggregation input, without merging claims or assuming actual Stop delivery was captured.

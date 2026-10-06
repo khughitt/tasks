@@ -1,108 +1,78 @@
 # Task note integrity
 
-Scoping handoff, 2026-09-30. Goal: tasks-ea2a79. This is not an approved design.
-Updated 2026-10-06: three direct fixes are done; tasks-d56b72 joins the existing
-correction design with a concrete flat amendment proposal.
+Scoping handoff, updated 2026-10-06. Goal: tasks-ea2a79. Not an approved design.
 
 ## Problem
 
-Task notes need to pass repository gates, avoid publishing generated machine details,
-and support correcting mistakes without corrupting the history other tools read. Five
-reports share the note-writing path, but prevention and diagnostics can proceed before
-deciding how historical redaction and corrections work. The newer report extends
-correction examples to `concerns:` and `review:` as well as `run:`.
+Notes should avoid machine details and permit meaningful corrections. Publishing
+sensitive history and correcting structured measurements are different needs:
+redacting the current record alone does not sanitize a repository's Git history.
+They share note selection and protected-history constraints, but their decisions
+and delivery need not wait on each other.
 
 ## Current behaviour and evidence
 
-- `src/commands/mod.rs::append_note` now normalizes trailing whitespace. All command
-  note writers, including lifecycle and feedback writers, use it.
-`src/commands/edit.rs::check_invariants` permits whitespace-only repairs and
-  protects other historical changes (tasks-7c6fcd, done).
-- `src/commands/status.rs::start` now persists `Ctx::takeover_summary`, omitting
-  host, PID, and absolute worktree; detail remains in warnings. Similarly,
-  `src/commands/park.rs` keeps host/worktree in the local `Park` record and writes only
-  the waiting reason and next step to the note (tasks-0238e4, done). Lifecycle provenance
-  stamping landed in `8f13112`; it is independent of these text diagnostics.
-- `src/commands/feedback.rs::recur_into` accepts a single-line body and rejects multiline
-  detail before writing. Creation accepts multiline bodies. The feedback design section
-  3 explicitly requires this distinction, and
-  `feedback_recurs_on_exact_titles_and_refuses_to_guess_on_similar_ones` checks the
-  rejection kind; the error now names `--body` and explains its single-line rule (tasks-fcf6f7,
-done).
-- `src/model.rs::Note` has timestamp, author, text, and optional provenance, with no
-  distinct note ID. The append-only editor guard prevents redaction (tasks-cc9a31) and
-  run-total correction (tasks-2bb0ba). The latter report says a second `run:` line counts
-  as another attempt; the downstream reader was not inspected in this checkout.
-
-- tasks-d56b72 proposes `note --amends <note-ref>` with an ordered amendment list
-  attached to each original note, latest correction effective, and no amendment of
-  an amendment. It suggests excluding generated lifecycle markers and selecting by
-  timestamp plus index. These are proposals; no selector, schema or consumer contract
-  is approved. This pass did not inspect downstream outcome-measure readers.
+- `src/commands/mod.rs::append_note` normalizes trailing whitespace;
+  `src/commands/edit.rs::check_invariants` allows whitespace-only historical repairs
+  (tasks-7c6fcd, done). Other historical edits remain protected.
+- `Ctx::takeover_summary` omits separate host, PID and absolute-worktree fields,
+  but persists claim.session. Unix fallback writes sid:<pid>, so tasks-0238e4's
+  PID-omission guarantee is incomplete. tasks-46f99f tracks that remaining defect.
+  Detailed diagnostics remain local. Park notes already exclude store host/worktree.
+- Feedback recurrence errors now name the single-line --body rule (tasks-fcf6f7, done).
+- `src/model.rs::Note` has whole-second timestamps and no distinct note ID.
+  Append-only history blocks removal (tasks-cc9a31) and machine-readable correction
+  (tasks-2bb0ba, tasks-d56b72). Downstream outcome-measure readers were not inspected.
+- tasks-d56b72 proposes flat amendments targeting original notes, latest correction
+  effective, without amendment chains. Its full proposal remains in the task body;
+  selectors, schema and protected-marker rules are not approved.
 
 ## Constraints
 
-Preserve original reports and sources. Existing notes remain unchanged on unrelated
-writes. A narrowly defined, explicit trailing-space/tab repair does not authorize general
-history editing. The core design documents the append-only rule; changing it requires
-an explicit contract.
+Preserve original reports and unrelated notes. Lifecycle markers/provenance and the
+attachment ledger carry machine-readable meaning. A timestamp alone cannot select
+a note safely; consider equal timestamps, concurrent changes and redaction. Tasks
+must not interpret run arithmetic or flow states.
 
-Notes carry machine-readable meaning: lifecycle markers/provenance and the attachment
-ownership ledger (`src/attachments.rs`, attachment design section “Ownership ledger”).
-Timestamps have whole-second precision, so a timestamp alone cannot safely select a
-note. Tasks should not interpret run arithmetic or flow states. Redaction from the
-current record does not erase prior Git commits. The delivered record-home design under
-tasks-ab8d2d/tasks-9949f3 is related
-concurrency context, not open correction research or a duplicate of this work.
+Current-record redaction leaves earlier Git commits intact and therefore does not
+by itself meet tasks-cc9a31's publishing goal. Historical publication cleanup needs
+an explicit separate route even if a redaction command is adopted. Shared selection
+work is a reason to coordinate design, not to block the tasks-local publishing
+choice on obs's correction-reader work.
 
 ## Alternatives
 
-1. **Explicit audited replacement:** select an existing note unambiguously, reject stale
-   targets, replace permitted text, and record the operation without repeating removed
-   sensitive text. This can serve redaction, but needs rules protecting structured notes.
-2. **Append-only supersession:** identify the original note and append a correction that
-   readers resolve. This preserves history but cannot remove sensitive text and requires
-   reader changes before a corrected run, review or concern counts once. The flat
-   proposal in tasks-d56b72 is a concrete variant to compare, not a new design task.
-3. **Keep the current rule:** record prose corrections and handle publishing exceptions
-   manually. This leaves both reported gaps unresolved.
+1. **Audited current-record redaction.** Select and replace permitted text without
+   copying sensitive content into the audit. Justify the mutation contract by its
+   actual value; do not promise it removes sensitive Git history.
+2. **Append-only correction.** Select an original note and append supersession,
+   including the flat proposal. Coordinate obs readers so one effective run, review
+   or concern remains after correction; this cannot remove sensitive historical text.
+3. **Manual publishing exceptions for removal.** Retain the CLI's mutation rule and
+   handle publication sanitization explicitly outside it. Compare this route before
+   deciding redaction deserves a feature; prose-only corrections still miss readers.
 
-Current lean: explicit redaction for removal, with correction semantics chosen after
-checking reader behavior. Avoid a generic event framework. Ship the three bounded fixes
-independently; do not make them wait for a new note model.
+Current lean: decide publishing/redaction value within tasks first, with manual
+publishing exceptions a viable alternative. Design shared selection constraints,
+then settle correction and its reader contract with obs. Stage delivery separately.
 
 ## Unanswered questions
 
-- How should a caller select a note and prove it has not changed? The design follow-up
-  must compare selectors against same-second notes and concurrent edits.
-- Which edits preserve lifecycle and attachment meaning, and what does the audit retain?
-  The design follow-up and user review settle the contract.
-- Would the run reader correctly re-read replaced text, or does it need supersession and
-  cache invalidation? Coordinate with obs during design; this pass establishes no finding
-  about that implementation.
-
-- Can a stable original-note selector survive equal timestamps, concurrent updates
-  and redaction? Can obs readers count exactly one effective review/concern/run after
-  correction? tasks-1f6d08 evaluates the amendment proposal alongside replacement,
-  including protected lifecycle and attachment-ledger notes.
+- Does current-record redaction provide enough value to justify mutation, given that
+  publication also needs Git-history cleanup? tasks-1f6d08 settles this first.
+- How should callers select a stable note and reject stale targets while preserving
+  lifecycle and attachment meaning, and what can a redaction audit safely retain?
+- Can correction readers count exactly one effective run, review and concern, through
+  replacement or supersession? tasks-1f6d08 coordinates this later stage with obs.
 
 ## Proposed decomposition
 
-- tasks-7c6fcd: done, originally scoped, priority 2, small/mid/direct. Normalize new note
-  endings and permit
-  only explicit trailing-space/tab removal from existing note text with metadata intact.
-- tasks-0238e4: done, originally scoped, priority 2, small/mid/direct. Persist a concise
-  takeover summary;
-  keep machine details in local diagnostics/store. Ordinary park already does this.
-- tasks-fcf6f7: done, originally scoped, priority 2, extra-small/low/direct. Identify `--body`
-  in recurrence
-  errors and document its single-line constraint, for automatic and explicit recurrence.
-- tasks-1f6d08: priority 2, medium/high/planned. Design historical redaction and correction
-  semantics, then obtain design and plan reviews before implementation. Its findings wake
-  tasks-cc9a31, tasks-2bb0ba and tasks-d56b72, which remain ideas. No separate research task is
-needed
-  before this bounded design investigation.
-
-- tasks-d56b72: briefed in the 2026-10-06 pass and parented under tasks-ea2a79;
-  its full amendment proposal remains in the original body. Reuse tasks-1f6d08
-  rather than file overlapping research or prematurely adopt its proposed JSON shape.
+- tasks-7c6fcd and tasks-fcf6f7: done; whitespace and feedback diagnostics are delivered.
+- tasks-0238e4: delivered separate-field privacy, with the sid:<pid> gap recorded.
+  tasks-46f99f: P2/xs/low/direct prevention fix; historical notes remain publishing work.
+- tasks-1f6d08: P2/m/high/planned, staged within the existing design task. First choose
+  redaction versus manual publishing handling without waiting on obs; share note
+  selection constraints, then coordinate structured correction. Review design and
+  implementation plans before code; delivery stages may proceed independently.
+- tasks-cc9a31, tasks-2bb0ba and tasks-d56b72 remain ideas. Findings wake each in the
+  same commit and update this brief; preserve the full amendment proposal and sources.

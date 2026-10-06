@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/takeover-notes
 created: 2026-09-19T13:13:54Z
-updated: 2026-09-30T14:49:13Z
+updated: 2026-10-06T10:41:53Z
 started: 2026-09-30T14:45:49Z
 completed: 2026-09-30T14:49:13Z
 depends: []
@@ -38,3 +38,4 @@ Original report: tasks start --force writes 'took over session … host <name>, 
   provenance: {"harness_session":"claude-code:30d2809d-2d77-4c34-b242-55903be96b97","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-30T14:49:13Z (fix/takeover-notes): start's takeover note is now a summary (displaced session, owner, live-forced or stale); host, pid, worktree, and the staleness diagnostic stay in the warning, claimed error, and claim store; park unchanged and now covered; work-claims spec updated
   provenance: {"harness_session":"claude-code:30d2809d-2d77-4c34-b242-55903be96b97","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T10:41:53Z (main): Review finding: takeover_summary persists sid:<pid> through claim.session; the promise to omit PID is incomplete for Unix fallback. Prevention is tracked in tasks-46f99f; historical notes remain separate publishing/redaction work.
