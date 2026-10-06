@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: planned
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-06T16:50:08Z
+updated: 2026-10-06T17:05:32Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
@@ -21,6 +21,8 @@ Done: a recorded decision whether the claim rule moves into tasks or stays in op
 
 Hook boundary: use parent session_id with SubagentStart/SubagentStop agent_id and agent_type to associate workers; tasks-c0bad3 establishes the agent_id/CODEX_THREAD_ID mapping. Design around worker SubagentStop and controller Stop rather than the investigation's synthetic child Stop; verify actual event delivery separately from pure policy controls. Do not depend on child SessionEnd or Interrupt for cleanup.
 
+Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent_id equals CODEX_THREAD_ID at Codex 0.160.1 commit d27764b82f7118f674371e6d6e76271d9d606edb. Hook session_id is the shared root ID, not necessarily the immediate spawning parent; root grouping alone cannot reconstruct nested ownership. Worker turn completion dispatches SubagentStop and may continue; it does not establish final claim closure. SessionEnd and Interrupt exclude workers. Design policy with that source mapping; actual hook delivery remains to be verified. Evidence: docs/notes/2026-09-30-delegated-identity-brief.md.
+
 ## Notes
 
 - 2026-10-06T10:07:12Z (investigate/tasks-1ece46): tasks-1ece46 capture separates worker claim identity from controller Stop aggregation: current hook matches only own live Stop session; pure injected-event check blocks controller on own claim and allows child with dead claim. Identity repair alone will not aggregate separately owned child claims; reuse this planned policy task. Evidence: docs/notes/2026-09-30-delegated-identity-brief.md.
@@ -29,3 +31,4 @@ Hook boundary: use parent session_id with SubagentStart/SubagentStop agent_id an
 - 2026-10-06T15:22:25Z (main): Hand-off from the residue (tack docs/specs/2026-10-06-residue-design.md §4.4, §4.7): the three facts live in tack facts/capabilities.toml and are read only through tack tools/harness-facts (get/list, or lookup(fact, harness) as a loaded module; the registry locates the checkout). When the guard reads them, delete two things with the constants: ops tests.test_claim_guard.FactsMirrorTests and the mirror step in tack's .githooks/pre-commit (with just facts-mirror).
 - 2026-10-06T16:50:05Z (main): priority: raised to P1 under the adopted agent-identity lane; identity research precedes dependent design, and controller-owned closure stays a separate decision.
 - 2026-10-06T16:50:05Z (main): dependency: tasks-c0bad3 supplies the worker/parent/event mapping needed for completion-policy design; capability-facts sourcing and ownership can be discussed independently, but closure requires the verified mapping.
+- 2026-10-06T17:05:31Z (investigate/tasks-c0bad3): Exact Codex 0.160.1 source at d27764b82f7118f674371e6d6e76271d9d606edb deliberately writes shared root CODEX_SESSION_ID and concrete CODEX_THREAD_ID; SubagentStart/SubagentStop agent_id equals worker thread ID. Worker completion dispatches SubagentStop, not Stop; worker SessionEnd/Interrupt are excluded. Recommend tasks contract adaptation, not upstream export repair. Root grouping is not an immediate-parent link for nested workers. Findings and immutable source links: docs/notes/2026-09-30-delegated-identity-brief.md; live hook delivery remains unverified.

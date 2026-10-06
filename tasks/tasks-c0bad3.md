@@ -1,15 +1,16 @@
 ---
 id: tasks-c0bad3
 title: Establish Codex spawned-agent identity and hook semantics
-status: doing
+status: done
 priority: 1
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: investigate/tasks-c0bad3
 created: 2026-10-06T10:41:53Z
-updated: 2026-10-06T16:59:49Z
+updated: 2026-10-06T17:08:39Z
 started: 2026-10-06T16:59:40Z
+completed: 2026-10-06T17:08:37Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -35,3 +36,13 @@ Ideas it wakes: on completion add the finding to tasks-5745bb, tasks-616cd7, tas
 - 2026-10-06T16:59:40Z (main): started
   provenance: {"harness_session":"codex:01a11226-e23f-7c60-a6c3-9e51bdcfdd97","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-10-06T16:59:49Z (main): Direct exact-release source/documentation research in .worktrees/tasks-c0bad3; no harness sweep, native-ID override, product code, or host configuration changes. Trial arm: not enrolled.
+- 2026-10-06T17:00:09Z (investigate/tasks-c0bad3): resumed
+  provenance: {"harness_session":"codex:01a11226-e23f-7c60-a6c3-9e51bdcfdd97","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:05:31Z (investigate/tasks-c0bad3): Exact Codex 0.160.1 source at d27764b82f7118f674371e6d6e76271d9d606edb deliberately writes shared root CODEX_SESSION_ID and concrete CODEX_THREAD_ID; SubagentStart/SubagentStop agent_id equals worker thread ID. Worker completion dispatches SubagentStop, not Stop; worker SessionEnd/Interrupt are excluded. Recommend tasks contract adaptation, not upstream export repair. Root grouping is not an immediate-parent link for nested workers. Findings and immutable source links: docs/notes/2026-09-30-delegated-identity-brief.md; live hook delivery remains unverified.
+- 2026-10-06T17:06:35Z (investigate/tasks-c0bad3): Verification: 25 exact-release source files match their Git tree blob IDs; all 15 cited source ranges and Markdown reference links validated. just test-one codex (6 passed), just test-one provenance (11 passed), just test-fast and just check passed. No runtime code changed. Worktree resume warning filed as tasks-ef69c0.
+- 2026-10-06T17:08:37Z (investigate/tasks-c0bad3): review: impl round 1 — verdict: accept; findings: none; reviewer: codex (model unspecified)
+- 2026-10-06T17:08:37Z (investigate/tasks-c0bad3): Review exclusions accepted: actual hook/relay delivery belongs to follow-up verification; schema, aggregation and closure policy remain separate reviewed tasks; other releases, ordinary forks and configuration overrides are outside the captured worker scope; historical capture is preserved, not reproduced.
+- 2026-10-06T17:08:37Z (investigate/tasks-c0bad3): done
+  provenance: {"harness_session":"codex:01a11226-e23f-7c60-a6c3-9e51bdcfdd97","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:08:37Z (investigate/tasks-c0bad3): Verified Codex 0.160.1 source: commands deliberately use shared root-session and concrete worker-thread IDs; SubagentStart/SubagentStop agent_id equals worker thread ID, worker completion uses SubagentStop, and workers exclude SessionEnd/Interrupt. Recommend tasks adaptation; brief and eight related records updated. Source blob/range checks, focused tests, fast suite, repository checks and review pass; live delivery remains follow-up scope.
+  provenance: {"harness_session":"codex:01a11226-e23f-7c60-a6c3-9e51bdcfdd97","harness_session_source":"CODEX_SESSION_ID"}
