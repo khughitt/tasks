@@ -1,13 +1,15 @@
 ---
 id: tasks-1ece46
 title: Determine why delegated Codex claims lose their session identity
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-30T09:58:25Z
-updated: 2026-10-06T09:45:48Z
+updated: 2026-10-06T09:58:16Z
+started: 2026-10-06T09:58:07Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -28,3 +30,6 @@ Ideas it wakes: on completion add the finding to tasks-0c2c39, tasks-5745bb, tas
 
 - 2026-10-02T14:37:26Z (main): scope follow-up: tasks-cf8687 joins the existing conflict/provenance investigation and Ideas it wakes list; tasks-616cd7 recurred without capture evidence; task remains one bounded controller/worker capture
 - 2026-10-06T09:45:47Z (main): scope follow-up: five newer worker reports join the existing bounded capture; record delegated done evidence independently of conflicting native IDs; wake every processed report on completion
+- 2026-10-06T09:58:07Z (main): started
+  provenance: {"harness_session":"codex:01a110a5-ab41-7552-baa2-c9410cb5dce6","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T09:58:16Z (main): Direct investigation; capture one current controller/worker pair in disposable isolated projects, trace identity/liveness/provenance/closure separately, and update the brief in .worktrees/tasks-1ece46 without product changes.
