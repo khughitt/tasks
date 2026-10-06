@@ -6,15 +6,16 @@ priority: 1
 size: m
 complexity: high
 process: planned
-owner: main
+owner: design/tasks-5e2472
 created: 2026-10-06T10:04:44Z
-updated: 2026-10-06T17:23:30Z
+updated: 2026-10-06T17:27:39Z
 started: 2026-10-06T17:23:30Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
 source: tasks-1ece46
 agent: codex/gpt-6.1-sol
+spec: docs/specs/2026-10-06-delegated-identity-design.md
 ---
 
 Why: tasks-1ece46 captured equal controller IDs but parent CODEX_SESSION_ID and child CODEX_THREAD_ID in the worker. This proves disagreement, not a Codex defect. Research tasks-c0bad3 must establish intended native-variable and hook semantics before design chooses the owner or remedy.
@@ -39,4 +40,10 @@ Verified prerequisite: tasks-c0bad3 traced Codex 0.160.1 commit d27764b82f7118f6
 - 2026-10-06T16:50:04Z (main): priority: raised to P1 under the adopted agent-identity lane; identity research precedes dependent design, and controller-owned closure stays a separate decision.
 - 2026-10-06T17:05:31Z (investigate/tasks-c0bad3): Exact Codex 0.160.1 source at d27764b82f7118f674371e6d6e76271d9d606edb deliberately writes shared root CODEX_SESSION_ID and concrete CODEX_THREAD_ID; SubagentStart/SubagentStop agent_id equals worker thread ID. Worker completion dispatches SubagentStop, not Stop; worker SessionEnd/Interrupt are excluded. Recommend tasks contract adaptation, not upstream export repair. Root grouping is not an immediate-parent link for nested workers. Findings and immutable source links: docs/notes/2026-09-30-delegated-identity-brief.md; live hook delivery remains unverified.
 - 2026-10-06T17:23:30Z (main): started
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:23:45Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:24:33Z (design/tasks-5e2472): Design scope: thread identity must cover claims, native provenance, relay hints and process-proof continuation together. Shared Codex process ancestry cannot establish worker ownership without a concrete thread hint; root association never grants authority. Prior spec-review notes concern the scoping record, not an existing design artifact.
+- 2026-10-06T17:27:12Z (design/tasks-5e2472): Proposed design uses native thread claims and provenance, optional claim root_session, strict Codex thread proof, and fail-closed relay root-only refusal. Relay adapter lacks worker registration; filed relay-f56e30. Native-note format stays unchanged. Written spec awaits user review; implementation plan follows approval.
+- 2026-10-06T17:27:39Z (design/tasks-5e2472): parked (waiting on user, review): User reviews .worktrees/tasks-5e2472/docs/specs/2026-10-06-delegated-identity-design.md; after approval, agent resumes here and writes the implementation plan for its separate review.
   provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
