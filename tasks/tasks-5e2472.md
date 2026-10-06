@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-5e2472
 created: 2026-10-06T10:04:44Z
-updated: 2026-10-06T17:40:16Z
+updated: 2026-10-06T18:19:16Z
 started: 2026-10-06T17:23:30Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -52,4 +52,15 @@ Verified prerequisite: tasks-c0bad3 traced Codex 0.160.1 commit d27764b82f7118f6
 - 2026-10-06T17:37:22Z (design/tasks-5e2472): review: spec round 3 — verdict: revise; findings: Important 3, Minor 4; reviewer: human
 - 2026-10-06T17:39:35Z (design/tasks-5e2472): Spec revision addresses all seven human findings: normal worker release before controller handoff and explicit takeover recovery with reverse-direction/live acceptance; native and relay root sources named; missing-thread relay proof compatibility break and TASKS_SESSION recovery; root-conflict release/reacquire guidance; value-free relay validation errors; top-level provenance source change; session-only worker identity-sharing limit. Plan remains gated on revised written-spec approval.
 - 2026-10-06T17:40:16Z (design/tasks-5e2472): parked (waiting on user, review): User reviews revised .worktrees/tasks-5e2472/docs/specs/2026-10-06-delegated-identity-design.md, especially interim worker handoff and recovery; after approval, agent resumes this worktree and writes the implementation plan.
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): Review bookkeeping correction: earlier review: spec rounds 1 and 2 assessed the scoped task description, not this design document. The entry labeled spec round 3 with reviewer human was design-document round 1, relayed from claude-code/claude-opus-5-5, verdict revise, findings Important 3 and Minor 4. Notes are append-only; preserve those entries as history and use the corrected document sequence below.
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): review: spec round 2 — verdict: accept; findings: none; reviewer: claude-code/claude-opus-5-5
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): review: spec round 3 — verdict: accept; findings: none; reviewer: human
+- 2026-10-06T18:12:19Z (design/tasks-5e2472): Keith approved the revised written spec. Plan must require controller wait/completion evidence that a worker has stopped before forced takeover, and document that agent-waiting parks are visible to every agent rather than reserved for their controller.
+- 2026-10-06T18:12:49Z (design/tasks-5e2472): review: spec round 1 — verdict: revise; findings: Important 3, Minor 4; reviewer: claude-code/claude-opus-5-5
+- 2026-10-06T18:12:49Z (design/tasks-5e2472): The preceding spec round 1 entry is a retrospective corrected entry for the first design-document review; it does not reopen the accepted spec. Correct design sequence: Claude Code revise round 1, Claude Code accept round 2, Keith approval round 3.
+- 2026-10-06T18:18:56Z (design/tasks-5e2472): Implementation plan drafted at docs/plans/2026-10-06-delegated-identity.md: four sequential steps, inline execution recommended, final independent branch review, native and real-relay acceptance kept distinct. Incorporated worker-specific completion/wait evidence before takeover and globally visible agent-waiting parks. Keep plan unlinked until review to avoid premature step-task creation; known unlinked_step behavior is tasks-b2e718. Review correction limitation filed as obs-8bb397.
+- 2026-10-06T18:19:16Z (design/tasks-5e2472): parked (waiting on user, review): User reviews .worktrees/tasks-5e2472/docs/plans/2026-10-06-delegated-identity.md; after approval, agent files and links its four sequential implementation tasks, closes the design deliverable, and integrates the approved documents. Inline execution with final independent review is recommended.
   provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
