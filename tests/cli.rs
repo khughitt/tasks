@@ -20543,7 +20543,8 @@ fn an_acceptance_relay_off_keeps_a_harness_session_on_the_native_ladder() {
     );
     let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
     assert!(
-        store.contains("session = \"s1\"") && !store.contains("codex:s1"),
+        store.contains("session = \"s1\"")
+            && !store.lines().any(|line| line == "session = \"codex:s1\""),
         "relay off must key the claim by the native raw id: {store}"
     );
 }
@@ -27013,4 +27014,181 @@ fn delegated_native_malformed_writes_preserve_claim_and_record() {
         .assert()
         .success();
     assert_eq!(env.json(&dir, &["show", &id])["claim"]["session"], "worker");
+}
+
+#[test]
+fn delegated_root_refresh_and_recovery() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "Root association"]));
+    let run = |root: Option<&str>, args: &[&str]| {
+        let mut cmd = env.cmd(&dir);
+        cmd.env("CODEX_THREAD_ID", "worker");
+        if let Some(root) = root {
+            cmd.env("CODEX_SESSION_ID", root);
+        }
+        cmd.args(args).output().unwrap()
+    };
+    assert!(run(Some("root"), &["start", &id]).status.success());
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["root_session"],
+        "codex:root"
+    );
+    assert!(run(None, &["start", &id]).status.success());
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["root_session"],
+        "codex:root"
+    );
+    let record = std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    for args in [
+        vec!["start", id.as_str()],
+        vec!["start", id.as_str(), "--force", "--reason", "same owner"],
+    ] {
+        let refused = run(Some("private-other"), &args);
+        assert!(!refused.status.success());
+        let detail = err_detail(&refused);
+        assert!(
+            detail.contains("CODEX_SESSION_ID")
+                && detail.contains("tasks show")
+                && detail.contains("park"),
+            "{detail}"
+        );
+        assert!(!detail.contains("private-other") && !detail.contains("codex:root"));
+        assert_eq!(
+            std::fs::read(dir.join(format!("tasks/{id}.md"))).unwrap(),
+            record
+        );
+        assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+    }
+    assert!(
+        run(Some("other"), &["park", &id, "intentional reassociation"])
+            .status
+            .success()
+    );
+    assert!(run(Some("other"), &["start", &id]).status.success());
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["root_session"],
+        "codex:other"
+    );
+    let opaque = id_of(env.json(&dir, &["add", "Opaque root"]));
+    assert!(run(Some("codex:x"), &["start", &opaque]).status.success());
+    assert_eq!(
+        env.json(&dir, &["show", &opaque])["claim"]["root_session"],
+        "codex:codex:x"
+    );
+    env.cmd(&dir)
+        .env("CODEX_THREAD_ID", "rival")
+        .env("CODEX_SESSION_ID", "rival-root")
+        .args([
+            "start",
+            &id,
+            "--force",
+            "--reason",
+            "distinct owner takeover",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(&dir, &["show", &id])["claim"]["root_session"],
+        "codex:rival-root"
+    );
+    env.cmd(&dir)
+        .env("TASKS_SESSION", "explicit")
+        .env("CODEX_SESSION_ID", "ignored-root")
+        .args(["start", &id, "--force", "--reason", "explicit takeover"])
+        .assert()
+        .success();
+    assert!(
+        env.json(&dir, &["show", &id])["claim"]
+            .get("root_session")
+            .is_none()
+    );
+    let claims = env.json(&dir, &["claims"]);
+    assert_eq!(
+        claims["claims"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == opaque)
+            .unwrap()["root_session"],
+        "codex:codex:x"
+    );
+    let prime = env.json(&dir, &["prime"]);
+    assert_eq!(
+        prime["doing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == opaque)
+            .unwrap()["claim"]["root_session"],
+        "codex:codex:x"
+    );
+}
+
+#[test]
+fn delegated_root_invalid_read_owns_no_holds() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let holder = id_of(env.json(&dir, &["add", "Holder", "--need", "quiet"]));
+    let next = id_of(env.json(&dir, &["add", "Next", "--need", "quiet"]));
+    env.cmd(&dir)
+        .env("CODEX_SESSION_ID", "root")
+        .env("CODEX_THREAD_ID", "worker")
+        .args(["start", &holder])
+        .assert()
+        .success();
+    let record = std::fs::read(dir.join(format!("tasks/{holder}.md"))).unwrap();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    let valid = env
+        .cmd(&dir)
+        .env("CODEX_SESSION_ID", "root")
+        .env("CODEX_THREAD_ID", "worker")
+        .args(["ready"])
+        .output()
+        .unwrap();
+    let valid: serde_json::Value = serde_json::from_slice(&valid.stdout).unwrap();
+    assert!(
+        valid["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == next)
+    );
+    for args in [
+        vec!["ready"],
+        vec!["prime"],
+        vec!["next"],
+        vec!["show", holder.as_str()],
+        vec!["claims"],
+    ] {
+        let out = env
+            .cmd(&dir)
+            .env("CODEX_SESSION_ID", "private\nroot")
+            .env("CODEX_THREAD_ID", "worker")
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        if args[0] == "ready" || args[0] == "prime" {
+            let rows = if args[0] == "ready" {
+                &v["tasks"]
+            } else {
+                &v["ready"]
+            };
+            assert!(
+                !rows.as_array().unwrap().iter().any(|t| t["id"] == next),
+                "{v}"
+            );
+        } else if args[0] == "next" {
+            assert!(v["next"].is_null(), "{v}");
+        }
+        assert_eq!(
+            std::fs::read(dir.join(format!("tasks/{holder}.md"))).unwrap(),
+            record
+        );
+        assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+    }
 }

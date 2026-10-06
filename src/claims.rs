@@ -14,6 +14,7 @@ pub struct Identity {
     pub pid: Option<u32>,
     pub tagged: String,
     pub proof: Option<Proof>,
+    pub root_session: Option<String>,
 }
 
 /// Process proof adopted from a matched relay handle, written into the claim's existing
@@ -68,6 +69,7 @@ pub fn identity_from(
             session,
             pid: pid_of("TASKS_SESSION_PID"),
             proof: None,
+            root_session: None,
         });
     }
     // Stage 1 of spec §7 is above: an explicit pair short-circuits, so the relay level is
@@ -77,6 +79,7 @@ pub fn identity_from(
             tagged: resolved.session.clone(),
             session: resolved.session,
             pid: Some(resolved.pid),
+            root_session: resolved.root_session,
             proof: Some(Proof {
                 pid_start: resolved.pid_start,
                 boot_id: resolved.boot_id,
@@ -90,6 +93,7 @@ pub fn identity_from(
             session,
             pid: pid_of("CLAUDE_PID"),
             proof: None,
+            root_session: None,
         });
     }
     let invalid_native = |detail| {
@@ -99,12 +103,14 @@ pub fn identity_from(
     };
     let session = crate::native::value(&get, "CODEX_SESSION_ID").map_err(invalid_native)?;
     let thread = crate::native::value(&get, "CODEX_THREAD_ID").map_err(invalid_native)?;
+    let root_session = session.as_ref().map(|id| format!("codex:{id}"));
     if let Some(session) = thread.or(session) {
         return Ok(Identity {
             tagged: format!("codex:{session}"),
             session,
             pid: None,
             proof: None,
+            root_session,
         });
     }
     match session_pid {
@@ -113,6 +119,7 @@ pub fn identity_from(
             tagged: format!("sid:{pid}"),
             pid: Some(pid),
             proof: None,
+            root_session: None,
         }),
         None => Err(Error::Config(
             "cannot determine a session identity: set TASKS_SESSION (no \
@@ -135,6 +142,8 @@ pub fn hostname() -> String {
 pub struct Claim {
     pub owner: String,
     pub session: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_session: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -388,6 +397,17 @@ impl ClaimStore {
             escalations,
         } = file;
         for (id, claim) in &claims {
+            if let Some(root) = &claim.root_session {
+                match root.strip_prefix("codex:") {
+                    Some(id) if !id.is_empty() && !id.chars().any(char::is_control) => {}
+                    _ => {
+                        return Err(Error::Config(format!(
+                            "{}: claim {id} has an invalid root_session",
+                            path.display()
+                        )));
+                    }
+                }
+            }
             for (field, value) in [("started", &claim.started), ("seen", &claim.seen)] {
                 crate::time::parse(value).map_err(|error| {
                     Error::Config(format!(
@@ -886,6 +906,7 @@ pub fn resolve_identity(warnings: &mut Vec<String>) -> Resolution {
 pub fn continuation_identity(claim: &Claim) -> Identity {
     Identity {
         session: claim.session.clone(),
+        root_session: claim.root_session.clone(),
         tagged: claim.session.clone(),
         pid: claim.pid,
         proof: match (claim.pid_start, &claim.boot_id) {
@@ -963,6 +984,7 @@ mod tests {
             started: "2026-09-05T08:00:00Z".into(),
             seen: "2026-09-05T08:00:00Z".into(),
             holds: Vec::new(),
+            root_session: None,
         }
     }
 
@@ -995,6 +1017,7 @@ mod tests {
             started: "2026-09-22T00:00:00Z".into(),
             seen: "2026-09-22T00:00:00Z".into(),
             holds: Vec::new(),
+            root_session: None,
         }
     }
 
@@ -1217,6 +1240,7 @@ mod tests {
         move || {
             Ok(Some(crate::relay::resolve::Resolved {
                 session,
+                root_session: None,
                 pid: 42,
                 pid_start: 900,
                 boot_id: "boot".into(),
@@ -1552,6 +1576,52 @@ mod tests {
     }
 
     #[test]
+    fn delegated_root_store_roundtrip_and_validation() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("sci.toml");
+        let id = TaskId::parse("sci-000001").unwrap();
+        for root in [None, Some("codex:root"), Some("codex:codex:x")] {
+            let mut store = ClaimStore::load_from(&path).unwrap();
+            let mut claim = sample();
+            claim.root_session = root.map(String::from);
+            store.insert(&id, claim.clone());
+            store.save().unwrap();
+            let loaded = ClaimStore::load_from(&path).unwrap();
+            assert_eq!(loaded.get(&id), Some(&claim));
+            assert_eq!(
+                continuation_identity(loaded.get(&id).unwrap()).root_session,
+                root.map(String::from)
+            );
+            if root.is_none() {
+                assert!(
+                    !std::fs::read_to_string(&path)
+                        .unwrap()
+                        .contains("root_session")
+                );
+            }
+        }
+        for root in [
+            "codex:",
+            "claude:private-root",
+            "codex:private\nroot",
+            "codex:private\u{7f}root",
+        ] {
+            let mut store = ClaimStore::load_from(&path).unwrap();
+            let mut claim = sample();
+            claim.root_session = Some(root.into());
+            store.insert(&id, claim);
+            store.save().unwrap();
+            let error = ClaimStore::load_from(&store.path).unwrap_err().to_string();
+            assert!(
+                error.contains("root_session") && error.contains(&id.to_string()),
+                "{error}"
+            );
+            assert!(!error.contains("private"), "{error}");
+            std::fs::remove_file(&store.path).unwrap();
+        }
+    }
+
+    #[test]
     fn store_roundtrips_and_is_keyed_by_prefix() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("claims/sci.toml");
@@ -1867,6 +1937,7 @@ mod tests {
             started: "2026-09-09T20:00:00Z".into(),
             seen: "2026-09-09T20:00:00Z".into(),
             holds: Vec::new(),
+            root_session: None,
         }
     }
 
@@ -2237,6 +2308,7 @@ mod tests {
                 started: "2026-09-09T22:00:00Z".into(),
                 seen: "2026-09-09T22:00:00Z".into(),
                 holds: Vec::new(),
+                root_session: None,
             },
         );
         assert_eq!(store.parks().count(), 0, "one entry per task");

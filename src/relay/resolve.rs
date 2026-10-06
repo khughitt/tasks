@@ -6,6 +6,7 @@ use crate::relay::snapshot::Snapshot;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
     pub session: String,
+    pub root_session: Option<String>,
     pub pid: u32,
     pub pid_start: u64,
     pub boot_id: String,
@@ -200,6 +201,7 @@ pub fn resolve(
         .expect("filtered on a present handle");
     Ok(Some(Resolved {
         session: agent.id.clone(),
+        root_session: None,
         pid: process.pid,
         pid_start: process.start,
         boot_id: boot_id.to_string(),

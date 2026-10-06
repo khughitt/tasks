@@ -125,6 +125,18 @@ no pid, and lives by the four-hour TTL. Malformed selected Codex input refuses
 claim writes with repair or exact held `TASKS_SESSION` recovery guidance. With
 only `CODEX_SESSION_ID`, workers cannot be distinguished from their controller.
 
+Codex claims expose optional `root_session` in `show`, `prime` and `claims` and
+persist it in the claim store as `codex:<root>`. It names the tree root, never an
+immediate parent, and grants no ownership or shared holds. Native Codex sets it
+from validated `CODEX_SESSION_ID`; explicit overrides and other harnesses omit it.
+A same-owner refresh without root data retains the recorded root; conflicting
+known roots refuse before mutation, including same-owner `start --force`. Inspect
+`tasks show` and the exports, restore incorrect exports, or intentionally release
+with `park` before starting under the new root. Takeovers record the new owner's
+root, including absence. Release removes the metadata; notes and parks gain no
+root field. Old claims still load, but older writers may discard this field when
+rewriting a store; participating sessions need the updated binary for retention.
+
 The generated lifecycle texts are the consumer contract (including status edits):
 
 - `started` on first start; `resumed` on subsequent starts, including owner refresh.

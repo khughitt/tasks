@@ -357,6 +357,8 @@ pub struct TaskSummary {
 pub struct ClaimInfo {
     pub owner: String,
     pub session: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_session: Option<String>,
     pub host: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -373,6 +375,7 @@ impl ClaimInfo {
         ClaimInfo {
             owner: claim.owner.clone(),
             session: claim.session.clone(),
+            root_session: claim.root_session.clone(),
             host: claim.host.clone(),
             pid: claim.pid,
             worktree: claim.worktree.clone(),
@@ -2606,10 +2609,20 @@ mod tests {
             started: "2026-10-03T00:00:00Z".into(),
             seen: "2026-10-03T00:00:00Z".into(),
             holds: Vec::new(),
+            root_session: None,
         };
         let live = crate::claims::Liveness::Live;
         let bare = serde_json::to_value(ClaimInfo::of(&claim, &live)).unwrap();
         assert!(bare.get("holds").is_none(), "{bare}");
+        assert!(bare.get("root_session").is_none());
+        let rooted = crate::claims::Claim {
+            root_session: Some("codex:root".into()),
+            ..claim.clone()
+        };
+        assert_eq!(
+            serde_json::to_value(ClaimInfo::of(&rooted, &live)).unwrap()["root_session"],
+            "codex:root"
+        );
         let holding = crate::claims::Claim {
             holds: vec!["quiet".into()],
             ..claim
