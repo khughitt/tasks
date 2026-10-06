@@ -106,8 +106,9 @@ nothing is eligible.
    Adding an exclusive need that another session holds takes `tasks edit <id> --need <n>
    --force --reason "<why>"`.
    Set `TASKS_SESSION` (and `TASKS_SESSION_PID`, when a long-lived process id is available)
-   when several agents share one terminal or harness process; otherwise agents that resolve
-   to the same session id are indistinguishable to the claim store.
+   when concrete native identity is unavailable and several agents share one terminal or
+   harness process. Distinct Codex threads already supply separate native identities;
+   unnecessary explicit overrides bypass native root association.
    On a host with relay identity enabled (`[identity] relay = true` in
    `~/.config/tasks/config.toml`), a claim is keyed by the relay agent id
    `<harness>:<sessionId>`, so it belongs to the session rather than to the terminal. The

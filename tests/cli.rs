@@ -20529,8 +20529,11 @@ fn an_acceptance_force_cannot_take_over_without_a_resolved_identity() {
     );
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(text.contains("TASKS_SESSION"), "{text}");
-    // The held error names the claim it was raised against, per §§5 and 6.5.
-    assert!(text.contains("departed"), "{text}");
+    // A held error directs recovery through show without exposing stored identity.
+    assert!(
+        text.contains("tasks show") && !text.contains("departed"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -27349,6 +27352,10 @@ TASKS_SESSION=codex:private-worker "$TASKS_BIN" done {closed} recovered
         let error = env.read(env.home.path(), &format!("error-{mode}.json"));
         assert!(
             error.contains(name) && error.contains("TASKS_SESSION"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("private-worker") && !error.contains("private-root"),
             "{error}"
         );
         assert!(

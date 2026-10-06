@@ -9,7 +9,7 @@ never evidence of delivered worker registration.
 | Case | Evidence | Expected result | Observed result | Verdict |
 | --- | --- | --- | --- | --- |
 | Split native root/thread selection | Native unit and CLI regressions | Thread key, tagged thread, no PID or proof | Baseline produced Unix key; remedy selects worker | pass |
-| Malformed selected native values | Native unit/CLI tables, Unicode and controls in either value | Name variable/recovery; no input-value leak, no fallback or mutation | Both values validated even with valid thread; writes refuse, read views succeed | pass |
+| Malformed selected native values | Native unit/CLI tables, Unicode and controls in either value | Name variable/recovery; no input-value leak, no fallback or mutation | Both values validated even with valid thread; writes refuse, read views succeed; held-claim errors direct recovery through show and omit both native values | pass |
 | Explicit and Claude precedence | Native unit controls | Higher tiers remain authoritative | Explicit owner can recover despite malformed Codex input; Claude precedence retained | pass |
 | Native note provenance | Provenance/format/CLI tables | Thread source including equal IDs, unchanged serialized pair | New stamps use concrete thread; malformed/mixed/qualified conflicts warn and omit | pass |
 | Root persistence and recovery | Store/output and `delegated_root` checks | Optional qualified root; retain absent refresh, refuse conflict, replace takeover | Old records and opaque `codex:codex:x` load; conflict preserves files/store; release/reacquire succeeds | pass |

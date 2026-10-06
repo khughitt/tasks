@@ -920,12 +920,12 @@ pub fn continuation_identity(claim: &Claim) -> Identity {
     }
 }
 
-/// Name the claim an error was raised against, so a resolution failure on a claimed task
-/// tells the operator which session to set `TASKS_SESSION` to. Spec §§5 and 6.5.
+/// Direct a held-claim resolution error to explicit owner recovery without exposing IDs.
+/// A stored session may equal the other native input in a malformed-value diagnostic.
 pub fn name_the_claim(error: Error, held: Option<&str>) -> Error {
     match held {
-        Some(session) => Error::Config(format!(
-            "{error}; the existing claim is held by session {session:?}"
+        Some(_) => Error::Config(format!(
+            "{error}; inspect tasks show for the existing claim's exact session identity"
         )),
         None => error,
     }
@@ -1121,7 +1121,7 @@ mod tests {
             &nearest("codex", 9, 900),
             "testhost",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "claude-code:c1")])
         ));
     }
 
@@ -1164,21 +1164,21 @@ mod tests {
             &nearest("codex", 42, 901),
             "testhost",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
         assert!(!proves_ownership(
             &claim,
             &nearest("codex", 42, 900),
             "testhost",
             Some("22222222-2222-4222-8222-222222222222"),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
         assert!(!proves_ownership(
             &claim,
             &nearest("codex", 42, 900),
             "elsewhere",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
     }
 
@@ -1191,7 +1191,7 @@ mod tests {
             &nearest("codex", 42, 900),
             "testhost",
             Some(PROOF_BOOT),
-            &no_env()
+            &env_of(&[("CODEX_THREAD_ID", "s1")])
         ));
     }
 

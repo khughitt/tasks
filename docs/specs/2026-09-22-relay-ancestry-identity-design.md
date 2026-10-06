@@ -256,8 +256,10 @@ These are errors **on acquisition**. On a task that already carries a claim they
 rather than raised, and are raised as soon as ownership proof fails to establish the
 caller's right to act — including when the caller then attempts a takeover, since a
 takeover is itself acquisition and `--force` does not stand in for an owner that could
-not be resolved (§6.2.2). When raised on a claimed task, the message additionally names
-`existing.session` so the operator can recover with the explicit pair.
+not be resolved (§6.2.2). When raised on a claimed task, the message additionally directs
+inspection through `tasks show` for exact held-session recovery. The 2026-10-06
+amendment avoids interpolating stored identity: it can equal another native input
+and would otherwise defeat the value-free malformed-input diagnostic.
 
 `note` is the exception, and the only one: it guards nothing, so a relay-level resolution
 failure there is not an error at all (§6.6).
@@ -380,10 +382,12 @@ owner look live. Combined with §6.2, a session that acquired under relay and th
 registry can still park, close and release everything it holds, and can still be taken over
 normally once its process is gone.
 
-When identity does not resolve and ownership proof is unavailable, the §5 error names
-`existing.session` verbatim, so the operator can set `TASKS_SESSION` to that string and
-act. The explicit pair sits above the relay level, so this recovery works with relay
-enabled and on a host where §7 refuses the platform.
+When identity does not resolve and ownership proof is unavailable, the §5 error
+directs the legitimate owner to inspect `tasks show` and set `TASKS_SESSION` to the
+exact held session it displays. Errors no longer interpolate `existing.session`
+(2026-10-06 amendment), preserving value-free malformed-input diagnostics. The
+explicit pair sits above relay, so recovery works with relay enabled and on a
+host where §7 refuses the platform.
 
 ### 6.6 `note` is a heartbeat, not a guard
 
