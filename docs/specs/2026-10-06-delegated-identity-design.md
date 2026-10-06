@@ -2,7 +2,8 @@
 
 Task: tasks-5e2472. Status: approved by Keith on 2026-10-06 after the revised
 document was accepted by claude-code/claude-opus-5-5. The implementation plan is
-also approved; execution is paused at the user's request.
+also approved; execution resumed at the user's request. Implementation is on
+`feat/delegated-identity`, with real relay acceptance still open before integration.
 
 ## Outcome and scope
 
