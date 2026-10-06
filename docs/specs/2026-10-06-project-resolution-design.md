@@ -1,6 +1,6 @@
 # Former roots and project resolution
 
-Status: draft 2026-10-06; spec review round 1 (revise) incorporated, awaiting re-review
+Status: draft 2026-10-06; spec review rounds 1–2 incorporated; approved 2026-10-06
 Task: tasks-7580d2 (lane tasks-a7460c; blocks tack-8b7a28; used by obs-ff4e76, flows-44890e)
 
 ## 1. Goal
@@ -210,10 +210,12 @@ or one that fails load validation. These use the usual envelope: stderr, exit 1.
 **Fields.** Optional fields are omitted when they don't apply:
 
 - `alias`: the retired prefix the input was spelled with.
-- `worktree`: present only under a storage location, and only when a component follows
-  `.worktrees`.
-- `relpath`: relative to `worktree` when there is one, otherwise to `location`. It is
-  `""` when the input is the location itself.
+- `worktree`: the git worktree the input lies in. It is present in two cases: a
+  storage match where a component follows `.worktrees`, and a `git` match, where it is
+  the worktree top `T` (§4.3, step 5).
+- `relpath`: relative to `worktree` when there is one, otherwise to `location`. So
+  joining `worktree`, or else `location`, with `relpath` always gives back the
+  normalized input. It is `""` when the input is that directory itself.
 
 `root` is always the project's current registered root.
 
@@ -285,8 +287,8 @@ Every registered project contributes these locations:
    registered at `M/sub/nested`, the depth rule picks it over a parent project at `M`.
 
    A match through this step reports `via: "git"`. Its `location` is the matched
-   location under `M`, its `worktree` is `T`, and its `relpath` is the mapped path
-   relative to `location`. Git is spawned only on a miss, so matched paths cost nothing
+   location under `M`, its `worktree` is `T`, and its `relpath` is the input
+   relative to `T` (`sub/nested/x` in the example), following the field rule in §3.2. Git is spawned only on a miss, so matched paths cost nothing
    extra.
 6. Anything else is `unregistered`.
 
@@ -400,6 +402,6 @@ through the alias.
 5. A git worktree created outside `.worktrees` storage, holding a nested project
    registered at `M/sub/nested`, plus a parent project registered at `M`. A path at
    `T/sub/nested/x` resolves to the nested project with `via: "git"`, `worktree: T`,
-   and `relpath: "x"`. Without the parent registered, it still resolves to the nested
+   `location: M/sub/nested`, and `relpath: "sub/nested/x"`. Without the parent registered, it still resolves to the nested
    project.
 6. A malformed `[locations]` table fails with `config` on stderr and exit 1.

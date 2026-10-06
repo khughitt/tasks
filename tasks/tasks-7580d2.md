@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-7580d2
 created: 2026-10-06T13:23:04Z
-updated: 2026-10-06T19:06:36Z
+updated: 2026-10-06T19:11:24Z
 started: 2026-10-06T18:41:11Z
 depends: []
 parent: tasks-a7460c
@@ -41,3 +41,8 @@ Cover canonical and aliased ids, current/former roots and their worktree storage
 - 2026-10-06T19:06:34Z (design/tasks-7580d2): spec round 1 addressed: git fallback maps the path into the main checkout keeping its offset, then reapplies the depth rule; former entries keyed by (root, storage) and kept on move-back; adoption merges both [locations] tables; classification order path > id > prefix, so six-hex strings starting with a letter are prefixes
 - 2026-10-06T19:06:36Z (design/tasks-7580d2): parked (waiting on user, review): user re-reviews docs/specs/2026-10-06-project-resolution-design.md (round 2); on approval the agent writes the implementation plan in .worktrees/tasks-7580d2
   provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T19:08:46Z (design/tasks-7580d2): review: spec round 2 — verdict: revise; findings: P2 1; reviewer: codex/gpt-6
+- 2026-10-06T19:08:46Z (design/tasks-7580d2): spec round 2: all four round-1 findings are addressed. One P2 remains: section 3.2 says worktree is storage-only and relpath is relative to worktree when present, but section 4.3 and CLI test 5 report via git, worktree T, relpath x for T/sub/nested/x. Joining the fields yields T/x. Recommend allow worktree for git results, keep worktree T, and use relpath sub/nested/x; update the regression expectation to preserve the general field contract.
+- 2026-10-06T19:11:15Z (design/tasks-7580d2): resumed
+  provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T19:11:24Z (design/tasks-7580d2): spec round 2 addressed: worktree is allowed on git matches and relpath is always relative to worktree when present (git example: sub/nested/x); user approved the spec with this fix
