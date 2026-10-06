@@ -4,11 +4,12 @@
 > for the recommended inline execution. If the user selects delegation, use
 > superpowers:subagent-driven-development. Steps use checkboxes for tracking.
 
-**Status:** approved on 2026-10-06 after acceptance by
-claude-code/claude-opus-5-5. Execution resumed at the user's request. Tasks 1–3
-are committed on the shared implementation branch; Task 4's deterministic and
-native and real relay live checks pass. Final branch/evidence review accepted the refreshed branch.
-Integration, installation and report closeout follow the final checklist. The written spec is approved.
+**Status:** completed on 2026-10-06. Approved spec/plan execution, four sequential
+steps, deterministic/native/genuine relay acceptance and final independent review
+are complete. The shared branch was merged locally into main and reinstalled
+from main; executable/version and installed behavior were verified. Private
+scratch state, sign-in copy and rollouts were removed. Namespace support remains
+separate as tasks-b9cbe3; no push, PR or global hook/configuration change occurred.
 
 **Goal:** Give Codex workers distinct, persistent claim identity and native note
 provenance, retaining root association without transferring ownership.
@@ -607,7 +608,7 @@ fn delegated_worker_handoff_and_takeover() {
   the brief's resolved-question links. Cite acceptance without claiming worker
   Stop/SessionEnd/Interrupt delivery or relay worker registration was fixed.
 
-- [ ] **Review, integrate and deploy through the normal gates.** Run focused tests
+- [x] **Review, integrate and deploy through the normal gates.** Run focused tests
   for any changed logic, then `just test-fast`, `tasks check`, `git diff --check`.
   Obtain a final whole-branch independent review of code, documents and live
   verdicts under requesting-code-review; log its outcome before acting. Correct
@@ -637,7 +638,7 @@ fn delegated_worker_handoff_and_takeover() {
 The user resumed execution on 2026-10-06. The document/task-only handoff was
 integrated locally and tasks-5e2472 closed as the reviewed design/plan deliverable.
 Linked direct steps are tasks-3809b8, tasks-2047cd, tasks-17c844 and tasks-a5a502.
-The first three are committed; the fourth has passed live relay acceptance and final review; local closeout follows. The implementation
+The first three are committed; all four are closed after reviewed native/relay acceptance, local merge and installation. The implementation
 steps then proceed sequentially on the single `feat/delegated-identity` branch
 in `.worktrees/delegated-identity`, using the workspace sequence above. The
 document/task-only integration is not an intermediate implementation merge.

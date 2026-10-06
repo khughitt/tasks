@@ -1,11 +1,12 @@
 # Delegated identity acceptance — 2026-10-06
 
-Implementation: `feat/delegated-identity`; Tasks 1–3 committed, Task 4 open.
+Implementation: merged into main and reinstalled on this host; all four steps closed.
 Contract: [approved design](../specs/2026-10-06-delegated-identity-design.md).
 Native and real relay live acceptance pass. Final independent review accepted the
 refreshed branch and independently corroborated the live relay evidence. The one
-stale documentation sentence was corrected. Integration and installation follow
-the approved local closeout procedure. Synthetic rows are test fixtures,
+stale documentation sentence was corrected. The reviewed branch was merged locally
+and `cargo install --path .` rebuilt/replaced the tracker from main. Executable
+resolution/version and an installed-binary worker/root/provenance smoke passed. Synthetic rows are test fixtures,
 never evidence of delivered worker registration.
 
 | Case | Evidence | Expected result | Observed result | Verdict |
@@ -39,8 +40,9 @@ The live root is the shared tree root. This one-level exchange does not establis
 an immediate-parent contract for nested workers. No worker Stop/SessionEnd/Interrupt
 delivery or relay worker registration has been repaired. Session-only workers
 remain indistinguishable from their controller; uncaptured historical missing
-exports have no new evidence. The six split-ID reports and tasks-0c2c39 remain open
-until the approved closeout gates are met. relay-f56e30, tasks-f8c9cc and tasks-56b450
+exports have no new evidence. The six split-ID reports closed with the reviewed
+remedy; tasks-0c2c39 closed with the bounded disposition that missing exports were
+not repaired and session-only workers remain indistinguishable. relay-f56e30, tasks-f8c9cc and tasks-56b450
 remain outside the remedy.
 
 Real relay capture used a separate private Codex home, empty subscriber list,

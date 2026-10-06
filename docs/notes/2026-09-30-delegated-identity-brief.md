@@ -196,6 +196,6 @@ historical uncaptured missing-export report remain separate limits.
 
 [Acceptance evidence](2026-10-06-delegated-identity-acceptance.md) records passing
 native controller/worker and deterministic tests, plus a genuine isolated relay
-root/worker capture with normally trusted hook delivery. Implementation remains on its branch until that gate and
-final review pass. No worker hook delivery or relay worker registration fix is
+root/worker capture with normally trusted hook delivery. The accepted implementation was merged locally and reinstalled after those gates
+and final review passed. No worker hook delivery or relay worker registration fix is
 claimed; relay-f56e30, tasks-f8c9cc and tasks-56b450 stay outside the remedy.

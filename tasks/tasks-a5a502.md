@@ -8,7 +8,7 @@ complexity: high
 process: direct
 owner: feat/delegated-identity
 created: 2026-10-06T19:09:22Z
-updated: 2026-10-06T21:19:56Z
+updated: 2026-10-06T21:21:51Z
 started: 2026-10-06T19:24:08Z
 completed: 2026-10-06T21:19:56Z
 depends: [tasks-17c844]
@@ -56,3 +56,5 @@ Execute Task 4 of the approved delegated identity plan, including regression, do
   provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-10-06T21:19:56Z (feat/delegated-identity): Approved identity remedy and required deterministic/native/genuine relay acceptance complete; final independent review accepted, minor stale documentation corrected, private scratch/sign-in/rollouts removed. Closeout records committed with the reviewed implementation for local integration and reinstall from main; namespace gap and relay producer/closure/aggregation work remain open.
   provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T21:21:51Z (main): Deployment complete: reviewed branch merged locally into main; cargo install --path . built the merged commit and replaced the tasks executable. command -v tasks and tasks --version verified; installed-binary synthetic worker/root/provenance smoke passed with private config/state and released claims. Required native/genuine relay captures and final review passed; six split-ID reports plus the bounded historical report closed. Private live scratch/sign-in/rollouts removed. Namespace limitation remains tasks-b9cbe3; no push, PR, global hook/config change or producer/closure/aggregation fix.
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_THREAD_ID"}
