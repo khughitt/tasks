@@ -2,10 +2,10 @@
 
 Implementation: `feat/delegated-identity`; Tasks 1–3 committed, Task 4 open.
 Contract: [approved design](../specs/2026-10-06-delegated-identity-design.md).
-Native and real relay live acceptance now pass. Integration, installation and
-symptom-report closeout await the final review of this evidence and the refreshed
-branch. Prior whole-branch review and corrective re-review have no remaining
-implementation findings. Synthetic rows are test fixtures,
+Native and real relay live acceptance pass. Final independent review accepted the
+refreshed branch and independently corroborated the live relay evidence. The one
+stale documentation sentence was corrected. Integration and installation follow
+the approved local closeout procedure. Synthetic rows are test fixtures,
 never evidence of delivered worker registration.
 
 | Case | Evidence | Expected result | Observed result | Verdict |
@@ -63,8 +63,10 @@ namespace support is tracked separately as tasks-b9cbe3. The first host-PID run
 verified controller acquisition but `--ephemeral` prevented loading a worker fork
 context. The retry retained rollouts only in the private Codex home. No passing
 worker verdict was inferred from either failed attempt or from controller exit.
-Private native IDs/sign-in/rollouts are excluded from this acceptance record and
-will be removed with scratch state after evidence inspection.
+After independent evidence inspection and a final zero-claims check, private
+scratch task/relay state, native-ID receipts, the sign-in copy and Codex rollouts
+were removed. Only sanitized verdict/completion summaries remain in the local
+execution ledger.
 
 Validation: focused checks named in the plan and `just test-fast` pass for Tasks
 1–3. The Task 4 handoff regression passes and fails on the identity assertion
@@ -77,5 +79,7 @@ failed before the shared recovery suffix was corrected to direct inspection
 through `tasks show`. Round 2 reproduced the refusal without native values and
 accepted the correction with no remaining findings. It also verified that process
 controls use matching thread input and override guidance is conditional. Reviews
-are recorded on tasks-a5a502; live relay evidence now passes and awaits final review
-before integration.
+are recorded on tasks-a5a502. Final review round 3 accepted the refreshed branch,
+independently corroborated actual relay delivery/worker checks and process cleanup,
+and reported no Critical or Important findings; its one stale-documentation Minor
+finding was corrected before closeout.

@@ -1,15 +1,16 @@
 ---
 id: tasks-a5a502
 title: "Verify worker handoff, run live acceptance and close the remedy"
-status: doing
+status: done
 priority: 1
 size: m
 complexity: high
 process: direct
 owner: feat/delegated-identity
 created: 2026-10-06T19:09:22Z
-updated: 2026-10-06T21:09:56Z
+updated: 2026-10-06T21:19:56Z
 started: 2026-10-06T19:24:08Z
+completed: 2026-10-06T21:19:56Z
 depends: [tasks-17c844]
 parent: tasks-2fa8c6
 tags: []
@@ -50,3 +51,8 @@ Execute Task 4 of the approved delegated identity plan, including regression, do
   provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-10-06T21:07:21Z (feat/delegated-identity): User ran the approved host-PID capture: genuine root SessionStart receipt, real root row, and matching live relay controller claim passed. Worker spawn failed before any worker was created because --ephemeral omitted the root rollout required for model-context fork; no worker verdict/completion exists. Recorded controller final failure report and process-group cleanup, preserved private logs/case, verified old claim live=false, and explicitly took over/closed only scratch records for cleanup. Removed --ephemeral so fork context persists privately; hook definition/trust, native exports, and approved per-invocation permissions stay unchanged.
 - 2026-10-06T21:09:56Z (feat/delegated-identity): Real relay live acceptance passed on Codex 0.160.1 with normal user /hooks trust and genuine current-root receipt/row. Actual root acquired a qualified live claim; actual distinct worker had no relay row and refused start plus controller done/park, with task/claim/registry snapshots unchanged and no native IDs in errors. Actual tracked worker completion reported no pending tools/checks/background work; controller released all scratch claims, exited, and supervisor reaped its process group. Capture used user-approved shared host PID visibility and private persistent rollouts after diagnosing the failed namespace/ephemeral setups. Final evidence review and refreshed-main integration remain.
+- 2026-10-06T21:18:46Z (feat/delegated-identity): review: impl round 3 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6-astra
+- 2026-10-06T21:19:56Z (feat/delegated-identity): done
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T21:19:56Z (feat/delegated-identity): Approved identity remedy and required deterministic/native/genuine relay acceptance complete; final independent review accepted, minor stale documentation corrected, private scratch/sign-in/rollouts removed. Closeout records committed with the reviewed implementation for local integration and reinstall from main; namespace gap and relay producer/closure/aggregation work remain open.
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}

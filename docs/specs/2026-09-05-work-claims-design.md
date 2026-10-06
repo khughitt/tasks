@@ -150,7 +150,7 @@ falls to the TTL path; it is never paired with an unrelated fallback pid.
    the four-hour TTL. Added 2026-09-22 (tasks-3190fb): the Unix fallback previously
    recorded the command's pid, leaving its claim dead after command exit.
    [Acceptance](../notes/2026-10-06-delegated-identity-acceptance.md) records the
-   native worker evidence and the separately unverified relay live gate.
+   native worker evidence and the passing genuine isolated relay live capture.
 4. The caller's Unix session id, from `/proc/self/stat`.
 
 Level 4 is **terminal identity, not agent identity**: several agents can share one terminal
