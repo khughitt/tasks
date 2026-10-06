@@ -1,6 +1,6 @@
 # Former roots and project resolution
 
-Status: draft 2026-10-06; spec review rounds 1–2 incorporated; approved 2026-10-06
+Status: approved 2026-10-06 (spec review rounds 1–2); the dangling-link rule in §2.1 and §2.2 was amended in plan review round 1
 Task: tasks-7580d2 (lane tasks-a7460c; blocks tack-8b7a28; used by obs-ff4e76, flows-44890e)
 
 ## 1. Goal
@@ -95,9 +95,19 @@ All writes happen under the registry lock the command already takes.
   adds a warning that names the root. If an entry with the same (`root`, `storage`)
   pair already exists, only its `until` is updated.
 - **Refreshing the `storage` record.**
-  - If the root's `.worktrees` is a symlink, the record is set to its realpath.
+  - If the root's `.worktrees` is a symlink that resolves, the record is set to its
+    realpath.
   - If `.worktrees` is a directory inside the root, or does not exist, the record is
     removed. An in-tree `.worktrees` is already under the root.
+  - If the symlink dangles, the command warns. Then:
+    - **Unchanged root:** the record is kept. It still describes this root, for
+      example while its storage is briefly missing.
+    - **Root changed in this command:** the record is removed. The record never
+      describes a root other than the current one. A displaced root's storage lives
+      only in its `former` entry.
+
+    The second host adopts in this state on purpose: it runs `--adopt` before its own
+    storage move, so the new checkout's link dangles.
 - **Moving back to a former root.** Every `former` entry stays. Take a project that
   moves `A` (storage `S1`) → `B` → `A` (storage `S2`). Paths under `S1` keep resolving
   through the entry (`A`, `S1`). Paths under `A` itself match the current root, which
@@ -120,8 +130,9 @@ therefore merges the two tables and never replaces one with the other:
 2. **The old project's displaced root** is then appended as in §2.1, with the old
    table's `storage` record as its fallback storage. It is appended only when that root
    differs from the checkout's root.
-3. **The `storage` record** is refreshed from the checkout's live `.worktrees`. Neither
-   table's record is copied.
+3. **The `storage` record** starts empty and is then refreshed from the checkout's live
+   `.worktrees` by the rules in §2.1. Neither table's record is copied into it. With a
+   dangling link, it stays empty.
 
 The merge is a pure function of the two tables plus the displaced root, so it is
 idempotent. A second `--adopt` run finds `old` already flattened and changes nothing.
