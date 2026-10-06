@@ -8,12 +8,13 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T13:13:57Z
+updated: 2026-10-06T13:30:00Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-10-06-comfy-tables-design.md
+plan: docs/plans/2026-10-06-comfy-tables.md
 ---
 
 Why: the hand-rolled layout in src/output.rs (fixed paddings, id_width, render_row, wrap_lines, fill_hard_split, TITLE_FLOOR, LongWord) keeps producing warts: a long next: line breaks the parked table, quiet recipes misalign the wait column, and every fix adds a special case. The tasks-8a14be spike (branch spike/comfy-table, c2e0e0e) showed comfy-table 8 lays out the parked table with title and next wrapped side by side in their own columns, within our width and painter colours; the user adopted it.
@@ -37,3 +38,8 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T13:13:48Z (feat/comfy-tables): spec revised for round 1, all four findings verified in code and accepted: shared widths for every fixed column across same-schema prime sections (id only across schemas); one ReadCtx colour helper applied by list, search, ready, tree, prime, lanes and parked rows (ParkedRow gains the only new field); claims exempt from colour; width tests bound lines where wrapping is feasible and assert intact text where overflow is permitted
 - 2026-10-06T13:13:57Z (feat/comfy-tables): parked (waiting on user, review): User reviews the revised spec docs/specs/2026-10-06-comfy-tables-design.md (round 1 findings addressed in c5076c6; a scoped re-review checks §3 shared widths, §5 colour, §10 width tests); on approval the agent writes the implementation plan
   provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T13:15:34Z (feat/comfy-tables): review: spec round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-06T13:15:34Z (feat/comfy-tables): Focused re-review of sections 3, 5 and 10: all four round 1 findings resolved. Same-schema prime sections share every fixed-column width, task-row colour propagation covers the named views without redundant lane fields, claims preserves checkout independence, and width checks distinguish wrapping from permitted overflow. This is technical review acceptance; the user design-approval gate remains.
+- 2026-10-06T13:22:00Z (feat/comfy-tables): resumed
+  provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T13:29:59Z (feat/comfy-tables): plan drafted: docs/plans/2026-10-06-comfy-tables.md, 9 tasks filed as steps (tasks-8b152f, -565420, -73c29c, -2ac5d1, -9d8e5d, -ff7985, -674d5d, -014c55, -f52fca; ops piece ops-539e1a); tasks-9b5b0a closes with Task 5
