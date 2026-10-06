@@ -15,7 +15,23 @@ need independent decisions.
 - `src/resolve.rs::resolve_task` reads local records for its prefix and the registered
   checkout for another. `src/commands/dep.rs::add_dependencies` rejects unresolved
   targets and `ensure_acyclic` walks that resolver. Show's separate claim/park fallback
-  does not make dependency reads worktree-aware. Original dependency captures are absent.
+  does not make dependency reads worktree-aware. tasks-d0d520's isolated two-project
+  probe confirms the table below; its script/transcript, versions and binary digest
+  are attached to that task. Original incident captures remain absent.
+
+  | Upstream state | Direct foreign `show` | Dependency behavior | Downstream readiness |
+  | --- | --- | --- | --- |
+  | Claimed, record only in worktree | `doing`, with claim-based fallback warning | New edge refuses `unresolvable_id`; writes nothing | Ready because failed link created no edge |
+  | Open record published to registered checkout | `doing`, registered copy | Edge creation succeeds even with foreign upstream claim; dependency shows `doing` | Blocked, locally and with `--all-projects` |
+  | Completion only in worktree | Still `doing`, registered copy | Dependency still shows `doing` | Still blocked in both scopes |
+  | Completed record published | `done`, registered copy | Dependency shows `done` | Ready in both scopes |
+
+- The publication probe used `git restore --source=work -- tasks/<id>.md` followed
+  by a record-only commit in the registered checkout. A runtime sentinel stayed
+  `live` there while the worktree's committed version was `prepared`. Cyclic edges
+  in the published graph and foreign-owner closure refused without changing records.
+  Missing authority blocked dependency reads with warnings; malformed config returned
+  a typed error. Both disposable projects and their worktree were removed.
 - `src/stale.rs::compare` refuses newer siblings and equal-stamp/different-byte forks.
   tasks-29f71f reproduced a one-sided union retaining the source stamp: it preserves
   both note histories but still refuses against the different sibling bytes. The
@@ -49,7 +65,8 @@ need independent decisions.
 
 Preserve stale-copy refusal, notes, ownership, cycle checks and JSON contracts. A
 completed dependency does not grant rollout authority. Investigations isolate config
-and two host state stores; no live-store editing, host pointers or hand-edited stamps.
+and host state; the park probe compares two stores. No live-store editing, host pointers
+or hand-edited stamps.
 Do not erase a legitimate recurring or live-owned obligation when reconciling history.
 Related halt-audit and linked-project tasks address different questions.
 
@@ -61,6 +78,18 @@ Related halt-audit and linked-project tasks address different questions.
    depends on it or observes completion; improve explicit publication guidance.
 2. If publication is insufficient, design shared worktree-aware dependency resolution
    with reviewed source selection, cycles and ownership, distinct from runtime rollout.
+
+Dependency recommendation: retain registered authority and publish the upstream record
+before creating a foreign dependency, then publish its completion before expecting
+downstream readiness. Direct `show` fallback is a diagnostic convenience, not a
+publication mechanism. The probe establishes that record publication is sufficient
+for its unlinked plain records; publish required linked documents/attachments too
+when the record uses them. Coordinate the upstream owner, preserve newer registered
+changes, and use the recovery procedure below for divergent copies rather than
+blindly replacing them. Publication records progress; it does not authorize runtime
+activation. Tasks owns CLI/skill guidance; upstream project owners publish their
+records and retain their own rollout gates. No shared-resolver change is justified
+by this probe. tasks-70f0bc covers the guidance, including completion visibility.
 
 **Recovery**
 
@@ -82,14 +111,15 @@ and merge it into the worktree before retrying. For divergent histories:
    stamp itself. Coordinate with active owners before integrating their checkout.
 
 tasks-a20a64 now covers precise guidance and regression protection for this existing
-contract; a new recovery mechanism is unnecessary. Dependency publication still needs
-tasks-d0d520's probe, and local park recovery still needs tasks-b9b10e's safeguards.
+contract; a new recovery mechanism is unnecessary. Dependency publication is established
+by tasks-d0d520; local park recovery still needs tasks-b9b10e's safeguards.
 These are separate choices; a recovery remedy is not an alternative read authority.
 
 ## Unanswered questions
 
-- Which authority should dependency creation/readiness use? tasks-d0d520 compares
-  worktree-only creation and newer completion before/after publication.
+- How should dependency diagnostics and workflow instructions make registered-record
+  publication clear? tasks-70f0bc owns this scoped guidance follow-up, supported by
+  tasks-d0d520's observed behavior table.
 - How should the stale-copy diagnostic explain a source-stamped Git union and its
   two-sided integration requirement? tasks-a20a64 implements the scoped guidance fix;
   tasks-29f71f established the recovery without changing the safety contract.
@@ -99,13 +129,16 @@ These are separate choices; a recovery remedy is not an alternative read authori
 
 ## Proposed decomposition
 
-- tasks-70f0bc and tasks-562c53: briefed; await tasks-d0d520 under tasks-984769.
+- tasks-d0d520: investigation complete; record-only publication suffices in its fixture.
+  tasks-70f0bc: scoped guidance follow-up under tasks-984769. tasks-562c53: proposed
+  drop, because its completion-visibility need is covered by tasks-70f0bc and its
+  behavior is established by tasks-d0d520; no separate resolver change is needed.
 - tasks-29f71f: investigation complete; attached probe verifies lossless Git recovery.
   tasks-a20a64: scoped guidance follow-up under the same goal; preserve the refusal,
   explain identical same-stamp siblings, and avoid blaming every fork on write timing.
 - tasks-6b2867: briefed; awaits tasks-b9b10e, with the reviewer's host-local-store and
   repeated-done finding recorded on both tasks. The original incident remains uncaptured.
-- All three follow-ups are P2/s/mid/direct investigations. tasks-b9b10e's bound now
+- The completed probes were P2/s/mid/direct investigations. tasks-b9b10e's bound now
   includes two independent host state stores and before/after record comparisons.
   Findings update this brief and wake named ideas in the same commit. Changed routing
   or recovery contracts require reviewed design and implementation plans afterward.
