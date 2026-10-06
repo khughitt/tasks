@@ -69,8 +69,8 @@ will be removed with scratch state after evidence inspection.
 Validation: focused checks named in the plan and `just test-fast` pass for Tasks
 1–3. The Task 4 handoff regression passes and fails on the identity assertion
 with a temporarily restored root-first selector; the thread-first selector was
-restored and rechecked. Final `just test-fast` passes 1,088 tests (435 unit, 36 attachment, 615 CLI and
-2 front-door); one unrelated exhaustive enumeration is ignored by the fast target.
+restored and rechecked. After refreshing from current main, final `just test-fast` passes 1,121 tests
+(457 unit, 36 attachment, 615 CLI, 2 front-door and 11 resolver); one unrelated exhaustive enumeration is ignored by the fast target.
 Commit hooks passed hygiene, format, clippy and task checks. Independent review
 round 1 reproduced a held-session diagnostic leak; the strengthened regression
 failed before the shared recovery suffix was corrected to direct inspection
