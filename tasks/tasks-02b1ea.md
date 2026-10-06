@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T14:53:53Z
+updated: 2026-10-06T14:57:04Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -60,3 +60,6 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T14:53:51Z (feat/comfy-tables): review: plan round 3 — verdict: accept; findings: none; reviewer: human
 - 2026-10-06T14:53:51Z (feat/comfy-tables): parked (waiting on user, decision): Plan accepted (round 3); execution paused by the user. On resume: user picks the execution method (recommended: subagent-driven), then the agent starts Task 1 (ops-539e1a, cli.toml --headers in an ops worktree) and works through Task 8 in .worktrees/comfy-tables
   provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T14:55:43Z (feat/comfy-tables): resumed
+  provenance: {"harness_session":"codex:01a111b5-34a9-7812-a601-575760678301","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T14:57:04Z (feat/comfy-tables): Execution resumed: user selected subagent-driven; Task 1 in ops .worktrees/cli-headers, then Tasks 2–8 in .worktrees/comfy-tables; accepted plan round 3 governs implementation.
