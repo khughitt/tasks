@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T16:01:52Z
+updated: 2026-10-06T16:03:03Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -71,3 +71,5 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T15:57:46Z (feat/comfy-tables): Final width fix decision: validate COLUMNS before pretty non-table commands can mutate state; retain warnings-before-width-error ordering for existing table/show/next reads. Valid widths reach every pretty warning divider, JSON unaffected; invalid COLUMNS now rejects pretty non-table commands even when they would emit no warnings.
 - 2026-10-06T16:01:51Z (feat/comfy-tables): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-06T16:01:51Z (feat/comfy-tables): All eight planned tasks and final warning-width correction are implemented and reviewed; final check/fast suite passed (1076 tests, 1 ignored), and release build prepared. Integration approval is the remaining gate because merge activates the linked global tasks skill.
+- 2026-10-06T16:03:03Z (feat/comfy-tables): parked (waiting on user, approval): User approves local merge of feat/comfy-tables and activation of linked global tasks skill; agent then merges, verifies merged tree, reinstalls CLI with cargo install --path ., closes goal, harvests timings and removes worktree after pointer check.
+  provenance: {"harness_session":"codex:01a111b5-34a9-7812-a601-575760678301","harness_session_source":"CODEX_SESSION_ID"}
