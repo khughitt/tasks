@@ -8,7 +8,7 @@ complexity: high
 process: direct
 owner: feat/delegated-identity
 created: 2026-10-06T19:09:22Z
-updated: 2026-10-06T19:39:37Z
+updated: 2026-10-06T20:37:21Z
 started: 2026-10-06T19:24:08Z
 depends: [tasks-17c844]
 parent: tasks-2fa8c6
@@ -33,4 +33,10 @@ Execute Task 4 of the approved delegated identity plan, including regression, do
 - 2026-10-06T19:39:35Z (feat/delegated-identity): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
 - 2026-10-06T19:39:35Z (feat/delegated-identity): Independent whole-branch review and scoped corrective re-review now have no remaining findings. Fixed the reproduced held-session diagnostic leak with a red/green regression, strengthened process-proof controls, and qualified native override guidance. Fresh test-fast: 435 unit + 36 attachment + 615 CLI + 2 front-door tests pass; one unrelated slow enumeration remains ignored per fast-suite policy. No merge, install or report closeout until the required genuine relay capture and its verdict review pass.
 - 2026-10-06T19:39:35Z (feat/delegated-identity): parked (waiting on user, environment): User arranges a clean Codex scratch controller/worker session with trusted SessionStart delivery through local relay Node entry, an absolute private subscriber file and private RELAY_STATE_DIR (current session has no relay hook delivery/registry; no replay or global hook changes). Agent resumes .worktrees/delegated-identity on feat/delegated-identity, captures genuine root-row worker refusal without mutation, reviews the live verdict, then completes approved report closeout, local merge and reinstall from main.
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T20:29:49Z (feat/delegated-identity): resumed
+  provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T20:31:33Z (feat/delegated-identity): User authorized preparing the isolated live relay setup and using Codex normal hook trust. Continue process direct in .worktrees/delegated-identity on feat/delegated-identity. Prepare private config/state/subscriber artifacts and launch instructions; no global hook/config changes or trust bypass.
+- 2026-10-06T20:37:20Z (feat/delegated-identity): Isolated relay setup prepared in private host-local scratch storage; manifest .worktrees/delegated-identity/.superpowers/sdd/2026-10-06-delegated-identity/relay-live-setup.json. Normal user hooks/config are unchanged. Private setup/schema/permission and script syntax checks pass; untrusted preflight refuses before launching Codex or writing registry. Launcher relay-trust.sh opens only the isolated CLI for normal /hooks trust; no session launched yet. relay-capture.py will run one bounded 300-second actual controller/worker exchange with tracked completion and owned process-group cleanup after user trusts the exact hook. Private sign-in copy is retained only for this smoke and must be removed with scratch state at cleanup.
+- 2026-10-06T20:37:20Z (feat/delegated-identity): parked (waiting on user, review): User reviews the private hook definition and session-start.py referenced by .worktrees/delegated-identity/.superpowers/sdd/2026-10-06-delegated-identity/relay-live-setup.json; runs relay-trust.sh, trusts the SessionStart hook via /hooks, then exits that CLI and reports completion. Agent resumes this worktree, runs relay-capture.py in the foreground, inspects the genuine root/worker verdict, cleans private scratch including sign-in copy, obtains final evidence review and completes the approved integration/install/closeout.
   provenance: {"harness_session":"codex:01a1129d-a6a5-7022-b443-3840ac0c9c25","harness_session_source":"CODEX_SESSION_ID"}
