@@ -1,13 +1,15 @@
 ---
 id: tasks-af97da
 title: No text search over task titles and bodies across registered projects; quick-add's near-duplicate check had to grep tasks/*.md files in each project directly
-status: todo
+status: doing
 priority: 1
 size: m
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-30T14:13:18Z
-updated: 2026-10-05T01:18:40Z
+updated: 2026-10-06T09:17:32Z
+started: 2026-10-06T09:17:32Z
 depends: []
 parent: tasks-ffdbaa
 tags: [feedback, gap, "from:mind6"]
@@ -32,3 +34,5 @@ Original report: No text search over task titles and bodies across registered pr
 - 2026-10-02T14:29:35Z (main): scope: scoped; literal case-insensitive title/body search reuses list selection, scopes, modes, warnings, and JSON; P2/m/mid/direct; brief: docs/notes/2026-10-02-cross-project-review-brief.md
 - 2026-10-05T00:22:26Z (main): Raised to P1 on 2026-10-04: a quick-add pass filed a duplicate (mind6-c2cdb6 of mind6-b81107) because its near-duplicate check is keyword grep across projects; text search over titles and bodies is the fix.
 - 2026-10-05T01:18:40Z (main): Review 2026-10-05: literal substring search helps discovery but will not reliably catch paraphrased duplicates (the mind6-c2cdb6/b81107 pair shared few words); keep the P1 for discovery and treat paraphrase detection as a separate question.
+- 2026-10-06T09:17:32Z (main): started
+  provenance: {"harness_session":"claude-code:5ea724da-a9ed-49f2-b579-b29c13ab5efd","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
