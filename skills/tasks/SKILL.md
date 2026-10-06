@@ -324,6 +324,16 @@ there is no bulk backfill requirement. Parked `phase` is a link-derived resume h
 `process: planned` with `phase: implementing` on a link-less todo still requires
 the document reviews.
 
+Codex claim `root_session`, when present, is `codex:<root>` grouping metadata,
+never an immediate parent or ownership authority. Same-owner refresh without root
+data retains it; conflicting known roots refuse until the owner restores exports
+or releases with `park` before intentional reassociation. Takeovers record the
+new owner's root. Older claim writers can discard it. Relay worker acquisition
+still refuses a root-only row (`relay-f56e30`); Codex proof-only continuation needs
+a matching concrete thread even when process ancestry agrees. A legitimate owner
+missing that thread can recover with the exact held `TASKS_SESSION` from `show`;
+never fabricate a thread or use the command PID as a liveness handle.
+
 ## Worker handoff
 
 A worker releases its claims before ending its assignment: `done` if responsible

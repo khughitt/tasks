@@ -82,8 +82,8 @@ id copied from the end of a sentence works. Embedded dots, other punctuation, an
 or trailing whitespace are not accepted; records on disk and every output stay canonical.
 
 `start` also writes a per-project claim outside git, so every worktree sees the session and
-its liveness. `ready` and `next` omit live claims with an explanatory warning. Set
-`TASKS_SESSION` per agent when agents share a terminal or harness process; use
+its liveness. `ready` and `next` omit live claims with an explanatory warning. When concrete native identity is unavailable, set
+`TASKS_SESSION` per agent sharing a terminal or harness process; use
 `tasks start --force <id>` for an explicit, recorded takeover. A write refuses with
 `stale_copy` when another worktree holds a newer copy of the record, and says whether to
 rerun there, merge, or leave it to the session working there.
@@ -287,7 +287,8 @@ Enabling relay never rewrites a claim already held: a claim keeps the identity i
 created with. The level is Linux-only — it needs `/proc` — and it sits *below*
 `TASKS_SESSION` in the ladder, which is why every relay identity error ends by telling you
 to set `TASKS_SESSION` and `TASKS_SESSION_PID`. That override is the recovery path from all
-of them, and it also remains the way to tell apart several agents sharing one process.
+of them, and distinguishes agents sharing a process when native thread identity is
+unavailable. It never supplies native note provenance.
 
 ## Install
 

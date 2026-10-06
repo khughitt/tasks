@@ -27370,3 +27370,185 @@ TASKS_SESSION=codex:private-worker "$TASKS_BIN" done {closed} recovered
     assert!(released["claims"].as_array().unwrap().is_empty());
     assert_eq!(env.json(&dir, &["show", &closed])["task"]["status"], "done");
 }
+
+#[test]
+fn delegated_worker_handoff_and_takeover() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    hold_vocab(&dir);
+    let id = id_of(env.json(&dir, &["add", "Worker handoff", "--need", "quiet"]));
+    let controller = id_of(env.json(&dir, &["add", "Controller"]));
+    let contender = id_of(env.json(&dir, &["add", "Controller hold", "--need", "quiet"]));
+    let run = |thread: &str, args: &[&str]| {
+        env.cmd(&dir)
+            .env("CODEX_SESSION_ID", "root")
+            .env("CODEX_THREAD_ID", thread)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(run("worker", &["start", &id]).status.success());
+    assert!(run("root", &["start", &controller]).status.success());
+    let held = env.json(&dir, &["show", &id]);
+    assert_eq!(held["claim"]["session"], "worker");
+    assert_eq!(held["claim"]["live"], true);
+    assert_eq!(held["claim"]["root_session"], "codex:root");
+    assert_eq!(held["claim"]["holds"], serde_json::json!(["quiet"]));
+    for (actor, target) in [("root", &id), ("worker", &controller)] {
+        let record = std::fs::read(dir.join(format!("tasks/{target}.md"))).unwrap();
+        let store = std::fs::read(env.claim_store("sci")).unwrap();
+        for args in [
+            vec!["done", target, "premature"],
+            vec!["park", target, "premature"],
+            vec!["edit", target, "--status", "done"],
+            vec!["edit", target, "--need", "owner"],
+        ] {
+            let out = run(actor, &args);
+            assert!(!out.status.success());
+            assert_eq!(err_kind(&out), "claimed");
+            assert_eq!(
+                std::fs::read(dir.join(format!("tasks/{target}.md"))).unwrap(),
+                record
+            );
+            assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+        }
+    }
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    let record = std::fs::read(dir.join(format!("tasks/{contender}.md"))).unwrap();
+    assert_eq!(err_kind(&run("root", &["start", &contender])), "need_held");
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{contender}.md"))).unwrap(),
+        record
+    );
+    assert!(
+        run("root", &["note", &id, "foreign note", "--stamp"])
+            .status
+            .success()
+    );
+    assert_eq!(
+        std::fs::read(env.claim_store("sci")).unwrap(),
+        store,
+        "foreign note cannot heartbeat"
+    );
+    assert!(run("worker", &["start", &id]).status.success());
+    assert!(
+        run("worker", &["note", &id, "owner heartbeat", "--stamp"])
+            .status
+            .success()
+    );
+    assert!(
+        run(
+            "worker",
+            &["park", &id, "controller reviews", "--waiting-on", "agent"]
+        )
+        .status
+        .success()
+    );
+    assert!(env.json(&dir, &["show", &id])["claim"].is_null());
+    assert!(run("root", &["start", &id]).status.success());
+    assert!(run("root", &["done", &id, "reviewed"]).status.success());
+    assert!(
+        run("root", &["start", &contender]).status.success(),
+        "park/done released worker's hold"
+    );
+    assert!(run("root", &["done", &contender]).status.success());
+
+    let own_done = id_of(env.json(&dir, &["add", "Worker closes own work"]));
+    assert!(run("worker", &["start", &own_done]).status.success());
+    assert!(
+        run("worker", &["done", &own_done, "completed"])
+            .status
+            .success()
+    );
+    assert!(env.json(&dir, &["show", &own_done])["claim"].is_null());
+
+    let public_park = id_of(env.json(&dir, &["add", "Public handoff"]));
+    assert!(run("worker", &["start", &public_park]).status.success());
+    assert!(
+        run(
+            "worker",
+            &[
+                "park",
+                &public_park,
+                "controller starts and reviews",
+                "--waiting-on",
+                "agent"
+            ]
+        )
+        .status
+        .success()
+    );
+    let next = run("third-agent", &["next"]);
+    assert!(next.status.success());
+    let next: serde_json::Value = serde_json::from_slice(&next.stdout).unwrap();
+    assert_eq!(next["next"]["task"]["id"], public_park);
+    let parked = run("third-agent", &["list", "--parked"]);
+    assert!(parked.status.success());
+    let parked: serde_json::Value = serde_json::from_slice(&parked.stdout).unwrap();
+    assert!(
+        parked["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == public_park)
+    );
+    assert!(
+        run("third-agent", &["start", &public_park])
+            .status
+            .success()
+    );
+    assert!(run("third-agent", &["done", &public_park]).status.success());
+
+    let abandoned = id_of(env.json(&dir, &["add", "Worker left claim"]));
+    assert!(run("worker", &["start", &abandoned]).status.success());
+    let record = std::fs::read(dir.join(format!("tasks/{abandoned}.md"))).unwrap();
+    let store = std::fs::read(env.claim_store("sci")).unwrap();
+    assert!(
+        !run("root", &["done", &abandoned, "premature"])
+            .status
+            .success()
+    );
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{abandoned}.md"))).unwrap(),
+        record
+    );
+    assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+    assert!(
+        run(
+            "root",
+            &[
+                "start",
+                &abandoned,
+                "--force",
+                "--reason",
+                "finished worker left a live claim"
+            ]
+        )
+        .status
+        .success()
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &abandoned])["claim"]["session"],
+        "root"
+    );
+    assert!(
+        run("root", &["done", &abandoned, "reviewed"])
+            .status
+            .success()
+    );
+    let shown = env.json(&dir, &["show", &abandoned]);
+    assert!(shown["task"]["notes"].as_array().unwrap().iter().any(|n| {
+        n["text"]
+            .as_str()
+            .unwrap()
+            .contains("finished worker left a live claim")
+    }));
+    assert!(run("root", &["done", &controller]).status.success());
+    assert!(
+        env.json(&dir, &["claims"])["claims"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
