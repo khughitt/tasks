@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-7580d2
 created: 2026-10-06T13:23:04Z
-updated: 2026-10-06T19:06:34Z
+updated: 2026-10-06T19:06:36Z
 started: 2026-10-06T18:41:11Z
 depends: []
 parent: tasks-a7460c
@@ -39,3 +39,5 @@ Cover canonical and aliased ids, current/former roots and their worktree storage
 - 2026-10-06T19:05:27Z (design/tasks-7580d2): resumed
   provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-06T19:06:34Z (design/tasks-7580d2): spec round 1 addressed: git fallback maps the path into the main checkout keeping its offset, then reapplies the depth rule; former entries keyed by (root, storage) and kept on move-back; adoption merges both [locations] tables; classification order path > id > prefix, so six-hex strings starting with a letter are prefixes
+- 2026-10-06T19:06:36Z (design/tasks-7580d2): parked (waiting on user, review): user re-reviews docs/specs/2026-10-06-project-resolution-design.md (round 2); on approval the agent writes the implementation plan in .worktrees/tasks-7580d2
+  provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
