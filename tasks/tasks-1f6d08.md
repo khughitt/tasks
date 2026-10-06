@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-09-30T09:53:57Z
-updated: 2026-10-06T10:41:54Z
+updated: 2026-10-06T10:59:44Z
 depends: []
 parent: tasks-ea2a79
 tags: []
@@ -29,3 +29,4 @@ Ideas it wakes: on completion, add a finding note to tasks-cc9a31, tasks-2bb0ba 
 - 2026-10-06T09:45:47Z (main): scope follow-up: tasks-d56b72 contributes flat original-note amendments; extend consumer verification beyond run totals to review and concern records without choosing the proposed schema
 - 2026-10-06T10:39:15Z (main): review: spec round 1 — verdict: revise; findings: Important 3, Minor 1; reviewer: human
 - 2026-10-06T10:41:53Z (main): Review disposition: decide publishing/redaction value first within tasks, including the manual publishing option and unchanged Git-history exposure; coordinate obs only for structured corrections. Share selectors without coupling delivery milestones.
+- 2026-10-06T10:59:44Z (main): review: spec round 2 — verdict: accept; findings: none; reviewer: unspecified

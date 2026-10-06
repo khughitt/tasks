@@ -24,14 +24,16 @@ controller-owned task is a separate authorization decision.
 - Full capture/control/report tables now live on tasks-1ece46, alongside its
   sanitized attachment at `tasks/files/tasks-1ece46/delegated-identity-evidence.json`.
   The recovered original dead claim has no surviving native-input capture. Relay
-  checks and controller Stop checks were injected controls; real relay matching
-  and actual Stop/wake delivery remain unverified.
+  checks and Stop-policy checks were injected controls. The child Stop input used
+  a child session_id and does not model the documented subagent hook shape; it
+  establishes no child lifecycle coverage. Real relay and hook delivery remain unverified.
 - The work-claims spec's Identity section assumes native-ID equality with hook
   session_id, based on top-level sessions. Relay's design already allows inherited
   parent variables. Current [official Hooks documentation](https://learn.chatgpt.com/docs/hooks)
-  says subagent hooks carry the parent session_id and subagent events carry agent_id.
-  That supports distinguishing parent and worker, but does not establish both
-  environment variables' intended semantics at the captured release.
+  answers hook session_id: it is the parent's. SubagentStart/SubagentStop also carry
+  agent_id and agent_type; SessionEnd and Interrupt exclude subagents. Research must
+  establish agent_id/thread equality and verify the review's no-child-Stop finding
+  against exact-release dispatch, rather than assume the synthetic event is real.
 
 ## Constraints
 
@@ -52,21 +54,25 @@ export bug. relay-60ae9e is related feedback, not authority over Codex itself.
 3. **Explicit worker claim override.** A stable TASKS_SESSION can be a bounded
    workaround. It does not settle native provenance or delegated authorization.
 
-Current lean: establish semantics first, then choose 1 or 2 from that answer. Keep
+Current lean: documented parent hook identity and captured parent session values
+favor option 1; verify native semantics and agent_id/thread mapping before design.
+Upstream repair still requires evidence of a contract violation. Keep
 controller-closes for controller-owned tasks; evaluate that policy in its own small
 follow-up, not inside the identity design.
 
 ## Unanswered questions
 
-- What are Codex's intended semantics for CODEX_SESSION_ID and CODEX_THREAD_ID in a
-  spawned agent, and what session_id do that worker's hooks receive? tasks-c0bad3
-  checks exact-release source against current docs before tasks-5e2472 designs.
+- Does SubagentStart/SubagentStop agent_id equal CODEX_THREAD_ID, and do the native
+  variables intentionally distinguish parent conversation from worker? tasks-c0bad3
+  traces those assignments and actual event dispatch at the captured release; parent
+  hook session_id is already documented, not an unanswered question.
 - Which signal identifies the worker and which associates its parent, and how should
   each identity/provenance/relay contract use them? tasks-5e2472 follows that evidence.
 - Is explicit closure delegation needed? tasks-f8c9cc recommends controller-closes
   and records an independent disposition for tasks-f27fe3 and tasks-673b21.
 - How should a controller count separately owned worker claims? tasks-56b450 uses the
-  verified parent/hook mapping; actual Stop/wake delivery remains separate verification.
+  verified parent/agent_id mapping and SubagentStop for workers, not a child Stop.
+  Actual event delivery remains separate verification.
 
 ## Proposed decomposition
 

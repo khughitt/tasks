@@ -22,8 +22,9 @@ need independent decisions.
 - Claim/park state is host-local under XDG_STATE_HOME (`src/claims.rs::ClaimStore::path_with`),
   independent of task files shared through Git or synchronized across hosts. Closing
   on one host does not clear another host's park store.
-- The human review's isolated two-state-store probe parked under store A and closed
-  under store B. After record integration, prime under A showed the closed task parked.
+- The reviewer's isolated two-state-store probe, run at the controller's request,
+  parked under store A and closed under store B. After record integration, prime
+  under A showed the closed task parked.
   Re-running tasks done <id> under A exited 0 and cleared its park; the probe was deleted.
   This is a demonstrated mechanism, not proof of the original incident's host sequence.
 - An additional current-binary probe with shared files and two isolated stores confirms
@@ -78,7 +79,7 @@ These are separate choices; a recovery remedy is not an alternative read authori
 
 - tasks-70f0bc and tasks-562c53: briefed; await tasks-d0d520 under tasks-984769.
 - tasks-a20a64: briefed; awaits tasks-29f71f under the same goal.
-- tasks-6b2867: briefed; awaits tasks-b9b10e, with the human host-local-store and
+- tasks-6b2867: briefed; awaits tasks-b9b10e, with the reviewer's host-local-store and
   repeated-done finding recorded on both tasks. The original incident remains uncaptured.
 - All three follow-ups are P2/s/mid/direct investigations. tasks-b9b10e's bound now
   includes two independent host state stores and before/after record comparisons.

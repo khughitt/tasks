@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: investigate/tasks-1ece46
 created: 2026-09-30T09:58:25Z
-updated: 2026-10-06T10:41:55Z
+updated: 2026-10-06T10:59:45Z
 started: 2026-10-06T09:58:07Z
 completed: 2026-10-06T10:10:01Z
 depends: []
@@ -140,3 +140,5 @@ launched. The original evidence scratch was already deleted by its own controlle
   provenance: {"harness_session":"codex:01a110a5-ab41-7552-baa2-c9410cb5dce6","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-10-06T10:41:53Z (main): review: impl round 2 — verdict: revise; findings: Important 1, Minor 1; reviewer: human
 - 2026-10-06T10:41:53Z (main): Review correction: the capture establishes parent-session/child-thread disagreement and tasks fallback, not defective Codex delivery. Full evidence tables now live on this task alongside the existing sanitized attachment; source semantics must be checked before recommending an upstream repair.
+- 2026-10-06T10:59:44Z (main): review: impl round 3 — verdict: accept; findings: none; reviewer: unspecified
+- 2026-10-06T10:59:44Z (main): Evidence limit correction: the injected child Stop used its own child session_id, whereas documented subagent hooks carry parent session_id and worker events carry agent_id. The review identifies SubagentStop, not child Stop, as the real completion event. Preserve the injected result solely as a pure policy control; it does not establish subagent event delivery or controller/worker lifecycle coverage. tasks-c0bad3 verifies exact-release dispatch and agent_id/thread equality.
