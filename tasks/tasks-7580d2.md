@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-7580d2
 created: 2026-10-06T13:23:04Z
-updated: 2026-10-06T19:11:24Z
+updated: 2026-10-06T19:20:06Z
 started: 2026-10-06T18:41:11Z
 depends: []
 parent: tasks-a7460c
@@ -16,6 +16,7 @@ tags: []
 source: tack-8b7a28
 agent: claude-code/claude-fable-5-1
 spec: docs/specs/2026-10-06-project-resolution-design.md
+plan: docs/plans/2026-10-06-project-resolution.md
 ---
 
 Why: a prefix rename keeps aliases, but once it completes nothing on the host records the directory the project used to live in (the rename state directory is empty afterwards), and each consumer that maps an id or a path to a project reads [projects] by hand: obs's indexer and join, flows' trial tools, tack's session-episodes. So a rename drops their history (tack docs/specs/2026-10-06-rename-to-hq-design.md §3.5, §3.6; obs-ff4e76, flows-44890e). The user asked on 2026-10-06 that renames be made smoother in general before tack's rename to hq. Done: the registry records each former root when rename, init --prefix --force or rename --adopt changes a root or a prefix, per host; one read-only resolver answers the canonical id for any id form (alias prefixes included) and the project for any path (current root, former roots, and the worktree storage of each); its output is stable JSON a hook or an indexer can call; a host that adopts a rename made elsewhere ends with the same answers; and the existing ai alias gets its former root backfilled or is documented as unknown. This task blocks the cutover (tack-8b7a28) and is the mechanism obs-ff4e76 and flows-44890e are asked to use.
