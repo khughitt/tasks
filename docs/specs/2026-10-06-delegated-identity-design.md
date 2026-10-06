@@ -50,9 +50,10 @@ errors. Do not add a new identity service or unify the three resolution policies
 
 An upstream export repair is rejected because the audited exports satisfy Codex's
 intent. Requiring `TASKS_SESSION` for every worker is a workaround, not the remedy:
-it requires per-worker setup and cannot supply native provenance. Root-owned
-worker claims are rejected because they merge ownership. A relay root row is not
-an acceptable substitute for a missing worker row.
+it requires per-worker setup and cannot supply native provenance. Deliberately
+keying a known worker to its root is rejected because it merges ownership; the
+indistinguishable session-only input remains a known limit (§1 and §6). A relay
+root row is not an acceptable substitute for a missing worker row.
 
 ## 1. Native claims
 
@@ -91,7 +92,8 @@ has no process proof and retains the existing TTL and heartbeat behavior.
 
 Add optional `root_session: String` to `Identity`, `Claim`, and the public
 `ClaimInfo` projection. It is a qualified `codex:<root>` key, recorded only from
-valid `CODEX_SESSION_ID` when Codex identity is actually selected. Omit it when
+valid `CODEX_SESSION_ID` when either the native Codex level or a relay-matched
+Codex actor row supplies the identity. Omit it when
 unknown, for other harnesses, and for explicit overrides. An explicit override
 does not inherit a native root association merely because it resembles a Codex ID.
 
@@ -108,6 +110,20 @@ not carry the displaced owner's root. Proof-only continuation preserves the
 existing association, as it preserves the claim's identity. Association-only
 changes never establish ownership, heartbeat rights, shared exclusive holds,
 or closure permission.
+
+A root disagreement can arise from changed or misconfigured exports for the same
+thread. A resumed thread under a different root is a possible input case, not
+behavior established by the source audit or live capture. The typed error names
+the task and `CODEX_SESSION_ID`, without printing either root value, and directs
+the operator to inspect `tasks show <id>` and the environment. Restore incorrect
+exports and retry. If reassociation is intentional, the owner runs
+`tasks park <id> "release before intentional root reassociation"`, then
+`tasks start <id>` with the intended native inputs. The mismatch guard applies
+to acquisition/refresh that would overwrite a known association, not to an
+otherwise authorized release. The park releases the claim and its holds; the
+next start is ordinary acquisition and may refuse if another session acquired
+the task or a needed resource meanwhile. `start --force` by the same owner is
+not an override for conflicting root metadata.
 
 `root_session` names the tree root, never an immediate parent. A nested worker
 `W2` spawned by `W1` under `R` records root `R`, not parent `W1`. This design does
@@ -133,6 +149,11 @@ meaning is the concrete native actor when available, not an assertion that the
 root session and thread are the same entity. Historical stamps remain untouched;
 their recorded source remains authoritative about which export they used.
 
+For new top-level stamps with equal native IDs, `harness_session` stays the same
+but `harness_session_source` changes from `CODEX_SESSION_ID` to `CODEX_THREAD_ID`.
+Both source names are already supported. This is a source-value change despite
+the unchanged JSON shape; consumers must not require the former source name.
+
 Retain provenance's existing validation of all inspected inputs. Malformed
 values, simultaneous Claude and Codex native identities, and a qualified
 `TASKS_SESSION` differing from the selected native actor omit the entire stamp
@@ -149,6 +170,11 @@ changed here. For a Codex boundary, validate native values before registry match
 and use the thread as the actor hint when present; otherwise use the session.
 Unequal valid root/thread values are not a conflict. Other harness hints remain
 scoped to the detected harness.
+
+Malformed-input refusals use the same diagnostic rule as native claims: name the
+invalid variable and validation failure, never interpolate its value or the
+other native ID. Preserve the relay recovery guidance. Acceptance must check
+non-Unicode and control-character inputs without leaking either value.
 
 Keep every current process, host, boot, platform, harness, and cardinality check.
 The one qualifying registry row's `sessionId` must match the actor hint, and its
@@ -177,6 +203,42 @@ acquisition remains unavailable against a root-only registry. The remedy must
 report that limitation plainly. Do not disable a user's relay setting to make a
 test or rollout pass. Existing explicit override recovery remains available.
 
+### Interim worker handoff
+
+Repairing native identity makes a worker's claim live for four hours after its
+last heartbeat, even after the worker reports completion. No hook added by this
+design releases it: SubagentStop denotes turn completion, and workers do not
+receive root Stop or SessionEnd. Controller `done`, `park`, protected edits,
+and ownership of the worker's exclusive holds therefore remain foreign and
+refused while that claim is live. Root association grants no exception.
+
+Use release before handoff as the normal protocol, rather than relying on TTL
+expiry or routine forced takeover. The implementation must ship this rule in
+`skills/tasks/SKILL.md` alongside the native identity change:
+
+> Before ending its assignment, a worker releases every task claim it holds.
+> If the assigned task is complete and the worker is responsible for closing it,
+> use `tasks done`. If controller review or closure remains, use
+> `tasks park <id> "Controller starts this task, reviews the result, then closes it"`
+> with `--waiting-on agent`, then report the result and task/worktree location.
+> Verify the release succeeded before ending. The controller resumes the parked
+> task with `tasks start <id>` before review edits or closure. A worker must not
+> close a controller-owned task.
+
+A finished or failed worker may have exited without releasing. The controller
+first confirms the worker has stopped and inspects its work and claim, then uses
+the existing `tasks start <id> --force --reason "finished worker left a live claim"`
+to take ownership explicitly, followed by its normal review, park or closure.
+Use the task's current authoritative checkout; takeover does not bypass stale-copy
+checks. A failure of this recovery remains an actionable error, never a reason
+to wait silently for four hours or impersonate the worker with `TASKS_SESSION`.
+
+This is operational handoff using existing commands, not delegated closure
+authority. It is consistent with tasks-f8c9cc's proposed controller-closes rule
+for controller-owned tasks. A separately worker-owned task must first be released
+and acquired by the controller; the proposal does not let a controller close a
+live worker claim merely because it spawned that worker.
+
 ## 5. Changes and rollout
 
 Expected code surfaces are `src/claims.rs`, `src/provenance.rs`,
@@ -188,14 +250,25 @@ duplicated boundary validation. No registry schema adapter is needed.
 When the reviewed remedy lands, amend the work-claims Identity section to remove
 its top-level-only equality premise, and amend the relay spec's hint and Codex
 proof rules. Update README and the shipped tasks skill for thread-first native
-provenance, claim root association, and the relay limitation. Keep the evidence
-brief historical and link its resolved questions to this decision.
+provenance, claim root association, the relay limitation, and the worker-release
+handoff above. Keep the evidence brief historical and link its resolved questions
+to this decision.
 
 There is no automatic claim migration or inferred parentage. Top-level native
 keys remain stable. A worker's old dead Unix claim follows ordinary stale takeover;
 a still-live foreign claim requires the existing explicit takeover procedure.
-Existing process-proof continuation retains its stored key. Neither old Unix
-claims nor historical provenance gains guessed root metadata.
+Successful process-proof continuation retains its stored key. **Known compatibility
+break:** a relay-acquired Codex claim can no longer be continued by process proof
+alone when `CODEX_THREAD_ID` is missing, even if `CODEX_SESSION_ID` is present and
+matches. Older Codex sessions or environments with only the session export lose
+that fallback. Exact identity matches from successful resolution still work.
+For a legitimate owner whose identity cannot resolve, the error directs it to
+set `TASKS_SESSION` to the exact existing claim session shown by `tasks show <id>`;
+this preserves the explicit recovery path without inventing a thread export.
+Set `TASKS_SESSION_PID` only when an actual long-lived process is known; never use
+the command PID. This owner recovery is separate from controller takeover of a
+foreign worker claim. Neither old Unix claims nor historical provenance gains
+guessed root metadata.
 
 Older claim readers ignore the new optional field but can lose it when rewriting
 the store; mixed-version writers cannot promise association retention. Use the
@@ -212,17 +285,27 @@ door, including negative assertions that no claim or record was mutated on refus
    Claude precedence stay intact; invalid selected native input cannot become SID.
 2. Claim identity and root persistence across commands; root metadata round trips
    through the store and all `ClaimInfo` views, with absent-field old-record controls,
-   same-owner refresh, conflicting-root refusal, takeover, and proof continuation.
+   same-owner refresh, conflicting-root refusal with value-free recovery guidance,
+   release/reacquisition for intentional reassociation, takeover, and proof
+   continuation.
 3. Provenance selects the thread source, including equal IDs; existing pair-only
    records still round trip. Root-valued explicit overrides conflict with workers;
    mixed-harness and malformed inputs still warn and omit stamps.
 4. Relay equal/split hints, root-only-row refusal, missing registry, ambiguity,
-   malformed inputs, and a synthetic matching worker row. Shared PID alone, missing
-   thread, sibling thread, and root session must not prove ownership. Owner proof
-   still works with an unavailable registry and matching thread.
+   malformed inputs with no native values in errors, and a synthetic matching
+   worker row. Shared PID alone, missing thread, sibling thread, and root session
+   must not prove ownership. Owner proof
+   still works with an unavailable registry and matching thread. Missing-thread
+   proof refusal on an existing claim has an explicit-identity recovery control.
 5. Foreign-live-claim refusal for closure, park, protected edits, and hold ownership;
    only the worker's own heartbeat refreshes its claim. Test both native identity
-   and relay continuation paths, preserving the distinct error policies.
+   and relay continuation paths, preserving the distinct error policies. Test
+   both directions: worker against controller, and controller against a finished
+   worker's still-live claim. Completion alone must not clear the latter or grant
+   ownership. Worker park followed by controller start and done succeeds without
+   force; worker done releases its own completed task. For a worker that exits
+   without release, controller start --force records takeover and permits normal
+   review/closure, without changing the foreign-live refusal before takeover.
 
 Then run one real controller/worker smoke using the worktree binary by explicit
 path, private scratch task/config/state stores, and native exports as delivered.
@@ -230,7 +313,14 @@ The worker starts a scratch task, exits that command, reads and refreshes it in 
 second command, stamps a note, and attempts to close a live controller-owned
 scratch task. Capture equality relationships rather than private IDs. Require a
 stable distinct worker claim, `live: true` after command exit, root association,
-correct native provenance, and foreign closure refusal. Existing TTL expiry is a
+correct native provenance, and foreign closure refusal. Also require the controller
+to fail to close the worker-owned task while its claim remains live. Have the
+worker park it before ending, then verify the controller can start and close it
+without force. A second scratch task intentionally left claimed by that same
+worker supplies the abnormal-exit control: after the worker finishes, the
+controller's unforced closure still refuses, then explicit takeover and closure
+succeed with the takeover recorded. The worker's report must identify that one
+intentional test exception; the smoke owns its cleanup. Existing TTL expiry is a
 separate deterministic test, not a long live wait.
 
 Because relay hint/proof semantics change, also capture a real relay-enabled
@@ -248,5 +338,10 @@ tasks-cf8687, tasks-290fa3, tasks-6e2d15, and tasks-f537a8 together, preserving 
 historical evidence limit. Give tasks-0c2c39 an explicit disposition: the recorded
 dead-SID symptom is addressed for the verified unequal-ID case; the historical
 claim that exports were missing was never captured and is not proven repaired.
+Explicit known limit: a worker receiving only `CODEX_SESSION_ID` is indistinguishable
+from a session-only controller and uses the same native claim identity `R`
+(tagged `codex:R`) and root `codex:R`. The remedy does not isolate that worker;
+the session-only control must demonstrate this retained behavior. Neither that
+case nor genuinely missing exports may be reported as fixed under tasks-0c2c39.
 Relay worker registration remains relay-f56e30. Closure and completion policy
 remain their existing tasks. No report closes merely because this spec is approved.

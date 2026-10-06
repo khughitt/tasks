@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-5e2472
 created: 2026-10-06T10:04:44Z
-updated: 2026-10-06T17:27:39Z
+updated: 2026-10-06T17:40:16Z
 started: 2026-10-06T17:23:30Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -46,4 +46,10 @@ Verified prerequisite: tasks-c0bad3 traced Codex 0.160.1 commit d27764b82f7118f6
 - 2026-10-06T17:24:33Z (design/tasks-5e2472): Design scope: thread identity must cover claims, native provenance, relay hints and process-proof continuation together. Shared Codex process ancestry cannot establish worker ownership without a concrete thread hint; root association never grants authority. Prior spec-review notes concern the scoping record, not an existing design artifact.
 - 2026-10-06T17:27:12Z (design/tasks-5e2472): Proposed design uses native thread claims and provenance, optional claim root_session, strict Codex thread proof, and fail-closed relay root-only refusal. Relay adapter lacks worker registration; filed relay-f56e30. Native-note format stays unchanged. Written spec awaits user review; implementation plan follows approval.
 - 2026-10-06T17:27:39Z (design/tasks-5e2472): parked (waiting on user, review): User reviews .worktrees/tasks-5e2472/docs/specs/2026-10-06-delegated-identity-design.md; after approval, agent resumes here and writes the implementation plan for its separate review.
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:37:22Z (design/tasks-5e2472): resumed
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T17:37:22Z (design/tasks-5e2472): review: spec round 3 — verdict: revise; findings: Important 3, Minor 4; reviewer: human
+- 2026-10-06T17:39:35Z (design/tasks-5e2472): Spec revision addresses all seven human findings: normal worker release before controller handoff and explicit takeover recovery with reverse-direction/live acceptance; native and relay root sources named; missing-thread relay proof compatibility break and TASKS_SESSION recovery; root-conflict release/reacquire guidance; value-free relay validation errors; top-level provenance source change; session-only worker identity-sharing limit. Plan remains gated on revised written-spec approval.
+- 2026-10-06T17:40:16Z (design/tasks-5e2472): parked (waiting on user, review): User reviews revised .worktrees/tasks-5e2472/docs/specs/2026-10-06-delegated-identity-design.md, especially interim worker handoff and recovery; after approval, agent resumes this worktree and writes the implementation plan.
   provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
