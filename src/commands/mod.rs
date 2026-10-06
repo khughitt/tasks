@@ -15,6 +15,7 @@ pub mod parked;
 pub mod projects;
 pub mod quiet;
 pub mod rename;
+mod resolver;
 pub mod retire;
 pub mod root;
 pub mod sample;
@@ -1755,6 +1756,7 @@ pub fn run(cli: Cli) -> Result<Output> {
         },
         Command::Groups => group::list(dir),
         Command::Root { id } => root::run(id, dir),
+        Command::Resolve { inputs, stdin } => resolver::run(inputs, stdin, dir),
         Command::Add {
             title,
             status,

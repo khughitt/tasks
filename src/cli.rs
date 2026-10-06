@@ -429,6 +429,16 @@ pub enum Command {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
     },
+    /// The project, canonical id, or live prefix for an id, prefix, or path, through
+    /// renames and moves.
+    Resolve {
+        /// Ids, prefixes, or paths.
+        #[arg(required_unless_present = "stdin", conflicts_with = "stdin")]
+        inputs: Vec<String>,
+        /// Read one input per line from stdin.
+        #[arg(long)]
+        stdin: bool,
+    },
     /// Create a task.
     Add {
         title: String,

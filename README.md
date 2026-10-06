@@ -461,6 +461,76 @@ stop its owning session or wait for it to become stale, then retry. For a rehear
 both `XDG_CONFIG_HOME` and `XDG_STATE_HOME` to scratch directories so no live registry or
 park is touched. `--explain --adopt` diagnoses the local state without writes.
 
+### Location history
+
+The host-local registry's optional `[locations.<prefix>]` table records the current
+root's symlinked worktree `storage` and `former` roots, each with optional storage and
+a UTC `until` date. Paths must be absolute; history is not synced between hosts.
+
+| Command | Location history |
+| --- | --- |
+| `init` | Records current storage. |
+| `init --prefix <p> --force` at the same root | Refreshes current storage. |
+| `init --prefix <p> --force` at a new root | Records the former root and storage, then refreshes current storage. |
+| `rename <old> <new>` | Carries history to the new prefix and refreshes storage. |
+| `rename <old> <new> --adopt` | Merges both prefixes' history, records a displaced root, and refreshes storage. |
+| `unregister <p>` | Removes that project's history. |
+
+Before moving a checkout, run `tasks -C <root> init --prefix <p> --force` on every
+other host while the old root and storage still exist. Without that record, adoption
+can retain the former root but may lack its storage and warn. A dangling link at an
+unchanged root preserves recorded storage; after a root change it clears the current
+storage record. Former entries remain until unregistering.
+
+For a move made before location history was available, backfill the former root in
+that host's `~/.config/tasks/projects.toml`, substituting its absolute paths:
+
+```toml
+[locations.tack]
+former = [
+  { root = "<Dropbox>/ai", storage = "<WORK_ROOT>/ai/.worktrees", until = "2026-09-27" },
+]
+```
+
+Preserve existing history when adding an entry, then run
+`tasks -C <root> init --prefix tack --force` to refresh current storage. An older
+`tasks` binary drops `[locations]` whenever it writes the registry; update each host's
+binary before recording history.
+
+## Resolving ids and paths
+
+Use `tasks resolve <id|prefix|path>...` or `tasks resolve --stdin` (one input per line)
+to map inputs through prefix renames and directory moves. It is read-only and needs no
+current project. Paths containing `/` or beginning with `.` or `~` are classified
+first, then full ids, then prefixes matching `[a-z][a-z0-9]{1,7}`, then invalid inputs.
+Relative paths use the working directory, or `-C` if supplied. Bare hex shorthand is
+not expanded: `beef00` is a prefix, while `4f2a9c` is invalid. Id resolution does not
+check whether the task file exists; use `tasks show` for that.
+
+```json
+{"results": [
+  {"input": "ai-1a2b3c", "kind": "id", "status": "resolved",
+   "id": "hq-1a2b3c", "prefix": "hq", "alias": "ai", "root": "<Dropbox>/hq"},
+  {"input": "zz-123456", "kind": "id", "status": "unregistered", "prefix": "zz"},
+  {"input": "/x/y", "kind": "path", "status": "ambiguous",
+   "candidates": [{"prefix": "aa", "via": "former_root", "location": "/x"},
+                  {"prefix": "bb", "via": "former_root", "location": "/x"}]},
+  {"input": "4f2a9c", "kind": "invalid", "status": "invalid",
+   "detail": "expected an id <prefix>-<hex6>, a prefix, or a path"}
+], "warnings": []}
+```
+
+Resolved paths include `via` and `location`. `worktree` is present for a storage match
+with a following component, or a git worktree match. `relpath` is relative to
+`worktree` when present, otherwise to `location`; it is empty at that directory itself.
+`root` always names the current registered root, and inapplicable fields are omitted.
+
+Per-item outcomes never fail a batch. Malformed UTF-8 stdin lines become `invalid`
+rows with replacement characters in `input` and decoding details; a stdin read error
+adds an invalid diagnostic and stops reading, preserving earlier rows. Unavailable
+relative-path bases also produce invalid rows. Only registry problems fail command
+execution with the usual error envelope on stderr and exit 1.
+
 ## Choosing a process
 
 Set `--process direct|planned` on `add` or `edit`; `edit --no-process` clears it.

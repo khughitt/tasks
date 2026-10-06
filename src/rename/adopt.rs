@@ -124,7 +124,7 @@ pub fn run(
     } else {
         (target.parks().count(), target.escalations().count())
     };
-    let out = RenameOut {
+    let mut out = RenameOut {
         mode: Some("adopt".into()),
         prefix: new.into(),
         previous: old.into(),
@@ -166,7 +166,10 @@ pub fn run(
         }
     }
     if recovery == "fresh" || recovery == "resume_registry" {
-        registry.adopt(old, new, &project.root)?;
+        let displaced = registry.adopt(old, new, &project.root)?;
+        let today = crate::time::day(&crate::time::now()).to_string();
+        out.warnings
+            .extend(registry.note_root_change(new, Some(displaced), &today)?);
         registry.save()?;
         if super::stop_after("registry") {
             return Ok(out);
