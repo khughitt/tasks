@@ -91,6 +91,16 @@ pub struct ListArgs {
     /// Only parked tasks, most recently parked first.
     #[arg(long, conflicts_with_all = ["sort", "reverse"])]
     pub parked: bool,
+    /// With --parked, only parks waiting on this party: user or agent.
+    #[arg(
+        long,
+        requires = "parked",
+        value_name = "WHO",
+        add = ArgValueCandidates::new(crate::complete::waiting_on),
+        add = ValueSet,
+        value_parser = ValueSet
+    )]
+    pub waiting_on: Option<String>,
     /// Only tasks with a cadence, soonest due first, at any status.
     #[arg(long, conflicts_with_all = ["sort", "reverse", "parked"])]
     pub periodic: bool,

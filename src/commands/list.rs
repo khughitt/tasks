@@ -35,6 +35,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
         sort,
         reverse,
         parked,
+        waiting_on,
         periodic,
         deferred,
         scope: _,
@@ -42,7 +43,8 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     let sort = SortKey::parse(&sort)?;
     let mut filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
     if parked {
-        return list_parked(ctx, filter, text.as_ref());
+        let waiting_on = waiting_on.as_deref().map(WaitingOn::parse).transpose()?;
+        return list_parked(ctx, filter, waiting_on, text.as_ref());
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -111,11 +113,12 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
 fn list_parked(
     mut ctx: ReadCtx,
     mut filter: TaskFilter,
+    waiting_on: Option<WaitingOn>,
     text: Option<&TextQuery>,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
-    let rows = super::parked::rows_with_records(&mut ctx, &all, &claims, now)?;
+    let rows = super::parked::rows_with_records(&mut ctx, &all, &claims, now, waiting_on)?;
     let warnings = std::mem::take(&mut ctx.warnings);
     check_parent(&filter, &all, |parent| {
         rows.iter().any(|(row, _)| {

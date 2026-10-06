@@ -1,17 +1,19 @@
 ---
 id: tasks-7efcb7
 title: "list --parked --waiting-on <user|agent>: work parked on the user across projects"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: feat/list-waiting-on
 created: 2026-10-06T11:16:10Z
-updated: 2026-10-06T11:18:58Z
+updated: 2026-10-06T11:27:48Z
 started: 2026-10-06T11:18:51Z
+completed: 2026-10-06T11:27:47Z
 depends: [ops-d72df3]
 tags: [feedback, gap, "from:ops"]
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -29,4 +31,12 @@ Source report: no view lists work parked waiting on the user across projects; wo
 
 - 2026-10-06T11:18:45Z (main): scope: scoped; title and body rewritten to a --waiting-on filter on list/search --parked (rejected a separate command since list --parked pretty rows already show reason and next step); todo P2 s low direct
 - 2026-10-06T11:18:51Z (main): started
+  provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T11:20:43Z (feat/list-waiting-on): resumed
+  provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T11:26:41Z (feat/list-waiting-on): review: impl round 1 — verdict: accept; findings: Minor 2; reviewer: claude-code/claude-opus-5-5
+- 2026-10-06T11:27:47Z (feat/list-waiting-on): round 1 minors fixed: waiting_on now selects park entries before rows are built (no reads or warnings for parks it leaves out); new test covers --all-projects, --project and the skipped warning
+- 2026-10-06T11:27:47Z (feat/list-waiting-on): done
+  provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T11:27:47Z (feat/list-waiting-on): list/search --parked --waiting-on <user|agent>: filters park entries before rows are built, requires --parked, works across --all-projects/--group/--project; cli.toml adopted from ops ad56d82; skill and README name the queue command
   provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

@@ -19319,6 +19319,10 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
             vec!["list", "--process", "direct"],
         ),
         (
+            (vec!["list"], "--waiting-on"),
+            vec!["list", "--parked", "--waiting-on", "user"],
+        ),
+        (
             (vec!["search"], "--status"),
             vec!["search", "x", "--status", "todo"],
         ),
@@ -19341,6 +19345,10 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
         (
             (vec!["search"], "--process"),
             vec!["search", "x", "--process", "direct"],
+        ),
+        (
+            (vec!["search"], "--waiting-on"),
+            vec!["search", "x", "--parked", "--waiting-on", "user"],
         ),
         ((vec!["tags"], "--status"), vec!["tags", "--status", "todo"]),
         (
@@ -21874,6 +21882,122 @@ fn list_parked_applies_the_filter_and_keeps_shelved_in_its_pool() {
     assert_eq!(
         list_ids(&env.json(&sci, &["list", "--parked", "-p", "2", "--size", "l"])),
         std::slice::from_ref(&large)
+    );
+}
+
+#[test]
+fn list_parked_waiting_on_narrows_to_who_the_park_waits_on() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let agent = id_of(env.json(&sci, &["add", "Agent work", "--size", "s"]));
+    let user = id_of(env.json(&sci, &["add", "User work", "--size", "s"]));
+    let large = id_of(env.json(&sci, &["add", "Large user work", "--size", "l"]));
+    let root = sci.display().to_string();
+    write_park(&env, "sci", &agent, "agent-a", "agent", &root);
+    write_park(&env, "sci", &user, "agent-a", "user", &root);
+    write_park(&env, "sci", &large, "agent-a", "user", &root);
+    // A park whose task no scan holds still records who it waits on.
+    write_park(&env, "sci", "sci-ffffff", "agent-a", "user", &root);
+
+    let mut waiting = list_ids(&env.json(&sci, &["list", "--parked", "--waiting-on", "user"]));
+    waiting.sort();
+    let mut expected = vec![user.clone(), large.clone(), "sci-ffffff".to_string()];
+    expected.sort();
+    assert_eq!(
+        waiting, expected,
+        "the unresolved park filters on its own record"
+    );
+    assert_eq!(
+        list_ids(&env.json(&sci, &["list", "--parked", "--waiting-on", "agent"])),
+        std::slice::from_ref(&agent)
+    );
+    assert_eq!(
+        list_ids(&env.json(
+            &sci,
+            &["list", "--parked", "--waiting-on", "user", "--size", "s"]
+        )),
+        std::slice::from_ref(&user),
+        "a record filter narrows further and drops the unresolved row"
+    );
+    assert_eq!(
+        list_ids(&env.json(
+            &sci,
+            &["search", "large", "--parked", "--waiting-on", "user"]
+        )),
+        std::slice::from_ref(&large)
+    );
+
+    let err = env.usage(&sci, &["list", "--waiting-on", "user"]);
+    assert!(err.contains("--parked"), "{err}");
+    let err = env.usage(&sci, &["list", "--parked", "--waiting-on", "nobody"]);
+    assert!(
+        err.contains("--waiting-on") && err.contains("nobody"),
+        "{err}"
+    );
+}
+
+#[test]
+fn list_parked_waiting_on_reads_every_project_and_skips_left_out_parks() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let in_sci = id_of(env.json(&sci, &["add", "Sci review"]));
+    let in_fam = id_of(env.json(&fam, &["add", "Fam review"]));
+    write_park(
+        &env,
+        "sci",
+        &in_sci,
+        "agent-a",
+        "user",
+        &sci.display().to_string(),
+    );
+    write_park(
+        &env,
+        "fam",
+        &in_fam,
+        "agent-a",
+        "user",
+        &fam.display().to_string(),
+    );
+    // An agent park recorded in a checkout that no longer exists warns when it is read.
+    write_park(
+        &env,
+        "sci",
+        "sci-eeeeee",
+        "agent-a",
+        "agent",
+        "/nonexistent/checkout",
+    );
+
+    let all = env.json(&sci, &["list", "--parked", "--all-projects"]);
+    assert!(all["warnings"].to_string().contains("sci-eeeeee"), "{all}");
+
+    let queue = env.json(
+        &sci,
+        &["list", "--parked", "--waiting-on", "user", "--all-projects"],
+    );
+    let mut ids = list_ids(&queue);
+    ids.sort();
+    let mut expected = vec![in_sci.clone(), in_fam.clone()];
+    expected.sort();
+    assert_eq!(ids, expected, "{queue}");
+    assert!(
+        !queue["warnings"].to_string().contains("sci-eeeeee"),
+        "a park the filter leaves out is never read: {queue}"
+    );
+    assert_eq!(
+        list_ids(&env.json(
+            &sci,
+            &[
+                "list",
+                "--parked",
+                "--waiting-on",
+                "user",
+                "--project",
+                "fam"
+            ]
+        )),
+        std::slice::from_ref(&in_fam)
     );
 }
 
