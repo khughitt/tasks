@@ -3,7 +3,8 @@
 Implementation: `feat/delegated-identity`; Tasks 1–3 committed, Task 4 open.
 Contract: [approved design](../specs/2026-10-06-delegated-identity-design.md).
 Integration, installation and symptom-report closeout remain gated on real relay
-acceptance and the final independent review. Synthetic rows are test fixtures,
+acceptance and review of that new live verdict. Independent whole-branch review
+and scoped corrective re-review have no remaining implementation findings. Synthetic rows are test fixtures,
 never evidence of delivered worker registration.
 
 | Case | Evidence | Expected result | Observed result | Verdict |
@@ -52,5 +53,13 @@ not substitutes. No global hooks, configuration or launcher repointing is author
 Validation: focused checks named in the plan and `just test-fast` pass for Tasks
 1–3. The Task 4 handoff regression passes and fails on the identity assertion
 with a temporarily restored root-first selector; the thread-first selector was
-restored and rechecked. Final verification and independent-review outcomes are
-recorded on tasks-a5a502 before any integration decision.
+restored and rechecked. Final `just test-fast` passes 1,088 tests (435 unit, 36 attachment, 615 CLI and
+2 front-door); one unrelated exhaustive enumeration is ignored by the fast target.
+Commit hooks passed hygiene, format, clippy and task checks. Independent review
+round 1 reproduced a held-session diagnostic leak; the strengthened regression
+failed before the shared recovery suffix was corrected to direct inspection
+through `tasks show`. Round 2 reproduced the refusal without native values and
+accepted the correction with no remaining findings. It also verified that process
+controls use matching thread input and override guidance is conditional. Reviews
+are recorded on tasks-a5a502; live relay evidence still needs capture and review
+before integration.
