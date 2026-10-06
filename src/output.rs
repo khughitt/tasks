@@ -1082,6 +1082,7 @@ fn pretty(out: &Output, painter: &Painter, wrap: Wrap) -> String {
             &o.tasks,
             painter,
             id_width(o.tasks.iter().map(|row| row.id.as_str())),
+            wrap,
         ),
         Output::Claims(o) => {
             let width = id_width(o.claims.iter().map(|row| row.id.as_str()));
@@ -1877,6 +1878,15 @@ pub fn table(
 }
 
 pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap: Wrap) -> String {
+    let stop = |park: &ParkInfo| {
+        crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)
+    };
+    let stop_width = rows
+        .iter()
+        .filter_map(|row| row.park.as_ref())
+        .map(|park| stop(park).chars().count())
+        .max()
+        .unwrap_or(0);
     let mut rendered = String::new();
     for row in rows {
         let Some(park) = &row.park else {
@@ -1891,8 +1901,8 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap
         let process = present::process(row.process, "-").left(7).paint(painter);
         let parked = present::date(&park.at).paint(painter);
         let prefix = format!(
-            "{id}  {status} {process} {phase} waits on {:<18} {parked}  ",
-            crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)
+            "{id}  {status} {process} {phase} waits on {:<stop_width$}  {parked}  ",
+            stop(park)
         );
         rendered.push_str(&render_row(
             &prefix,
@@ -1900,14 +1910,21 @@ pub fn parked_table(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap
             painter,
             wrap,
         ));
-        rendered
-            .push_str(&painter.paint(Style::Chrome, &format!("        next: {}", park.next_step)));
-        rendered.push('\n');
+        rendered.push_str(&detail_line("next", &park.next_step, painter, wrap));
     }
     rendered
 }
 
-pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> String {
+/// An indented `label: text` line under a row, wrapped under its text.
+fn detail_line(label: &str, text: &str, painter: &Painter, wrap: Wrap) -> String {
+    let prefix = painter.paint(
+        Style::Chrome,
+        &format!("        {:<6}", format!("{label}:")),
+    );
+    render_row(&prefix, &[(text, Some(Style::Chrome))], painter, wrap)
+}
+
+pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize, wrap: Wrap) -> String {
     let mut rendered = String::new();
     for (index, row) in rows.iter().enumerate() {
         let Some(park) = &row.park else {
@@ -1927,16 +1944,15 @@ pub fn quiet_briefs(rows: &[ParkedRow], painter: &Painter, id_width: usize) -> S
             None => "-".into(),
         };
         let parked = present::date(&park.at).paint(painter);
-        rendered.push_str(&format!(
-            "{id}  {priority}  {needs:<8}  {minutes:>8}  parked {parked}  {}\n",
-            row.title
+        let prefix = format!("{id}  {priority}  {needs:<8}  {minutes:>8}  parked {parked}  ");
+        rendered.push_str(&render_row(
+            &prefix,
+            &[(row.title.as_str(), None)],
+            painter,
+            wrap,
         ));
-        rendered
-            .push_str(&painter.paint(Style::Chrome, &format!("        next: {}", park.next_step)));
-        rendered.push('\n');
-        rendered
-            .push_str(&painter.paint(Style::Chrome, &format!("        in:   {}", park.worktree)));
-        rendered.push('\n');
+        rendered.push_str(&detail_line("next", &park.next_step, painter, wrap));
+        rendered.push_str(&detail_line("in", &park.worktree, painter, wrap));
     }
     rendered
 }
@@ -2607,7 +2623,7 @@ mod tests {
             host: "h".into(),
             worktree: "w".into(),
         });
-        let text = parked_table(&[parked], &plain(), 0, Wrap::at(140));
+        let text = parked_table(&[parked], &plain(), 0, Wrap::at(100));
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines.len() > 1, "{text:?}");
         let title_start = lines[0].find("alpha").expect("parked title");
@@ -2617,6 +2633,80 @@ mod tests {
             title_start,
             "{text:?}"
         );
+    }
+
+    fn parked_with(next_step: &str, reason: Option<crate::claims::Reason>) -> ParkedRow {
+        let mut parked = ParkedRow::resolved(long_row(), crate::model::Phase::Implementing);
+        let quiet = reason == Some(crate::claims::Reason::Quiet);
+        parked.park = Some(ParkInfo {
+            at: "2026-09-06T00:00:00Z".into(),
+            next_step: next_step.into(),
+            waiting_on: crate::claims::WaitingOn::User,
+            reason,
+            needs: quiet.then_some(crate::claims::Needs::Headless),
+            minutes: quiet.then_some(39),
+            session: "s".into(),
+            owner: "o".into(),
+            host: "h".into(),
+            worktree: "/a/long/checkout/path/that/runs/well/past/the/width/.worktrees/x".into(),
+        });
+        parked
+    }
+
+    const LONG_STEP: &str = "Agent: run the prepared smoke pilot and the full matrix, write and \
+        attach the evidence, then hand the contact sheet to the owner for a judgement";
+
+    fn assert_fits(text: &str, width: usize) {
+        for line in text.lines() {
+            assert!(visible_width(line) <= width, "{line:?} exceeds {width}");
+        }
+    }
+
+    #[test]
+    fn a_parked_rows_next_step_wraps_under_its_text() {
+        let text = parked_table(&[parked_with(LONG_STEP, None)], &plain(), 0, Wrap::at(120));
+        assert_fits(&text, 120);
+        let lines: Vec<&str> = text.lines().collect();
+        let next = lines
+            .iter()
+            .position(|line| line.contains("next: "))
+            .unwrap();
+        let text_start = lines[next].find("next: ").unwrap() + "next: ".len();
+        let continuation = lines[next + 1];
+        assert_eq!(
+            continuation.len() - continuation.trim_start().len(),
+            text_start,
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_parked_tables_wait_column_fits_its_longest_stop() {
+        let rows = [
+            parked_with("a", Some(crate::claims::Reason::Quiet)),
+            parked_with("b", Some(crate::claims::Reason::Review)),
+        ];
+        let text = parked_table(&rows, &plain(), 0, Wrap::NONE);
+        let dates: Vec<usize> = text
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("next:"))
+            .map(|line| line.find("2026-09-06").unwrap())
+            .collect();
+        assert_eq!(dates.len(), 2, "{text}");
+        assert_eq!(dates[0], dates[1], "{text}");
+        assert!(text.contains("39 min  2026-09-06"), "{text}");
+    }
+
+    #[test]
+    fn quiet_briefs_wrap_next_and_in_under_their_text() {
+        let text = quiet_briefs(
+            &[parked_with(LONG_STEP, Some(crate::claims::Reason::Quiet))],
+            &plain(),
+            0,
+            Wrap::at(100),
+        );
+        assert_fits(&text, 100);
+        assert!(text.lines().count() > 4, "{text}");
     }
 
     #[test]

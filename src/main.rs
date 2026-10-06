@@ -241,17 +241,13 @@ fn main() {
             } else {
                 stdout_painter
             };
-            if format == Format::Pretty {
-                let mut warnings = output::warnings_of(&out);
-                warnings.extend(theme_warning);
-                to_stderr(&output::pretty_warnings(&warnings, &stderr_painter));
-            }
             let wrap_width = if format == Format::Pretty
                 && matches!(
                     &out,
                     output::Output::List(_)
                         | output::Output::Prime(_)
                         | output::Output::Parked(_)
+                        | output::Output::Quiet(_)
                         | output::Output::Tree(_)
                         | output::Output::Show(_)
                         | output::Output::Next(_)
@@ -288,6 +284,13 @@ fn main() {
                     ));
                     std::process::exit(1);
                 }
+            }
+            // After the output, so a long list is not pushed down and the warnings sit
+            // next to the prompt.
+            if format == Format::Pretty {
+                let mut warnings = output::warnings_of(&out);
+                warnings.extend(theme_warning);
+                to_stderr(&output::pretty_warnings(&warnings, &stderr_painter));
             }
             if let output::Output::Check(check) = &out
                 && !check.errors.is_empty()
