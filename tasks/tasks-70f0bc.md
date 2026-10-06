@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-04T19:25:06Z
-updated: 2026-10-06T11:25:35Z
+updated: 2026-10-06T11:39:18Z
 depends: []
 parent: tasks-984769
 tags: [feedback, friction, "from:lore"]
@@ -23,7 +23,7 @@ Done: Clarify foreign-dependency diagnostics and tasks-owned workflow guidance: 
 
 Where: src/commands/dep.rs::add_dependencies, src/resolve.rs::resolve_task/resolve_registered, src/commands/show.rs::recorded_elsewhere; README.md and skills/tasks/SKILL.md cross-project/worktree guidance; existing record-home and multi-project specs. Evidence: tasks-d0d520 attachments and docs/notes/2026-10-06-record-continuity-brief.md.
 
-Verification: Retain or adapt the attached isolated two-project reproduction: before/after publication, missing-record show fallback versus dependency rejection, worktree-only completion versus registered readiness, and record-only integration retaining the runtime sentinel. Keep failed writes, cycles, foreign closure and missing/config-invalid authority guarded. Use just test-one filters and just test-fast before committing code.
+Verification: Retain or adapt the attached isolated two-project reproduction: before/after publication, missing-record show fallback versus dependency rejection, worktree-only completion versus registered readiness, and record-only integration retaining the runtime sentinel. Extend it through merging the upstream worktree branch after publication: an add/add conflict on the record occurs whenever the published copy differs from the branch copy (plain-git check, 2026-10-06), and is clean when identical. Guidance states when restore --source is safe (registered copy unchanged since the branch point) versus merging, and how the later branch merge is kept clean or resolved. If publication cannot be made routine, note it and return to the brief before writing guidance. Keep failed writes, cycles, foreign closure and missing/config-invalid authority guarded. Use just test-one filters and just test-fast before committing code.
 
 ## Notes
 

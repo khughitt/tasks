@@ -4,7 +4,7 @@ title: "A park recorded from a worktree survives the task's close from another c
 status: idea
 priority: 2
 created: 2026-10-06T09:08:25Z
-updated: 2026-10-06T10:59:44Z
+updated: 2026-10-06T11:39:23Z
 depends: []
 parent: tasks-984769
 tags: [feedback, gap, "from:material"]
@@ -19,3 +19,4 @@ Task closed with done in the main checkout while its park was keyed to a since-r
 - 2026-10-06T10:41:53Z (main): Human review probe: with isolated config and two independent state directories, a worktree park under state A survived closure under state B and record integration; prime under A showed the closed record as parked. Re-running tasks done <id> under A exited 0 and cleared its park. This uses host-local XDG_STATE_HOME, not a new cleanup command. Scratch probe was deleted; b9b10e must verify exact record changes and recurrence/foreign-claim safeguards.
 - 2026-10-06T10:44:19Z (main): Additional isolated current-binary probe: one non-recurring record shared by two XDG_STATE_HOME stores; park under A, done under B leaves A park, then plain done under A exits 0 and clears it. Only task.updated changes; completed, model and notes remain unchanged. This probe used shared files without a Git worktree; removed-worktree, recurrence and foreign-live safeguards remain in b9b10e. Temporary config/state/project removed.
 - 2026-10-06T10:59:44Z (main): Attribution correction for the 2026-10-06T10:41:53Z note beginning Human review probe: this was the reviewer's isolated probe performed at the controller's request, not an established human-run probe. Its technical result and cleanup report are unchanged; reviewer harness/model identity was not supplied.
+- 2026-10-06T11:39:23Z (main): Review finding: prime lists a park on a closed record while list --parked hides it (list.rs::list_parked filters is_open; prime's parked::rows does not), matching this report's second symptom. Added to tasks-b9b10e's question; brief: docs/notes/2026-10-06-record-continuity-brief.md

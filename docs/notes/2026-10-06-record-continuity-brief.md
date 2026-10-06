@@ -12,12 +12,15 @@ need independent decisions.
 
 ## Current behaviour and evidence
 
-- `src/resolve.rs::resolve_task` reads local records for its prefix and the registered
-  checkout for another. `src/commands/dep.rs::add_dependencies` rejects unresolved
-  targets and `ensure_acyclic` walks that resolver. Show's separate claim/park fallback
-  does not make dependency reads worktree-aware. tasks-d0d520's isolated two-project
-  probe confirms the table below; its script/transcript, versions and binary digest
-  are attached to that task. Original incident captures remain absent.
+Probe scripts, transcripts, versions and binary digests are attached to the task named
+in each bullet; original incident captures remain absent.
+
+- **Dependency reads (tasks-d0d520).** `src/resolve.rs::Resolver::resolve_task` reads
+  the current checkout's records for its own prefix (so inside a worktree, same-project
+  dependencies read the worktree copy) and the registered checkout for another prefix.
+  `src/commands/dep.rs::add_dependencies` rejects unresolved targets and `ensure_acyclic`
+  walks the same resolver. Show's claim/park fallback (`show.rs::recorded_elsewhere`)
+  does not make dependency reads worktree-aware.
 
   | Upstream state | Direct foreign `show` | Dependency behavior | Downstream readiness |
   | --- | --- | --- | --- |
@@ -26,49 +29,48 @@ need independent decisions.
   | Completion only in worktree | Still `doing`, registered copy | Dependency still shows `doing` | Still blocked in both scopes |
   | Completed record published | `done`, registered copy | Dependency shows `done` | Ready in both scopes |
 
-- The publication probe used `git restore --source=work -- tasks/<id>.md` followed
-  by a record-only commit in the registered checkout. A runtime sentinel stayed
-  `live` there while the worktree's committed version was `prepared`. Cyclic edges
-  in the published graph and foreign-owner closure refused without changing records.
-  Missing authority blocked dependency reads with warnings; malformed config returned
-  a typed error. Both disposable projects and their worktree were removed.
-- `src/stale.rs::compare` refuses newer siblings and equal-stamp/different-byte forks.
-  tasks-29f71f reproduced a one-sided union retaining the source stamp: it preserves
-  both note histories but still refuses against the different sibling bytes. The
-  diagnostic attributes the fork to same-second writes even when Git resolution
-  created it. Normal fast-forward integration of a behind-only copy permits a retry.
-- Lossless divergent recovery needs no hand-edited stamp: commit the resolved union
-  with the authoritative header intact, integrate that exact record into both
-  equal-stamp siblings, then rerun the CLI write. The retry advances `updated` and
-  preserves every original note. The isolated probe, command transcript, versions
-  and binary digest are attached to tasks-29f71f; its fixture was removed.
-- Claim/park state is host-local under XDG_STATE_HOME (`src/claims.rs::ClaimStore::path_with`),
-  independent of task files shared through Git or synchronized across hosts. Closing
-  on one host does not clear another host's park store.
-- The reviewer's isolated two-state-store probe, run at the controller's request,
-  parked under store A and closed under store B. After record integration, prime
-  under A showed the closed task parked.
-  Re-running tasks done <id> under A exited 0 and cleared its park; the probe was deleted.
-  This is a demonstrated mechanism, not proof of the original incident's host sequence.
-- An additional current-binary probe with shared files and two isolated stores confirms
-  that plain done on a closed non-recurring record changes only updated; completed,
-  model and notes stay unchanged. Local park and parked rows disappear. Its result is
-  attached to tasks-b9b10e; this smaller check did not exercise Git worktree removal.
-- `src/commands/mod.rs::claim_guard/save` clear parks on done/drop. Same-status closure
-  reaches that release path, and cleanup-failure guidance already recommends repeating
-  done. The report's blanket claim that no command clears it is therefore incorrect.
-  tasks-b9b10e must verify worktree-removal and recurrence/foreign-claim safeguards.
+  Publication was `git restore --source=work -- tasks/<id>.md` plus a record-only commit
+  in the registered checkout; a runtime sentinel stayed `live`. Published cycles,
+  foreign-owner closure, missing authority and malformed config stayed guarded. The
+  probe removed its worktree without merging the branch. A plain-git check since then
+  shows that merge hits an add/add conflict on the record whenever the published copy
+  differs from the branch's, and merges cleanly when they are identical. `restore
+  --source` also overwrites the registered copy, so it is safe only when that copy is
+  unchanged since the branch point.
+- **Stale-copy recovery (tasks-29f71f).** `src/stale.rs::compare` refuses newer siblings
+  and equal-stamp/different-byte forks. A one-sided union keeping the source stamp
+  preserves both histories but still refuses against the different sibling bytes, and
+  `stale.rs::refusal` blames the fork on same-second writes even when Git resolution
+  created it. Committing the resolved union with the authoritative header and
+  integrating it into both equal-stamp siblings permits a CLI retry that advances
+  `updated` and keeps every note. A behind-only copy needs only an ordinary merge.
+- **Closed parks (tasks-6b2867).** Claim/park state is host-local under
+  `XDG_STATE_HOME` (`src/claims.rs::ClaimStore::path_with`), independent of task files
+  shared through Git or file sync. Two isolated-store probes (attached to tasks-b9b10e):
+  park under store A, close under store B, and A's `prime` still lists the closed task.
+  Plain `done` under A on the closed non-recurring record exits 0, changes only
+  `updated` (completed, model and notes unchanged) and clears A's park. Neither probe
+  removed a Git worktree or exercised recurrence or a foreign live claim. This shows a
+  mechanism, not the original incident's host sequence.
+- Park clearing: `claim_guard` records a release intent without persisting;
+  `save` removes the park when the destination is done, dropped or shelved
+  (`src/commands/mod.rs:532`, `:1554`). The report's claim that no command clears it is
+  therefore incorrect; cleanup-failure guidance already recommends repeating done.
+- `prime` and `list --parked` disagree on a closed park: `list_parked` hides a park whose
+  record is closed unless a status filter is given (`src/commands/list.rs::list_parked`,
+  `is_open`), while prime's `parked::rows` lists it. The shelved case is kept visible
+  deliberately "for cleanup".
 - The record-home spec is accepted and implemented under tasks-9949f3; use it and
-  current code rather than the older brief's superseded pre-implementation behavior.
+  current code rather than the older brief's pre-implementation behavior.
 
 ## Constraints
 
 Preserve stale-copy refusal, notes, ownership, cycle checks and JSON contracts. A
 completed dependency does not grant rollout authority. Investigations isolate config
-and host state; the park probe compares two stores. No live-store editing, host pointers
-or hand-edited stamps.
-Do not erase a legitimate recurring or live-owned obligation when reconciling history.
-Related halt-audit and linked-project tasks address different questions.
+and host state; park probes compare two stores. No live-store editing, host pointers
+or hand-edited stamps. Do not erase a legitimate recurring or live-owned obligation
+when reconciling history. Related halt-audit and linked-project tasks address different
+questions.
 
 ## Alternatives
 
@@ -79,17 +81,17 @@ Related halt-audit and linked-project tasks address different questions.
 2. If publication is insufficient, design shared worktree-aware dependency resolution
    with reviewed source selection, cycles and ownership, distinct from runtime rollout.
 
-Dependency recommendation: retain registered authority and publish the upstream record
-before creating a foreign dependency, then publish its completion before expecting
-downstream readiness. Direct `show` fallback is a diagnostic convenience, not a
-publication mechanism. The probe establishes that record publication is sufficient
-for its unlinked plain records; publish required linked documents/attachments too
-when the record uses them. Coordinate the upstream owner, preserve newer registered
-changes, and use the recovery procedure below for divergent copies rather than
-blindly replacing them. Publication records progress; it does not authorize runtime
-activation. Tasks owns CLI/skill guidance; upstream project owners publish their
-records and retain their own rollout gates. No shared-resolver change is justified
-by this probe. tasks-70f0bc covers the guidance, including completion visibility.
+Recommendation, option 1: keep registered authority. Publish the upstream record before
+creating a foreign dependency, and publish its completion before expecting downstream
+readiness. Direct `show` fallback is a diagnostic, not publication. Publish linked
+documents/attachments too when the record uses them. Overwrite the registered copy only
+when it is unchanged since the branch point; otherwise merge it, using the recovery
+procedure below for divergent copies. The guidance must also cover the later branch
+merge, whose add/add conflict on a differing record is so far unexercised with the CLI.
+Publication records progress; it does not authorize runtime activation. Tasks owns
+CLI/skill guidance; upstream owners publish their records and keep their own rollout
+gates. tasks-70f0bc covers this guidance. No shared-resolver change is justified unless
+its branch-merge check shows publication cannot be made routine.
 
 **Recovery**
 
@@ -98,47 +100,42 @@ by this probe. tasks-70f0bc covers the guidance, including completion visibility
 2. Design a narrowly scoped recovery change only if those paths cannot handle the
    reproduced case safely. Avoid automatic cleanup that removes valid foreign work.
 
-Recovery recommendation: use existing Git integration, rather than a timestamp edit
-or a stale-copy override. For a behind-only worktree, commit the authoritative record
-and merge it into the worktree before retrying. For divergent histories:
+Recommendation, option 1: no timestamp edit or stale-copy override. For divergent
+histories:
 
-1. Commit both sides and resolve their Git merge conflict with both note histories
-   intact, retaining the authoritative frontmatter rather than inventing a timestamp.
-2. Integrate the resolved record into every sibling with the same or a newer stamp;
-   the probe used a fast-forward back to the source branch. A sibling with the same
-   stamp must have identical record bytes before retrying.
-3. Retry the original CLI command in its intended checkout; the CLI advances the
-   stamp itself. Coordinate with active owners before integrating their checkout.
+1. Commit both sides and resolve their Git conflict with both note histories intact,
+   keeping the authoritative frontmatter rather than inventing a timestamp.
+2. Integrate the resolved record into every sibling with the same or a newer stamp; a
+   same-stamp sibling must have identical bytes before retrying.
+3. Retry the original CLI command in its intended checkout; the CLI advances the stamp.
+   Coordinate with active owners before integrating their checkout.
 
-tasks-a20a64 now covers precise guidance and regression protection for this existing
-contract; a new recovery mechanism is unnecessary. Dependency publication is established
-by tasks-d0d520; local park recovery still needs tasks-b9b10e's safeguards.
-These are separate choices; a recovery remedy is not an alternative read authority.
+tasks-a20a64 covers guidance and regression protection for this existing contract.
+Closed-park recovery waits on tasks-b9b10e. A recovery remedy is not an alternative
+read authority.
 
 ## Unanswered questions
 
-- How should dependency diagnostics and workflow instructions make registered-record
-  publication clear? tasks-70f0bc owns this scoped guidance follow-up, supported by
-  tasks-d0d520's observed behavior table.
-- How should the stale-copy diagnostic explain a source-stamped Git union and its
-  two-sided integration requirement? tasks-a20a64 implements the scoped guidance fix;
-  tasks-29f71f established the recovery without changing the safety contract.
-- What does repeated done write on a closed record after closure in another host's
-  store: updated/completed/model, notes and local state? tasks-b9b10e checks exact
-  changes and warnings, including removed worktrees and protected active occurrences.
+- Does repeated done stay safe once the park's worktree has been removed, on a recurring
+  record, and against a foreign live claim? tasks-b9b10e answers with its two-store
+  probe.
+- Should `prime` hide a park on a closed record as `list --parked` does, or should
+  `list --parked` show it as a cleanup row, as it already does for shelved parks?
+  tasks-b9b10e records both outputs and recommends one; changing either is a JSON/output
+  decision for the user.
+- Is the branch merge after publication clean when the final bytes were published, and
+  how is the add/add conflict resolved when they were not? tasks-70f0bc extends the
+  tasks-d0d520 probe before writing guidance.
 
 ## Proposed decomposition
 
-- tasks-d0d520: investigation complete; record-only publication suffices in its fixture.
-  tasks-70f0bc: scoped guidance follow-up under tasks-984769. tasks-562c53: proposed
-  drop, because its completion-visibility need is covered by tasks-70f0bc and its
-  behavior is established by tasks-d0d520; no separate resolver change is needed.
-- tasks-29f71f: investigation complete; attached probe verifies lossless Git recovery.
-  tasks-a20a64: scoped guidance follow-up under the same goal; preserve the refusal,
-  explain identical same-stamp siblings, and avoid blaming every fork on write timing.
-- tasks-6b2867: briefed; awaits tasks-b9b10e, with the reviewer's host-local-store and
-  repeated-done finding recorded on both tasks. The original incident remains uncaptured.
-- The completed probes were P2/s/mid/direct investigations. tasks-b9b10e's bound now
-  includes two independent host state stores and before/after record comparisons.
-  Findings update this brief and wake named ideas in the same commit. Changed routing
-  or recovery contracts require reviewed design and implementation plans afterward.
+- tasks-d0d520 (done): record-only publication suffices for reads in its fixture.
+  tasks-70f0bc: guidance follow-up, including the branch-merge check. tasks-562c53:
+  proposed drop, covered by tasks-70f0bc.
+- tasks-29f71f (done): lossless Git recovery verified. tasks-a20a64: guidance follow-up;
+  preserve the refusal, explain identical same-stamp siblings, stop blaming every fork
+  on write timing.
+- tasks-b9b10e: closed-park safeguards and the `prime`/`list --parked` disagreement.
+  tasks-6b2867 waits on it.
+- Findings update this brief and wake named ideas in the same commit. Changed routing,
+  recovery or output contracts require a reviewed design and implementation plan.
