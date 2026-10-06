@@ -4,7 +4,7 @@ title: Task-note writes in a delegated Codex worker warn that CODEX_SESSION_ID c
 status: idea
 priority: 2
 created: 2026-10-04T18:04:18Z
-updated: 2026-10-06T10:41:53Z
+updated: 2026-10-06T17:05:31Z
 depends: []
 parent: tasks-2fa8c6
 tags: [feedback, friction, "from:mind6"]
@@ -17,3 +17,4 @@ agent: codex
 - 2026-10-06T10:07:12Z (investigate/tasks-1ece46): finding: tasks-1ece46 — Stamped worker note lands with conflict warnings and no native provenance; claim is already stale and not refreshed. Identity and provenance require separate contract checks. Evidence: attached capture and docs/notes/2026-09-30-delegated-identity-brief.md; follow-up tasks-5e2472.
 - 2026-10-06T10:07:12Z (investigate/tasks-1ece46): scope: briefed; reconsidered using tasks-1ece46 capture; preserve historical source and separate identity, provenance, delegated close and controller Stop; wait on planned tasks-5e2472 and reuse tasks-56b450 for Stop policy; brief: docs/notes/2026-09-30-delegated-identity-brief.md
 - 2026-10-06T10:41:53Z (main): Review disposition: one conflict-to-fallback remediation cluster under tasks-5e2472; all six reports close together after its reviewed remedy lands, retaining their sources and historical evidence limits.
+- 2026-10-06T17:05:31Z (investigate/tasks-c0bad3): Exact Codex 0.160.1 source at d27764b82f7118f674371e6d6e76271d9d606edb deliberately writes shared root CODEX_SESSION_ID and concrete CODEX_THREAD_ID; SubagentStart/SubagentStop agent_id equals worker thread ID. Worker completion dispatches SubagentStop, not Stop; worker SessionEnd/Interrupt are excluded. Recommend tasks contract adaptation, not upstream export repair. Root grouping is not an immediate-parent link for nested workers. Findings and immutable source links: docs/notes/2026-09-30-delegated-identity-brief.md; live hook delivery remains unverified.

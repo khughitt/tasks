@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-06T10:04:44Z
-updated: 2026-10-06T16:50:05Z
+updated: 2026-10-06T17:05:32Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
@@ -27,9 +27,12 @@ Regression: one real worker has a stable identity distinct from its controller a
 
 Reports resolved together: tasks-5745bb, tasks-616cd7, tasks-cf8687, tasks-290fa3, tasks-6e2d15 and tasks-f537a8 share the conflict-to-fallback acceptance check. Close them together when the reviewed remedy produced by this design lands; do not re-scope each independently. tasks-0c2c39 retains its historical missing-input limit and needs an explicit final disposition against that remedy.
 
+Verified prerequisite: tasks-c0bad3 traced Codex 0.160.1 commit d27764b82f7118f674371e6d6e76271d9d606edb. The distinct shared root-session and concrete worker-thread exports are intentional; design tasks adaptation rather than upstream export repair for this capture. SubagentStart/SubagentStop agent_id equals the worker thread ID and can address a thread-keyed claim under the reviewed new contract. Root session association does not identify an immediate parent in a nested tree or grant closure authority. Source tables and immutable links: docs/notes/2026-09-30-delegated-identity-brief.md.
+
 ## Notes
 
 - 2026-10-06T10:39:15Z (main): review: spec round 1 — verdict: revise; findings: Important 4; reviewer: human
 - 2026-10-06T10:41:53Z (main): Review disposition: intended semantics is now prerequisite tasks-c0bad3; delegated closure moved to tasks-f8c9cc; the six conflict/fallback reports share one remedy and closeout; upstream repair is conditional, not the default.
 - 2026-10-06T10:59:44Z (main): review: spec round 2 — verdict: accept; findings: none; reviewer: unspecified
 - 2026-10-06T16:50:04Z (main): priority: raised to P1 under the adopted agent-identity lane; identity research precedes dependent design, and controller-owned closure stays a separate decision.
+- 2026-10-06T17:05:31Z (investigate/tasks-c0bad3): Exact Codex 0.160.1 source at d27764b82f7118f674371e6d6e76271d9d606edb deliberately writes shared root CODEX_SESSION_ID and concrete CODEX_THREAD_ID; SubagentStart/SubagentStop agent_id equals worker thread ID. Worker completion dispatches SubagentStop, not Stop; worker SessionEnd/Interrupt are excluded. Recommend tasks contract adaptation, not upstream export repair. Root grouping is not an immediate-parent link for nested workers. Findings and immutable source links: docs/notes/2026-09-30-delegated-identity-brief.md; live hook delivery remains unverified.
