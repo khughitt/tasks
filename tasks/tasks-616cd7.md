@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-09-27T17:11:41Z
-updated: 2026-10-02T14:37:27Z
+updated: 2026-10-06T10:07:13Z
 depends: []
 parent: tasks-2fa8c6
 tags: [feedback, friction, "from:beliefs", "from:tack"]
@@ -29,3 +29,5 @@ Recurrence: feedback from tack: Subagent task start reports conflicting Codex se
 - 2026-09-30T09:58:28Z (main): scope: briefed; overlaps the conflicting-ID report but lacks capture evidence; share one investigation rather than infer an identical cause; waits on tasks-1ece46; brief: docs/notes/2026-09-30-delegated-identity-brief.md
 - 2026-09-30T21:46:30Z (feedback): feedback from tack: Subagent task start reports conflicting Codex session variables and falls back to a shared Unix session identity.
 - 2026-10-02T14:37:26Z (main): scope: briefed; recurrence adds no native-ID capture, so reuse tasks-1ece46 and tasks-2fa8c6; claim identity and note provenance remain separate; brief: docs/notes/2026-09-30-delegated-identity-brief.md
+- 2026-10-06T10:07:12Z (investigate/tasks-1ece46): finding: tasks-1ece46 — Worker session variable equals controller while thread matches child rollout; same Codex process, distinct command SIDs; claimed shared Unix identity is not demonstrated. Evidence: attached capture and docs/notes/2026-09-30-delegated-identity-brief.md; follow-up tasks-5e2472.
+- 2026-10-06T10:07:12Z (investigate/tasks-1ece46): scope: briefed; reconsidered using tasks-1ece46 capture; preserve historical source and separate identity, provenance, delegated close and controller Stop; wait on planned tasks-5e2472 and reuse tasks-56b450 for Stop policy; brief: docs/notes/2026-09-30-delegated-identity-brief.md

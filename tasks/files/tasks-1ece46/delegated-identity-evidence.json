@@ -1,0 +1,902 @@
+{
+  "capture": "2026-10-06, one Codex controller and one native spawn_agent worker",
+  "tasks_version": "0.2.0",
+  "tasks_executable": "$HOME/.cargo/bin/tasks",
+  "codex_version": "0.160.1",
+  "codex_launcher": "$HOME/.local/bin/codex",
+  "codex_resolved": "$CODEX_HOME/packages/standalone/releases/0.160.1-x86_64-unknown-linux-musl/bin/codex",
+  "metadata": {
+    "metadata-controller": {
+      "role": "metadata-controller",
+      "presence": {
+        "CODEX_SESSION_ID": true,
+        "CODEX_THREAD_ID": true,
+        "CLAUDE_CODE_SESSION_ID": false,
+        "CLAUDE_PID": false,
+        "TASKS_SESSION": false,
+        "TASKS_SESSION_PID": false
+      },
+      "pair_agrees": true,
+      "equals_controller": {
+        "CODEX_SESSION_ID": true,
+        "CODEX_THREAD_ID": true,
+        "CLAUDE_CODE_SESSION_ID": true,
+        "CLAUDE_PID": true,
+        "TASKS_SESSION": true,
+        "TASKS_SESSION_PID": true
+      },
+      "nearest": {
+        "pid": 2084866,
+        "comm": "codex",
+        "ppid": 575318,
+        "sid": 2084866,
+        "start": "14894621"
+      },
+      "same_harness_process": true,
+      "command_sid": 3666163,
+      "tasks_binary": "$HOME/.cargo/bin/tasks",
+      "tasks_version": "tasks 0.2.0",
+      "registry_present": false,
+      "registry_matching_rows": []
+    },
+    "metadata-worker": {
+      "role": "metadata-worker",
+      "presence": {
+        "CODEX_SESSION_ID": true,
+        "CODEX_THREAD_ID": true,
+        "CLAUDE_CODE_SESSION_ID": false,
+        "CLAUDE_PID": false,
+        "TASKS_SESSION": false,
+        "TASKS_SESSION_PID": false
+      },
+      "pair_agrees": false,
+      "equals_controller": {
+        "CODEX_SESSION_ID": true,
+        "CODEX_THREAD_ID": false,
+        "CLAUDE_CODE_SESSION_ID": true,
+        "CLAUDE_PID": true,
+        "TASKS_SESSION": true,
+        "TASKS_SESSION_PID": true
+      },
+      "nearest": {
+        "pid": 2084866,
+        "comm": "codex",
+        "ppid": 575318,
+        "sid": 2084866,
+        "start": "14894621"
+      },
+      "same_harness_process": true,
+      "command_sid": 3668223,
+      "tasks_binary": "$HOME/.cargo/bin/tasks",
+      "tasks_version": "tasks 0.2.0",
+      "registry_present": false,
+      "registry_matching_rows": []
+    },
+    "worker-rollout": {
+      "payload_id_matches_codex_thread_id": true,
+      "payload_id_matches_codex_session_id": false,
+      "parent_thread_id_matches_controller_session": true
+    },
+    "worker-proof": [
+      {
+        "task_id": "probe-dce69d",
+        "session_starts_sid": true,
+        "pid": 3690366,
+        "pid_start_present": true,
+        "boot_id_present": true,
+        "proc_pid_exists": false,
+        "pid_equals_own_current_command_sid": false
+      }
+    ],
+    "hook-control": {
+      "kind": "injected Stop events with captured claim rows",
+      "controller_blocked": true,
+      "child_blocked": false,
+      "child_wakes_codex": false
+    }
+  },
+  "controller_proof": {
+    "pid": null,
+    "pid_start_present": false,
+    "boot_id_present": true,
+    "liveness": "4h TTL"
+  },
+  "records": [
+    {
+      "role": "controller",
+      "command": [
+        "start",
+        "probe-441b81"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-441b81",
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3666194,
+      "launcher_pid": 3666194
+    },
+    {
+      "role": "controller",
+      "command": [
+        "show",
+        "probe-441b81"
+      ],
+      "exit": 0,
+      "stdout": {
+        "task": {
+          "id": "probe-441b81",
+          "title": "controller",
+          "status": "doing",
+          "priority": 2,
+          "complexity": "low",
+          "process": "direct",
+          "parallel": false,
+          "lane": false,
+          "owner": "keith",
+          "created": "2026-10-06T09:59:43Z",
+          "updated": "2026-10-06T09:59:44Z",
+          "started": "2026-10-06T09:59:44Z",
+          "agent": "codex",
+          "body": "",
+          "notes": [
+            {
+              "at": "2026-10-06T09:59:44Z",
+              "by": "keith",
+              "text": "started",
+              "harness_session": "codex:<controller-native>",
+              "harness_session_source": "CODEX_SESSION_ID"
+            }
+          ]
+        },
+        "claim": {
+          "owner": "keith",
+          "session": "<controller-native>",
+          "host": "<host>",
+          "worktree": "<scratch>/project",
+          "started": "2026-10-06T09:59:44Z",
+          "seen": "2026-10-06T09:59:44Z",
+          "live": true
+        },
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3666248,
+      "launcher_pid": 3666248
+    },
+    {
+      "role": "worker",
+      "command": [
+        "done",
+        "probe-441b81",
+        "worker attempted delegated close"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": {
+        "error": {
+          "detail": "probe-441b81 is claimed by session <controller-native> (owner keith, host <host>, worktree <scratch>/project, since 2026-10-06T09:59:44Z, age 37s, live)",
+          "kind": "claimed"
+        }
+      },
+      "command_sid": 3668446,
+      "launcher_pid": 3668446
+    },
+    {
+      "role": "controller",
+      "command": [
+        "note",
+        "probe-441b81",
+        "controller continuation",
+        "--stamp"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-441b81",
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3668465,
+      "launcher_pid": 3668465
+    },
+    {
+      "role": "worker",
+      "command": [
+        "start",
+        "probe-a533d0"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-a533d0",
+        "warnings": [
+          "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls to the Unix session id",
+          "unknown harness provenance: CODEX_SESSION_ID conflicts with CODEX_THREAD_ID"
+        ]
+      },
+      "stderr": "",
+      "command_sid": 3668698,
+      "launcher_pid": 3668698
+    },
+    {
+      "role": "worker",
+      "command": [
+        "show",
+        "probe-a533d0"
+      ],
+      "exit": 0,
+      "stdout": {
+        "task": {
+          "id": "probe-a533d0",
+          "title": "worker",
+          "status": "doing",
+          "priority": 2,
+          "complexity": "low",
+          "process": "direct",
+          "parallel": false,
+          "lane": false,
+          "owner": "keith",
+          "created": "2026-10-06T09:59:43Z",
+          "updated": "2026-10-06T10:00:25Z",
+          "started": "2026-10-06T10:00:25Z",
+          "agent": "codex",
+          "body": "",
+          "notes": [
+            {
+              "at": "2026-10-06T10:00:25Z",
+              "by": "keith",
+              "text": "started"
+            }
+          ]
+        },
+        "claim": {
+          "owner": "keith",
+          "session": "sid:3668698",
+          "host": "<host>",
+          "pid": 3668698,
+          "worktree": "<scratch>/project",
+          "started": "2026-10-06T10:00:25Z",
+          "seen": "2026-10-06T10:00:25Z",
+          "live": false
+        },
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3668922,
+      "launcher_pid": 3668922
+    },
+    {
+      "role": "worker",
+      "command": [
+        "ready"
+      ],
+      "exit": 0,
+      "stdout": {
+        "tasks": [
+          {
+            "id": "probe-7894b4",
+            "title": "relay-controller",
+            "status": "todo",
+            "priority": 2,
+            "complexity": "low",
+            "process": "direct",
+            "parallel": false,
+            "lane": false,
+            "created": "2026-10-06T09:59:43Z",
+            "updated": "2026-10-06T09:59:43Z",
+            "agent": "codex",
+            "child_count": 0,
+            "open_descendant_count": 0
+          },
+          {
+            "id": "probe-dce69d",
+            "title": "relay-worker",
+            "status": "todo",
+            "priority": 2,
+            "complexity": "low",
+            "process": "direct",
+            "parallel": false,
+            "lane": false,
+            "created": "2026-10-06T09:59:43Z",
+            "updated": "2026-10-06T09:59:43Z",
+            "agent": "codex",
+            "child_count": 0,
+            "open_descendant_count": 0
+          }
+        ],
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3669281,
+      "launcher_pid": 3669281
+    },
+    {
+      "role": "worker",
+      "command": [
+        "next"
+      ],
+      "exit": 0,
+      "stdout": {
+        "next": {
+          "task": {
+            "id": "probe-7894b4",
+            "title": "relay-controller",
+            "status": "todo",
+            "priority": 2,
+            "complexity": "low",
+            "process": "direct",
+            "parallel": false,
+            "lane": false,
+            "created": "2026-10-06T09:59:43Z",
+            "updated": "2026-10-06T09:59:43Z",
+            "agent": "codex",
+            "body": ""
+          }
+        },
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3669705,
+      "launcher_pid": 3669705
+    },
+    {
+      "role": "worker",
+      "command": [
+        "note",
+        "probe-a533d0",
+        "worker continuation",
+        "--stamp"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-a533d0",
+        "warnings": [
+          "unknown harness provenance: CODEX_SESSION_ID conflicts with CODEX_THREAD_ID",
+          "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls to the Unix session id"
+        ]
+      },
+      "stderr": "",
+      "command_sid": 3670099,
+      "launcher_pid": 3670099
+    },
+    {
+      "role": "worker",
+      "command": [
+        "park",
+        "probe-a533d0",
+        "controller will clean up"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-a533d0",
+        "warnings": [
+          "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls to the Unix session id",
+          "unknown harness provenance: CODEX_SESSION_ID conflicts with CODEX_THREAD_ID"
+        ]
+      },
+      "stderr": "",
+      "command_sid": 3670539,
+      "launcher_pid": 3670539
+    },
+    {
+      "role": "worker",
+      "command": [
+        "show",
+        "probe-a533d0"
+      ],
+      "exit": 0,
+      "stdout": {
+        "task": {
+          "id": "probe-a533d0",
+          "title": "worker",
+          "status": "doing",
+          "priority": 2,
+          "complexity": "low",
+          "process": "direct",
+          "parallel": false,
+          "lane": false,
+          "owner": "keith",
+          "created": "2026-10-06T09:59:43Z",
+          "updated": "2026-10-06T10:00:43Z",
+          "started": "2026-10-06T10:00:25Z",
+          "agent": "codex",
+          "body": "",
+          "notes": [
+            {
+              "at": "2026-10-06T10:00:25Z",
+              "by": "keith",
+              "text": "started"
+            },
+            {
+              "at": "2026-10-06T10:00:38Z",
+              "by": "keith",
+              "text": "worker continuation"
+            },
+            {
+              "at": "2026-10-06T10:00:43Z",
+              "by": "keith",
+              "text": "parked (waiting on agent): controller will clean up"
+            }
+          ]
+        },
+        "park": {
+          "at": "2026-10-06T10:00:43Z",
+          "next_step": "controller will clean up",
+          "waiting_on": "agent",
+          "session": "sid:3670539",
+          "owner": "keith",
+          "host": "<host>",
+          "worktree": "<scratch>/project"
+        },
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3670840,
+      "launcher_pid": 3670840
+    },
+    {
+      "role": "worker",
+      "command": [
+        "start",
+        "probe-a533d0"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-a533d0",
+        "warnings": [
+          "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls to the Unix session id",
+          "unknown harness provenance: CODEX_SESSION_ID conflicts with CODEX_THREAD_ID"
+        ]
+      },
+      "stderr": "",
+      "command_sid": 3675697,
+      "launcher_pid": 3675697
+    },
+    {
+      "role": "worker",
+      "command": [
+        "show",
+        "probe-a533d0"
+      ],
+      "exit": 0,
+      "stdout": {
+        "task": {
+          "id": "probe-a533d0",
+          "title": "worker",
+          "status": "doing",
+          "priority": 2,
+          "complexity": "low",
+          "process": "direct",
+          "parallel": false,
+          "lane": false,
+          "owner": "keith",
+          "created": "2026-10-06T09:59:43Z",
+          "updated": "2026-10-06T10:01:50Z",
+          "started": "2026-10-06T10:00:25Z",
+          "agent": "codex",
+          "body": "",
+          "notes": [
+            {
+              "at": "2026-10-06T10:00:25Z",
+              "by": "keith",
+              "text": "started"
+            },
+            {
+              "at": "2026-10-06T10:00:38Z",
+              "by": "keith",
+              "text": "worker continuation"
+            },
+            {
+              "at": "2026-10-06T10:00:43Z",
+              "by": "keith",
+              "text": "parked (waiting on agent): controller will clean up"
+            },
+            {
+              "at": "2026-10-06T10:01:50Z",
+              "by": "keith",
+              "text": "resumed"
+            }
+          ]
+        },
+        "claim": {
+          "owner": "keith",
+          "session": "sid:3675697",
+          "host": "<host>",
+          "pid": 3675697,
+          "worktree": "<scratch>/project",
+          "started": "2026-10-06T10:01:50Z",
+          "seen": "2026-10-06T10:01:50Z",
+          "live": false
+        },
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3675939,
+      "launcher_pid": 3675939
+    },
+    {
+      "role": "controller",
+      "command": [
+        "claims"
+      ],
+      "exit": 0,
+      "stdout": {
+        "claims": [
+          {
+            "id": "probe-441b81",
+            "prefix": "probe",
+            "owner": "keith",
+            "session": "<controller-native>",
+            "host": "<host>",
+            "worktree": "<scratch>/project",
+            "started": "2026-10-06T09:59:44Z",
+            "seen": "2026-10-06T10:00:21Z",
+            "live": true
+          },
+          {
+            "id": "probe-a533d0",
+            "prefix": "probe",
+            "owner": "keith",
+            "session": "sid:3675697",
+            "host": "<host>",
+            "pid": 3675697,
+            "worktree": "<scratch>/project",
+            "started": "2026-10-06T10:01:50Z",
+            "seen": "2026-10-06T10:01:50Z",
+            "live": false
+          }
+        ]
+      },
+      "stderr": "",
+      "command_sid": 3676093,
+      "launcher_pid": 3676093
+    },
+    {
+      "role": "worker",
+      "command": [
+        "done",
+        "probe-a533d0",
+        "worker closes its own disposable task"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-a533d0",
+        "warnings": [
+          "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls to the Unix session id",
+          "took over session sid:3675697 (owner keith, host <host>, pid 3675697, worktree <scratch>/project, since 2026-10-06T10:01:50Z, age 7s, stale: pid 3675697 is gone)",
+          "unknown harness provenance: CODEX_SESSION_ID conflicts with CODEX_THREAD_ID",
+          "unknown harness provenance: CODEX_SESSION_ID conflicts with CODEX_THREAD_ID"
+        ]
+      },
+      "stderr": "",
+      "command_sid": 3676427,
+      "launcher_pid": 3676427
+    },
+    {
+      "role": "worker",
+      "command": [
+        "show",
+        "probe-a533d0"
+      ],
+      "exit": 0,
+      "stdout": {
+        "task": {
+          "id": "probe-a533d0",
+          "title": "worker",
+          "status": "done",
+          "priority": 2,
+          "complexity": "low",
+          "process": "direct",
+          "parallel": false,
+          "lane": false,
+          "owner": "keith",
+          "created": "2026-10-06T09:59:43Z",
+          "updated": "2026-10-06T10:01:57Z",
+          "started": "2026-10-06T10:00:25Z",
+          "completed": "2026-10-06T10:01:57Z",
+          "agent": "codex",
+          "body": "",
+          "notes": [
+            {
+              "at": "2026-10-06T10:00:25Z",
+              "by": "keith",
+              "text": "started"
+            },
+            {
+              "at": "2026-10-06T10:00:38Z",
+              "by": "keith",
+              "text": "worker continuation"
+            },
+            {
+              "at": "2026-10-06T10:00:43Z",
+              "by": "keith",
+              "text": "parked (waiting on agent): controller will clean up"
+            },
+            {
+              "at": "2026-10-06T10:01:50Z",
+              "by": "keith",
+              "text": "resumed"
+            },
+            {
+              "at": "2026-10-06T10:01:57Z",
+              "by": "keith",
+              "text": "done"
+            },
+            {
+              "at": "2026-10-06T10:01:57Z",
+              "by": "keith",
+              "text": "worker closes its own disposable task"
+            }
+          ]
+        },
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3676823,
+      "launcher_pid": 3676823
+    },
+    {
+      "role": "worker",
+      "command": [
+        "start",
+        "probe-dce69d"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": {
+        "error": {
+          "detail": "relay identity: CODEX_SESSION_ID \"<controller-native>\" conflicts with CODEX_THREAD_ID \"<worker-native>\"; set TASKS_SESSION and TASKS_SESSION_PID to name this session explicitly",
+          "kind": "config"
+        }
+      },
+      "command_sid": 3678915,
+      "launcher_pid": 3678915
+    },
+    {
+      "role": "worker",
+      "command": [
+        "done",
+        "probe-441b81",
+        "relay delegated close attempt"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": {
+        "error": {
+          "detail": "relay identity: CODEX_SESSION_ID \"<controller-native>\" conflicts with CODEX_THREAD_ID \"<worker-native>\"; set TASKS_SESSION and TASKS_SESSION_PID to name this session explicitly; the existing claim is held by session \"<controller-native>\"",
+          "kind": "config"
+        }
+      },
+      "command_sid": 3679893,
+      "launcher_pid": 3679893
+    },
+    {
+      "role": "controller",
+      "command": [
+        "start",
+        "probe-7894b4"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": {
+        "error": {
+          "detail": "relay identity: no relay agent matches the nearest codex ancestor, pid 2084866; set TASKS_SESSION and TASKS_SESSION_PID to name this session explicitly",
+          "kind": "config"
+        }
+      },
+      "command_sid": 3687689,
+      "launcher_pid": 3687689
+    },
+    {
+      "role": "worker",
+      "command": [
+        "start",
+        "probe-dce69d"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-dce69d",
+        "warnings": [
+          "CODEX_SESSION_ID conflicts with CODEX_THREAD_ID; the claim identity falls to the Unix session id",
+          "unknown harness provenance: CODEX_SESSION_ID conflicts with CODEX_THREAD_ID"
+        ]
+      },
+      "stderr": "",
+      "command_sid": 3690366,
+      "launcher_pid": 3690366
+    },
+    {
+      "role": "worker",
+      "command": [
+        "show",
+        "probe-dce69d"
+      ],
+      "exit": 0,
+      "stdout": {
+        "task": {
+          "id": "probe-dce69d",
+          "title": "relay-worker",
+          "status": "doing",
+          "priority": 2,
+          "complexity": "low",
+          "process": "direct",
+          "parallel": false,
+          "lane": false,
+          "owner": "keith",
+          "created": "2026-10-06T09:59:43Z",
+          "updated": "2026-10-06T10:03:11Z",
+          "started": "2026-10-06T10:03:11Z",
+          "agent": "codex",
+          "body": "",
+          "notes": [
+            {
+              "at": "2026-10-06T10:03:11Z",
+              "by": "keith",
+              "text": "started"
+            }
+          ]
+        },
+        "claim": {
+          "owner": "keith",
+          "session": "sid:3690366",
+          "host": "<host>",
+          "pid": 3690366,
+          "worktree": "<scratch>/project",
+          "started": "2026-10-06T10:03:11Z",
+          "seen": "2026-10-06T10:03:11Z",
+          "live": false
+        },
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3690662,
+      "launcher_pid": 3690662
+    },
+    {
+      "role": "controller",
+      "command": [
+        "show",
+        "probe-dce69d"
+      ],
+      "exit": 0,
+      "stdout": {
+        "task": {
+          "id": "probe-dce69d",
+          "title": "relay-worker",
+          "status": "doing",
+          "priority": 2,
+          "complexity": "low",
+          "process": "direct",
+          "parallel": false,
+          "lane": false,
+          "owner": "keith",
+          "created": "2026-10-06T09:59:43Z",
+          "updated": "2026-10-06T10:03:11Z",
+          "started": "2026-10-06T10:03:11Z",
+          "agent": "codex",
+          "body": "",
+          "notes": [
+            {
+              "at": "2026-10-06T10:03:11Z",
+              "by": "keith",
+              "text": "started"
+            }
+          ]
+        },
+        "claim": {
+          "owner": "keith",
+          "session": "sid:3690366",
+          "host": "<host>",
+          "pid": 3690366,
+          "worktree": "<scratch>/project",
+          "started": "2026-10-06T10:03:11Z",
+          "seen": "2026-10-06T10:03:11Z",
+          "live": false
+        },
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3692718,
+      "launcher_pid": 3692718
+    },
+    {
+      "role": "controller",
+      "command": [
+        "park",
+        "probe-441b81",
+        "controller ownership confirmed; close next"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-441b81",
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3692751,
+      "launcher_pid": 3692751
+    },
+    {
+      "role": "controller",
+      "command": [
+        "done",
+        "probe-441b81",
+        "controller cleanup"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-441b81",
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3692785,
+      "launcher_pid": 3692785
+    },
+    {
+      "role": "controller",
+      "command": [
+        "done",
+        "probe-dce69d",
+        "controller cleanup of dead worker claim"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-dce69d",
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3692843,
+      "launcher_pid": 3692843
+    },
+    {
+      "role": "controller",
+      "command": [
+        "drop",
+        "probe-7894b4",
+        "unused disposable relay control cleanup"
+      ],
+      "exit": 0,
+      "stdout": {
+        "id": "probe-7894b4",
+        "warnings": []
+      },
+      "stderr": "",
+      "command_sid": 3692884,
+      "launcher_pid": 3692884
+    },
+    {
+      "role": "controller",
+      "command": [
+        "claims"
+      ],
+      "exit": 0,
+      "stdout": {
+        "claims": []
+      },
+      "stderr": "",
+      "command_sid": 3692922,
+      "launcher_pid": 3692922
+    }
+  ],
+  "original_capture": {
+    "source": "tack-2f1271 controller transcript",
+    "claim_tool_result_line": 1174,
+    "cleanup_tool_call_line": 1178,
+    "observed_dead_sid_claim": true,
+    "original_scratch_deleted": true,
+    "native_presence_not_captured": true
+  },
+  "controls": {
+    "relay": "scratch relay=true with empty schema-2 registry; no observed live registry or successful real match",
+    "stop": "pure claim-guard.decide with injected Stop events and captured claims; no actual Stop or wake test",
+    "synthetic_checks": [
+      "just test-one codex (6 passed)",
+      "just test-one provenance (11 passed)",
+      "just test-fast (passed)"
+    ]
+  },
+  "cleanup": {
+    "disposable_claims": [],
+    "scratch_processes_remaining": [],
+    "desktop_used": false
+  }
+}

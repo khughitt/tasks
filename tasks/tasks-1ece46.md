@@ -1,18 +1,20 @@
 ---
 id: tasks-1ece46
 title: Determine why delegated Codex claims lose their session identity
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: investigate/tasks-1ece46
 created: 2026-09-30T09:58:25Z
-updated: 2026-10-06T09:58:16Z
+updated: 2026-10-06T10:10:02Z
 started: 2026-10-06T09:58:07Z
+completed: 2026-10-06T10:10:01Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
+model: gpt-6.1-sol
 agent: codex
 ---
 
@@ -33,3 +35,13 @@ Ideas it wakes: on completion add the finding to tasks-0c2c39, tasks-5745bb, tas
 - 2026-10-06T09:58:07Z (main): started
   provenance: {"harness_session":"codex:01a110a5-ab41-7552-baa2-c9410cb5dce6","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-10-06T09:58:16Z (main): Direct investigation; capture one current controller/worker pair in disposable isolated projects, trace identity/liveness/provenance/closure separately, and update the brief in .worktrees/tasks-1ece46 without product changes.
+- 2026-10-06T09:58:24Z (investigate/tasks-1ece46): resumed
+  provenance: {"harness_session":"codex:01a110a5-ab41-7552-baa2-c9410cb5dce6","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T10:06:35Z (investigate/tasks-1ece46): attached: delegated-identity-evidence.json (24019 bytes): One controller/worker capture; native equality relationships, command exits, process proofs, injected controls, original-source limits, cleanup.
+- 2026-10-06T10:07:12Z (investigate/tasks-1ece46): Capture reproduced inherited controller session plus child thread in one shared Codex process; native claim dead after command exit, native provenance omitted, foreign live close refused by tasks, own close succeeds through stale takeover. Relay/Stop controls explicitly synthetic; host registry absent. Nine report findings and scope audits recorded; planned tasks-5e2472 filed and existing tasks-56b450 reused; relay-60ae9e recurrence filed.
+- 2026-10-06T10:08:21Z (investigate/tasks-1ece46): Verification: just test-one codex (6 passed), just test-one provenance (11 passed), just test-fast and just check passed; attached JSON validated for native-ID redaction and empty scratch claims. No product code changed.
+- 2026-10-06T10:10:01Z (investigate/tasks-1ece46): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-06T10:10:01Z (investigate/tasks-1ece46): done
+  provenance: {"harness_session":"codex:01a110a5-ab41-7552-baa2-c9410cb5dce6","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T10:10:01Z (investigate/tasks-1ece46): Captured one Codex controller/worker pair: inherited parent session conflicts with child thread, causing dead Unix claims and omitted provenance; tasks rejects delegated live-controller closure. Sanitized evidence attached, brief updated, nine ideas awakened and scoped, planned tasks-5e2472 filed; focused tests, fast suite, checks and review pass.
+  provenance: {"harness_session":"codex:01a110a5-ab41-7552-baa2-c9410cb5dce6","harness_session_source":"CODEX_SESSION_ID"}

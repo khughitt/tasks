@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-01T10:18:50Z
-updated: 2026-10-02T14:37:27Z
+updated: 2026-10-06T10:07:13Z
 depends: []
 parent: tasks-2fa8c6
 tags: [feedback, friction, "from:tack"]
@@ -25,3 +25,5 @@ Original report: Task start reports conflicting Codex session and thread identit
 ## Notes
 
 - 2026-10-02T14:37:26Z (main): scope: briefed; add the newer conflict/provenance report to existing tasks-2fa8c6 and research tasks-1ece46 without inferring a shared cause; brief: docs/notes/2026-09-30-delegated-identity-brief.md
+- 2026-10-06T10:07:12Z (investigate/tasks-1ece46): finding: tasks-1ece46 — Current pair demonstrates inherited parent session versus child thread; native claim fallback and omitted stamped-note provenance are independent resolver results. Evidence: attached capture and docs/notes/2026-09-30-delegated-identity-brief.md; follow-up tasks-5e2472.
+- 2026-10-06T10:07:12Z (investigate/tasks-1ece46): scope: briefed; reconsidered using tasks-1ece46 capture; preserve historical source and separate identity, provenance, delegated close and controller Stop; wait on planned tasks-5e2472 and reuse tasks-56b450 for Stop policy; brief: docs/notes/2026-09-30-delegated-identity-brief.md

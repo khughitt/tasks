@@ -5,6 +5,8 @@ Updated 2026-10-02: recurring and newer worker reports reuse this investigation;
 the related opt-in note-stamping capability is scoped independently.
 Updated 2026-10-06: five new reports join the same goal and single-pair capture;
 delegated closure is investigated separately from identity and provenance.
+Investigation completed 2026-10-06 under tasks-1ece46; findings and limits below.
+This brief remains a handoff, not an approved ownership design.
 
 ## Problem
 
@@ -21,119 +23,174 @@ so stage attribution need not infer it from nearby lifecycle markers.
 
 ## Current behaviour and evidence
 
-- `src/claims.rs::identity_from` tries explicit `TASKS_SESSION`, opt-in relay, Claude
-  native identity, Codex native identity, then Unix session identity. A single Codex ID
-  or an agreeing pair yields a raw session ID with no PID and uses TTL liveness. This
-  landed in `903f04a` under tasks-3190fb.
-- Missing Codex IDs reach the Unix fallback when no higher level resolves. Conflicting
-  IDs warn and skip the Codex level. The fallback uses the command's Unix session-leader
-  PID; `liveness_with` marks a claim stale when its recorded process is gone, subject
-  to its existing proof/TTL rules. These paths explain the reported symptoms but do not
-  establish what the affected worker actually exported.
-- `src/relay/resolve.rs` rejects conflicting hints and requires exactly one qualifying
-  process match. Relay is not an automatic cure for multiple logical workers sharing a
-  process. The relay design explicitly requires explicit identities for that case.
-- `src/provenance.rs::resolve_from` independently omits provenance and warns on native
-  conflicts. An explicit claim override does not supply native note provenance.
-- tasks-616cd7 received another feedback note after its earlier scope audit, making it
-  eligible again. tasks-cf8687 is a newer report of conflicting native variables,
-  Unix fallback, and omitted provenance. Neither includes a controller/worker capture;
-  recurrence supports reusing the investigation, not assuming a demonstrated cause.
-- `src/commands/status.rs::note` uses `append_note` for plain notes and
-  `append_stamped_note` for `--stamp`, which now supplies the optional native pair
-  independently of claim resolution. The stamped helper normalizes text and attaches the
-  existing optional pair through the native resolver. The reader round-trips that
-  pair today. The lifecycle writer landed in `8f13112`, and its local plan documents
-  the separate claim and consumer contracts. A plain note can opt into the same
-  metadata without recognizing gate prefixes or changing task status.
-- `just test-one codex` passed six tests on 2026-09-30, including native claim survival,
-  conflicting-variable fallback, and relay hint disagreement. These are controlled
-  fixtures, not a fresh reproduction in a delegated worker.
-- tasks-fc61f4 records a successful outer/nested Claude live check. Its recipe remains
-  in `docs/plans/2026-09-23-relay-session-process.md`, Task 5. Vendored ancestry and
-  process-handle fixtures provide repeatable synthetic coverage; no automation script
-  for that live recipe was found.
+One current controller and one `spawn_agent` worker were captured on 2026-10-06,
+using four disposable tasks in one project. Every invocation isolated
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME`, and `RELAY_STATE_DIR`; native identity variables
+were left unchanged. Evidence is attached to tasks-1ece46 at
+`tasks/files/tasks-1ece46/delegated-identity-evidence.json`. IDs are redacted to
+relationships; command PIDs are retained as process evidence.
 
-- The five newer reports contain no controller/worker capture or exact closure refusal.
-  `src/commands/mod.rs::ownership` accepts matching identity or process proof;
-  `claim_guard` refuses a foreign live claim. Prose authorization does not change
-  that check. tasks-673b21's reported shared key does not prove matching effective
-  identities, and a harness/controller gate might have stopped the command earlier.
-  No live reproduction was attempted in this scope pass.
+Executables: `tasks 0.2.0` at `$HOME/.cargo/bin/tasks`; `codex-cli 0.160.1`
+through `$HOME/.local/bin/codex`, resolving to the standalone release's
+`bin/codex` under `$CODEX_HOME/packages/standalone/releases/0.160.1-x86_64-unknown-linux-musl/`.
+The capture used the installed CLI; source checks ran at `6edc5c5` in the task
+worktree. Both participants' shell commands reached the same installed tasks binary.
+The host tasks config has no identity table (relay defaults off); its Codex shell
+policy sets only `TASKS_FORMAT` and `TASKS_AGENT`, with neither native ID overridden.
+No host relay registry was present. No host setting, launcher, desktop, or product
+code changed.
+
+| Check | Controller observation | Worker observation |
+| --- | --- | --- |
+| Native inputs | Both Codex variables present and equal; both equal controller rollout ID | Both present; session equals controller; thread differs and equals child rollout ID; child metadata identifies controller as parent |
+| Other identity inputs | Claude variables and explicit tasks session/PID absent | Same absence |
+| Process | Nearest recognized `codex` PID 2084866, start 14894621 | Exactly the same harness PID/start; logical sessions differ |
+| Command session | A new Unix session leader for each invocation | A new Unix session leader for each invocation, distinct from the controller's commands |
+| Registry | No matching row; host registry absent | Same absence; no real relay success demonstrated |
+| Native claim after start exits | Raw native controller ID, no PID/start proof; boot ID recorded; live by four-hour TTL | `sid:<start command PID>`; PID/start/boot recorded; PID already gone; `live:false` |
+| Continuation | Later stamped note refreshes the same live identity; park and close succeed | Stamped note lands with omitted provenance; stale claim is pruned rather than refreshed; park records a new command SID |
+| Delegated close | Own task remains live until controller cleanup | Controller-owned close exits 1, `claimed`; worker-owned close exits 0 only after automatic stale-claim takeover |
+
+The worker's final proof capture used command PID 3690366. Its stored `pid_start`
+and `boot_id` were present, but `/proc/3690366` did not exist by the next invocation.
+The tasks JSON claim view does not expose those two proof fields; the isolated store
+was inspected separately. The controller claim has no PID or start proof, so sharing
+its harness process does not establish worker ownership of that native claim.
+
+The native `ready`/`next` calls returned the two unstarted relay-control tasks and
+omitted both doing tasks. That does **not** prove liveness-based exclusion, because
+the local records already said `doing`; `tasks claims` independently showed the
+controller live and the worker dead. The existing cross-checkout and rival-start
+fixtures cover live claim exclusion. There was no second controller or worker.
+
+The exact native delegated refusal, with identity and scratch path redacted, was:
+
+```json
+{"error":{"detail":"probe-441b81 is claimed by session <controller-native> (owner keith, host <host>, worktree <scratch>/project, since 2026-10-06T09:59:44Z, age 37s, live)","kind":"claimed"}}
+```
+
+This reached tasks; no harness/controller gate prevented execution. The worker's
+effective identity was its current command SID, not either exported Codex ID.
+`src/commands/mod.rs::ownership` requires matching effective identity or valid
+relay-mode process proof; `claim_guard` refuses a foreign live claim. Plain-language
+permission from the controller does not supply either. Worker-owned closure warned
+that the previous command PID was gone and used the stale-claim takeover path. Its
+success is not evidence of stable continuation ownership.
+
+| Injected control | Result and limit |
+| --- | --- |
+| Scratch relay enabled, real native/process inputs, empty schema-2 registry | Worker start exits 1, `config`: conflicting session/controller and thread/worker hints, with explicit-session recovery instruction. Worker delegated close reports the same conflict plus the held controller identity. Hints are checked before registry loading. Controller start exits 1, `config`: no agent matches PID 2084866. This is not a captured real relay match. |
+| Existing Codex fixtures | `just test-one codex`: six tests pass, covering agreeing/thread-only inputs, conflict fallback, claim survival, and relay hint disagreement. Missing-input Unix fallback is covered by the fast suite. These are synthetic inputs, not extra live worker captures. |
+| Existing provenance fixtures | `just test-one provenance`: eleven tests pass, including missing/agreeing/conflicting inputs, lifecycle metadata, and opt-in stamped notes. `just test-fast` also passes. |
+| Pure controller Stop-policy check | `ops/hooks/claim-guard::decide`, injected Stop events and captured live/dead claim rows: controller blocked on its own live claim, child allowed with no matching live claim. This tests the decision function, not actual Stop delivery or controller wake. |
+
+Current resolution is demonstrated, rather than inferred from the reports:
+
+- `src/claims.rs::identity_from` skips the native Codex level when the pair conflicts;
+  Unix fallback records the command session leader. `liveness_with` sees that PID gone
+  after exit and immediately marks the claim stale. The agreeing controller uses TTL
+  liveness. This is the existing deliberate contract, including the native level from
+  `903f04a` (tasks-3190fb).
+- `src/provenance.rs::resolve_from` independently rejects the same conflicting pair;
+  lifecycle and `note --stamp` metadata are omitted with warnings. Plain notes are
+  unstamped by design. Explicit claim overrides do not provide native provenance.
+  The independent note-stamping capability in tasks-0005a6 is done.
+- `src/relay/resolve.rs::hint_for` rejects the worker pair before loading the registry.
+  `resolve` also requires exactly one qualifying process row. Shared process proof
+  cannot select two logical sessions by itself; the native child thread signal can
+  distinguish this pair, but how to trust/deliver it requires a reviewed contract.
+- `ops/hooks/claim-guard::held` filters by live claim and exact/known-prefixed Stop
+  session ID. A separately live child identity would still not match a controller's
+  Stop ID. Native identity repair alone therefore does not solve controller aggregation.
+
+| Reports | Demonstrated path and remaining historical limit |
+| --- | --- |
+| tasks-0c2c39 (`ai-2f1271`, now tack-2f1271) | Original controller transcript recovered: tool-result line 1174 records `sid:1112013`, `live:false`; line 1178 removes the scratch capture. No actual native-variable presence capture survived. Missing IDs remain the reporter's inference; current reproduction demonstrates conflicting inherited IDs instead. |
+| tasks-5745bb, tasks-616cd7, tasks-cf8687 | Current pair reproduces conflict → Unix fallback → dead claim, plus independent omitted provenance. Their historical pair/config inputs remain uncaptured; the reported shared Unix identity is not established by this pair's distinct command SIDs. |
+| tasks-290fa3, tasks-6e2d15, tasks-f537a8 | Same current conflict path; parent session versus child thread is now demonstrated for this pair. This maps the symptoms, without proving every earlier shell used this exact environment. |
+| tasks-f27fe3, tasks-673b21 | Current delegated close is a tasks `claimed` refusal against a live controller identity. Sharing an exported parent key or harness process does not mean matching effective identity. Historical refusals were not captured; another layer may have refused those original calls. |
+
+All disposable tasks were closed/dropped by their appropriate owner or controller
+cleanup; final isolated `tasks claims` was empty. No detached scratch process was
+launched. The original evidence scratch was already deleted by its own controller.
 
 ## Constraints
 
-Preserve the reports rather than label them duplicates without captures. The
-original `ai-2f1271` source is outside this fixed checkout and was not inspected; the
-missing-ID account in tasks-0c2c39 remains report evidence. The other reports do not
-record the effective relay configuration or full parent/worker identity relationship.
-For tasks-0005a6, the original mindful lookup returned no matching thought on
-2026-10-02; its captured body and source reference remain the available evidence.
+Preserve report sources and distinguish observations from injected controls.
+The recovered original dead claim is evidence; its missing-ID explanation is not
+verified. This capture establishes the current input mismatch at the worker command
+boundary, not which upstream statement exports it, and only for Codex 0.160.1 on
+this host. A real relay registry match and actual controller Stop/wake remain gaps.
 
-Keep session/PID pairs from one resolution level. Do not choose whichever conflicting
-variable happens to work, or merge worker ownership into the controller by assumption.
-Claim liveness, lifecycle provenance, and controller completion gating are separate
-contracts. Investigations isolate config, state, registry, and processes; host settings
-and shared launchers stay untouched. Existing ownership/precedence changes require
-reviewed design and plan work after evidence establishes the needed change.
-Opt-in note stamping preserves plain-note behavior, the existing pair schema and
-warning-only provenance failures, and all existing note mutation/claim checks.
-Generated text remains the lifecycle classifier; user text equal to a marker retains
-the already documented ambiguity. Flow and stage-cost consumers were not inspected
-in this checkout, so adoption there remains separate owner work.
+Keep identity/PID pairs from one resolution level. Neither inherited parent keys nor
+a shared process justify merging ownership. Claim identity, native note provenance,
+delegated lifecycle authorization, and controller completion policy are separate
+contracts. No precedence, ownership, or host configuration change belongs in this
+completed investigation. New contracts require reviewed design and implementation
+plan work. Opt-in note stamping retains its independent existing semantics.
 
 ## Alternatives
 
-1. **Repair identity delivery at the harness boundary.** If workers receive stale,
-   conflicting, or absent IDs, fix the adapter/configuration that supplies them. This is
-   the first path to investigate because agreeing native IDs already pass the survival
-   check.
-2. **Change tasks' resolution contract.** If correct worker signals cannot be represented,
-   design how to distinguish them while preserving explicit overrides and ownership.
-   Do not weaken conflict checks without evidence for a trustworthy selector.
-3. **Use an explicit worker identity as a bounded workaround.** It must remain stable
-   across that worker's commands; any PID must belong to its lifetime. This does not
-   by itself solve native provenance or controller aggregation.
+1. **Repair worker identity delivery at the harness/adapter boundary (recommended).**
+   Deliver one authoritative logical worker identity consistently across commands;
+   align supported native variables or remove a stale parent alias at that boundary.
+   The child rollout already distinguishes the worker. Codex/native command delivery
+   is the demonstrated failure boundary; the exact exporting implementation is not
+   identified. The relay harness-adapter owner has the captured recurrence in
+   relay-60ae9e and can route an upstream repair. Host config did not override these IDs.
+2. **Change tasks' identity contract.** A reviewed design could name a trustworthy
+   signal and change claim/provenance/relay hint handling together. Do not silently
+   prefer `CODEX_THREAD_ID` while the existing contract treats disagreement as invalid.
+3. **Explicit worker claim identity as a bounded workaround.** A stable
+   `TASKS_SESSION` with a lifetime-appropriate PID (or no PID for TTL) can name a worker
+   sharing a process. It does not repair native provenance or authorize closing a
+   controller claim. No such override was used to hide this reproduction.
 
-Current lean: capture one controller/worker pair before assigning the fix to tasks,
-relay, harness configuration, or controller hooks. One investigation covers the overlap.
-For ordinary notes, choose explicit `note --stamp` over automatic prefix recognition:
-the existing append helper supplies the capability while tasks stays ignorant of
-flow's gate vocabulary. Stamping cannot repair conflicting worker identities.
+Choose the boundary repair over loosening tasks' conflict checks. Retain controller
+closure of controller-owned tasks under today's contract; separately decide whether
+explicit lifecycle delegation is needed. For controller Stop policy, reuse
+planned tasks-56b450 rather than assume an identity repair makes child claims count
+as controller obligations.
 
 ## Unanswered questions
 
-- Are worker IDs missing, inherited from the controller, or independently correct?
-  Research tasks-1ece46 answers with presence/equality relationships and versions.
-- Which resolution mode and process proof were active, and do controller and worker
-  share a process? The same capture must answer this before proposing ownership rules.
-- Does the controller need to aggregate child claims, or is claim identity alone wrong?
-  Research identifies the boundary and owner; this pass does not change that policy.
-
-- Which layer refused delegated `done`, with which effective worker identity and
-  controller claim owner? tasks-1ece46 records the exact outcome in the same pair,
-  compares a worker-owned disposable task, and leaves controller cleanup to the
-  controller. Do not override a live claim to conceal the failure.
+- Which Codex/harness delivery statement leaves the parent session alias in worker
+  commands? The capture identifies the boundary and excludes the local native-ID
+  config overrides; the harness/adapter owner must trace and repair delivery.
+- What reviewed identity contract should tasks accept if upstream alignment cannot
+  be provided, and how should relay represent logical sessions sharing a process?
+  tasks-5e2472 designs this from the capture; a real relay match is needed before
+  claiming a relay-specific fix.
+- Is explicit delegated close needed beyond controller cleanup, and what authority
+  would grant it? tasks-5e2472 must settle it independently of identity/provenance.
+- How should controller completion aggregate separately owned worker obligations?
+  tasks-56b450 owns the existing Stop-policy decision; an actual Stop/wake run remains
+  outside this bounded capture.
 
 ## Proposed decomposition
 
-- tasks-0c2c39, tasks-5745bb, tasks-616cd7, tasks-cf8687: briefed; remain ideas under
-  tasks-2fa8c6. The 2026-10-02 pass reconsidered tasks-616cd7 and added tasks-cf8687;
-  the first two were related context, not processed again.
-- tasks-1ece46: priority 2, small/mid/direct investigation. Capture one controller/worker
-  pair, distinguish actual observations from synthetic controls, recommend an owner and
-  regression check, update this brief, and add finding notes that wake all nine ideas.
-  Include the delegated closure comparison while retaining the single-pair bound.
-  No speculative implementation or separate design task is filed yet.
-- tasks-290fa3, tasks-6e2d15, tasks-f537a8, tasks-f27fe3, tasks-673b21: briefed
-  in the 2026-10-06 pass, parented under tasks-2fa8c6, and added to tasks-1ece46's
-  wake list. No duplicate investigation or speculative implementation was created.
-- tasks-0005a6: done; independent `note --stamp`
-  capability using the existing resolver, pair codec, warnings, and note write path.
-  Check stamped versus plain gate text, native inputs and conflicts, round-trip
-  preservation, status, and claim behavior. It remains outside the claim-identity
-  goal and is not blocked on the investigation. No new umbrella goal or handoff is
-  needed for this independent scoped capability.
-- tasks-481fd6: shelved outside the goal. Wake when a relay/tasks change to process
-  selection or registry identity matching requires another outer/nested Claude live
-  check; reuse the existing Task 5 recipe then.
+- tasks-1ece46: completed direct investigation. One pair demonstrated inherited
+  parent session plus child thread, short-lived fallback, omitted provenance, tasks
+  delegated-close refusal, and stale worker-owned close. Six Codex and eleven
+  provenance checks plus the fast suite passed. Sanitized evidence attached; original
+  evidence and relay/Stop gaps recorded; all nine reports received finding notes and
+  were reconsidered in the same scope pass.
+- tasks-5e2472: new priority-2, medium/high/planned design task under tasks-2fa8c6.
+  Review identity delivery ownership, accepted native signals, shared-process relay
+  representation, and explicit lifecycle delegation before implementation. Regression:
+  one real worker's identity matches its rollout, differs from controller, stays live
+  and stable across commands, and stamps child provenance; foreign live close remains
+  refused unless a separate reviewed authority permits it.
+- tasks-0c2c39, tasks-5745bb, tasks-616cd7, tasks-cf8687, tasks-290fa3,
+  tasks-6e2d15, tasks-f537a8, tasks-f27fe3, tasks-673b21: briefed ideas remain under
+  tasks-2fa8c6, with sources preserved. Wait on tasks-5e2472 for the contract decision;
+  this investigation does not turn historical symptom reports into implementation
+  specifications or drop requests.
+- tasks-56b450: existing planned controller Stop-policy ownership decision; reuse
+  it for aggregation and harness-capability facts, rather than create another hook task.
+- relay-60ae9e: captured recurrence filed to the harness-adapter owner for delivery
+  repair/routing; its maintainer reviews and commits the feedback separately.
+- tasks-0005a6: done; independent explicit `note --stamp` capability. It cannot rescue
+  conflicting identities, and no consumer adoption or new stamp schema was added here.
+- tasks-481fd6: remains shelved. Its existing Claude live-check recipe wakes on an
+  actual relay/tasks process-selection change, not this Codex-only capture.
