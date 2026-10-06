@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-7580d2
 created: 2026-10-06T13:23:04Z
-updated: 2026-10-06T19:28:52Z
+updated: 2026-10-06T19:42:36Z
 started: 2026-10-06T18:41:11Z
 depends: []
 parent: tasks-a7460c
@@ -54,4 +54,9 @@ Cover canonical and aliased ids, current/former roots and their worktree storage
 - 2026-10-06T19:27:06Z (design/tasks-7580d2): review: plan round 1 — verdict: revise; findings: Important 2, Minor 2; reviewer: agent (tack session; harness/model unstated)
 - 2026-10-06T19:28:50Z (design/tasks-7580d2): plan round 1 addressed: merge leaves the storage record empty and the displaced record travels in Displaced; a dangling link after a root change clears the record and warns (spec §2.1/§2.2 amended); second-host test adopts before its storage move; Task 6 hands the other host its install, pre-move init --force, and ai backfill in that order; clean-tree check after init --force. Execution: subagent-driven (agreed by reviewer)
 - 2026-10-06T19:28:52Z (design/tasks-7580d2): parked (waiting on user, review): user re-reviews docs/plans/2026-10-06-project-resolution.md (round 2); on approval the agent runs it subagent-driven from tasks-b1dbc5 in .worktrees/tasks-7580d2
+  provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T19:42:34Z (design/tasks-7580d2): resumed
+  provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T19:42:34Z (design/tasks-7580d2): review: plan round 2 — verdict: accept; findings: none; reviewer: agent (tack session; harness/model unstated)
+- 2026-10-06T19:42:34Z (design/tasks-7580d2): parked (waiting on user, approval): plan accepted (round 2); user paused before execution. On the user's go, the agent runs docs/plans/2026-10-06-project-resolution.md subagent-driven, starting tasks-b1dbc5 in .worktrees/tasks-7580d2
   provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
