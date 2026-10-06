@@ -345,6 +345,79 @@ impl Registry {
         })
     }
 
+    /// `root` with `prefix`'s current storage record: what `init --force` passes to
+    /// `note_root_change` for the root it re-pointed away from.
+    pub fn displaced(&self, prefix: &str, root: PathBuf) -> crate::locations::Displaced {
+        crate::locations::Displaced {
+            root,
+            storage: self.locations.get(prefix).and_then(|h| h.storage.clone()),
+        }
+    }
+
+    /// Records `prefix`'s location history after a command wrote its entry (spec §2.1).
+    /// `previous` is the root it was registered at before, with that root's storage
+    /// record, when the command may have moved it. A different root joins `former` with
+    /// its storage: the live link if it still resolves, else `previous.storage`. Then the
+    /// record is refreshed from the current root; it never describes another root.
+    /// Returns warnings.
+    pub fn note_root_change(
+        &mut self,
+        prefix: &str,
+        previous: Option<crate::locations::Displaced>,
+        today: &str,
+    ) -> Result<Vec<String>> {
+        use crate::locations::{Former, StorageState, storage_state};
+        let root = self
+            .projects
+            .get(prefix)
+            .cloned()
+            .ok_or_else(|| Error::Config(format!("no project registered as {prefix:?}")))?;
+        let mut warnings = Vec::new();
+        let mut history = self.locations.remove(prefix).unwrap_or_default();
+        let mut root_changed = false;
+        if let Some(displaced) = previous {
+            let previous = crate::rename::root_identity(&displaced.root)?;
+            if previous != crate::rename::root_identity(&root)? {
+                root_changed = true;
+                let storage = match storage_state(&previous)? {
+                    StorageState::Link(real) => Some(real),
+                    StorageState::InTree => None,
+                    StorageState::Dangling | StorageState::Absent => displaced.storage,
+                };
+                if storage.is_none() && !previous.exists() {
+                    warnings.push(format!(
+                        "former root {} of {prefix} has no known worktree storage; paths under \
+                         its storage will not resolve (spec §2.3)",
+                        previous.display()
+                    ));
+                }
+                history.push_former(Former {
+                    root: previous,
+                    storage,
+                    until: today.into(),
+                });
+            }
+        }
+        match storage_state(&root)? {
+            StorageState::Link(real) => history.storage = Some(real),
+            StorageState::InTree | StorageState::Absent => history.storage = None,
+            StorageState::Dangling => {
+                if root_changed {
+                    history.storage = None;
+                }
+                warnings.push(format!(
+                    "{}/.worktrees points at missing storage; the storage record for {prefix} is {}",
+                    root.display(),
+                    if root_changed { "empty until a later init --force there" } else { "unchanged" }
+                ));
+            }
+        }
+        if !history.is_empty() {
+            self.locations.insert(prefix.into(), history);
+        }
+        Ok(warnings)
+    }
+
     pub fn project_root(&self, prefix: &str) -> Option<&Path> {
         self.projects.get(prefix).map(PathBuf::as_path)
     }
@@ -960,5 +1033,149 @@ mod tests {
             };
             assert_eq!(roots, expected, "partial_init={partial_init}");
         }
+    }
+    fn link_storage(root: &Path, storage: &Path) {
+        std::fs::create_dir_all(root).unwrap();
+        std::fs::create_dir_all(storage).unwrap();
+        std::os::unix::fs::symlink(storage, root.join(".worktrees")).unwrap();
+    }
+
+    #[test]
+    fn note_root_change_records_storage_then_the_displaced_root() {
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let (a, s1, b) = (base.join("a"), base.join("w/a"), base.join("b"));
+        link_storage(&a, &s1);
+        std::fs::create_dir(&b).unwrap();
+        let mut r = Registry::default();
+        r.register("p", &a).unwrap();
+        assert!(
+            r.note_root_change("p", None, "2026-10-01")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(r.locations["p"].storage, Some(s1.clone()));
+
+        // The checkout and its storage move away; init --force re-points the prefix.
+        std::fs::remove_file(a.join(".worktrees")).unwrap();
+        std::fs::remove_dir(&a).unwrap();
+        let displaced = r
+            .repoint("p", &b)
+            .unwrap()
+            .map(|root| r.displaced("p", root));
+        let warnings = r.note_root_change("p", displaced, "2026-10-02").unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let h = &r.locations["p"];
+        assert_eq!(h.storage, None, "b keeps no .worktrees link");
+        assert_eq!(h.former.len(), 1);
+        assert_eq!(
+            (h.former[0].root.clone(), h.former[0].storage.clone()),
+            (a.clone(), Some(s1))
+        );
+        assert_eq!(h.former[0].until, "2026-10-02");
+    }
+
+    #[test]
+    fn moving_back_keeps_the_storage_the_root_used_before() {
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let (a, s1, s2, b) = (
+            base.join("a"),
+            base.join("w/s1"),
+            base.join("w/s2"),
+            base.join("b"),
+        );
+        link_storage(&a, &s1);
+        std::fs::create_dir(&b).unwrap();
+        let mut r = Registry::default();
+        r.register("p", &a).unwrap();
+        r.note_root_change("p", None, "2026-10-01").unwrap();
+        let displaced = r
+            .repoint("p", &b)
+            .unwrap()
+            .map(|root| r.displaced("p", root));
+        r.note_root_change("p", displaced, "2026-10-02").unwrap();
+        std::fs::remove_file(a.join(".worktrees")).unwrap();
+        std::os::unix::fs::symlink(&s2, a.join(".worktrees")).unwrap();
+        std::fs::create_dir_all(&s2).unwrap();
+        let displaced = r
+            .repoint("p", &a)
+            .unwrap()
+            .map(|root| r.displaced("p", root));
+        r.note_root_change("p", displaced, "2026-10-03").unwrap();
+        let h = &r.locations["p"];
+        assert_eq!(h.storage, Some(s2));
+        let pairs: Vec<_> = h
+            .former
+            .iter()
+            .map(|f| (f.root.clone(), f.storage.clone()))
+            .collect();
+        assert_eq!(
+            pairs,
+            [(a, Some(s1)), (b, None)],
+            "(a, s1) survives the move back"
+        );
+    }
+
+    #[test]
+    fn a_vanished_root_without_a_record_is_kept_without_storage_and_warned() {
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let (gone, b) = (base.join("gone"), base.join("b"));
+        std::fs::create_dir(&b).unwrap();
+        let mut r = Registry::default();
+        r.register("p", &gone).unwrap();
+        let displaced = r
+            .repoint("p", &b)
+            .unwrap()
+            .map(|root| r.displaced("p", root));
+        let warnings = r.note_root_change("p", displaced, "2026-10-02").unwrap();
+        assert_eq!(r.locations["p"].former[0].storage, None);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("no known worktree storage") && w.contains("gone")),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn a_dangling_link_at_a_new_root_leaves_no_record_and_the_old_storage_under_former() {
+        // The second host: --adopt runs before its storage move, so the new link dangles
+        // and the old root is already gone (spec §2.1, §2.2).
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let (gone, s_old, b) = (base.join("tack"), base.join("w/tack"), base.join("hq"));
+        std::fs::create_dir(&b).unwrap();
+        std::os::unix::fs::symlink(base.join("w/hq"), b.join(".worktrees")).unwrap();
+        let mut r = Registry::default();
+        r.register("p", &b).unwrap();
+        let previous = crate::locations::Displaced {
+            root: gone.clone(),
+            storage: Some(s_old.clone()),
+        };
+        let warnings = r
+            .note_root_change("p", Some(previous), "2026-10-07")
+            .unwrap();
+        let h = &r.locations["p"];
+        assert_eq!(
+            h.storage, None,
+            "the old record never becomes the current one"
+        );
+        assert_eq!(
+            (h.former[0].root.clone(), h.former[0].storage.clone()),
+            (gone, Some(s_old))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("points at missing storage")),
+            "{warnings:?}"
+        );
+
+        // With the root unchanged, a dangling link keeps the record it had.
+        r.locations.get_mut("p").unwrap().storage = Some(base.join("w/hq"));
+        r.note_root_change("p", None, "2026-10-07").unwrap();
+        assert_eq!(r.locations["p"].storage, Some(base.join("w/hq")));
     }
 }

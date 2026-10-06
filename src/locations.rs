@@ -107,6 +107,43 @@ impl Locations {
     }
 }
 
+/// What a root's `.worktrees` is on this host right now (§2.1, §4.2).
+#[derive(Debug, Clone, PartialEq)]
+pub enum StorageState {
+    /// A symlink that resolves: the storage path, canonical.
+    Link(PathBuf),
+    /// A symlink whose target is missing.
+    Dangling,
+    /// A real directory inside the root, already covered by the root.
+    InTree,
+    /// No `.worktrees`, or no root.
+    Absent,
+}
+
+pub fn storage_state(root: &std::path::Path) -> std::io::Result<StorageState> {
+    let link = root.join(".worktrees");
+    let meta = match std::fs::symlink_metadata(&link) {
+        Ok(meta) => meta,
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(StorageState::Absent);
+        }
+        Err(e) => return Err(e),
+    };
+    if !meta.file_type().is_symlink() {
+        return Ok(StorageState::InTree);
+    }
+    match link.canonicalize() {
+        Ok(real) => Ok(StorageState::Link(real)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(StorageState::Dangling),
+        Err(e) => Err(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

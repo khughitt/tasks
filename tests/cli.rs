@@ -875,12 +875,13 @@ fn id_of(value: serde_json::Value) -> String {
 /// Until Task 11 there is no command that does this.
 fn alias_registry(env: &TestEnv, alias: &str, target: &str) {
     let path = env.home.path().join(".config/tasks/projects.toml");
-    let mut text = std::fs::read_to_string(&path).unwrap();
-    if !text.contains("[aliases]") {
-        text.push_str("\n[aliases]\n");
-    }
-    text.push_str(&format!("{alias} = {target:?}\n"));
-    std::fs::write(&path, text).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    let mut registry: toml::Value = toml::from_str(&text).unwrap();
+    registry["aliases"]
+        .as_table_mut()
+        .unwrap()
+        .insert(alias.into(), toml::Value::String(target.into()));
+    std::fs::write(&path, toml::to_string(&registry).unwrap()).unwrap();
 }
 
 #[test]

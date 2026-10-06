@@ -245,6 +245,9 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     }
     if recovery != Recovery::ResumeCleanup {
         registry.rename(&invocation.source, &invocation.target)?;
+        let today = crate::time::day(&crate::time::now()).to_string();
+        out.warnings
+            .extend(registry.note_root_change(&invocation.target, None, &today)?);
         registry.save()?;
         if stop_after("registry") {
             return Ok(out);
