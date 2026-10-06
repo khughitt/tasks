@@ -7,19 +7,23 @@ size: m
 complexity: high
 process: planned
 created: 2026-09-30T09:53:57Z
-updated: 2026-09-30T09:53:57Z
+updated: 2026-10-06T09:45:48Z
 depends: []
 parent: tasks-ea2a79
 tags: []
 agent: codex
 ---
 
-Why: tasks-cc9a31 needs removal of sensitive historical note text, while tasks-2bb0ba needs a corrected run total to count as the same attempt. Neither is solved by an arbitrary extra note.
+Why: tasks-cc9a31 needs removal of sensitive historical note text, while tasks-2bb0ba needs a corrected run total to count as the same attempt. Neither is solved by an arbitrary extra note. tasks-d56b72 adds a concrete flat amendment proposal for concerns:, review: and run: corrections; retain it as an alternative rather than an approved JSON contract.
 
-Where to start: docs/notes/2026-09-30-note-integrity-brief.md; src/model.rs::Note, src/commands/edit.rs::check_invariants, src/format.rs, src/attachments.rs, and the lifecycle provenance and attachment contracts. Coordinate with obs on the run-note reader contract; its current implementation has not been inspected in this pass.
+Where to start: docs/notes/2026-09-30-note-integrity-brief.md; src/model.rs::Note, src/commands/edit.rs::check_invariants, src/format.rs, src/attachments.rs, and the lifecycle provenance and attachment contracts. Coordinate with obs on the run-note, review-round and concern reader contracts; its current implementation has not been inspected in this pass.
 
-Bound: prepare a design and implementation plan for review before code. Compare an explicit audited text-replacement operation with append-only supersession, including how a target note is selected when timestamps repeat, how concurrent changes are rejected, how lifecycle and attachment-ledger meaning survives, and what data a redaction audit retains. Keep tasks ignorant of run: arithmetic and flow state names. Historical Git cleanup is outside this CLI feature.
+Bound: prepare a design and implementation plan for review before code. Compare an explicit audited text-replacement operation with append-only supersession, including the flat original-note-plus-amendments proposal in tasks-d56b72, whether generated lifecycle/attachment notes are protected, and how a target note is selected when timestamps repeat, how concurrent changes are rejected, how lifecycle and attachment-ledger meaning survives, and what data a redaction audit retains. Keep tasks ignorant of run: arithmetic and flow state names. Historical Git cleanup is outside this CLI feature.
 
-Expected result: a reviewed decision on mutation versus supersession, necessary consumer coordination and checks, and executable child tasks only after plan review. A correction check must show one attempt with a corrected total; a redaction check must remove the selected text from the current record without copying it into the audit event or damaging protected history.
+Expected result: a reviewed decision on mutation versus supersession, necessary consumer coordination and checks, and executable child tasks only after plan review. A correction check must show one attempt with a corrected total and one effective review/concern after amendment, retaining the original audit history; a redaction check must remove the selected text from the current record without copying it into the audit event or damaging protected history.
 
-Ideas it wakes: on completion, add a finding note to tasks-cc9a31 and tasks-2bb0ba in the same commit and update the brief; then rerun scope on them.
+Ideas it wakes: on completion, add a finding note to tasks-cc9a31, tasks-2bb0ba and tasks-d56b72 in the same commit and update the brief; then rerun scope on them.
+
+## Notes
+
+- 2026-10-06T09:45:47Z (main): scope follow-up: tasks-d56b72 contributes flat original-note amendments; extend consumer verification beyond run totals to review and concern records without choosing the proposed schema

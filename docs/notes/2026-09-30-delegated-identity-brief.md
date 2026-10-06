@@ -3,13 +3,19 @@
 Scoping handoff, 2026-09-30. Goal: tasks-2fa8c6. This is not an approved design.
 Updated 2026-10-02: recurring and newer worker reports reuse this investigation;
 the related opt-in note-stamping capability is scoped independently.
+Updated 2026-10-06: five new reports join the same goal and single-pair capture;
+delegated closure is investigated separately from identity and provenance.
 
 ## Problem
 
-Four reports describe Codex workers whose claims become stale as soon as a command
+The original four reports describe Codex workers whose claims become stale as soon as a command
 exits, sometimes alongside conflicting session-variable and provenance warnings.
 Reliable ownership needs a stable identity that distinguishes the sessions actually
-doing the work. The related Claude live-check automation idea is conditional upkeep.
+doing the work. Three newer reports repeat conflicting native IDs (tasks-290fa3,
+tasks-6e2d15, tasks-f537a8); two report workers unable to close controller-owned
+tasks (tasks-f27fe3, tasks-673b21). They share tasks-2fa8c6, but closure is not yet
+established as an identity-fallback symptom. The related Claude live-check automation idea is
+conditional upkeep.
 tasks-0005a6 separately asks for explicit session provenance on ordinary gate notes,
 so stage attribution need not infer it from nearby lifecycle markers.
 
@@ -33,8 +39,9 @@ so stage attribution need not infer it from nearby lifecycle markers.
   eligible again. tasks-cf8687 is a newer report of conflicting native variables,
   Unix fallback, and omitted provenance. Neither includes a controller/worker capture;
   recurrence supports reusing the investigation, not assuming a demonstrated cause.
-- `src/commands/status.rs::note` always uses `append_note`, which leaves provenance
-  absent. `append_lifecycle_note` already appends normalized text and attaches the
+- `src/commands/status.rs::note` uses `append_note` for plain notes and
+  `append_stamped_note` for `--stamp`, which now supplies the optional native pair
+  independently of claim resolution. The stamped helper normalizes text and attaches the
   existing optional pair through the native resolver. The reader round-trips that
   pair today. The lifecycle writer landed in `8f13112`, and its local plan documents
   the separate claim and consumer contracts. A plain note can opt into the same
@@ -47,9 +54,16 @@ so stage attribution need not infer it from nearby lifecycle markers.
   process-handle fixtures provide repeatable synthetic coverage; no automation script
   for that live recipe was found.
 
+- The five newer reports contain no controller/worker capture or exact closure refusal.
+  `src/commands/mod.rs::ownership` accepts matching identity or process proof;
+  `claim_guard` refuses a foreign live claim. Prose authorization does not change
+  that check. tasks-673b21's reported shared key does not prove matching effective
+  identities, and a harness/controller gate might have stopped the command earlier.
+  No live reproduction was attempted in this scope pass.
+
 ## Constraints
 
-Preserve the four reports rather than label them duplicates without captures. The
+Preserve the reports rather than label them duplicates without captures. The
 original `ai-2f1271` source is outside this fixed checkout and was not inspected; the
 missing-ID account in tasks-0c2c39 remains report evidence. The other reports do not
 record the effective relay configuration or full parent/worker identity relationship.
@@ -96,6 +110,11 @@ flow's gate vocabulary. Stamping cannot repair conflicting worker identities.
 - Does the controller need to aggregate child claims, or is claim identity alone wrong?
   Research identifies the boundary and owner; this pass does not change that policy.
 
+- Which layer refused delegated `done`, with which effective worker identity and
+  controller claim owner? tasks-1ece46 records the exact outcome in the same pair,
+  compares a worker-owned disposable task, and leaves controller cleanup to the
+  controller. Do not override a live claim to conceal the failure.
+
 ## Proposed decomposition
 
 - tasks-0c2c39, tasks-5745bb, tasks-616cd7, tasks-cf8687: briefed; remain ideas under
@@ -103,9 +122,13 @@ flow's gate vocabulary. Stamping cannot repair conflicting worker identities.
   the first two were related context, not processed again.
 - tasks-1ece46: priority 2, small/mid/direct investigation. Capture one controller/worker
   pair, distinguish actual observations from synthetic controls, recommend an owner and
-  regression check, update this brief, and add finding notes that wake all four ideas.
+  regression check, update this brief, and add finding notes that wake all nine ideas.
+  Include the delegated closure comparison while retaining the single-pair bound.
   No speculative implementation or separate design task is filed yet.
-- tasks-0005a6: scoped, priority 2, small/mid/direct; independent `note --stamp`
+- tasks-290fa3, tasks-6e2d15, tasks-f537a8, tasks-f27fe3, tasks-673b21: briefed
+  in the 2026-10-06 pass, parented under tasks-2fa8c6, and added to tasks-1ece46's
+  wake list. No duplicate investigation or speculative implementation was created.
+- tasks-0005a6: done; independent `note --stamp`
   capability using the existing resolver, pair codec, warnings, and note write path.
   Check stamped versus plain gate text, native inputs and conflicts, round-trip
   preservation, status, and claim behavior. It remains outside the claim-identity
