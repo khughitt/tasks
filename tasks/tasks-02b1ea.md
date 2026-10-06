@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T13:30:07Z
+updated: 2026-10-06T14:05:20Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -45,3 +45,6 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T13:29:59Z (feat/comfy-tables): plan drafted: docs/plans/2026-10-06-comfy-tables.md, 9 tasks filed as steps (tasks-8b152f, -565420, -73c29c, -2ac5d1, -9d8e5d, -ff7985, -674d5d, -014c55, -f52fca; ops piece ops-539e1a); tasks-9b5b0a closes with Task 5
 - 2026-10-06T13:30:07Z (feat/comfy-tables): parked (waiting on user, review): User reviews docs/plans/2026-10-06-comfy-tables.md (in .worktrees/comfy-tables) and picks the execution method; then Task 1 (ops-539e1a, cli.toml --headers) starts
   provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T13:38:46Z (feat/comfy-tables): review: plan round 1 — verdict: revise; findings: P1 1, P2 4; reviewer: codex/gpt-6.1-sol
+- 2026-10-06T13:38:46Z (feat/comfy-tables): Plan review findings: Task 2 leaves non-shared fixed columns unconstrained; an isolated run of its exact renderer splits a 40-character fixed cell at width 100 and panics in row_blocks when a detail is added. Intermediate commits cannot meet gates: Task 2 leaves unused module items under clippy -D warnings and Task 4 breaks prime alignment until Task 6. Task 7 parks its sole header-test task on the user, leaving ready empty. Task 9 exempts any overflowing whole title regardless of layout feasibility and its ready fixture is empty. Task 6 paints lane pick and active ids/titles with generic roles despite filling their project colours. Plan unchanged; user review park remains.
+- 2026-10-06T14:05:20Z (feat/comfy-tables): plan revised for round 1, all five findings verified and accepted: fixed columns always constrained (ContentWidth, or Absolute when shared) with a regression test; module items arrive with their first users and prime's task sections move with the list family, so every commit passes just check and the alignment tests (eight tasks; tasks-f52fca dropped); header and width fixtures keep eligible ready tasks; width test derives permitted overflow from the fixture's arithmetic (strict at 80/120/236, whole titles at 50); lane picks and active rows painted with project colours and tested

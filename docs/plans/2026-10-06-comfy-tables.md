@@ -11,6 +11,8 @@ and rows of already-painted cells, decides between a wrapped table, the stacked
 fallback and an unwrapped table, and hands layout to comfy-table. The views in
 `src/output.rs` build rows and call it; colours keep coming from `present` and the
 `Painter`. A `ReadCtx` colour map fills `project_color` on every row a pretty view shows.
+Each module item arrives with its first user, so every commit passes `just check`
+(`clippy -D warnings`) and the existing alignment tests.
 
 **Tech Stack:** Rust 2024, clap 4, comfy-table 8 (`custom_styling`), the existing
 `style`/`present`/`palette` modules.
@@ -22,21 +24,23 @@ fallback and an unwrapped table, and hands layout to comfy-table. The views in
 - Dependency: `comfy-table = { version = "8", features = ["custom_styling"] }`, nothing else new.
 - JSON output does not change: every new field is `#[serde(skip)]`; JSON tests stay untouched.
 - Column gap is two spaces; no border characters; no line ends in whitespace.
+- A fixed column never wraps: it carries `ContentWidth`, or `Absolute` when its width is shared.
 - No width (piped or redirected): every row on one line, no column caps, every detail on one line.
 - `claims` is never coloured: it opens no checkout.
 - `projects` always shows its header row.
 - `show`, `next` and `graph` keep their own layout.
 - New CLI options land in ops `cli.toml` first and are adopted with `vendored adopt`.
-- Gates: `just test-one <filter>` while working, `just test-fast` before every commit, never `cargo test`.
+- Gates: `just test-one <filter>` while working; `just check` and `just test-fast` before every commit (pre-commit runs `clippy -D warnings`, so an item nothing uses yet fails it); never `cargo test`.
+- Each task deletes the old layout code it leaves unused, in the same commit.
 - Conventional commits, no AI attribution. Every task closes its step task (named in its commit step) with `tasks done` in the same commit as its code.
 
 ## Review Focus
 
-1. A wide CJK or emoji title in a wrapping column: lines stay within the width and columns stay aligned (comfy-table measures display width; pin it in Task 2).
-2. An empty table (no rows) with `--headers`: prints nothing, not a lone header (Task 2).
-3. `prime` piped to a file: sections still align, because shared widths apply without a terminal (Task 6).
-4. A parked row whose park names no resolvable task (an unresolved row: no status, no phase): renders `?` for status and `-` for phase, no panic (Task 5).
-5. `--headers` combined with the narrow fallback: the moved column's header disappears with it (Task 2).
+1. A wide CJK or emoji title in a wrapping column: lines stay within the width and columns stay aligned (Task 3).
+2. An empty table (no rows) with `--headers`: prints nothing, not a lone header (Task 3).
+3. `prime` piped to a file: sections still align, because shared widths apply without a terminal (Task 3).
+4. A parked row whose park names no resolvable task (no status, no phase): renders `?` for status and `-` for phase, no panic (Task 4).
+5. `--headers` combined with the narrow fallback: the moved column's header disappears with it (Task 3).
 
 ---
 
@@ -46,7 +50,7 @@ fallback and an unwrapped table, and hands layout to comfy-table. The views in
 - Modify: ops `cli.toml` (the `[[cli.tasks.commands]]` row with `path = []`)
 
 **Interfaces:**
-- Produces: a root row `{ names = ["--headers"], value = "none" }` that tasks adopts in Task 7.
+- Produces: a root row `{ names = ["--headers"], value = "none" }` that tasks adopts in Task 6.
 
 Work in an ops worktree (`work-link --ensure .worktrees`, `git worktree add .worktrees/cli-headers -b feat/cli-headers`, lock it), under ops-539e1a. Close tasks-8b152f in tasks when the ops merge lands.
 
@@ -68,35 +72,174 @@ Expected: PASS (4 tests).
 
 - [ ] **Step 3: Fast suite, commit, merge to ops main**
 
-Run: `just test-fast` → OK. Commit `feat(cli): --headers on the tasks root (ops-539e1a)` with `tasks done ops-539e1a`, merge `--no-ff` into ops main, unlock and remove the worktree after `tt-report`.
+Run: `just test-fast` → OK. Commit `feat(cli): --headers on the tasks root (ops-539e1a)` with `tasks done ops-539e1a`, merge `--no-ff` into ops main, run `tt-report`, unlock and remove the worktree. Then in tasks: `tasks done tasks-8b152f "cli.toml --headers landed in ops (<merge sha>)"` and commit that record alone.
 
 ---
 
-### Task 2: The table module
+### Task 2: Project colours on task-summary rows
 
 **Files:**
-- Modify: `Cargo.toml` (add the dependency), `src/main.rs` (add `mod table;` after `mod style;`)
-- Create: `src/table.rs`
+- Modify: `src/commands/mod.rs` (`ReadCtx`), `src/output.rs` (`ProjectColors`, `Output::paint_projects`), `src/commands/list.rs` (list, ready, prime), `src/commands/sample.rs`, `src/commands/tree.rs`, `src/commands/lanes.rs`
+- Test: `tests/cli.rs`
 
 **Interfaces:**
-- Produces (all `pub` in `crate::table`):
+- Produces: `pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;` in `src/output.rs`; `ReadCtx::project_colors(&self) -> ProjectColors`; `Output::paint_projects(&mut self, colors: &ProjectColors)` covering `List`, `Tree`, `Lanes` and `Prime`'s summary sections (Task 4 adds the parked rows).
+
+- [ ] **Step 1: Write the failing test** (next to `search_rows_carry_the_project_color` in `tests/cli.rs`)
+
+```rust
+#[test]
+fn ready_tree_and_prime_rows_carry_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal title", "--lane", "-b", "why"]));
+    env.json(&sci, &["add", "Child title", "--parent", &goal, "--size", "s"]);
+    write_project_color(&sci, "sci", "#123456");
+    let paint = "\x1b[38;2;18;52;86m";
+    // lanes paints its titles from Task 5, which pins it there.
+    for args in [vec!["ready"], vec!["tree"], vec!["prime"]] {
+        let mut full = vec!["--pretty", "--color", "always"];
+        full.extend(args.iter().copied());
+        let out = env.cmd(&sci).args(&full).output().unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(text.contains(&format!("{paint}Child title")), "{args:?}: {text}");
+    }
+}
+```
+
+- [ ] **Step 2: Run it to see it fail**
+
+Run: `just test-one --test cli ready_tree_and_prime_rows_carry_the_project_color`
+Expected: FAIL at `["ready"]` (only `list` and `search` fill the colour today).
+
+- [ ] **Step 3: Implement**
+
+In `src/output.rs`, near `TaskSummary`:
+
+```rust
+/// Each in-scope prefix's configured colour (comfy-tables spec §5).
+pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;
+
+fn color_of(colors: &ProjectColors, id: &str) -> Option<crate::palette::Rgb> {
+    crate::model::TaskId::parse(id)
+        .ok()
+        .and_then(|id| colors.get(&id.prefix).copied())
+}
+
+fn paint_summary(colors: &ProjectColors, row: &mut TaskSummary) {
+    row.project_color = color_of(colors, &row.id);
+}
+
+fn paint_tree(colors: &ProjectColors, nodes: &mut [TreeNode]) {
+    for node in nodes {
+        paint_summary(colors, &mut node.summary);
+        paint_tree(colors, &mut node.children);
+    }
+}
+
+fn paint_lane(colors: &ProjectColors, lane: &mut crate::lanes::LaneRow) {
+    paint_summary(colors, &mut lane.lane);
+    if let Some(pick) = &mut lane.pick {
+        paint_summary(colors, pick);
+    }
+    lane.active.iter_mut().for_each(|row| paint_summary(colors, row));
+}
+
+impl Output {
+    /// Fill `project_color` on every task row a pretty view of this output shows. `claims`
+    /// is left alone: it opens no checkout (comfy-tables spec §5).
+    pub fn paint_projects(&mut self, colors: &ProjectColors) {
+        match self {
+            Output::List(o) => o.tasks.iter_mut().for_each(|row| paint_summary(colors, row)),
+            Output::Tree(o) => paint_tree(colors, &mut o.nodes),
+            Output::Lanes(o) => o.lanes.iter_mut().for_each(|lane| paint_lane(colors, lane)),
+            Output::Prime(o) => {
+                for row in o.closeout.iter_mut().chain(o.ready.iter_mut()).chain(o.doing.iter_mut()) {
+                    paint_summary(colors, row);
+                }
+                paint_tree(colors, &mut o.roadmap);
+                o.lanes.iter_mut().for_each(|lane| paint_lane(colors, lane));
+            }
+            _ => {}
+        }
+    }
+}
+```
+
+In `src/commands/mod.rs`:
+
+```rust
+impl ReadCtx {
+    /// Every in-scope project's configured colour, keyed by prefix.
+    pub fn project_colors(&self) -> crate::output::ProjectColors {
+        self.scope
+            .projects()
+            .iter()
+            .filter_map(|project| project.color.map(|color| (project.prefix.clone(), color)))
+            .collect()
+    }
+}
+```
+
+In `src/commands/list.rs::list`, replace the `row.project_color = ctx.scope.projects()...` block in the `ListOut` construction with plain `TaskSummary::of(...)` rows, and wrap the result:
+
+```rust
+    let colors = ctx.project_colors();
+    let mut out = Output::List(ListOut {
+        tasks: tasks
+            .iter()
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
+            .collect(),
+        halts: vec![],
+        warnings: ctx.warnings,
+        date: if periodic || deferred { DateColumn::Due } else { sort.date_column() },
+    });
+    out.paint_projects(&colors);
+    Ok(out)
+```
+
+Apply the same two lines (`let colors = ctx.project_colors();` before `ctx.warnings` is moved; `out.paint_projects(&colors);` before `Ok(out)`) at: the ready builder's `Output::List` (near line 486), `prime`'s `Output::Prime`, `src/commands/sample.rs`'s `Output::List`, `src/commands/tree.rs`'s `Output::Tree`, `src/commands/lanes.rs`'s `Output::Lanes`. Do not touch `src/commands/claims.rs`.
+
+- [ ] **Step 4: Run the new test and the existing colour tests**
+
+Run: `just test-one --test cli project_color` → PASS (the new test, `search_rows_carry_the_project_color`, `project_colors_*`).
+
+- [ ] **Step 5: Gates and commit**
+
+Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): project colours on every task-summary row (tasks-565420)` with `tasks done tasks-565420`.
+
+---
+
+### Task 3: The table module, with the list family, tree and prime's task sections
+
+**Files:**
+- Modify: `Cargo.toml`, `src/main.rs` (`mod table;`, build a `Layout`), `src/present.rs` (`row_id`), `src/output.rs` (`render`/`pretty` take a `Layout`; the `List`, `Tree` and `Prime` arms; delete `table`, `tree_text`, `id_width_tree`, `Wrap::indented`, and move `visible_width` out)
+- Create: `src/table.rs`
+- Test: `src/table.rs` unit tests, `src/output.rs` unit tests, `tests/cli.rs`
+
+**Interfaces:**
+- Consumes: `TaskSummary.project_color` filled (Task 2).
+- Produces (`pub` in `crate::table` unless noted):
   - `enum Fit { Fixed, Wrap { min: usize, max: Option<usize> } }`
-  - `enum Align { Left, Right }`
-  - `struct Column { header: &'static str, fit: Fit, align: Align }` with `const fn fixed(header)`, `const fn right(header)`, `const fn wrap(header, min, max)`
-  - `enum Detail { Wrap(String), Whole(String) }`
+  - `struct Column { header: &'static str, fit: Fit }` with `const fn fixed(header) -> Column` and `const fn wrap(header, min, max) -> Column` (Task 4 adds `align`)
+  - `enum Detail { Wrap(String) }` (Task 4 adds `Whole`)
   - `struct Row { cells: Vec<String>, details: Vec<(&'static str, Detail)> }` with `fn new(cells: Vec<String>) -> Row`
   - `struct Layout { width: Option<usize>, headers: bool }` (`Clone, Copy, Default`)
-  - `struct Widths(pub Vec<Option<usize>>)` with `fn id_only(id: usize, columns: usize) -> Widths` and `fn id(&self) -> Option<usize>`
+  - `struct Widths(pub Vec<Option<usize>>)` with `fn id(&self) -> Option<usize>` (Task 4 adds `id_only`)
   - `fn shared_widths(columns: &[Column], sections: &[&[Row]], headers: bool) -> Widths`
   - `fn render(columns: &[Column], rows: &[Row], layout: &Layout, widths: Option<&Widths>, painter: &Painter) -> String`
-  - `fn visible_width(text: &str) -> usize` (moved here from `output.rs`; `output.rs` imports it)
+  - `fn visible_width(text: &str) -> usize` (moved from `output.rs`)
+  - `present::row_id(id: &str, project: Option<Rgb>) -> Span`
+  - `output::task_columns(parallel: bool, kind: bool) -> Vec<table::Column>`
+  - `output::task_row(row: &TaskSummary, date: DateColumn, painter: &Painter, parallel: bool, kind: bool, indent: usize) -> table::Row`
+  - `output::tree_rows(nodes: &[TreeNode], depth: usize, painter: &Painter, parallel: bool, kind: bool, rows: &mut Vec<table::Row>)`
+  - `output::render(out: &Output, format: Format, painter: &Painter, layout: &table::Layout) -> String`
 
-- [ ] **Step 1: Add the dependency**
+- [ ] **Step 1: Add the dependency and the module skeleton**
 
-Run: `cargo add comfy-table@8 --features custom_styling`
-Expected: `Cargo.toml` gains `comfy-table = { version = "8.0.1", features = ["custom_styling"] }`.
+Run: `cargo add comfy-table@8 --features custom_styling`. Add `mod table;` after `mod style;` in `src/main.rs`. Create `src/table.rs` with the code of Step 4 but `render`'s body replaced by `String::new()`, and with the tests of Step 2 at the bottom.
 
-- [ ] **Step 2: Write the failing tests.** Create `src/table.rs` with the module doc, the imports and every type and helper from Step 4, but with `render`'s body replaced by `String::new()`, and put this test module at the bottom:
+- [ ] **Step 2: Write the failing module tests** (bottom of `src/table.rs`)
 
 ```rust
 #[cfg(test)]
@@ -172,6 +315,21 @@ mod tests {
     }
 
     #[test]
+    fn a_long_fixed_cell_stays_whole_beside_wrapping_columns_and_details() {
+        let long = "a-fixed-cell-that-is-forty-columns-wide!";
+        assert_eq!(long.len(), 40);
+        let mut first = Row::new(vec![long.into(), "doing".into(), LONG.into(), LONG.into()]);
+        first.details.push(("note", Detail::Wrap("after the first row".into())));
+        let second = row("sci-000002");
+        let text = render(&columns(), &[first, second], &at(100), None, &plain());
+        assert!(text.lines().next().unwrap().starts_with(long), "{text}");
+        assert!(text.lines().all(|line| visible_width(line) <= 100), "{text}");
+        let note = text.lines().position(|l| l.contains("after the first row")).unwrap();
+        let next_row = text.lines().position(|l| l.starts_with("sci-000002")).unwrap();
+        assert!(note < next_row, "{text}");
+    }
+
+    #[test]
     fn too_narrow_for_both_moves_the_last_wrap_column_under_the_row() {
         // fixed 10 + 5 + gaps 6 + mins 20 + 30 = 71 > 60, but 10 + 5 + 4 + 20 = 39 fits.
         let text = render(&columns(), &[row("sci-000001")], &at(60), None, &plain());
@@ -230,13 +388,6 @@ mod tests {
     }
 
     #[test]
-    fn an_id_only_width_aligns_a_section_with_other_columns() {
-        let widths = Widths::id_only(15, 4);
-        let text = render(&columns(), &[row("sci-000001")], &at(200), Some(&widths), &plain());
-        assert!(text.starts_with("sci-000001       doing"), "{text}");
-    }
-
-    #[test]
     fn painted_cells_keep_their_alignment() {
         let painter = colored();
         let paint = |s: &str| painter.paint(crate::style::Style::Chrome, s);
@@ -270,38 +421,22 @@ mod tests {
             assert!(visible_width(line) <= 100, "{line:?}");
         }
     }
-
-    #[test]
-    fn details_follow_their_row_and_whole_ones_are_never_split() {
-        let path = "/a/long/checkout/path/that/runs/well/past/the/width/.worktrees/x";
-        let mut first = row("sci-000001");
-        first.details.push(("in", Detail::Whole(path.into())));
-        let second = row("sci-000002");
-        let text = render(&columns(), &[first, second], &at(80), None, &plain());
-        let lines: Vec<&str> = text.lines().collect();
-        let detail = lines.iter().position(|l| l.contains(path)).unwrap();
-        let second_row = lines.iter().position(|l| l.starts_with("sci-000002")).unwrap();
-        assert!(detail < second_row, "{text}");
-        assert_eq!(lines[detail], format!("        in:     {path}"));
-    }
 }
 ```
 
-- [ ] **Step 3: Run the tests to see them fail**
+- [ ] **Step 3: Run them to see them fail**
 
 Run: `just test-one table::tests`
 Expected: FAIL (the stub renders nothing).
 
-- [ ] **Step 4: Implement the module** (above the tests in `src/table.rs`; move `visible_width` out of `src/output.rs` into here and `use crate::table::visible_width;` there)
+- [ ] **Step 4: Implement the module** (above the tests in `src/table.rs`; delete `visible_width` from `src/output.rs` and `use crate::table::visible_width;` there)
 
 ```rust
 //! Pretty tables: columns and rows of painted cells, laid out by comfy-table
 //! (docs/specs/2026-10-06-comfy-tables-design.md §3). Views paint; this module places.
 
 use crate::style::{Painter, Style};
-use comfy_table::{
-    CellAlignment, ColumnConstraint, ContentArrangement, Table, Width, presets::NOTHING,
-};
+use comfy_table::{ColumnConstraint, ContentArrangement, Table, Width, presets::NOTHING};
 use unicode_width::UnicodeWidthChar;
 
 /// Spaces between two columns.
@@ -320,37 +455,25 @@ pub enum Fit {
     Wrap { min: usize, max: Option<usize> },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Align {
-    Left,
-    Right,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Column {
     pub header: &'static str,
     pub fit: Fit,
-    pub align: Align,
 }
 
 impl Column {
     pub const fn fixed(header: &'static str) -> Column {
-        Column { header, fit: Fit::Fixed, align: Align::Left }
-    }
-    pub const fn right(header: &'static str) -> Column {
-        Column { header, fit: Fit::Fixed, align: Align::Right }
+        Column { header, fit: Fit::Fixed }
     }
     pub const fn wrap(header: &'static str, min: usize, max: Option<usize>) -> Column {
-        Column { header, fit: Fit::Wrap { min, max }, align: Align::Left }
+        Column { header, fit: Fit::Wrap { min, max } }
     }
 }
 
-/// A `label: text` line under a row. `Wrap` wraps under its text; `Whole` is printed in
-/// one piece so a path copies intact.
+/// A `label: text` line under a row, wrapped under its text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Detail {
     Wrap(String),
-    Whole(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -376,15 +499,6 @@ pub struct Layout {
 pub struct Widths(pub Vec<Option<usize>>);
 
 impl Widths {
-    /// Only the id column shared, for a section whose other columns differ.
-    pub fn id_only(id: usize, columns: usize) -> Widths {
-        let mut widths = vec![None; columns];
-        if let Some(first) = widths.first_mut() {
-            *first = Some(id);
-        }
-        Widths(widths)
-    }
-
     pub fn id(&self) -> Option<usize> {
         self.0.first().copied().flatten()
     }
@@ -398,13 +512,23 @@ pub fn shared_widths(columns: &[Column], sections: &[&[Row]], headers: bool) -> 
             .enumerate()
             .map(|(index, column)| match column.fit {
                 Fit::Wrap { .. } => None,
-                Fit::Fixed => Some(widest(sections.iter().flat_map(|rows| rows.iter()), index, column, headers)),
+                Fit::Fixed => Some(widest(
+                    sections.iter().flat_map(|rows| rows.iter()),
+                    index,
+                    column,
+                    headers,
+                )),
             })
             .collect(),
     )
 }
 
-fn widest<'a>(rows: impl Iterator<Item = &'a Row>, index: usize, column: &Column, headers: bool) -> usize {
+fn widest<'a>(
+    rows: impl Iterator<Item = &'a Row>,
+    index: usize,
+    column: &Column,
+    headers: bool,
+) -> usize {
     rows.filter_map(|row| row.cells.get(index))
         .map(|cell| visible_width(cell))
         .chain(headers.then(|| visible_width(column.header)))
@@ -514,13 +638,14 @@ pub fn render(
             .expect("comfy-table holds one column per kept cell");
         let padding = if position == last { 0 } else { GAP };
         column.set_padding((0, clamp(padding)));
-        if columns[index].align == Align::Right {
-            column.set_cell_alignment(CellAlignment::Right);
-        }
         // Constraint widths include the padding (comfy-table's absolute_width_with_padding).
+        // A fixed column always carries a constraint: without one, Dynamic arrangement may
+        // wrap it (plan review round 1).
         let constraint = match (columns[index].fit, mode) {
-            (Fit::Fixed, _) => shared(index)
-                .map(|width| ColumnConstraint::Absolute(Width::Fixed(clamp(natural[index].max(width) + padding)))),
+            (Fit::Fixed, _) => Some(match shared(index) {
+                Some(_) => ColumnConstraint::Absolute(Width::Fixed(clamp(natural[index] + padding))),
+                None => ColumnConstraint::ContentWidth,
+            }),
             (Fit::Wrap { .. }, Mode::Unwrapped) => None,
             (Fit::Wrap { min, max }, _) => {
                 let lower = Width::Fixed(clamp(min.min(natural[index]) + padding));
@@ -540,7 +665,8 @@ pub fn render(
 
     let lines: Vec<String> = table.lines().map(|line| line.trim_end().to_string()).collect();
     let header_lines = usize::from(layout.headers);
-    let has_details = matches!(mode, Mode::Stacked(_)) || rows.iter().any(|row| !row.details.is_empty());
+    let has_details =
+        matches!(mode, Mode::Stacked(_)) || rows.iter().any(|row| !row.details.is_empty());
     let mut rendered = String::new();
     for line in &lines[..header_lines] {
         rendered.push_str(line);
@@ -553,9 +679,9 @@ pub fn render(
         }
         return rendered;
     }
-    // Every row with details starts with a non-blank first cell, and a continuation line
-    // starts with that cell's blank padding, so a row starts where a line does not start
-    // with a space.
+    // Fixed columns never wrap and a row with details starts with a non-blank first cell,
+    // so a row's first line starts with that cell and its continuation lines with the
+    // cell's blank padding.
     let blocks = row_blocks(&lines[header_lines..]);
     assert_eq!(blocks.len(), rows.len(), "one block of lines per row:\n{lines:?}");
     for (block, row) in blocks.iter().zip(rows) {
@@ -565,7 +691,12 @@ pub fn render(
         }
         if let Mode::Stacked(moved) = mode {
             let text = row.cells.get(moved).cloned().unwrap_or_default();
-            rendered.push_str(&detail(columns[moved].header, &Detail::Wrap(text), layout.width, painter));
+            rendered.push_str(&detail(
+                columns[moved].header,
+                &Detail::Wrap(text),
+                layout.width,
+                painter,
+            ));
         }
         for (label, item) in &row.details {
             rendered.push_str(&detail(label, item, layout.width, painter));
@@ -586,20 +717,12 @@ fn row_blocks(lines: &[String]) -> Vec<Vec<&String>> {
 }
 
 fn detail(label: &str, item: &Detail, width: Option<usize>, painter: &Painter) -> String {
-    let lead = format!(
-        "{}{:<DETAIL_LABEL$} ",
-        " ".repeat(DETAIL_INDENT),
-        format!("{label}:")
-    );
+    let lead = format!("{}{:<DETAIL_LABEL$} ", " ".repeat(DETAIL_INDENT), format!("{label}:"));
     let indent = DETAIL_INDENT + DETAIL_LABEL + 1;
     let lead = painter.paint(Style::Chrome, &lead);
-    let (text, wrap) = match item {
-        Detail::Wrap(text) => (text, true),
-        Detail::Whole(text) => (text, false),
-    };
-    let available = width.map(|width| width.saturating_sub(indent));
-    match available {
-        Some(available) if wrap && available >= DETAIL_FLOOR => {
+    let Detail::Wrap(text) = item;
+    match width.map(|width| width.saturating_sub(indent)) {
+        Some(available) if available >= DETAIL_FLOOR => {
             let mut cell = Table::new();
             cell.load_style(NOTHING)
                 .force_no_tty()
@@ -644,190 +767,22 @@ pub fn visible_width(text: &str) -> usize {
 }
 ```
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 5: Run the module tests**
 
 Run: `just test-one table::tests`
-Expected: PASS (12 tests). If `the_gap_is_two_spaces_and_fixed_columns_never_wrap` or the detail-label test is off by the padding, check that constraints add `padding` (comfy-table subtracts it in `absolute_width_with_padding`).
+Expected: PASS (11 tests).
 
-- [ ] **Step 6: Fast suite and commit**
-
-Run: `just test-fast` → all pass (the module is not yet used). Commit
-`feat(pretty): table module over comfy-table (tasks-565420)` with `tasks done tasks-565420`.
-
----
-
-### Task 3: Project colours on every row a pretty view shows
-
-**Files:**
-- Modify: `src/commands/mod.rs` (`ReadCtx`), `src/output.rs` (`ParkedRow`, a new `paint_projects`), `src/commands/list.rs` (list, parked, ready, prime), `src/commands/sample.rs`, `src/commands/tree.rs`, `src/commands/lanes.rs`, `src/commands/quiet.rs`
-- Test: `tests/cli.rs`
-
-**Interfaces:**
-- Produces: `pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;` in `src/output.rs`; `ReadCtx::project_colors(&self) -> ProjectColors`; `Output::paint_projects(&mut self, colors: &ProjectColors)`; `ParkedRow.project_color: Option<Rgb>` (`#[serde(skip)]`).
-
-- [ ] **Step 1: Write the failing test** (next to `search_rows_carry_the_project_color` in `tests/cli.rs`)
-
-```rust
-#[test]
-fn ready_tree_and_prime_rows_carry_the_project_color() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let goal = id_of(env.json(&sci, &["add", "Goal title", "--lane", "-b", "why"]));
-    env.json(&sci, &["add", "Child title", "--parent", &goal, "--size", "s"]);
-    write_project_color(&sci, "sci", "#123456");
-    let paint = "\x1b[38;2;18;52;86m";
-    // lanes paints its titles from Task 6, which pins it there.
-    for args in [vec!["ready"], vec!["tree"], vec!["prime"]] {
-        let mut full = vec!["--pretty", "--color", "always"];
-        full.extend(args.iter().copied());
-        let out = env.cmd(&sci).args(&full).output().unwrap();
-        let text = String::from_utf8(out.stdout).unwrap();
-        assert!(
-            text.contains(&format!("{paint}Child title")) || text.contains(&format!("{paint}Goal title")),
-            "{args:?}: {text}"
-        );
-    }
-}
-```
-
-- [ ] **Step 2: Run it to see it fail**
-
-Run: `just test-one --test cli ready_tree_and_prime_rows_carry_the_project_color`
-Expected: FAIL at `["ready"]` (only `list` and `search` fill the colour today).
-
-- [ ] **Step 3: Implement**
-
-In `src/output.rs`, beside `ParkedRow`:
-
-```rust
-/// Each in-scope prefix's configured colour (project colours spec; comfy-tables §5).
-pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;
-
-fn color_of(colors: &ProjectColors, id: &str) -> Option<crate::palette::Rgb> {
-    crate::model::TaskId::parse(id)
-        .ok()
-        .and_then(|id| colors.get(&id.prefix).copied())
-}
-
-fn paint_summary(colors: &ProjectColors, row: &mut TaskSummary) {
-    row.project_color = color_of(colors, &row.id);
-}
-
-fn paint_tree(colors: &ProjectColors, nodes: &mut [TreeNode]) {
-    for node in nodes {
-        paint_summary(colors, &mut node.summary);
-        paint_tree(colors, &mut node.children);
-    }
-}
-
-impl Output {
-    /// Fill `project_color` on every task row a pretty view of this output shows. `claims`
-    /// is left alone: it opens no checkout (comfy-tables §5).
-    pub fn paint_projects(&mut self, colors: &ProjectColors) {
-        match self {
-            Output::List(o) => o.tasks.iter_mut().for_each(|row| paint_summary(colors, row)),
-            Output::Parked(o) => o.tasks.iter_mut().for_each(|row| row.project_color = color_of(colors, &row.id)),
-            Output::Quiet(o) => o.tasks.iter_mut().for_each(|row| row.project_color = color_of(colors, &row.id)),
-            Output::Tree(o) => paint_tree(colors, &mut o.nodes),
-            Output::Lanes(o) => o.lanes.iter_mut().for_each(|lane| paint_lane(colors, lane)),
-            Output::Prime(o) => {
-                for row in o.closeout.iter_mut().chain(o.ready.iter_mut()).chain(o.doing.iter_mut()) {
-                    paint_summary(colors, row);
-                }
-                paint_tree(colors, &mut o.roadmap);
-                for row in &mut o.parked {
-                    row.project_color = color_of(colors, &row.id);
-                }
-                o.lanes.iter_mut().for_each(|lane| paint_lane(colors, lane));
-            }
-            _ => {}
-        }
-    }
-}
-
-fn paint_lane(colors: &ProjectColors, lane: &mut crate::lanes::LaneRow) {
-    paint_summary(colors, &mut lane.lane);
-    if let Some(pick) = &mut lane.pick {
-        paint_summary(colors, pick);
-    }
-    lane.active.iter_mut().for_each(|row| paint_summary(colors, row));
-}
-```
-
-Add to `ParkedRow` (after `title`): `#[serde(skip)] pub project_color: Option<crate::palette::Rgb>,`; set it from `summary.project_color` in `ParkedRow::resolved` and to `None` in `ParkedRow::unresolved` and in every test literal that builds a `ParkedRow` (search `ParkedRow {`).
-
-In `src/commands/mod.rs`:
-
-```rust
-impl ReadCtx {
-    /// Every in-scope project's configured colour, keyed by prefix.
-    pub fn project_colors(&self) -> crate::output::ProjectColors {
-        self.scope
-            .projects()
-            .iter()
-            .filter_map(|project| project.color.map(|color| (project.prefix.clone(), color)))
-            .collect()
-    }
-}
-```
-
-In each command, take the map before `ctx.warnings` is moved and apply it to the output before returning. `src/commands/list.rs::list` replaces the per-row block at its `ListOut` (the `row.project_color = ctx.scope.projects()...` closure) with:
-
-```rust
-    let colors = ctx.project_colors();
-    let mut out = Output::List(ListOut {
-        tasks: tasks
-            .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
-            .collect(),
-        halts: vec![],
-        warnings: ctx.warnings,
-        date: if periodic || deferred { DateColumn::Due } else { sort.date_column() },
-    });
-    out.paint_projects(&colors);
-    Ok(out)
-```
-
-and applies the same two lines (`let colors = ctx.project_colors();` first, `out.paint_projects(&colors);` before `Ok(out)`) at the other constructions: `list_parked` (`Output::Parked`), the ready builder (`Output::List` near line 486), `prime` (`Output::Prime`), `src/commands/sample.rs` (`Output::List`), `src/commands/tree.rs` (`Output::Tree`), `src/commands/lanes.rs` (`Output::Lanes`), `src/commands/quiet.rs` (`Output::Quiet`). `src/commands/claims.rs` is not touched.
-
-- [ ] **Step 4: Run the new test and the existing colour tests**
-
-Run: `just test-one --test cli project_color` → PASS (the new test, `search_rows_carry_the_project_color`, `project_colors_*`).
-
-- [ ] **Step 5: Fast suite and commit**
-
-Run: `just test-fast` → all pass. Commit `feat(pretty): project colours on every row a pretty view shows (tasks-73c29c)` with `tasks done tasks-73c29c`.
-
----
-
-### Task 4: The list family and tree on the table module
-
-**Files:**
-- Modify: `src/present.rs` (add `row_id`), `src/output.rs` (`table`, `tree_text`, `render`, `pretty`, the `Output::List` / `Output::Tree` arms; replace `Wrap` with `table::Layout`), `src/main.rs` (build a `Layout`)
-- Test: `src/output.rs` unit tests, `tests/cli.rs`
-
-**Interfaces:**
-- Consumes: `crate::table::{Column, Fit, Row, Layout, Widths, render, shared_widths}` (Task 2); `TaskSummary.project_color` filled (Task 3).
-- Produces:
-  - `present::row_id(id: &str, project: Option<Rgb>) -> Span` (project colour, else chrome)
-  - `output::task_columns(parallel: bool, kind: bool) -> Vec<table::Column>`
-  - `output::task_row(row: &TaskSummary, date: DateColumn, painter: &Painter, parallel: bool, kind: bool, indent: usize) -> table::Row`
-  - `output::tree_rows(nodes: &[TreeNode], depth: usize, painter: &Painter, parallel: bool, kind: bool, rows: &mut Vec<table::Row>)`
-  - `output::render(out: &Output, format: Format, painter: &Painter, layout: &table::Layout) -> String` (was `wrap: Wrap`)
-
-- [ ] **Step 1: Write the failing tests** (in `src/output.rs`'s test module, replacing `a_long_title_wraps_under_itself_at_the_terminal_width`)
+- [ ] **Step 6: Write the failing view tests** (in `src/output.rs`'s test module, replacing `a_long_title_wraps_under_itself_at_the_terminal_width`)
 
 ```rust
     #[test]
     fn a_list_row_lays_out_its_columns_and_wraps_its_title_in_place() {
         let layout = crate::table::Layout { width: Some(80), headers: false };
-        let rows = [long_row()];
-        let columns = task_columns(false, false);
-        let built: Vec<crate::table::Row> = rows
+        let built: Vec<crate::table::Row> = [long_row()]
             .iter()
             .map(|row| task_row(row, DateColumn::Updated, &plain(), false, false, 0))
             .collect();
-        let text = crate::table::render(&columns, &built, &layout, None, &plain());
+        let text = crate::table::render(&task_columns(false, false), &built, &layout, None, &plain());
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines.len() > 1, "{text}");
         let title = lines[0].find("alpha").unwrap();
@@ -873,14 +828,29 @@ fn list_ids_take_the_project_color() {
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains(&format!("\x1b[38;2;18;52;86m{id}")), "{text}");
 }
+
+#[test]
+fn prime_sections_share_every_fixed_width_when_piped() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let todo = id_of(env.json(&dir, &["add", "Ready one", "--size", "s"]));
+    let doing = id_of(env.json(&dir, &["add", "Doing one", "--size", "xl"]));
+    env.json(&dir, &["start", &doing]);
+    let text = env.pretty(&dir, &["prime"]);
+    let line = |id: &str| text.lines().find(|l| l.contains(id)).unwrap().to_string();
+    let (a, b) = (line(&todo), line(&doing));
+    assert_eq!(a.find("Ready"), b.find("Doing"), "titles align across sections:\n{text}");
+}
 ```
 
-- [ ] **Step 2: Run them to see them fail**
+Keep both existing tests that assert "dates must start in the same column across prime's blocks".
 
-Run: `just test-one output::tests::a_` then `just test-one --test cli list_ids_take_the_project_color`
-Expected: FAIL (`task_columns` and `task_row` do not exist; ids are chrome).
+- [ ] **Step 7: Run them to see them fail**
 
-- [ ] **Step 3: Implement**
+Run: `just test-one output::tests::a_`, `just test-one --test cli list_ids_take_the_project_color`, `just test-one --test cli prime_sections_share`
+Expected: FAIL (`task_columns`, `task_row`, `tree_rows` do not exist; ids are chrome).
+
+- [ ] **Step 8: Implement the views**
 
 `src/present.rs`:
 
@@ -894,7 +864,7 @@ pub fn row_id(id: &str, project: Option<Rgb>) -> Span {
 }
 ```
 
-`src/output.rs` — replace `table` with the column and row builders and a thin renderer:
+`src/output.rs` — replace `table` and `tree_text` with:
 
 ```rust
 pub fn task_columns(parallel: bool, kind: bool) -> Vec<crate::table::Column> {
@@ -975,7 +945,7 @@ fn title_cell(row: &TaskSummary, painter: &Painter) -> String {
     if !row.tags.is_empty() {
         let tags = present::tags(&row.tags);
         cell.push(' ');
-        cell.push_str(&Span { text: format!("[{}]", tags.text), ..tags }.paint(painter));
+        cell.push_str(&present::Span { text: format!("[{}]", tags.text), ..tags }.paint(painter));
     }
     if let Some(periodic) = row.periodic.as_ref().filter(|periodic| periodic.due_now) {
         let when = periodic
@@ -995,7 +965,11 @@ fn title_cell(row: &TaskSummary, painter: &Painter) -> String {
         cell.push_str("  ");
         cell.push_str(&painter.paint(Style::Emphasis, &text));
     }
-    if let Some(park) = row.park.as_ref().filter(|park| park.reason == Some(crate::claims::Reason::Quiet)) {
+    if let Some(park) = row
+        .park
+        .as_ref()
+        .filter(|park| park.reason == Some(crate::claims::Reason::Quiet))
+    {
         let text = format!(
             "waits on {}",
             crate::claims::describe_stop(park.waiting_on, park.reason, park.needs, park.minutes)
@@ -1009,7 +983,7 @@ fn title_cell(row: &TaskSummary, painter: &Painter) -> String {
     };
     if let Some(owner) = owner {
         cell.push(' ');
-        cell.push_str(&Span { text: format!("@{}", owner.text), ..owner }.paint(painter));
+        cell.push_str(&present::Span { text: format!("@{}", owner.text), ..owner }.paint(painter));
     }
     cell
 }
@@ -1044,25 +1018,67 @@ fn task_table(
 }
 ```
 
-(`use crate::present::Span;` at the top of `output.rs` if it is not imported.) The `Output::List` arm becomes `format!("{}{}", halt_line(&o.halts), task_table(&o.tasks, o.date, painter, layout))`; the `Output::Tree` arm builds `tree_rows(&o.nodes, 0, painter, any_parallel_tree(&o.nodes), any_type_tree(&o.nodes), &mut rows)` and renders it with `task_columns` of the same flags. Delete `tree_text`.
+`render` and `pretty` take `layout: &crate::table::Layout` instead of `wrap: Wrap`. The `Show` and `Next` arms pass `layout.width`. The `Parked`, `Quiet` and `Lanes` arms keep their old renderers until Tasks 4 and 5, given `layout.width.map_or(Wrap::NONE, Wrap::at)` where they took a `Wrap`.
 
-`render` and `pretty` take `layout: &crate::table::Layout` instead of `wrap: Wrap`; the `Show` and `Next` arms pass `layout.width`. Until Task 5 and Task 6 replace them, the `Parked`, `Quiet`, `Prime` and `Lanes` arms build the old `Wrap` from `layout.width` (`layout.width.map_or(Wrap::NONE, Wrap::at)`), and prime's `table(...)`/`tree_text(...)` calls are rewritten in Task 6. In this task, so the crate compiles, each `table(&o.<section>, ...)` call in the prime arm becomes `task_table(&o.<section>, DateColumn::Updated, painter, layout)`, and the roadmap's `tree_text(std::slice::from_ref(node), ...)` call becomes:
+`Output::List`: `format!("{}{}", halt_line(&o.halts), task_table(&o.tasks, o.date, painter, layout))`.
+
+`Output::Tree`:
 
 ```rust
-                    let mut rows = Vec::new();
-                    tree_rows(std::slice::from_ref(node), 0, painter, parallel_column, type_column, &mut rows);
-                    rendered.push_str(&crate::table::render(
-                        &task_columns(parallel_column, type_column),
-                        &rows,
-                        layout,
-                        None,
-                        painter,
-                    ));
+        Output::Tree(o) => {
+            let parallel = any_parallel_tree(&o.nodes);
+            let kind = any_type_tree(&o.nodes);
+            let mut rows = Vec::new();
+            tree_rows(&o.nodes, 0, painter, parallel, kind, &mut rows);
+            crate::table::render(&task_columns(parallel, kind), &rows, layout, None, painter)
+        }
 ```
 
-Task 6 replaces both with the shared-width sections.
+`Output::Prime`: keep the header, counts, periodic and deferred lines and the section labels as they are; replace the computation of `parallel_column`, `type_column` and `id_width` and every section render with:
 
-`src/main.rs`: replace the `wrap_width` block's result with a `Layout`:
+```rust
+            let parallel = any_parallel(&o.closeout) || any_parallel_tree(&o.roadmap)
+                || any_parallel(&o.ready) || any_parallel(&o.doing);
+            let kind = any_type(&o.closeout) || any_type_tree(&o.roadmap)
+                || any_type(&o.ready) || any_type(&o.doing);
+            let columns = task_columns(parallel, kind);
+            let rows_of = |rows: &[TaskSummary]| -> Vec<crate::table::Row> {
+                rows.iter()
+                    .map(|row| task_row(row, DateColumn::Updated, painter, parallel, kind, 0))
+                    .collect()
+            };
+            let closeout = rows_of(&o.closeout);
+            let ready_ids: std::collections::HashSet<&str> =
+                o.ready.iter().map(|row| row.id.as_str()).collect();
+            let mut roadmap = Vec::new();
+            let mut listed_under_ready = 0;
+            for node in &o.roadmap {
+                if node.summary.child_count > 0 {
+                    tree_rows(std::slice::from_ref(node), 0, painter, parallel, kind, &mut roadmap);
+                } else if ready_ids.contains(node.summary.id.as_str()) {
+                    listed_under_ready += 1;
+                } else {
+                    roadmap.push(task_row(&node.summary, DateColumn::Updated, painter, parallel, kind, 0));
+                }
+            }
+            let ready = rows_of(&o.ready);
+            let doing = rows_of(&o.doing);
+            let mut shared =
+                crate::table::shared_widths(&columns, &[&closeout, &roadmap, &ready, &doing], layout.headers);
+            let id = shared
+                .id()
+                .unwrap_or(0)
+                .max(o.parked.iter().map(|row| row.id.len()).max().unwrap_or(0));
+            shared.0[0] = Some(id);
+            let section = |rows: &[crate::table::Row]| {
+                crate::table::render(&columns, rows, layout, Some(&shared), painter)
+            };
+            let wrap = layout.width.map_or(Wrap::NONE, Wrap::at);
+```
+
+then, under today's labels and in today's order: `section(&closeout)`; the lanes block unchanged (`lane_lines(&o.lanes, painter, lane_width, false)`); `section(&roadmap)` followed by the `listed_under_ready` line; `parked_table(&o.parked, painter, id, wrap)` (today's renderer, given the shared id width); `section(&ready)`; `section(&doing)`.
+
+`src/main.rs`: replace the `wrap_width` block with a `Layout`:
 
 ```rust
             let layout = if format == Format::Pretty
@@ -1091,28 +1107,71 @@ Task 6 replaces both with the shared-width sections.
             let rendered = output::render(&out, format, &stdout_painter, &layout);
 ```
 
-- [ ] **Step 4: Run the tests**
+Delete `table`, `tree_text`, `id_width_tree` and `Wrap::indented`, which nothing calls now.
 
-Run: `just test-one output::tests` and `just test-one --test cli list`
-Expected: the new tests PASS. Existing tests that pin the old list spacing (single spaces between P, size, cx, process, status) fail: update each to the two-space gap and leave its assertion's intent unchanged. `project_colors_reset_and_resume_on_wrapped_titles` must still pass unchanged except for the continuation-indent column, which it reads from the plain output.
+- [ ] **Step 9: Run the tests**
 
-- [ ] **Step 5: Fast suite and commit**
+Run: `just test-one table::tests`, `just test-one output::tests`, `just test-one --test cli list`, `just test-one --test cli prime`, `just test-one --test cli tree`
+Expected: the new tests PASS, and both prime date-alignment tests PASS. Existing tests that pin the old list spacing (single spaces between P, size, cx, process, status) fail: update each to the two-space gap and keep its assertion's intent.
 
-Run: `just test-fast` → all pass. Commit `feat(pretty): list, ready, search and tree on the table module (tasks-2ac5d1)` with `tasks done tasks-2ac5d1`.
+- [ ] **Step 10: Gates and commit**
+
+Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): table module with list, ready, search, tree and prime's task sections (tasks-73c29c)` with `tasks done tasks-73c29c`.
 
 ---
 
-### Task 5: Parked and quiet on the table module
+### Task 4: Parked and quiet on the table module
 
 **Files:**
-- Modify: `src/output.rs` (`parked_table`, `quiet_briefs`, their arms; delete `detail_line`)
-- Test: `src/output.rs` unit tests, `tests/cli.rs`
+- Modify: `src/table.rs` (`Align`, `Column::right`, `Detail::Whole`, `Widths::id_only`), `src/output.rs` (`ParkedRow.project_color`, `paint_projects` parked arms, `parked_table`, `quiet_briefs` → `quiet_table`, prime's parked section; delete `detail_line`, `render_row`, `render_wrapped`, `LongWord`, `TITLE_FLOOR`, `Wrap` and its uses)
+- Test: `src/table.rs` and `src/output.rs` unit tests, `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `table::{Column, Row, Detail, Layout, Widths, render}`; `ParkedRow.project_color` (Task 3); `present::row_id` (Task 4).
-- Produces: `output::parked_columns() -> Vec<table::Column>`, `output::parked_row(row: &ParkedRow, painter: &Painter) -> table::Row`, `output::parked_table(rows: &[ParkedRow], painter: &Painter, layout: &table::Layout, widths: Option<&table::Widths>) -> String`, `output::quiet_table(rows: &[ParkedRow], painter: &Painter, layout: &table::Layout) -> String`.
+- Consumes: Task 3's module, `present::row_id`, the shared id width in `prime`.
+- Produces:
+  - `table::Align { Left, Right }`, `Column.align: Align`, `Column::right(header) -> Column`
+  - `table::Detail::Whole(String)` (printed in one piece)
+  - `table::Widths::id_only(id: usize, columns: usize) -> Widths`
+  - `ParkedRow.project_color: Option<Rgb>` (`#[serde(skip)]`)
+  - `output::parked_columns() -> Vec<table::Column>`, `output::parked_row(row: &ParkedRow, painter: &Painter) -> table::Row`, `output::parked_table(rows: &[ParkedRow], painter: &Painter, layout: &table::Layout, widths: Option<&table::Widths>) -> String`, `output::quiet_table(rows: &[ParkedRow], painter: &Painter, layout: &table::Layout) -> String`
 
-- [ ] **Step 1: Write the failing tests** (replace `a_parked_rows_next_step_wraps_under_its_text`, `a_parked_tables_wait_column_fits_its_longest_stop`, `quiet_briefs_wrap_title_and_next_under_their_text` and `a_detail_line_keeps_a_long_word_whole`; keep `parked_with` and `LONG_STEP`)
+- [ ] **Step 1: Write the failing module tests** (add to `src/table.rs`'s tests)
+
+```rust
+    #[test]
+    fn an_id_only_width_aligns_a_section_with_other_columns() {
+        let widths = Widths::id_only(15, 4);
+        let text = render(&columns(), &[row("sci-000001")], &at(200), Some(&widths), &plain());
+        assert!(text.starts_with("sci-000001       doing"), "{text}");
+    }
+
+    #[test]
+    fn a_right_aligned_column_pads_on_the_left() {
+        let columns = [Column::fixed("id"), Column::right("min")];
+        let rows = [
+            Row::new(vec!["a".into(), "5".into()]),
+            Row::new(vec!["b".into(), "40".into()]),
+        ];
+        let text = render(&columns, &rows, &at(80), None, &plain());
+        assert_eq!(text, "a   5\nb  40\n");
+    }
+
+    #[test]
+    fn details_follow_their_row_and_whole_ones_are_never_split() {
+        let path = "/a/long/checkout/path/that/runs/well/past/the/width/.worktrees/x";
+        let mut first = row("sci-000001");
+        first.details.push(("in", Detail::Whole(path.into())));
+        let second = row("sci-000002");
+        let text = render(&columns(), &[first, second], &at(80), None, &plain());
+        let lines: Vec<&str> = text.lines().collect();
+        let detail = lines.iter().position(|l| l.contains(path)).unwrap();
+        let second_row = lines.iter().position(|l| l.starts_with("sci-000002")).unwrap();
+        assert!(detail < second_row, "{text}");
+        assert_eq!(lines[detail], format!("        in:     {path}"));
+    }
+```
+
+- [ ] **Step 2: Write the failing view tests** (in `src/output.rs`, replacing `a_parked_rows_next_step_wraps_under_its_text`, `a_parked_tables_wait_column_fits_its_longest_stop`, `quiet_briefs_wrap_title_and_next_under_their_text`, `a_detail_line_keeps_a_long_word_whole` and `a_parked_row_wraps_its_title`; keep `parked_with` and `LONG_STEP`)
 
 ```rust
     #[test]
@@ -1133,7 +1192,7 @@ Run: `just test-fast` → all pass. Commit `feat(pretty): list, ready, search an
     }
 
     #[test]
-    fn an_unresolved_park_renders_dashes() {
+    fn an_unresolved_park_renders_placeholders() {
         let mut row = parked_with("x", None);
         row.status = None;
         row.phase = None;
@@ -1161,23 +1220,93 @@ fn parked_rows_paint_ids_and_titles_with_the_project_color() {
     let id = id_of(env.json(&sci, &["add", "Parked title"]));
     write_park(&env, "sci", &id, "agent-a", "user", &sci.display().to_string());
     write_project_color(&sci, "sci", "#123456");
-    let out = env
-        .cmd(&sci)
-        .args(["--pretty", "--color", "always", "list", "--parked"])
-        .output()
-        .unwrap();
-    let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains(&format!("\x1b[38;2;18;52;86m{id}")), "{text}");
-    assert!(text.contains("\x1b[38;2;18;52;86mParked"), "{text}");
+    for args in [vec!["list", "--parked"], vec!["prime"]] {
+        let mut full = vec!["--pretty", "--color", "always"];
+        full.extend(args.iter().copied());
+        let out = env.cmd(&sci).args(&full).output().unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(text.contains(&format!("\x1b[38;2;18;52;86m{id}")), "{args:?}: {text}");
+        assert!(text.contains("\x1b[38;2;18;52;86mParked"), "{args:?}: {text}");
+    }
 }
 ```
 
-- [ ] **Step 2: Run them to see them fail**
+- [ ] **Step 3: Run them to see them fail**
 
-Run: `just test-one output::tests::a_parked` and `just test-one --test cli parked_rows_paint`
-Expected: FAIL (old signatures; titles unpainted).
+Run: `just test-one table::tests`, `just test-one output::tests`, `just test-one --test cli parked_rows_paint`
+Expected: FAIL (no `Whole`, `right`, `id_only`; old parked signatures; titles unpainted).
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 4: Implement**
+
+`src/table.rs`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Column {
+    pub header: &'static str,
+    pub fit: Fit,
+    pub align: Align,
+}
+
+impl Column {
+    pub const fn fixed(header: &'static str) -> Column {
+        Column { header, fit: Fit::Fixed, align: Align::Left }
+    }
+    pub const fn right(header: &'static str) -> Column {
+        Column { header, fit: Fit::Fixed, align: Align::Right }
+    }
+    pub const fn wrap(header: &'static str, min: usize, max: Option<usize>) -> Column {
+        Column { header, fit: Fit::Wrap { min, max }, align: Align::Left }
+    }
+}
+
+/// A `label: text` line under a row. `Wrap` wraps under its text; `Whole` is printed in
+/// one piece so a path copies intact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Detail {
+    Wrap(String),
+    Whole(String),
+}
+
+impl Widths {
+    /// Only the id column shared, for a section whose other columns differ.
+    pub fn id_only(id: usize, columns: usize) -> Widths {
+        let mut widths = vec![None; columns];
+        if let Some(first) = widths.first_mut() {
+            *first = Some(id);
+        }
+        Widths(widths)
+    }
+}
+```
+
+In `render`, after `column.set_padding(...)`: `if columns[index].align == Align::Right { column.set_cell_alignment(comfy_table::CellAlignment::Right); }`. In `detail`, replace `let Detail::Wrap(text) = item;` and the match guard with:
+
+```rust
+    let (text, wrap) = match item {
+        Detail::Wrap(text) => (text, true),
+        Detail::Whole(text) => (text, false),
+    };
+    match width.map(|width| width.saturating_sub(indent)) {
+        Some(available) if wrap && available >= DETAIL_FLOOR => {
+```
+
+`src/output.rs`: add `#[serde(skip)] pub project_color: Option<crate::palette::Rgb>,` to `ParkedRow` after `title`; set it from `summary.project_color` in `ParkedRow::resolved`, to `None` in `ParkedRow::unresolved` and in every test literal that builds a `ParkedRow` (search `ParkedRow {`). Extend `paint_projects`:
+
+```rust
+            Output::Parked(o) => o.tasks.iter_mut().for_each(|row| row.project_color = color_of(colors, &row.id)),
+            Output::Quiet(o) => o.tasks.iter_mut().for_each(|row| row.project_color = color_of(colors, &row.id)),
+```
+
+and in its `Prime` arm: `for row in &mut o.parked { row.project_color = color_of(colors, &row.id); }`. Apply `paint_projects` in `list_parked` (`Output::Parked`) and `src/commands/quiet.rs` (`Output::Quiet`) the way Task 2 did for the others.
+
+Replace `parked_table` and `quiet_briefs`:
 
 ```rust
 pub fn parked_columns() -> Vec<crate::table::Column> {
@@ -1255,75 +1384,70 @@ pub fn quiet_table(rows: &[ParkedRow], painter: &Painter, layout: &crate::table:
 }
 ```
 
-The `Output::Parked` arm calls `parked_table(&o.tasks, painter, layout, None)`; `Output::Quiet` calls `quiet_table(&o.tasks, painter, layout)`. Delete `quiet_briefs` and `detail_line`. Prime's parked call becomes `parked_table(&o.parked, painter, layout, None)` until Task 6.
+The `Output::Parked` arm calls `parked_table(&o.tasks, painter, layout, None)`; `Output::Quiet` calls `quiet_table(&o.tasks, painter, layout)`; prime's parked section calls `parked_table(&o.parked, painter, layout, Some(&crate::table::Widths::id_only(id, 7)))` and the `let wrap = ...` line goes. Delete `quiet_briefs`, `detail_line`, `render_row`, `render_wrapped`, `LongWord`, `TITLE_FLOOR` and `Wrap`: nothing uses them now. `wrap_lines` stays for `show_text.rs` (its body is `wrap_lines_with(chars, available, LongWord::Split)`: inline that body as `wrap_lines`'s own, always hard-splitting, and delete `wrap_lines_with`).
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 5: Run the tests**
 
-Run: `just test-one output::tests` and `just test-one --test cli parked`, `just test-one --test cli quiet`
-Expected: new tests PASS. Update existing CLI tests that look for the `next:` label or `waits on user, review` with a fixed 18-wide pad: `next:` now appears only in the narrow fallback; the wait column reads `user, review` with no `waits on` prefix (the header carries it). `quiet` briefs lose their blank separator lines.
+Run: `just test-one table::tests`, `just test-one output::tests`, `just test-one --test cli parked`, `just test-one --test cli quiet`, `just test-one --test cli prime`
+Expected: PASS. Update existing CLI tests that look for the `next:` label (it now appears only in the narrow fallback) or for `waits on user, review` (the column reads `user, review`; `waits on` is its header). `quiet` loses its blank separator lines and its unlabelled `next:` line.
 
-- [ ] **Step 5: Fast suite and commit**
+- [ ] **Step 6: Gates and commit**
 
-Run: `just test-fast` → all pass. Commit `feat(pretty): parked and quiet on the table module (tasks-9d8e5d)` with `tasks done tasks-9d8e5d`.
+Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): parked and quiet on the table module (tasks-2ac5d1)` with `tasks done tasks-2ac5d1` and `tasks done tasks-9b5b0a "parked titles and ids take the project colour"`.
 
 ---
 
-### Task 6: Prime with shared widths, and lanes
+### Task 5: Lanes on the table module, picks and active rows in their project colours
 
 **Files:**
-- Modify: `src/output.rs` (the `Output::Prime` and `Output::Lanes` arms; `lane_lines` becomes `lane_table`)
-- Test: `src/output.rs` unit tests, `tests/cli.rs`
+- Modify: `src/output.rs` (`lane_lines` → `lane_table`; the `Output::Lanes` arm; prime's lanes block)
+- Test: `tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `task_columns`, `task_row`, `tree_rows` (Task 4); `parked_table` (Task 5); `table::shared_widths`, `Widths::id_only`.
+- Consumes: `table::{Column, Row, Detail, Widths::id_only, render}`; `present::{row_id, title}`; lane rows' colours (Task 2).
 - Produces: `output::lane_table(rows: &[LaneRow], painter: &Painter, layout: &table::Layout, widths: Option<&table::Widths>, detail: bool) -> String`.
 
-- [ ] **Step 1: Write the failing tests** (`tests/cli.rs`)
+- [ ] **Step 1: Write the failing test** (`tests/cli.rs`)
 
 ```rust
 #[test]
-fn prime_sections_share_every_fixed_width_when_piped() {
-    let mut env = TestEnv::new();
-    let dir = env.init("sci");
-    let todo = id_of(env.json(&dir, &["add", "Ready one", "--size", "s"]));
-    let doing = id_of(env.json(&dir, &["add", "Doing one", "--size", "xl"]));
-    env.json(&dir, &["start", &doing]);
-    let text = env.pretty(&dir, &["prime"]);
-    let line = |id: &str| text.lines().find(|l| l.contains(id)).unwrap().to_string();
-    let (a, b) = (line(&todo), line(&doing));
-    assert_eq!(a.find("Ready"), b.find("Doing"), "titles align across sections:\n{text}");
-}
-
-#[test]
-fn lanes_render_as_a_table_with_details() {
+fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let lane = id_of(env.json(&sci, &["add", "Lane title", "--lane", "-b", "Lane guidance here."]));
-    env.json(&sci, &["add", "Step", "--parent", &lane, "--size", "s"]);
+    let pick = id_of(env.json(&sci, &["add", "Pick step", "--parent", &lane, "--size", "s"]));
+    let running = id_of(env.json(&sci, &["add", "Running step", "--parent", &lane, "--size", "s"]));
+    as_agent(&env, &sci, "agent-a").args(["start", &running]).assert().success();
     let text = env.pretty(&sci, &["lanes"]);
     assert!(text.lines().next().unwrap().starts_with(&lane), "{text}");
     assert!(text.contains("        guide:  Lane guidance here."), "{text}");
     write_project_color(&sci, "sci", "#123456");
+    let paint = "\x1b[38;2;18;52;86m";
     let out = env
         .cmd(&sci)
         .args(["--pretty", "--color", "always", "lanes"])
         .output()
         .unwrap();
     let colored = String::from_utf8(out.stdout).unwrap();
-    assert!(colored.contains("\x1b[38;2;18;52;86mLane title"), "{colored}");
+    for span in [
+        format!("{paint}{lane}"),
+        format!("{paint}Lane title"),
+        format!("{paint}{pick}"),
+        format!("{paint}Pick step"),
+        format!("{paint}{running}"),
+        format!("{paint}Running step"),
+    ] {
+        assert!(colored.contains(&span), "{span:?} in:\n{colored}");
+    }
 }
 ```
 
-Keep both existing tests that assert "dates must start in the same column across prime's blocks".
+- [ ] **Step 2: Run it to see it fail**
 
-- [ ] **Step 2: Run them to see them fail**
-
-Run: `just test-one --test cli prime_sections_share` and `just test-one --test cli lanes_render_as`
-Expected: FAIL (sections are sized apart since Task 4; lanes still use `lane_lines`).
+Run: `just test-one --test cli lanes_render_as_a_table`
+Expected: FAIL (`lane_lines` prints `guidance` unlabelled and paints nothing in the project colour).
 
 - [ ] **Step 3: Implement**
-
-`lane_table`:
 
 ```rust
 fn lane_table(
@@ -1340,27 +1464,34 @@ fn lane_table(
         Column::wrap("title", 20, None),
         Column::wrap("state", 20, None),
     ];
+    let task = |row: &TaskSummary| {
+        format!(
+            "{} {}",
+            present::row_id(&row.id, row.project_color).paint(painter),
+            present::title(&row.title, row.project_color).paint(painter)
+        )
+    };
     let built: Vec<Row> = rows
         .iter()
         .map(|row| {
             let state = match row.state {
                 LaneState::Ready => {
                     let pick = row.pick.as_ref().expect("a ready lane has a pick");
-                    format!("ready → {} {}", pick.id, pick.title)
+                    format!("{} {}", painter.paint(Style::Emphasis, "ready →"), task(pick))
                 }
                 LaneState::Held => {
                     let first = row.held.first().expect("a held lane names what it waits for");
-                    format!("held: {} ← {}", first.need, first.holder)
+                    painter.paint(Style::Emphasis, &format!("held: {} ← {}", first.need, first.holder))
                 }
-                LaneState::Waiting => waiting_text(&row.causes),
-                LaneState::Paused => "paused".into(),
-                LaneState::Empty => "empty".into(),
+                LaneState::Waiting => painter.paint(Style::Emphasis, &waiting_text(&row.causes)),
+                LaneState::Paused => painter.paint(Style::Emphasis, "paused"),
+                LaneState::Empty => painter.paint(Style::Emphasis, "empty"),
             };
             let mut built = Row::new(vec![
                 present::row_id(&row.lane.id, row.lane.project_color).paint(painter),
                 present::priority(row.lane.priority).paint(painter),
                 present::title(&row.lane.title, row.lane.project_color).paint(painter),
-                painter.paint(Style::Emphasis, &state),
+                state,
             ]);
             if detail {
                 if let Some(guidance) = &row.guidance {
@@ -1370,12 +1501,9 @@ fn lane_table(
                     let holder = active
                         .claim
                         .as_ref()
-                        .map(|claim| format!(" @{} [{}]", claim.owner, claim.session))
+                        .map(|claim| painter.paint(Style::Chrome, &format!(" @{} [{}]", claim.owner, claim.session)))
                         .unwrap_or_default();
-                    built.details.push((
-                        "active",
-                        Detail::Wrap(painter.paint(Style::Chrome, &format!("{} {}{holder}", active.id, active.title))),
-                    ));
+                    built.details.push(("active", Detail::Wrap(format!("{}{holder}", task(active)))));
                 }
             }
             built
@@ -1385,73 +1513,23 @@ fn lane_table(
 }
 ```
 
-The `Output::Lanes` arm calls `lane_table(&o.lanes, painter, layout, None, true)`; delete `lane_lines`.
-
-The `Output::Prime` arm keeps its header, counts, periodic and deferred lines and its section labels, and builds every section's rows before rendering any:
-
-```rust
-            let parallel = any_parallel(&o.closeout) || any_parallel_tree(&o.roadmap)
-                || any_parallel(&o.ready) || any_parallel(&o.doing);
-            let kind = any_type(&o.closeout) || any_type_tree(&o.roadmap)
-                || any_type(&o.ready) || any_type(&o.doing);
-            let columns = task_columns(parallel, kind);
-            let rows_of = |rows: &[TaskSummary]| -> Vec<crate::table::Row> {
-                rows.iter()
-                    .map(|row| task_row(row, DateColumn::Updated, painter, parallel, kind, 0))
-                    .collect()
-            };
-            let closeout = rows_of(&o.closeout);
-            let ready_ids: std::collections::HashSet<&str> =
-                o.ready.iter().map(|row| row.id.as_str()).collect();
-            let mut roadmap = Vec::new();
-            let mut listed_under_ready = 0;
-            for node in &o.roadmap {
-                if node.summary.child_count > 0 {
-                    tree_rows(std::slice::from_ref(node), 0, painter, parallel, kind, &mut roadmap);
-                } else if ready_ids.contains(node.summary.id.as_str()) {
-                    listed_under_ready += 1;
-                } else {
-                    roadmap.push(task_row(&node.summary, DateColumn::Updated, painter, parallel, kind, 0));
-                }
-            }
-            let ready = rows_of(&o.ready);
-            let doing = rows_of(&o.doing);
-            let parked: Vec<crate::table::Row> =
-                o.parked.iter().filter(|row| row.park.is_some()).map(|row| parked_row(row, painter)).collect();
-            let shared = crate::table::shared_widths(
-                &columns,
-                &[&closeout, &roadmap, &ready, &doing],
-                layout.headers,
-            );
-            let id = crate::table::shared_widths(&parked_columns(), &[&parked], layout.headers)
-                .id()
-                .unwrap_or(0)
-                .max(shared.id().unwrap_or(0))
-                .max(o.lanes.iter().map(|row| row.lane.id.len()).max().unwrap_or(0));
-            let mut shared = shared;
-            shared.0[0] = Some(id);
-            let section = |rows: &[crate::table::Row]| {
-                crate::table::render(&columns, rows, layout, Some(&shared), painter)
-            };
-```
-
-then, in today's order and under today's labels: `section(&closeout)`; the lanes block as `lane_table(&o.lanes, painter, layout, Some(&crate::table::Widths::id_only(id, 4)), false)`; `section(&roadmap)` followed by the `listed_under_ready` line; `crate::table::render(&parked_columns(), &parked, layout, Some(&crate::table::Widths::id_only(id, 7)), painter)`; `section(&ready)`; `section(&doing)`. Delete the `Wrap`-based fallbacks Task 4 left in this arm.
+The `Output::Lanes` arm calls `lane_table(&o.lanes, painter, layout, None, true)`; prime's lanes block calls `lane_table(&o.lanes, painter, layout, Some(&crate::table::Widths::id_only(id, 4)), false)` and its `lane_width` computation goes. In prime, widen the shared id to the lane ids too: `.max(o.lanes.iter().map(|row| row.lane.id.len()).max().unwrap_or(0))` on `id`. Delete `lane_lines`.
 
 - [ ] **Step 4: Run the tests**
 
-Run: `just test-one --test cli prime` and `just test-one --test cli lanes`
-Expected: PASS, including the two existing date-alignment tests. Update existing lanes tests for the `guide:`/`active:` labels.
+Run: `just test-one --test cli lanes`, `just test-one --test cli prime`
+Expected: PASS. Update the existing lanes test that expects `    Ship the captures...` and `    active: {running} Running @` to the `guide:` and `active:` labels.
 
-- [ ] **Step 5: Fast suite and commit**
+- [ ] **Step 5: Gates and commit**
 
-Run: `just test-fast` → all pass. Commit `feat(pretty): prime shares its widths; lanes on the table module (tasks-ff7985)` with `tasks done tasks-ff7985`.
+Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): lanes on the table module with picks and active rows in project colours (tasks-9d8e5d)` with `tasks done tasks-9d8e5d`.
 
 ---
 
-### Task 7: Projects, claims and the `--headers` option
+### Task 6: Projects, claims and the `--headers` option
 
 **Files:**
-- Modify: `tools/cli.toml` (adopt from ops), `src/cli.rs` (`Cli.headers`), `src/main.rs` (`Layout.headers`), `src/output.rs` (`Output::Projects` and `Output::Claims` arms; delete `grid_text`, `Cell`, `cell`, the private `Align`), `README.md`, `skills/tasks/SKILL.md`
+- Modify: `tools/cli.toml` (adopt from ops), `src/cli.rs` (`Cli.headers`), `src/main.rs` (`Layout.headers`; width for projects and claims), `src/output.rs` (`Output::Projects` and `Output::Claims` arms; delete `grid_text`, `Cell`, `cell`, the private `Align`, `id_width`), `README.md`, `skills/tasks/SKILL.md`
 - Test: `tests/cli.rs`
 
 **Interfaces:**
@@ -1470,22 +1548,21 @@ Expected: `tools/cli.toml from <ops merge sha>`; `just test-one --test cli cli_v
 fn headers_label_each_table_view_and_leave_json_alone() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "A task", "--size", "s"]));
-    write_park(&env, "sci", &id, "agent-a", "user", &sci.display().to_string());
-    for (args, first) in [
-        (vec!["list"], "id"),
-        (vec!["ready"], "id"),
-        (vec!["list", "--parked"], "id"),
-        (vec!["tree"], "id"),
+    env.json(&sci, &["add", "Ready task", "--size", "s"]);
+    let parked = id_of(env.json(&sci, &["add", "Parked task", "--size", "s"]));
+    write_park(&env, "sci", &parked, "agent-a", "user", &sci.display().to_string());
+    for args in [
+        vec!["list"],
+        vec!["ready"],
+        vec!["list", "--parked"],
+        vec!["tree"],
     ] {
         let mut full = vec!["--headers"];
         full.extend(args.iter().copied());
         let text = env.pretty(&sci, &full);
-        assert!(text.lines().next().unwrap().starts_with(first), "{args:?}: {text}");
+        assert!(text.lines().next().unwrap().starts_with("id"), "{args:?}: {text}");
         assert!(!env.pretty(&sci, &args).starts_with("id"), "{args:?}");
-        let mut json = vec!["--headers"];
-        json.extend(args.iter().copied());
-        assert_eq!(env.json(&sci, &json), env.json(&sci, &args), "{args:?}");
+        assert_eq!(env.json(&sci, &full), env.json(&sci, &args), "{args:?}");
     }
 }
 
@@ -1522,9 +1599,9 @@ Run: `just test-one --test cli headers_label` → FAIL (`--headers` unknown).
     pub headers: bool,
 ```
 
-`src/main.rs`: `Ok(width) => table::Layout { width, headers: cli.headers }` (bind `let headers = cli.headers;` where `cli` is still in scope if it has been moved by then).
+`src/main.rs`: take `let headers = cli.headers;` where `cli` is in scope, use `Ok(width) => table::Layout { width, headers }`, and add `output::Output::Projects(_)` and `output::Output::Claims(_)` to the outputs that get a width.
 
-`Output::Projects` arm — same cells as today, rendered by the module with headers always on:
+`Output::Projects` arm (same cells as today, headers always on):
 
 ```rust
         Output::Projects(o) => {
@@ -1599,7 +1676,7 @@ Run: `just test-one --test cli headers_label` → FAIL (`--headers` unknown).
         }
 ```
 
-Add `Output::Projects(_)` and `Output::Claims(_)` to `main.rs`'s list of outputs that get a width. Delete `grid_text`, `Cell`, `cell` and the private `Align` in `output.rs`.
+Delete `grid_text`, `Cell`, `cell`, the private `Align` and `id_width`.
 
 README.md, in the command list after the `list --parked --waiting-on` line:
 
@@ -1614,24 +1691,24 @@ README.md, in the command list after the `list --parked --waiting-on` line:
 Run: `just test-one --test cli headers`, `just test-one --test cli claims`, `just test-one --test cli projects`, `just test-one --test cli cli_vocabulary`
 Expected: PASS.
 
-- [ ] **Step 6: Fast suite and commit**
+- [ ] **Step 6: Gates and commit**
 
-Run: `just test-fast` → all pass. Commit `feat(pretty): --headers; projects and claims on the table module (tasks-674d5d)` with `tasks done tasks-674d5d` (the commit holds `tools/cli.toml` with the implementation).
+Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): --headers; projects and claims on the table module (tasks-ff7985)` with `tasks done tasks-ff7985` (the commit holds `tools/cli.toml` with the implementation).
 
 ---
 
-### Task 8: Warnings under a rule
+### Task 7: Warnings under a rule
 
 **Files:**
 - Modify: `src/present.rs` (add `rule`), `src/show_text.rs` (use it), `src/output.rs` (`pretty_warnings`), `src/main.rs`
-- Test: `tests/cli.rs` (`pretty_warnings_follow_the_output_and_survive_an_early_exit` and the tests that grep `warning:` in pretty stderr)
+- Test: `tests/cli.rs`
 
 **Interfaces:**
 - Produces: `present::rule(name: &str, painter: &Painter, width: usize) -> String`; `output::pretty_warnings(warnings: &[String], painter: &Painter, width: Option<usize>) -> String`.
 
-- [ ] **Step 1: Write the failing test** (update the existing one in `tests/cli.rs`)
+- [ ] **Step 1: Update the failing test**
 
-In `pretty_warnings_follow_the_output_and_survive_an_early_exit`, replace `merged.find("warning: sci-eeeeee")` with `merged.find("── warnings (1) ")` and add, after the order assertion:
+In `pretty_warnings_follow_the_output_and_survive_an_early_exit`, replace `merged.find("warning: sci-eeeeee")` with `merged.find("── warnings (1) ")` and add after the order assertion:
 
 ```rust
     let rule = merged.find("── warnings (1) ").unwrap();
@@ -1639,7 +1716,7 @@ In `pretty_warnings_follow_the_output_and_survive_an_early_exit`, replace `merge
     assert!(!merged.contains("warning: sci-eeeeee"), "{merged}");
 ```
 
-and in its early-exit half, `text.contains("── warnings (1) ")` instead of `warning: sci-eeeeee`.
+and in its early-exit half check `text.contains("── warnings (1) ")` instead of `warning: sci-eeeeee`.
 
 - [ ] **Step 2: Run it to see it fail**
 
@@ -1664,7 +1741,7 @@ pub fn rule(name: &str, painter: &Painter, width: usize) -> String {
 }
 ```
 
-`src/show_text.rs`: delete its `rule` and call `present::rule(name, painter, width.unwrap_or(MEASURE))` at each former call site.
+`src/show_text.rs`: delete its `rule` and call `present::rule(name, painter, width.unwrap_or(MEASURE))` where it called `rule(name, painter, width)`.
 
 `src/output.rs`:
 
@@ -1687,23 +1764,23 @@ pub fn pretty_warnings(warnings: &[String], painter: &Painter, width: Option<usi
 }
 ```
 
-`src/main.rs`: compute the warnings text after the layout is known, `output::pretty_warnings(&warnings, &stderr_painter, layout.width)`; on the invalid-`COLUMNS` path, where no width exists, pass `None`.
+`src/main.rs`: keep the warnings list where it is built today, and render it with `output::pretty_warnings(&warning_list, &stderr_painter, layout.width)` once the layout exists; on the invalid-`COLUMNS` path, which has no width, render it with `None`.
 
 - [ ] **Step 4: Run the tests**
 
 Run: `just test-one --test cli warning`
 Expected: PASS. Update every other test that looked for `warning: <text>` on pretty stderr to look for `<text>` after the rule; JSON `warnings` assertions do not change.
 
-- [ ] **Step 5: Fast suite and commit**
+- [ ] **Step 5: Gates and commit**
 
-Run: `just test-fast` → all pass. Commit `feat(pretty): warnings under a rule after the output (tasks-014c55)` with `tasks done tasks-014c55`.
+Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): warnings under a rule after the output (tasks-674d5d)` with `tasks done tasks-674d5d`.
 
 ---
 
-### Task 9: Remove the hand-rolled layout and prove widths on a realistic fixture
+### Task 8: Show's wrapping helpers move home, and widths proven on a realistic fixture
 
 **Files:**
-- Modify: `src/output.rs` (delete `render_row`, `render_wrapped`, `LongWord`, `wrap_lines_with`, `TITLE_FLOOR`, `Wrap`, `id_width`, `id_width_tree`; move `wrap_lines`, `fill_hard_split`, `paint_runs`, `columns` into `src/show_text.rs`), `src/show_text.rs`
+- Modify: `src/output.rs` (move `wrap_lines`, `fill_hard_split`, `paint_runs`, `columns` out), `src/show_text.rs` (receive them)
 - Test: `tests/cli.rs`
 
 **Interfaces:**
@@ -1711,65 +1788,64 @@ Run: `just test-fast` → all pass. Commit `feat(pretty): warnings under a rule 
 
 - [ ] **Step 1: Write the width test**
 
+The fixture makes every view's arithmetic known in advance. Its ids are 10 columns, sizes `m`, complexity and process unset (`-`), statuses `todo` or `doing`, dates 10, parks waiting on `user` with no reason, phases at most `implementing` (12). So, with two-space gaps:
+
+- list family (`list`, `ready`, `tree`, prime's task sections): fixed 10+2+1+1+1+5+10 plus 7 gaps = 44, plus the title's min 20 = 64.
+- parked (`list --parked`, prime's parked section): fixed 10+5+12+4+10 plus 6 gaps = 53, plus mins 20 + 40 = 113; stacked without `next`, 53 + 20 = 73.
+
+At 80, 120 and 236 every view therefore wraps or stacks, and no line may exceed the width. At 50 every view is below its floor (64 and 73), so every row is unwrapped and each title must appear whole on one line.
+
 ```rust
 #[test]
 fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
+    let title = |n: usize| format!("A realistic title number {n} that runs long enough to need wrapping in a table");
     for n in 0..4 {
-        let id = id_of(env.json(&sci, &[
-            "add",
-            &format!("A realistic title number {n} that runs long enough to need wrapping in a table"),
-            "--size", "m", "--tag", "pretty",
-        ]));
+        let id = id_of(env.json(&sci, &["add", &title(n), "--size", "m"]));
         if n % 2 == 0 {
             env.json(&sci, &["start", &id]);
+            write_park(&env, "sci", &id, "agent-a", "user", &sci.display().to_string());
         }
-        write_park(&env, "sci", &id, "agent-a", "user", &sci.display().to_string());
     }
+    let views: [&[&str]; 5] = [&["list"], &["ready"], &["list", "--parked"], &["prime"], &["tree"]];
+    let run = |width: &str, args: &[&str]| {
+        let out = env.cmd(&sci).env("COLUMNS", width).arg("--pretty").args(args).output().unwrap();
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
     for width in ["80", "120", "236"] {
-        for args in [vec!["list"], vec!["ready"], vec!["list", "--parked"], vec!["prime"], vec!["tree"]] {
-            let out = env
-                .cmd(&sci)
-                .env("COLUMNS", width)
-                .args(["--pretty"])
-                .args(&args)
-                .output()
-                .unwrap();
-            let text = String::from_utf8(out.stdout).unwrap();
-            let limit: usize = width.parse().unwrap();
+        let limit: usize = width.parse().unwrap();
+        for args in views {
+            let text = run(width, args);
             for line in text.lines() {
-                let fixed_overflow = !line.starts_with(' ') && line.chars().count() > limit
-                    && line.contains("A realistic title number");
-                assert!(
-                    line.chars().count() <= limit || fixed_overflow,
-                    "COLUMNS={width} {args:?}: {line:?}"
-                );
-                if fixed_overflow {
-                    assert!(line.contains("that runs long enough to need wrapping in a table"),
-                        "an unwrapped row keeps its title whole: {line:?}");
-                }
+                assert!(line.chars().count() <= limit, "COLUMNS={width} {args:?}: {line:?}");
             }
+        }
+    }
+    for args in views {
+        let text = run("50", args);
+        let shown: Vec<usize> = (0..4).filter(|&n| text.contains(&title(n))).collect();
+        assert!(!shown.is_empty(), "COLUMNS=50 {args:?} shows its titles whole:\n{text}");
+        for n in 0..4 {
+            assert!(
+                text.contains(&title(n)) || !text.contains(&format!("number {n} ")),
+                "COLUMNS=50 {args:?}: title {n} split:\n{text}"
+            );
         }
     }
 }
 ```
 
-(The parks written by `write_park` carry the next step `finish §3`; the long-step behaviour is pinned by Task 5's unit tests.)
-
 - [ ] **Step 2: Run it**
 
 Run: `just test-one --test cli every_table_view_fits`
-Expected: PASS (behaviour is complete; this pins it). If it fails, the failing line names the view and width: fix the view's column fits, not the test.
+Expected: PASS (behaviour is complete; this pins it). If a line fails, it names the view and width: fix that view's column fits, not the test.
 
-- [ ] **Step 3: Delete the dead layout code**
+- [ ] **Step 3: Move show's helpers**
 
-Remove the items listed under **Files**. `cargo build` (through `just check`) lists any remaining caller; there should be none outside `show_text.rs`, which now owns `wrap_lines`, `fill_hard_split`, `paint_runs` and `columns` (move them with their doc comments and unit tests, and change `show_text.rs`'s import from `crate::output::{..., paint_runs, wrap_lines}` to the local items).
+Move `wrap_lines`, `fill_hard_split`, `paint_runs` and `columns` (with their doc comments and unit tests) from `src/output.rs` into `src/show_text.rs`, the only caller, and change `show_text.rs`'s import `crate::output::{ParkInfo, ShowFields, paint_runs, wrap_lines}` to `crate::output::{ParkInfo, ShowFields}`.
 
-- [ ] **Step 4: Gates**
+- [ ] **Step 4: Gates and commit**
 
-Run: `just check` → clean (no dead-code warnings); `just test-fast` → all pass.
-
-- [ ] **Step 5: Commit**
-
-Commit `refactor(pretty): remove the hand-rolled table layout (tasks-f52fca)` with `tasks done tasks-f52fca`.
+Run: `just check` → clean; `just test-fast` → all pass. Commit `refactor(pretty): show owns its wrapping helpers; widths pinned on a fixture (tasks-014c55)` with `tasks done tasks-014c55`.

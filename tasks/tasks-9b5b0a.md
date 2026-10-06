@@ -7,8 +7,8 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-02T08:13:54Z
-updated: 2026-10-06T13:29:55Z
-depends: [tasks-9d8e5d]
+updated: 2026-10-06T14:05:21Z
+depends: [tasks-2ac5d1]
 parent: tasks-02b1ea
 tags: []
 source: tack-fc26cf
@@ -21,3 +21,4 @@ Found by a cross-family review experiment (tack-fc26cf) of 75990f0 (tasks-2578c3
 
 - 2026-10-06T13:01:34Z (main): folded into tasks-02b1ea (comfy-table migration): parked titles and every table's ids take the project colour there
 - 2026-10-06T13:29:53Z (feat/comfy-tables): closes with tasks-9d8e5d (Task 5: parked rows paint ids and titles with the project colour); close it in that task's commit
+- 2026-10-06T14:05:20Z (feat/comfy-tables): closes with tasks-2ac5d1 (plan Task 4, after the round 1 revision)
