@@ -3,10 +3,10 @@ id: tasks-674d5d
 title: Warnings under a rule
 status: todo
 priority: 2
-complexity: mid
+complexity: low
 process: direct
 created: 2026-10-06T13:29:40Z
-updated: 2026-10-06T14:05:19Z
+updated: 2026-10-06T14:05:34Z
 depends: [tasks-ff7985]
 parent: tasks-02b1ea
 tags: [pretty]
