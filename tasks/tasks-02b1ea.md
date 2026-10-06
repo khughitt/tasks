@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T15:31:56Z
+updated: 2026-10-06T15:44:05Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -65,3 +65,4 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T14:57:04Z (feat/comfy-tables): Execution resumed: user selected subagent-driven; Task 1 in ops .worktrees/cli-headers, then Tasks 2–8 in .worktrees/comfy-tables; accepted plan round 3 governs implementation.
 - 2026-10-06T15:10:03Z (feat/comfy-tables): Task 3 RED run exposed three plan-specified module tests that also pass with an empty renderer; strengthen shared-width, painted-cell, and CJK checks with explicit nonempty content assertions so they detect missing behavior.
 - 2026-10-06T15:31:56Z (feat/comfy-tables): Task 6 header interpretation: claims data rows stay uncolored and checkout-independent; its optional header uses the shared chrome role required by spec section 6 and the reviewed render(...painter) snippet.
+- 2026-10-06T15:44:05Z (feat/comfy-tables): Task 8 fixture correction: real park CLI replaces a write_park helper immediately after start; the helper retained the live claim and produced a claim-plus-park config error before layout could be tested. Width and intact-text assertions remain.

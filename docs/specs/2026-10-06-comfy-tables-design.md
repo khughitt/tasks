@@ -1,6 +1,7 @@
 # Pretty tables on comfy-table — design
 
-**Status:** draft (2026-10-06), tasks-02b1ea. Builds on the tasks-8a14be spike (branch
+**Status:** implemented (2026-10-06; accepted spec round 2), tasks-02b1ea.
+Builds on the tasks-8a14be spike (branch
 `spike/comfy-table`, commit c2e0e0e). Supersedes the hand-rolled wrapping of
 tasks-380515 and tasks-517584 for table views; `show` keeps its own layout
 (docs/specs/2026-10-03-show-layout-design.md).
@@ -50,9 +51,9 @@ pub struct Row { pub cells: Vec<String>, pub details: Vec<(&'static str, Detail)
 
 pub struct Layout { pub width: Option<usize>, pub headers: bool }
 
-/// One width per column, taken across several sections that share a schema.
-pub struct Widths(Vec<usize>);
-pub fn shared_widths(columns: &[Column], sections: &[&[Row]]) -> Widths;
+/// One width per column; None lets the section size that column itself.
+pub struct Widths(pub Vec<Option<usize>>);
+pub fn shared_widths(columns: &[Column], sections: &[&[Row]], headers: bool) -> Widths;
 
 pub fn render(
     columns: &[Column],
@@ -148,10 +149,10 @@ With no warnings nothing is printed. JSON warnings are unchanged.
 
 ## 8. What goes
 
-`render_row`, `render_wrapped`, `LongWord`, `wrap_lines_with`, `fill_hard_split`,
+`render_row`, `render_wrapped`, `LongWord`, `wrap_lines_with`,
 `TITLE_FLOOR`, `Wrap::indent`, `grid_text` and its `Cell`/`Align`, `detail_line`, and the
-fixed paddings in each view. `wrap_lines` stays, moved into `show_text.rs`, the one
-non-table user. `Span::left` goes if nothing else pads.
+fixed paddings in each view. `wrap_lines`, `fill_hard_split`, `paint_runs` and
+`columns` stay, moved into `show_text.rs`, the one non-table user. `Span::left` goes if nothing else pads.
 
 ## 9. Dependency
 

@@ -1,6 +1,9 @@
 # Pretty tables on comfy-table Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+
+**Implementation status:** Tasks 1–8 implemented (2026-10-06). Whole-branch review
+and integration are tracked separately on tasks-02b1ea.
 
 **Goal:** Every pretty table view renders through one module over comfy-table, with
 side-by-side wrapping, shared widths in `prime`, project colours on ids and titles,
@@ -54,7 +57,7 @@ Each module item arrives with its first user, so every commit passes `just check
 
 Work in an ops worktree (`work-link --ensure .worktrees`, `git worktree add .worktrees/cli-headers -b feat/cli-headers`, lock it), under ops-539e1a. Close tasks-8b152f in tasks when the ops merge lands.
 
-- [ ] **Step 1: Add the row**
+- [x] **Step 1: Add the row**
 
 ```toml
 [[cli.tasks.commands]]
@@ -65,12 +68,12 @@ options = [
 ]
 ```
 
-- [ ] **Step 2: Run the table's tests**
+- [x] **Step 2: Run the table's tests**
 
 Run: `just test-one tests.test_cli`
 Expected: PASS (4 tests).
 
-- [ ] **Step 3: Fast suite, commit, merge to ops main**
+- [x] **Step 3: Fast suite, commit, merge to ops main**
 
 Run: `just test-fast` → OK. Commit `feat(cli): --headers on the tasks root (ops-539e1a)` with `tasks done ops-539e1a`, merge `--no-ff` into ops main, run `tt-report`, unlock and remove the worktree. Then in tasks: `tasks done tasks-8b152f "cli.toml --headers landed in ops (<merge sha>)"` and commit that record alone.
 
@@ -85,7 +88,7 @@ Run: `just test-fast` → OK. Commit `feat(cli): --headers on the tasks root (op
 **Interfaces:**
 - Produces: `pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;` in `src/output.rs`; `ReadCtx::project_colors(&self) -> ProjectColors`; `Output::paint_projects(&mut self, colors: &ProjectColors)` covering `List`, `Tree`, `Lanes` and `Prime`'s summary sections (Task 4 adds the parked rows).
 
-- [ ] **Step 1: Write the failing test** (next to `search_rows_carry_the_project_color` in `tests/cli.rs`)
+- [x] **Step 1: Write the failing test** (next to `search_rows_carry_the_project_color` in `tests/cli.rs`)
 
 ```rust
 #[test]
@@ -107,12 +110,12 @@ fn ready_tree_and_prime_rows_carry_the_project_color() {
 }
 ```
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail**
 
 Run: `just test-one --test cli ready_tree_and_prime_rows_carry_the_project_color`
 Expected: FAIL at `["ready"]` (only `list` and `search` fill the colour today).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/output.rs`, near `TaskSummary`:
 
@@ -200,11 +203,11 @@ In `src/commands/list.rs::list`, replace the `row.project_color = ctx.scope.proj
 
 Apply the same two lines (`let colors = ctx.project_colors();` before `ctx.warnings` is moved; `out.paint_projects(&colors);` before `Ok(out)`) at: the ready builder's `Output::List` (near line 486), `prime`'s `Output::Prime`, `src/commands/sample.rs`'s `Output::List`, `src/commands/tree.rs`'s `Output::Tree`, `src/commands/lanes.rs`'s `Output::Lanes`. Do not touch `src/commands/claims.rs`.
 
-- [ ] **Step 4: Run the new test and the existing colour tests**
+- [x] **Step 4: Run the new test and the existing colour tests**
 
 Run: `just test-one --test cli project_color` → PASS (the new test, `search_rows_carry_the_project_color`, `project_colors_*`).
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): project colours on every task-summary row (tasks-565420)` with `tasks done tasks-565420`.
 
@@ -235,11 +238,11 @@ Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty)
   - `output::tree_rows(nodes: &[TreeNode], depth: usize, painter: &Painter, parallel: bool, kind: bool, rows: &mut Vec<table::Row>)`
   - `output::render(out: &Output, format: Format, painter: &Painter, layout: &table::Layout) -> String`
 
-- [ ] **Step 1: Add the dependency and the module skeleton**
+- [x] **Step 1: Add the dependency and the module skeleton**
 
 Run: `cargo add comfy-table@8 --features custom_styling`. Add `mod table;` after `mod style;` in `src/main.rs`. Create `src/table.rs` with the code of Step 4 but `render`'s body replaced by `String::new()`, and with the tests of Step 2 at the bottom.
 
-- [ ] **Step 2: Write the failing module tests** (bottom of `src/table.rs`)
+- [x] **Step 2: Write the failing module tests** (bottom of `src/table.rs`)
 
 ```rust
 #[cfg(test)]
@@ -433,12 +436,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Run them to see them fail**
+- [x] **Step 3: Run them to see them fail**
 
 Run: `just test-one table::tests`
 Expected: FAIL (the stub renders nothing).
 
-- [ ] **Step 4: Implement the module** (above the tests in `src/table.rs`; delete `visible_width` from `src/output.rs` and `use crate::table::visible_width;` there)
+- [x] **Step 4: Implement the module** (above the tests in `src/table.rs`; delete `visible_width` from `src/output.rs` and `use crate::table::visible_width;` there)
 
 ```rust
 //! Pretty tables: columns and rows of painted cells, laid out by comfy-table
@@ -776,12 +779,12 @@ pub fn visible_width(text: &str) -> usize {
 }
 ```
 
-- [ ] **Step 5: Run the module tests**
+- [x] **Step 5: Run the module tests**
 
 Run: `just test-one table::tests`
 Expected: PASS (11 tests).
 
-- [ ] **Step 6: Write the failing view tests** (in `src/output.rs`'s test module, replacing `a_long_title_wraps_under_itself_at_the_terminal_width`)
+- [x] **Step 6: Write the failing view tests** (in `src/output.rs`'s test module, replacing `a_long_title_wraps_under_itself_at_the_terminal_width`)
 
 ```rust
     #[test]
@@ -854,12 +857,12 @@ fn prime_sections_share_every_fixed_width_when_piped() {
 
 Keep both existing tests that assert "dates must start in the same column across prime's blocks".
 
-- [ ] **Step 7: Run them to see them fail**
+- [x] **Step 7: Run them to see them fail**
 
 Run: `just test-one output::tests::a_`, `just test-one --test cli list_ids_take_the_project_color`, `just test-one --test cli prime_sections_share`
 Expected: FAIL (`task_columns`, `task_row`, `tree_rows` do not exist; ids are chrome).
 
-- [ ] **Step 8: Implement the views**
+- [x] **Step 8: Implement the views**
 
 `src/present.rs`:
 
@@ -1118,12 +1121,12 @@ then, under today's labels and in today's order: `section(&closeout)`; the lanes
 
 Delete `table`, `tree_text`, `id_width_tree` and `Wrap::indented`, which nothing calls now.
 
-- [ ] **Step 9: Run the tests**
+- [x] **Step 9: Run the tests**
 
 Run: `just test-one table::tests`, `just test-one output::tests`, `just test-one --test cli list`, `just test-one --test cli prime`, `just test-one --test cli tree`
 Expected: the new tests PASS, and both prime date-alignment tests PASS. Existing tests that pin the old list spacing (single spaces between P, size, cx, process, status) fail: update each to the two-space gap and keep its assertion's intent.
 
-- [ ] **Step 10: Gates and commit**
+- [x] **Step 10: Gates and commit**
 
 Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): table module with list, ready, search, tree and prime's task sections (tasks-73c29c)` with `tasks done tasks-73c29c`.
 
@@ -1144,7 +1147,7 @@ Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty)
   - `ParkedRow.project_color: Option<Rgb>` (`#[serde(skip)]`)
   - `output::parked_columns() -> Vec<table::Column>`, `output::parked_row(row: &ParkedRow, painter: &Painter) -> table::Row`, `output::parked_table(rows: &[ParkedRow], painter: &Painter, layout: &table::Layout, widths: Option<&table::Widths>) -> String`, `output::quiet_table(rows: &[ParkedRow], painter: &Painter, layout: &table::Layout) -> String`
 
-- [ ] **Step 1: Write the failing module tests** (add to `src/table.rs`'s tests)
+- [x] **Step 1: Write the failing module tests** (add to `src/table.rs`'s tests)
 
 ```rust
     #[test]
@@ -1180,7 +1183,7 @@ Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty)
     }
 ```
 
-- [ ] **Step 2: Write the failing view tests** (in `src/output.rs`, replacing `a_parked_rows_next_step_wraps_under_its_text`, `a_parked_tables_wait_column_fits_its_longest_stop`, `quiet_briefs_wrap_title_and_next_under_their_text`, `a_detail_line_keeps_a_long_word_whole` and `a_parked_row_wraps_its_title`; keep `parked_with` and `LONG_STEP`)
+- [x] **Step 2: Write the failing view tests** (in `src/output.rs`, replacing `a_parked_rows_next_step_wraps_under_its_text`, `a_parked_tables_wait_column_fits_its_longest_stop`, `quiet_briefs_wrap_title_and_next_under_their_text`, `a_detail_line_keeps_a_long_word_whole` and `a_parked_row_wraps_its_title`; keep `parked_with` and `LONG_STEP`)
 
 ```rust
     #[test]
@@ -1227,7 +1230,7 @@ fn parked_rows_paint_ids_and_titles_with_the_project_color() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "Parked title"]));
-    write_park(&env, "sci", &id, "agent-a", "user", &sci.display().to_string());
+    env.json(&sci, &["park", &id, "finish §3", "--waiting-on", "user"]);
     write_project_color(&sci, "sci", "#123456");
     for args in [vec!["list", "--parked"], vec!["prime"]] {
         let mut full = vec!["--pretty", "--color", "always"];
@@ -1240,12 +1243,12 @@ fn parked_rows_paint_ids_and_titles_with_the_project_color() {
 }
 ```
 
-- [ ] **Step 3: Run them to see them fail**
+- [x] **Step 3: Run them to see them fail**
 
 Run: `just test-one table::tests`, `just test-one output::tests`, `just test-one --test cli parked_rows_paint`
 Expected: FAIL (no `Whole`, `right`, `id_only`; old parked signatures; titles unpainted).
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `src/table.rs`:
 
@@ -1395,12 +1398,12 @@ pub fn quiet_table(rows: &[ParkedRow], painter: &Painter, layout: &crate::table:
 
 The `Output::Parked` arm calls `parked_table(&o.tasks, painter, layout, None)`; `Output::Quiet` calls `quiet_table(&o.tasks, painter, layout)`; prime's parked section calls `parked_table(&o.parked, painter, layout, Some(&crate::table::Widths::id_only(id, 7)))` and the `let wrap = ...` line goes. Delete `quiet_briefs`, `detail_line`, `render_row`, `render_wrapped`, `LongWord`, `TITLE_FLOOR` and `Wrap`: nothing uses them now. `wrap_lines` stays for `show_text.rs` (its body is `wrap_lines_with(chars, available, LongWord::Split)`: inline that body as `wrap_lines`'s own, always hard-splitting, and delete `wrap_lines_with`).
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `just test-one table::tests`, `just test-one output::tests`, `just test-one --test cli parked`, `just test-one --test cli quiet`, `just test-one --test cli prime`
 Expected: PASS. Update existing CLI tests that look for the `next:` label (it now appears only in the narrow fallback) or for `waits on user, review` (the column reads `user, review`; `waits on` is its header). `quiet` loses its blank separator lines and its unlabelled `next:` line.
 
-- [ ] **Step 6: Gates and commit**
+- [x] **Step 6: Gates and commit**
 
 Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): parked and quiet on the table module (tasks-2ac5d1)` with `tasks done tasks-2ac5d1` and `tasks done tasks-9b5b0a "parked titles and ids take the project colour"`.
 
@@ -1416,7 +1419,7 @@ Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty)
 - Consumes: `table::{Column, Row, Detail, Widths::id_only, render}`; `present::{row_id, title}`; lane rows' colours (Task 2).
 - Produces: `output::lane_table(rows: &[LaneRow], painter: &Painter, layout: &table::Layout, widths: Option<&table::Widths>, detail: bool) -> String`.
 
-- [ ] **Step 1: Write the failing test** (`tests/cli.rs`)
+- [x] **Step 1: Write the failing test** (`tests/cli.rs`)
 
 ```rust
 #[test]
@@ -1451,12 +1454,12 @@ fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
 }
 ```
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail**
 
 Run: `just test-one --test cli lanes_render_as_a_table`
 Expected: FAIL (`lane_lines` prints `guidance` unlabelled and paints nothing in the project colour).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```rust
 fn lane_table(
@@ -1524,12 +1527,12 @@ fn lane_table(
 
 The `Output::Lanes` arm calls `lane_table(&o.lanes, painter, layout, None, true)`; prime's lanes block calls `lane_table(&o.lanes, painter, layout, Some(&crate::table::Widths::id_only(id, 4)), false)` and its `lane_width` computation goes. In prime, widen the shared id to the lane ids too: `.max(o.lanes.iter().map(|row| row.lane.id.len()).max().unwrap_or(0))` on `id`. Delete `lane_lines`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `just test-one --test cli lanes`, `just test-one --test cli prime`
 Expected: PASS. Update the existing lanes test that expects `    Ship the captures...` and `    active: {running} Running @` to the `guide:` and `active:` labels.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): lanes on the table module with picks and active rows in project colours (tasks-9d8e5d)` with `tasks done tasks-9d8e5d`.
 
@@ -1545,12 +1548,15 @@ Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty)
 - Consumes: Task 1's merged `cli.toml`; `table::{Column, Row, Layout, render}`.
 - Produces: `Cli.headers: bool`.
 
-- [ ] **Step 1: Adopt the table**
+- [x] **Step 1: Adopt the table**
 
 Run: `"$(tasks --pretty root ops-539e1a)/bin/vendored" adopt cli.toml` in the worktree (`tasks root` prints the registered ops checkout).
-Expected: `tools/cli.toml from <ops merge sha>`; `just test-one --test cli cli_vocabulary` now FAILS (the parser lacks `--headers`).
+Expected: `tools/cli.toml from <ops merge sha>`; `just test-one parser_surface_equals_table` is the structural adoption check.
+Execution recorded RED through the headers integration test (unknown `--headers`),
+then GREEN through this structural check after parser adoption; the behavioral
+`cli_vocabulary` filter does not check parser/table equality.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```rust
 #[test]
@@ -1594,11 +1600,11 @@ fn claims_is_a_table_and_never_coloured() {
 
 `projects_pretty_prints_one_header_and_aligned_columns` stays as the projects test.
 
-- [ ] **Step 3: Run them to see them fail**
+- [x] **Step 3: Run them to see them fail**
 
 Run: `just test-one --test cli headers_label` → FAIL (`--headers` unknown).
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `src/cli.rs`, in `Cli` after `color`:
 
@@ -1690,17 +1696,17 @@ Delete `grid_text`, `Cell`, `cell`, the private `Align` and `id_width`.
 README.md, in the command list after the `list --parked --waiting-on` line:
 
 ```
-    tasks --headers list             # label each column of a pretty table
+    tasks --pretty --headers list     # label each column of a pretty table
 ```
 
 `skills/tasks/SKILL.md`, at the end of step 5's `list --parked` sentence: "`--headers` labels the columns of any pretty table."
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
-Run: `just test-one --test cli headers`, `just test-one --test cli claims`, `just test-one --test cli projects`, `just test-one --test cli cli_vocabulary`
+Run: `just test-one --test cli headers`, `just test-one --test cli claims`, `just test-one --test cli projects`, `just test-one parser_surface_equals_table`
 Expected: PASS.
 
-- [ ] **Step 6: Gates and commit**
+- [x] **Step 6: Gates and commit**
 
 Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): --headers; projects and claims on the table module (tasks-ff7985)` with `tasks done tasks-ff7985` (the commit holds `tools/cli.toml` with the implementation).
 
@@ -1715,7 +1721,7 @@ Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty)
 **Interfaces:**
 - Produces: `present::rule(name: &str, painter: &Painter, width: usize) -> String`; `output::pretty_warnings(warnings: &[String], painter: &Painter, width: Option<usize>) -> String`.
 
-- [ ] **Step 1: Update the failing test**
+- [x] **Step 1: Update the failing test**
 
 In `pretty_warnings_follow_the_output_and_survive_an_early_exit`, replace `merged.find("warning: sci-eeeeee")` with `merged.find("── warnings (1) ")` and add after the order assertion:
 
@@ -1727,12 +1733,12 @@ In `pretty_warnings_follow_the_output_and_survive_an_early_exit`, replace `merge
 
 and in its early-exit half check `text.contains("── warnings (1) ")` instead of `warning: sci-eeeeee`.
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail**
 
 Run: `just test-one --test cli pretty_warnings_follow`
 Expected: FAIL (no rule yet).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/present.rs` (moved from `show_text::rule`, taking a resolved width):
 
@@ -1775,12 +1781,12 @@ pub fn pretty_warnings(warnings: &[String], painter: &Painter, width: Option<usi
 
 `src/main.rs`: keep the warnings list where it is built today, and render it with `output::pretty_warnings(&warning_list, &stderr_painter, layout.width)` once the layout exists; on the invalid-`COLUMNS` path, which has no width, render it with `None`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `just test-one --test cli warning`
 Expected: PASS. Update every other test that looked for `warning: <text>` on pretty stderr to look for `<text>` after the rule; JSON `warnings` assertions do not change.
 
-- [ ] **Step 5: Gates and commit**
+- [x] **Step 5: Gates and commit**
 
 Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty): warnings under a rule after the output (tasks-674d5d)` with `tasks done tasks-674d5d`.
 
@@ -1795,7 +1801,7 @@ Run: `just check` → clean; `just test-fast` → all pass. Commit `feat(pretty)
 **Interfaces:**
 - Consumes: everything above. Produces nothing new.
 
-- [ ] **Step 1: Write the width test**
+- [x] **Step 1: Write the width test**
 
 The fixture makes every view's arithmetic known in advance. Its ids are 10 columns, sizes `m`, complexity and process unset (`-`), statuses `todo` or `doing`, dates 10, parks waiting on `user` with no reason, phases at most `implementing` (12). So, with two-space gaps:
 
@@ -1814,7 +1820,7 @@ fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
         let id = id_of(env.json(&sci, &["add", &title(n), "--size", "m"]));
         if n % 2 == 0 {
             env.json(&sci, &["start", &id]);
-            write_park(&env, "sci", &id, "agent-a", "user", &sci.display().to_string());
+            env.json(&sci, &["park", &id, "finish §3", "--waiting-on", "user"]);
         }
     }
     let views: [&[&str]; 5] = [&["list"], &["ready"], &["list", "--parked"], &["prime"], &["tree"]];
@@ -1846,15 +1852,15 @@ fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
 }
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `just test-one --test cli every_table_view_fits`
 Expected: PASS (behaviour is complete; this pins it). If a line fails, it names the view and width: fix that view's column fits, not the test.
 
-- [ ] **Step 3: Move show's helpers**
+- [x] **Step 3: Move show's helpers**
 
 Move `wrap_lines`, `fill_hard_split`, `paint_runs` and `columns` (with their doc comments and unit tests) from `src/output.rs` into `src/show_text.rs`, the only caller, and change `show_text.rs`'s import `crate::output::{ParkInfo, ShowFields, paint_runs, wrap_lines}` to `crate::output::{ParkInfo, ShowFields}`.
 
-- [ ] **Step 4: Gates and commit**
+- [x] **Step 4: Gates and commit**
 
 Run: `just check` → clean; `just test-fast` → all pass. Commit `refactor(pretty): show owns its wrapping helpers; widths pinned on a fixture (tasks-014c55)` with `tasks done tasks-014c55`.

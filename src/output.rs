@@ -1,5 +1,4 @@
 use std::io::IsTerminal;
-use unicode_width::UnicodeWidthChar;
 
 use crate::error::{Error, Result};
 use crate::lanes::{Causes, LaneRow, LaneState};
@@ -1538,111 +1537,6 @@ fn terminal_attached_width() -> Option<usize> {
     }
 }
 
-// ponytail: per-character widths can split joined emoji; use grapheme clusters if needed.
-fn columns(chars: &[(char, Option<Style>)]) -> usize {
-    chars.iter().map(|(c, _)| c.width().unwrap_or(0)).sum()
-}
-
-/// Paint runs of one style each. Adjacent pieces sharing a style merge into one run; the
-/// visible text is unchanged, so `ColorMode::Never` output matches painting each piece
-/// whole.
-pub(crate) fn paint_runs(chars: &[(char, Option<Style>)], painter: &Painter) -> String {
-    let mut rendered = String::new();
-    let mut index = 0;
-    while index < chars.len() {
-        let style = chars[index].1;
-        let end = chars[index..]
-            .iter()
-            .take_while(|(_, s)| *s == style)
-            .count()
-            + index;
-        let text: String = chars[index..end].iter().map(|(c, _)| c).collect();
-        rendered.push_str(&match style {
-            Some(style) => painter.paint(style, &text),
-            None => text,
-        });
-        index = end;
-    }
-    rendered
-}
-
-/// Greedy word wrap over already-styled characters: a break lands on a space run, which is
-/// dropped there, and a word longer than `available` is hard-split at the width. A word
-/// keeps its style across the split.
-pub(crate) fn wrap_lines(
-    chars: &[(char, Option<Style>)],
-    available: usize,
-) -> Vec<Vec<(char, Option<Style>)>> {
-    let mut lines: Vec<Vec<(char, Option<Style>)>> = Vec::new();
-    let mut line: Vec<(char, Option<Style>)> = Vec::new();
-    let mut pending: Option<&[(char, Option<Style>)]> = None;
-    let mut index = 0;
-    while index < chars.len() {
-        let spaces = chars[index].0 == ' ';
-        let end = chars[index..]
-            .iter()
-            .take_while(|(c, _)| (*c == ' ') == spaces)
-            .count()
-            + index;
-        let run = &chars[index..end];
-        index = end;
-        if spaces {
-            if !line.is_empty() {
-                pending = Some(run);
-            }
-            continue;
-        }
-        let sep = pending.take().unwrap_or(&[]);
-        if columns(&line) + columns(sep) + columns(run) <= available {
-            line.extend_from_slice(sep);
-            line.extend_from_slice(run);
-        } else if columns(run) > available {
-            if !line.is_empty() {
-                lines.push(std::mem::take(&mut line));
-            }
-            fill_hard_split(&mut lines, &mut line, run, available);
-        } else {
-            lines.push(std::mem::take(&mut line));
-            line.extend_from_slice(run);
-        }
-    }
-    if !line.is_empty() {
-        lines.push(line);
-    }
-    lines
-}
-
-/// Chunk a word longer than the width into full-width lines, leaving the tail on the
-/// current line.
-fn fill_hard_split(
-    lines: &mut Vec<Vec<(char, Option<Style>)>>,
-    line: &mut Vec<(char, Option<Style>)>,
-    word: &[(char, Option<Style>)],
-    available: usize,
-) {
-    let mut word = word;
-    while columns(word) > available {
-        let mut used = 0;
-        let split = word
-            .iter()
-            .take_while(|(c, _)| {
-                let next = used + c.width().unwrap_or(0);
-                if next > available {
-                    false
-                } else {
-                    used = next;
-                    true
-                }
-            })
-            .count()
-            .max(1);
-        let (chunk, rest) = word.split_at(split);
-        lines.push(chunk.to_vec());
-        word = rest;
-    }
-    line.extend_from_slice(word);
-}
-
 pub fn task_columns(parallel: bool, kind: bool) -> Vec<crate::table::Column> {
     use crate::table::Column;
     let mut columns = vec![
@@ -2498,54 +2392,6 @@ mod tests {
             layout_at(60),
         );
         assert_eq!(text.lines().count(), 1, "{text:?}");
-    }
-
-    #[test]
-    fn a_word_longer_than_the_available_width_is_hard_split() {
-        let chars: Vec<(char, Option<Style>)> = "abcdefghij".chars().map(|c| (c, None)).collect();
-        let lines = wrap_lines(&chars, 4);
-        let texts: Vec<String> = lines
-            .iter()
-            .map(|line| line.iter().map(|(c, _)| c).collect())
-            .collect();
-        assert_eq!(texts, ["abcd", "efgh", "ij"]);
-    }
-
-    #[test]
-    fn hard_split_does_not_join_the_previous_word() {
-        let chars: Vec<(char, Option<Style>)> =
-            "abcd bbbbbbbb".chars().map(|c| (c, None)).collect();
-        let lines = wrap_lines(&chars, 5);
-        let texts: Vec<String> = lines
-            .iter()
-            .map(|line| line.iter().map(|(c, _)| c).collect())
-            .collect();
-        assert_eq!(texts, ["abcd", "bbbbb", "bbb"]);
-    }
-
-    #[test]
-    fn a_break_drops_the_space_and_keeps_words_inline() {
-        let chars: Vec<(char, Option<Style>)> = "ab cd ef".chars().map(|c| (c, None)).collect();
-        let lines = wrap_lines(&chars, 6);
-        let texts: Vec<String> = lines
-            .iter()
-            .map(|line| line.iter().map(|(c, _)| c).collect())
-            .collect();
-        assert_eq!(texts, ["ab cd", "ef"]);
-    }
-
-    #[test]
-    fn a_suffix_keeps_its_style_on_the_continuation_line() {
-        let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
-        let chars: Vec<(char, Option<Style>)> = "hello "
-            .chars()
-            .map(|c| (c, Some(Style::Chrome)))
-            .chain("world".chars().map(|c| (c, Some(Style::Emphasis))))
-            .collect();
-        let lines = wrap_lines(&chars, 8);
-        assert_eq!(lines.len(), 2, "{lines:?}");
-        assert_eq!(paint_runs(&lines[0], &colored), "\x1b[2mhello\x1b[0m");
-        assert_eq!(paint_runs(&lines[1], &colored), "\x1b[1mworld\x1b[0m");
     }
 
     #[test]

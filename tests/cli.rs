@@ -26762,20 +26762,35 @@ fn headers_label_each_table_view_and_leave_json_alone() {
         "user",
         &sci.display().to_string(),
     );
+    let store = env.claim_store("sci");
+    let mut parks = std::fs::read_to_string(&store).unwrap();
+    parks.push_str("reason = \"quiet\"\nminutes = 40\n");
+    std::fs::write(&store, parks).unwrap();
+    env.json(&sci, &["add", "Lane task", "--lane"]);
     for args in [
         vec!["list"],
         vec!["ready"],
         vec!["list", "--parked"],
         vec!["tree"],
+        vec!["search", "task"],
+        vec!["prime"],
+        vec!["quiet"],
+        vec!["lanes"],
     ] {
         let mut full = vec!["--headers"];
         full.extend(args.iter().copied());
         let text = env.pretty(&sci, &full);
         assert!(
-            text.lines().next().unwrap().starts_with("id"),
+            text.lines()
+                .any(|line| line.split_whitespace().next() == Some("id")),
             "{args:?}: {text}"
         );
-        assert!(!env.pretty(&sci, &args).starts_with("id"), "{args:?}");
+        assert!(
+            !env.pretty(&sci, &args)
+                .lines()
+                .any(|line| line.split_whitespace().next() == Some("id")),
+            "{args:?}"
+        );
         assert_eq!(env.json(&sci, &full), env.json(&sci, &args), "{args:?}");
     }
 }
@@ -26824,4 +26839,64 @@ fn claims_headers_use_chrome_without_painting_claims() {
         env.json(&sci, &["claims"]),
         env.json(&sci, &["--headers", "claims"])
     );
+}
+
+#[test]
+fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let title = |n: usize| {
+        format!("A realistic title number {n} that runs long enough to need wrapping in a table")
+    };
+    for n in 0..4 {
+        let id = id_of(env.json(&sci, &["add", &title(n), "--size", "m"]));
+        if n % 2 == 0 {
+            env.json(&sci, &["start", &id]);
+            env.json(&sci, &["park", &id, "finish §3", "--waiting-on", "user"]);
+        }
+    }
+    let views: [&[&str]; 5] = [
+        &["list"],
+        &["ready"],
+        &["list", "--parked"],
+        &["prime"],
+        &["tree"],
+    ];
+    let run = |width: &str, args: &[&str]| {
+        let out = env
+            .cmd(&sci)
+            .env("COLUMNS", width)
+            .arg("--pretty")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    for width in ["80", "120", "236"] {
+        let limit: usize = width.parse().unwrap();
+        for args in views {
+            let text = run(width, args);
+            for line in text.lines() {
+                assert!(
+                    line.chars().count() <= limit,
+                    "COLUMNS={width} {args:?}: {line:?}"
+                );
+            }
+        }
+    }
+    for args in views {
+        let text = run("50", args);
+        let shown: Vec<usize> = (0..4).filter(|&n| text.contains(&title(n))).collect();
+        assert!(
+            !shown.is_empty(),
+            "COLUMNS=50 {args:?} shows its titles whole:\n{text}"
+        );
+        for n in 0..4 {
+            assert!(
+                text.contains(&title(n)) || !text.contains(&format!("number {n} ")),
+                "COLUMNS=50 {args:?}: title {n} split:\n{text}"
+            );
+        }
+    }
 }
