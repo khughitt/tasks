@@ -161,7 +161,8 @@ nothing is eligible.
    `run: 69 min (est 40, idle); preflight 1, build 4, smoke 64; hung: trace export`.
    Tools that compare estimates with actuals parse this form, so keep it exact.
    `prime` lists parked work first with where it was left; `ready` omits work waiting on
-   the user; `list --parked` is the picker's feed.
+   the user; `list --parked` is the picker's feed. `list --parked --waiting-on user
+   --all-projects` is the person's queue: everything parked on them, with each next step.
 6. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are
    still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any

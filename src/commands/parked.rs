@@ -34,7 +34,7 @@ pub fn rows_preferring(
     prefer: Prefer,
     reason: Option<Reason>,
 ) -> Result<Vec<ParkedRow>> {
-    Ok(sourced_rows(ctx, all, claims, now, prefer, reason)?
+    Ok(sourced_rows(ctx, all, claims, now, prefer, reason, None)?
         .into_iter()
         .map(|(row, _)| row)
         .collect())
@@ -42,13 +42,15 @@ pub fn rows_preferring(
 
 /// `rows`, each with the record its row was built from: the registered copy or the one in
 /// the checkout the park recorded, whichever the row shows. `None` for an unresolved park.
+/// `waiting_on` keeps only parks waiting on that party, unresolved ones included.
 pub fn rows_with_records(
     ctx: &mut ReadCtx,
     all: &[Task],
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
+    waiting_on: Option<WaitingOn>,
 ) -> Result<Vec<(ParkedRow, Option<Task>)>> {
-    sourced_rows(ctx, all, claims, now, Prefer::Registered, None)
+    sourced_rows(ctx, all, claims, now, Prefer::Registered, None, waiting_on)
 }
 
 fn sourced_rows(
@@ -58,10 +60,14 @@ fn sourced_rows(
     now: OffsetDateTime,
     prefer: Prefer,
     reason: Option<Reason>,
+    waiting_on: Option<WaitingOn>,
 ) -> Result<Vec<(ParkedRow, Option<Task>)>> {
+    // Selected from the park entry, before any row is built, so a park left out never
+    // reads another checkout or warns.
     let mut entries: Vec<(&String, &Park)> = claims
         .parks()
         .filter(|(_, park)| reason.is_none_or(|reason| park.reason == Some(reason)))
+        .filter(|(_, park)| waiting_on.is_none_or(|who| park.waiting_on == who))
         .collect();
     entries.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| a.0.cmp(b.0)));
     let mut rows = Vec::new();
