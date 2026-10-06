@@ -7,8 +7,9 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T14:44:07Z
-updated: 2026-10-02T14:55:41Z
+updated: 2026-10-06T16:49:58Z
 depends: []
+parent: tasks-0e432f
 tags: []
 source: docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md
 agent: codex

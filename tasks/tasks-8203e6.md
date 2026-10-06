@@ -7,8 +7,9 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T13:01:35Z
+updated: 2026-10-06T16:49:59Z
 depends: [ops-b31634]
+parent: tasks-1f05a7
 tags: [pretty]
 agent: claude-code/claude-opus-5-5
 ---

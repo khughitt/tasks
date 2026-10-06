@@ -7,8 +7,9 @@ size: s
 complexity: mid
 process: direct
 created: 2026-09-09T03:01:18Z
-updated: 2026-09-30T10:10:19Z
+updated: 2026-10-06T16:50:00Z
 depends: []
+parent: tasks-6ed79b
 tags: [curation, skill]
 ---
 

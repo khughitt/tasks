@@ -7,8 +7,9 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-02T19:19:44Z
-updated: 2026-10-02T19:19:44Z
+updated: 2026-10-06T16:50:03Z
 depends: []
+parent: tasks-46d207
 tags: [cli]
 agent: claude-code/claude-opus-5-5
 ---

@@ -4,8 +4,8 @@ title: "Color tags consistently, with styles drawn from the tag vocabulary"
 status: idea
 priority: 3
 created: 2026-10-03T16:55:26Z
-updated: 2026-10-03T16:55:30Z
-depends: [tasks-606552]
+updated: 2026-10-06T16:50:07Z
+depends: [tasks-606552, tasks-6ac7fd]
 parent: tasks-cea445
 tags: [cli]
 source: "user:2026-10-03 session (show screenshot)"
@@ -20,3 +20,7 @@ Options to weigh when scoped:
 - let mindful own tag styles as part of the shared vocabulary (tasks-eb2b4e) and have tasks read them, keeping tasks standalone when mindful is absent.
 
 Rendering goes through the field-role mapping from tasks-606552, so this depends on it, and the style source should fall out of tasks-6ac7fd's precedence and offline rules rather than invent its own.
+
+## Notes
+
+- 2026-10-06T16:50:06Z (main): dependency: use tasks-6ac7fd's reviewed vocabulary/style-source contract; retain the existing rendering dependency and scope the color idea after that decision.

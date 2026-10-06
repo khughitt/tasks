@@ -2,12 +2,12 @@
 id: tasks-5e2472
 title: Design delegated identity from verified Codex semantics
 status: todo
-priority: 2
+priority: 1
 size: m
 complexity: high
 process: planned
 created: 2026-10-06T10:04:44Z
-updated: 2026-10-06T10:59:44Z
+updated: 2026-10-06T16:50:05Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
@@ -32,3 +32,4 @@ Reports resolved together: tasks-5745bb, tasks-616cd7, tasks-cf8687, tasks-290fa
 - 2026-10-06T10:39:15Z (main): review: spec round 1 — verdict: revise; findings: Important 4; reviewer: human
 - 2026-10-06T10:41:53Z (main): Review disposition: intended semantics is now prerequisite tasks-c0bad3; delegated closure moved to tasks-f8c9cc; the six conflict/fallback reports share one remedy and closeout; upstream repair is conditional, not the default.
 - 2026-10-06T10:59:44Z (main): review: spec round 2 — verdict: accept; findings: none; reviewer: unspecified
+- 2026-10-06T16:50:04Z (main): priority: raised to P1 under the adopted agent-identity lane; identity research precedes dependent design, and controller-owned closure stays a separate decision.

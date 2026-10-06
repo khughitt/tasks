@@ -7,8 +7,9 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T15:13:22Z
-updated: 2026-10-02T15:13:22Z
+updated: 2026-10-06T16:49:59Z
 depends: []
+parent: tasks-1f05a7
 tags: []
 source: docs/notes/2026-10-02-tag-vocabulary-brief.md
 agent: codex

@@ -2,12 +2,12 @@
 id: tasks-c0bad3
 title: Establish Codex spawned-agent identity and hook semantics
 status: todo
-priority: 2
+priority: 1
 size: s
 complexity: mid
 process: direct
 created: 2026-10-06T10:41:53Z
-updated: 2026-10-06T11:00:23Z
+updated: 2026-10-06T16:50:04Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -29,3 +29,4 @@ Ideas it wakes: on completion add the finding to tasks-5745bb, tasks-616cd7, tas
 
 - 2026-10-06T10:41:53Z (main): concerns: tasks-1ece46 extension — Verify Codex intended variable and hook semantics before treating captured disagreement as an upstream delivery defect.
 - 2026-10-06T10:59:44Z (main): Review follow-up: parent hook session_id is already documented. Narrow the open hook identity question to whether SubagentStart/SubagentStop agent_id equals CODEX_THREAD_ID, and trace the captured release event dispatch. The prior child Stop input was synthetic, not a real subagent event. Reviewer identity was not supplied; probe/review attribution is to the reviewer, not assumed human.
+- 2026-10-06T16:50:03Z (main): priority: raised to P1 under the adopted agent-identity lane; identity research precedes dependent design, and controller-owned closure stays a separate decision.
