@@ -86,19 +86,11 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             tasks.reverse();
         }
     }
-    Ok(Output::List(ListOut {
+    let colors = ctx.project_colors();
+    let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| {
-                let mut row = TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now);
-                row.project_color = ctx
-                    .scope
-                    .projects()
-                    .iter()
-                    .find(|project| project.prefix == task.id.prefix)
-                    .and_then(|project| project.color);
-                row
-            })
+            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
             .collect(),
         halts: vec![],
         warnings: ctx.warnings,
@@ -107,7 +99,9 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
         } else {
             sort.date_column()
         },
-    }))
+    });
+    out.paint_projects(&colors);
+    Ok(out)
 }
 
 fn list_parked(
@@ -483,7 +477,8 @@ pub fn ready(
     if let Some(limit) = limit {
         tasks.truncate(limit);
     }
-    Ok(Output::List(ListOut {
+    let colors = ctx.project_colors();
+    let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
@@ -491,7 +486,9 @@ pub fn ready(
         halts,
         warnings: ctx.warnings,
         date: DateColumn::Updated,
-    }))
+    });
+    out.paint_projects(&colors);
+    Ok(out)
 }
 
 /// The head of `ready` in the show shape, so a caller can start on it without a second
@@ -786,7 +783,8 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
             force_hint(id, &snapshots)
         ));
     }
-    Ok(Output::Prime(Box::new(PrimeOut {
+    let colors = ctx.project_colors();
+    let mut out = Output::Prime(Box::new(PrimeOut {
         prefix: match &ctx.scope {
             Scope::Local(project) => Some(project.prefix.clone()),
             Scope::All { .. } => None,
@@ -820,7 +818,9 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
             .collect(),
         halts,
         warnings: ctx.warnings,
-    })))
+    }));
+    out.paint_projects(&colors);
+    Ok(out)
 }
 
 #[cfg(test)]

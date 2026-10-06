@@ -30,8 +30,11 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
             now,
         ));
     }
-    Ok(Output::Tree(TreeOut {
+    let colors = ctx.project_colors();
+    let mut out = Output::Tree(TreeOut {
         nodes,
         warnings: ctx.warnings,
-    }))
+    });
+    out.paint_projects(&colors);
+    Ok(out)
 }

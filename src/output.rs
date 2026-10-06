@@ -228,6 +228,64 @@ pub struct HaltRow {
     pub present_locally: bool,
 }
 
+/// Each in-scope prefix's configured colour (comfy-tables spec §5).
+pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;
+
+fn color_of(colors: &ProjectColors, id: &str) -> Option<crate::palette::Rgb> {
+    crate::model::TaskId::parse(id)
+        .ok()
+        .and_then(|id| colors.get(&id.prefix).copied())
+}
+
+fn paint_summary(colors: &ProjectColors, row: &mut TaskSummary) {
+    row.project_color = color_of(colors, &row.id);
+}
+
+fn paint_tree(colors: &ProjectColors, nodes: &mut [TreeNode]) {
+    for node in nodes {
+        paint_summary(colors, &mut node.summary);
+        paint_tree(colors, &mut node.children);
+    }
+}
+
+fn paint_lane(colors: &ProjectColors, lane: &mut crate::lanes::LaneRow) {
+    paint_summary(colors, &mut lane.lane);
+    if let Some(pick) = &mut lane.pick {
+        paint_summary(colors, pick);
+    }
+    lane.active
+        .iter_mut()
+        .for_each(|row| paint_summary(colors, row));
+}
+
+impl Output {
+    /// Fill `project_color` on every task row a pretty view of this output shows. `claims`
+    /// is left alone: it opens no checkout (comfy-tables spec §5).
+    pub fn paint_projects(&mut self, colors: &ProjectColors) {
+        match self {
+            Output::List(o) => o
+                .tasks
+                .iter_mut()
+                .for_each(|row| paint_summary(colors, row)),
+            Output::Tree(o) => paint_tree(colors, &mut o.nodes),
+            Output::Lanes(o) => o.lanes.iter_mut().for_each(|lane| paint_lane(colors, lane)),
+            Output::Prime(o) => {
+                for row in o
+                    .closeout
+                    .iter_mut()
+                    .chain(o.ready.iter_mut())
+                    .chain(o.doing.iter_mut())
+                {
+                    paint_summary(colors, row);
+                }
+                paint_tree(colors, &mut o.roadmap);
+                o.lanes.iter_mut().for_each(|lane| paint_lane(colors, lane));
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Serialize, Clone)]
 pub struct TaskSummary {
     pub id: String,

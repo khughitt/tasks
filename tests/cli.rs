@@ -26601,3 +26601,27 @@ fn search_rows_carry_the_project_color() {
     assert!(colored.contains("\x1b[38;2;18;52;86m"), "{colored:?}");
     assert!(strip_ansi(&colored).contains("Colored match"));
 }
+
+#[test]
+fn ready_tree_and_prime_rows_carry_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let goal = id_of(env.json(&sci, &["add", "Goal title", "--lane", "-b", "why"]));
+    env.json(
+        &sci,
+        &["add", "Child title", "--parent", &goal, "--size", "s"],
+    );
+    write_project_color(&sci, "sci", "#123456");
+    let paint = "\x1b[38;2;18;52;86m";
+    // lanes paints its titles from Task 5, which pins it there.
+    for args in [vec!["ready"], vec!["tree"], vec!["prime"]] {
+        let mut full = vec!["--pretty", "--color", "always"];
+        full.extend(args.iter().copied());
+        let out = env.cmd(&sci).args(&full).output().unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            text.contains(&format!("{paint}Child title")),
+            "{args:?}: {text}"
+        );
+    }
+}

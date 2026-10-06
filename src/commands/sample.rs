@@ -90,7 +90,8 @@ pub fn sample(
     }
     let drawn = &pool[..take];
 
-    Ok(Output::List(ListOut {
+    let colors = ctx.project_colors();
+    let mut out = Output::List(ListOut {
         tasks: drawn
             .iter()
             .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
@@ -98,5 +99,7 @@ pub fn sample(
         halts: vec![],
         warnings: ctx.warnings,
         date: DateColumn::Updated,
-    }))
+    });
+    out.paint_projects(&colors);
+    Ok(out)
 }

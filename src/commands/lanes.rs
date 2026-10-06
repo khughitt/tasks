@@ -26,10 +26,13 @@ pub fn run(
     let now = crate::time::parse(&crate::time::now())?;
     let halts = super::list::halt_snapshots(&mut ctx, &all);
     let lanes = rows(&mut ctx, &all, &claims, &halts, cutoff, &without, now)?;
-    Ok(Output::Lanes(LanesOut {
+    let colors = ctx.project_colors();
+    let mut out = Output::Lanes(LanesOut {
         lanes,
         warnings: ctx.warnings,
-    }))
+    });
+    out.paint_projects(&colors);
+    Ok(out)
 }
 
 /// Every open, unshelved lane in scope as a `LaneRow`. Dependencies are resolved only for
