@@ -34,6 +34,31 @@ pub fn rows_preferring(
     prefer: Prefer,
     reason: Option<Reason>,
 ) -> Result<Vec<ParkedRow>> {
+    Ok(sourced_rows(ctx, all, claims, now, prefer, reason)?
+        .into_iter()
+        .map(|(row, _)| row)
+        .collect())
+}
+
+/// `rows`, each with the record its row was built from: the registered copy or the one in
+/// the checkout the park recorded, whichever the row shows. `None` for an unresolved park.
+pub fn rows_with_records(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &ClaimSnapshot,
+    now: OffsetDateTime,
+) -> Result<Vec<(ParkedRow, Option<Task>)>> {
+    sourced_rows(ctx, all, claims, now, Prefer::Registered, None)
+}
+
+fn sourced_rows(
+    ctx: &mut ReadCtx,
+    all: &[Task],
+    claims: &ClaimSnapshot,
+    now: OffsetDateTime,
+    prefer: Prefer,
+    reason: Option<Reason>,
+) -> Result<Vec<(ParkedRow, Option<Task>)>> {
     let mut entries: Vec<(&String, &Park)> = claims
         .parks()
         .filter(|(_, park)| reason.is_none_or(|reason| park.reason == Some(reason)))
@@ -47,14 +72,16 @@ pub fn rows_preferring(
                 ctx.warnings.push(format!(
                     "park entry {key:?} is not a task id ({error}); shown as is"
                 ));
-                rows.push(ParkedRow::unresolved(key, park));
+                rows.push((ParkedRow::unresolved(key, park), None));
                 continue;
             }
         };
-        let registered = all
-            .iter()
-            .find(|task| task.id == id)
-            .map(|task| resolved_row(task, all, claims, &ctx.registry, now));
+        let registered = all.iter().find(|task| task.id == id).map(|task| {
+            (
+                resolved_row(task, all, claims, &ctx.registry, now),
+                task.clone(),
+            )
+        });
         let recorded_is_scanned = ctx
             .scope
             .projects()
@@ -68,7 +95,10 @@ pub fn rows_preferring(
                 recorded_or_fallback(ctx, &id, park, claims, now, registered)
             }
         };
-        rows.push(row.unwrap_or_else(|| ParkedRow::unresolved(key, park)));
+        rows.push(match row {
+            Some((row, task)) => (row, Some(task)),
+            None => (ParkedRow::unresolved(key, park), None),
+        });
     }
     Ok(rows)
 }
@@ -92,8 +122,8 @@ fn recorded_or_fallback(
     park: &Park,
     claims: &ClaimSnapshot,
     now: OffsetDateTime,
-    fallback: Option<ParkedRow>,
-) -> Option<ParkedRow> {
+    fallback: Option<(ParkedRow, Task)>,
+) -> Option<(ParkedRow, Task)> {
     match resolve_recorded(id, park, claims, &ctx.registry, now) {
         Ok(Some(row)) => {
             ctx.warnings.push(format!(
@@ -139,14 +169,15 @@ fn resolve_recorded(
     claims: &ClaimSnapshot,
     registry: &Registry,
     now: OffsetDateTime,
-) -> Result<Option<ParkedRow>> {
+) -> Result<Option<(ParkedRow, Task)>> {
     let Some((task, scan)) = scan_recorded(id, Path::new(&park.worktree))? else {
         return Ok(None);
     };
-    Ok(Some(ParkedRow::resolved(
+    let row = ParkedRow::resolved(
         TaskSummary::of(&task, &scan, Some(claims), registry, now),
         Phase::of(&task),
-    )))
+    );
+    Ok(Some((row, task)))
 }
 
 /// Opens the checkout a store entry recorded and reads `id` there, with that checkout's

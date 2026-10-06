@@ -1751,25 +1751,12 @@ pub fn run(cli: Cli) -> Result<Output> {
             add::run(ctx, title, status, fields)
         }
         Command::Show { id } => show::run(open_id_ctx(dir, &id)?, id),
-        Command::List {
-            statuses,
-            filter,
-            sort,
-            reverse,
-            parked,
-            periodic,
-            deferred,
-            scope,
-        } => list::list(
-            open_read_ctx(dir, &scope)?,
-            statuses,
-            filter,
-            sort,
-            reverse,
-            parked,
-            periodic,
-            deferred,
-        ),
+        Command::List { list: args } => list::list(open_read_ctx(dir, &args.scope)?, args, None),
+        Command::Search { query, list: args } => {
+            // Validated before the scan, so an empty query never reads a project.
+            let text = crate::filter::TextQuery::parse(&query)?;
+            list::list(open_read_ctx(dir, &args.scope)?, args, Some(text))
+        }
         Command::Ready {
             filter,
             limit,

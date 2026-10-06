@@ -19277,6 +19277,30 @@ fn cli_vocabulary_enum_baselines_cover_every_enum_row() {
             (vec!["list"], "--process"),
             vec!["list", "--process", "direct"],
         ),
+        (
+            (vec!["search"], "--status"),
+            vec!["search", "x", "--status", "todo"],
+        ),
+        (
+            (vec!["search"], "--sort"),
+            vec!["search", "x", "--sort", "updated"],
+        ),
+        (
+            (vec!["search"], "--priority"),
+            vec!["search", "x", "--priority", "1"],
+        ),
+        (
+            (vec!["search"], "--size"),
+            vec!["search", "x", "--size", "s"],
+        ),
+        (
+            (vec!["search"], "--complexity"),
+            vec!["search", "x", "--complexity", "mid"],
+        ),
+        (
+            (vec!["search"], "--process"),
+            vec!["search", "x", "--process", "direct"],
+        ),
         ((vec!["tags"], "--status"), vec!["tags", "--status", "todo"]),
         (
             (vec!["projects"], "--sort"),
@@ -26055,4 +26079,307 @@ fn retired_write_every_command_is_refused_from_a_worktree_made_before_retirement
         ),
         "retired_project"
     );
+}
+
+fn search_ids(v: &serde_json::Value) -> Vec<String> {
+    let mut ids: Vec<String> = v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[test]
+fn search_matches_title_or_body_literally_and_never_notes() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let title = id_of(env.json(&sci, &["add", "Cache the Parser", "-p", "2"]));
+    let body = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Plain",
+            "-p",
+            "2",
+            "-b",
+            "warm the parser cache (v2.1) first",
+        ],
+    ));
+    let noted = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Other",
+            "-p",
+            "2",
+            "--tag",
+            "parserish",
+            "--source",
+            "parser-src",
+        ],
+    ));
+    env.json(&sci, &["note", &noted, "the parser broke"]);
+
+    let v = env.json(&sci, &["search", "PARSER"]);
+    let mut expected = vec![title.clone(), body.clone()];
+    expected.sort();
+    assert_eq!(search_ids(&v), expected, "{v}");
+    assert!(v["warnings"].as_array().unwrap().is_empty(), "{v}");
+    // A quoted phrase is one literal substring; punctuation is not a pattern.
+    assert_eq!(
+        search_ids(&env.json(&sci, &["search", "cache (v2.1)"])),
+        vec![body.clone()]
+    );
+    assert!(search_ids(&env.json(&sci, &["search", "cache (v2.)"])).is_empty());
+    assert!(search_ids(&env.json(&sci, &["search", "parser cache first"])).is_empty());
+    assert!(search_ids(&env.json(&sci, &["search", "broke"])).is_empty());
+    // Frontmatter values are not text: the id, tags, and source never match.
+    for query in [noted.as_str(), "parserish", "parser-src"] {
+        assert!(
+            search_ids(&env.json(&sci, &["search", query])).is_empty(),
+            "{query}"
+        );
+    }
+
+    // Refused before any project is read: outside every project it is still validation.
+    let nowhere = tempfile::tempdir().unwrap();
+    for (dir, query) in [
+        (sci.as_path(), ""),
+        (sci.as_path(), "  "),
+        (nowhere.path(), ""),
+    ] {
+        let error = error_of(&env, dir, &["search", query]);
+        assert_eq!(error["error"]["kind"], "validation", "{error}");
+    }
+    env.usage(&sci, &["search"]);
+}
+
+#[test]
+fn search_takes_list_filters_pools_and_order() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let p1 = id_of(env.json(&sci, &["add", "Alpha widget", "-p", "1", "--tag", "x"]));
+    let p2 = id_of(env.json(&sci, &["add", "Beta widget", "-p", "2", "--size", "s"]));
+    let p3 = id_of(env.json(&sci, &["add", "Gamma widget", "-p", "3", "--tag", "x"]));
+    let closed = id_of(env.json(&sci, &["add", "Done widget", "-p", "2"]));
+    env.json(&sci, &["done", &closed, "finished"]);
+    env.json(&sci, &["add", "Unrelated", "-p", "1", "--tag", "x"]);
+
+    // Every match is open and listed, so search and list agree row for row.
+    let searched = env.json(
+        &sci,
+        &["search", "widget", "--sort", "created", "--reverse"],
+    );
+    let listed = env.json(&sci, &["list", "--sort", "created", "--reverse"]);
+    let without_unrelated: Vec<_> = listed["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["title"] != "Unrelated")
+        .cloned()
+        .collect();
+    assert_eq!(searched["tasks"].as_array().unwrap(), &without_unrelated);
+    assert_eq!(searched["date"], listed["date"]);
+
+    // Repeats of one filter widen; different filters narrow.
+    let mut both = vec![p1.clone(), p2.clone()];
+    both.sort();
+    assert_eq!(
+        search_ids(&env.json(&sci, &["search", "widget", "-p", "1", "-p", "2"])),
+        both
+    );
+    assert_eq!(
+        search_ids(&env.json(
+            &sci,
+            &["search", "widget", "-p", "1", "-p", "3", "--tag", "x"]
+        )),
+        {
+            let mut v = vec![p1.clone(), p3.clone()];
+            v.sort();
+            v
+        }
+    );
+    assert_eq!(
+        search_ids(&env.json(&sci, &["search", "widget", "--size", "s"])),
+        vec![p2.clone()]
+    );
+    // The default pool is open work; --status replaces it.
+    assert!(search_ids(&env.json(&sci, &["search", "done widget"])).is_empty());
+    assert_eq!(
+        search_ids(&env.json(&sci, &["search", "widget", "--status", "done"])),
+        vec![closed.clone()]
+    );
+    // Mode conflicts are list's.
+    env.usage(&sci, &["search", "widget", "--parked", "--sort", "updated"]);
+    env.usage(&sci, &["search", "widget", "--deferred", "--periodic"]);
+
+    let table = env.pretty(&sci, &["search", "beta"]);
+    assert!(
+        table.contains("Beta widget") && !table.contains("Alpha"),
+        "{table}"
+    );
+}
+
+#[test]
+fn search_periodic_and_deferred_use_their_list_pools() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let sweep = id_of(env.json(
+        &sci,
+        &["add", "Sweep the logs", "-p", "2", "--every", "30d"],
+    ));
+    env.json(&sci, &["done", &sweep, "swept"]);
+    env.json(&sci, &["add", "Read the logs", "-p", "2"]);
+    let later = id_of(env.json(
+        &sci,
+        &[
+            "add",
+            "Rotate logs",
+            "-p",
+            "2",
+            "--status",
+            "idea",
+            "--defer",
+            "30d",
+        ],
+    ));
+    let other = id_of(env.json(&sci, &["add", "Water plants", "-p", "2", "--every", "7d"]));
+    env.json(&sci, &["done", &other, "watered"]);
+    env.json(
+        &sci,
+        &[
+            "add",
+            "Repot plants",
+            "-p",
+            "2",
+            "--status",
+            "idea",
+            "--defer",
+            "30d",
+        ],
+    );
+    assert_eq!(
+        search_ids(&env.json(&sci, &["search", "logs", "--periodic"])),
+        [sweep]
+    );
+    assert_eq!(
+        search_ids(&env.json(&sci, &["search", "logs", "--deferred"])),
+        [later]
+    );
+}
+
+#[test]
+fn search_reads_every_project_and_keeps_unreachable_warnings() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let fam = env.init("fam");
+    let gone = env.init("old");
+    let here = id_of(env.json(&sci, &["add", "Shared phrase here", "-p", "2"]));
+    let there = id_of(env.json(&fam, &["add", "There", "-p", "2", "-b", "a shared phrase"]));
+    env.json(&fam, &["add", "Nothing to see", "-p", "2"]);
+    std::fs::remove_dir_all(&gone).unwrap();
+
+    assert_eq!(
+        search_ids(&env.json(&sci, &["search", "shared phrase"])),
+        vec![here.clone()]
+    );
+    assert_eq!(
+        search_ids(&env.json(&sci, &["search", "shared phrase", "--project", "fam"])),
+        vec![there.clone()]
+    );
+    let wide = env.json(&sci, &["search", "shared phrase", "--all-projects"]);
+    let mut both = vec![here, there];
+    both.sort();
+    assert_eq!(search_ids(&wide), both);
+    assert!(
+        warnings_of(&wide)
+            .iter()
+            .any(|w| w.starts_with("project old at ") && w.ends_with(" is unreachable")),
+        "{wide}"
+    );
+    let none = env.json(&sci, &["search", "no such words", "--all-projects"]);
+    assert!(none["tasks"].as_array().unwrap().is_empty());
+    assert!(
+        warnings_of(&none).iter().any(|w| w.contains("unreachable")),
+        "{none}"
+    );
+}
+
+#[test]
+fn search_parked_matches_the_copy_the_row_shows() {
+    let mut env = TestEnv::new();
+    let (main, wt) = two_roots(&mut env);
+    // A task that exists only in the other checkout is read, and matched, from there.
+    let away = id_of(env.json(&wt, &["add", "Away", "-p", "2", "-b", "recorded body text"]));
+    as_agent(&env, &wt, "agent-a")
+        .args(["park", &away, "pick it up"])
+        .assert()
+        .success();
+    let v = env.json(&main, &["search", "--parked", "recorded body"]);
+    assert_eq!(search_ids(&v), vec![away.clone()], "{v}");
+    // The parked container and rows, as list --parked gives them.
+    assert_eq!(v["tasks"][0]["park"]["next_step"], "pick it up", "{v}");
+    assert_eq!(v["tasks"][0]["phase"], "implementing", "{v}");
+    assert!(
+        v["warnings"]
+            .to_string()
+            .contains("resume it from that checkout"),
+        "{v}"
+    );
+    assert!(search_ids(&env.json(&main, &["search", "--parked", "absent"])).is_empty());
+
+    // A copy in the scanned checkout wins: its body is the one searched.
+    let file = format!("tasks/{away}.md");
+    let text = std::fs::read_to_string(wt.join(&file)).unwrap();
+    std::fs::write(
+        main.join(&file),
+        text.replace("recorded body text", "registered body text"),
+    )
+    .unwrap();
+    assert_eq!(
+        search_ids(&env.json(&main, &["search", "--parked", "registered body"])),
+        vec![away.clone()]
+    );
+    assert!(search_ids(&env.json(&main, &["search", "--parked", "recorded body"])).is_empty());
+    std::fs::remove_file(main.join(&file)).unwrap();
+
+    // An unresolved park has no text to match, and its warning stays.
+    std::fs::remove_dir_all(wt.join("tasks")).unwrap();
+    let v = env.json(&main, &["search", "--parked", "away"]);
+    assert!(v["tasks"].as_array().unwrap().is_empty(), "{v}");
+    assert!(v["warnings"].to_string().contains("unavailable"), "{v}");
+    assert_eq!(
+        env.json(&main, &["list", "--parked"])["tasks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn search_rows_carry_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    env.json(&sci, &["add", "Colored match", "-p", "2"]);
+    write_project_color(&sci, "sci", "#123456");
+    let out = env
+        .cmd(&sci)
+        .args([
+            "--pretty",
+            "--color",
+            "always",
+            "search",
+            "colored",
+            "--all-projects",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let colored = String::from_utf8(out.stdout).unwrap();
+    assert!(colored.contains("\x1b[38;2;18;52;86m"), "{colored:?}");
+    assert!(strip_ansi(&colored).contains("Colored match"));
 }

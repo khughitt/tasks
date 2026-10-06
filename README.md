@@ -284,6 +284,7 @@ from a clone):
     tasks add "Reply to Dana" --source "mail:<42@example.org>"  # again: reuses the id, writes nothing
     tasks list --source "mail:<42@example.org>"  # what came from this reference (exact match)
     tasks list -p 0 -p 1 --size s --size xs   # P0 or P1, and small or extra-small
+    tasks search "claim identity" --all-projects  # title or body contains the phrase; every list option applies
     tasks ready --complexity none             # ready work nobody has rated yet
     tasks ready                      # what can be worked on now (JSON)
     tasks ready --parallel -n 3      # up to 3 candidates marked safe to dispatch together
