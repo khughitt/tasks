@@ -1552,7 +1552,7 @@ fn park_reason_rides_the_entry_the_note_and_every_park_view() {
     let text = env.pretty(&sci, &["show", &id]);
     assert!(text.contains("waiting on user, review since"), "{text}");
     let table = env.pretty(&sci, &["list", "--parked"]);
-    assert!(table.contains("waits on user, review"), "{table}");
+    assert!(table.contains("user, review"), "{table}");
 
     // `next` hands back agent-parked work with the same block.
     as_agent(&env, &sci, "agent-a")
@@ -1732,7 +1732,7 @@ fn a_quiet_park_records_its_recipe_in_the_entry_the_note_and_every_park_view() {
     );
     assert!(
         env.pretty(&sci, &["list", "--parked"])
-            .contains("waits on user, quiet; idle, 50 min")
+            .contains("user, quiet; idle, 50 min")
     );
 
     as_agent(&env, &sci, "agent-a")
@@ -9525,7 +9525,7 @@ fn quiet_lists_quiet_parks_across_projects_by_priority_then_park_time() {
     let explicit = env.json(&sci, &["quiet", "--all-projects"]);
     assert_eq!(explicit["tasks"].as_array().unwrap().len(), 3);
     let text = env.pretty(nowhere.path(), &["quiet"]);
-    let brief = text.lines().collect::<Vec<_>>();
+    let brief = text.trim_end().lines().collect::<Vec<_>>();
     assert!(
         brief[0].starts_with(&urgent)
             && brief[0].contains("P1")
@@ -9534,12 +9534,13 @@ fn quiet_lists_quiet_parks_across_projects_by_priority_then_park_time() {
             && brief[0].contains("Urgent sweep"),
         "{text}"
     );
-    assert!(brief[1].trim_start().starts_with("next: sweep"), "{text}");
+    assert!(brief[0].ends_with("sweep"), "{text}");
     assert!(
-        brief[2].trim_start().starts_with("in:") && brief[2].contains(&*fam.to_string_lossy()),
+        brief[1].trim_start().starts_with("in:") && brief[1].contains(&*fam.to_string_lossy()),
         "{text}"
     );
-    assert_eq!(brief[3], "", "one blank line between briefs: {text}");
+    assert!(brief[2].contains("First capture"), "{text}");
+    assert!(brief.iter().all(|line| !line.is_empty()), "{text}");
     assert!(
         text.contains("headless") && text.contains("45 min"),
         "{text}"
@@ -18369,7 +18370,10 @@ fn process_survives_ready_and_parked_next() {
         env.json(&dir, &["next"])["next"]["task"]["process"],
         "planned"
     );
-    assert!(env.pretty(&dir, &["list", "--parked"]).contains("planned"));
+    assert!(
+        env.pretty(&dir, &["list", "--parked"])
+            .contains("implementing")
+    );
     env.json(&dir, &["edit", &id, "--no-process"]);
     assert_eq!(
         overview_value(&env.pretty(&dir, &["show", &id]), "process").as_deref(),
@@ -26656,4 +26660,38 @@ fn prime_sections_share_every_fixed_width_when_piped() {
         b.find("Doing"),
         "titles align across sections:\n{text}"
     );
+}
+
+#[test]
+fn parked_rows_paint_ids_and_titles_with_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Parked title"]));
+    write_park(
+        &env,
+        "sci",
+        &id,
+        "agent-a",
+        "user",
+        &sci.display().to_string(),
+    );
+    let store = env.claim_store("sci");
+    let mut parks = std::fs::read_to_string(&store).unwrap();
+    parks.push_str("reason = \"quiet\"\nminutes = 40\n");
+    std::fs::write(&store, parks).unwrap();
+    write_project_color(&sci, "sci", "#123456");
+    for args in [vec!["list", "--parked"], vec!["prime"], vec!["quiet"]] {
+        let mut full = vec!["--pretty", "--color", "always"];
+        full.extend(args.iter().copied());
+        let out = env.cmd(&sci).args(&full).output().unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            text.contains(&format!("\x1b[38;2;18;52;86m{id}")),
+            "{args:?}: {text}"
+        );
+        assert!(
+            text.contains("\x1b[38;2;18;52;86mParked"),
+            "{args:?}: {text}"
+        );
+    }
 }

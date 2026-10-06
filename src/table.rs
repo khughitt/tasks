@@ -21,10 +21,17 @@ pub enum Fit {
     Wrap { min: usize, max: Option<usize> },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Column {
     pub header: &'static str,
     pub fit: Fit,
+    pub align: Align,
 }
 
 impl Column {
@@ -32,20 +39,31 @@ impl Column {
         Column {
             header,
             fit: Fit::Fixed,
+            align: Align::Left,
+        }
+    }
+    pub const fn right(header: &'static str) -> Column {
+        Column {
+            header,
+            fit: Fit::Fixed,
+            align: Align::Right,
         }
     }
     pub const fn wrap(header: &'static str, min: usize, max: Option<usize>) -> Column {
         Column {
             header,
             fit: Fit::Wrap { min, max },
+            align: Align::Left,
         }
     }
 }
 
-/// A `label: text` line under a row, wrapped under its text.
+/// A `label: text` line under a row. `Wrap` wraps under its text; `Whole` is printed in
+/// one piece so a path copies intact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Detail {
     Wrap(String),
+    Whole(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -74,6 +92,15 @@ pub struct Layout {
 pub struct Widths(pub Vec<Option<usize>>);
 
 impl Widths {
+    /// Only the id column shared, for a section whose other columns differ.
+    pub fn id_only(id: usize, columns: usize) -> Widths {
+        let mut widths = vec![None; columns];
+        if let Some(first) = widths.first_mut() {
+            *first = Some(id);
+        }
+        Widths(widths)
+    }
+
     pub fn id(&self) -> Option<usize> {
         self.0.first().copied().flatten()
     }
@@ -217,6 +244,9 @@ pub fn render(
             .expect("comfy-table holds one column per kept cell");
         let padding = if position == last { 0 } else { GAP };
         column.set_padding((0, clamp(padding)));
+        if columns[index].align == Align::Right {
+            column.set_cell_alignment(comfy_table::CellAlignment::Right);
+        }
         // Constraint widths include the padding (comfy-table's absolute_width_with_padding).
         // A fixed column always carries a constraint: without one, Dynamic arrangement may
         // wrap it (plan review round 1).
@@ -309,9 +339,12 @@ fn detail(label: &str, item: &Detail, width: Option<usize>, painter: &Painter) -
     );
     let indent = DETAIL_INDENT + DETAIL_LABEL + 1;
     let lead = painter.paint(Style::Chrome, &lead);
-    let Detail::Wrap(text) = item;
+    let (text, wrap) = match item {
+        Detail::Wrap(text) => (text, true),
+        Detail::Whole(text) => (text, false),
+    };
     match width.map(|width| width.saturating_sub(indent)) {
-        Some(available) if available >= DETAIL_FLOOR => {
+        Some(available) if wrap && available >= DETAIL_FLOOR => {
             let mut cell = Table::new();
             cell.load_style(NOTHING)
                 .force_no_tty()
@@ -426,6 +459,47 @@ mod tests {
             width: Some(width),
             headers: false,
         }
+    }
+
+    #[test]
+    fn an_id_only_width_aligns_a_section_with_other_columns() {
+        let widths = Widths::id_only(15, 4);
+        let text = render(
+            &columns(),
+            &[row("sci-000001")],
+            &at(200),
+            Some(&widths),
+            &plain(),
+        );
+        assert!(text.starts_with("sci-000001       doing"), "{text}");
+    }
+
+    #[test]
+    fn a_right_aligned_column_pads_on_the_left() {
+        let columns = [Column::fixed("id"), Column::right("min")];
+        let rows = [
+            Row::new(vec!["a".into(), "5".into()]),
+            Row::new(vec!["b".into(), "40".into()]),
+        ];
+        let text = render(&columns, &rows, &at(80), None, &plain());
+        assert_eq!(text, "a   5\nb  40\n");
+    }
+
+    #[test]
+    fn details_follow_their_row_and_whole_ones_are_never_split() {
+        let path = "/a/long/checkout/path/that/runs/well/past/the/width/.worktrees/x";
+        let mut first = row("sci-000001");
+        first.details.push(("in", Detail::Whole(path.into())));
+        let second = row("sci-000002");
+        let text = render(&columns(), &[first, second], &at(80), None, &plain());
+        let lines: Vec<&str> = text.lines().collect();
+        let detail = lines.iter().position(|l| l.contains(path)).unwrap();
+        let second_row = lines
+            .iter()
+            .position(|l| l.starts_with("sci-000002"))
+            .unwrap();
+        assert!(detail < second_row, "{text}");
+        assert_eq!(lines[detail], format!("        in:     {path}"));
     }
 
     #[test]

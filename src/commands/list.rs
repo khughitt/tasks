@@ -141,7 +141,9 @@ fn list_parked(
             }
         })
         .collect();
-    Ok(Output::Parked(ParkedOut { tasks, warnings }))
+    let mut out = Output::Parked(ParkedOut { tasks, warnings });
+    out.paint_projects(&ctx.project_colors());
+    Ok(out)
 }
 
 /// Why a live claim keeps a task out of a read command's rows. `ready` appends the

@@ -43,8 +43,11 @@ pub fn run(mut ctx: ReadCtx, limit: Option<usize>) -> Result<Output> {
     if let Some(limit) = limit {
         tasks.truncate(limit);
     }
-    Ok(Output::Quiet(QuietOut {
+    let colors = ctx.project_colors();
+    let mut out = Output::Quiet(QuietOut {
         tasks,
         warnings: ctx.warnings,
-    }))
+    });
+    out.paint_projects(&colors);
+    Ok(out)
 }
