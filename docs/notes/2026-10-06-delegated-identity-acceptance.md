@@ -2,9 +2,10 @@
 
 Implementation: `feat/delegated-identity`; Tasks 1–3 committed, Task 4 open.
 Contract: [approved design](../specs/2026-10-06-delegated-identity-design.md).
-Integration, installation and symptom-report closeout remain gated on real relay
-acceptance and review of that new live verdict. Independent whole-branch review
-and scoped corrective re-review have no remaining implementation findings. Synthetic rows are test fixtures,
+Native and real relay live acceptance now pass. Integration, installation and
+symptom-report closeout await the final review of this evidence and the refreshed
+branch. Prior whole-branch review and corrective re-review have no remaining
+implementation findings. Synthetic rows are test fixtures,
 never evidence of delivered worker registration.
 
 | Case | Evidence | Expected result | Observed result | Verdict |
@@ -22,7 +23,7 @@ never evidence of delivered worker registration.
 | Public agent-waiting park | Native CLI regression | No controller reservation | Third agent sees doing park in next/list --parked and starts it; ready retains its todo filter | pass |
 | Native real controller/worker | Codex 0.160.1, actual exported IDs, explicit worktree binary, private scratch config/state | Distinct persistent worker claims, shared root and thread provenance; foreign close refused | Clean Codex pair, worker thread distinct/root shared, claim live after separate command exits, no PID, exact provenance, worker cannot close controller | pass |
 | Native real reverse handoff | Same actual pair and tracked worker-specific completion | Controller cannot close live worker; normal release/start; forced takeover only after stopped worker | Controller done/park refused without mutation; worker parked normal task before final report; after tracked completion unforced control close still refused, recorded forced start/done succeeded | pass |
-| Live relay root-only registry | Required trusted isolated Codex SessionStart hook and actual root row | Registered root refuses worker acquisition | Current SessionStart hooks do not invoke relay; no current registry or relay launcher on PATH. Local Node source exists, but no trusted private hook event was delivered for this run | **unverified** |
+| Live relay root-only registry | Codex 0.160.1, normally trusted isolated SessionStart hook, actual root row and actual worker | Registered root refuses worker acquisition | Genuine current-root event matched native exports; root acquired a live qualified claim; distinct worker had no row and start/controller done/park refused without changing task, claim or registry; errors omitted native IDs | pass |
 
 The native worker issued acquire and checkpoint commands separately, refreshed and
 stamped both worker tasks, and reported a checkpoint while holding them. The
@@ -42,13 +43,28 @@ exports have no new evidence. The six split-ID reports and tasks-0c2c39 remain o
 until the approved closeout gates are met. relay-f56e30, tasks-f8c9cc and tasks-56b450
 remain outside the remedy.
 
-To resume the live relay gate, arrange a clean scratch Codex controller/worker
-session with trusted SessionStart delivery to the local relay Node entry, an
-absolute private `--subscribers` file, and private `RELAY_STATE_DIR`. Keep native
-exports as delivered, enable relay identity only in scratch tasks configuration,
-and verify the resulting real root row refuses worker acquisition without
-mutating task or claim state. Manufactured hook payloads and shim registries are
-not substitutes. No global hooks, configuration or launcher repointing is authorized.
+Real relay capture used a separate private Codex home, empty subscriber list,
+private task config/state and `RELAY_STATE_DIR`, and the explicit worktree binary.
+The user reviewed/trusted the exact hook through `/hooks`. A startup handler
+forwarded the genuinely delivered payload to the existing relay Node entry with
+an absolute private `--subscribers` file, recording an event receipt. Neither
+registry rows nor hook payloads were manufactured. The controller verified its
+own receipt and matching live relay root claim before dispatching one real worker.
+The worker checked acquisition and controller release refusals with unchanged
+record/store/registry snapshots. Tracked worker completion preceded controller
+cleanup; the final verdict reports all scratch claims released, controller exit
+and owned process-group cleanup. Global configuration and launchers were unchanged.
+
+Two setup limits were observed and preserved before retry. Workspace-write command
+isolation exposed the nearest Codex ancestor as PID 1 while relay published its
+host PID, preventing controller acquisition. The successful capture used the
+user-approved per-invocation `danger-full-access` mode to share host PID visibility;
+namespace support is tracked separately as tasks-b9cbe3. The first host-PID run
+verified controller acquisition but `--ephemeral` prevented loading a worker fork
+context. The retry retained rollouts only in the private Codex home. No passing
+worker verdict was inferred from either failed attempt or from controller exit.
+Private native IDs/sign-in/rollouts are excluded from this acceptance record and
+will be removed with scratch state after evidence inspection.
 
 Validation: focused checks named in the plan and `just test-fast` pass for Tasks
 1–3. The Task 4 handoff regression passes and fails on the identity assertion
@@ -61,5 +77,5 @@ failed before the shared recovery suffix was corrected to direct inspection
 through `tasks show`. Round 2 reproduced the refusal without native values and
 accepted the correction with no remaining findings. It also verified that process
 controls use matching thread input and override guidance is conditional. Reviews
-are recorded on tasks-a5a502; live relay evidence still needs capture and review
+are recorded on tasks-a5a502; live relay evidence now passes and awaits final review
 before integration.

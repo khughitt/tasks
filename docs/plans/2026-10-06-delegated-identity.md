@@ -7,7 +7,7 @@
 **Status:** approved on 2026-10-06 after acceptance by
 claude-code/claude-opus-5-5. Execution resumed at the user's request. Tasks 1–3
 are committed on the shared implementation branch; Task 4's deterministic and
-native live checks pass. Real relay capture remains an acceptance gate before
+native and real relay live checks pass. Final branch/evidence review remains before
 integration, installation and report closeout. The written spec is approved.
 
 **Goal:** Give Codex workers distinct, persistent claim identity and native note
@@ -575,7 +575,7 @@ fn delegated_worker_handoff_and_takeover() {
   partial verdict before cleanup; wait for the worker to stop, release remaining
   scratch claims, and remove scratch registry/state. Do not leave jobs detached.
 
-- [ ] **Capture real relay behavior separately.** Check where the installed relay
+- [x] **Capture real relay behavior separately.** Check where the installed relay
   executable resolves before using it. Inspect its supported isolated state/config
   invocation and arrange actual root hook delivery to a private registry for the
   scratch Codex session, with the user's host-use/config permissions if needed.
@@ -637,7 +637,7 @@ fn delegated_worker_handoff_and_takeover() {
 The user resumed execution on 2026-10-06. The document/task-only handoff was
 integrated locally and tasks-5e2472 closed as the reviewed design/plan deliverable.
 Linked direct steps are tasks-3809b8, tasks-2047cd, tasks-17c844 and tasks-a5a502.
-The first three are committed; the fourth retains the live relay acceptance gate. The implementation
+The first three are committed; the fourth has passed live relay acceptance and awaits final review/integration. The implementation
 steps then proceed sequentially on the single `feat/delegated-identity` branch
 in `.worktrees/delegated-identity`, using the workspace sequence above. The
 document/task-only integration is not an intermediate implementation merge.
