@@ -39,8 +39,10 @@ Evidence: [research brief](../notes/2026-09-30-delegated-identity-brief.md).
 - No code work before plan approval. Then file four sequential `process: direct`
   implementation tasks under tasks-2fa8c6, linked to this spec and their exact
   `Task N` headings, and chain their dependencies. Keep tasks-5e2472 as the design
-  deliverable, not the implementation goal. Commit their records before creating
-  any implementation worktree. Reuse each task's worktree on resumption.
+  deliverable, not the implementation goal. All four implementation tasks share
+  `.worktrees/delegated-identity` on branch `feat/delegated-identity`, following
+  the workspace sequence below. Never create a fresh worktree from main for a
+  later step, and never merge or deploy an intermediate implementation step.
 - Use `just test-one <filter>` while changing code; `just test-fast`, `tasks check`
   and `git diff --check` before each commit. Hooks supply `just check`; the full
   suite remains in the pre-push hook unless required by repository exceptions.
@@ -74,6 +76,34 @@ Use the existing large test modules and fixtures; do not split them as incidenta
 cleanup. These steps share types and execute in order, not concurrently. Each
 step leaves the crate compiling and its tests passing; full remedy acceptance is
 the final step. No new schema is added to `HarnessProvenance` or relay snapshots.
+
+### One implementation workspace
+
+After plan approval, integrate the approved design/plan and the four linked task
+records into main as a document/task-only change. Note the common worktree path
+and branch on all four records. Start Task 1 in main, run its trial arm, and
+commit its updated record before creating the implementation worktree:
+
+```bash
+work-link --ensure .worktrees
+git worktree add .worktrees/delegated-identity -b feat/delegated-identity
+git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees/delegated-identity
+```
+
+Run `just setup` there immediately if the justfile then defines it (the reviewed
+baseline does not). The first task command there is `tasks start <Task 1 id>`,
+followed by its trial arm. Execute and commit all four steps on this same branch.
+Each step's `tasks done` goes in its own code commit in this shared worktree.
+Before the next step, run `tasks start <next task id>` there, then its trial arm;
+its predecessor's code and closed task record are already in the branch. No
+cherry-pick, per-step branch, or intermediate main merge is needed.
+
+If interrupted, resume the current task in this same worktree and branch; read
+its notes and `git log` to find the last completed step. Do not recreate the
+worktree or reset it to main. Keep it through all steps and final review. Task 4
+reviews the entire implementation diff since the approved document/task baseline
+and performs the sole implementation merge to main after all acceptance gates
+pass. Intermediate step completion means committed on this branch, not deployed.
 
 ### Task 1: Resolve native Codex claims and provenance by thread
 
@@ -128,8 +158,13 @@ pub fn value(
   In claims, invoke it only after explicit/relay/Claude precedence is exhausted:
 
 ```rust
-let session = crate::native::value(&get, "CODEX_SESSION_ID").map_err(Error::Config)?;
-let thread = crate::native::value(&get, "CODEX_THREAD_ID").map_err(Error::Config)?;
+let invalid_native = |detail| Error::Config(format!(
+    "{detail}; correct the native variables or set TASKS_SESSION to this \
+     session's explicit identity (use the exact held session from tasks show \
+     when recovering an existing claim)"
+));
+let session = crate::native::value(&get, "CODEX_SESSION_ID").map_err(invalid_native)?;
+let thread = crate::native::value(&get, "CODEX_THREAD_ID").map_err(invalid_native)?;
 if let Some(session) = thread.or(session) {
     return Ok(Identity {
         tagged: format!("codex:{session}"), session, pid: None, proof: None,
@@ -137,7 +172,10 @@ if let Some(session) = thread.or(session) {
 }
 ```
 
-  Leave Unix fallback for absence only. In provenance, wrap validator errors with
+  Keep this recovery hint at the claim boundary, not in the shared validator;
+  relay and provenance retain their own diagnostics. Never suggest the command
+  PID as a liveness handle or let the explicit recovery impersonate a foreign
+  owner. Leave Unix fallback for absence only. In provenance, wrap errors with
   `unknown harness provenance: `, keep inspection of Claude, both Codex inputs and
   the explicit override, remove unequal-ID rejection, and select:
 
@@ -158,6 +196,9 @@ let codex = thread.map(|id| (id, "CODEX_THREAD_ID"))
   source names in the parser/serializer tests. Use an override of `codex:root`
   against worker `worker` to keep a genuine conflict control after split IDs
   become valid. Assert errors name variables but contain no private test values.
+  Malformed claim errors must also name `TASKS_SESSION` and explain repair or
+  explicit-identity recovery; assert a matching explicit override still takes
+  precedence over malformed native inputs when resuming an owned claim.
 
   Run `just test-one claims::tests`, `just test-one provenance::tests`, and
   `just test-one format::tests::provenance`. Update any old split-ID CLI assertions
@@ -263,6 +304,23 @@ let root_session = if mine {
   tests for present/absent roots. Do not invent a relation to raw claim keys or
   require a root on historical claims.
 
+  `codex:codex:x` is intentionally valid: the outer `codex:` is the scheme and
+  the opaque native ID is `codex:x`. Neither writer nor validator interprets or
+  strips a scheme-looking prefix inside a native ID. Add a stored-root fixture
+  that round trips this value and append this producer check to the CLI test
+  above, using its existing `run` closure:
+
+```rust
+let opaque = id_of(env.json(&dir, &["add", "Opaque root"]));
+assert!(run(Some("codex:x"), &["start", &opaque]).status.success());
+assert_eq!(env.json(&dir, &["show", &opaque])["claim"]["root_session"],
+    "codex:codex:x");
+```
+
+  The CLI check proves the writer can produce it; the store fixture proves it
+  survives reload. Keep rejection controls for bare `codex:`, wrong outer scheme,
+  and control characters, without introducing UUID-only validation.
+
   Extend the CLI test with explicit override and different-thread forced takeover
   cases, each asserting the displaced root does not survive; exercise same-owner
   force refusal and recovery guidance without ID values. Through `ClaimInfo::of`
@@ -319,6 +377,30 @@ Ok(thread.or(session))
   leave it None for other harnesses. Do not synthesize worker rows, prefer a hint
   among multiple qualifying rows, or change snapshot schema/cardinality rules.
 
+  Replace the existing mismatch refusal that prints `hint` and `agent.id`.
+  Inside the existing `hint != agent.session_id` branch, distinguish a root-only
+  Codex match using the validated root export; keep other mismatches generic:
+
+```rust
+let root = if harness == "codex" {
+    crate::native::value(get, "CODEX_SESSION_ID").map_err(refuse)?
+} else {
+    None
+};
+let detail = if harness == "codex" && root.as_deref() == Some(agent.session_id.as_str()) {
+    "only the Codex root is registered in relay; worker registration is unavailable \
+     (relay-f56e30), so the worker cannot claim as its controller"
+} else {
+    "the native actor hint does not match the qualifying relay row"
+};
+return Err(refuse(detail.into()));
+```
+
+  The surrounding mismatch condition plus the root match distinguishes the
+  worker case from session-only input. Do not assert missing worker registration
+  for an unrelated registry mismatch. `refuse` keeps its `TASKS_SESSION` recovery
+  guidance; neither message interpolates native IDs or registry row IDs.
+
   In proof, keep all current process checks, then use this Codex-only branch:
 
 ```rust
@@ -355,6 +437,10 @@ if boundary.harness == "codex" {
   Include a legitimate owner using exact held `TASKS_SESSION` to recover from
   missing-thread proof failure. No PID is fabricated. Verify malformed relay
   input errors include variable names/recovery guidance and no input values.
+  Assert the root-row/worker-hint refusal names missing worker registration,
+  `relay-f56e30` and `TASKS_SESSION`, with neither test ID present. Also test an
+  unrelated row mismatch: it uses the generic value-free refusal, not the
+  root-only diagnosis, and still leaves the claim/record untouched.
   Keep invalid registry, ambiguity, wrong host/boot/platform and other-harness
   controls intact. Run `just test-one --test cli delegated_relay_ownership`,
   `just test-one relay::`, and `just test-one claims::tests`.
@@ -439,6 +525,23 @@ fn delegated_worker_handoff_and_takeover() {
   controller's worker-specific completion result, not a nonexistent relay worker
   row or root Stop hook. This does not change tasks-f8c9cc's authorization scope.
 
+- [ ] **Check native live-smoke preconditions.** The controller must be an actual
+  Codex session with working worker-spawn and tracked wait/completion tools, and
+  native Codex IDs available to its command environment. The controller and its
+  real worker must have no nonempty `CLAUDE_CODE_SESSION_ID`. A Claude Code
+  implementer cannot substitute its own session for this smoke. Codex launched
+  beneath Claude may inherit that variable: Claude then wins claim precedence,
+  and mixed-harness provenance is intentionally omitted.
+
+  Check only presence and equality relationships, not private values. If running
+  under the wrong harness, lacking spawn support, or observing an inherited
+  Claude ID in either participant, record **unverified: setup precondition not
+  met**, not a product test failure. Preserve the observed exports; do not unset
+  the Claude ID in-place to manufacture a clean native capture. Continue
+  independent deterministic checks, then park this live gate for an eligible
+  clean Codex controller session. A future clean session may resume the same
+  implementation worktree; implementation need not be repeated.
+
 - [ ] **Run the native live smoke as a bounded controller/worker exchange.** Build
   the worktree debug binary through the focused test recipe. Use a temporary
   scratch directory with private XDG config/state directories and a scratch
@@ -490,6 +593,8 @@ fn delegated_worker_handoff_and_takeover() {
   the documented live gate and park with the exact prerequisite; keep the remedy
   reports open. No global launcher/config repointing or quiet-host request is
   implied by plan approval.
+  The real relay smoke likewise needs an eligible Codex controller/worker pair;
+  inherited mixed-harness IDs leave its setup unverified as above.
 
 - [ ] **Record verdicts and update contracts.** Write the acceptance note with
   columns: case, native/synthetic/live-relay evidence, expected result, observed
@@ -503,8 +608,10 @@ fn delegated_worker_handoff_and_takeover() {
   Obtain a final whole-branch independent review of code, documents and live
   verdicts under requesting-code-review; log its outcome before acting. Correct
   Important/Critical findings and re-review under repository policy. Prepare the
-  final code/closeout commit below, run `tasks check`, then commit and merge locally
-  only after required checks and review pass. Follow the repository's explicit
+  final code/closeout commit below, run `tasks check`, then commit on the shared
+  `feat/delegated-identity` branch and merge that complete branch locally only
+  after required checks and review pass. Tasks 1–3 stay on that branch until this
+  single implementation merge. Follow the repository's explicit
   reinstall requirement: run `cargo install --path .` from the accepted checkout,
   verify `command -v tasks` and `tasks --version`, and ensure participating sessions
   use the new binary. Report an installation failure separately; do not claim it
@@ -527,4 +634,6 @@ in the task note until approval; linking its Task headings before filing steps
 would produce the known `unlinked_step` warnings. After approval, file and link
 the four implementation tasks, close tasks-5e2472 as the reviewed design/plan
 deliverable, and integrate the document/task records locally. The implementation
-steps then proceed sequentially with the accepted process and worktree rules.
+steps then proceed sequentially on the single `feat/delegated-identity` branch
+in `.worktrees/delegated-identity`, using the workspace sequence above. The
+document/task-only integration is not an intermediate implementation merge.
