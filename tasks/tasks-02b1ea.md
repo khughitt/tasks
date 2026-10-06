@@ -1,15 +1,16 @@
 ---
 id: tasks-02b1ea
 title: "Pretty tables on comfy-table: every table view, project colours, optional headers, a warnings divider"
-status: doing
+status: done
 priority: 2
 size: l
 complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T16:16:39Z
+updated: 2026-10-06T16:21:19Z
 started: 2026-10-06T13:01:47Z
+completed: 2026-10-06T16:21:19Z
 depends: []
 tags: [pretty]
 agent: claude-code/claude-opus-5-5
@@ -76,3 +77,7 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T16:16:38Z (feat/comfy-tables): resumed
   provenance: {"harness_session":"codex:01a111b5-34a9-7812-a601-575760678301","harness_session_source":"CODEX_SESSION_ID"}
 - 2026-10-06T16:16:38Z (feat/comfy-tables): User approved local merge and reinstall, including activation of the linked global tasks skill; integrate the reviewed branch and complete merged verification and closeout.
+- 2026-10-06T16:21:19Z (main): done
+  provenance: {"harness_session":"codex:01a111b5-34a9-7812-a601-575760678301","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-10-06T16:21:19Z (main): Reviewed comfy-table migration merged in cee64fb; merged check and 1076 fast tests passed (1 ignored), CLI reinstalled and --headers verified on PATH. All table views, colors, shared widths and warning divider complete.
+  provenance: {"harness_session":"codex:01a111b5-34a9-7812-a601-575760678301","harness_session_source":"CODEX_SESSION_ID"}
