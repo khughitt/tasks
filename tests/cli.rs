@@ -10086,6 +10086,47 @@ fn a_stale_takeover_note_names_the_session_without_machine_details() {
 }
 
 #[test]
+fn unix_takeover_notes_omit_the_pid_while_warnings_keep_it() {
+    for live in [true, false] {
+        let mut env = TestEnv::new();
+        let sci = env.init("sci");
+        let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+        let pid = if live { std::process::id() } else { GONE_PID };
+        let session = format!("sid:{pid}");
+        write_detailed_claim(&env, "sci", &id, &session, live);
+
+        let mut cmd = as_agent(&env, &sci, "agent-b");
+        cmd.args(["start", &id]);
+        if live {
+            cmd.args(["--force", "--reason", "continue the work"]);
+        }
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let warnings = warnings_text(&out);
+        for detail in [&session, &format!("pid {pid}")] {
+            assert!(warnings.contains(detail), "{warnings}");
+        }
+
+        let raw = env.read(&sci, &format!("tasks/{id}.md"));
+        assert_no_machine_details(&raw, pid);
+        let expected = if live {
+            "took over Unix session (owner someone, live, forced); reason: continue the work"
+        } else {
+            "took over Unix session (owner someone, stale)"
+        };
+        assert!(raw.contains(expected), "{raw}");
+        let shown = env.json(&sci, &["show", &id]);
+        for note in shown["task"]["notes"].as_array().unwrap() {
+            assert!(
+                !note["text"].as_str().unwrap().contains(&pid.to_string()),
+                "{note}"
+            );
+        }
+        assert_eq!(shown["claim"]["session"], "agent-b");
+    }
+}
+
+#[test]
 fn a_park_over_a_stale_claim_keeps_machine_details_out_of_its_note() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

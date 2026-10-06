@@ -140,18 +140,23 @@ impl Ctx {
         Ok(self.claims.as_mut().expect("just loaded"))
     }
 
-    /// What a task record keeps of a takeover: the displaced session and owner and why it
-    /// could be taken, never `describe_claim`'s machine details (work-claims design,
-    /// "Command behaviour").
+    /// What a task record keeps of a takeover: the displaced logical session and owner
+    /// and why it could be taken, never a Unix session PID or `describe_claim`'s machine
+    /// details (work-claims design, "Command behaviour").
     pub fn takeover_summary(claim: &crate::claims::Claim, live: &Liveness) -> String {
         let how = match live {
             Liveness::Live => "live, forced",
             Liveness::Stale(_) => "stale",
         };
-        format!(
-            "took over session {} (owner {}, {how})",
-            claim.session, claim.owner
-        )
+        let session = match claim
+            .session
+            .strip_prefix("sid:")
+            .and_then(|pid| pid.parse::<u32>().ok())
+        {
+            Some(_) => "Unix session".to_string(),
+            None => format!("session {}", claim.session),
+        };
+        format!("took over {session} (owner {}, {how})", claim.owner)
     }
 
     pub fn describe_claim(claim: &crate::claims::Claim, live: &Liveness) -> String {

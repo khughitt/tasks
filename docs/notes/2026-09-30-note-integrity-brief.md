@@ -15,9 +15,9 @@ and delivery need not wait on each other.
 - `src/commands/mod.rs::append_note` normalizes trailing whitespace;
   `src/commands/edit.rs::check_invariants` allows whitespace-only historical repairs
   (tasks-7c6fcd, done). Other historical edits remain protected.
-- `Ctx::takeover_summary` omits separate host, PID and absolute-worktree fields,
-  but persists claim.session. Unix fallback writes sid:<pid>, so tasks-0238e4's
-  PID-omission guarantee is incomplete. tasks-46f99f tracks that remaining defect.
+- `Ctx::takeover_summary` omits host, PID and absolute-worktree fields and names
+  numeric Unix fallback identities (`sid:<pid>`) only as `Unix session`
+  (tasks-46f99f). Logical session identifiers remain named in takeover notes.
   Detailed diagnostics remain local. Park notes already exclude store host/worktree.
 - Feedback recurrence errors now name the single-line --body rule (tasks-fcf6f7, done).
 - `src/model.rs::Note` has whole-second timestamps and no distinct note ID.
@@ -68,8 +68,8 @@ then settle correction and its reader contract with obs. Stage delivery separate
 ## Proposed decomposition
 
 - tasks-7c6fcd and tasks-fcf6f7: done; whitespace and feedback diagnostics are delivered.
-- tasks-0238e4: delivered separate-field privacy, with the sid:<pid> gap recorded.
-  tasks-46f99f: P2/xs/low/direct prevention fix; historical notes remain publishing work.
+- tasks-0238e4 and tasks-46f99f: delivered separate-field and Unix-identity privacy
+  for new takeover notes; historical notes remain publishing work.
 - tasks-1f6d08: P2/m/high/planned, staged within the existing design task. First choose
   redaction versus manual publishing handling without waiting on obs; share note
   selection constraints, then coordinate structured correction. Review design and

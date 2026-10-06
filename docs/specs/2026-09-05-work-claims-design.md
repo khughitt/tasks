@@ -196,7 +196,9 @@ the shared chokepoint covers all four paths at once.
   `--force`, but with a warning naming the displaced holder and why it was judged stale.
   Either takeover appends a note, and the note is a summary, not the warning:
   `took over session <session> (owner <owner>, live, forced)` or `(…, stale)`. The task
-  record is tracked and may be published, so the host, pid, worktree path, and staleness
+  note names a numeric Unix fallback identity (`sid:<pid>`) only as `Unix session`;
+  logical session identifiers retain their names. The task record is tracked and may
+  be published, so the host, pid, worktree path, and staleness
   diagnostic (which can embed a pid) stay in the warning, the `claimed` error, and the
   claim store, all of which remain on the machine. `park` taking over a stale claim warns
   the same way and writes no takeover note; its own note carries only the waiting side
