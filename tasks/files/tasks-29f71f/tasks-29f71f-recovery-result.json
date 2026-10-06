@@ -1,0 +1,568 @@
+{
+  "tasks_version": "tasks 0.2.0",
+  "git_version": "git version 2.56.0",
+  "binary_sha256": "5f1d12f592dde8c582ce8a10981b0eeac79114abca3478961e068381a695d964",
+  "verdict": "passed",
+  "clean_handoff": "fast-forward then CLI retry succeeds",
+  "union_with_source_stamp": "same-stamp stale_copy; nothing written",
+  "recovery": "integrate resolved union in both siblings, then CLI retry succeeds",
+  "history_preserved": true,
+  "fixture_removed": true,
+  "commands": [
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "init",
+        "-b",
+        "base"
+      ],
+      "exit": 0,
+      "stdout": "Initialized empty Git repository in <fixture>/main/.git/\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "config",
+        "user.name",
+        "Probe"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "config",
+        "user.email",
+        "probe@example.invalid"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "tasks",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "tasks 0.2.0\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "git version 2.56.0\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "tasks",
+        "init",
+        "--prefix",
+        "probe"
+      ],
+      "exit": 0,
+      "stdout": "{\"prefix\":\"probe\",\"root\":\"<fixture>/main\",\"warnings\":[],\"aliases\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "tasks",
+        "add",
+        "Recovery fixture",
+        "--process",
+        "direct"
+      ],
+      "exit": 0,
+      "stdout": "{\"id\":\"probe-9beb1d\",\"action\":\"created\",\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "common history"
+      ],
+      "exit": 0,
+      "stdout": "{\"id\":\"probe-9beb1d\",\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "add",
+        "tasks"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "chore: create common record"
+      ],
+      "exit": 0,
+      "stdout": "[base (root-commit) 1c09c04] chore: create common record\n 2 files changed, 16 insertions(+)\n create mode 100644 tasks/.config.toml\n create mode 100644 tasks/probe-9beb1d.md\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "switch",
+        "-c",
+        "local"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "Switched to a new branch 'local'\n"
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "local-only history"
+      ],
+      "exit": 0,
+      "stdout": "{\"id\":\"probe-9beb1d\",\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "add",
+        "tasks"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "chore: retain local history"
+      ],
+      "exit": 0,
+      "stdout": "[local b244eb4] chore: retain local history\n 1 file changed, 2 insertions(+), 1 deletion(-)\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "switch",
+        "-c",
+        "source",
+        "base"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "Switched to a new branch 'source'\n"
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "source-only history"
+      ],
+      "exit": 0,
+      "stdout": "{\"id\":\"probe-9beb1d\",\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "source second note"
+      ],
+      "exit": 0,
+      "stdout": "{\"id\":\"probe-9beb1d\",\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "add",
+        "tasks"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "chore: advance authoritative record"
+      ],
+      "exit": 0,
+      "stdout": "[source e82c244] chore: advance authoritative record\n 1 file changed, 3 insertions(+), 1 deletion(-)\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "work-link",
+        "--ensure",
+        ".worktrees"
+      ],
+      "exit": 0,
+      "stdout": "outside\t<fixture>/main/.worktrees\t<fixture>/main is outside the configured checkout root; stays in-tree\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "worktree",
+        "add",
+        "-b",
+        "clean",
+        "<fixture>/main/.worktrees/recovery",
+        "base"
+      ],
+      "exit": 0,
+      "stdout": "HEAD is now at 1c09c04 chore: create common record\n",
+      "stderr": "Preparing worktree (new branch 'clean')\n"
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "worktree",
+        "lock",
+        "--reason",
+        "disposable recovery probe",
+        "<fixture>/main/.worktrees/recovery"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "clean retry"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"detail\":\"tasks/probe-9beb1d.md in <fixture>/main is newer than this copy (2026-10-06T11:19:46Z there, 2026-10-06T11:19:44Z here); nothing was written. Commit tasks/probe-9beb1d.md in <fixture>/main if it has changes, merge it into this branch, then rerun here; the merge may conflict where both copies changed. Or, to write in the main checkout instead: tasks -C <fixture>/main note probe-9beb1d 'clean retry'\",\"kind\":\"stale_copy\"}}\n"
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "merge",
+        "--ff-only",
+        "source"
+      ],
+      "exit": 0,
+      "stdout": "Updating 1c09c04..e82c244\nFast-forward\n tasks/probe-9beb1d.md | 4 +++-\n 1 file changed, 3 insertions(+), 1 deletion(-)\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "clean retry"
+      ],
+      "exit": 0,
+      "stdout": "{\"id\":\"probe-9beb1d\",\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "add",
+        "tasks"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "chore: verify ordinary handoff"
+      ],
+      "exit": 0,
+      "stdout": "[clean 3cae6d0] chore: verify ordinary handoff\n 1 file changed, 2 insertions(+), 1 deletion(-)\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "switch",
+        "local"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "Switched to branch 'local'\n"
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "union retry"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"detail\":\"tasks/probe-9beb1d.md in <fixture>/main is newer than this copy (2026-10-06T11:19:46Z there, 2026-10-06T11:19:45Z here); nothing was written. Commit tasks/probe-9beb1d.md in <fixture>/main if it has changes, merge it into this branch, then rerun here; the merge may conflict where both copies changed. Or, to write in the main checkout instead: tasks -C <fixture>/main note probe-9beb1d 'union retry'\",\"kind\":\"stale_copy\"}}\n"
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "merge",
+        "--no-commit",
+        "--no-ff",
+        "source"
+      ],
+      "exit": 1,
+      "stdout": "Auto-merging tasks/probe-9beb1d.md\nCONFLICT (content): Merge conflict in tasks/probe-9beb1d.md\nAutomatic merge failed; fix conflicts and then commit the result.\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "show",
+        ":1:tasks/probe-9beb1d.md"
+      ],
+      "exit": 0,
+      "stdout": "---\nid: probe-9beb1d\ntitle: Recovery fixture\nstatus: todo\npriority: 2\nprocess: direct\ncreated: 2026-10-06T11:19:43Z\nupdated: 2026-10-06T11:19:44Z\ndepends: []\ntags: []\n---\n\n## Notes\n\n- 2026-10-06T11:19:43Z (probe): common history\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "show",
+        ":2:tasks/probe-9beb1d.md"
+      ],
+      "exit": 0,
+      "stdout": "---\nid: probe-9beb1d\ntitle: Recovery fixture\nstatus: todo\npriority: 2\nprocess: direct\ncreated: 2026-10-06T11:19:43Z\nupdated: 2026-10-06T11:19:45Z\ndepends: []\ntags: []\n---\n\n## Notes\n\n- 2026-10-06T11:19:43Z (probe): common history\n- 2026-10-06T11:19:43Z (probe): local-only history\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "show",
+        ":3:tasks/probe-9beb1d.md"
+      ],
+      "exit": 0,
+      "stdout": "---\nid: probe-9beb1d\ntitle: Recovery fixture\nstatus: todo\npriority: 2\nprocess: direct\ncreated: 2026-10-06T11:19:43Z\nupdated: 2026-10-06T11:19:46Z\ndepends: []\ntags: []\n---\n\n## Notes\n\n- 2026-10-06T11:19:43Z (probe): common history\n- 2026-10-06T11:19:43Z (probe): source-only history\n- 2026-10-06T11:19:43Z (probe): source second note\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "merge-file",
+        "--union",
+        "-p",
+        "<fixture>/body-1",
+        "<fixture>/body-0",
+        "<fixture>/body-2"
+      ],
+      "exit": 0,
+      "stdout": "\n## Notes\n\n- 2026-10-06T11:19:43Z (probe): common history\n- 2026-10-06T11:19:43Z (probe): local-only history\n- 2026-10-06T11:19:43Z (probe): source-only history\n- 2026-10-06T11:19:43Z (probe): source second note\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "add",
+        "tasks"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "chore: resolve conflict retaining both histories"
+      ],
+      "exit": 0,
+      "stdout": "[local 7fdbb97] chore: resolve conflict retaining both histories\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "tasks",
+        "show",
+        "probe-9beb1d"
+      ],
+      "exit": 0,
+      "stdout": "{\"task\":{\"id\":\"probe-9beb1d\",\"title\":\"Recovery fixture\",\"status\":\"todo\",\"priority\":2,\"process\":\"direct\",\"parallel\":false,\"lane\":false,\"created\":\"2026-10-06T11:19:43Z\",\"updated\":\"2026-10-06T11:19:46Z\",\"body\":\"\",\"notes\":[{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"common history\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"source-only history\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"source second note\"}]},\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "tasks",
+        "show",
+        "probe-9beb1d"
+      ],
+      "exit": 0,
+      "stdout": "{\"task\":{\"id\":\"probe-9beb1d\",\"title\":\"Recovery fixture\",\"status\":\"todo\",\"priority\":2,\"process\":\"direct\",\"parallel\":false,\"lane\":false,\"created\":\"2026-10-06T11:19:43Z\",\"updated\":\"2026-10-06T11:19:46Z\",\"body\":\"\",\"notes\":[{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"common history\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"local-only history\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"source-only history\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"source second note\"}]},\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "union retry"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "{\"error\":{\"detail\":\"tasks/probe-9beb1d.md in <fixture>/main has the same stamp as this copy (2026-10-06T11:19:46Z) but different content, so both were written in the same second; nothing was written. Merge that copy of tasks/probe-9beb1d.md into this checkout, then rerun here\",\"kind\":\"stale_copy\"}}\n"
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "merge",
+        "--ff-only",
+        "local"
+      ],
+      "exit": 0,
+      "stdout": "Updating e82c244..7fdbb97\nFast-forward\n tasks/probe-9beb1d.md | 1 +\n 1 file changed, 1 insertion(+)\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "tasks",
+        "note",
+        "probe-9beb1d",
+        "union retry"
+      ],
+      "exit": 0,
+      "stdout": "{\"id\":\"probe-9beb1d\",\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "tasks",
+        "show",
+        "probe-9beb1d"
+      ],
+      "exit": 0,
+      "stdout": "{\"task\":{\"id\":\"probe-9beb1d\",\"title\":\"Recovery fixture\",\"status\":\"todo\",\"priority\":2,\"process\":\"direct\",\"parallel\":false,\"lane\":false,\"created\":\"2026-10-06T11:19:43Z\",\"updated\":\"2026-10-06T11:19:47Z\",\"body\":\"\",\"notes\":[{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"common history\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"local-only history\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"source-only history\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"source second note\"},{\"at\":\"2026-10-06T11:19:43Z\",\"by\":\"probe\",\"text\":\"union retry\"}]},\"warnings\":[]}\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "tasks",
+        "check"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "add",
+        "tasks"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main/.worktrees/recovery",
+      "argv": [
+        "git",
+        "commit",
+        "-m",
+        "chore: verify lossless recovery"
+      ],
+      "exit": 0,
+      "stdout": "[local adc3dd4] chore: verify lossless recovery\n 1 file changed, 2 insertions(+), 1 deletion(-)\n",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "worktree",
+        "unlock",
+        "<fixture>/main/.worktrees/recovery"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "cwd": "<fixture>/main",
+      "argv": [
+        "git",
+        "worktree",
+        "remove",
+        "<fixture>/main/.worktrees/recovery"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}
