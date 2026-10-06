@@ -9,21 +9,19 @@ use std::path::{Path, PathBuf};
 
 pub fn run(inputs: Vec<String>, stdin: bool, dir: Option<&Path>) -> Result<Output> {
     let registry = Registry::load()?;
-    let base = super::start_dir(dir)?;
     let inputs = if stdin {
-        std::io::stdin()
-            .lock()
-            .lines()
-            .map(|line| line.map(|l| l.trim_end_matches('\r').to_string()))
-            .collect::<std::io::Result<Vec<_>>>()?
+        read_inputs(std::io::stdin().lock())
     } else {
-        inputs
+        inputs.into_iter().map(Ok).collect()
     };
     let index = Index::build(&registry);
     let mut warnings = index.warnings.clone();
     let results = inputs
         .into_iter()
-        .map(|input| row(&registry, &index, &base, input, &mut warnings))
+        .map(|input| match input {
+            Ok(input) => row(&registry, &index, dir, input, &mut warnings),
+            Err((input, detail)) => invalid_row(input, "invalid", detail),
+        })
         .collect();
     Ok(Output::Resolve(ResolveOut { results, warnings }))
 }
@@ -32,12 +30,12 @@ pub fn run(inputs: Vec<String>, stdin: bool, dir: Option<&Path>) -> Result<Outpu
 fn row(
     registry: &Registry,
     index: &Index,
-    base: &Path,
+    dir: Option<&Path>,
     input: String,
     warnings: &mut Vec<String>,
 ) -> ResolveRow {
     if input.contains('/') || input.starts_with('.') || input.starts_with('~') {
-        return path_row(registry, index, base, input, warnings);
+        return path_row(registry, index, dir, input, warnings);
     }
     if let Ok(id) = TaskId::parse(&input) {
         let live = registry.canonical_prefix(&id.prefix).to_string();
@@ -79,7 +77,7 @@ fn row(
 fn path_row(
     registry: &Registry,
     index: &Index,
-    base: &Path,
+    dir: Option<&Path>,
     input: String,
     warnings: &mut Vec<String>,
 ) -> ResolveRow {
@@ -92,7 +90,20 @@ fn path_row(
             };
         }
     };
-    let path = match normalize(&expanded, base) {
+    let base = if expanded.is_absolute() {
+        Ok(PathBuf::from("/"))
+    } else if let Some(base) = dir.filter(|base| base.is_absolute()) {
+        Ok(base.to_path_buf())
+    } else {
+        std::env::current_dir()
+            .map(|cwd| dir.map_or(cwd.clone(), |base| cwd.join(base)))
+            .map_err(|error| format!("cannot read working directory: {error}"))
+    };
+    let base = match base {
+        Ok(base) => base,
+        Err(detail) => return invalid_row(input, "path", detail),
+    };
+    let path = match normalize(&expanded, &base) {
         Ok(path) => path,
         Err(detail) => {
             return ResolveRow {
@@ -138,5 +149,84 @@ fn row_of(input: String, kind: &'static str, status: &'static str) -> ResolveRow
         kind,
         status,
         ..ResolveRow::default()
+    }
+}
+
+/// Decode each line independently; a read failure ends the stream, not the command.
+fn read_inputs(mut reader: impl BufRead) -> Vec<std::result::Result<String, (String, String)>> {
+    let mut inputs = Vec::new();
+    loop {
+        let mut bytes = Vec::new();
+        match reader.read_until(b'\n', &mut bytes) {
+            Ok(0) => break,
+            Ok(_) => {
+                if bytes.last() == Some(&b'\n') {
+                    bytes.pop();
+                    if bytes.last() == Some(&b'\r') {
+                        bytes.pop();
+                    }
+                }
+                inputs.push(String::from_utf8(bytes).map_err(|error| {
+                    (
+                        String::from_utf8_lossy(error.as_bytes()).into_owned(),
+                        format!("stdin line is not valid UTF-8: {}", error.utf8_error()),
+                    )
+                }));
+            }
+            Err(error) => {
+                inputs.push(Err((
+                    String::from_utf8_lossy(&bytes).into_owned(),
+                    format!("cannot read stdin: {error}"),
+                )));
+                break;
+            }
+        }
+    }
+    inputs
+}
+
+fn invalid_row(input: String, kind: &'static str, detail: String) -> ResolveRow {
+    ResolveRow {
+        detail: Some(detail),
+        ..row_of(input, kind, "invalid")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stdin_read_error_preserves_prior_lines_and_stops() {
+        struct Failing {
+            first: bool,
+        }
+        impl std::io::Read for Failing {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                unreachable!()
+            }
+        }
+        impl BufRead for Failing {
+            fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+                if self.first {
+                    Ok(b"sci\n")
+                } else {
+                    Err(std::io::Error::other("reader failed"))
+                }
+            }
+            fn consume(&mut self, _: usize) {
+                self.first = false;
+            }
+        }
+        let inputs = read_inputs(Failing { first: true });
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0], Ok("sci".into()));
+        assert!(
+            inputs[1]
+                .as_ref()
+                .unwrap_err()
+                .1
+                .contains("cannot read stdin: reader failed")
+        );
     }
 }

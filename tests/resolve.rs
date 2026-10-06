@@ -374,3 +374,76 @@ fn git(dir: &Path, args: &[&str]) {
         .unwrap();
     assert!(out.status.success(), "git {args:?}: {out:?}");
 }
+
+#[test]
+fn unavailable_cwd_only_invalidates_paths_that_need_it() {
+    use std::os::unix::process::CommandExt;
+    let mut env = TestEnv::new();
+    let root = env.init("sci");
+    let gone = tempfile::tempdir().unwrap();
+    let gone_name = std::ffi::CString::new(gone.path().as_os_str().as_encoded_bytes()).unwrap();
+    let mut command = env.raw(gone.path());
+    command.args([
+        "resolve",
+        "sci",
+        "sci-123456",
+        root.to_str().unwrap(),
+        "./x",
+    ]);
+    // SAFETY: rmdir is async-signal-safe; the CString lives in the child closure.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::rmdir(gone_name.as_ptr()) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let out = command.output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let rows = value["results"].as_array().unwrap();
+    for row in &rows[..3] {
+        assert_eq!(row["status"], "resolved");
+    }
+    assert_eq!(rows[3]["status"], "invalid");
+    assert!(
+        rows[3]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("working directory")
+    );
+}
+
+#[test]
+fn relative_directory_override_resolves_against_cwd() {
+    let env = TestEnv::new();
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("project");
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    env.json(&root, &["init", "--prefix", "sci"]);
+    let value = env.json(base.path(), &["-C", "project/sub", "resolve", "./x"]);
+    assert_eq!(value["results"][0]["status"], "resolved");
+    assert_eq!(value["results"][0]["relpath"], "sub/x");
+}
+
+#[test]
+fn malformed_stdin_line_preserves_valid_neighbors() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let out = env
+        .cmd(&dir)
+        .args(["resolve", "--stdin"])
+        .write_stdin(b"sci\n\xff\nzz-123456\n")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let rows = value["results"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0]["status"], "resolved");
+    assert_eq!(rows[1]["input"], "\u{fffd}");
+    assert_eq!(rows[1]["status"], "invalid");
+    assert!(rows[1]["detail"].as_str().unwrap().contains("UTF-8"));
+    assert_eq!(rows[2]["status"], "unregistered");
+}
