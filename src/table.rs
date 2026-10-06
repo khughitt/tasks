@@ -244,10 +244,7 @@ pub fn render(
         }
     }
 
-    let lines: Vec<String> = table
-        .lines()
-        .map(|line| line.trim_end().to_string())
-        .collect();
+    let lines: Vec<String> = table.lines().map(|line| trim_visible_end(&line)).collect();
     let header_lines = usize::from(layout.headers);
     let has_details =
         matches!(mode, Mode::Stacked(_)) || rows.iter().any(|row| !row.details.is_empty());
@@ -326,18 +323,44 @@ fn detail(label: &str, item: &Detail, width: Option<usize>, painter: &Painter) -
             }
             let mut rendered = String::new();
             for (index, line) in cell.lines().enumerate() {
-                if index == 0 {
-                    rendered.push_str(&lead);
+                let prefix = if index == 0 {
+                    lead.clone()
                 } else {
-                    rendered.push_str(&" ".repeat(indent));
-                }
-                rendered.push_str(line.trim_end());
+                    " ".repeat(indent)
+                };
+                rendered.push_str(&trim_visible_end(&format!("{prefix}{line}")));
                 rendered.push('\n');
             }
             rendered
         }
-        _ => format!("{lead}{text}\n"),
+        _ => format!("{}\n", trim_visible_end(&format!("{lead}{text}"))),
     }
+}
+
+/// Trim trailing display whitespace without dropping the ANSI sequences around it.
+fn trim_visible_end(text: &str) -> String {
+    let mut end = 0;
+    let mut escapes = Vec::new();
+    let mut chars = text.char_indices();
+    while let Some((index, c)) = chars.next() {
+        if c == '\x1b' {
+            let mut escape_end = index + c.len_utf8();
+            for (offset, terminator) in chars.by_ref() {
+                escape_end = offset + terminator.len_utf8();
+                if terminator.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            escapes.push(index..escape_end);
+        } else if !c.is_whitespace() {
+            end = index + c.len_utf8();
+        }
+    }
+    let mut trimmed = text[..end].to_string();
+    for escape in escapes.into_iter().filter(|escape| escape.start >= end) {
+        trimmed.push_str(&text[escape]);
+    }
+    trimmed
 }
 
 /// Display columns of `text`, skipping ANSI escape sequences.
@@ -613,6 +636,39 @@ mod tests {
         assert_eq!(strip(&text), plain_text);
         for line in text.lines() {
             assert!(visible_width(line) <= 100, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn painted_cells_and_details_have_no_visible_trailing_whitespace() {
+        let columns = [Column::fixed("id"), Column::wrap("title", 20, None)];
+        for layout in [Layout::default(), at(40)] {
+            for painter in [plain(), colored()] {
+                let paint = |text: &str| painter.paint(Style::Chrome, text);
+                let mut row = Row::new(vec!["sci-000001".into(), paint("title  ")]);
+                row.details = vec![
+                    ("empty", Detail::Wrap(String::new())),
+                    ("note", Detail::Wrap(paint("text  "))),
+                    ("long", Detail::Wrap(paint(&format!("{LONG}  ")))),
+                ];
+                let text = render(&columns, &[row], &layout, None, &painter);
+                let visible = strip(&text);
+                assert!(
+                    visible.contains("title") && visible.contains("text"),
+                    "{text:?}"
+                );
+                assert!(visible.contains("empty:"), "{text:?}");
+                assert!(visible.contains("omega"), "{text:?}");
+                for line in visible.lines() {
+                    assert_eq!(line, line.trim_end(), "{layout:?}: {text:?}");
+                }
+                if painter.enabled() {
+                    assert!(
+                        text.contains("\x1b[2m") && text.contains("\x1b[0m"),
+                        "{text:?}"
+                    );
+                }
+            }
         }
     }
 
