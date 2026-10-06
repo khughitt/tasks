@@ -1,13 +1,15 @@
 ---
 id: tasks-5e2472
 title: Design delegated identity from verified Codex semantics
-status: todo
+status: doing
 priority: 1
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-10-06T10:04:44Z
-updated: 2026-10-06T17:05:32Z
+updated: 2026-10-06T17:23:30Z
+started: 2026-10-06T17:23:30Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
@@ -36,3 +38,5 @@ Verified prerequisite: tasks-c0bad3 traced Codex 0.160.1 commit d27764b82f7118f6
 - 2026-10-06T10:59:44Z (main): review: spec round 2 — verdict: accept; findings: none; reviewer: unspecified
 - 2026-10-06T16:50:04Z (main): priority: raised to P1 under the adopted agent-identity lane; identity research precedes dependent design, and controller-owned closure stays a separate decision.
 - 2026-10-06T17:05:31Z (investigate/tasks-c0bad3): Exact Codex 0.160.1 source at d27764b82f7118f674371e6d6e76271d9d606edb deliberately writes shared root CODEX_SESSION_ID and concrete CODEX_THREAD_ID; SubagentStart/SubagentStop agent_id equals worker thread ID. Worker completion dispatches SubagentStop, not Stop; worker SessionEnd/Interrupt are excluded. Recommend tasks contract adaptation, not upstream export repair. Root grouping is not an immediate-parent link for nested workers. Findings and immutable source links: docs/notes/2026-09-30-delegated-identity-brief.md; live hook delivery remains unverified.
+- 2026-10-06T17:23:30Z (main): started
+  provenance: {"harness_session":"codex:01a1123d-601a-7e53-ad22-3f5a728755fd","harness_session_source":"CODEX_SESSION_ID"}
