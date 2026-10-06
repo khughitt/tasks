@@ -1,6 +1,6 @@
 # Former roots and project resolution
 
-Status: approved 2026-10-06 (spec review rounds 1–2); the dangling-link rule in §2.1 and §2.2 was amended in plan review round 1
+Status: implemented 2026-10-06 (tasks-7580d2); host rollout remains Task 6
 Task: tasks-7580d2 (lane tasks-a7460c; blocks tack-8b7a28; used by obs-ff4e76, flows-44890e)
 
 ## 1. Goal
@@ -167,9 +167,8 @@ tasks resolve --stdin        # one input per line
 ```
 
 The command is read-only: it takes no locks and makes no writes. It needs no current
-project, so it works from anywhere. The command needs a row in ops `cli.toml` before it
-lands ("The project, canonical id, or live prefix for an id, prefix, or path, through
-renames and moves"), followed by `vendored adopt`.
+project, so it works from anywhere. Its ops `cli.toml` row landed on ops main
+`309a70d`, followed by adoption into tasks with `vendored adopt`.
 
 ### 3.1 Input classification
 
@@ -217,6 +216,10 @@ so a batch survives one odd input. The statuses are `resolved`, `unregistered`,
 
 **Errors.** Only registry problems are errors: an unreadable registry, a malformed one,
 or one that fails load validation. These use the usual envelope: stderr, exit 1.
+Malformed UTF-8 stdin lines instead
+produce `invalid` rows with lossily decoded `input` and decoding details. A stdin read
+error adds an invalid diagnostic and ends reading, preserving preceding rows. An
+unavailable relative-path base is likewise a per-item invalid outcome.
 
 **Fields.** Optional fields are omitted when they don't apply:
 

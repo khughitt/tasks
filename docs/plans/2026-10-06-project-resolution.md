@@ -25,9 +25,21 @@
 - Classification order is path → id → prefix → invalid. `resolve` never expands the bare-hex shorthand.
 - `relpath` is relative to `worktree` when present, otherwise to `location`.
 - JSON shapes of existing commands do not change. New warnings are the only addition to their output.
-- The ops `cli.toml` row lands first: edit it in an ops worktree, then copy it byte for byte to `tools/cli.toml`. Never hand-edit `tools/cli.toml` alone.
+- The ops `cli.toml` row lands first: review and land it on ops main, then run `python3 <ops>/bin/vendored adopt cli.toml --into <tasks-worktree>`. Never hand-edit `tools/cli.toml` alone.
 - Run tests only through `just test-one …` and `just test-fast`, and the gate through `just check` / `just gate`. Never call `cargo test` directly.
 - No machine-specific absolute paths in code, comments, or docs. Use `<Dropbox>`, `<WORK_ROOT>`, and `<ops>` in prose.
+
+## Execution amendments (2026-10-06)
+
+Delivered code takes precedence over the illustrative snippets below. Registry saves
+filter empty per-project location tables. The alias test fixture edits the structured
+TOML table rather than appending text. Task 3's temporary dead-code expectation was
+removed when Task 4 wired the resolver. The stdin regression includes an ambiguous
+path. Resolver cwd lookup is lazy; relative `-C` is anchored to cwd. Malformed UTF-8
+lines become invalid rows with lossy input, and read failures add an invalid diagnostic
+while preserving prior rows, maintaining registry-only command errors. The ops inputs
+inventory explicitly sets `required = false`; vocabulary landing and adoption follow
+the corrected procedure below. Host installation and backfill remain Task 6.
 
 ## Review focus
 
@@ -1334,7 +1346,7 @@ git commit -m "feat(locations): match paths against current and former locations
 ### Task 4: `tasks resolve`
 
 **Files:**
-- Modify, in a locked ops worktree: ops `cli.toml`. Copy it to `tools/cli.toml`.
+- Modify, in a locked ops worktree: ops `cli.toml`. Land it, then adopt into `tools/cli.toml`.
 - Create: `src/commands/resolver.rs`. The name avoids the existing `crate::resolve`, which links specs and plans.
 - Modify: `src/cli.rs`, `src/commands/mod.rs` (module and dispatch), `src/output.rs` (payload, pretty, warnings), `src/main.rs` (width-error exemption)
 - Test: `tests/resolve.rs`
@@ -1357,16 +1369,17 @@ git commit -m "feat(locations): match paths against current and former locations
      [[cli.tasks.commands]]
      path = ["resolve"]
      summary = "The project, canonical id, or live prefix for an id, prefix, or path, through renames and moves"
-     args = [{ name = "inputs", value = "string", variadic = true }]
+     args = [{ name = "inputs", value = "string", variadic = true, required = false }]
      options = [
        { names = ["--stdin"], value = "none" },
      ]
      ```
 
-  5. Run `just test-one test_cli` in the ops worktree. Expected: PASS.
-  6. Copy it: `cp <ops worktree>/cli.toml .worktrees/tasks-7580d2/tools/cli.toml`.
+  5. Run `just test-one tests.test_cli` in the ops worktree. Expected: PASS.
+  6. Review, commit, and land the ops row on main, then run
+     `python3 <ops>/bin/vendored adopt cli.toml --into <tasks-worktree>`.
 
-  Leave the ops change uncommitted. Task 6 publishes and commits it.
+  Completed: ops main `309a70d`; tasks adopted the landed table before Task 4.
 
 - [ ] **Step 2: Write the failing CLI tests.** Append to `tests/resolve.rs`:
 
@@ -1814,8 +1827,8 @@ fn row_of(input: String, kind: &'static str, status: &'static str) -> ResolveRow
 - [ ] **Step 7: Run the tests.**
   - Run: `just test-one --test resolve`, then `just test-one surface`
   - Expected: PASS.
-  - If the surface test reports a difference, fix the ops row, run its `test_cli`, and
-    copy it again. Never edit `tools/cli.toml` alone.
+  - If the surface test reports a difference, run `just test-one tests.test_cli` for the corrected ops row, land it,
+    and adopt it again. Never edit `tools/cli.toml` alone.
 
 - [ ] **Step 8: Run the gate pieces, then commit.**
   - Run: `just check`, then `just test-fast`
@@ -1897,9 +1910,8 @@ git commit -m "docs(tasks): document location history and tasks resolve"
 
 ### Task 6: Integrate, publish the vocabulary, and roll out on this host
 
-This task changes live host state: the installed binary, the registry, and vendored
-copies in other repositories. Each step that changes host state is announced before it
-runs. The `ai` backfill edits the user's registry, so ask before writing it.
+This task changes live host state: the installed binary and the registry. Each step
+that changes host state is announced before it runs. The `ai` backfill edits the user's registry, so ask before writing it.
 
 - [ ] **Step 1: Final review and integration.**
   1. Run the whole-branch review.
@@ -1907,15 +1919,11 @@ runs. The `ai` backfill edits the user's registry, so ask before writing it.
   3. Merge into `main` locally. This is a personal checkout, so a local merge is the
      default.
 
-- [ ] **Step 2: Publish the vocabulary.**
-  1. From the ops worktree, run `just vendor-cli --force`.
-  2. Run ops `just test-one test_cli`, `just test-fast`, and `just check`.
-  3. Commit the ops source as `feat: add tasks resolve to cli inventory`, and commit
-     each clean vendored copy in its owning repository.
-  4. Close the ops task filed in Task 4.
-
-  Publish before committing the ops source, because ops pre-commit refuses while
-  copies are stale.
+- [x] **Step 2: Publish the vocabulary.**
+  Completed in Task 4: ops row reviewed and landed on main `309a70d`, then adopted
+  with `python3 <ops>/bin/vendored adopt cli.toml --into <tasks-worktree>`.
+  No other consumers need vocabulary adoption for this feature; do not broadcast
+  adopted tables. The ops prerequisite task is closed.
 
 - [ ] **Step 3: Install.**
   1. Run `cargo install --path .` from the main checkout.

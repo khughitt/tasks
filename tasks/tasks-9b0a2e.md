@@ -7,7 +7,7 @@ size: l
 complexity: high
 process: planned
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-06T16:52:01Z
+updated: 2026-10-06T20:21:49Z
 depends: []
 parent: tasks-a7460c
 tags: [cross-project]
@@ -20,3 +20,4 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 
 - 2026-10-01T16:23:47Z (main): spec amended in ops plan review round 1: holds_records counts a top-level tasks/.config.toml only when tracked in HEAD (§8.1, decision 5); the CLI's error JSON goes to stderr as today and consumers read it there
 - 2026-10-06T16:52:01Z (main): organization: share registry identity/path classification with tasks-7580d2; before implementation compare locate/where and former-root resolver contracts, preserving the linked-checkout spec and reviewing any required amendment rather than inventing a second resolver.
+- 2026-10-06T20:21:49Z (design/tasks-7580d2): tasks-7580d2 implementation reviewed: src/locations.rs is the shared history/normalization index; where's link step adds checkout kind there and never consults former roots (spec 2026-10-06-project-resolution section 5); main integration/install follows Task 6

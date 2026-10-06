@@ -467,6 +467,11 @@ stored under either spelling changes nothing and warns, and `dep --rm` with eith
 spelling removes it. Never repoint a stored reference with `--on` then `--rm`; in two
 calls that drops the dependency, and in one call it is refused.
 
+Tools map ids and paths through renames and moves with
+`tasks resolve <id|prefix|path>...` (or `--stdin`), never by parsing `projects.toml`
+by hand. Before moving a checkout, run `tasks init --prefix <p> --force` there
+on every host while the old root and storage still exist, so storage is recorded.
+
 Start with clean `tasks/`, no live claims, and at most one git worktree. A pending rename
 freezes every writer to that project, including `start`, feedback, `init --force`, and
 `unregister`; reads remain available. `tasks rename <old> <new> --explain` reports the
