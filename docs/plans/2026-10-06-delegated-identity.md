@@ -4,7 +4,9 @@
 > for the recommended inline execution. If the user selects delegation, use
 > superpowers:subagent-driven-development. Steps use checkboxes for tracking.
 
-**Status:** proposed; awaiting plan review. The written spec is approved.
+**Status:** approved on 2026-10-06 after acceptance by
+claude-code/claude-opus-5-5. Execution is paused at the user's explicit request;
+resume only when the user asks to proceed. The written spec is approved.
 
 **Goal:** Give Codex workers distinct, persistent claim identity and native note
 provenance, retaining root association without transferring ownership.
@@ -612,7 +614,8 @@ fn delegated_worker_handoff_and_takeover() {
   `feat/delegated-identity` branch and merge that complete branch locally only
   after required checks and review pass. Tasks 1–3 stay on that branch until this
   single implementation merge. Follow the repository's explicit
-  reinstall requirement: run `cargo install --path .` from the accepted checkout,
+  reinstall requirement: run `cargo install --path .` from the main checkout
+  on main after the final merge, so installation builds the merged commit;
   verify `command -v tasks` and `tasks --version`, and ensure participating sessions
   use the new binary. Report an installation failure separately; do not claim it
   was deployed. No push, PR, hook installation or global configuration change is
@@ -629,11 +632,28 @@ fn delegated_worker_handoff_and_takeover() {
 
 ## Design-task handoff
 
-This plan is held for review, not authorization to execute. Keep it referenced
-in the task note until approval; linking its Task headings before filing steps
-would produce the known `unlinked_step` warnings. After approval, file and link
+The approved plan is paused before execution at the user's request. Keep it
+referenced in the task note until resumption; linking its Task headings before
+filing steps would produce the known `unlinked_step` warnings. When the user
+resumes execution, file and link
 the four implementation tasks, close tasks-5e2472 as the reviewed design/plan
 deliverable, and integrate the document/task records locally. The implementation
 steps then proceed sequentially on the single `feat/delegated-identity` branch
 in `.worktrees/delegated-identity`, using the workspace sequence above. The
 document/task-only integration is not an intermediate implementation merge.
+
+## Worktree cleanup
+
+After the document/task-only merge, remove `.worktrees/tasks-5e2472` once all its
+changes are committed and integrated. Keep `.worktrees/delegated-identity` through
+all implementation steps, acceptance and final review; remove it after the final
+merge and installation from main. A blocked installation or acceptance run keeps
+the implementation worktree available for recovery.
+
+For either removal, run `tt-report` in that worktree first. From the main checkout,
+check that the target is clean and integrated and that no host pointer resolves
+into it: use `readlink -f` on launchers under `~/bin` and `~/.local/bin`, and inspect
+user systemd units and known configuration includes. Refuse removal while any
+pointer targets the worktree; restore a recorded test pointer before retrying.
+Then run `git worktree unlock` followed by `git worktree remove` with that
+worktree's `.worktrees/` path. Do not use force removal or discard unrelated work.
