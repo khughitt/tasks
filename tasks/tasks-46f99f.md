@@ -1,13 +1,15 @@
 ---
 id: tasks-46f99f
 title: Keep Unix fallback PIDs out of persisted takeover summaries
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-06T10:41:53Z
-updated: 2026-10-06T10:41:54Z
+updated: 2026-10-06T11:06:22Z
+started: 2026-10-06T11:06:22Z
 depends: []
 parent: tasks-ea2a79
 tags: []
@@ -26,3 +28,5 @@ Verification: exercise a distinctive sid:<pid> in forced-live and stale takeover
 ## Notes
 
 - 2026-10-06T10:41:53Z (main): concerns: tasks-0238e4 defect — Persisted Unix fallback session identifiers still expose the PID despite the completed takeover-summary privacy requirement.
+- 2026-10-06T11:06:22Z (main): started
+  provenance: {"harness_session":"codex:01a110e0-1db2-71e0-a82e-64c5c72e2a27","harness_session_source":"CODEX_SESSION_ID"}
