@@ -323,6 +323,14 @@ summary = "The registered root of the project an id belongs to"
 args = [{ name = "id", value = "ref", required = true }]
 
 [[cli.tasks.commands]]
+path = ["resolve"]
+summary = "The project, canonical id, or live prefix for an id, prefix, or path, through renames and moves"
+args = [{ name = "inputs", value = "string", required = false, variadic = true }]
+options = [
+  { names = ["--stdin"], value = "none" },
+]
+
+[[cli.tasks.commands]]
 path = ["add"]
 verb = "add"
 summary = "Create a task"

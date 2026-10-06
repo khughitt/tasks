@@ -87,6 +87,40 @@ pub struct RootOut {
 }
 
 #[derive(Serialize)]
+pub struct ResolveOut {
+    pub results: Vec<ResolveRow>,
+    pub warnings: Vec<String>,
+}
+
+/// One input's answer (spec §3.2). Fields that do not apply are omitted.
+#[derive(Serialize, Default)]
+pub struct ResolveRow {
+    pub input: String,
+    pub kind: &'static str,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub via: Option<crate::locations::Via>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relpath: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<crate::locations::Candidate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct ProjectRow {
     pub prefix: String,
     #[serde(skip)]
@@ -926,6 +960,7 @@ pub enum Output {
     Id(IdOut),
     Add(AddOut),
     Root(RootOut),
+    Resolve(ResolveOut),
     Projects(ProjectsOut),
     Group(GroupOut),
     Groups(GroupsOut),
@@ -1000,6 +1035,30 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         Output::Id(o) => o.id.clone(),
         Output::Add(o) => o.id.clone(),
         Output::Root(o) => o.root.clone(),
+        Output::Resolve(o) => o
+            .results
+            .iter()
+            .map(|r| {
+                let answer = r.id.as_deref().or(r.prefix.as_deref()).unwrap_or("");
+                let via = r
+                    .via
+                    .map(|v| {
+                        serde_json::to_value(v)
+                            .unwrap()
+                            .as_str()
+                            .unwrap()
+                            .to_string()
+                    })
+                    .unwrap_or_default();
+                [r.input.as_str(), r.status, answer, via.as_str()]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("  ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+
         Output::Group(o) => o.name.clone(),
         Output::Groups(o) => o
             .groups
@@ -1825,6 +1884,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Id(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),
+        Output::Resolve(o) => o.warnings.clone(),
         Output::Group(o) => o.warnings.clone(),
         Output::Groups(o) => o.warnings.clone(),
         Output::Projects(o) => o.warnings.clone(),

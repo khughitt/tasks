@@ -15,7 +15,6 @@ mod halt;
 mod hierarchy;
 mod holds;
 mod lanes;
-#[expect(dead_code, reason = "Task 4 wires the resolver; remove then")]
 mod locations;
 mod model;
 mod needs;
@@ -208,6 +207,7 @@ fn main() {
             cli::Command::Projects { .. }
                 | cli::Command::Groups
                 | cli::Command::Root { .. }
+                | cli::Command::Resolve { .. }
                 | cli::Command::Show { .. }
                 | cli::Command::List { .. }
                 | cli::Command::Search { .. }
