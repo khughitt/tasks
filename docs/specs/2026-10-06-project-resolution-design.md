@@ -1,6 +1,6 @@
 # Former roots and project resolution
 
-Status: implemented 2026-10-06 (tasks-7580d2); host rollout remains Task 6
+Status: implemented and rolled out on this host 2026-10-06 (tasks-7580d2); other-host steps are user-owned
 Task: tasks-7580d2 (lane tasks-a7460c; blocks tack-8b7a28; used by obs-ff4e76, flows-44890e)
 
 ## 1. Goal

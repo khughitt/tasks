@@ -14,6 +14,8 @@
 
 **Spec:** `docs/specs/2026-10-06-project-resolution-design.md`
 
+**Status:** implementation and this-host rollout verified 2026-10-06; completion is recorded in the linked tasks. Other-host steps remain user-owned.
+
 ## Global constraints
 
 - `[projects]` keeps its exact shape. Eight hand readers parse it.
@@ -1930,7 +1932,7 @@ that changes host state is announced before it runs. The `ai` backfill edits the
   adopted tables. The ops prerequisite task is closed.
 
 - [ ] **Step 3: Install.**
-  1. Run `cargo install --path .` from the main checkout.
+  1. Run `cargo install --locked --path .` from the main checkout.
   2. Run `tasks resolve tasks`. Expected: `resolved`.
 
 - [ ] **Step 4: Record storage for live projects.**
@@ -1939,6 +1941,10 @@ that changes host state is announced before it runs. The `ai` backfill edits the
   3. Run `git status --porcelain` in the tack checkout. Expected: empty. A re-init that
      rewrote `tasks/.config.toml` would trip tack's `rename-cutover` clean-tree
      precondition. If it is not empty, stop and report the diff; do not commit it.
+
+  Execution: config and git status were unchanged by re-init. The user approved
+  continuing with existing edits preserved; the later cutover still requires a
+  clean checkout.
 
 - [ ] **Step 5: Backfill `ai` (ask first).**
   1. Show the user the exact `[[locations.tack.former]]` entry from spec §6, with this
@@ -1950,7 +1956,7 @@ that changes host state is announced before it runs. The `ai` backfill edits the
   other host. Its steps are the user's, in this order, because an older binary drops
   `[locations]` on any registry write (spec §2), and the pre-move record must exist
   before the synced move arrives (spec §2.3):
-  1. Install the current binary there: `cargo install --path .` in its synced tasks
+  1. Install the current binary there: `cargo install --locked --path .` in its synced tasks
      checkout, once `main` carries this work.
   2. In its tack checkout, run `tasks init --prefix tack --force`, and check that
      `git status --porcelain` is empty.
