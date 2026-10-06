@@ -316,12 +316,21 @@ mod tests {
 
     #[test]
     fn a_long_fixed_cell_stays_whole_beside_wrapping_columns_and_details() {
+        // fixed 40 + gaps 4 + wrap mins 20 + 30 = 94 <= 100: a table, not the stacked
+        // fallback, so an unconstrained fixed column would be squeezed and wrapped here
+        // (plan review round 2: with the old constraints this panics in row_blocks).
         let long = "a-fixed-cell-that-is-forty-columns-wide!";
         assert_eq!(long.len(), 40);
-        let mut first = Row::new(vec![long.into(), "doing".into(), LONG.into(), LONG.into()]);
+        let columns = [
+            Column::fixed("id"),
+            Column::wrap("title", 20, Some(30)),
+            Column::wrap("next", 30, None),
+        ];
+        let mut first = Row::new(vec![long.into(), LONG.into(), LONG.into()]);
         first.details.push(("note", Detail::Wrap("after the first row".into())));
-        let second = row("sci-000002");
-        let text = render(&columns(), &[first, second], &at(100), None, &plain());
+        let second = Row::new(vec!["sci-000002".into(), LONG.into(), LONG.into()]);
+        let text = render(&columns, &[first, second], &at(100), None, &plain());
+        assert!(!text.contains("next:"), "a table, not the stacked fallback:\n{text}");
         assert!(text.lines().next().unwrap().starts_with(long), "{text}");
         assert!(text.lines().all(|line| visible_width(line) <= 100), "{text}");
         let note = text.lines().position(|l| l.contains("after the first row")).unwrap();
