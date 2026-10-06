@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T13:30:00Z
+updated: 2026-10-06T13:30:07Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
@@ -43,3 +43,5 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 - 2026-10-06T13:22:00Z (feat/comfy-tables): resumed
   provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-06T13:29:59Z (feat/comfy-tables): plan drafted: docs/plans/2026-10-06-comfy-tables.md, 9 tasks filed as steps (tasks-8b152f, -565420, -73c29c, -2ac5d1, -9d8e5d, -ff7985, -674d5d, -014c55, -f52fca; ops piece ops-539e1a); tasks-9b5b0a closes with Task 5
+- 2026-10-06T13:30:07Z (feat/comfy-tables): parked (waiting on user, review): User reviews docs/plans/2026-10-06-comfy-tables.md (in .worktrees/comfy-tables) and picks the execution method; then Task 1 (ops-539e1a, cli.toml --headers) starts
+  provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
