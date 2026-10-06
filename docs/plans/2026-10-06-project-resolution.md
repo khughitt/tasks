@@ -40,6 +40,9 @@ lines become invalid rows with lossy input, and read failures add an invalid dia
 while preserving prior rows, maintaining registry-only command errors. The ops inputs
 inventory explicitly sets `required = false`; vocabulary landing and adoption follow
 the corrected procedure below. Host installation and backfill remain Task 6.
+Final review corrections retain displaced recorded storage even when the old root
+now has an in-tree `.worktrees` directory. Missing former storage warns whether
+the old root exists or not; current-root in-tree refresh still clears its record.
 
 ## Review focus
 
@@ -675,10 +678,11 @@ pub fn storage_state(root: &std::path::Path) -> std::io::Result<StorageState> {
                 root_changed = true;
                 let storage = match storage_state(&previous)? {
                     StorageState::Link(real) => Some(real),
-                    StorageState::InTree => None,
-                    StorageState::Dangling | StorageState::Absent => displaced.storage,
+                    StorageState::InTree | StorageState::Dangling | StorageState::Absent => {
+                        displaced.storage
+                    }
                 };
-                if storage.is_none() && !previous.exists() {
+                if storage.is_none() {
                     warnings.push(format!(
                         "former root {} of {prefix} has no known worktree storage; paths under \
                          its storage will not resolve (spec §2.3)",

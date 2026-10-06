@@ -381,10 +381,11 @@ impl Registry {
                 root_changed = true;
                 let storage = match storage_state(&previous)? {
                     StorageState::Link(real) => Some(real),
-                    StorageState::InTree => None,
-                    StorageState::Dangling | StorageState::Absent => displaced.storage,
+                    StorageState::InTree | StorageState::Dangling | StorageState::Absent => {
+                        displaced.storage
+                    }
                 };
-                if storage.is_none() && !previous.exists() {
+                if storage.is_none() {
                     warnings.push(format!(
                         "former root {} of {prefix} has no known worktree storage; paths under \
                          its storage will not resolve (spec §2.3)",
@@ -1073,6 +1074,69 @@ mod tests {
             (a.clone(), Some(s1))
         );
         assert_eq!(h.former[0].until, "2026-10-02");
+    }
+
+    #[test]
+    fn displaced_in_tree_storage_keeps_the_former_external_record_resolvable() {
+        use crate::locations::{Answer, Index, Via};
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let (a, storage, b) = (base.join("a"), base.join("w/a"), base.join("b"));
+        link_storage(&a, &storage);
+        std::fs::create_dir_all(b.join(".worktrees")).unwrap();
+        let mut r = Registry::default();
+        r.register("p", &a).unwrap();
+        r.note_root_change("p", None, "2026-10-01").unwrap();
+        std::fs::remove_file(a.join(".worktrees")).unwrap();
+        std::fs::create_dir(a.join(".worktrees")).unwrap();
+        let displaced = r
+            .repoint("p", &b)
+            .unwrap()
+            .map(|root| r.displaced("p", root));
+        assert!(
+            r.note_root_change("p", displaced, "2026-10-02")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(r.locations["p"].storage, None);
+        assert_eq!(r.locations["p"].former[0].storage, Some(storage.clone()));
+        let index = Index::build(&r);
+        let Answer::Resolved(found) = index.resolve(&storage.join("old/src"), &mut Vec::new())
+        else {
+            panic!("former external storage must resolve");
+        };
+        assert_eq!(
+            (found.prefix.as_str(), found.via),
+            ("p", Via::FormerStorage)
+        );
+        assert_eq!(found.location, storage);
+        assert_eq!(found.relpath, PathBuf::from("src"));
+    }
+
+    #[test]
+    fn an_extant_displaced_root_without_storage_warns() {
+        let base = tempfile::tempdir().unwrap();
+        let base = base.path().canonicalize().unwrap();
+        let (a, b) = (base.join("a"), base.join("b"));
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        let mut r = Registry::default();
+        r.register("p", &a).unwrap();
+        let displaced = r
+            .repoint("p", &b)
+            .unwrap()
+            .map(|root| r.displaced("p", root));
+        let warnings = r.note_root_change("p", displaced, "2026-10-02").unwrap();
+        assert_eq!(r.locations["p"].former[0].storage, None);
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("no known worktree storage"),
+            "{warnings:?}"
+        );
+        assert!(
+            warnings[0].contains(&a.display().to_string()),
+            "{warnings:?}"
+        );
     }
 
     #[test]
