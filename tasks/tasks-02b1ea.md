@@ -6,13 +6,14 @@ priority: 2
 size: l
 complexity: high
 process: planned
-owner: main
+owner: feat/comfy-tables
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-06T13:01:47Z
+updated: 2026-10-06T13:03:58Z
 started: 2026-10-06T13:01:47Z
 depends: []
 tags: [pretty]
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-10-06-comfy-tables-design.md
 ---
 
 Why: the hand-rolled layout in src/output.rs (fixed paddings, id_width, render_row, wrap_lines, fill_hard_split, TITLE_FLOOR, LongWord) keeps producing warts: a long next: line breaks the parked table, quiet recipes misalign the wait column, and every fix adds a special case. The tasks-8a14be spike (branch spike/comfy-table, c2e0e0e) showed comfy-table 8 lays out the parked table with title and next wrapped side by side in their own columns, within our width and painter colours; the user adopted it.
@@ -25,3 +26,6 @@ Where to look: tasks-8a14be notes (costs, gaps), spike commit c2e0e0e, src/outpu
 
 - 2026-10-06T13:01:47Z (main): started
   provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T13:01:48Z (feat/comfy-tables): resumed
+  provenance: {"harness_session":"claude-code:5cee487d-b8b1-430e-8b20-7e4be6194daf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-06T13:03:57Z (feat/comfy-tables): spec drafted: docs/specs/2026-10-06-comfy-tables-design.md (one table module over comfy-table; per-view columns; narrow fallback; --headers; warnings rule; project colour on ids and titles)
