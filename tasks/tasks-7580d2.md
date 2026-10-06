@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-7580d2
 created: 2026-10-06T13:23:04Z
-updated: 2026-10-06T18:48:17Z
+updated: 2026-10-06T18:48:41Z
 started: 2026-10-06T18:41:11Z
 depends: []
 parent: tasks-a7460c
@@ -32,3 +32,5 @@ Cover canonical and aliased ids, current/former roots and their worktree storage
 - 2026-10-06T18:41:20Z (design/tasks-7580d2): resumed
   provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-06T18:48:16Z (design/tasks-7580d2): design: separate read-only 'tasks resolve' (registry history, existence-independent) beside 9b0a2e's live 'where', sharing a src/locations.rs index; per-host [locations] table records storage and former roots; rejected inferring storage from the work-link layout
+- 2026-10-06T18:48:41Z (design/tasks-7580d2): parked (waiting on user, review): user reviews docs/specs/2026-10-06-project-resolution-design.md; on approval the agent writes the implementation plan in .worktrees/tasks-7580d2
+  provenance: {"harness_session":"claude-code:00da167b-561d-40c6-aa34-7a035e885cf2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
