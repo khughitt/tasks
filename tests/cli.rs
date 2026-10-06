@@ -24517,13 +24517,13 @@ fn lanes_view_reports_every_state_and_picks_as_next_does() {
         "{text}"
     );
     assert!(
-        text.contains("    Ship the captures. First milestone: one clean run."),
+        text.contains("        guide:  Ship the captures. First milestone: one clean run."),
         "{text}"
     );
     assert!(text.contains(&format!("held: quiet ← {capture}")), "{text}");
     assert!(text.contains("waiting: 1 user"), "{text}");
     assert!(
-        text.contains(&format!("    active: {running} Running @")),
+        text.contains(&format!("        active: {running} Running @")),
         "{text}"
     );
 
@@ -26693,5 +26693,51 @@ fn parked_rows_paint_ids_and_titles_with_the_project_color() {
             text.contains("\x1b[38;2;18;52;86mParked"),
             "{args:?}: {text}"
         );
+    }
+}
+
+#[test]
+fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let lane = id_of(env.json(
+        &sci,
+        &["add", "Lane title", "--lane", "-b", "Lane guidance here."],
+    ));
+    let pick = id_of(env.json(
+        &sci,
+        &["add", "Pick step", "--parent", &lane, "--size", "s"],
+    ));
+    let running = id_of(env.json(
+        &sci,
+        &["add", "Running step", "--parent", &lane, "--size", "s"],
+    ));
+    as_agent(&env, &sci, "agent-a")
+        .args(["start", &running])
+        .assert()
+        .success();
+    let text = env.pretty(&sci, &["lanes"]);
+    assert!(text.lines().next().unwrap().starts_with(&lane), "{text}");
+    assert!(
+        text.contains("        guide:  Lane guidance here."),
+        "{text}"
+    );
+    write_project_color(&sci, "sci", "#123456");
+    let paint = "\x1b[38;2;18;52;86m";
+    let out = env
+        .cmd(&sci)
+        .args(["--pretty", "--color", "always", "lanes"])
+        .output()
+        .unwrap();
+    let colored = String::from_utf8(out.stdout).unwrap();
+    for span in [
+        format!("{paint}{lane}"),
+        format!("{paint}Lane title"),
+        format!("{paint}{pick}"),
+        format!("{paint}Pick step"),
+        format!("{paint}{running}"),
+        format!("{paint}Running step"),
+    ] {
+        assert!(colored.contains(&span), "{span:?} in:\n{colored}");
     }
 }

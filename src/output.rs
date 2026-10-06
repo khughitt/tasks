@@ -1211,7 +1211,14 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             let id = shared
                 .id()
                 .unwrap_or(0)
-                .max(o.parked.iter().map(|row| row.id.len()).max().unwrap_or(0));
+                .max(o.parked.iter().map(|row| row.id.len()).max().unwrap_or(0))
+                .max(
+                    o.lanes
+                        .iter()
+                        .map(|row| row.lane.id.len())
+                        .max()
+                        .unwrap_or(0),
+                );
             shared.0[0] = Some(id);
             let section = |rows: &[crate::table::Row]| {
                 crate::table::render(&columns, rows, layout, Some(&shared), painter)
@@ -1275,13 +1282,13 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             rendered.push_str(&section(&closeout));
             if !o.lanes.is_empty() {
                 rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "lanes:")));
-                let lane_width = o
-                    .lanes
-                    .iter()
-                    .map(|row| row.lane.id.len())
-                    .max()
-                    .unwrap_or(0);
-                rendered.push_str(&lane_lines(&o.lanes, painter, lane_width, false));
+                rendered.push_str(&lane_table(
+                    &o.lanes,
+                    painter,
+                    layout,
+                    Some(&crate::table::Widths::id_only(id, 4)),
+                    false,
+                ));
             }
             rendered.push_str(&format!(
                 "\n{}\n",
@@ -1307,12 +1314,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             rendered.push_str(&section(&doing));
             rendered
         }
-        Output::Lanes(o) => lane_lines(
-            &o.lanes,
-            painter,
-            id_width(o.lanes.iter().map(|row| row.lane.id.as_str())),
-            true,
-        ),
+        Output::Lanes(o) => lane_table(&o.lanes, painter, layout, None, true),
         Output::Graph(o) => o.text.clone(),
         Output::Check(o) => {
             let mut rendered = String::new();
@@ -1368,55 +1370,88 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
     }
 }
 
-/// One line per lane: id, priority, title, then its state with the pick or its main
+/// One row per lane: id, priority, title, then its state with the pick or its main
 /// cause (lanes design §5.3). `detail` adds the guidance and the active claims under each
 /// row, as `tasks lanes` prints them; `prime` leaves them out.
-fn lane_lines(rows: &[LaneRow], painter: &Painter, id_width: usize, detail: bool) -> String {
-    let mut rendered = String::new();
-    for row in rows {
-        let id = present::id(&row.lane.id).left(id_width).paint(painter); // `TaskSummary.id` is a `String`
-        let priority = present::priority(row.lane.priority).paint(painter);
-        let state = match row.state {
-            LaneState::Ready => {
-                let pick = row.pick.as_ref().expect("a ready lane has a pick");
-                format!("ready → {} {}", pick.id, pick.title)
+fn lane_table(
+    rows: &[LaneRow],
+    painter: &Painter,
+    layout: &crate::table::Layout,
+    widths: Option<&crate::table::Widths>,
+    detail: bool,
+) -> String {
+    use crate::table::{Column, Detail, Row};
+    let columns = [
+        Column::fixed("id"),
+        Column::fixed("P"),
+        Column::wrap("title", 20, None),
+        Column::wrap("state", 20, None),
+    ];
+    let task = |row: &TaskSummary| {
+        format!(
+            "{} {}",
+            present::row_id(&row.id, row.project_color).paint(painter),
+            present::title(&row.title, row.project_color).paint(painter)
+        )
+    };
+    let built: Vec<Row> = rows
+        .iter()
+        .map(|row| {
+            let state = match row.state {
+                LaneState::Ready => {
+                    let pick = row.pick.as_ref().expect("a ready lane has a pick");
+                    format!(
+                        "{} {}",
+                        painter.paint(Style::Emphasis, "ready →"),
+                        task(pick)
+                    )
+                }
+                LaneState::Held => {
+                    let first = row
+                        .held
+                        .first()
+                        .expect("a held lane names what it waits for");
+                    painter.paint(
+                        Style::Emphasis,
+                        &format!("held: {} ← {}", first.need, first.holder),
+                    )
+                }
+                LaneState::Waiting => painter.paint(Style::Emphasis, &waiting_text(&row.causes)),
+                LaneState::Paused => painter.paint(Style::Emphasis, "paused"),
+                LaneState::Empty => painter.paint(Style::Emphasis, "empty"),
+            };
+            let mut built = Row::new(vec![
+                present::row_id(&row.lane.id, row.lane.project_color).paint(painter),
+                present::priority(row.lane.priority).paint(painter),
+                present::title(&row.lane.title, row.lane.project_color).paint(painter),
+                state,
+            ]);
+            if detail {
+                if let Some(guidance) = &row.guidance {
+                    built
+                        .details
+                        .push(("guide", Detail::Wrap(guidance.clone())));
+                }
+                for active in &row.active {
+                    let holder = active
+                        .claim
+                        .as_ref()
+                        .map(|claim| {
+                            painter.paint(
+                                Style::Chrome,
+                                &format!(" @{} [{}]", claim.owner, claim.session),
+                            )
+                        })
+                        .unwrap_or_default();
+                    built
+                        .details
+                        .push(("active", Detail::Wrap(format!("{}{holder}", task(active)))));
+                }
             }
-            LaneState::Held => {
-                let first = row
-                    .held
-                    .first()
-                    .expect("a held lane names what it waits for");
-                format!("held: {} ← {}", first.need, first.holder)
-            }
-            LaneState::Waiting => waiting_text(&row.causes),
-            LaneState::Paused => "paused".into(),
-            LaneState::Empty => "empty".into(),
-        };
-        rendered.push_str(&format!(
-            "{id}  {priority}  {}  {}\n",
-            row.lane.title,
-            painter.paint(Style::Emphasis, &state)
-        ));
-        if !detail {
-            continue;
-        }
-        if let Some(guidance) = &row.guidance {
-            rendered.push_str(&format!("    {guidance}\n"));
-        }
-        for active in &row.active {
-            let holder = active
-                .claim
-                .as_ref()
-                .map(|claim| format!(" @{} [{}]", claim.owner, claim.session))
-                .unwrap_or_default();
-            rendered.push_str(&painter.paint(
-                Style::Chrome,
-                &format!("    active: {} {}{holder}", active.id, active.title),
-            ));
-            rendered.push('\n');
-        }
-    }
-    rendered
+            built
+        })
+        .collect();
+    crate::table::render(&columns, &built, layout, widths, painter)
 }
 
 /// `waiting: 2 user, 1 deferred`: every cause with its count, the largest first, ties in
