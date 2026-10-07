@@ -93,6 +93,10 @@ pub struct Project {
     /// absolute and normalized; `None` for an in-tree project. It need not exist: `check`
     /// reports a missing one, and a missing one never matches (ops linked-checkouts §4.1).
     pub checkout: Option<PathBuf>,
+    /// The code working tree this command runs in, when `locate` found the project through
+    /// its `[checkout]` link; `None` otherwise. Claims and parks record it (ops
+    /// linked-checkouts §4.1, "record location and resume location are separate").
+    pub worktree: Option<PathBuf>,
 }
 
 /// One other checkout's copy of a record, as `sibling_task_copies` found it.
@@ -322,6 +326,13 @@ fn doc_roots(key: &str, configured: Option<Vec<String>>, defaults: &[&str]) -> R
 }
 
 impl Project {
+    /// Where a session working on this project resumes: the code working tree for a
+    /// project found through its link, otherwise the root. Claims, parks, and the owner
+    /// fallback use it; records are never read from it.
+    pub fn resume_root(&self) -> &Path {
+        self.worktree.as_deref().unwrap_or(&self.root)
+    }
+
     pub fn init(root: &Path, prefix: &str) -> Result<Project> {
         if !is_valid_prefix(prefix) {
             return Err(Error::Config(format!(
@@ -377,6 +388,7 @@ impl Project {
         Ok(Project {
             root,
             checkout,
+            worktree: None,
             prefix: config.prefix,
             color: config
                 .color

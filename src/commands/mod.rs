@@ -437,7 +437,7 @@ impl Ctx {
     fn claim_guard(&mut self, id: &TaskId, to: Status, force: bool) -> Result<()> {
         let resolution = self.resolve_for_guard()?;
         let owner = owner_name(&self.project)?;
-        let worktree = self.project.root.display().to_string();
+        let worktree = self.project.resume_root().display().to_string();
 
         let existing = self.claims_mut()?.get(id).cloned();
         let ownership = match &existing {
@@ -709,7 +709,10 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
         let registry = Registry::load()?;
         reject_pending_rename(&ctx.project)?;
         let project = match routing {
-            Routing::Local => Project::open(&ctx.project.root)?,
+            Routing::Local => Project {
+                worktree: ctx.project.worktree.clone(),
+                ..Project::open(&ctx.project.root)?
+            },
             Routing::Registered(prefix) => {
                 let live = registry.canonical_prefix(prefix);
                 crate::scope::open_registered(&registry, live, Origin::Prefix)?
@@ -1176,7 +1179,7 @@ pub(crate) fn follow_holder(
         }
     }
     let moved = crate::claims::Claim {
-        worktree: ctx.project.root.display().to_string(),
+        worktree: ctx.project.resume_root().display().to_string(),
         seen: crate::time::now(),
         ..claim
     };
@@ -1367,7 +1370,7 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
         && let Some(every) = task.every
     {
         let id = task.id.clone();
-        let worktree = ctx.project.root.display().to_string();
+        let worktree = ctx.project.resume_root().display().to_string();
         let store = ctx.claims_mut()?;
         for entry_worktree in store
             .get(&id)
@@ -1696,7 +1699,7 @@ fn raw_owner_name(project: &Project) -> Result<String> {
     }
     if let Ok(output) = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(&project.root)
+        .current_dir(project.resume_root())
         .output()
         && output.status.success()
     {

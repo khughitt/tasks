@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 /// git's view of a directory, canonical: the repository's common git directory.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GitTree {
+    pub top: PathBuf,
     pub common: PathBuf,
 }
 
@@ -21,7 +22,12 @@ impl GitTree {
         let output = match std::process::Command::new("git")
             .arg("-C")
             .arg(dir)
-            .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+            .args([
+                "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-common-dir",
+            ])
             .env("LC_ALL", "C")
             .output()
         {
@@ -54,7 +60,10 @@ impl GitTree {
                 })?
                 .map_err(Error::from)
         };
-        Ok(Some(GitTree { common: next()? }))
+        Ok(Some(GitTree {
+            top: next()?,
+            common: next()?,
+        }))
     }
 
     /// The repository's main checkout: the common directory's parent when that is a
@@ -68,7 +77,7 @@ impl GitTree {
 }
 
 /// The registered project whose `[checkout]` is `tree`'s main checkout. Two such projects
-/// are `checkout_conflict`.
+/// are `checkout_conflict`. Opened with `worktree` set to `tree`'s top level.
 pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Project>> {
     let Some(main) = tree.main_checkout() else {
         return Ok(None);
@@ -80,8 +89,12 @@ pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
         .collect();
     match matches.as_slice() {
         [] => Ok(None),
-        [one] => crate::scope::open_registered(registry, &one.prefix, crate::scope::Origin::Prefix)
-            .map(Some),
+        [one] => {
+            let mut project =
+                crate::scope::open_registered(registry, &one.prefix, crate::scope::Origin::Prefix)?;
+            project.worktree = Some(tree.top.clone());
+            Ok(Some(project))
+        }
         many => Err(Error::CheckoutConflict(format!(
             "{} is declared as the checkout of {}; keep one project's [checkout]",
             main.display(),
@@ -100,6 +113,7 @@ mod tests {
     #[test]
     fn main_checkout_is_the_parent_of_a_dot_git_common_dir_only() {
         let tree = |common: &str| GitTree {
+            top: "/r".into(),
             common: common.into(),
         };
         assert_eq!(tree("/r/.git").main_checkout(), Some(PathBuf::from("/r")));

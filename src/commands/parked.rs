@@ -92,7 +92,7 @@ fn sourced_rows(
             .scope
             .projects()
             .iter()
-            .any(|project| project.root == Path::new(&park.worktree));
+            .any(|project| project.resume_root() == Path::new(&park.worktree));
         let row = match (prefer, registered) {
             (_, Some(row)) if recorded_is_scanned => Some(row),
             (Prefer::Registered, Some(row)) => Some(row),
@@ -188,13 +188,24 @@ fn resolve_recorded(
 
 /// Opens the checkout a store entry recorded and reads `id` there, with that checkout's
 /// whole scan so the task's children, dependencies, and documents resolve there too (park
-/// design §5.3). `None` when the checkout is gone, belongs to another prefix, or lacks the
-/// record.
+/// design §5.3). A recorded code worktree of a linked checkout holds no config; its
+/// project is the one its repository is linked to (ops linked-checkouts §4.1). `None` when
+/// the checkout is gone, belongs to another prefix, or lacks the record.
 pub fn open_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Project, Task, Vec<Task>)>> {
-    if !crate::scope::has_config(worktree)? {
-        return Ok(None);
-    }
-    let project = Project::open(worktree)?;
+    let project = if crate::scope::has_config(worktree)? {
+        Project::open(worktree)?
+    } else {
+        if !worktree.try_exists()? {
+            return Ok(None);
+        }
+        let Some(tree) = crate::link::GitTree::of(worktree)? else {
+            return Ok(None);
+        };
+        match crate::link::linked_project(&Registry::load()?, &tree)? {
+            Some(project) => project,
+            None => return Ok(None),
+        }
+    };
     if project.prefix != id.prefix {
         return Ok(None);
     }

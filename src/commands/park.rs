@@ -175,7 +175,7 @@ pub fn run(
         owner,
         session: me.tagged,
         host: crate::claims::hostname(),
-        worktree: ctx.project.root.display().to_string(),
+        worktree: ctx.project.resume_root().display().to_string(),
         at: crate::time::now(),
         next_step,
         waiting_on,
