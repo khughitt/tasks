@@ -35,7 +35,8 @@ consumers already test against.
 - `tasks where [PATH] --json` outcomes: `{"project": {"prefix", "root", "checkout", "linked"}, "holds_records": bool, "warnings": []}`; `{"project": null, "holds_records": bool, "warnings": []}`; error: exit 1 with `{"error": {"kind", "detail"}}`.
 - Stream contract: success JSON on stdout with exit 0; error JSON on stderr with exit 1 and nothing on stdout (the CLI's existing behaviour; do not change it).
 - In `where`'s project object, `checkout` is a non-empty string when `linked` is true and JSON `null` (key present) when `linked` is false. ops's `bin/linked.py` rejects any other shape.
-- `holds_records` counts a top-level `tasks/.config.toml` only when it is tracked in `HEAD` (spec decision 5, plan review round 1), and only as a regular file: `git ls-tree HEAD -- tasks/.config.toml` must name a `blob` of mode `100644` or `100755`. A tree or a symlink at that path is not a config (`git cat-file -e` accepts a tree, so it is not the test).
+- `holds_records` counts a top-level `tasks/.config.toml` only when it is tracked in `HEAD` (spec decision 5, plan review round 1), and only as a regular file: `git ls-tree HEAD -- tasks/.config.toml` must name a `blob` of mode `100644` or `100755`. A tree or a symlink at that path is not a config (`git cat-file -e` accepts a tree, so it is not the test). A genuinely unborn branch counts as no config; any other failure to read `HEAD` (a malformed loose ref, a corrupt `packed-refs`) is an `io` error, never `false`.
+- `init --checkout` refuses a repository that any registered project already lives in, judged by common git directory as well as path containment, so a project registered from a worktree stored elsewhere still counts.
 - No command writes into a linked checkout, and that includes `tasks init` run without `--checkout`: every init destination inside a repository that a registered project declares as its checkout is refused, judged by repository identity (common git directory), so a worktree of that repository stored anywhere is refused too.
 - `tasks projects --json` rows carry `checkout` (absolute path) only for linked projects; the key is absent on every other row.
 - `where` never crosses a git boundary: inside a git repository its walk for `tasks/.config.toml` stops at that repository's top level, and its link step matches that repository's main checkout. Outside git it walks as the CLI does today.
@@ -1163,6 +1164,31 @@ fn holds_records_refuses_a_tracked_tree_or_symlink_at_the_config_path() {
 }
 
 #[test]
+fn a_corrupt_head_ref_is_an_error_not_an_empty_repository() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    // A malformed loose branch ref.
+    let loose = code_repo(&l.base, "loose");
+    std::fs::write(loose.join(".git/refs/heads/main"), "garbage\n").unwrap();
+    assert_eq!(env.fail(&loose, &["where"]), "io", "a malformed loose ref");
+    // A corrupt packed-refs entry for the branch.
+    let packed = code_repo(&l.base, "packed");
+    git(&packed, &["pack-refs", "--all"]);
+    let refs = packed.join(".git/packed-refs");
+    let text = std::fs::read_to_string(&refs).unwrap();
+    let broken: String = text
+        .lines()
+        .map(|line| match line.split_once(' ') {
+            Some((_, "refs/heads/main")) => "zzzz refs/heads/main".to_string(),
+            _ => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&refs, broken + "\n").unwrap();
+    assert_eq!(env.fail(&packed, &["where"]), "io", "a corrupt packed-refs entry");
+}
+
+#[test]
 fn where_reports_resolver_errors_as_errors() {
     let env = TestEnv::new();
     let l = layout(&env);
@@ -1263,6 +1289,24 @@ fn init_checkout_refuses_what_it_cannot_link() {
         "a project directory in a worktree of its own checkout's repository"
     );
     assert!(!in_wt.join("tasks").exists());
+    // An in-tree project registered from a worktree stored outside the repository's tree,
+    // with no config in the main checkout: linking the main checkout would give one
+    // repository two project identities.
+    let split = code_repo(&l.base, "split");
+    let split_store = l.base.join("storage/split");
+    std::fs::create_dir_all(&split_store).unwrap();
+    std::os::unix::fs::symlink(&split_store, split.join(".worktrees")).unwrap();
+    git(&split, &["worktree", "add", "-q", "-b", "sw", ".worktrees/sw"]);
+    let split_wt = split.join(".worktrees/sw").canonicalize().unwrap();
+    env.json(&split_wt, &["init", "--prefix", "spl"]);
+    assert!(!split.join("tasks/.config.toml").exists(), "main holds no config");
+    let dir = fresh("p8");
+    let out = env.cmd(&dir).args(["init", "--prefix", "p8", "--checkout", split.to_str().unwrap()]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "config");
+    assert!(error["error"]["detail"].as_str().unwrap().contains("spl"), "names the registered project");
+    assert!(!dir.join("tasks").exists());
     let nested = code_repo(&l.nexc, "nested");
     let dir = fresh("p6");
     assert_eq!(
@@ -1405,8 +1449,9 @@ pub fn holds_records(registry: &Registry, tree: &GitTree) -> Result<bool> {
 
 /// `tasks/.config.toml` is tracked in `HEAD` at `top` as a regular file: `ls-tree` names a
 /// `blob` of mode `100644` or `100755`. A tree at that path (which `git cat-file -e`
-/// accepts) or a symlink (`120000`) is not a config. An unborn `HEAD` tracks nothing;
-/// any other git failure is an `io` error.
+/// accepts) or a symlink (`120000`) is not a config. A genuinely unborn branch tracks
+/// nothing; every other failure to read `HEAD` (a malformed loose ref, a corrupt
+/// `packed-refs`) is an `io` error, never "no records" (plan review round 2).
 fn tracked_config(top: &Path) -> Result<bool> {
     let git = |args: &[&str]| {
         std::process::Command::new("git")
@@ -1418,11 +1463,11 @@ fn tracked_config(top: &Path) -> Result<bool> {
     };
     let listed = git(&["ls-tree", "-z", "HEAD", "--", CONFIG_PATH])?;
     if !listed.status.success() {
-        if !git(&["rev-parse", "-q", "--verify", "HEAD"])?.status.success() {
+        if unborn(top)? {
             return Ok(false);
         }
         return Err(Error::Io(format!(
-            "git ls-tree in {} failed: {}",
+            "git ls-tree HEAD in {} failed: {}",
             top.display(),
             String::from_utf8_lossy(&listed.stderr).trim()
         )));
@@ -1441,6 +1486,29 @@ fn tracked_config(top: &Path) -> Result<bool> {
 }
 
 const CONFIG_PATH: &str = crate::repo::CONFIG_REL;
+
+/// `HEAD` names a branch that does not exist yet, and nothing is wrong: `symbolic-ref`
+/// resolves `HEAD` to a ref name, and `for-each-ref` on that name lists nothing and says
+/// nothing. A malformed loose ref fails `symbolic-ref` ("No such ref: HEAD"), and a
+/// corrupt `packed-refs` fails both, so neither reads as unborn (both reproduced in
+/// scratch repositories while planning).
+fn unborn(top: &Path) -> Result<bool> {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(top)
+            .args(args)
+            .env("LC_ALL", "C")
+            .output()
+    };
+    let head = git(&["symbolic-ref", "-q", "HEAD"])?;
+    if !head.status.success() {
+        return Ok(false);
+    }
+    let name = String::from_utf8_lossy(&head.stdout).trim().to_string();
+    let listed = git(&["for-each-ref", "--format=%(refname)", &name])?;
+    Ok(listed.status.success() && listed.stdout.is_empty() && listed.stderr.is_empty())
+}
 
 /// `to` relative to `from`, both absolute and canonical: the shared prefix dropped, one
 /// `..` per remaining component of `from`, then the rest of `to`.
@@ -1694,13 +1762,25 @@ fn validate_checkout(root: &Path, checkout: &Path, registry: &Registry, prefix: 
     {
         return refuse("holds this project; records must live outside the code tree".into());
     }
+    // A registered project in any working tree of this repository, wherever that tree is
+    // stored, already gives the repository an identity: containment misses a worktree
+    // stored outside the checkout, so the common git directory decides (plan review
+    // round 2). A nested repository inside the checkout's tree is caught by containment.
     for (other, other_root) in &registry.projects {
         if other == prefix || !other_root.try_exists()? {
             continue;
         }
         let other_root = other_root.canonicalize()?;
-        if checkout.starts_with(&other_root) || other_root.starts_with(&checkout) {
-            return refuse(format!("overlaps registered project {other} ({})", other_root.display()));
+        if checkout.starts_with(&other_root)
+            || other_root.starts_with(&checkout)
+            || crate::link::GitTree::of(&other_root)?
+                .is_some_and(|theirs| theirs.common == tree.common)
+        {
+            return refuse(format!(
+                "overlaps registered project {other} ({}): that project already keeps this \
+                 repository's records",
+                other_root.display()
+            ));
         }
     }
     let taken: Vec<_> = crate::locations::scan_checkouts(registry)

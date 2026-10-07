@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/linked-projects
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T10:23:08Z
+updated: 2026-10-07T10:38:04Z
 started: 2026-10-07T09:45:04Z
 depends: []
 parent: tasks-a7460c
@@ -37,3 +37,8 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 - 2026-10-07T10:23:06Z (feat/linked-projects): plan revised for round 1: init refuses every destination in a linked checkout's repository and checks --checkout by repository identity; holds_records uses ls-tree (regular-file blob only); ops Task 1 via an ops worktree with patch-only apply and local merge; methods land with first callers (GitTree.top/worktree/resume_root in Task 3, git_dir/is_main/worktrees in Task 4); real quiet park + claim-move tests; CheckoutScan keeps per-project results for resolve; one filter per test-one. Cross-project: ops check 5 fast path and ops-projects link use the same cat-file -e test (ops-b9b733's record is held in another session's worktree, so not noted there).
 - 2026-10-07T10:23:08Z (feat/linked-projects): parked (waiting on user, review): User re-reviews docs/plans/2026-10-07-linked-projects.md (round 2) and picks an execution method; then the agent executes Task 1 in an ops worktree and Tasks 2-5 here.
   provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T10:28:06Z (feat/linked-projects): review: plan round 2 — verdict: revise; findings: P2 2; reviewer: codex
+- 2026-10-07T10:28:07Z (feat/linked-projects): Round 2: all seven original findings addressed. Remaining: tracked_config treats every failed HEAD verification as unborn, hiding an existing malformed branch ref; validate_checkout checks registered roots only by path containment, allowing a repository already holding an in-tree project in an externally stored worktree to gain a second linked project. Both reproduced with scratch Git repositories. Confirmed the two reported ops cat-file fast paths; their correction remains a prerequisite before the guard goes live.
+- 2026-10-07T10:37:12Z (feat/linked-projects): resumed
+  provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T10:38:04Z (feat/linked-projects): plan revised for round 2: unborn HEAD recognized explicitly (symbolic-ref resolves, for-each-ref silent and empty), any other HEAD failure is io, with loose-ref and packed-refs corruption tests; --checkout refuses a repository whose common git dir any registered root shares, tested with a project registered from an externally stored worktree.
