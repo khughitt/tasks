@@ -6417,21 +6417,6 @@ fn feedback_fails_early_without_a_target_or_a_reporter() {
         "config",
         "a registry entry pointing at a project with another prefix is refused"
     );
-    let nowhere = tempfile::tempdir().unwrap();
-    assert_eq!(
-        env.fail(
-            nowhere.path(),
-            &[
-                "feedback",
-                "--project",
-                "tasks",
-                "probe summary",
-                "--category",
-                "gap"
-            ]
-        ),
-        "no_project"
-    );
     let err = env.usage(
         &reporter,
         &[
@@ -6583,6 +6568,131 @@ fn prime_warns_about_uncommitted_task_files_only_in_a_git_checkout() {
     // `git status` fail after discovery succeeded
     std::fs::write(outer.path().join(".git/index"), "garbage").unwrap();
     assert_eq!(env.fail(&nested, &["prime"]), "io");
+}
+
+#[test]
+fn feedback_outside_every_project_reports_as_unregistered() {
+    let (mut env, target, _reporter) = feedback_env();
+    env.init("zz");
+    let nowhere = tempfile::tempdir().unwrap();
+    let file = |summary: &str, extra: &[&str]| {
+        let mut args = vec![
+            "feedback",
+            "--project",
+            "tasks",
+            summary,
+            "--category",
+            "gap",
+        ];
+        args.extend_from_slice(extra);
+        env.json(nowhere.path(), &args)
+    };
+    let out = file(
+        "hook output names no remedy",
+        &["-b", "seen from a scratch clone"],
+    );
+    assert_eq!(out["action"], "created", "{out}");
+    let id = out["id"].as_str().unwrap().to_string();
+    assert!(
+        out["path"]
+            .as_str()
+            .unwrap()
+            .starts_with(target.to_str().unwrap()),
+        "{out}"
+    );
+    let shown = env.json(&target, &["show", &id]);
+    assert_eq!(
+        shown["task"]["tags"],
+        serde_json::json!(["feedback", "gap", "from:unregistered"])
+    );
+    assert_eq!(shown["task"]["body"], "seen from a scratch clone");
+
+    // The tag is one feedback writes, so a project with a tag dictionary holds it defined.
+    let config = target.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[tags]\nunrelated = \"a tag the dictionary defines\"\n");
+    std::fs::write(&config, text).unwrap();
+    let out = env.cmd(&target).arg("check").output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // Recurrence names the reporter the same way, in its note and its tags.
+    let again = file("hook output names no remedy", &[]);
+    assert_eq!(again["action"], "recurred", "{again}");
+    assert_eq!(again["id"], id.as_str());
+    let shown = env.json(&target, &["show", &id]);
+    let notes: Vec<String> = shown["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["text"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        notes.contains(&"feedback from unregistered: hook output names no remedy".to_string()),
+        "{notes:?}"
+    );
+    let explicit = file("another report", &["--recur", &id]);
+    assert_eq!(explicit["action"], "recurred", "{explicit}");
+
+    // A bare suffix still names a task in the current project, and there is none here.
+    let hex = id.strip_prefix("tasks-").unwrap();
+    assert_eq!(
+        env.fail(
+            nowhere.path(),
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "x report",
+                "--category",
+                "gap",
+                "--recur",
+                hex
+            ]
+        ),
+        "invalid_id"
+    );
+    // A target that does not accept is refused as it is from inside a project.
+    assert_eq!(
+        env.fail(
+            nowhere.path(),
+            &[
+                "feedback",
+                "--project",
+                "zz",
+                "probe summary",
+                "--category",
+                "gap"
+            ]
+        ),
+        "validation"
+    );
+    // A checkout whose config cannot be read is an error, never unregistered.
+    let broken = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(broken.path().join("tasks")).unwrap();
+    std::fs::write(broken.path().join("tasks/.config.toml"), "prefix = [\n").unwrap();
+    assert_eq!(
+        env.fail(
+            broken.path(),
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "probe summary",
+                "--category",
+                "gap"
+            ]
+        ),
+        "config"
+    );
 }
 
 #[test]
@@ -12498,6 +12608,7 @@ fn id_commands_route_from_outside_every_project() {
         );
     }
     assert_eq!(env.fail(nowhere.path(), &["tree"]), "no_project");
+    // Feedback needs no local project; the target must still be registered.
     assert_eq!(
         env.fail(
             nowhere.path(),
@@ -12510,7 +12621,7 @@ fn id_commands_route_from_outside_every_project() {
                 "gap"
             ]
         ),
-        "no_project"
+        "config"
     );
 
     // A broken local config is an error, even when the id names a healthy registry root.

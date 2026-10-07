@@ -10,6 +10,33 @@ use crate::similarity::Match;
 
 pub const CATEGORIES: [&str; 4] = ["friction", "gap", "idea", "positive"];
 
+/// The reporter of feedback filed outside every project (ops linked-checkouts spec §4.2).
+/// Longer than any prefix may be, so it never names a project.
+pub const UNREGISTERED: &str = "unregistered";
+
+/// The context and reporter for `feedback`: the project the command stands in, or,
+/// outside every project, the target alone with the reporter [`UNREGISTERED`]. Only *no
+/// project* falls through; a checkout whose config cannot be read is still an error.
+pub fn open(dir: Option<&std::path::Path>, target: &str) -> Result<(Ctx, String)> {
+    match super::open_ctx(dir) {
+        Ok(ctx) => {
+            let reporter = ctx.project.prefix.clone();
+            Ok((ctx, reporter))
+        }
+        Err(Error::NoProject(_)) => {
+            let registry = Registry::load()?;
+            let shorthand = crate::shorthand::Shorthand::new(super::start_dir(dir)?);
+            let project = locate_target(&registry, target)?;
+            let routing = super::Routing::Registered(target.to_string());
+            Ok((
+                Ctx::new(project, registry, routing, shorthand),
+                UNREGISTERED.to_string(),
+            ))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Every registered, reachable project that accepts feedback, with its scope, read from
 /// its config alone. Never a task file: a malformed task anywhere must not hide an owner.
 /// A config that cannot be read is listed with its error instead of failing the caller.
@@ -87,11 +114,13 @@ pub fn writes_tag(task: &Task, tag: &str) -> bool {
             || CATEGORIES.contains(&tag)
             || tag
                 .strip_prefix("from:")
-                .is_some_and(crate::model::is_valid_prefix))
+                .is_some_and(|from| from == UNREGISTERED || crate::model::is_valid_prefix(from)))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     mut ctx: Ctx,
+    reporter: String,
     project: String,
     summary: String,
     category: String,
@@ -113,8 +142,7 @@ pub fn run(
     }
     let body = body.unwrap_or_default();
     validate_body(&body)?;
-    let prefix = ctx.project.prefix.clone();
-    let from = format!("from:{prefix}");
+    let from = format!("from:{reporter}");
     ctx.project = locate_target(&ctx.registry, &project)?;
     // Only the target is locked, even when the reporter shares its prefix. Routing by the
     // name asked for lets a rename during the wait resolve through its alias, as before.
@@ -168,7 +196,7 @@ pub fn run(
     let (task, action) = match existing {
         Some((id, automatic)) => {
             let task = recur_into(
-                &mut ctx, &id, automatic, &summary, &body, &category, &from, &prefix,
+                &mut ctx, &id, automatic, &summary, &body, &category, &from, &reporter,
             )?;
             // Record-home spec §4: a holder's recurrence follows the owner's registered
             // root, where it landed. `recur_into` saved its own pruned store first.

@@ -385,7 +385,7 @@ from a clone):
 Commands targeting an existing id, including `show`, `tree <id>`, `note`, and `start`,
 work from outside every project: the prefix selects the registered root. Inside a
 project, a matching prefix keeps the current checkout, including a worktree selected
-with `-C`. `feedback` still needs a local project for its provenance tag.
+with `-C`. `feedback` works there too and reports as `from:unregistered`.
 
 A recurring task closes normally: `done` records the completion and anchors its next
 cycle. When due, it appears in `ready` with status `done`; use `start` before completing
@@ -703,7 +703,8 @@ A report about a project's tooling goes to the project that owns it:
 The owner must be registered and opt in with a `[feedback]` table (`scope = "<what it
 owns>"`) in its `tasks/.config.toml`; any other is refused with the list of those that
 accept. The entry lands as an `idea` in the owner's registered checkout, tagged `feedback`,
-the category, and `from:<your prefix>`. A repeat of the same one-liner in the same owner
+the category, and `from:<your prefix>`, or `from:unregistered` when filed outside every
+project. A repeat of the same one-liner in the same owner
 appends a note to the open entry instead of creating a duplicate; `--recur <id>` and
 `--new` settle an `ambiguous` result. The command never commits: a person in the owner's
 repository reviews each uncommitted file before it is committed, and this repository is

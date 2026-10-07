@@ -236,7 +236,8 @@ Every write command that takes an id writes to the project that id's prefix name
 registered project without leaving the current one, or from outside every project.
 `show` and bare `tree <id>` follow the same rule. A prefix matching the current project
 always means this checkout; without a local project, the registry supplies the root.
-Malformed local configuration still fails. `feedback` needs a local project for its `from:` tag.
+Malformed local configuration still fails. `feedback` works from anywhere: outside every
+project it reports as `from:unregistered`.
 
 A linked project keeps its records outside its code checkout: its `tasks/.config.toml`
 carries `[checkout] path`, and every command run anywhere in that checkout or its
@@ -565,8 +566,8 @@ runbook in ops has the whole procedure.
 
 ## Feedback
 
-A report about a project's tooling goes to the project that owns it, from any tracked
-checkout, in one command:
+A report about a project's tooling goes to the project that owns it, from any checkout or
+from outside every project, in one command:
 
     tasks feedback --project <owner> "<one line about the tool>" --category <friction|gap|idea|positive> [-b "<command, error kind, what you expected>"]
 
@@ -577,7 +578,8 @@ something you needed (`gap`), gave you an idea (`idea`), or worked notably well
 projects that accept, each with its scope. Your agent instructions may say when to
 report and list the owners; the refusal lists them either way. The report lands as an
 uncommitted `idea` in the owner's registered checkout, tagged `feedback`, the category,
-and `from:<your prefix>`. Describe the tool, not the project: no repository names, file
+and `from:<your prefix>` (`from:unregistered` outside every project; a linked checkout
+reports its project's prefix). Describe the tool, not the project: no repository names, file
 paths, people, or project content. Do not
 commit in the owner's repository and do not triage your own report. If `ambiguous` comes
 back, rerun with `--recur <id>` to join the listed entry or `--new` to insist. `--body`
@@ -597,5 +599,6 @@ Uncommitted files under `tasks/` tagged `feedback` are unreviewed reports: read 
 redact anything that describes a project rather than the tool, then commit. Ideas tagged
 `feedback` are the triage queue; scope, drop, or promote them like any other idea and
 record the outcome in a note. Drop a misfiled report with a note naming the owner it
-belongs to. `check` holds `feedback`, the categories, and any `from:<prefix>` as defined
+belongs to. `check` holds `feedback`, the categories, and any `from:<prefix>` or
+`from:unregistered` as defined
 on feedback records, whatever the tag dictionary says.

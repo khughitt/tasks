@@ -1922,6 +1922,9 @@ pub fn run(cli: Cli) -> Result<Output> {
             body,
             recur,
             new,
-        } => feedback::run(open_ctx(dir)?, project, summary, category, body, recur, new),
+        } => {
+            let (ctx, reporter) = feedback::open(dir, &project)?;
+            feedback::run(ctx, reporter, project, summary, category, body, recur, new)
+        }
     }
 }

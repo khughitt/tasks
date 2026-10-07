@@ -121,6 +121,42 @@ fn a_linked_checkout_opens_its_overlay_project_from_every_tree() {
 }
 
 #[test]
+fn feedback_from_a_linked_checkout_carries_the_linked_prefix() {
+    let mut env = TestEnv::new();
+    let owner = env.init("tasks");
+    let config = owner.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[feedback]\nscope = \"The tasks CLI.\"\n");
+    std::fs::write(&config, text).unwrap();
+    let l = layout(&env);
+    let before = git(&l.code, &["status", "--porcelain", "--ignored"]);
+    for dir in [&l.code, &l.wt] {
+        let out = env.json(
+            dir,
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "report from a code tree",
+                "--category",
+                "gap",
+                "--new",
+            ],
+        );
+        let shown = env.json(&owner, &["show", out["id"].as_str().unwrap()]);
+        assert_eq!(
+            shown["task"]["tags"],
+            serde_json::json!(["feedback", "gap", "from:nexc"]),
+            "{dir:?}"
+        );
+    }
+    assert_eq!(
+        git(&l.code, &["status", "--porcelain", "--ignored"]),
+        before
+    );
+}
+
+#[test]
 fn two_projects_declaring_one_checkout_is_a_conflict_naming_both() {
     let env = TestEnv::new();
     let l = layout(&env);
