@@ -6712,6 +6712,14 @@ fn feedback_outside_every_project_reports_as_unregistered() {
         ),
         "config"
     );
+    // Bad input is judged first there too.
+    assert_eq!(
+        env.fail(
+            broken.path(),
+            &["feedback", "--project", "tasks", "x y", "--category", "gap"]
+        ),
+        "validation"
+    );
 }
 
 #[test]
