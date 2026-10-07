@@ -825,6 +825,47 @@ fn init_checkout_refuses_a_head_tracked_config_deleted_locally() {
 }
 
 #[test]
+fn corrupt_head_discovery_errors_without_writing_into_linked_checkouts() {
+    for worktree in [false, true] {
+        let env = TestEnv::new();
+        let l = layout(&env);
+        let root = if worktree { &l.wt } else { &l.code };
+        let sub = root.join("src/deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        let head =
+            PathBuf::from(git(root, &["rev-parse", "--absolute-git-dir"]).trim()).join("HEAD");
+        let valid_head = std::fs::read(&head).unwrap();
+        let before = porcelain(root);
+        let registry = env.home.path().join(".config/tasks/projects.toml");
+        let registry_before = std::fs::read(&registry).unwrap();
+        std::fs::write(&head, "garbage\n").unwrap();
+
+        for dir in [root, &sub] {
+            let located = env.cmd(dir).arg("where").output().unwrap();
+            let initialized = env
+                .cmd(dir)
+                .args(["init", "--prefix", "oops"])
+                .output()
+                .unwrap();
+            assert!(
+                located.status.code() == Some(1) && initialized.status.code() == Some(1),
+                "where: {located:?}; init: {initialized:?}"
+            );
+            for out in [located, initialized] {
+                assert!(out.stdout.is_empty());
+                let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+                assert_eq!(error["error"]["kind"], "io");
+            }
+            assert!(!dir.join("tasks").exists());
+            assert_eq!(std::fs::read(&registry).unwrap(), registry_before);
+            assert_eq!(std::fs::read(&head).unwrap(), b"garbage\n");
+        }
+        std::fs::write(&head, valid_head).unwrap();
+        assert_eq!(porcelain(root), before);
+    }
+}
+
+#[test]
 fn projects_rows_carry_checkout_only_when_linked() {
     let env = TestEnv::new();
     let l = layout(&env);

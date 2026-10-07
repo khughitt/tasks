@@ -15,9 +15,9 @@ pub struct GitTree {
 }
 
 impl GitTree {
-    /// `None` when git says `dir` is not inside a repository, or there is no git
-    /// executable; any other git failure is an `io` error. `LC_ALL=C` pins the one
-    /// message matched, as `Project::git_toplevel` does. One line per requested fact, in
+    /// `None` when git says `dir` is not inside a repository and no ancestor has a
+    /// `.git` marker, or there is no git executable; broken metadata is an `io` error.
+    /// `LC_ALL=C` pins the message matched, as `Project::git_toplevel` does. One line per requested fact, in
     /// the order of the flags.
     pub fn of(dir: &Path) -> Result<Option<GitTree>> {
         let output = match std::process::Command::new("git")
@@ -40,7 +40,20 @@ impl GitTree {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.contains("not a git repository") {
-                return Ok(None);
+                let mut marker = false;
+                for ancestor in dir.canonicalize()?.ancestors() {
+                    match ancestor.join(".git").symlink_metadata() {
+                        Ok(_) => {
+                            marker = true;
+                            break;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+                if !marker {
+                    return Ok(None);
+                }
             }
             return Err(Error::Io(format!(
                 "git rev-parse in {} failed ({}): {}",
