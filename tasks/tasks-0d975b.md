@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: feat/feedback-unregistered
 created: 2026-10-07T16:48:39Z
-updated: 2026-10-07T16:55:07Z
+updated: 2026-10-07T17:12:11Z
 started: 2026-10-07T16:54:41Z
 completed: 2026-10-07T16:55:07Z
 depends: []
@@ -29,3 +29,5 @@ Piece 7 (tasks-skill half) of ops docs/specs/2026-10-01-linked-checkouts-design.
   provenance: {"harness_session":"claude-code:cd13df6e-7206-46e3-bd3f-30be99c37559","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-07T16:55:07Z (feat/feedback-unregistered): tasks skill: in a linked checkout the same-commit and commit-before-worktree rules read as overlay commits, the worktree is added in the code checkout, and task ids never appear in the code repository (cite its issue key via --source)
   provenance: {"harness_session":"claude-code:cd13df6e-7206-46e3-bd3f-30be99c37559","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T17:07:15Z (feat/feedback-unregistered): review: impl round 1 — verdict: accept; findings: Minor 3; reviewer: claude-code/claude-opus-5-5
+- 2026-10-07T17:12:11Z (feat/feedback-unregistered): review minors addressed after close: commit order (code first), <prefix>/tasks/ named, issue key only when there is one

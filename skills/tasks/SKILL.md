@@ -247,11 +247,12 @@ records, specs and plans are read and written in the project root, never in the 
 tree. `tasks where [PATH]` prints which project a path opens (`linked` says whether
 through the link) and whether its repository keeps records; two projects declaring one
 checkout is `checkout_conflict`. The rules that tie a record to the code read through the
-overlay there: "in the same commit as the code" is the matching commit in the overlay
-repository, and the record committed before `git worktree add` is committed there; the
-worktree itself is added in the code checkout, and `tasks start <id>` in it moves the
-claim. Task ids never appear in the code repository: its commits, branches, pull requests
-and docs cite the repository's own issue key, which the task records with `--source`.
+overlay there: "in the same commit as the code" is the matching commit of
+`<prefix>/tasks/` in the overlay repository, made after the code commit, and the record
+committed before `git worktree add` is committed there; the worktree itself is added in
+the code checkout, and `tasks start <id>` in it moves the claim. Task ids never appear in
+the code repository: its commits, branches, pull requests and docs cite the repository's
+own issue key when there is one, which the task records with `--source`.
 
 The read commands say where to look instead of inferring it from an id: `list`, `ready`,
 `next`, `prime`, `lanes`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one
