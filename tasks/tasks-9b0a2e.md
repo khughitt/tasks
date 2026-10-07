@@ -6,14 +6,15 @@ priority: 2
 size: l
 complexity: high
 process: planned
-owner: main
+owner: feat/linked-projects
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T09:45:04Z
+updated: 2026-10-07T09:59:57Z
 started: 2026-10-07T09:45:04Z
 depends: []
 parent: tasks-a7460c
 tags: [cross-project]
 agent: claude-code/claude-opus-5-5
+plan: docs/plans/2026-10-07-linked-projects.md
 ---
 
 Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, §8). A project's tasks/.config.toml may declare [checkout] path; when the walk up (stopped at the git top level) finds no config, locate matches the git main checkout of cwd against registered projects' [checkout]. New: tasks init --checkout <path> (validates a main checkout outside every registered tree; docs/ created in the project root), tasks where [PATH] --json with three outcomes ({project:{prefix,root,checkout,linked}}, {project:null}, error envelope incl. checkout_conflict) plus holds_records (§8.1), and checkout on linked rows of tasks projects --json (§8.2). Claims and parks keep the code worktree as resume location; parked::open_recorded/scan_recorded and their readers (quiet, next, prime parked, show fallback) resolve the project from that path via locate. No command writes into a linked checkout. CLI surface lands in ops cli.toml first (ops plan Task 1); vendored adopt cli.toml in the same commit. Tests: spec §6 tasks (1), nested foreign checkout, resolver outcomes.
@@ -25,3 +26,6 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 - 2026-10-06T20:21:49Z (design/tasks-7580d2): tasks-7580d2 implementation reviewed: src/locations.rs is the shared history/normalization index; where's link step adds checkout kind there and never consults former roots (spec 2026-10-06-project-resolution section 5); main integration/install follows Task 6
 - 2026-10-07T09:45:04Z (main): started
   provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T09:45:16Z (feat/linked-projects): resumed
+  provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T09:59:57Z (feat/linked-projects): plan drafted: docs/plans/2026-10-07-linked-projects.md (5 tasks, children tasks-6211fb..tasks-1f5664); spec is ops 2026-10-01-linked-checkouts-design rev 5 (approved). Decisions flagged for review: locate unbounded vs where bounded; open_recorded link-only; init does not relink; unreachable projects skipped; resolve lenient. Task 1 commits to ops main.
