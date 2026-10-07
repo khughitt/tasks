@@ -1,18 +1,20 @@
 ---
 id: tasks-2f9022
 title: "resolve maps paths under a linked checkout's .worktrees storage, as it does for registered roots"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: fix/linked-storage
 created: 2026-10-07T16:47:08Z
-updated: 2026-10-07T17:15:33Z
+updated: 2026-10-07T17:19:16Z
 started: 2026-10-07T17:13:38Z
+completed: 2026-10-07T17:19:16Z
 depends: []
 parent: tasks-a7460c
 tags: [cross-project]
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -26,3 +28,8 @@ tasks resolve answers a path under a registered root's .worktrees storage (via s
 - 2026-10-07T17:13:39Z (fix/linked-storage): resumed
   provenance: {"harness_session":"claude-code:cd13df6e-7206-46e3-bd3f-30be99c37559","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-07T17:15:33Z (fix/linked-storage): bounded choice: the linked checkout's storage is read from its live .worktrees link only, not persisted in [locations] (the registry's storage record describes the root; a record for the checkout would be a schema change). A removed worktree resolves while the link stands, which is nexcode's normal case; a removed link loses it, with no warning.
+- 2026-10-07T17:18:42Z (fix/linked-storage): review: impl round 1 — verdict: accept; findings: Important 1, Minor 4; reviewer: claude-code/claude-opus-5-5
+- 2026-10-07T17:19:16Z (fix/linked-storage): done
+  provenance: {"harness_session":"claude-code:cd13df6e-7206-46e3-bd3f-30be99c37559","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T17:19:16Z (fix/linked-storage): resolve matches a linked checkout's .worktrees storage (live link only, warned when unreadable), so removed and live linked worktrees resolve via storage; README and resolution spec amended. Review accepted; obs cache fingerprint follow-up noted on obs-1e876b.
+  provenance: {"harness_session":"claude-code:cd13df6e-7206-46e3-bd3f-30be99c37559","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

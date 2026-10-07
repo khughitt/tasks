@@ -310,7 +310,8 @@ A storage match splits off the first component after the location as `worktree`.
 
 ### 4.4 Cost
 
-A call loads the registry and does one `readlink` per project. It spawns git only on
+A call loads the registry and does one `readlink` per registered root, plus a config
+read and a `readlink` per linked checkout. It spawns git only on
 the miss case in §4.3, step 5. That fits a hook's budget. The `--stdin` form lets an
 indexer resolve all of a run's distinct paths in one process.
 

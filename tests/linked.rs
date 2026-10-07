@@ -913,6 +913,15 @@ fn resolve_follows_a_linked_checkouts_worktree_storage_after_removal() {
     let env = TestEnv::new();
     let l = layout(&env);
     let physical = l.base.join("storage/code/wt");
+    let storage = l.base.join("storage/code");
+    // A live worktree answers through the storage too, as a registered root's does.
+    let live = env.json(&l.base, &["resolve", l.wt.join("README").to_str().unwrap()]);
+    assert_eq!(live["results"][0]["via"], "storage", "{live}");
+    assert_eq!(
+        live["results"][0]["worktree"],
+        physical.to_str().unwrap(),
+        "{live}"
+    );
     git(&l.code, &["worktree", "remove", ".worktrees/wt"]);
     assert!(!physical.exists());
     for path in [l.code.join(".worktrees/wt/src/x"), physical.join("src/x")] {
@@ -922,7 +931,36 @@ fn resolve_follows_a_linked_checkouts_worktree_storage_after_removal() {
         assert_eq!(row["prefix"], "nexc", "{path:?}: {out}");
         assert_eq!(row["via"], "storage", "{path:?}: {out}");
         assert_eq!(row["relpath"], "src/x", "{path:?}: {out}");
+        assert_eq!(
+            row["location"],
+            storage.to_str().unwrap(),
+            "{path:?}: {out}"
+        );
+        assert_eq!(
+            row["worktree"],
+            physical.to_str().unwrap(),
+            "{path:?}: {out}"
+        );
     }
+}
+
+#[test]
+fn resolve_warns_when_a_linked_checkouts_worktrees_cannot_be_read() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    std::fs::remove_file(l.code.join(".worktrees")).unwrap();
+    std::os::unix::fs::symlink(".worktrees", l.code.join(".worktrees")).unwrap();
+    let out = env.json(
+        &l.base,
+        &["resolve", l.code.join("README").to_str().unwrap()],
+    );
+    assert_eq!(out["results"][0]["prefix"], "nexc", "{out}");
+    let warnings = out["warnings"].to_string();
+    assert!(
+        warnings.contains("nexc: cannot read")
+            && warnings.contains("worktree storage is not matched"),
+        "{out}"
+    );
 }
 
 #[test]
