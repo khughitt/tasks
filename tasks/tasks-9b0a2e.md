@@ -1,15 +1,16 @@
 ---
 id: tasks-9b0a2e
 title: "Linked projects: records outside the code checkout ([checkout] config, locate on miss bounded at the git top, where, init --checkout)"
-status: doing
+status: done
 priority: 2
 size: l
 complexity: high
 process: planned
-owner: feat/linked-projects
+owner: main
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T11:31:00Z
+updated: 2026-10-07T11:34:05Z
 started: 2026-10-07T09:45:04Z
+completed: 2026-10-07T11:34:04Z
 depends: []
 parent: tasks-a7460c
 tags: [cross-project]
@@ -56,3 +57,10 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 - 2026-10-07T11:23:42Z (feat/linked-projects): review: impl round 1 — verdict: revise; findings: Important 1, Minor 2; reviewer: codex/gpt-6-astra
 - 2026-10-07T11:30:19Z (feat/linked-projects): review: impl round 2 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6-astra
 - 2026-10-07T11:31:00Z (feat/linked-projects): verified: final review Important findings addressed by 7040de3 and fresh scoped re-review; 1154 fast tests, 30 linked tests and checks pass. Deferred minors tasks-37d48a (docs) and tasks-084a9f (Git discovery ceiling). Integrate locally and install from main next.
+- 2026-10-07T11:31:15Z (main): resumed
+  provenance: {"harness_session":"codex:01a115f5-c858-7612-946e-9f9ae2f506d5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T11:34:04Z (main): rollout: locally integrated; main just test-fast 1154 passed/0 failed/1 ignored and just check clean; cargo install --path . succeeded; installed tasks where --json scratch smoke returned project:null, holds_records:false, warnings:[]; other-host verification user-owned
+- 2026-10-07T11:34:04Z (main): done
+  provenance: {"harness_session":"codex:01a115f5-c858-7612-946e-9f9ae2f506d5","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T11:34:04Z (main): Linked projects implemented and locally integrated: checkout config/locate, code-tree claim and park resume paths, where/init, projects/check/resolve and docs; task reviews plus final corrective re-review accepted, 1154 fast tests and checks pass, installed CLI smoke passes. Minors deferred as tasks-37d48a and tasks-084a9f.
+  provenance: {"harness_session":"codex:01a115f5-c858-7612-946e-9f9ae2f506d5","harness_session_source":"CODEX_THREAD_ID"}
