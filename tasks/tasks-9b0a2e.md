@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/linked-projects
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T10:23:06Z
+updated: 2026-10-07T10:23:08Z
 started: 2026-10-07T09:45:04Z
 depends: []
 parent: tasks-a7460c
@@ -35,3 +35,5 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 - 2026-10-07T10:15:50Z (feat/linked-projects): resumed
   provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-07T10:23:06Z (feat/linked-projects): plan revised for round 1: init refuses every destination in a linked checkout's repository and checks --checkout by repository identity; holds_records uses ls-tree (regular-file blob only); ops Task 1 via an ops worktree with patch-only apply and local merge; methods land with first callers (GitTree.top/worktree/resume_root in Task 3, git_dir/is_main/worktrees in Task 4); real quiet park + claim-move tests; CheckoutScan keeps per-project results for resolve; one filter per test-one. Cross-project: ops check 5 fast path and ops-projects link use the same cat-file -e test (ops-b9b733's record is held in another session's worktree, so not noted there).
+- 2026-10-07T10:23:08Z (feat/linked-projects): parked (waiting on user, review): User re-reviews docs/plans/2026-10-07-linked-projects.md (round 2) and picks an execution method; then the agent executes Task 1 in an ops worktree and Tasks 2-5 here.
+  provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
