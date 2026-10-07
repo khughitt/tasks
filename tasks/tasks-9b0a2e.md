@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/linked-projects
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T10:45:13Z
+updated: 2026-10-07T10:46:36Z
 started: 2026-10-07T09:45:04Z
 depends: []
 parent: tasks-a7460c
@@ -49,3 +49,4 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 - 2026-10-07T10:44:33Z (feat/linked-projects): resumed
   provenance: {"harness_session":"codex:01a115f5-c858-7612-946e-9f9ae2f506d5","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-07T10:45:13Z (feat/linked-projects): execution: user approved plan and selected subagent-driven; reuse linked-projects, direct step tasks under reviewed planned parent; current ops setup recipe supersedes plan assertion that it is absent
+- 2026-10-07T10:46:36Z (feat/linked-projects): ruling: Task 1 git apply conflicts only on adjacent newer resolve/obs entries; implement identical additions manually, preserve all newer vocabulary and tests, then review exact diff
