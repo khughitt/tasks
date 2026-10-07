@@ -10,8 +10,9 @@ and `checkout` on linked rows of `tasks projects`.
 **Architecture:** One new module, `src/link.rs`, owns everything git-shaped about a link:
 a path's git facts (`GitTree`), the registered project whose `[checkout]` names a
 repository's main checkout (`linked_project`), and whether a repository keeps records
-(`holds_records`). `src/locations.rs` gains the one strict scan of registered checkouts
-(`linked_checkouts`), which `link.rs` and `resolve`'s index both read. `Project` gains two
+(`holds_records`). `src/locations.rs` gains the one scan of registered checkouts (`scan_checkouts`), which
+keeps each project's success or failure: `link.rs` and `init` read it strictly,
+`resolve`'s index leniently, per project. `Project` gains two
 fields: `checkout` (declared, from the config) and `worktree` (the code working tree the
 command ran in, set only when the project was found through the link); `resume_root()` is
 the worktree when set, else the root, and every claim, park, and owner lookup uses it.
@@ -34,7 +35,8 @@ consumers already test against.
 - `tasks where [PATH] --json` outcomes: `{"project": {"prefix", "root", "checkout", "linked"}, "holds_records": bool, "warnings": []}`; `{"project": null, "holds_records": bool, "warnings": []}`; error: exit 1 with `{"error": {"kind", "detail"}}`.
 - Stream contract: success JSON on stdout with exit 0; error JSON on stderr with exit 1 and nothing on stdout (the CLI's existing behaviour; do not change it).
 - In `where`'s project object, `checkout` is a non-empty string when `linked` is true and JSON `null` (key present) when `linked` is false. ops's `bin/linked.py` rejects any other shape.
-- `holds_records` counts a top-level `tasks/.config.toml` only when it is tracked in `HEAD` (spec decision 5, plan review round 1).
+- `holds_records` counts a top-level `tasks/.config.toml` only when it is tracked in `HEAD` (spec decision 5, plan review round 1), and only as a regular file: `git ls-tree HEAD -- tasks/.config.toml` must name a `blob` of mode `100644` or `100755`. A tree or a symlink at that path is not a config (`git cat-file -e` accepts a tree, so it is not the test).
+- No command writes into a linked checkout, and that includes `tasks init` run without `--checkout`: every init destination inside a repository that a registered project declares as its checkout is refused, judged by repository identity (common git directory), so a worktree of that repository stored anywhere is refused too.
 - `tasks projects --json` rows carry `checkout` (absolute path) only for linked projects; the key is absent on every other row.
 - `where` never crosses a git boundary: inside a git repository its walk for `tasks/.config.toml` stops at that repository's top level, and its link step matches that repository's main checkout. Outside git it walks as the CLI does today.
 - `Project::locate` keeps its walk up unchanged (spec §4.1 "keeps the walk up"); only on a miss, inside git, does it try the link. An in-tree project never loads the registry in `locate`.
@@ -42,7 +44,9 @@ consumers already test against.
 - Errors stay errors: *no project* is the only fall-through. `checkout_conflict`, a malformed config of a registered project, and an unreadable registry are errors from `locate` and `where` alike.
 - `[checkout] path` is written relative to the project root by `init --checkout`; on read, an absolute path is accepted as written (ops's test stub writes one).
 - A new CLI option or command is a `cli.toml` change in ops first; this repo runs `vendored adopt cli.toml` in the commit that adds the parser surface (ops Rules).
-- Never call `cargo test` directly: `just test-one <filter>` or `just test-one --test linked <filter>` while working, `just test-fast` before each commit.
+- Never call `cargo test` directly: `just test-one <filter>` or `just test-one --test linked <filter>` while working, `just test-fast` before each commit. Cargo takes one positional filter: run one invocation per filter, never several filters in one.
+- The crate is a binary with private modules and pre-commit runs `cargo clippy --all-targets -- -D warnings`, so every function, method, field, and variant lands in the task that first calls or reads it. A task whose commit leaves one unused fails the gate.
+- Ops is changed only in an ops worktree under `.worktrees/`, merged to ops main locally after its gate passes (a personal-profile repository).
 - JSON shapes change only as this plan states. Conventional commits; no AI attribution.
 - Avoid machine-specific absolute paths in code comments and docs.
 
@@ -65,10 +69,15 @@ consumers already test against.
 4. **A registered project whose root is gone or holds no config is skipped by the link
    scan**, with no warning: it cannot be opened on this host, so nothing can be linked to
    it. A config that exists and does not parse is an error.
-5. **`resolve` reads checkouts leniently.** `Index::build` adds `via: "checkout"`
-   locations from the same scan but turns its error into a warning, as it already does for
-   unreadable storage links: `resolve` answers history questions and never refuses for one
-   project's broken config.
+5. **`resolve` reads checkouts leniently, per project.** The scan returns every project it
+   read and every project it could not (`CheckoutScan { linked, failed }`). `locate`,
+   `where`, and `init` call `.strict()`, which fails on the first failure; `Index::build`
+   adds `via: "checkout"` locations for every project that read and one warning per
+   project that did not, as it already does for unreadable storage links. One broken
+   config never hides another project's checkout from `resolve`.
+6. **`init` refuses inside a linked checkout's repository**, with or without
+   `--checkout` (plan review round 1, P1). The refusal names the linked project and its
+   root, which is where that repository's records already live.
 
 ## Review Focus
 
@@ -84,7 +93,7 @@ consumers already test against.
 
 - Create `src/link.rs` — `GitTree` (a path's git top, common dir, git dir; main checkout;
   worktree list), `linked_project`, `holds_records`, `relative_path`.
-- Modify `src/locations.rs` — `Linked`, `linked_checkouts` (strict scan); `Via::Checkout`
+- Modify `src/locations.rs` — `Linked`, `CheckoutScan`, `scan_checkouts`; `Via::Checkout`
   and its locations in `Index::build`.
 - Modify `src/repo.rs` — `[checkout]` config table; `Project.checkout`, `Project.worktree`,
   `resume_root()`; `locate`'s link step; `Project::init` takes the checkout.
@@ -94,7 +103,8 @@ consumers already test against.
 - Modify `src/commands/park.rs`, `src/commands/parked.rs` — park worktree; `open_recorded`
   link step; `recorded_is_scanned` compares the resume root.
 - Create `src/commands/where_.rs` — the `where` command (`where` is a keyword).
-- Modify `src/commands/init.rs` — `--checkout` validation.
+- Modify `src/commands/init.rs` — the destination check on every init; `--checkout`
+  validation.
 - Modify `src/commands/projects.rs`, `src/output.rs` — `checkout` on rows; `WhereOut`.
 - Modify `src/commands/check.rs` — `checkout_missing` finding.
 - Modify `src/cli.rs`, `src/main.rs` — the parser surface.
@@ -108,10 +118,13 @@ consumers already test against.
 
 The rows exist on ops branch `feat/shared-repos` (commit `91f191b`, "feat(cli): declare
 tasks where and init --checkout") but not on ops main, and `vendored adopt` copies what
-ops main has landed. The ops plan allows its Tasks 1–3 to merge to main at any time.
+ops main has landed. The ops plan allows its Tasks 1–3 to merge to main at any time. The
+change is made in an ops worktree and merged locally (Global Constraints); only the
+commit's own hunks are applied, so vocabulary ops main has landed since `91f191b` (obs's
+`tests` view, for one) is kept.
 
 **Files:**
-- Modify (in ops main): `cli.toml`, `tests/test_cli.py`
+- Modify (in an ops worktree, then ops main): `cli.toml`, `tests/test_cli.py`
 
 **Interfaces:**
 - Produces: ops main's `cli.toml` with `{ names = ["--checkout"], value = "path" }` on
@@ -119,42 +132,61 @@ ops main has landed. The ops plan allows its Tasks 1–3 to merge to main at any
   linked, and whether its repository keeps records"`, one optional `path` arg of value
   `path`). Task 4 adopts it.
 
-- [ ] **Step 1: Apply only the vocabulary hunks to ops main**
+- [ ] **Step 1: Create the ops worktree**
 
 In the ops main checkout (clean tree on `main`):
 
 ```bash
-git checkout 91f191b -- cli.toml tests/test_cli.py
+work-link --ensure .worktrees
+git worktree add -b feat/cli-where .worktrees/cli-where main
+git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees/cli-where
+```
+
+ops's justfile defines no `setup`; its guide names none beyond a checkout.
+
+- [ ] **Step 2: Apply only the commit's hunks**
+
+In `.worktrees/cli-where`:
+
+```bash
+git show 91f191b -- cli.toml tests/test_cli.py | git apply --index
 git diff --cached --stat
 ```
 
-Expected: only `cli.toml` and `tests/test_cli.py` staged. If main's `cli.toml` has moved
-since `91f191b` (it has: obs rows changed), `git checkout <commit> -- cli.toml` would
-revert those. Instead:
+Expected: `cli.toml` and `tests/test_cli.py` staged, nothing else; `git diff --cached
+cli.toml` shows only the `--checkout` line and the `where` command block. If the patch
+does not apply, stop and report the conflicting hunk: never resolve it by checking out a
+whole file from `91f191b`, which would revert newer rows.
 
-```bash
-git reset -q
-git show 91f191b -- cli.toml tests/test_cli.py | git apply --index
-```
-
-Expected: applies cleanly (the hunks touch only the `init` and `root`/`where` rows and
-their test). If it does not, stop and report the conflict.
-
-- [ ] **Step 2: Run ops's gate for the change**
+- [ ] **Step 3: Run ops's gate in the worktree**
 
 Run: `just test-one tests.test_cli`
 Expected: PASS.
 Run: `just test-fast`
 Expected: PASS.
 
-- [ ] **Step 3: Commit on ops main**
+- [ ] **Step 4: Commit in the worktree**
 
 ```bash
 git commit -m "feat(cli): declare tasks where and init --checkout"
 ```
 
-Do not push (a push is outside this repository's authority); the adoption in Task 4 reads
-the local main.
+- [ ] **Step 5: Merge locally and remove the worktree**
+
+From the ops main checkout:
+
+```bash
+git merge --ff-only feat/cli-where
+tt-report
+git worktree unlock .worktrees/cli-where
+git worktree remove .worktrees/cli-where
+git branch -d feat/cli-where
+```
+
+If `--ff-only` refuses (main moved), `git merge --no-ff feat/cli-where` and rerun `just
+test-fast` on main. Do not push (a push is outside this repository's authority); Task 4's
+adoption reads the local main. When `feat/shared-repos` later merges, git sees the same
+hunks on both sides.
 
 ---
 
@@ -169,15 +201,16 @@ the local main.
 **Interfaces:**
 - Produces:
   - `Project.checkout: Option<PathBuf>` — declared checkout, absolute and normalized.
-  - `Project.worktree: Option<PathBuf>` — code working tree top, set only by the link.
-  - `Project::resume_root(&self) -> &Path`.
-  - `crate::link::GitTree { top: PathBuf, common: PathBuf, git_dir: PathBuf }` with
-    `GitTree::of(dir: &Path) -> Result<Option<GitTree>>`,
-    `fn main_checkout(&self) -> Option<PathBuf>`, `fn is_main(&self) -> bool`,
-    `fn worktrees(&self) -> Result<Vec<PathBuf>>`.
+  - `crate::link::GitTree { common: PathBuf }` with
+    `GitTree::of(dir: &Path) -> Result<Option<GitTree>>` and
+    `fn main_checkout(&self) -> Option<PathBuf>`. Task 3 adds `top`; Task 4 adds
+    `git_dir`, `is_main`, and `worktrees` — each with its first reader (Global
+    Constraints: nothing lands unused).
   - `crate::link::linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Project>>`.
-  - `crate::locations::Linked { prefix: String, root: PathBuf, checkout: PathBuf }` and
-    `crate::locations::linked_checkouts(registry: &Registry) -> Result<Vec<Linked>>`.
+  - `crate::locations::Linked { prefix: String, checkout: PathBuf }`,
+    `crate::locations::CheckoutScan { linked: Vec<Linked>, failed: Vec<(String, Error)> }`,
+    `crate::locations::scan_checkouts(registry: &Registry) -> CheckoutScan`, and
+    `CheckoutScan::strict(self) -> Result<Vec<Linked>>`.
   - `Error::CheckoutConflict(String)`, kind `"checkout_conflict"`.
 
 - [ ] **Step 1: Write the test fixture and the failing locate tests**
@@ -412,10 +445,6 @@ and to `Project` (after `retired`):
     /// absolute and normalized; `None` for an in-tree project. It need not exist: `check`
     /// reports a missing one, and a missing one never matches (ops linked-checkouts §4.1).
     pub checkout: Option<PathBuf>,
-    /// The code working tree this command runs in, when `locate` found the project through
-    /// its `[checkout]` link; `None` otherwise. Claims and parks record it (§4.1, "record
-    /// location and resume location are separate").
-    pub worktree: Option<PathBuf>,
 ```
 
 Add the parse helper beside `retirement`:
@@ -441,68 +470,90 @@ fn checkout_path(root: &Path, raw: Option<CheckoutConfig>) -> Result<Option<Path
 longest existing ancestor, and appends the rest; it refuses only a `..` after a missing
 component.
 
-In `Project::open`, set the new fields (the root is already canonical there):
+In `Project::open` (the root is already canonical there), compute the checkout before
+the struct literal, since `root` moves into it:
 
 ```rust
-            checkout: checkout_path(&root, config.checkout)?,
-            worktree: None,
+        let checkout = checkout_path(&root, config.checkout)?;
 ```
 
-Note the order: `root` is moved into the struct; compute `let checkout =
-checkout_path(&root, config.checkout)?;` before the `Ok(Project { ... })` and use it.
+and set `checkout,` in the `Ok(Project { ... })` literal.
 
 In `Project::init`, the `Config` literal gains `checkout: None` (Task 4 changes this).
 
-Add the accessor in `impl Project`:
-
-```rust
-    /// Where a session working on this project resumes: the code working tree for a
-    /// project found through its link, otherwise the root. Claims, parks, and the owner
-    /// fallback use it; records are never read from it.
-    pub fn resume_root(&self) -> &Path {
-        self.worktree.as_deref().unwrap_or(&self.root)
-    }
-```
-
 Every other place that builds a `Project` literal (search `Project {` in `src/` and tests)
-gains `checkout: None, worktree: None`.
+gains `checkout: None`.
 
-- [ ] **Step 5: The strict scan in `src/locations.rs`**
+- [ ] **Step 5: The scan in `src/locations.rs`**
+
+The scan keeps every project it read and every project it could not, so a strict caller
+fails on any failure while `resolve` (Task 5) keeps the good entries (Decision 5).
 
 ```rust
 /// One registered project that declares a `[checkout]` (linked-checkouts §4.1).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Linked {
     pub prefix: String,
-    pub root: PathBuf,
     pub checkout: PathBuf,
 }
 
-/// Every registered project on this host that declares a checkout. A project whose root
-/// is gone or holds no config is skipped: it cannot be opened here, so nothing can be
-/// linked to it. One whose config exists and does not open is an error, never skipped
-/// (§4.1a: errors stay errors).
-pub fn linked_checkouts(registry: &crate::registry::Registry) -> crate::error::Result<Vec<Linked>> {
-    let mut found = Vec::new();
-    for (prefix, root) in &registry.projects {
-        if !crate::scope::is_reachable(root)? {
-            continue;
-        }
-        let project =
-            crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)?;
-        if let Some(checkout) = project.checkout {
-            found.push(Linked {
-                prefix: prefix.clone(),
-                root: project.root,
-                checkout,
-            });
+/// Every registered project on this host that declares a checkout, and every registered
+/// project whose config could not be read. A project whose root is gone or holds no config
+/// is in neither: it cannot be opened here, so nothing can be linked to it.
+#[derive(Debug, Default)]
+pub struct CheckoutScan {
+    pub linked: Vec<Linked>,
+    pub failed: Vec<(String, crate::error::Error)>,
+}
+
+impl CheckoutScan {
+    /// The linked projects, or the first failure, naming its project (§4.1a: errors stay
+    /// errors for every caller that opens a project).
+    pub fn strict(self) -> crate::error::Result<Vec<Linked>> {
+        match self.failed.into_iter().next() {
+            Some((prefix, error)) => {
+                Err(error.with_suffix(&format!(" (registered project {prefix})")))
+            }
+            None => Ok(self.linked),
         }
     }
-    Ok(found)
+}
+
+pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
+    let mut scan = CheckoutScan::default();
+    for (prefix, root) in &registry.projects {
+        let opened = crate::scope::is_reachable(root).and_then(|reachable| {
+            reachable
+                .then(|| {
+                    crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)
+                })
+                .transpose()
+        });
+        match opened {
+            Ok(Some(project)) => {
+                if let Some(checkout) = project.checkout {
+                    scan.linked.push(Linked {
+                        prefix: prefix.clone(),
+                        checkout,
+                    });
+                }
+            }
+            Ok(None) => {}
+            Err(error) => scan.failed.push((prefix.clone(), error)),
+        }
+    }
+    scan
 }
 ```
 
+`Error::with_suffix` (`src/error.rs`, `pub`) rebuilds the same variant with the suffix
+appended, so a malformed config stays kind `config` and keeps naming its project.
+
 - [ ] **Step 6: `src/link.rs`**
+
+`GitTree` starts with the one fact Task 2 reads, the common directory. Task 3 adds the
+working tree's top level and Task 4 the git dir, each by adding a flag to the one
+`rev-parse` call below and a field to the struct.
 
 ```rust
 //! Linked checkouts: a path's git facts and the registered project whose `[checkout]`
@@ -513,30 +564,22 @@ use crate::registry::Registry;
 use crate::repo::Project;
 use std::path::{Path, PathBuf};
 
-/// git's view of a directory: its working tree's top level, the repository's common git
-/// directory, and this working tree's own git directory, all canonical.
+/// git's view of a directory, canonical: the repository's common git directory.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GitTree {
-    pub top: PathBuf,
     pub common: PathBuf,
-    pub git_dir: PathBuf,
 }
 
 impl GitTree {
     /// `None` when git says `dir` is not inside a repository, or there is no git
     /// executable; any other git failure is an `io` error. `LC_ALL=C` pins the one
-    /// message matched, as `Project::git_toplevel` does.
+    /// message matched, as `Project::git_toplevel` does. One line per requested fact, in
+    /// the order of the flags.
     pub fn of(dir: &Path) -> Result<Option<GitTree>> {
         let output = match std::process::Command::new("git")
             .arg("-C")
             .arg(dir)
-            .args([
-                "rev-parse",
-                "--path-format=absolute",
-                "--show-toplevel",
-                "--git-common-dir",
-                "--absolute-git-dir",
-            ])
+            .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
             .env("LC_ALL", "C")
             .output()
         {
@@ -561,71 +604,39 @@ impl GitTree {
         let mut next = || -> Result<PathBuf> {
             lines
                 .next()
-                .ok_or_else(|| Error::Io(format!("git rev-parse in {} printed too little", dir.display())))?
+                .ok_or_else(|| {
+                    Error::Io(format!("git rev-parse in {} printed too little", dir.display()))
+                })?
                 .map_err(Error::from)
         };
-        Ok(Some(GitTree {
-            top: next()?,
-            common: next()?,
-            git_dir: next()?,
-        }))
+        Ok(Some(GitTree { common: next()? }))
     }
 
     /// The repository's main checkout: the common directory's parent when that is a
     /// `.git` directory. `None` for a bare repository or a separate git dir.
     pub fn main_checkout(&self) -> Option<PathBuf> {
-        (self.common.file_name()? == ".git").then(|| self.common.parent().map(Path::to_path_buf))?
-    }
-
-    /// This working tree is the main checkout, not a linked worktree.
-    pub fn is_main(&self) -> bool {
-        self.git_dir == self.common
-    }
-
-    /// Every working tree of the repository, canonical where it still exists, main first.
-    pub fn worktrees(&self) -> Result<Vec<PathBuf>> {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&self.top)
-            .args(["worktree", "list", "--porcelain", "-z"])
-            .env("LC_ALL", "C")
-            .output()?;
-        if !output.status.success() {
-            return Err(Error::Io(format!(
-                "git worktree list in {} failed: {}",
-                self.top.display(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
+        if self.common.file_name()? != ".git" {
+            return None;
         }
-        Ok(String::from_utf8_lossy(&output.stdout)
-            .split('\0')
-            .filter_map(|field| field.strip_prefix("worktree "))
-            .map(|listed| {
-                let listed = PathBuf::from(listed);
-                listed.canonicalize().unwrap_or(listed)
-            })
-            .collect())
+        self.common.parent().map(Path::to_path_buf)
     }
 }
 
-/// The registered project whose `[checkout]` is `tree`'s main checkout, opened with
-/// `worktree` set to `tree`'s top level. Two such projects are `checkout_conflict`.
+/// The registered project whose `[checkout]` is `tree`'s main checkout. Two such projects
+/// are `checkout_conflict`.
 pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Project>> {
     let Some(main) = tree.main_checkout() else {
         return Ok(None);
     };
-    let matches: Vec<_> = crate::locations::linked_checkouts(registry)?
+    let matches: Vec<_> = crate::locations::scan_checkouts(registry)
+        .strict()?
         .into_iter()
         .filter(|linked| linked.checkout == main)
         .collect();
     match matches.as_slice() {
         [] => Ok(None),
-        [one] => {
-            let mut project =
-                crate::scope::open_registered(registry, &one.prefix, crate::scope::Origin::Prefix)?;
-            project.worktree = Some(tree.top.clone());
-            Ok(Some(project))
-        }
+        [one] => crate::scope::open_registered(registry, &one.prefix, crate::scope::Origin::Prefix)
+            .map(Some),
         many => Err(Error::CheckoutConflict(format!(
             "{} is declared as the checkout of {}; keep one project's [checkout]",
             main.display(),
@@ -640,11 +651,7 @@ mod tests {
 
     #[test]
     fn main_checkout_is_the_parent_of_a_dot_git_common_dir_only() {
-        let tree = |common: &str| GitTree {
-            top: "/r".into(),
-            common: common.into(),
-            git_dir: common.into(),
-        };
+        let tree = |common: &str| GitTree { common: common.into() };
         assert_eq!(tree("/r/.git").main_checkout(), Some(PathBuf::from("/r")));
         assert_eq!(tree("/srv/r.git").main_checkout(), None, "a bare repository has none");
     }
@@ -656,6 +663,8 @@ mod tests {
     }
 }
 ```
+
+When Task 3 and Task 4 add fields, the unit test's `GitTree { ... }` literal gains them.
 
 Register the module where the crate declares its modules (`grep -n "^mod \|^pub mod "
 src/main.rs src/lib.rs`), alphabetically.
@@ -709,24 +718,31 @@ git commit -m "feat(locate): open a linked project from its code checkout"
 ```
 
 (Add `src/lib.rs` instead of `src/main.rs` if that is where modules are declared, and any
-file whose `Project` literal gained the two fields.)
+file whose `Project` literal gained the field.) Before committing, `just check` must be
+clean: clippy runs with `-D warnings`, so nothing this task adds may be unused.
 
 ---
 
 ### Task 3: Record location and resume location
 
 **Files:**
-- Modify: `src/commands/mod.rs` (`claim_guard`, `follow_holder`, `transition`,
-  `raw_owner_name`, `lock_and_revalidate`), `src/commands/park.rs`,
-  `src/commands/parked.rs` (`open_recorded`, the `recorded_is_scanned` comparison)
+- Modify: `src/link.rs` (`GitTree.top`, `linked_project` sets the worktree),
+  `src/repo.rs` (`Project.worktree`, `resume_root`), `src/commands/mod.rs`
+  (`claim_guard`, `follow_holder`, `transition`, `raw_owner_name`, `lock_and_revalidate`),
+  `src/commands/park.rs`, `src/commands/parked.rs` (`open_recorded`, the
+  `recorded_is_scanned` comparison)
 - Test: `tests/linked.rs`
 
 **Interfaces:**
-- Consumes: `Project::resume_root`, `Project.worktree`, `link::GitTree::of`,
-  `link::linked_project` (Task 2).
-- Produces: claims and parks whose `worktree` is the code working tree for a linked
-  project; `parked::open_recorded(id, worktree)` that opens the overlay project for a
-  recorded code worktree.
+- Consumes: `link::GitTree::of`, `link::linked_project` (Task 2).
+- Produces:
+  - `GitTree.top: PathBuf` — the working tree's top level, canonical.
+  - `Project.worktree: Option<PathBuf>` — code working tree top, set only by
+    `linked_project`.
+  - `Project::resume_root(&self) -> &Path`.
+  - Claims and parks whose `worktree` is the code working tree for a linked project;
+    `parked::open_recorded(id, worktree)` that opens the overlay project for a recorded
+    code worktree.
 
 - [ ] **Step 1: Write the failing lifecycle test**
 
@@ -769,10 +785,8 @@ fn the_lifecycle_in_a_code_worktree_keeps_records_in_the_overlay() {
     .enumerate()
     {
         let top = top.to_str().unwrap();
-        let id = env.json(tree, &["add", &format!("Linked work {n}")])["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let title = format!("Linked work {n}");
+        let id = env.json(tree, &["add", &title])["id"].as_str().unwrap().to_string();
         env.json(tree, &["start", &id]);
         let shown = env.json(tree, &["show", &id]);
         assert_eq!(shown["claim"]["worktree"], top, "{n}: the claim names the code tree");
@@ -780,19 +794,30 @@ fn the_lifecycle_in_a_code_worktree_keeps_records_in_the_overlay() {
         env.json(tree, &["note", &id, "a note"]);
         env.json(tree, &["edit", &id, "--spec", "topic"]);
         env.json(tree, &["attach", &id, shot.to_str().unwrap(), "--caption", "a shot"]);
-        env.json(tree, &["park", &id, "resume here"]);
 
-        for view in [
-            env.json(&l.code, &["quiet", "--project", "nexc"]),
-            env.json(&l.code, &["next"]),
-            env.json(&l.code, &["prime"]),
-        ] {
+        // An agent-waiting park: next and prime list it with the code tree to open.
+        env.json(tree, &["park", &id, "resume here"]);
+        for view in [env.json(&l.code, &["next"]), env.json(&l.code, &["prime"])] {
             let text = string(&view);
             assert!(text.contains(&id) && text.contains(top), "{n}: {text}");
+            assert!(!string(&view["warnings"]).contains("unavailable"), "{n}: {text}");
         }
         let found = env.json(elsewhere.path(), &["show", &id]);
         assert_eq!(found["park"]["worktree"], top, "{n}");
         assert_eq!(found["task"]["spec"], "docs/specs/topic.md", "{n}");
+
+        // A quiet park, read from outside every project: quiet resolves the recorded code
+        // tree through the link (`open_recorded`), so the row carries the record's title
+        // and no warning calls the checkout unavailable.
+        env.json(tree, &["start", &id]);
+        env.json(
+            tree,
+            &["park", &id, "run it", "--reason", "quiet", "--waiting-on", "user", "--minutes", "5"],
+        );
+        let quiet = env.json(elsewhere.path(), &["quiet", "--project", "nexc"]);
+        let text = string(&quiet);
+        assert!(text.contains(&id) && text.contains(top) && text.contains(&title), "{n}: {text}");
+        assert!(!string(&quiet["warnings"]).contains("unavailable"), "{n}: {text}");
 
         env.json(tree, &["start", &id]);
         env.json(tree, &["done", &id, "landed"]);
@@ -801,6 +826,41 @@ fn the_lifecycle_in_a_code_worktree_keeps_records_in_the_overlay() {
     }
     assert_eq!(porcelain(&l.code), before, "nothing written into the code repository");
     assert_eq!(porcelain(&l.wt), before_wt, "nothing written into the code worktree");
+}
+
+#[test]
+fn open_recorded_reads_a_recorded_code_tree_through_the_link() {
+    // The unit seam under quiet, next, prime, and show's fallback: with the overlay root
+    // never named, a recorded code worktree still opens the overlay project.
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let id = env.json(&l.wt, &["add", "Recorded"])["id"].as_str().unwrap().to_string();
+    env.json(&l.wt, &["start", &id]);
+    env.json(
+        &l.wt,
+        &["park", &id, "run it", "--reason", "quiet", "--waiting-on", "user", "--minutes", "5"],
+    );
+    let elsewhere = tempfile::tempdir().unwrap();
+    let quiet = env.json(elsewhere.path(), &["quiet"]);
+    let text = string(&quiet);
+    assert!(text.contains(&id) && text.contains("Recorded"), "{text}");
+    assert!(!string(&quiet["warnings"]).contains("unavailable"), "{text}");
+}
+
+#[test]
+fn a_holders_write_moves_its_one_claim_between_code_trees() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let id = env.json(&l.code, &["add", "Moving"])["id"].as_str().unwrap().to_string();
+    env.json(&l.code, &["start", &id]);
+    assert_eq!(env.json(&l.code, &["show", &id])["claim"]["worktree"], l.code.to_str().unwrap());
+    env.json(&l.wt, &["note", &id, "from the worktree"]);
+    let moved = env.json(&l.code, &["show", &id]);
+    assert_eq!(moved["claim"]["worktree"], l.wt.to_str().unwrap(), "the claim follows its holder");
+    env.json(&l.code, &["note", &id, "back in the main checkout"]);
+    assert_eq!(env.json(&l.wt, &["show", &id])["claim"]["worktree"], l.code.to_str().unwrap());
+    let claims = string(&env.json(&l.code, &["claims"]));
+    assert_eq!(claims.matches(&format!("\"{id}\"")).count(), 1, "one claim, moved: {claims}");
 }
 
 #[test]
@@ -816,16 +876,82 @@ fn prime_warns_only_about_this_projects_directory_in_the_overlay() {
 }
 ```
 
-If `quiet` refuses a park that is not `--reason quiet`, replace that entry with `env.json(&l.code,
-&["list", "--parked"])`; the assertion stays the same. Check `tasks quiet --help` first and
-keep whichever view lists agent-waiting parks.
+Before running, check two shapes with `--help` and one scratch run, and adjust only the
+lookup, never the assertion: `tasks quiet` lists only parks made with `--reason quiet`
+(so the ordinary park above is deliberately not asserted there), and `tasks claims`
+names each claimed id once as a JSON string. If `claims` keys its rows differently,
+count rows whose id field equals `id` instead.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `just test-one --test linked lifecycle`
 Expected: FAIL on the `claim.worktree` assertion (it names the overlay project root).
+Run: `just test-one --test linked holders_write`
+Expected: FAIL on the first `claim.worktree` assertion.
 
-- [ ] **Step 3: Record the resume root**
+- [ ] **Step 3: The working tree's top, and the resume root**
+
+In `src/link.rs`, `GitTree` gains its first field and `of` its first flag:
+
+```rust
+pub struct GitTree {
+    pub top: PathBuf,
+    pub common: PathBuf,
+}
+```
+
+```rust
+            .args([
+                "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-common-dir",
+            ])
+```
+
+```rust
+        Ok(Some(GitTree {
+            top: next()?,
+            common: next()?,
+        }))
+```
+
+The unit test's literal becomes `GitTree { top: "/r".into(), common: common.into() }`.
+`linked_project`'s single-match arm sets the worktree:
+
+```rust
+        [one] => {
+            let mut project =
+                crate::scope::open_registered(registry, &one.prefix, crate::scope::Origin::Prefix)?;
+            project.worktree = Some(tree.top.clone());
+            Ok(Some(project))
+        }
+```
+
+and its doc comment says so: "opened with `worktree` set to `tree`'s top level".
+
+In `src/repo.rs`, `Project` gains (after `checkout`):
+
+```rust
+    /// The code working tree this command runs in, when `locate` found the project through
+    /// its `[checkout]` link; `None` otherwise. Claims and parks record it (ops
+    /// linked-checkouts §4.1, "record location and resume location are separate").
+    pub worktree: Option<PathBuf>,
+```
+
+`Project::open` sets `worktree: None`; every other `Project` literal gains `worktree:
+None`. Add the accessor in `impl Project`:
+
+```rust
+    /// Where a session working on this project resumes: the code working tree for a
+    /// project found through its link, otherwise the root. Claims, parks, and the owner
+    /// fallback use it; records are never read from it.
+    pub fn resume_root(&self) -> &Path {
+        self.worktree.as_deref().unwrap_or(&self.root)
+    }
+```
+
+- [ ] **Step 4: Record the resume root**
 
 In `src/commands/mod.rs`:
 - `claim_guard`: `let worktree = self.project.resume_root().display().to_string();`
@@ -847,7 +973,7 @@ retire — leave it) or a *resume* location (a claim or park `worktree` written 
 — change it to `resume_root()`). The list above is every resume hit known when this plan
 was written; report any other you change.
 
-- [ ] **Step 4: Keep the link across the lock**
+- [ ] **Step 5: Keep the link across the lock**
 
 In `lock_and_revalidate`, the local arm reopens the root and would drop `worktree`:
 
@@ -858,7 +984,7 @@ In `lock_and_revalidate`, the local arm reopens the root and would drop `worktre
             },
 ```
 
-- [ ] **Step 5: `open_recorded` through the link**
+- [ ] **Step 6: `open_recorded` through the link**
 
 In `src/commands/parked.rs`:
 
@@ -902,21 +1028,21 @@ And where `recorded_is_scanned` is computed:
             .any(|project| project.resume_root() == Path::new(&park.worktree));
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `just test-one --test linked`
 Expected: PASS.
 
-- [ ] **Step 7: Run the fast suite**
+- [ ] **Step 8: Run the fast suite**
 
 Run: `just test-fast`
 Expected: PASS (in-tree projects have `worktree: None`, so `resume_root()` is the root and
 every existing claim and park test is unchanged).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/commands/mod.rs src/commands/park.rs src/commands/parked.rs tests/linked.rs
+git add src/link.rs src/repo.rs src/commands/mod.rs src/commands/park.rs src/commands/parked.rs tests/linked.rs
 git commit -m "feat(claims): record a linked project's code worktree as its resume location"
 ```
 
@@ -934,8 +1060,10 @@ git commit -m "feat(claims): record a linked project's code worktree as its resu
 
 **Interfaces:**
 - Consumes: ops main's `cli.toml` rows (Task 1); `GitTree`, `linked_project` (Task 2).
-- Produces: `Output::Where(WhereOut)`; `link::holds_records(registry: &Registry, tree:
-  &GitTree) -> Result<bool>`; `link::relative_path(from: &Path, to: &Path) -> PathBuf`;
+- Produces: `Output::Where(WhereOut)`; `GitTree.git_dir: PathBuf`, `GitTree::is_main(&self)
+  -> bool`, `GitTree::worktrees(&self) -> Result<Vec<PathBuf>>`;
+  `link::holds_records(registry: &Registry, tree: &GitTree) -> Result<bool>`;
+  `link::relative_path(from: &Path, to: &Path) -> PathBuf`;
   `Project::init(root: &Path, prefix: &str, checkout: Option<&Path>) -> Result<Project>`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1011,6 +1139,30 @@ fn holds_records_needs_a_config_tracked_in_head() {
 }
 
 #[test]
+fn holds_records_refuses_a_tracked_tree_or_symlink_at_the_config_path() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    // A directory named like the config: `git cat-file -e` would accept its tree object.
+    let tree = code_repo(&l.base, "tree");
+    std::fs::create_dir_all(tree.join("tasks/.config.toml")).unwrap();
+    std::fs::write(tree.join("tasks/.config.toml/inner"), "x\n").unwrap();
+    git(&tree, &["add", "-A"]);
+    git(&tree, &["commit", "-q", "-m", "a tree at the config path"]);
+    assert_eq!(env.json(&tree, &["where"])["holds_records"], false, "a tree is not a config");
+    let link = code_repo(&l.base, "link");
+    std::fs::create_dir_all(link.join("tasks")).unwrap();
+    std::fs::write(link.join("real.toml"), "prefix = \"lnk\"\n").unwrap();
+    std::os::unix::fs::symlink("../real.toml", link.join("tasks/.config.toml")).unwrap();
+    git(&link, &["add", "-A"]);
+    git(&link, &["commit", "-q", "-m", "a symlink at the config path"]);
+    assert_eq!(env.json(&link, &["where"])["holds_records"], false, "a symlink is not a config");
+    let unborn = l.base.join("unborn");
+    std::fs::create_dir_all(&unborn).unwrap();
+    git(&unborn, &["init", "-q"]);
+    assert_eq!(env.json(&unborn, &["where"])["holds_records"], false, "no HEAD tracks nothing");
+}
+
+#[test]
 fn where_reports_resolver_errors_as_errors() {
     let env = TestEnv::new();
     let l = layout(&env);
@@ -1048,6 +1200,27 @@ fn init_checkout_writes_a_relative_link_outside_the_code_tree() {
 }
 
 #[test]
+fn plain_init_refuses_every_tree_of_a_linked_checkout() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let sub = l.code.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let before = porcelain(&l.code);
+    let before_wt = porcelain(&l.wt);
+    for (n, dir) in [&l.code, &sub, &l.wt].into_iter().enumerate() {
+        let out = env.cmd(dir).args(["init", "--prefix", "intr"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{n}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "config", "{n}");
+        assert!(error["error"]["detail"].as_str().unwrap().contains("nexc"), "{n}: names the linked project");
+        assert!(!dir.join("tasks").exists(), "{n}: nothing created");
+    }
+    assert_eq!(porcelain(&l.code), before);
+    assert_eq!(porcelain(&l.wt), before_wt);
+    assert!(env.json(&l.nexc, &["projects"])["projects"].as_array().unwrap().iter().all(|r| r["prefix"] != "intr"));
+}
+
+#[test]
 fn init_checkout_refuses_what_it_cannot_link() {
     let env = TestEnv::new();
     let l = layout(&env);
@@ -1073,6 +1246,23 @@ fn init_checkout_refuses_what_it_cannot_link() {
         assert_eq!(env.fail(&dir, &["init", "--prefix", name, "--checkout", checkout]), kind, "{name}");
         assert!(!dir.join("tasks").exists(), "{name}: a refused init writes nothing");
     }
+    // The project directory inside a worktree of the very repository passed as
+    // --checkout, that worktree stored outside the checkout's tree: no project links the
+    // repository yet, and containment misses it; repository identity does not.
+    let other = code_repo(&l.base, "other");
+    let other_store = l.base.join("storage/other");
+    std::fs::create_dir_all(&other_store).unwrap();
+    std::os::unix::fs::symlink(&other_store, other.join(".worktrees")).unwrap();
+    git(&other, &["worktree", "add", "-q", "-b", "ow", ".worktrees/ow"]);
+    let in_wt = other.join(".worktrees/ow").canonicalize().unwrap().join("overlay-here");
+    std::fs::create_dir_all(&in_wt).unwrap();
+    assert!(!in_wt.starts_with(&other), "the worktree really is outside the checkout's tree");
+    assert_eq!(
+        env.fail(&in_wt, &["init", "--prefix", "p7", "--checkout", other.to_str().unwrap()]),
+        "config",
+        "a project directory in a worktree of its own checkout's repository"
+    );
+    assert!(!in_wt.join("tasks").exists());
     let nested = code_repo(&l.nexc, "nested");
     let dir = fresh("p6");
     assert_eq!(
@@ -1091,6 +1281,8 @@ rather than "does not exist". Add that line before the loop.
 
 Run: `just test-one --test linked where`
 Expected: FAIL — `where` is an unknown subcommand (exit 2).
+Run: `just test-one --test linked plain_init`
+Expected: FAIL — `init` succeeds inside the code checkout and creates `tasks/` there.
 
 - [ ] **Step 3: Adopt the vocabulary**
 
@@ -1137,13 +1329,63 @@ others) and the dispatch:
         Command::Where { path } => where_::run(path, dir),
 ```
 
-- [ ] **Step 5: `holds_records` and `relative_path` in `src/link.rs`**
+- [ ] **Step 5: `GitTree`'s git dir, `holds_records`, and `relative_path` in `src/link.rs`**
+
+`GitTree` gains its last fact, and the two methods whose first callers are this task's
+`holds_records` and `validate_checkout`:
+
+```rust
+pub struct GitTree {
+    pub top: PathBuf,
+    pub common: PathBuf,
+    pub git_dir: PathBuf,
+}
+```
+
+`of` adds `"--absolute-git-dir"` after `"--git-common-dir"` and `git_dir: next()?,` after
+`common: next()?,`; the unit test's literal gains `git_dir: common.into()`. In `impl
+GitTree`:
+
+```rust
+    /// This working tree is the main checkout, not a linked worktree.
+    pub fn is_main(&self) -> bool {
+        self.git_dir == self.common
+    }
+
+    /// Every working tree of the repository, canonical where it still exists, main first.
+    pub fn worktrees(&self) -> Result<Vec<PathBuf>> {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&self.top)
+            .args(["worktree", "list", "--porcelain", "-z"])
+            .env("LC_ALL", "C")
+            .output()?;
+        if !output.status.success() {
+            return Err(Error::Io(format!(
+                "git worktree list in {} failed: {}",
+                self.top.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .split('\0')
+            .filter_map(|field| field.strip_prefix("worktree "))
+            .map(|listed| {
+                let listed = PathBuf::from(listed);
+                listed.canonicalize().unwrap_or(listed)
+            })
+            .collect())
+    }
+```
+
+Then the two free functions:
 
 ```rust
 /// Linked-checkouts decision 5 and §8.1: the repository holding `tree` keeps our records
 /// when a registered project's root is in it (the same common git directory), or its top
-/// level holds a `tasks/.config.toml` tracked in `HEAD`. Only roots inside one of the
-/// repository's working trees can share its common directory, so git runs only for those.
+/// level holds a `tasks/.config.toml` tracked in `HEAD` as a regular file. Only roots
+/// inside one of the repository's working trees can share its common directory, so git
+/// runs only for those.
 pub fn holds_records(registry: &Registry, tree: &GitTree) -> Result<bool> {
     let worktrees = tree.worktrees()?;
     for root in registry.projects.values() {
@@ -1158,15 +1400,47 @@ pub fn holds_records(registry: &Registry, tree: &GitTree) -> Result<bool> {
             return Ok(true);
         }
     }
-    let tracked = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&tree.top)
-        .args(["cat-file", "-e", "HEAD:tasks/.config.toml"])
-        .env("LC_ALL", "C")
-        .stderr(std::process::Stdio::null())
-        .status()?;
-    Ok(tracked.success())
+    tracked_config(&tree.top)
 }
+
+/// `tasks/.config.toml` is tracked in `HEAD` at `top` as a regular file: `ls-tree` names a
+/// `blob` of mode `100644` or `100755`. A tree at that path (which `git cat-file -e`
+/// accepts) or a symlink (`120000`) is not a config. An unborn `HEAD` tracks nothing;
+/// any other git failure is an `io` error.
+fn tracked_config(top: &Path) -> Result<bool> {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(top)
+            .args(args)
+            .env("LC_ALL", "C")
+            .output()
+    };
+    let listed = git(&["ls-tree", "-z", "HEAD", "--", CONFIG_PATH])?;
+    if !listed.status.success() {
+        if !git(&["rev-parse", "-q", "--verify", "HEAD"])?.status.success() {
+            return Ok(false);
+        }
+        return Err(Error::Io(format!(
+            "git ls-tree in {} failed: {}",
+            top.display(),
+            String::from_utf8_lossy(&listed.stderr).trim()
+        )));
+    }
+    // `<mode> SP <type> SP <object> TAB <path> NUL`, or nothing when the path is untracked.
+    let entry = String::from_utf8_lossy(&listed.stdout);
+    let Some((meta, path)) = entry.trim_end_matches('\0').split_once('\t') else {
+        return Ok(false);
+    };
+    let mut fields = meta.split(' ');
+    Ok(path == CONFIG_PATH
+        && matches!(
+            (fields.next(), fields.next()),
+            (Some("100644" | "100755"), Some("blob"))
+        ))
+}
+
+const CONFIG_PATH: &str = crate::repo::CONFIG_REL;
 
 /// `to` relative to `from`, both absolute and canonical: the shared prefix dropped, one
 /// `..` per remaining component of `from`, then the rest of `to`.
@@ -1344,12 +1618,45 @@ In the `Config` literal:
 Update every other caller of `Project::init` (tests included) to pass `None`.
 
 In `src/commands/init.rs`, `run` gains `checkout: Option<PathBuf>`. After the registry is
-loaded and before `registry.register`:
+loaded and before `registry.register`, every init checks its destination, and one with
+`--checkout` also checks the checkout:
 
 ```rust
+    reject_linked_destination(&root, &registry)?;
     let checkout = checkout
         .map(|checkout| validate_checkout(&root, &root.join(checkout), &registry, &prefix))
         .transpose()?;
+```
+
+```rust
+/// No command writes into a linked checkout (ops linked-checkouts §4.1), `init` included:
+/// a destination in a repository that a registered project declares as its checkout is
+/// refused, whichever of that repository's working trees it is in, because the
+/// repository's records already live in that project's root.
+fn reject_linked_destination(root: &Path, registry: &Registry) -> Result<()> {
+    let Some(tree) = crate::link::GitTree::of(root)? else {
+        return Ok(());
+    };
+    let Some(main) = tree.main_checkout() else {
+        return Ok(());
+    };
+    let owners: Vec<_> = crate::locations::scan_checkouts(registry)
+        .strict()?
+        .into_iter()
+        .filter(|linked| linked.checkout == main)
+        .map(|linked| linked.prefix)
+        .collect();
+    if owners.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Config(format!(
+        "{} is in {}, the linked checkout of {}; its records live in that project's root \
+         (`tasks where` names it), and nothing is written into the code tree",
+        root.display(),
+        main.display(),
+        owners.join(" and ")
+    )))
+}
 ```
 
 (`root.join` keeps an absolute argument as given and resolves a relative one against the
@@ -1380,8 +1687,12 @@ fn validate_checkout(root: &Path, checkout: &Path, registry: &Registry, prefix: 
     if checkout.join(crate::repo::CONFIG_REL).exists() {
         return refuse("keeps records in-tree".into());
     }
-    if root.starts_with(&checkout) {
-        return refuse("contains this project; records must live outside the code tree".into());
+    // Repository identity, not only containment: a worktree of this repository stored
+    // anywhere (`.worktrees` linked into separate storage) is still its code tree.
+    if root.starts_with(&checkout)
+        || crate::link::GitTree::of(root)?.is_some_and(|here| here.common == tree.common)
+    {
+        return refuse("holds this project; records must live outside the code tree".into());
     }
     for (other, other_root) in &registry.projects {
         if other == prefix || !other_root.try_exists()? {
@@ -1392,7 +1703,8 @@ fn validate_checkout(root: &Path, checkout: &Path, registry: &Registry, prefix: 
             return refuse(format!("overlaps registered project {other} ({})", other_root.display()));
         }
     }
-    let taken: Vec<_> = crate::locations::linked_checkouts(registry)?
+    let taken: Vec<_> = crate::locations::scan_checkouts(registry)
+        .strict()?
         .into_iter()
         .filter(|linked| linked.prefix != prefix && linked.checkout == checkout)
         .map(|linked| linked.prefix)
@@ -1408,7 +1720,7 @@ fn validate_checkout(root: &Path, checkout: &Path, registry: &Registry, prefix: 
 }
 ```
 
-The refused-init assertion (`!dir.join("tasks").exists()`) holds because validation runs
+The refused-init assertions (`!dir.join("tasks").exists()`) hold because both checks run
 before `Project::init` creates anything and before `registry.save()`.
 
 - [ ] **Step 8: Run the tests to verify they pass**
@@ -1442,7 +1754,7 @@ git commit -m "feat(where): tasks where and init --checkout for linked projects"
 - Test: `tests/linked.rs`
 
 **Interfaces:**
-- Consumes: `Project.checkout`, `locations::linked_checkouts` (Task 2).
+- Consumes: `Project.checkout`, `locations::scan_checkouts` and `CheckoutScan` (Task 2).
 - Produces: `tasks projects --json` rows with `checkout` on linked rows (§8.2);
   a `checkout_missing` warning from `check`; `resolve` matches with `via: "checkout"`.
 
@@ -1479,10 +1791,26 @@ fn resolve_matches_a_linked_checkout() {
     let text = serde_json::to_string(&out).unwrap();
     assert!(text.contains("\"nexc\"") && text.contains("\"checkout\""), "{text}");
 }
+
+#[test]
+fn resolve_keeps_every_valid_checkout_when_one_project_is_broken() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let broken = project(&env, &l.overlay, "brk", None);
+    std::fs::write(broken.join("tasks/.config.toml"), "prefix = \"brk\"\n[checkout]\npath = 7\n").unwrap();
+    let out = env.json(&l.base, &["resolve", l.code.join("README").to_str().unwrap()]);
+    let text = serde_json::to_string(&out).unwrap();
+    assert!(text.contains("\"nexc\"") && text.contains("\"checkout\""), "nexc still resolves: {text}");
+    let warnings = serde_json::to_string(&out["warnings"]).unwrap();
+    assert!(warnings.contains("brk"), "one warning names the broken project: {warnings}");
+    assert!(!warnings.contains("nexc"), "{warnings}");
+}
 ```
 
-Run: `just test-one --test linked projects_rows check_reports resolve_matches`
-Expected: FAIL on all three.
+Run each separately (Cargo takes one filter):
+`just test-one --test linked projects_rows`, `just test-one --test linked check_reports`,
+`just test-one --test linked resolve_`.
+Expected: FAIL on all four tests.
 
 - [ ] **Step 2: `checkout` on `projects` rows**
 
@@ -1529,16 +1857,16 @@ Add `Checkout` to `Via` after `Storage`, and count it as current:
     }
 ```
 
-At the end of `Index::build`'s loop (after the per-project loop, once):
+After `Index::build`'s per-project loop, once (Decision 5: keep every project that read,
+warn once for each that did not):
 
 ```rust
-        match linked_checkouts(registry) {
-            Ok(linked) => {
-                for l in linked {
-                    add(&l.prefix, Via::Checkout, &l.checkout, &mut warnings);
-                }
-            }
-            Err(e) => warnings.push(format!("linked checkouts not matched: {e}")),
+        let scan = scan_checkouts(registry);
+        for l in scan.linked {
+            add(&l.prefix, Via::Checkout, &l.checkout, &mut warnings);
+        }
+        for (prefix, error) in scan.failed {
+            warnings.push(format!("{prefix}: its checkout is not matched ({error})"));
         }
 ```
 
