@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/linked-projects
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T10:38:04Z
+updated: 2026-10-07T10:38:06Z
 started: 2026-10-07T09:45:04Z
 depends: []
 parent: tasks-a7460c
@@ -42,3 +42,5 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 - 2026-10-07T10:37:12Z (feat/linked-projects): resumed
   provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-07T10:38:04Z (feat/linked-projects): plan revised for round 2: unborn HEAD recognized explicitly (symbolic-ref resolves, for-each-ref silent and empty), any other HEAD failure is io, with loose-ref and packed-refs corruption tests; --checkout refuses a repository whose common git dir any registered root shares, tested with a project registered from an externally stored worktree.
+- 2026-10-07T10:38:06Z (feat/linked-projects): parked (waiting on user, review): User re-reviews docs/plans/2026-10-07-linked-projects.md (round 3) and picks an execution method; then the agent executes Task 1 in an ops worktree and Tasks 2-5 here.
+  provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
