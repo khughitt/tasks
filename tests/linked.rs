@@ -823,3 +823,73 @@ fn init_checkout_refuses_a_head_tracked_config_deleted_locally() {
     assert_eq!(std::fs::read(registry).unwrap(), registry_before);
     assert_eq!(porcelain(&code), code_before);
 }
+
+#[test]
+fn projects_rows_carry_checkout_only_when_linked() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let other = project(&env, &l.overlay, "oth", None);
+    let rows = env.json(&other, &["projects"])["projects"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let row = |p: &str| rows.iter().find(|r| r["prefix"] == p).unwrap().clone();
+    assert_eq!(row("nexc")["checkout"], l.code.to_str().unwrap());
+    assert!(!row("oth").as_object().unwrap().contains_key("checkout"));
+}
+
+#[test]
+fn check_reports_a_declared_checkout_that_is_missing() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let gone = project(&env, &l.overlay, "gone", Some("../../nowhere"));
+    let report = env.check(&gone);
+    let text = serde_json::to_string(&report).unwrap();
+    assert!(
+        text.contains("checkout_missing") && text.contains("nowhere"),
+        "{text}"
+    );
+    assert_eq!(env.check(&l.nexc)["warnings"], serde_json::json!([]));
+}
+
+#[test]
+fn resolve_matches_a_linked_checkout() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let out = env.json(
+        &l.base,
+        &["resolve", l.code.join("README").to_str().unwrap()],
+    );
+    let text = serde_json::to_string(&out).unwrap();
+    assert!(
+        text.contains("\"nexc\"") && text.contains("\"checkout\""),
+        "{text}"
+    );
+}
+
+#[test]
+fn resolve_keeps_every_valid_checkout_when_one_project_is_broken() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let broken = project(&env, &l.overlay, "brk", None);
+    std::fs::write(
+        broken.join("tasks/.config.toml"),
+        "prefix = \"brk\"\n[checkout]\npath = 7\n",
+    )
+    .unwrap();
+    let out = env.json(
+        &l.base,
+        &["resolve", l.code.join("README").to_str().unwrap()],
+    );
+    let text = serde_json::to_string(&out).unwrap();
+    assert!(
+        text.contains("\"nexc\"") && text.contains("\"checkout\""),
+        "nexc still resolves: {text}"
+    );
+    let warnings = serde_json::to_string(&out["warnings"]).unwrap();
+    assert!(
+        warnings.contains("brk"),
+        "one warning names the broken project: {warnings}"
+    );
+    assert!(!warnings.contains("nexc"), "{warnings}");
+}

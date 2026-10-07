@@ -250,6 +250,7 @@ pub fn normalize(path: &Path, base: &Path) -> std::result::Result<PathBuf, Strin
 pub enum Via {
     Root,
     Storage,
+    Checkout,
     FormerRoot,
     FormerStorage,
     Git,
@@ -257,7 +258,7 @@ pub enum Via {
 
 impl Via {
     fn current(self) -> bool {
-        matches!(self, Via::Root | Via::Storage)
+        matches!(self, Via::Root | Via::Storage | Via::Checkout)
     }
     fn storage(self) -> bool {
         matches!(self, Via::Storage | Via::FormerStorage)
@@ -342,6 +343,18 @@ impl Index {
                     add(prefix, Via::FormerStorage, storage, &mut warnings);
                 }
             }
+        }
+        let scan = scan_checkouts(registry);
+        for linked in scan.linked {
+            add(
+                &linked.prefix,
+                Via::Checkout,
+                &linked.checkout,
+                &mut warnings,
+            );
+        }
+        for (prefix, error) in scan.failed {
+            warnings.push(format!("{prefix}: its checkout is not matched ({error})"));
         }
         Index {
             locations,

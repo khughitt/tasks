@@ -503,6 +503,35 @@ Preserve existing history when adding an entry, then run
 `tasks` binary drops `[locations]` whenever it writes the registry; update each host's
 binary before recording history.
 
+## Linked projects
+
+A linked project keeps its task records, specs, and plans in an overlay project directory
+while its code lives in another git checkout. Run this in the overlay project directory:
+
+    tasks init --prefix <p> --checkout <path>
+
+Its `tasks/.config.toml` carries `[checkout] path`, written relative to the project root
+(absolute paths are accepted when read). Commands run in the code checkout or its
+worktrees open the linked project; nothing is written into the code tree. Claims and
+parks name the code worktree, so resume there. `tasks projects --json` includes an
+absolute `checkout` only on linked rows; `check` warns `checkout_missing` when the
+checkout is absent on this host. `resolve` matches it with `via: "checkout"`.
+
+`tasks where [PATH] --json` reports which project a directory or file opens. In git,
+it stays within that repository; outside git it walks up to find a project. Its three
+outcomes are:
+
+- Project found: `{"project":{"prefix":"<p>","root":"<overlay>","checkout":"<code>","linked":true},"holds_records":false,"warnings":[]}`.
+  An in-tree project has `linked: false` and `checkout: null`.
+- No project: `{"project":null,"holds_records":false,"warnings":[]}`.
+- Error: exit 1 with `{"error":{"kind":"<kind>","detail":"<detail>"}}` on stderr;
+  success JSON is on stdout with exit 0.
+
+`holds_records` reports whether the repository tracks a regular `tasks/.config.toml`
+file in `HEAD`, even if it is deleted locally; an unborn branch holds none. Two
+projects declaring the same checkout fail with `checkout_conflict`. Init refuses
+writes into a declared code checkout or any of its worktrees.
+
 ## Resolving ids and paths
 
 Use `tasks resolve <id|prefix|path>...` or `tasks resolve --stdin` (one input per line)

@@ -157,6 +157,10 @@ pub struct ProjectRow {
     /// The project's `[retired]` table, when it has one. Its counts stay in the row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retired: Option<crate::repo::Retirement>,
+    /// A linked project's declared code checkout. Absent on other rows and when
+    /// the project's config could not be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
 }
 
 /// `group set` and `group rm`: the group, and the members it now has (set) or had (rm).

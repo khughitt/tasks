@@ -238,6 +238,15 @@ registered project without leaving the current one, or from outside every projec
 always means this checkout; without a local project, the registry supplies the root.
 Malformed local configuration still fails. `feedback` needs a local project for its `from:` tag.
 
+A linked project keeps its records outside its code checkout: its `tasks/.config.toml`
+carries `[checkout] path`, and every command run anywhere in that checkout or its
+worktrees opens the linked project (`tasks init --prefix <p> --checkout <path>` in the
+overlay directory makes one). Claims and parks name the code worktree, so resume there;
+records, specs and plans are read and written in the project root, never in the code
+tree. `tasks where [PATH]` prints which project a path opens (`linked` says whether
+through the link) and whether its repository keeps records; two projects declaring one
+checkout is `checkout_conflict`.
+
 The read commands say where to look instead of inferring it from an id: `list`, `ready`,
 `next`, `prime`, `lanes`, `tree`, `tags`, and `sample` each take `--project <prefix>` for one
 registered project, `--group <name>` for the members of a project group, or

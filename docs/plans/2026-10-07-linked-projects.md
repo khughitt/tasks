@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+Status: implemented through Task 5; pending final branch review and integration. Installation remains after merge.
+
 **Goal:** A tasks project whose code lives in another checkout: `[checkout] path` in its
 config, `locate` that finds it from that checkout on a miss, claims and parks that record
 the code worktree while records stay in the overlay, `tasks init --checkout`, `tasks where`,
@@ -133,7 +135,7 @@ commit's own hunks are applied, so vocabulary ops main has landed since `91f191b
   linked, and whether its repository keeps records"`, one optional `path` arg of value
   `path`). Task 4 adopts it.
 
-- [ ] **Step 1: Create the ops worktree**
+- [x] **Step 1: Create the ops worktree**
 
 In the ops main checkout (clean tree on `main`):
 
@@ -145,7 +147,7 @@ git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees
 
 ops's justfile defines no `setup`; its guide names none beyond a checkout.
 
-- [ ] **Step 2: Apply only the commit's hunks**
+- [x] **Step 2: Apply only the commit's hunks**
 
 In `.worktrees/cli-where`:
 
@@ -159,20 +161,20 @@ cli.toml` shows only the `--checkout` line and the `where` command block. If the
 does not apply, stop and report the conflicting hunk: never resolve it by checking out a
 whole file from `91f191b`, which would revert newer rows.
 
-- [ ] **Step 3: Run ops's gate in the worktree**
+- [x] **Step 3: Run ops's gate in the worktree**
 
 Run: `just test-one tests.test_cli`
 Expected: PASS.
 Run: `just test-fast`
 Expected: PASS.
 
-- [ ] **Step 4: Commit in the worktree**
+- [x] **Step 4: Commit in the worktree**
 
 ```bash
 git commit -m "feat(cli): declare tasks where and init --checkout"
 ```
 
-- [ ] **Step 5: Merge locally and remove the worktree**
+- [x] **Step 5: Merge locally and remove the worktree**
 
 From the ops main checkout:
 
@@ -214,7 +216,7 @@ hunks on both sides.
     `CheckoutScan::strict(self) -> Result<Vec<Linked>>`.
   - `Error::CheckoutConflict(String)`, kind `"checkout_conflict"`.
 
-- [ ] **Step 1: Write the test fixture and the failing locate tests**
+- [x] **Step 1: Write the test fixture and the failing locate tests**
 
 Create `tests/linked.rs`:
 
@@ -392,14 +394,14 @@ fn an_overlay_missing_on_this_host_is_no_project() {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `just test-one --test linked`
 Expected: FAIL — the config parse rejects `[checkout]` (unknown field is not denied on
 `Config`, so the first failures are `no_project` from the code checkout), and
 `checkout_conflict` does not exist.
 
-- [ ] **Step 3: Add the error kind**
+- [x] **Step 3: Add the error kind**
 
 In `src/error.rs`, add the variant after `NotRegisteredCheckout`:
 
@@ -420,7 +422,7 @@ and its arm in `with_suffix`:
             Error::CheckoutConflict(detail) => Error::CheckoutConflict(detail + suffix),
 ```
 
-- [ ] **Step 4: The `[checkout]` table and the Project fields**
+- [x] **Step 4: The `[checkout]` table and the Project fields**
 
 In `src/repo.rs`, add beside `FeedbackConfig`:
 
@@ -485,7 +487,7 @@ In `Project::init`, the `Config` literal gains `checkout: None` (Task 4 changes 
 Every other place that builds a `Project` literal (search `Project {` in `src/` and tests)
 gains `checkout: None`.
 
-- [ ] **Step 5: The scan in `src/locations.rs`**
+- [x] **Step 5: The scan in `src/locations.rs`**
 
 The scan keeps every project it read and every project it could not, so a strict caller
 fails on any failure while `resolve` (Task 5) keeps the good entries (Decision 5).
@@ -550,7 +552,7 @@ pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
 `Error::with_suffix` (`src/error.rs`, `pub`) rebuilds the same variant with the suffix
 appended, so a malformed config stays kind `config` and keeps naming its project.
 
-- [ ] **Step 6: `src/link.rs`**
+- [x] **Step 6: `src/link.rs`**
 
 `GitTree` starts with the one fact Task 2 reads, the common directory. Task 3 adds the
 working tree's top level and Task 4 the git dir, each by adding a flag to the one
@@ -670,7 +672,7 @@ When Task 3 and Task 4 add fields, the unit test's `GitTree { ... }` literal gai
 Register the module where the crate declares its modules (`grep -n "^mod \|^pub mod "
 src/main.rs src/lib.rs`), alphabetically.
 
-- [ ] **Step 7: `locate`'s link step**
+- [x] **Step 7: `locate`'s link step**
 
 Replace `Project::locate` in `src/repo.rs`:
 
@@ -699,19 +701,19 @@ Replace `Project::locate` in `src/repo.rs`:
     }
 ```
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
 Run: `just test-one --test linked`
 Expected: PASS (all nine). Then `just test-one link::` for the unit tests: PASS.
 
-- [ ] **Step 9: Run the fast suite**
+- [x] **Step 9: Run the fast suite**
 
 Run: `just test-fast`
 Expected: PASS. A failure in a test that expects `no_project` from inside a git
 repository with a malformed registry is this change: such a test asserted the old
 fall-through. Report it rather than weakening the new rule.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/link.rs src/repo.rs src/locations.rs src/error.rs src/main.rs tests/linked.rs
@@ -745,7 +747,7 @@ clean: clippy runs with `-D warnings`, so nothing this task adds may be unused.
     `parked::open_recorded(id, worktree)` that opens the overlay project for a recorded
     code worktree.
 
-- [ ] **Step 1: Write the failing lifecycle test**
+- [x] **Step 1: Write the failing lifecycle test**
 
 Append to `tests/linked.rs`:
 
@@ -883,14 +885,14 @@ lookup, never the assertion: `tasks quiet` lists only parks made with `--reason 
 names each claimed id once as a JSON string. If `claims` keys its rows differently,
 count rows whose id field equals `id` instead.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `just test-one --test linked lifecycle`
 Expected: FAIL on the `claim.worktree` assertion (it names the overlay project root).
 Run: `just test-one --test linked holders_write`
 Expected: FAIL on the first `claim.worktree` assertion.
 
-- [ ] **Step 3: The working tree's top, and the resume root**
+- [x] **Step 3: The working tree's top, and the resume root**
 
 In `src/link.rs`, `GitTree` gains its first field and `of` its first flag:
 
@@ -952,7 +954,7 @@ None`. Add the accessor in `impl Project`:
     }
 ```
 
-- [ ] **Step 4: Record the resume root**
+- [x] **Step 4: Record the resume root**
 
 In `src/commands/mod.rs`:
 - `claim_guard`: `let worktree = self.project.resume_root().display().to_string();`
@@ -974,7 +976,7 @@ retire — leave it) or a *resume* location (a claim or park `worktree` written 
 — change it to `resume_root()`). The list above is every resume hit known when this plan
 was written; report any other you change.
 
-- [ ] **Step 5: Keep the link across the lock**
+- [x] **Step 5: Keep the link across the lock**
 
 In `lock_and_revalidate`, the local arm reopens the root and would drop `worktree`:
 
@@ -985,7 +987,7 @@ In `lock_and_revalidate`, the local arm reopens the root and would drop `worktre
             },
 ```
 
-- [ ] **Step 6: `open_recorded` through the link**
+- [x] **Step 6: `open_recorded` through the link**
 
 In `src/commands/parked.rs`:
 
@@ -1029,18 +1031,18 @@ And where `recorded_is_scanned` is computed:
             .any(|project| project.resume_root() == Path::new(&park.worktree));
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `just test-one --test linked`
 Expected: PASS.
 
-- [ ] **Step 8: Run the fast suite**
+- [x] **Step 8: Run the fast suite**
 
 Run: `just test-fast`
 Expected: PASS (in-tree projects have `worktree: None`, so `resume_root()` is the root and
 every existing claim and park test is unchanged).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/link.rs src/repo.rs src/commands/mod.rs src/commands/park.rs src/commands/parked.rs tests/linked.rs
@@ -1067,7 +1069,7 @@ git commit -m "feat(claims): record a linked project's code worktree as its resu
   `link::relative_path(from: &Path, to: &Path) -> PathBuf`;
   `Project::init(root: &Path, prefix: &str, checkout: Option<&Path>) -> Result<Project>`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/linked.rs`:
 
@@ -1321,14 +1323,14 @@ Note on `p2`: `code/src` does not exist in the layout; create it first
 (`std::fs::create_dir_all(l.code.join("src"))`) so the case tests "not the top level"
 rather than "does not exist". Add that line before the loop.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `just test-one --test linked where`
 Expected: FAIL — `where` is an unknown subcommand (exit 2).
 Run: `just test-one --test linked plain_init`
 Expected: FAIL — `init` succeeds inside the code checkout and creates `tasks/` there.
 
-- [ ] **Step 3: Adopt the vocabulary**
+- [x] **Step 3: Adopt the vocabulary**
 
 From this worktree (ops main must hold Task 1's commit):
 
@@ -1340,7 +1342,7 @@ git diff --stat tools/cli.toml
 Expected: `tools/cli.toml` gains the `--checkout` and `where` rows (and whatever else ops
 main has landed since the last adoption, such as obs's `tests` view). Do not edit it by hand.
 
-- [ ] **Step 4: The parser surface**
+- [x] **Step 4: The parser surface**
 
 In `src/cli.rs`, `Init` gains (between `prefix` and `force`):
 
@@ -1373,7 +1375,7 @@ others) and the dispatch:
         Command::Where { path } => where_::run(path, dir),
 ```
 
-- [ ] **Step 5: `GitTree`'s git dir, `holds_records`, and `relative_path` in `src/link.rs`**
+- [x] **Step 5: `GitTree`'s git dir, `holds_records`, and `relative_path` in `src/link.rs`**
 
 `GitTree` gains its last fact, and the two methods whose first callers are this task's
 `holds_records` and `validate_checkout`:
@@ -1537,7 +1539,7 @@ Unit tests in `link.rs`'s test module:
     }
 ```
 
-- [ ] **Step 6: The `where` command**
+- [x] **Step 6: The `where` command**
 
 `src/output.rs`, beside `RootOut`:
 
@@ -1644,7 +1646,7 @@ fn shown(project: Project, linked: bool) -> WhereProject {
 }
 ```
 
-- [ ] **Step 7: `init --checkout`**
+- [x] **Step 7: `init --checkout`**
 
 `Project::init` in `src/repo.rs` takes the checkout and writes it relative to the root:
 
@@ -1803,19 +1805,19 @@ fn validate_checkout(root: &Path, checkout: &Path, registry: &Registry, prefix: 
 The refused-init assertions (`!dir.join("tasks").exists()`) hold because both checks run
 before `Project::init` creates anything and before `registry.save()`.
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
 Run: `just test-one --test linked`
 Expected: PASS.
 Run: `just test-one parser_surface_equals_table`
 Expected: PASS (the parser and the adopted table agree).
 
-- [ ] **Step 9: Run the fast suite**
+- [x] **Step 9: Run the fast suite**
 
 Run: `just test-fast`
 Expected: PASS.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add tools/cli.toml src/cli.rs src/main.rs src/commands/mod.rs src/commands/where_.rs \
@@ -1838,7 +1840,7 @@ git commit -m "feat(where): tasks where and init --checkout for linked projects"
 - Produces: `tasks projects --json` rows with `checkout` on linked rows (§8.2);
   a `checkout_missing` warning from `check`; `resolve` matches with `via: "checkout"`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
@@ -1892,7 +1894,7 @@ Run each separately (Cargo takes one filter):
 `just test-one --test linked resolve_`.
 Expected: FAIL on all four tests.
 
-- [ ] **Step 2: `checkout` on `projects` rows**
+- [x] **Step 2: `checkout` on `projects` rows**
 
 `ProjectRow` gains (after `retired`):
 
@@ -1907,7 +1909,7 @@ In `projects.rs`, the reachable arm also yields `project.checkout.map(|c|
 c.display().to_string())`; the unreachable arm yields `None`; the test helper `row()`
 sets `checkout: None`.
 
-- [ ] **Step 3: `check`'s finding**
+- [x] **Step 3: `check`'s finding**
 
 In `check.rs`'s `run`, after the parse errors:
 
@@ -1927,7 +1929,7 @@ In `check.rs`'s `run`, after the parse errors:
 A warning, not an error: the same synced config is correct on a host that has the
 checkout (ops-projects check reports it the same way).
 
-- [ ] **Step 4: `resolve`'s checkout locations**
+- [x] **Step 4: `resolve`'s checkout locations**
 
 Add `Checkout` to `Via` after `Storage`, and count it as current:
 
@@ -1954,12 +1956,12 @@ Check that `Via`'s derived `Ord` still puts `Root` first for `min_by_key` (it do
 is declared first). Update the project-resolution spec's §4.2 table row for `checkout` to
 drop "once tasks-9b0a2e lands".
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `just test-one --test linked`
 Expected: PASS.
 
-- [ ] **Step 6: Docs**
+- [x] **Step 6: Docs**
 
 `README.md`: a "Linked projects" subsection beside the registry/projects section:
 what `[checkout] path` means, `tasks init --prefix <p> --checkout <path>` run in the
@@ -1981,14 +1983,14 @@ through the link) and whether its repository keeps records; two projects declari
 checkout is `checkout_conflict`.
 ```
 
-- [ ] **Step 7: Fast suite and the gate**
+- [x] **Step 7: Fast suite and the gate**
 
 Run: `just test-fast`
 Expected: PASS.
 Run: `just check`
 Expected: clean (fmt, clippy `-D warnings`, hygiene, `tasks check`).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/output.rs src/commands/projects.rs src/commands/check.rs src/locations.rs \

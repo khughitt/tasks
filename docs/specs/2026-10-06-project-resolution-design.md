@@ -274,7 +274,7 @@ Every registered project contributes these locations:
 | `storage` | the realpath of `<root>/.worktrees` when it is a live symlink, otherwise the `storage` record |
 | `former_root` | each `former[].root` |
 | `former_storage` | each `former[].storage` |
-| `checkout` | the linked code checkout, once tasks-9b0a2e lands (§5) |
+| `checkout` | the linked code checkout (§5) |
 
 ### 4.3 Matching
 
@@ -316,7 +316,7 @@ indexer resolve all of a run's distinct paths in one process.
 
 ## 5. Boundary with `tasks where` (tasks-9b0a2e)
 
-The two commands answer different questions, and they share one location index.
+The two commands answer different questions, and they share location helpers.
 
 **`where [PATH]`** (ops linked-checkouts design §4, §8) answers which project a
 command run at PATH would open. It is live and filesystem-bound:
@@ -332,12 +332,12 @@ A nested foreign clone is "no project" there.
 registry-bound and does not depend on the path existing. It knows former roots and
 storage, and it does not inspect repository boundaries for paths that are gone.
 
-**What they share** is a new module, `src/locations.rs`. It builds each registered
+**What they share** is `src/locations.rs`. It builds each registered
 project's location set from the registry (§4.2) and does the normalization in §4.1.
 
 - `resolve` uses the module for matching.
-- `where`'s link step, when it lands, takes the registered checkouts from the same
-  module and adds `checkout` as a location kind there.
+- `where`'s link step takes the registered checkouts from the same module; `resolve`
+  indexes them as `checkout` locations and warns for each config it cannot read.
 - Neither command reads the registry file another way.
 - `where` does not consult former roots: a command never opens a project at a root it
   has left.

@@ -54,6 +54,20 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         errors.push(finding(None, file, "parse", error.to_string()));
     }
 
+    if let Some(checkout) = &ctx.project.checkout
+        && !checkout.is_dir()
+    {
+        warnings.push(finding(
+            None,
+            crate::repo::CONFIG_REL.into(),
+            "checkout_missing",
+            format!(
+                "[checkout] path names {}, which is not on this machine",
+                checkout.display()
+            ),
+        ));
+    }
+
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
     let foreign = |id: &TaskId| -> std::result::Result<Option<Task>, String> {
         match resolver.resolve_task(id) {
