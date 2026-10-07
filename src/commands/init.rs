@@ -6,7 +6,12 @@ use std::path::{Path, PathBuf};
 
 const SKILL_REL: &str = "skills/tasks/SKILL.md";
 
-pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Output> {
+pub fn run(
+    dir: Option<&Path>,
+    prefix: Option<String>,
+    checkout: Option<PathBuf>,
+    force: bool,
+) -> Result<Output> {
     let root = match dir {
         Some(dir) => dir.to_path_buf(),
         None => std::env::current_dir()?,
@@ -35,13 +40,17 @@ pub fn run(dir: Option<&Path>, prefix: Option<String>, force: bool) -> Result<Ou
     if force {
         reject_repointing_a_retired_project(&registry, &prefix, &root)?;
     }
+    reject_linked_destination(&root, &registry)?;
+    let checkout = checkout
+        .map(|checkout| validate_checkout(&root, &root.join(checkout), &registry, &prefix))
+        .transpose()?;
     let displaced = if force {
         registry.repoint(&prefix, &root)?
     } else {
         registry.register(&prefix, &root)?;
         None
     };
-    let project = Project::init(&root, &prefix)?;
+    let project = Project::init(&root, &prefix, checkout.as_deref())?;
     let today = crate::time::day(&crate::time::now()).to_string();
     let previous = displaced
         .clone()
@@ -131,4 +140,119 @@ fn reject_repointing_a_retired_project(
         return refuse(current);
     }
     Ok(())
+}
+
+/// No command writes into a linked checkout (ops linked-checkouts §4.1), `init` included:
+/// a destination in a repository that a registered project declares as its checkout is
+/// refused, whichever of that repository's working trees it is in, because the
+/// repository's records already live in that project's root.
+fn reject_linked_destination(root: &Path, registry: &Registry) -> Result<()> {
+    let Some(tree) = crate::link::GitTree::of(root)? else {
+        return Ok(());
+    };
+    let Some(main) = tree.main_checkout() else {
+        return Ok(());
+    };
+    let owners: Vec<_> = crate::locations::scan_checkouts(registry)
+        .strict()?
+        .into_iter()
+        .filter(|linked| linked.checkout == main)
+        .map(|linked| linked.prefix)
+        .collect();
+    if owners.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Config(format!(
+        "{} is in {}, the linked checkout of {}; its records live in that project's root \
+         (`tasks where` names it), and nothing is written into the code tree",
+        root.display(),
+        main.display(),
+        owners.join(" and ")
+    )))
+}
+
+/// Linked-checkouts §4.1: the checkout must be the main checkout of a git repository that
+/// keeps no records, outside every registered project's tree, not containing this
+/// project, and declared by no other project.
+fn validate_checkout(
+    root: &Path,
+    checkout: &Path,
+    registry: &Registry,
+    prefix: &str,
+) -> Result<PathBuf> {
+    let refuse = |why: String| {
+        Err(Error::Config(format!(
+            "--checkout {}: {why}",
+            checkout.display()
+        )))
+    };
+    let Ok(checkout) = checkout.canonicalize() else {
+        return refuse("does not exist".into());
+    };
+    let Some(tree) = crate::link::GitTree::of(&checkout)? else {
+        return refuse("is not in a git repository".into());
+    };
+    if tree.top != checkout {
+        return refuse(format!(
+            "is not the top level of its repository ({})",
+            tree.top.display()
+        ));
+    }
+    if !tree.is_main() {
+        let main = tree
+            .main_checkout()
+            .map(|m| m.display().to_string())
+            .unwrap_or_default();
+        return refuse(format!(
+            "is a linked worktree; pass its main checkout {main}"
+        ));
+    }
+    if tree.main_checkout().as_deref() != Some(checkout.as_path()) {
+        return refuse("has no main checkout (a bare repository or a separate git dir)".into());
+    }
+    if checkout.join(crate::repo::CONFIG_REL).exists() {
+        return refuse("keeps records in-tree".into());
+    }
+    // Repository identity, not only containment: a worktree of this repository stored
+    // anywhere (`.worktrees` linked into separate storage) is still its code tree.
+    if root.starts_with(&checkout)
+        || crate::link::GitTree::of(root)?.is_some_and(|here| here.common == tree.common)
+    {
+        return refuse("holds this project; records must live outside the code tree".into());
+    }
+    // A registered project in any working tree of this repository, wherever that tree is
+    // stored, already gives the repository an identity: containment misses a worktree
+    // stored outside the checkout, so the common git directory decides (plan review
+    // round 2). A nested repository inside the checkout's tree is caught by containment.
+    for (other, other_root) in &registry.projects {
+        if other == prefix || !other_root.try_exists()? {
+            continue;
+        }
+        let other_root = other_root.canonicalize()?;
+        if checkout.starts_with(&other_root)
+            || other_root.starts_with(&checkout)
+            || crate::link::GitTree::of(&other_root)?
+                .is_some_and(|theirs| theirs.common == tree.common)
+        {
+            return refuse(format!(
+                "overlaps registered project {other} ({}): that project already keeps this \
+                 repository's records",
+                other_root.display()
+            ));
+        }
+    }
+    let taken: Vec<_> = crate::locations::scan_checkouts(registry)
+        .strict()?
+        .into_iter()
+        .filter(|linked| linked.prefix != prefix && linked.checkout == checkout)
+        .map(|linked| linked.prefix)
+        .collect();
+    if !taken.is_empty() {
+        return Err(Error::CheckoutConflict(format!(
+            "{} is already the checkout of {}",
+            checkout.display(),
+            taken.join(" and ")
+        )));
+    }
+    Ok(checkout)
 }

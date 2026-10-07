@@ -209,6 +209,7 @@ fn main() {
             cli::Command::Projects { .. }
                 | cli::Command::Groups
                 | cli::Command::Root { .. }
+                | cli::Command::Where { .. }
                 | cli::Command::Resolve { .. }
                 | cli::Command::Show { .. }
                 | cli::Command::List { .. }

@@ -260,6 +260,7 @@ path = ["init"]
 summary = "Initialize tasks/ in this repository and register it"
 options = [
   { names = ["--prefix"], value = "string" },
+  { names = ["--checkout"], value = "path" },
   { shared = "force", value = "none" },
 ]
 
@@ -321,6 +322,11 @@ summary = "Every group with its members and whether each is reachable"
 path = ["root"]
 summary = "The registered root of the project an id belongs to"
 args = [{ name = "id", value = "ref", required = true }]
+
+[[cli.tasks.commands]]
+path = ["where"]
+summary = "The project a path belongs to, in-tree or linked, and whether its repository keeps records"
+args = [{ name = "path", value = "path", required = false }]
 
 [[cli.tasks.commands]]
 path = ["resolve"]
@@ -859,8 +865,8 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost, quiet or hooks"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks or tests"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },

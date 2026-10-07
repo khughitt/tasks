@@ -24,6 +24,7 @@ pub mod status;
 pub mod tags;
 pub mod tree;
 pub mod unregister;
+pub mod where_;
 
 use crate::claims::{ClaimStore, Liveness, MutationLock};
 use crate::cli::{Cli, Command, FieldArgs, GroupAction, ScopeArgs};
@@ -1719,7 +1720,12 @@ fn raw_owner_name(project: &Project) -> Result<String> {
 pub fn run(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
-        Command::Init { prefix, force } => init::run(dir, prefix, force),
+        Command::Init {
+            prefix,
+            checkout,
+            force,
+        } => init::run(dir, prefix, checkout, force),
+        Command::Where { path } => where_::run(path, dir),
         Command::Rename {
             old,
             new,

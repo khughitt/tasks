@@ -832,7 +832,7 @@ mod tests {
     #[test]
     fn dependency_resolution_prefers_the_captured_snapshot() {
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "sci").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "sci", None).unwrap();
         let dependency =
             crate::commands::add::blank(&project, "Dependency".into(), Status::Todo, None).unwrap();
         std::fs::write(project.root.join(crate::repo::CONFIG_REL), "not toml = [").unwrap();

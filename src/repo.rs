@@ -333,7 +333,7 @@ impl Project {
         self.worktree.as_deref().unwrap_or(&self.root)
     }
 
-    pub fn init(root: &Path, prefix: &str) -> Result<Project> {
+    pub fn init(root: &Path, prefix: &str, checkout: Option<&Path>) -> Result<Project> {
         if !is_valid_prefix(prefix) {
             return Err(Error::Config(format!(
                 "prefix {prefix:?} must match [a-z][a-z0-9]{{1,7}}"
@@ -349,6 +349,18 @@ impl Project {
                     existing.prefix
                 )));
             }
+            if let Some(checkout) = checkout
+                && existing.checkout.as_deref() != Some(checkout)
+            {
+                return Err(Error::Config(format!(
+                    "{} already exists without this checkout; init does not relink an existing \
+                     project: add `[checkout] path = {:?}` by hand",
+                    config.display(),
+                    crate::link::relative_path(&existing.root, checkout)
+                        .display()
+                        .to_string()
+                )));
+            }
         }
         std::fs::create_dir_all(root.join("tasks"))?;
         if !config.exists() {
@@ -362,7 +374,22 @@ impl Project {
                 attachments: None,
                 needs: None,
                 retired: None,
-                checkout: None,
+                checkout: checkout
+                    .map(|checkout| {
+                        let relative = crate::link::relative_path(&root.canonicalize()?, checkout);
+                        relative
+                            .to_str()
+                            .map(|path| CheckoutConfig {
+                                path: path.to_string(),
+                            })
+                            .ok_or_else(|| {
+                                Error::Config(format!(
+                                    "checkout {} is not valid UTF-8",
+                                    checkout.display()
+                                ))
+                            })
+                    })
+                    .transpose()?,
             })
             .expect("config serializes");
             atomic_write(&config, text.as_bytes())?;
@@ -920,7 +947,7 @@ mod tests {
 
     fn temp_project() -> (tempfile::TempDir, Project) {
         let dir = tempfile::tempdir().unwrap();
-        let p = Project::init(dir.path(), "tst").unwrap();
+        let p = Project::init(dir.path(), "tst", None).unwrap();
         (dir, p)
     }
 
@@ -1032,12 +1059,12 @@ mod tests {
         assert_eq!(p.prefix, "tst");
         std::fs::remove_dir(dir.path().join("docs/plans")).unwrap();
         assert!(
-            Project::init(dir.path(), "tst").is_ok(),
+            Project::init(dir.path(), "tst", None).is_ok(),
             "rerun with the same prefix recovers"
         );
         assert!(dir.path().join("docs/plans").is_dir());
-        assert!(Project::init(dir.path(), "oth").is_err());
-        assert!(Project::init(tempfile::tempdir().unwrap().path(), "Bad").is_err());
+        assert!(Project::init(dir.path(), "oth", None).is_err());
+        assert!(Project::init(tempfile::tempdir().unwrap().path(), "Bad", None).is_err());
     }
 
     #[test]

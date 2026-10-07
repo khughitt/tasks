@@ -274,7 +274,7 @@ parent: dot-b11111\ntags: []\n---\n";
     #[test]
     fn observes_an_untouched_project_against_its_inventory() {
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot", None).unwrap();
         std::fs::write(project.tasks_dir().join("dot-a00088.md"), TASK_WITH_PARENT).unwrap();
 
         let inventory = Inventory::build(&project, "dots").unwrap();
@@ -306,7 +306,7 @@ parent: dot-b11111\ntags: []\n---\n";
     #[test]
     fn a_task_file_outside_the_inventory_is_a_stray() {
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot", None).unwrap();
         let inventory = Inventory::build(&project, "dots").unwrap();
         std::fs::write(project.tasks_dir().join("dot-ffffff.md"), "---\n").unwrap();
         let snap = observe(
@@ -321,7 +321,7 @@ parent: dot-b11111\ntags: []\n---\n";
     #[test]
     fn observing_without_an_inventory_still_counts_files_by_prefix() {
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot", None).unwrap();
         std::fs::write(project.tasks_dir().join("dot-a00088.md"), MINIMAL_TASK).unwrap();
         let snap = observe(
             &crate::registry::Registry::default(),
@@ -342,7 +342,7 @@ parent: dot-b11111\ntags: []\n---\n";
     #[test]
     fn observes_registry_config_and_absent_config_explicitly() {
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot", None).unwrap();
         let mut registry = crate::registry::Registry::default();
         registry.projects.insert("dot".into(), project.root.clone());
         registry
@@ -372,7 +372,7 @@ parent: dot-b11111\ntags: []\n---\n";
     #[test]
     fn observes_whether_the_target_names_a_group() {
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot", None).unwrap();
         let mut registry = crate::registry::Registry::default();
         registry.projects.insert("dot".into(), project.root.clone());
         let observed = |registry: &crate::registry::Registry| {
@@ -394,7 +394,7 @@ parent: dot-b11111\ntags: []\n---\n";
     #[test]
     fn inventory_roundtrips_and_pending_rejects_a_traversal_name() {
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot", None).unwrap();
         let inventory = Inventory::build(&project, "dots").unwrap();
         let state = dir.path().join("state/tasks/rename");
         let path = state.join("dot.toml");
@@ -452,7 +452,7 @@ parent: dot-b11111\ntags: []\n---\n";
         use std::os::unix::ffi::OsStringExt;
 
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot", None).unwrap();
         let name = std::ffi::OsString::from_vec(vec![0xff, b'.', b'm', b'd']);
         std::fs::write(project.tasks_dir().join(name), "---\n").unwrap();
 
@@ -467,7 +467,7 @@ parent: dot-b11111\ntags: []\n---\n";
         use std::os::unix::ffi::OsStringExt;
 
         let dir = tempfile::tempdir().unwrap();
-        let project = crate::repo::Project::init(dir.path(), "dot").unwrap();
+        let project = crate::repo::Project::init(dir.path(), "dot", None).unwrap();
         let name = std::ffi::OsString::from_vec(vec![b'.', 0xff, b'.', b'm', b'd']);
         std::fs::write(project.tasks_dir().join(name), "---\n").unwrap();
 

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 pub struct GitTree {
     pub top: PathBuf,
     pub common: PathBuf,
+    pub git_dir: PathBuf,
 }
 
 impl GitTree {
@@ -27,6 +28,7 @@ impl GitTree {
                 "--path-format=absolute",
                 "--show-toplevel",
                 "--git-common-dir",
+                "--absolute-git-dir",
             ])
             .env("LC_ALL", "C")
             .output()
@@ -63,7 +65,38 @@ impl GitTree {
         Ok(Some(GitTree {
             top: next()?,
             common: next()?,
+            git_dir: next()?,
         }))
+    }
+
+    /// This working tree is the main checkout, not a linked worktree.
+    pub fn is_main(&self) -> bool {
+        self.git_dir == self.common
+    }
+
+    /// Every working tree of the repository, canonical where it still exists, main first.
+    pub fn worktrees(&self) -> Result<Vec<PathBuf>> {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&self.top)
+            .args(["worktree", "list", "--porcelain", "-z"])
+            .env("LC_ALL", "C")
+            .output()?;
+        if !output.status.success() {
+            return Err(Error::Io(format!(
+                "git worktree list in {} failed: {}",
+                self.top.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .split('\0')
+            .filter_map(|field| field.strip_prefix("worktree "))
+            .map(|listed| {
+                let listed = PathBuf::from(listed);
+                listed.canonicalize().unwrap_or(listed)
+            })
+            .collect())
     }
 
     /// The repository's main checkout: the common directory's parent when that is a
@@ -106,6 +139,107 @@ pub fn linked_project(registry: &Registry, tree: &GitTree) -> Result<Option<Proj
     }
 }
 
+/// Linked-checkouts decision 5 and §8.1: the repository holding `tree` keeps our records
+/// when a registered project's root is in it (the same common git directory), or its top
+/// level holds a `tasks/.config.toml` tracked in `HEAD` as a regular file. Only roots
+/// inside one of the repository's working trees can share its common directory, so git
+/// runs only for those.
+pub fn holds_records(registry: &Registry, tree: &GitTree) -> Result<bool> {
+    let worktrees = tree.worktrees()?;
+    for root in registry.projects.values() {
+        if !root.try_exists()? {
+            continue;
+        }
+        let root = root.canonicalize()?;
+        if !worktrees.iter().any(|worktree| root.starts_with(worktree)) {
+            continue;
+        }
+        if GitTree::of(&root)?.is_some_and(|theirs| theirs.common == tree.common) {
+            return Ok(true);
+        }
+    }
+    tracked_config(&tree.top)
+}
+
+/// `tasks/.config.toml` is tracked in `HEAD` at `top` as a regular file: `ls-tree` names a
+/// `blob` of mode `100644` or `100755`. A tree at that path (which `git cat-file -e`
+/// accepts) or a symlink (`120000`) is not a config. A genuinely unborn branch tracks
+/// nothing; every other failure to read `HEAD` (a malformed loose ref, a corrupt
+/// `packed-refs`) is an `io` error, never "no records" (plan review round 2).
+fn tracked_config(top: &Path) -> Result<bool> {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(top)
+            .args(args)
+            .env("LC_ALL", "C")
+            .output()
+    };
+    let listed = git(&["ls-tree", "-z", "HEAD", "--", CONFIG_PATH])?;
+    if !listed.status.success() {
+        if unborn(top)? {
+            return Ok(false);
+        }
+        return Err(Error::Io(format!(
+            "git ls-tree HEAD in {} failed: {}",
+            top.display(),
+            String::from_utf8_lossy(&listed.stderr).trim()
+        )));
+    }
+    // `<mode> SP <type> SP <object> TAB <path> NUL`, or nothing when the path is untracked.
+    let entry = String::from_utf8_lossy(&listed.stdout);
+    let Some((meta, path)) = entry.trim_end_matches('\0').split_once('\t') else {
+        return Ok(false);
+    };
+    let mut fields = meta.split(' ');
+    Ok(path == CONFIG_PATH
+        && matches!(
+            (fields.next(), fields.next()),
+            (Some("100644" | "100755"), Some("blob"))
+        ))
+}
+
+const CONFIG_PATH: &str = crate::repo::CONFIG_REL;
+
+/// `HEAD` names a branch that does not exist yet, and nothing is wrong: `symbolic-ref`
+/// resolves `HEAD` to a ref name, and `for-each-ref` on that name lists nothing and says
+/// nothing. A malformed loose ref fails `symbolic-ref` ("No such ref: HEAD"), and a
+/// corrupt `packed-refs` fails both, so neither reads as unborn (both reproduced in
+/// scratch repositories while planning).
+fn unborn(top: &Path) -> Result<bool> {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(top)
+            .args(args)
+            .env("LC_ALL", "C")
+            .output()
+    };
+    let head = git(&["symbolic-ref", "-q", "HEAD"])?;
+    if !head.status.success() {
+        return Ok(false);
+    }
+    let name = String::from_utf8_lossy(&head.stdout).trim().to_string();
+    let listed = git(&["for-each-ref", "--format=%(refname)", &name])?;
+    Ok(listed.status.success() && listed.stdout.is_empty() && listed.stderr.is_empty())
+}
+
+/// `to` relative to `from`, both absolute and canonical: the shared prefix dropped, one
+/// `..` per remaining component of `from`, then the rest of `to`.
+pub fn relative_path(from: &Path, to: &Path) -> PathBuf {
+    let from: Vec<_> = from.components().collect();
+    let to: Vec<_> = to.components().collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut out = PathBuf::new();
+    for _ in shared..from.len() {
+        out.push("..");
+    }
+    for component in &to[shared..] {
+        out.push(component.as_os_str());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,12 +249,25 @@ mod tests {
         let tree = |common: &str| GitTree {
             top: "/r".into(),
             common: common.into(),
+            git_dir: common.into(),
         };
         assert_eq!(tree("/r/.git").main_checkout(), Some(PathBuf::from("/r")));
         assert_eq!(
             tree("/srv/r.git").main_checkout(),
             None,
             "a bare repository has none"
+        );
+    }
+
+    #[test]
+    fn relative_path_climbs_then_descends() {
+        assert_eq!(
+            relative_path(Path::new("/d/o/nexc"), Path::new("/d/code")),
+            PathBuf::from("../../code")
+        );
+        assert_eq!(
+            relative_path(Path::new("/d/o"), Path::new("/d/o/x")),
+            PathBuf::from("x")
         );
     }
 

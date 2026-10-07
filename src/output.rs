@@ -86,6 +86,23 @@ pub struct RootOut {
     pub warnings: Vec<String>,
 }
 
+/// `tasks where` (ops linked-checkouts §4, §8.1). `checkout` is serialized as `null` when
+/// absent: consumers require the key on every project object.
+#[derive(Serialize)]
+pub struct WhereOut {
+    pub project: Option<WhereProject>,
+    pub holds_records: bool,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct WhereProject {
+    pub prefix: String,
+    pub root: String,
+    pub checkout: Option<String>,
+    pub linked: bool,
+}
+
 #[derive(Serialize)]
 pub struct ResolveOut {
     pub results: Vec<ResolveRow>,
@@ -963,6 +980,7 @@ pub enum Output {
     Id(IdOut),
     Add(AddOut),
     Root(RootOut),
+    Where(WhereOut),
     Resolve(ResolveOut),
     Projects(ProjectsOut),
     Group(GroupOut),
@@ -1038,6 +1056,14 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         Output::Id(o) => o.id.clone(),
         Output::Add(o) => o.id.clone(),
         Output::Root(o) => o.root.clone(),
+        Output::Where(o) => match &o.project {
+            None => "no project".into(),
+            Some(p) => match &p.checkout {
+                Some(checkout) => format!("{} {} (linked to {checkout})", p.prefix, p.root),
+                None => format!("{} {}", p.prefix, p.root),
+            },
+        },
+
         Output::Resolve(o) => o
             .results
             .iter()
@@ -1887,6 +1913,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Id(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),
+        Output::Where(o) => o.warnings.clone(),
         Output::Resolve(o) => o.warnings.clone(),
         Output::Group(o) => o.warnings.clone(),
         Output::Groups(o) => o.warnings.clone(),

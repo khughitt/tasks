@@ -362,6 +362,10 @@ pub enum Command {
     Init {
         #[arg(long)]
         prefix: Option<String>,
+        /// Link this project to a code checkout kept elsewhere: the repository's main
+        /// checkout. Records stay here; nothing is written there.
+        #[arg(long, value_name = "PATH")]
+        checkout: Option<PathBuf>,
         /// Re-point the prefix at this directory even if it is registered elsewhere.
         #[arg(long)]
         force: bool,
@@ -428,6 +432,12 @@ pub enum Command {
     Root {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
+    },
+    /// The project a path belongs to, in-tree or linked, and whether its repository keeps records.
+    Where {
+        /// A directory or file; the current directory when omitted.
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
     },
     /// The project, canonical id, or live prefix for an id, prefix, or path, through
     /// renames and moves.

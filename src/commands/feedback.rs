@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn guarded_update_retries_after_a_concurrent_write_and_gives_up_eventually() {
         let dir = tempfile::tempdir().unwrap();
-        let project = Project::init(dir.path(), "tst").unwrap();
+        let project = Project::init(dir.path(), "tst", None).unwrap();
         let registry = Registry::default();
         let mut seed = create(
             &project,

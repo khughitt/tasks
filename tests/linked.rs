@@ -411,3 +411,377 @@ fn prime_warns_only_about_this_projects_directory_in_the_overlay() {
     assert!(warnings.contains("nexc-"), "{warnings}");
     assert!(!warnings.contains("oth-"), "{warnings}");
 }
+
+#[test]
+fn where_answers_linked_in_tree_and_no_project() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let linked = env.json(&l.wt, &["where", "--json"]);
+    assert_eq!(linked["project"]["prefix"], "nexc");
+    assert_eq!(linked["project"]["root"], l.nexc.to_str().unwrap());
+    assert_eq!(linked["project"]["checkout"], l.code.to_str().unwrap());
+    assert_eq!(linked["project"]["linked"], true);
+    assert_eq!(
+        linked["holds_records"], false,
+        "the code repository keeps no records"
+    );
+    assert_eq!(linked["warnings"], serde_json::json!([]));
+
+    let intree = env.json(&l.nexc, &["where"]);
+    assert_eq!(intree["project"]["linked"], false);
+    assert!(
+        intree["project"]
+            .as_object()
+            .unwrap()
+            .contains_key("checkout")
+    );
+    assert!(intree["project"]["checkout"].is_null());
+    assert_eq!(
+        intree["holds_records"], true,
+        "the overlay holds a registered root"
+    );
+
+    let plain = tempfile::tempdir().unwrap();
+    let none = env.json(plain.path(), &["where"]);
+    assert!(none["project"].is_null());
+    assert_eq!(none["holds_records"], false);
+}
+
+#[test]
+fn where_takes_a_path_a_file_and_refuses_a_missing_one() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let elsewhere = tempfile::tempdir().unwrap();
+    let by_path = env.json(elsewhere.path(), &["where", l.wt.to_str().unwrap()]);
+    assert_eq!(by_path["project"]["prefix"], "nexc");
+    let by_file = env.json(&l.code, &["where", "README"]);
+    assert_eq!(
+        by_file["project"]["prefix"], "nexc",
+        "a relative file answers for its directory"
+    );
+    assert_eq!(env.fail(&l.code, &["where", "no/such/path"]), "io");
+}
+
+#[test]
+fn where_never_crosses_into_an_enclosing_project() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let parent = code_repo(&l.base, "parent");
+    env.json(&parent, &["init", "--prefix", "par"]);
+    git(&parent, &["add", "-A"]);
+    git(&parent, &["commit", "-q", "-m", "records"]);
+    let nested = code_repo(&parent, "vendor/clone");
+    let inside = env.json(&nested, &["where"]);
+    assert!(
+        inside["project"].is_null(),
+        "a nested foreign clone is no project: {inside}"
+    );
+    assert_eq!(inside["holds_records"], false);
+    let sub = parent.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    assert_eq!(env.json(&sub, &["where"])["project"]["prefix"], "par");
+}
+
+#[test]
+fn holds_records_needs_a_config_tracked_in_head() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let repo = code_repo(&l.base, "unregistered");
+    std::fs::create_dir_all(repo.join("tasks")).unwrap();
+    std::fs::write(repo.join("tasks/.config.toml"), "prefix = \"unr\"\n").unwrap();
+    assert_eq!(
+        env.json(&repo, &["where"])["holds_records"],
+        false,
+        "untracked"
+    );
+    git(&repo, &["add", "tasks/.config.toml"]);
+    assert_eq!(
+        env.json(&repo, &["where"])["holds_records"],
+        false,
+        "staged only"
+    );
+    git(&repo, &["commit", "-q", "-m", "records"]);
+    assert_eq!(
+        env.json(&repo, &["where"])["holds_records"],
+        true,
+        "tracked in HEAD"
+    );
+}
+
+#[test]
+fn holds_records_refuses_a_tracked_tree_or_symlink_at_the_config_path() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    // A directory named like the config: `git cat-file -e` would accept its tree object.
+    let tree = code_repo(&l.base, "tree");
+    std::fs::create_dir_all(tree.join("tasks/.config.toml")).unwrap();
+    std::fs::write(tree.join("tasks/.config.toml/inner"), "x\n").unwrap();
+    git(&tree, &["add", "-A"]);
+    git(&tree, &["commit", "-q", "-m", "a tree at the config path"]);
+    assert_eq!(
+        env.json(&tree, &["where"])["holds_records"],
+        false,
+        "a tree is not a config"
+    );
+    let link = code_repo(&l.base, "link");
+    std::fs::create_dir_all(link.join("tasks")).unwrap();
+    std::fs::write(link.join("real.toml"), "prefix = \"lnk\"\n").unwrap();
+    std::os::unix::fs::symlink("../real.toml", link.join("tasks/.config.toml")).unwrap();
+    git(&link, &["add", "-A"]);
+    git(
+        &link,
+        &["commit", "-q", "-m", "a symlink at the config path"],
+    );
+    assert_eq!(
+        env.json(&link, &["where"])["holds_records"],
+        false,
+        "a symlink is not a config"
+    );
+    let unborn = l.base.join("unborn");
+    std::fs::create_dir_all(&unborn).unwrap();
+    git(&unborn, &["init", "-q"]);
+    assert_eq!(
+        env.json(&unborn, &["where"])["holds_records"],
+        false,
+        "no HEAD tracks nothing"
+    );
+}
+
+#[test]
+fn a_corrupt_head_ref_is_an_error_not_an_empty_repository() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    // A malformed loose branch ref.
+    let loose = code_repo(&l.base, "loose");
+    std::fs::write(loose.join(".git/refs/heads/main"), "garbage\n").unwrap();
+    assert_eq!(env.fail(&loose, &["where"]), "io", "a malformed loose ref");
+    // A corrupt packed-refs entry for the branch.
+    let packed = code_repo(&l.base, "packed");
+    git(&packed, &["pack-refs", "--all"]);
+    let refs = packed.join(".git/packed-refs");
+    let text = std::fs::read_to_string(&refs).unwrap();
+    let broken: String = text
+        .lines()
+        .map(|line| match line.split_once(' ') {
+            Some((_, "refs/heads/main")) => "zzzz refs/heads/main".to_string(),
+            _ => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&refs, broken + "\n").unwrap();
+    assert_eq!(
+        env.fail(&packed, &["where"]),
+        "io",
+        "a corrupt packed-refs entry"
+    );
+}
+
+#[test]
+fn where_reports_resolver_errors_as_errors() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    project(&env, &l.overlay, "dup", Some(l.code.to_str().unwrap()));
+    assert_eq!(env.fail(&l.wt, &["where", "--json"]), "checkout_conflict");
+    let env = TestEnv::new();
+    let l = layout(&env);
+    std::fs::write(
+        l.nexc.join("tasks/.config.toml"),
+        "prefix = \"nexc\"\n[checkout]\nbogus = 1\n",
+    )
+    .unwrap();
+    assert_eq!(env.fail(&l.code, &["where"]), "config");
+}
+
+#[test]
+fn where_with_the_overlay_missing_is_no_project() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    std::fs::rename(&l.nexc, l.base.join("moved-away")).unwrap();
+    assert!(env.json(&l.code, &["where"])["project"].is_null());
+}
+
+#[test]
+fn init_checkout_writes_a_relative_link_outside_the_code_tree() {
+    let env = TestEnv::new();
+    let holder = tempfile::tempdir().unwrap();
+    let base = holder.path().canonicalize().unwrap();
+    let code = code_repo(&base, "my code");
+    let before = porcelain(&code);
+    let dir = base.join("overlay/mine");
+    std::fs::create_dir_all(&dir).unwrap();
+    env.json(
+        &dir,
+        &["init", "--prefix", "mine", "--checkout", "../../my code"],
+    );
+    let config = std::fs::read_to_string(dir.join("tasks/.config.toml")).unwrap();
+    assert!(
+        config.contains("[checkout]") && config.contains("path = \"../../my code\""),
+        "{config}"
+    );
+    assert!(dir.join("docs/specs").is_dir() && dir.join("docs/plans").is_dir());
+    assert_eq!(
+        porcelain(&code),
+        before,
+        "init wrote nothing into the checkout"
+    );
+    assert_eq!(env.json(&code, &["where"])["project"]["prefix"], "mine");
+}
+
+#[test]
+fn plain_init_refuses_every_tree_of_a_linked_checkout() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let sub = l.code.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let before = porcelain(&l.code);
+    let before_wt = porcelain(&l.wt);
+    for (n, dir) in [&l.code, &sub, &l.wt].into_iter().enumerate() {
+        let out = env
+            .cmd(dir)
+            .args(["init", "--prefix", "intr"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{n}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "config", "{n}");
+        assert!(
+            error["error"]["detail"].as_str().unwrap().contains("nexc"),
+            "{n}: names the linked project"
+        );
+        assert!(!dir.join("tasks").exists(), "{n}: nothing created");
+    }
+    assert_eq!(porcelain(&l.code), before);
+    assert_eq!(porcelain(&l.wt), before_wt);
+    assert!(
+        env.json(&l.nexc, &["projects"])["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["prefix"] != "intr")
+    );
+}
+
+#[test]
+fn init_checkout_refuses_what_it_cannot_link() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let fresh = |name: &str| {
+        let dir = l.overlay.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    };
+    let plain = l.base.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let intree = code_repo(&l.base, "intree");
+    env.json(&intree, &["init", "--prefix", "own"]);
+    let inside = intree.join("inner");
+    std::fs::create_dir_all(&inside).unwrap();
+    std::fs::create_dir_all(l.code.join("src")).unwrap();
+    for (name, checkout, kind) in [
+        ("p1", l.wt.to_str().unwrap(), "config"), // a worktree, not the main checkout
+        ("p2", l.code.join("src").to_str().unwrap(), "config"), // not the top level
+        ("p3", plain.to_str().unwrap(), "config"), // not a git repository
+        ("p4", intree.to_str().unwrap(), "config"), // keeps records in-tree
+        ("p5", l.code.to_str().unwrap(), "checkout_conflict"), // nexc already declares it
+    ] {
+        let dir = fresh(name);
+        assert_eq!(
+            env.fail(&dir, &["init", "--prefix", name, "--checkout", checkout]),
+            kind,
+            "{name}"
+        );
+        assert!(
+            !dir.join("tasks").exists(),
+            "{name}: a refused init writes nothing"
+        );
+    }
+    // The project directory inside a worktree of the very repository passed as
+    // --checkout, that worktree stored outside the checkout's tree: no project links the
+    // repository yet, and containment misses it; repository identity does not.
+    let other = code_repo(&l.base, "other");
+    let other_store = l.base.join("storage/other");
+    std::fs::create_dir_all(&other_store).unwrap();
+    std::os::unix::fs::symlink(&other_store, other.join(".worktrees")).unwrap();
+    git(
+        &other,
+        &["worktree", "add", "-q", "-b", "ow", ".worktrees/ow"],
+    );
+    let in_wt = other
+        .join(".worktrees/ow")
+        .canonicalize()
+        .unwrap()
+        .join("overlay-here");
+    std::fs::create_dir_all(&in_wt).unwrap();
+    assert!(
+        !in_wt.starts_with(&other),
+        "the worktree really is outside the checkout's tree"
+    );
+    assert_eq!(
+        env.fail(
+            &in_wt,
+            &[
+                "init",
+                "--prefix",
+                "p7",
+                "--checkout",
+                other.to_str().unwrap()
+            ]
+        ),
+        "config",
+        "a project directory in a worktree of its own checkout's repository"
+    );
+    assert!(!in_wt.join("tasks").exists());
+    // An in-tree project registered from a worktree stored outside the repository's tree,
+    // with no config in the main checkout: linking the main checkout would give one
+    // repository two project identities.
+    let split = code_repo(&l.base, "split");
+    let split_store = l.base.join("storage/split");
+    std::fs::create_dir_all(&split_store).unwrap();
+    std::os::unix::fs::symlink(&split_store, split.join(".worktrees")).unwrap();
+    git(
+        &split,
+        &["worktree", "add", "-q", "-b", "sw", ".worktrees/sw"],
+    );
+    let split_wt = split.join(".worktrees/sw").canonicalize().unwrap();
+    env.json(&split_wt, &["init", "--prefix", "spl"]);
+    assert!(
+        !split.join("tasks/.config.toml").exists(),
+        "main holds no config"
+    );
+    let dir = fresh("p8");
+    let out = env
+        .cmd(&dir)
+        .args([
+            "init",
+            "--prefix",
+            "p8",
+            "--checkout",
+            split.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "config");
+    assert!(
+        error["error"]["detail"].as_str().unwrap().contains("spl"),
+        "names the registered project"
+    );
+    assert!(!dir.join("tasks").exists());
+    let nested = code_repo(&l.nexc, "nested");
+    let dir = fresh("p6");
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "init",
+                "--prefix",
+                "p6",
+                "--checkout",
+                nested.to_str().unwrap()
+            ]
+        ),
+        "config",
+        "a checkout inside a registered project's tree"
+    );
+}
