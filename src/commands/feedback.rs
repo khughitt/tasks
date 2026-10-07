@@ -17,6 +17,7 @@ pub const UNREGISTERED: &str = "unregistered";
 /// The context and reporter for `feedback`: the project the command stands in, or,
 /// outside every project, the target alone with the reporter [`UNREGISTERED`]. Only *no
 /// project* falls through; a checkout whose config cannot be read is still an error.
+/// Acceptance is left to `run`, which checks it once for either path.
 pub fn open(dir: Option<&std::path::Path>, target: &str) -> Result<(Ctx, String)> {
     match super::open_ctx(dir) {
         Ok(ctx) => {
@@ -26,7 +27,7 @@ pub fn open(dir: Option<&std::path::Path>, target: &str) -> Result<(Ctx, String)
         Err(Error::NoProject(_)) => {
             let registry = Registry::load()?;
             let shorthand = crate::shorthand::Shorthand::new(super::start_dir(dir)?);
-            let project = locate_target(&registry, target)?;
+            let project = crate::scope::open_registered(&registry, target, Origin::Prefix)?;
             let routing = super::Routing::Registered(target.to_string());
             Ok((
                 Ctx::new(project, registry, routing, shorthand),
@@ -117,6 +118,25 @@ pub fn writes_tag(task: &Task, tag: &str) -> bool {
                 .is_some_and(|from| from == UNREGISTERED || crate::model::is_valid_prefix(from)))
 }
 
+/// The input checks, run before any project is opened so that a bad category, summary, or
+/// body is reported the same way inside a project and outside every project.
+pub fn validate(summary: &str, category: &str, body: &str) -> Result<()> {
+    if !CATEGORIES.contains(&category) {
+        return Err(Error::Validation(format!(
+            "category must be one of {}",
+            CATEGORIES.join(", ")
+        )));
+    }
+    validate_line("summary", summary)?;
+    if crate::similarity::tokens(summary).is_empty() {
+        return Err(Error::Validation(
+            "summary needs at least one word of three or more letters or digits".into(),
+        ));
+    }
+    validate_body(body)
+}
+
+/// Files the report; `summary`, `category`, and `body` have passed [`validate`].
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     mut ctx: Ctx,
@@ -124,24 +144,10 @@ pub fn run(
     project: String,
     summary: String,
     category: String,
-    body: Option<String>,
+    body: String,
     recur: Option<String>,
     new: bool,
 ) -> Result<Output> {
-    if !CATEGORIES.contains(&category.as_str()) {
-        return Err(Error::Validation(format!(
-            "category must be one of {}",
-            CATEGORIES.join(", ")
-        )));
-    }
-    validate_line("summary", &summary)?;
-    if crate::similarity::tokens(&summary).is_empty() {
-        return Err(Error::Validation(
-            "summary needs at least one word of three or more letters or digits".into(),
-        ));
-    }
-    let body = body.unwrap_or_default();
-    validate_body(&body)?;
     let from = format!("from:{reporter}");
     ctx.project = locate_target(&ctx.registry, &project)?;
     // Only the target is locked, even when the reporter shares its prefix. Routing by the

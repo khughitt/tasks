@@ -6675,6 +6675,25 @@ fn feedback_outside_every_project_reports_as_unregistered() {
         ),
         "validation"
     );
+    // Input is judged before any project is opened, so a bad summary is reported the same
+    // way from both places even when the target is not registered.
+    for dir in [nowhere.path(), target.as_path()] {
+        assert_eq!(
+            env.fail(
+                dir,
+                &[
+                    "feedback",
+                    "--project",
+                    "nosuch",
+                    "x y",
+                    "--category",
+                    "gap"
+                ]
+            ),
+            "validation",
+            "{dir:?}"
+        );
+    }
     // A checkout whose config cannot be read is an error, never unregistered.
     let broken = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(broken.path().join("tasks")).unwrap();

@@ -7,7 +7,9 @@ shelved and explicit process 2026-09-13); see
 docs/plans/2026-08-29-tasks.md. The feedback passages' fixed `tasks` target (§5's
 `tasks feedback` command and §8's "Feedback about the tool") is superseded by ops
 docs/specs/2026-09-26-ecosystem-feedback-design.md: `--project` names an owner that
-opts in with `[feedback]`.
+opts in with `[feedback]`. Its `no_project` failure outside a project is superseded by
+ops docs/specs/2026-10-01-linked-checkouts-design.md §4.2 (2026-10-07): the reporter is
+then `unregistered`.
 
 ## 1. Purpose
 
@@ -506,8 +508,9 @@ tasks feedback <summary> --category friction|gap|idea|positive [-b|--body TEXT]
     File feedback about the tasks tool itself into the upstream tasks project: the
     registry entry whose prefix is exactly tasks (no configuration key; a missing entry,
     a root without a config, or a root whose own prefix differs is a config error). The
-    reporting project is the one located as for every other command; outside a project
-    the command fails with no_project. Unless --new is given, the target's open tasks
+    reporting project is the one located as for every other command; outside every
+    project the reporter is unregistered (from:unregistered, notes "feedback from
+    unregistered: <summary>"). Unless --new is given, the target's open tasks
     tagged feedback are matched on the summary's normalized tokens: exactly one exact
     match recurs, appending "feedback from <prefix>: <summary>" (and a second note for
     --body) authored as feedback, and adding from:<prefix> and the category to the tags
@@ -797,8 +800,8 @@ the registry, and an unregistered or unreachable one is `unresolvable_id`. The m
 and the claim store key off the resolved project, so a cross-project write locks and claims
 in the target, not the caller. Without a local project, id-directed commands resolve
 through the registry: the prefix already supplies the target. Only `no_project` permits
-this route; invalid local configuration still fails. `feedback` requires a local project
-for its provenance tag.
+this route; invalid local configuration still fails. `feedback` takes the same route and
+reports as `unregistered`.
 
 The same eight read commands (list, ready, prime, tree, next, tags, sample, lanes) take
 `--project <p>`, `--group <name>`, and `--all-projects`, which conflict pairwise. None

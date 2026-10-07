@@ -157,6 +157,54 @@ fn feedback_from_a_linked_checkout_carries_the_linked_prefix() {
 }
 
 #[test]
+fn feedback_from_an_unregistered_git_checkout_reports_as_unregistered() {
+    let mut env = TestEnv::new();
+    let owner = env.init("tasks");
+    let config = owner.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[feedback]\nscope = \"The tasks CLI.\"\n");
+    std::fs::write(&config, text).unwrap();
+    // A linked project elsewhere makes the miss scan the registry's checkouts.
+    let l = layout(&env);
+    let clone = code_repo(&l.base, "clone");
+    let before = git(&clone, &["status", "--porcelain", "--ignored"]);
+    let out = env.json(
+        &clone,
+        &[
+            "feedback",
+            "--project",
+            "tasks",
+            "report from a team clone",
+            "--category",
+            "gap",
+        ],
+    );
+    let shown = env.json(&owner, &["show", out["id"].as_str().unwrap()]);
+    assert_eq!(
+        shown["task"]["tags"],
+        serde_json::json!(["feedback", "gap", "from:unregistered"])
+    );
+    assert_eq!(git(&clone, &["status", "--porcelain", "--ignored"]), before);
+
+    // A registered config the checkout scan cannot read is an error, never unregistered.
+    std::fs::write(l.nexc.join("tasks/.config.toml"), "prefix = [\n").unwrap();
+    assert_eq!(
+        env.fail(
+            &clone,
+            &[
+                "feedback",
+                "--project",
+                "tasks",
+                "report from a team clone",
+                "--category",
+                "gap"
+            ]
+        ),
+        "config"
+    );
+}
+
+#[test]
 fn two_projects_declaring_one_checkout_is_a_conflict_naming_both() {
     let env = TestEnv::new();
     let l = layout(&env);

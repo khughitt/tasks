@@ -1923,6 +1923,8 @@ pub fn run(cli: Cli) -> Result<Output> {
             recur,
             new,
         } => {
+            let body = body.unwrap_or_default();
+            feedback::validate(&summary, &category, &body)?;
             let (ctx, reporter) = feedback::open(dir, &project)?;
             feedback::run(ctx, reporter, project, summary, category, body, recur, new)
         }

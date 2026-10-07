@@ -2,6 +2,8 @@
 
 **Status:** implemented 2026-09-04; see docs/plans/2026-09-04-multi-project.md. Task: tasks-3029be.
 ID-directed commands also work without a local project as of 2026-09-13 (tasks-120a02).
+`feedback` works without one as of 2026-10-07, reporting as `from:unregistered` (ops
+docs/specs/2026-10-01-linked-checkouts-design.md §4.2), superseding §4's provenance rule.
 
 ## 1. Problem
 
