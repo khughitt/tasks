@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Status: implemented through Task 5; pending final branch review and integration. Installation remains after merge.
+Status: implemented, reviewed, locally integrated and installed on this host; other-host verification remains user-owned.
+
+**Execution outcome:** Task reviews and final corrective re-review accepted; locally integrated and installed on this host. Merged fast suite: 1,154 passed, one intentionally ignored; checks and installed `tasks where --json` smoke passed. Deferred minors: tasks-37d48a (documentation) and tasks-084a9f (Git discovery ceiling). Other-host verification remains user-owned.
 
 **Goal:** A tasks project whose code lives in another checkout: `[checkout] path` in its
 config, `locate` that finds it from that checkout on a miss, claims and parks that record
@@ -1998,7 +2000,7 @@ git add src/output.rs src/commands/projects.rs src/commands/check.rs src/locatio
 git commit -m "feat(projects): checkout on linked rows; check and resolve know linked checkouts"
 ```
 
-- [ ] **Step 9: Install after merge**
+- [x] **Step 9: Install after merge**
 
 After the branch merges to main (the integration step, not this task): `cargo install
 --path .` from the main checkout, then in a scratch directory `tasks where --json` exits 0
