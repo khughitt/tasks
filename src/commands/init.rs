@@ -241,6 +241,9 @@ fn validate_checkout(
             ));
         }
     }
+    if crate::link::holds_records(registry, &tree)? {
+        return refuse("keeps records in-tree".into());
+    }
     let taken: Vec<_> = crate::locations::scan_checkouts(registry)
         .strict()?
         .into_iter()

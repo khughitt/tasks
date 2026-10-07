@@ -8,9 +8,9 @@ complexity: mid
 process: direct
 owner: feat/linked-projects
 created: 2026-10-07T09:59:51Z
-updated: 2026-10-07T11:05:52Z
+updated: 2026-10-07T11:12:06Z
 started: 2026-10-07T11:03:31Z
-completed: 2026-10-07T11:05:51Z
+completed: 2026-10-07T11:12:06Z
 depends: [tasks-dee8dc]
 parent: tasks-9b0a2e
 tags: []
@@ -26,4 +26,11 @@ step: "Task 4: `tasks where`, `tasks init --checkout`, and the vocabulary"
 - 2026-10-07T11:05:52Z (feat/linked-projects): done
   provenance: {"harness_session":"codex:01a11608-1be5-7172-ad07-d50b964b82cc","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-07T11:05:52Z (feat/linked-projects): Added tasks where with explicit project/checkout/holds_records output, init --checkout validation and relative config links, and adopted ops CLI vocabulary; linked integration and fast suite pass.
+  provenance: {"harness_session":"codex:01a11608-1be5-7172-ad07-d50b964b82cc","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T11:10:35Z (feat/linked-projects): review: impl round 1 — verdict: revise; findings: Important 1; reviewer: codex/gpt-6-astra
+- 2026-10-07T11:10:50Z (feat/linked-projects): resumed
+  provenance: {"harness_session":"codex:01a11608-1be5-7172-ad07-d50b964b82cc","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T11:12:06Z (feat/linked-projects): done
+  provenance: {"harness_session":"codex:01a11608-1be5-7172-ad07-d50b964b82cc","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T11:12:06Z (feat/linked-projects): Corrected init --checkout to reject HEAD-tracked record configs deleted locally using holds_records; 25 linked integration cases and 1149 fast tests pass.
   provenance: {"harness_session":"codex:01a11608-1be5-7172-ad07-d50b964b82cc","harness_session_source":"CODEX_THREAD_ID"}

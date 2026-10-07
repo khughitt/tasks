@@ -785,3 +785,41 @@ fn init_checkout_refuses_what_it_cannot_link() {
         "a checkout inside a registered project's tree"
     );
 }
+
+#[test]
+fn init_checkout_refuses_a_head_tracked_config_deleted_locally() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let code = code_repo(&l.base, "records-deleted");
+    std::fs::create_dir_all(code.join("tasks")).unwrap();
+    let config = code.join("tasks/.config.toml");
+    std::fs::write(&config, "prefix = \"old\"\n").unwrap();
+    git(&code, &["add", "tasks/.config.toml"]);
+    git(&code, &["commit", "-q", "-m", "records"]);
+    std::fs::remove_file(config).unwrap();
+    let located = env.json(&code, &["where"]);
+    assert!(located["project"].is_null());
+    assert_eq!(located["holds_records"], true);
+
+    let overlay = l.overlay.join("refused");
+    std::fs::create_dir_all(&overlay).unwrap();
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let registry_before = std::fs::read(&registry).unwrap();
+    let code_before = porcelain(&code);
+    assert_eq!(
+        env.fail(
+            &overlay,
+            &[
+                "init",
+                "--prefix",
+                "ref",
+                "--checkout",
+                code.to_str().unwrap()
+            ]
+        ),
+        "config"
+    );
+    assert_eq!(std::fs::read_dir(&overlay).unwrap().count(), 0);
+    assert_eq!(std::fs::read(registry).unwrap(), registry_before);
+    assert_eq!(porcelain(&code), code_before);
+}
