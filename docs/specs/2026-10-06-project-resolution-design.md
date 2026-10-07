@@ -271,7 +271,7 @@ Every registered project contributes these locations:
 | via | location |
 | --- | --- |
 | `root` | the registered root |
-| `storage` | the realpath of `<root>/.worktrees` when it is a live symlink, otherwise the `storage` record |
+| `storage` | the realpath of `<root>/.worktrees` when it is a live symlink, otherwise the `storage` record; for a linked project also the realpath of `<checkout>/.worktrees` when it is a live symlink (tasks-2f9022, 2026-10-07; no record backs it) |
 | `former_root` | each `former[].root` |
 | `former_storage` | each `former[].storage` |
 | `checkout` | the linked code checkout (§5) |

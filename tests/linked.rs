@@ -909,6 +909,23 @@ fn resolve_matches_a_linked_checkout() {
 }
 
 #[test]
+fn resolve_follows_a_linked_checkouts_worktree_storage_after_removal() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let physical = l.base.join("storage/code/wt");
+    git(&l.code, &["worktree", "remove", ".worktrees/wt"]);
+    assert!(!physical.exists());
+    for path in [l.code.join(".worktrees/wt/src/x"), physical.join("src/x")] {
+        let out = env.json(&l.base, &["resolve", path.to_str().unwrap()]);
+        let row = &out["results"][0];
+        assert_eq!(row["status"], "resolved", "{path:?}: {out}");
+        assert_eq!(row["prefix"], "nexc", "{path:?}: {out}");
+        assert_eq!(row["via"], "storage", "{path:?}: {out}");
+        assert_eq!(row["relpath"], "src/x", "{path:?}: {out}");
+    }
+}
+
+#[test]
 fn resolve_keeps_every_valid_checkout_when_one_project_is_broken() {
     let env = TestEnv::new();
     let l = layout(&env);

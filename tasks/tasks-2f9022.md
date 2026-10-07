@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: fix/linked-storage
 created: 2026-10-07T16:47:08Z
-updated: 2026-10-07T17:13:38Z
+updated: 2026-10-07T17:15:33Z
 started: 2026-10-07T17:13:38Z
 depends: []
 parent: tasks-a7460c
@@ -23,3 +23,6 @@ tasks resolve answers a path under a registered root's .worktrees storage (via s
 - 2026-10-07T16:47:17Z (main): concerns: tasks-7580d2 extension — resolve indexes a linked checkout but not its .worktrees storage, so removed linked worktrees resolve as unregistered
 - 2026-10-07T17:13:38Z (main): started
   provenance: {"harness_session":"claude-code:cd13df6e-7206-46e3-bd3f-30be99c37559","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T17:13:39Z (fix/linked-storage): resumed
+  provenance: {"harness_session":"claude-code:cd13df6e-7206-46e3-bd3f-30be99c37559","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T17:15:33Z (fix/linked-storage): bounded choice: the linked checkout's storage is read from its live .worktrees link only, not persisted in [locations] (the registry's storage record describes the root; a record for the checkout would be a schema change). A removed worktree resolves while the link stands, which is nexcode's normal case; a removed link loses it, with no warning.

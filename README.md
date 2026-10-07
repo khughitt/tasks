@@ -515,7 +515,8 @@ Its `tasks/.config.toml` carries `[checkout] path`, written relative to the proj
 worktrees open the linked project; nothing is written into the code tree. Claims and
 parks name the code worktree, so resume there. `tasks projects --json` includes an
 absolute `checkout` only on linked rows; `check` warns `checkout_missing` when the
-checkout is absent on this host. `resolve` matches it with `via: "checkout"`.
+checkout is absent on this host. `resolve` matches it with `via: "checkout"`, and the
+storage its `.worktrees` link points into, removed worktrees included, with `via: "storage"`.
 
 `tasks where [PATH] --json` reports which project a directory or file opens. In git,
 it stays within that repository; outside git it walks up to find a project. Its three
