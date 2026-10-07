@@ -84,7 +84,7 @@ pub fn registry_warnings(registry: &Registry, cwd: &Path) -> Result<Vec<String>>
 /// What a read command looks at: one project, or a registry-wide read. The wide read can
 /// cover every registered project or the members of one group.
 pub enum Scope {
-    Local(Project),
+    Local(Box<Project>),
     /// `projects` are the reachable ones among `members`, opened. `members` is what was
     /// asked for: every registered prefix under `--all-projects`, a group's members under
     /// `--group`. Warnings about absent projects name `members` only.
@@ -159,7 +159,7 @@ impl Scope {
 
     pub fn projects(&self) -> &[Project] {
         match self {
-            Scope::Local(project) => std::slice::from_ref(project),
+            Scope::Local(project) => std::slice::from_ref(project.as_ref()),
             Scope::All { projects, .. } => projects,
         }
     }

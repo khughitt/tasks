@@ -630,7 +630,7 @@ pub fn open_ctx(dir: Option<&Path>) -> Result<Ctx> {
 
 /// A checkout whose own prefix the registry has retired. Nothing else sees this:
 /// `open_registered` validates the registered destination, which after a rename is
-/// perfectly consistent, and `Project::locate` never reads the registry at all.
+/// perfectly consistent, and an in-tree hit in `Project::locate` does not read the registry.
 pub fn reject_stale_local(registry: &Registry, project: &Project) -> Result<()> {
     let live = registry.canonical_prefix(&project.prefix);
     if live != project.prefix {
@@ -819,7 +819,7 @@ pub fn open_id_read_ctx(
     };
     let ctx = open_id_ctx(dir, id)?;
     Ok(ReadCtx {
-        scope: Scope::Local(ctx.project),
+        scope: Scope::Local(Box::new(ctx.project)),
         registry: ctx.registry,
         warnings: ctx.warnings,
         shorthand: ctx.shorthand,
@@ -893,7 +893,7 @@ pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
         });
     }
     // The local arm locates before loading the registry, so a cwd outside every project
-    // still reports `no_project` rather than a malformed registry's `config`.
+    // outside git still reports `no_project` rather than a malformed registry's `config`.
     let (project, registry, shorthand) = match &scope.project {
         Some(prefix) => {
             let registry = Registry::load()?;
@@ -910,7 +910,7 @@ pub fn open_read_ctx(dir: Option<&Path>, scope: &ScopeArgs) -> Result<ReadCtx> {
     };
     let warnings = retired_warning(&project).into_iter().collect();
     Ok(ReadCtx {
-        scope: Scope::Local(project),
+        scope: Scope::Local(Box::new(project)),
         registry,
         warnings,
         shorthand,

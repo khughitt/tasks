@@ -3,6 +3,61 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// One registered project that declares a `[checkout]` (linked-checkouts §4.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Linked {
+    pub prefix: String,
+    pub checkout: PathBuf,
+}
+
+/// Every registered project on this host that declares a checkout, and every registered
+/// project whose config could not be read. A project whose root is gone or holds no config
+/// is in neither: it cannot be opened here, so nothing can be linked to it.
+#[derive(Debug, Default)]
+pub struct CheckoutScan {
+    pub linked: Vec<Linked>,
+    pub failed: Vec<(String, crate::error::Error)>,
+}
+
+impl CheckoutScan {
+    /// The linked projects, or the first failure, naming its project (§4.1a: errors stay
+    /// errors for every caller that opens a project).
+    pub fn strict(self) -> crate::error::Result<Vec<Linked>> {
+        match self.failed.into_iter().next() {
+            Some((prefix, error)) => {
+                Err(error.with_suffix(&format!(" (registered project {prefix})")))
+            }
+            None => Ok(self.linked),
+        }
+    }
+}
+
+pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
+    let mut scan = CheckoutScan::default();
+    for (prefix, root) in &registry.projects {
+        let opened = crate::scope::is_reachable(root).and_then(|reachable| {
+            reachable
+                .then(|| {
+                    crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)
+                })
+                .transpose()
+        });
+        match opened {
+            Ok(Some(project)) => {
+                if let Some(checkout) = project.checkout {
+                    scan.linked.push(Linked {
+                        prefix: prefix.clone(),
+                        checkout,
+                    });
+                }
+            }
+            Ok(None) => {}
+            Err(error) => scan.failed.push((prefix.clone(), error)),
+        }
+    }
+    scan
+}
+
 /// One project's history on this host. `storage` is the record of where the current
 /// root's `.worktrees` resolved when a command last wrote this project's entry (§2).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

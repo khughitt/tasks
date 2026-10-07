@@ -89,6 +89,10 @@ pub struct Project {
     pub attachments_max_bytes: u64,
     /// The `[retired]` table: `Some` means the project is over and takes no writes.
     pub retired: Option<Retirement>,
+    /// The code checkout this project is linked to, from the config's `[checkout] path`,
+    /// absolute and normalized; `None` for an in-tree project. It need not exist: `check`
+    /// reports a missing one, and a missing one never matches (ops linked-checkouts §4.1).
+    pub checkout: Option<PathBuf>,
 }
 
 /// One other checkout's copy of a record, as `sibling_task_copies` found it.
@@ -124,6 +128,8 @@ struct Config {
     needs: Option<crate::needs::Vocabulary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     retired: Option<RetiredConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    checkout: Option<CheckoutConfig>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -143,6 +149,29 @@ pub struct Retirement {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub successor: Option<String>,
     pub reason: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CheckoutConfig {
+    path: String,
+}
+
+/// A `[checkout] path`: relative to the project root as `init --checkout` writes it, or
+/// absolute as written by hand. Normalized the way `resolve` normalizes paths, so a
+/// symlinked spelling and its real path compare equal when the target exists.
+fn checkout_path(root: &Path, raw: Option<CheckoutConfig>) -> Result<Option<PathBuf>> {
+    let Some(table) = raw else {
+        return Ok(None);
+    };
+    if table.path.is_empty() {
+        return Err(Error::Config(format!(
+            "{CONFIG_REL}: [checkout] path must not be empty"
+        )));
+    }
+    crate::locations::normalize(Path::new(&table.path), root)
+        .map(Some)
+        .map_err(|problem| Error::Config(format!("{CONFIG_REL}: [checkout] path: {problem}")))
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -322,6 +351,7 @@ impl Project {
                 attachments: None,
                 needs: None,
                 retired: None,
+                checkout: None,
             })
             .expect("config serializes");
             atomic_write(&config, text.as_bytes())?;
@@ -343,8 +373,10 @@ impl Project {
                 config.prefix
             )));
         }
+        let checkout = checkout_path(&root, config.checkout)?;
         Ok(Project {
             root,
+            checkout,
             prefix: config.prefix,
             color: config
                 .color
@@ -376,6 +408,11 @@ impl Project {
         Ok(())
     }
 
+    /// The project a command run in `start` opens: the nearest `tasks/.config.toml` at or
+    /// above it, as always. Only on a miss, inside a git repository, the registered project
+    /// whose `[checkout]` is that repository's main checkout (linked-checkouts §4.1). An
+    /// in-tree project therefore never reads the registry here, and a miss outside git
+    /// stays `no_project` whatever state the registry is in.
     pub fn locate(start: &Path) -> Result<Project> {
         let start = start.canonicalize()?;
         let mut directory = Some(start.as_path());
@@ -384,6 +421,12 @@ impl Project {
                 return Self::open(path);
             }
             directory = path.parent();
+        }
+        if let Some(tree) = crate::link::GitTree::of(&start)? {
+            let registry = Registry::load()?;
+            if let Some(project) = crate::link::linked_project(&registry, &tree)? {
+                return Ok(project);
+            }
         }
         Err(Error::NoProject(start))
     }

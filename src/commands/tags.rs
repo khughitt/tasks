@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// scope.
 fn meaning_of(scope: &Scope, tag: &str) -> Option<String> {
     let projects: Vec<&crate::repo::Project> = match scope {
-        Scope::Local(project) => vec![project],
+        Scope::Local(project) => vec![project.as_ref()],
         Scope::All { projects, .. } => projects.iter().collect(),
     };
     projects

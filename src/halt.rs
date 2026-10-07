@@ -186,6 +186,7 @@ mod tests {
             needs: crate::needs::Vocabulary::new(),
             attachments_max_bytes: crate::attachments::DEFAULT_MAX_BYTES,
             retired: None,
+            checkout: None,
         };
         let target = task("000002");
         for status in Status::ALL {
@@ -211,6 +212,7 @@ mod tests {
             needs: crate::needs::Vocabulary::new(),
             attachments_max_bytes: crate::attachments::DEFAULT_MAX_BYTES,
             retired: None,
+            checkout: None,
         };
         let mut halt = task("000001");
         halt.priority = 0;
