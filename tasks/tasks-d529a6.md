@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: feat/linked-projects
 created: 2026-10-07T11:24:09Z
-updated: 2026-10-07T11:26:56Z
+updated: 2026-10-07T11:30:19Z
 started: 2026-10-07T11:25:03Z
 completed: 2026-10-07T11:26:56Z
 depends: []
@@ -28,3 +28,4 @@ Final whole-branch review Important finding: corrupt .git/HEAD is misclassified 
   provenance: {"harness_session":"codex:01a1161b-88ec-7572-aa17-b01616b634f6","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-07T11:26:56Z (feat/linked-projects): Shared Git discovery preserves io errors for corrupt metadata instead of treating existing .git markers as absence; where and plain init regressions protect main/subdirectory and external linked worktrees, registry, and code-tree status.
   provenance: {"harness_session":"codex:01a1161b-88ec-7572-aa17-b01616b634f6","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T11:30:19Z (feat/linked-projects): review: impl round 1 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6-astra

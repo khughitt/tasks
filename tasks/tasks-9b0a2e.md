@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/linked-projects
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T11:18:25Z
+updated: 2026-10-07T11:31:00Z
 started: 2026-10-07T09:45:04Z
 depends: []
 parent: tasks-a7460c
@@ -53,3 +53,6 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 - 2026-10-07T11:02:05Z (feat/linked-projects): execution: Tasks 1–2 reviewed clean; Task 3 committed ffdebe4 with 13 linked tests and fast/check passing, task review dispatched; no host pointers changed
 - 2026-10-07T11:10:35Z (feat/linked-projects): ruling: Task4 validate_checkout must retain its filesystem config check and also refuse holds_records=true; tracked HEAD configs deleted locally still make the repository hold records under the binding spec
 - 2026-10-07T11:18:25Z (feat/linked-projects): execution: Task4 review finding fixed in 352e112 and scoped re-review accepted; Task5 committed 5920cdb with 29 linked tests and 1153 fast tests passing; task review dispatched, then whole-branch review/integration/install
+- 2026-10-07T11:23:42Z (feat/linked-projects): review: impl round 1 — verdict: revise; findings: Important 1, Minor 2; reviewer: codex/gpt-6-astra
+- 2026-10-07T11:30:19Z (feat/linked-projects): review: impl round 2 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6-astra
+- 2026-10-07T11:31:00Z (feat/linked-projects): verified: final review Important findings addressed by 7040de3 and fresh scoped re-review; 1154 fast tests, 30 linked tests and checks pass. Deferred minors tasks-37d48a (docs) and tasks-084a9f (Git discovery ceiling). Integrate locally and install from main next.
