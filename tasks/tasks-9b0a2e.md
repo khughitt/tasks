@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/linked-projects
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T09:59:57Z
+updated: 2026-10-07T10:00:31Z
 started: 2026-10-07T09:45:04Z
 depends: []
 parent: tasks-a7460c
@@ -29,3 +29,5 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
 - 2026-10-07T09:45:16Z (feat/linked-projects): resumed
   provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-07T09:59:57Z (feat/linked-projects): plan drafted: docs/plans/2026-10-07-linked-projects.md (5 tasks, children tasks-6211fb..tasks-1f5664); spec is ops 2026-10-01-linked-checkouts-design rev 5 (approved). Decisions flagged for review: locate unbounded vs where bounded; open_recorded link-only; init does not relink; unreachable projects skipped; resolve lenient. Task 1 commits to ops main.
+- 2026-10-07T10:00:31Z (feat/linked-projects): parked (waiting on user, review): User reviews docs/plans/2026-10-07-linked-projects.md (in .worktrees/linked-projects) and picks an execution method; then the agent executes Task 1 (ops main vocabulary) and Tasks 2-5 here.
+  provenance: {"harness_session":"claude-code:619d972e-0d37-44a1-840e-6572e2e906ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
