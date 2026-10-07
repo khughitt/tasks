@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: feat/linked-projects
 created: 2026-10-07T09:59:51Z
-updated: 2026-10-07T11:16:48Z
+updated: 2026-10-07T11:19:18Z
 started: 2026-10-07T11:14:38Z
 completed: 2026-10-07T11:16:48Z
 depends: [tasks-32b97e]
@@ -27,3 +27,4 @@ step: "Task 5: `projects` rows, `check`, `resolve`, docs, and install"
   provenance: {"harness_session":"codex:01a11611-fb02-7df3-b164-08565c99f541","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-07T11:16:48Z (feat/linked-projects): Linked projects rows expose checkout; check warns on missing checkout; resolve indexes valid linked checkouts with per-project failure warnings; docs current. Installation remains controller-owned after final review/integration.
   provenance: {"harness_session":"codex:01a11611-fb02-7df3-b164-08565c99f541","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T11:19:18Z (feat/linked-projects): review: impl round 1 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6.1-sol

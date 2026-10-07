@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/linked-projects
 created: 2026-10-01T16:01:43Z
-updated: 2026-10-07T10:46:36Z
+updated: 2026-10-07T11:18:25Z
 started: 2026-10-07T09:45:04Z
 depends: []
 parent: tasks-a7460c
@@ -50,3 +50,6 @@ Piece 1 of ops docs/specs/2026-10-01-linked-checkouts-design.md (§4.1, §4.1a, 
   provenance: {"harness_session":"codex:01a115f5-c858-7612-946e-9f9ae2f506d5","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-07T10:45:13Z (feat/linked-projects): execution: user approved plan and selected subagent-driven; reuse linked-projects, direct step tasks under reviewed planned parent; current ops setup recipe supersedes plan assertion that it is absent
 - 2026-10-07T10:46:36Z (feat/linked-projects): ruling: Task 1 git apply conflicts only on adjacent newer resolve/obs entries; implement identical additions manually, preserve all newer vocabulary and tests, then review exact diff
+- 2026-10-07T11:02:05Z (feat/linked-projects): execution: Tasks 1–2 reviewed clean; Task 3 committed ffdebe4 with 13 linked tests and fast/check passing, task review dispatched; no host pointers changed
+- 2026-10-07T11:10:35Z (feat/linked-projects): ruling: Task4 validate_checkout must retain its filesystem config check and also refuse holds_records=true; tracked HEAD configs deleted locally still make the repository hold records under the binding spec
+- 2026-10-07T11:18:25Z (feat/linked-projects): execution: Task4 review finding fixed in 352e112 and scoped re-review accepted; Task5 committed 5920cdb with 29 linked tests and 1153 fast tests passing; task review dispatched, then whole-branch review/integration/install

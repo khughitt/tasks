@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: feat/linked-projects
 created: 2026-10-07T09:59:51Z
-updated: 2026-10-07T10:55:18Z
+updated: 2026-10-07T10:57:22Z
 started: 2026-10-07T10:51:19Z
 completed: 2026-10-07T10:55:18Z
 depends: [tasks-6211fb]
@@ -28,3 +28,4 @@ step: "Task 2: `[checkout]`, the location scan, and `locate` through the link"
   provenance: {"harness_session":"codex:01a115fc-fe78-7013-89d0-5f21bf9e9d32","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-07T10:55:18Z (feat/linked-projects): Added normalized checkout config, strict registered checkout scan, canonical common-git matching and locate fallback with conflict errors; linked tests and fast suite pass.
   provenance: {"harness_session":"codex:01a115fc-fe78-7013-89d0-5f21bf9e9d32","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T10:57:22Z (feat/linked-projects): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol

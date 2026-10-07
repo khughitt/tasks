@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: feat/linked-projects
 created: 2026-10-07T09:59:51Z
-updated: 2026-10-07T11:12:06Z
+updated: 2026-10-07T11:13:45Z
 started: 2026-10-07T11:03:31Z
 completed: 2026-10-07T11:12:06Z
 depends: [tasks-dee8dc]
@@ -34,3 +34,4 @@ step: "Task 4: `tasks where`, `tasks init --checkout`, and the vocabulary"
   provenance: {"harness_session":"codex:01a11608-1be5-7172-ad07-d50b964b82cc","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-07T11:12:06Z (feat/linked-projects): Corrected init --checkout to reject HEAD-tracked record configs deleted locally using holds_records; 25 linked integration cases and 1149 fast tests pass.
   provenance: {"harness_session":"codex:01a11608-1be5-7172-ad07-d50b964b82cc","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T11:13:45Z (feat/linked-projects): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
