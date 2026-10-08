@@ -1,6 +1,7 @@
 # Claim-guard policy and capability facts
 
-Task: tasks-56b450. Status: proposed; requires user review before planning.
+Task: tasks-56b450. Status: accepted 2026-10-08; approved revision `3d627b3`,
+reviewer claude-code/opus-5.5. Implementation requires a separately reviewed plan.
 
 ## Outcome and scope
 
@@ -127,7 +128,7 @@ Keep `decide` total and its readers injectable, but deliberately change its deci
 order. Today a qualifying Claude child allows a stop **without reading claims**.
 This design requires a complete inventory before granting that exception: a tracked
 child no longer conceals an unavailable or corrupt claims store. This is a stricter
-policy proposed for review, not preserved behavior. Its order is:
+policy approved in this design, not preserved behavior. Its order is:
 
 1. Parse the JSON object. An actual boolean `stop_hook_active: true` allows the
    retry immediately, before event validation, claim reads or fact reads.

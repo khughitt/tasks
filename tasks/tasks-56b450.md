@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T15:17:35Z
+updated: 2026-10-08T15:53:03Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -16,6 +16,7 @@ tags: []
 source: ops-cb9749
 agent: claude-code
 spec: docs/specs/2026-10-08-claim-guard-policy-design.md
+plan: docs/plans/2026-10-08-claim-guard-policy.md
 ---
 
 Why: ops hooks/claim-guard decides whether a turn may stop given live claims and running children (tasks policy) and carries CHILD_WAKES, WAKING and IN_FLIGHT (capability facts). The agent layer split (ops docs/specs/2026-10-03-agent-layer-split-design.md §4.4, §5.3) dissolves hooks to their owners and leaves this decision to tasks.
@@ -52,4 +53,12 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T15:16:36Z (docs/claim-guard-design): Evidence: an explicit worktree target/debug/tasks disposable native-level probe emitted actual tasks claims rows with distinct bare controller/worker sessions, shared qualified root, live true and no PID; fixed synthetic exports verify serialization only, not live hook delivery or root equality. Both scratch claims released and isolated project/config/state removed. No host settings or shared registry changed.
 - 2026-10-08T15:17:34Z (docs/claim-guard-design): Revision self-check: all ten review dispositions are present; own versus related native claims and qualified controls are distinct, and root equality plus two-turn retry reset remain explicit live activation gates. Spec link/anchor checks, tasks check, git diff --check and just test-fast passed (1159 tests, one ignored). No plan, product code or live hook configuration was changed.
 - 2026-10-08T15:17:34Z (docs/claim-guard-design): parked (waiting on user, review): User re-reviews the revised .worktrees/claim-guard-design/docs/specs/2026-10-08-claim-guard-policy-design.md; after explicit spec approval, agent resumes this worktree and writes the separately reviewed implementation plan.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T15:23:24Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T15:23:24Z (docs/claim-guard-design): review: spec round 2 — verdict: accept; findings: none; reviewer: claude-code/opus-5.5
+- 2026-10-08T15:23:24Z (docs/claim-guard-design): Spec 3d627b3 approved in this session. Write the implementation plan only; split live acceptance into separately checked delivery/identity, worker retry and next-turn, release, and unreleased-claim recovery stages so failures stop early. Inline execution is the recommendation; plan review precedes implementation.
+- 2026-10-08T15:42:34Z (docs/claim-guard-design): Implementation plan drafted with six blocked direct-process children. Native claim fixture tests capture the real CLI before ops Sandbox stubs PATH; hq staged validation remains after mirror deletion. Pilot stages gate inventory/trust/delivery and root equality before first retry, second-turn reset, normal handoff, explicit recovery and closeout. Inline execution is recommended; no code or live activation is authorized by this draft.
+- 2026-10-08T15:53:02Z (docs/claim-guard-design): Plan self-review: six tasks cover every approved spec section and all five Review Focus cases; owner-specific interfaces, real native fixtures, zero-skip reader acceptance, hq staged validation, both native homes, early pilot gates and ordered activation/rollback are specified. Eleven Python snippets parse, local links resolve, all six step records are blocked, tasks check and git diff --check pass, and just test-fast passes (1159 tests, one ignored). No implementation or live pilot ran.
+- 2026-10-08T15:53:02Z (docs/claim-guard-design): parked (waiting on user, review): User reviews .worktrees/claim-guard-design/docs/plans/2026-10-08-claim-guard-policy.md; after separate plan approval, agent resumes this worktree, publishes the approved document records, unblocks the steps and executes inline with fresh final review. Live cutover still needs its concrete approval packet.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
