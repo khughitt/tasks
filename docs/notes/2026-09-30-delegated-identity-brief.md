@@ -112,8 +112,8 @@ reports add no separate implementation beyond that existing policy task.
 - tasks-0c2c39 closed with its historical missing-input limit explicitly retained;
   the original incident was not newly reproduced.
 - tasks-f8c9cc: P1/s/mid/direct closure-policy decision for the two closure reports.
-- tasks-f27fe3 and tasks-673b21: proposed drops as covered by tasks-f8c9cc, which
-  remains open. Their reports and original capture remain intact; no drop was executed.
+- tasks-f27fe3 and tasks-673b21: dropped with user approval on 2026-10-08 as covered
+  by tasks-f8c9cc, which remains open. Their reports and original capture remain intact.
 - tasks-fe6c59: P2/s/mid/direct bounded namespace/process-proof investigation.
   tasks-b9cbe3 remains an idea and joins this lane; findings must wake it with a
   task note in the same commit and update this brief before re-scoping. No namespace
