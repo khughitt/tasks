@@ -1,13 +1,15 @@
 ---
 id: tasks-56b450
 title: Decide where claim-guard's claim policy lives; read the wake facts from harness support
-status: todo
+status: doing
 priority: 1
 size: s
 complexity: mid
 process: planned
+owner: main
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-06T17:05:32Z
+updated: 2026-10-08T14:48:23Z
+started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
@@ -32,3 +34,6 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-06T16:50:05Z (main): priority: raised to P1 under the adopted agent-identity lane; identity research precedes dependent design, and controller-owned closure stays a separate decision.
 - 2026-10-06T16:50:05Z (main): dependency: tasks-c0bad3 supplies the worker/parent/event mapping needed for completion-policy design; capability-facts sourcing and ownership can be discussed independently, but closure requires the verified mapping.
 - 2026-10-06T17:05:31Z (investigate/tasks-c0bad3): Exact Codex 0.160.1 source at d27764b82f7118f674371e6d6e76271d9d606edb deliberately writes shared root CODEX_SESSION_ID and concrete CODEX_THREAD_ID; SubagentStart/SubagentStop agent_id equals worker thread ID. Worker completion dispatches SubagentStop, not Stop; worker SessionEnd/Interrupt are excluded. Recommend tasks contract adaptation, not upstream export repair. Root grouping is not an immediate-parent link for nested workers. Findings and immutable source links: docs/notes/2026-09-30-delegated-identity-brief.md; live hook delivery remains unverified.
+- 2026-10-08T14:48:06Z (main): started
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T14:48:23Z (main): Design context: tasks-f8c9cc is complete and controller-closes remains independent of Stop policy. Harness support is now hq (tack alias). Inspect current guard, validated facts API, mirror gates and native hook wiring before choosing ownership and migration order; planned process requires written spec review before a plan.
