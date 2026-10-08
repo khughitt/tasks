@@ -177,7 +177,8 @@ unscoped pass: from a worktree it names the main checkout, so the pass would sel
 the worktree's records and then read and write main's. Keep `task.updated` from the
 first `show`.
 
-Per idea: `show`; the `source` (a mindful thought is read with `mindful --json show`);
+Per idea: `show`; the `source` (a mindful thought is read with `mindful --json show`
+after stripping only an optional `mindful:` wrapper and retaining `thought:`);
 the parent and `tree` when it has one; grep the code and docs the record names; `git
 log -S` / `--grep` for the described thing; the open titles for a duplicate; any
 existing brief or spec the cluster already has. What was found is written into the

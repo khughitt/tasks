@@ -49,8 +49,13 @@ parent and relevant `tree`, named code and specs, useful history (`git log -S` o
 `--grep`), open duplicate candidates, and any existing brief or attached draft spec.
 Keep every read in the fixed checkout.
 
-For a mindful source, first confirm the local CLI form, then use `mindful --json show`.
-Name unavailable context as an unknown; never invent the missing finding.
+For a mindful source, confirm the local CLI form, strip only the optional `mindful:`
+wrapper, and pass the full typed reference to `mindful --json show`:
+`mindful:thought:<uid>` becomes `thought:<uid>`; an already typed reference stays intact.
+Keep the task's stored source unchanged. Try this canonical reference before calling
+context unavailable. A failed lookup is not evidence that the source is missing or
+inaccessible: record command/tool failures separately from unavailable source evidence.
+Name genuinely unavailable context as an unknown; never invent the missing finding.
 
 Confirm the cluster from this evidence. Leave unrelated provisional members untouched.
 Before authoring, search for both an existing brief and an attached draft spec so a

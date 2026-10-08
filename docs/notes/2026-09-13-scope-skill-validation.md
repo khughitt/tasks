@@ -192,3 +192,42 @@ errors/warnings, 167 unit tests and 275 CLI tests. Both `tasks-39a041` and
 `tasks-0d50ff` completed in this change. `prime` offered `tasks-019c60` for closeout
 with zero open descendants, but its foreign live claim remained held; the umbrella
 was left unchanged for its holder. The pre-commit `tasks check` passed after closure.
+
+## Typed source references (2026-10-08, tasks-bde218)
+
+This bounded reference-lookup check covers the two historical misses named by the
+task, not a new scope pass. No thought content is copied here.
+
+Before editing the skill, both historical bare-UID commands were rerun with the
+current Mindful build and exited 1 with `no thought matching`. A fresh agent reading
+the old guidance also tried bare and UUID-hyphenated arguments, which failed. The
+controller then supplied the canonical typed references; those lookups succeeded.
+That assisted recovery is not counted as an unassisted green trial. Quick-add already
+states the applicable rule: remove only `mindful:` and preserve `thought:`.
+
+After the guidance change, one fresh agent read the whole skill and executed four
+cases: each source below both with and without the `mindful:` wrapper. All exited 0,
+returned the matching typed `id`, and read the archived source successfully.
+
+| Task | Canonical reference | Result |
+|---|---|---|
+| tasks-c591da | `thought:c21c822e191c2e6c5939f9caa1f05a39` | Available, archived |
+| tasks-77dbc6 | `thought:5ccf9506e36842cf8e635e55248040a9` | Available, archived |
+
+The commands used `node <mind6-checkout>/packages/mindful/dist/bin.js --json show
+<ref>` with the existing `MINDFUL_HOME`, or the launcher's normal thoughts directory
+when unset. The controller independently asserted all four results. Assertions use
+the returned canonical `id`; an initial test assumption that internal `uid` must
+equal that reference was corrected. Task-source strings and complete record bytes
+were unchanged in the agent's before/after comparison.
+
+The controller's PATH executable instead reported `read model version 3 is
+incompatible with expected version 2`; the baseline agent did not reproduce that
+environmental error. The green agent classified the captured error as a tool/version
+failure that establishes no source-availability conclusion. The version-matched build
+was invoked by explicit path; no launcher, index or source data was changed. The
+deployment mismatch was reported as ops-07a4ee.
+
+Both briefs now preserve their historical failed commands and add dated corrections
+that the typed archived sources are available. Their delivered work stays closed.
+No normalization parser, retrieval service or wider Mindful workflow was added.

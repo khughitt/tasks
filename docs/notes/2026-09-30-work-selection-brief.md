@@ -15,7 +15,9 @@ daily selection workflow; they need separate changes rather than a new schedulin
   Completed tasks-3029be and the multi-project design establish the existing union and
   dependency-resolution behavior. The captured motivating example is a named project
   family. `mindful --json show 5ccf9506e36842cf8e635e55248040a9` returned no match;
-  the original task body remains the available source.
+  correction (2026-10-08, tasks-bde218): that command omitted the `thought:` type.
+  The canonical `thought:5ccf9506e36842cf8e635e55248040a9` lookup succeeds and the
+  archived source is available. The historical miss does not establish missing context.
 - **Focus (tasks-9bdd68):** `src/commands/list.rs::ready_tasks` applies readiness and
   claim/park gates, then `ready` applies the complexity cutoff. `next` puts eligible
   parked-agent resumes ahead of ready tasks. The proposed goal preference therefore
