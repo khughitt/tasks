@@ -753,3 +753,7 @@ public.
     tasks/.config.toml               prefix = "sci"; optional color / spec_dirs / plan_dirs / [tags]
     tasks/sci-4f2a9c.md              one task
     ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live; [groups] name -> prefixes
+
+## License
+
+[MIT](LICENSE).

@@ -1,15 +1,16 @@
 ---
 id: tasks-8e189a
 title: Apply MIT licensing and coordinate the matching tasks-tui change
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: chore/tasks-8e189a-mit
 created: 2026-09-19T13:13:54Z
-updated: 2026-10-08T11:06:04Z
+updated: 2026-10-08T11:09:40Z
 started: 2026-10-08T11:05:39Z
+completed: 2026-10-08T11:09:38Z
 depends: []
 tags: []
 agent: "claude-code/claude-opus-5[1m]"
@@ -39,3 +40,12 @@ No LICENSE file, so the public repo is all rights reserved by default. The choic
 - 2026-10-08T11:05:39Z (main): started
   provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T11:06:04Z (main): Implementation scope: root LICENSE, Cargo package.license and one README reference; no runtime/API changes. Use MIT standard text and 2026 Keith Hughitt notice (repository history starts in 2026; remote owner profile confirms the name). Reuse companion idea tui-d2c96d for the matching Go repository handoff.
+- 2026-10-08T11:06:20Z (chore/tasks-8e189a-mit): resumed
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T11:06:45Z (chore/tasks-8e189a-mit): Companion handoff: tui-d2c96d is now scoped todo P2/s/low/direct for owner-approved MIT, root LICENSE and README reference; Go module has no Cargo-style license metadata. No companion code changed.
+- 2026-10-08T11:09:38Z (chore/tasks-8e189a-mit): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6
+- 2026-10-08T11:09:38Z (chore/tasks-8e189a-mit): Review disposition: runtime behavior/performance unchanged and companion implementation correctly excluded; handoff tui-d2c96d completes this task requirement. LICENSE comparison to standard text and Cargo metadata passed; just test-fast passed 1159 tests (1 ignored), just check passed.
+- 2026-10-08T11:09:38Z (chore/tasks-8e189a-mit): done
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T11:09:38Z (chore/tasks-8e189a-mit): Added verified 2026 Keith Hughitt MIT LICENSE, Cargo MIT license metadata and README reference; scoped companion tui-d2c96d; independent review accepted and repository checks passed.
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
