@@ -352,6 +352,20 @@ impl Index {
                 &linked.checkout,
                 &mut warnings,
             );
+            // The code checkout's worktrees live where its own `.worktrees` points, so a
+            // removed one still resolves while the link stands. There is no record to
+            // fall back on: the registry's storage record describes the root.
+            match storage_state(&linked.checkout) {
+                Ok(StorageState::Link(real)) => {
+                    add(&linked.prefix, Via::Storage, &real, &mut warnings)
+                }
+                Ok(_) => {}
+                Err(e) => warnings.push(format!(
+                    "{}: cannot read {}/.worktrees ({e}); its worktree storage is not matched",
+                    linked.prefix,
+                    linked.checkout.display()
+                )),
+            }
         }
         for (prefix, error) in scan.failed {
             warnings.push(format!("{prefix}: its checkout is not matched ({error})"));
