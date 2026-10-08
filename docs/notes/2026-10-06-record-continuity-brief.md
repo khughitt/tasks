@@ -1,6 +1,6 @@
 # Task records across checkouts: readers and recovery
 
-Scoping handoff, updated 2026-10-06. Goal: tasks-984769. Not an approved design.
+Scoping handoff, updated 2026-10-08. Goal: tasks-984769. Not an approved design.
 
 ## Problem
 
@@ -9,6 +9,11 @@ contains the work. Four reports cover missing worktree dependency records
 (tasks-70f0bc, tasks-562c53), stale-copy merge advice (tasks-a20a64), and a closed
 record still shown as parked (tasks-6b2867). Read authority and local-state recovery
 need independent decisions.
+
+The latest pass adds tasks-955c2a: recording a finding while another session holds
+the newer worktree copy. tasks-2337b3 repeats the stale-merge report; its remedy is
+already covered by tasks-a20a64. The related resume warning, tasks-ef69c0, duplicates
+tasks-9de6aa in the parent lane and needs no new implementation task.
 
 ## Current behaviour and evidence
 
@@ -62,6 +67,20 @@ in each bullet; original incident captures remain absent.
   deliberately "for cleanup".
 - The record-home spec is accepted and implemented under tasks-9949f3; use it and
   current code rather than the older brief's pre-implementation behavior.
+- **Foreign notes (2026-10-08 source inspection, not a new runtime probe).**
+  `src/commands/status.rs::note` loads through the stale-copy guard, appends in memory,
+  then saves the entire serialized record through `src/repo.rs::write_task`. Append-only
+  notes do not make writes to stale whole records safe. CLI writers share the per-prefix
+  host mutation lock; `concurrent_notes_and_a_status_change_lose_nothing` tests that
+  serialization. `a_note_from_a_foreign_session_leaves_the_claim_alone` covers a foreign
+  note in the same checkout without refreshing or moving the owner's claim. Neither
+  establishes the complete two-checkout workflow requested by tasks-955c2a.
+  `occupants` deliberately chooses wait/merge guidance for an occupied checkout.
+- **Repeated merge report.** tasks-2337b3 describes the same one-sided source-stamped
+  union demonstrated by tasks-29f71f (4095f53). Its attached transcript says recovery
+  passed with both histories intact after integrating identical resolved siblings;
+  hand-editing `updated` is unnecessary. The diagnostic remains unchanged in current
+  `src/stale.rs`, so tasks-a20a64 still owns the fix.
 
 ## Constraints
 
@@ -71,6 +90,12 @@ and host state; park probes compare two stores. No live-store editing, host poin
 or hand-edited stamps. Do not erase a legitimate recurring or live-owned obligation
 when reconciling history. Related halt-audit and linked-project tasks address different
 questions.
+
+The host mutation lock does not establish safety against another host, manual file
+edits or Git operations. Explicit targeting and silent routing are different decisions:
+the accepted record-home contract rejects silent routing. Preserve the queued-note
+proposal verbatim in tasks-955c2a without treating it as an approved design. Note
+redaction/correction (tasks-1f6d08) and halt-audit ordering (tasks-10c968) remain separate.
 
 ## Alternatives
 
@@ -114,6 +139,18 @@ tasks-a20a64 covers guidance and regression protection for this existing contrac
 Closed-park recovery waits on tasks-b9b10e. A recovery remedy is not an alternative
 read authority.
 
+**Notes sent to an active task**
+
+1. Coordinate an explicit `tasks -C <current-checkout> note` through the existing CLI
+   lock, if the two-session probe establishes the supported workflow and limits.
+2. Keep wait/merge or owner-mediated delivery when explicit targeting is unsuitable.
+3. Design queued delivery only if those routes leave a demonstrated gap; it needs
+   durable delivery, retry semantics, visibility, and a policy for absent owners.
+
+Current lean: test option 1 before introducing a second note store. Reject a blanket
+stale-copy exemption: appending a note still rewrites fields and earlier history.
+tasks-a984f1 supplies the evidence; this pass does not authorize automatic routing.
+
 ## Unanswered questions
 
 - Does repeated done stay safe once the park's worktree has been removed, on a recurring
@@ -126,6 +163,9 @@ read authority.
 - Is the branch merge after publication clean when the final bytes were published, and
   how is the add/add conflict resolved when they were not? tasks-70f0bc extends the
   tasks-d0d520 probe before writing guidance.
+- Does explicit targeting preserve all notes, fields and the owner's claim during
+  concurrent CLI writes, and what happens on retry? tasks-a984f1 runs the isolated
+  two-session probe and states where the host lock stops providing protection.
 
 ## Proposed decomposition
 
@@ -137,5 +177,10 @@ read authority.
   on write timing.
 - tasks-b9b10e: closed-park safeguards and the `prime`/`list --parked` disagreement.
   tasks-6b2867 waits on it.
+- tasks-a984f1 (P2/s/mid/direct): establish safe foreign-note delivery; tasks-955c2a
+  remains an idea awaiting its finding. No queue implementation or design task yet.
+- tasks-2337b3: dropped with user approval on 2026-10-08 as covered by tasks-a20a64
+  and the completed recovery probe. tasks-ef69c0: dropped with the same approval as
+  covered by tasks-9de6aa. Both retain their original reports.
 - Findings update this brief and wake named ideas in the same commit. Changed routing,
   recovery or output contracts require a reviewed design and implementation plan.

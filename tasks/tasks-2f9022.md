@@ -1,13 +1,15 @@
 ---
 id: tasks-2f9022
 title: "resolve maps paths under a linked checkout's .worktrees storage, as it does for registered roots"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-07T16:47:08Z
-updated: 2026-10-07T16:47:17Z
+updated: 2026-10-07T17:13:38Z
+started: 2026-10-07T17:13:38Z
 depends: []
 parent: tasks-a7460c
 tags: [cross-project]
@@ -19,3 +21,5 @@ tasks resolve answers a path under a registered root's .worktrees storage (via s
 ## Notes
 
 - 2026-10-07T16:47:17Z (main): concerns: tasks-7580d2 extension — resolve indexes a linked checkout but not its .worktrees storage, so removed linked worktrees resolve as unregistered
+- 2026-10-07T17:13:38Z (main): started
+  provenance: {"harness_session":"claude-code:cd13df6e-7206-46e3-bd3f-30be99c37559","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
