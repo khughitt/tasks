@@ -128,8 +128,8 @@ takeover workaround, Stop aggregation or new authority.
   keeps the executable in ops, reads hq's validated facts, and separates worker
   selection from root-controller aggregation. The
   [approved implementation plan](../plans/2026-10-08-claim-guard-policy.md)
-  has produced isolated candidates; actual event delivery remains separate
-  verification, recorded in the
+  is implemented and activated after reviewed native delivery and explicit
+  cutover approval, recorded in the
   [acceptance status](2026-10-08-claim-guard-acceptance.md).
 - What process relationship can the isolated caller actually verify, and can it
   remain valid for acquisition, continued ownership and liveness? tasks-fe6c59

@@ -1,6 +1,6 @@
 # Claim-guard coordinated cutover — approval packet
 
-Status: ready for approval; fresh whole-branch review and corrective re-review accepted. Live guard and native homes
+Status: approved and activated; fresh whole-branch review and corrective re-review accepted. Live guard and native homes
 are unchanged. This packet requests the final approval required by the accepted
 [plan](../plans/2026-10-08-claim-guard-policy.md#task-6-review-approve-and-activate-the-coordinated-cutover).
 
@@ -113,3 +113,13 @@ verdicts and this plan's ledger remain for review under the coordination worktre
 the author owns their cleanup after disposition. Candidate worktrees remain until
 integration and checks finish. Their removal requires ignored-file review,
 `tt-report`, host-pointer checks, and ledger rulings/minors in the final report.
+
+## Applied result
+
+The approved sequence landed: hq mirror phase through `c9c787b`, ops merge
+`62556f3`, hq wiring `116b0d7`, and ordinary personal/work native trust. Hq's
+generated tracked personal trust state is `9c7f432`; work trust stays in its
+untracked local config. Saved current hashes and active native browser counts
+were checked in both homes. Facts and all unrelated registrations are unchanged.
+Merged-result gates and explicit-main fixture controls pass; see the acceptance
+record for counts and limits. No rollback was required.
