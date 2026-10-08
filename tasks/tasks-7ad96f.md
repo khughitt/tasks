@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T10:35:27Z
-updated: 2026-10-02T14:55:48Z
+updated: 2026-10-08T10:09:42Z
 depends: []
 parent: tasks-0e7216
 tags: [feedback, friction, "from:sci"]
@@ -28,3 +28,4 @@ Original report: start --force --reason run from a worktree writes the halt-over
 
 - 2026-10-02T14:44:07Z (main): scope: briefed; authority audit writer bypass is confirmed but ownership/refusal contract needs design; waits on tasks-10c968; brief: docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md
 - 2026-10-02T14:55:48Z (main): scope: owns updating superseded spec status when the implementation lands (moved from tasks-10c968, whose Done ends at the reviewed spec and plan)
+- 2026-10-08T10:09:42Z (main): evidence from ops (material-cd7782, 2026-10-05): observed in use. The halt was worked in a worktree; tasks start --force on material-511efe at 08:54Z wrote the halt-override note into the registered checkout's copy, and the halt's own session had to merge that note back by hand at 09:08Z before continuing. ops decided (ops-f33b6a) that tt-latency records its verified: note only after the remedy merges, so verify will not add a second writer of this kind; the override path remains tasks' to fix.
