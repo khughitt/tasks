@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T17:34:44Z
+updated: 2026-10-08T18:57:43Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -76,3 +76,7 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T17:27:02Z (docs/claim-guard-design): Conditional plan approval: fix the fallback budget and tracked author-gate wait, move gates/Codex home/evidence outside the model-writable pilot project while keeping tasks config/state inside it, then check only these two changes; no further full plan review requested. Preserve agreed inline execution and the separate live cutover approval.
 - 2026-10-08T17:34:43Z (docs/claim-guard-design): review: plan round 3 — verdict: accept; findings: none; reviewer: codex
 - 2026-10-08T17:34:43Z (docs/claim-guard-design): Ruling: user conditional approval is satisfied by the scoped check of the two requested edits; fallback now has 1800 s and fully tracked 180 s helper waits, control files are outside model workspace/temp roots, and callers no longer write them. No new full plan review or execution-method question is needed. Runtime sandbox denial/recorder proof remains a Task 4 pre-gate. Proceed inline; live cutover keeps its separate approval.
+- 2026-10-08T18:47:18Z (docs/claim-guard-design): Enumeration prerequisite tasks-724c9e verified: tasks claims includes live worktree-only plan steps and dead rows independently of checkout listings. Candidate selector distinguishes explicit own sessions and excludes dead rows. Existing command is sufficient; no API change. Scratch inventory empty and isolated world removed; native root equality and real hook delivery remain pilot gates.
+- 2026-10-08T18:57:42Z (docs/claim-guard-design): Execution status: candidate Tasks 1–3 and inventory prerequisite complete, isolated ops/hq code suites green, flow-on owner reviews accepted with one wiring-test minor deferred. Task 4 preparation/recorder/auth controls pass; ordinary private native browser lists three new hooks and zero active. Pilot stops at approved plan Task 4 Step 3 exact-definition hook-trust gate before any model run or claim. Review packet, all prepared prompts and tracked cleanup launcher are retained ignored; auth copy removed; no native evidence or gates. After approval agent trusts only these private definitions through /hooks and runs no-claim smoke/transport/lifecycle gates. No live ops/hq integration authorized or performed.
+- 2026-10-08T18:57:42Z (docs/claim-guard-design): parked (waiting on user, approval): User approves exact private pilot hook trust packet; agent resumes .worktrees/claim-guard-design, trusts only those three definitions through normal /hooks, completes staged pilot and fresh whole-branch review, then prepares separately gated live cutover.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
