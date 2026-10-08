@@ -1,7 +1,8 @@
 # Claim-guard acceptance — 2026-10-08
 
 Status: candidate implementation verified; private native trust, no-claim
-pre-gates and held-claim Stage A passed. Lifecycle stages are in progress.
+pre-gates and lifecycle stages A–E passed. Both candidate-home registration smokes also passed; fresh whole-branch
+review and approved live cutover remain.
 No ops/hq live activation has occurred; cutover remains separately gated.
 
 ## Candidate verification
@@ -39,8 +40,8 @@ isolated project/config/state/registry deleted. Details are in the
 The private world is under `.superpowers/sdd/claim-guard-policy/pilot/` in the
 coordination worktree. Only tasks config/state are under `project/.private/`;
 `control/` is a real sibling outside the workspace and temporary roots. It owns
-Codex home, prompts, recorder, author gates and evidence. The fresh fixture now holds three native claims after Stage A; its captured
-first blocks and retries are retained outside the model workspace. No author
+Codex home, prompts, recorder, author gates and evidence. The fresh fixture held three native claims after Stage A and released all of
+them by E; captured events and snapshots remain outside the model workspace. No author
 gate is needed in the proven resumed-process transport.
 
 Codex is `0.161.0`. The current session's recorded routing is `gpt-6.1-sol` with
@@ -76,14 +77,14 @@ remains the next check after trust.
 | Actual-model write/deny/recorder smoke | PASS, isolated writes and add/note/drop; controls denied `EROFS`; empty claims; genuine first Stop allows |
 | Same-worker resume / fallback smoke | PASS across exec resume, same captured agent ID and distinct turn IDs; fallback unused |
 | A: native IDs, held claims and delivered worker event | PASS, native own/related identities; worker and root first blocks then true retries allow; three live claims retained |
-| B: second separate worker turn and retry reset | Not run |
-| C: normal release and specific worker final result | Not run |
-| D: unforced refusal then completion-proven recovery | Not run |
-| E: own closure, empty inventory, first-stop allow | Not run |
-| Other candidate-home registration smoke | Not run |
+| B: second separate worker turn and retry reset | PASS, same worker/new turn; false first flag blocks, true retry allows; all ownership and heartbeat rows identical |
+| C: normal release and specific worker final result | PASS, worker park/release, specific result plus tracked final, controller normal start/review/done; retained control unchanged |
+| D: unforced refusal then completion-proven recovery | PASS, native controller unforced done refuses claimed with unchanged byte hashes, then completion-reason force start/review/done |
+| E: own closure, empty inventory, first-stop allow | PASS, own close; all three done and zero claims; actual first Stop allows |
+| Other candidate-home registration smoke | PASS, freshly spawned root/worker; matching actual exports and events; empty inventory; selected definitions unchanged |
 
-Root equality, worker delivery and same-turn retry are verified. The second
-held-claim turn, handoff, recovery and closeout remain unverified. Transport is
+Root equality, worker delivery, retry reset across two held turns, normal
+handoff, explicit recovery and closeout are verified on Codex 0.161.0. Transport is
 `resumed_processes`, selected only after its no-claim pre-gate. The fallback has its own
 1,800-second foreground budget and 180-second author helpers fully awaited with
 a tool timeout of at least 200 seconds or the same yielded process handle.
@@ -114,8 +115,55 @@ a different fresh root would not establish that relationship.
 
 ## Cleanup and continuation
 
-Each completed foreground slice has exited and its process group is reaped.
-The launcher deletes its private auth copy at every slice exit. Captures and
-claim snapshots remain in author-controlled storage for the staged checks and
-fresh final review; the author owns their cleanup. Stage B continues on the exact
-worker in the proven resumed transport. No live host pointer was changed.
+Every native pilot slice has exited and its process group is reaped. The private
+credential copy is absent and completed fixture config/state have been removed.
+Captures, sanitized verdicts and record/claim snapshots remain in private
+author-controlled storage for fresh final review; the author owns their cleanup.
+The lifecycle worker received no input after C; D/E resumed only the controller.
+The other source had a fresh no-claim root/worker smoke with actual native IDs.
+No live host pointer was changed.
+
+## Recovery and verification evidence
+
+C sends the detailed worker result through the existing message channel before
+the fixed one-line blocked retry replaces its final text. The controller still
+waits for that specific worker's actual final notification; a message alone is
+not completion. D's takeover reason records that received result, normal release,
+deliberately retained control and no pending tools/checks/background process.
+The controller's unforced negative control returned exit 1/claimed with both
+record and claims-store SHA-256 values unchanged before any force start. Takeover
+and closure provenance belongs to the actual controller.
+
+The coordination fast suite had one failed run (68 CLI init fixtures reporting a
+git-discovery error). `graph_renders_open_tasks` passed in a focused rerun, and
+the unchanged full rerun passed 1,159 tests with one ignored. The documentation
+commit was made before its exit status was checked; the ledger was corrected and
+verification repeated. No runtime code was changed for this failure. Feedback
+tasks-eec7d5 preserves it for investigation; final owner gates remain required.
+
+## Acceptance limits
+
+This verifies one normally trusted Codex 0.161.0 lifecycle in an isolated personal
+auth route, plus fresh no-claim registration smokes for both candidate sources.
+The selected personal/work definitions are identical; unrelated work-home hooks
+were excluded. It does not re-probe stored wake capabilities, reconstruct
+immediate-parent ancestry, or cover rootless overrides/intermediate-worker
+descendants beyond the selectors in the accepted design. The single-process
+fallback was prepared but unused because same-worker resume passed. Both native
+live homes still require their own ordinary trust after any approved rollout.
+
+Other-home export verification initially rejected a nested tool-output JSON
+envelope with escaped newlines. Reading the actual executed output confirmed
+the native IDs match; the decoder was corrected and its assertions passed before
+fixture config/state were removed. The premature completion-note cleanup wording
+was explicitly superseded on the task; no additional model run was needed.
+
+## Final owner verification
+
+Final candidate runs exited 0: ops real hq reader 4/4 with no skips, fast suite
+1,276 tests with one existing skip, and hygiene; hq 226 agent tests plus 553
+hook/tool tests and full live-facts validation; tasks fast suite 1,159 tests with
+one ignored, and hygiene. All use their owner test front doors. The one earlier
+coordination suite failure and unchanged passing reruns remain recorded above.
+These checks and the pilot support candidate review; they do not activate the
+host's existing global guard or either native live home.

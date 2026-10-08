@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T20:35:19Z
+updated: 2026-10-08T21:05:51Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -83,3 +83,4 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T20:35:18Z (docs/claim-guard-design): resumed
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T20:35:18Z (docs/claim-guard-design): User approved exact three private pilot definitions for normal /hooks trust and staged execution. Approval is limited to the isolated pilot; live ops/hq cutover remains separately gated.
+- 2026-10-08T21:05:51Z (docs/claim-guard-design): Verification correction: coordination fast run failed 68 CLI init tests with a git-discovery error; graph_renders_open_tasks focused rerun and unchanged full fast rerun passed (1159 tests, one ignored). Documentation commit was made before its exit status was checked; ledger corrected and gate repeated. No runtime change; feedback tasks-eec7d5 filed for the intermittent fixture failure.
