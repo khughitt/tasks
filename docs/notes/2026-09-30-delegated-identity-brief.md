@@ -1,14 +1,14 @@
 # Delegated session identity
 
-Scoping handoff, updated 2026-10-06. Goal: tasks-2fa8c6. Not an approved design.
+Scoping handoff, updated 2026-10-08. Goal: tasks-2fa8c6. Not an approved design.
 
 ## Problem
 
-A worker needs stable claim ownership distinct from its controller. The current
-Codex worker environment triggers tasks' conflict-to-Unix-fallback path, leaving
-claims dead after command exit and native note provenance absent. Exact-release source research now establishes that the
-root-session/worker-thread difference is intentional. Closing a
-controller-owned task is a separate authorization decision.
+A worker needs stable claim ownership distinct from its controller. The original
+split-ID fallback defect is resolved by the reviewed remedy and acceptance below.
+The remaining reports concern closing controller-owned tasks and establishing relay
+process identity when the caller and registry producer see different PID namespaces.
+Authorization and process identity need separate decisions.
 
 ## Current behaviour and evidence
 
@@ -17,34 +17,55 @@ controller-owned task is a separate authorization decision.
   equals its own rollout ID, and child metadata names the controller as parent.
   Both logical sessions share a harness process. These are observations, not proof
   of defective identity delivery.
-- `src/claims.rs::identity_from` rejects the unequal pair and falls back to a
-  command SID whose PID is gone after exit. `src/provenance.rs::resolve_from`
-  independently omits provenance; `src/relay/resolve.rs::hint_for` rejects the pair.
+- Before the remedy, `src/claims.rs::identity_from` rejected the unequal pair and
+  fell back to a command SID whose PID was gone after exit. `src/provenance.rs::resolve_from`
+  independently omitted provenance; `src/relay/resolve.rs::hint_for` rejected the pair.
   A worker's close of a live controller claim reached tasks and failed `claimed`.
 - Full capture/control/report tables now live on tasks-1ece46, alongside its
   sanitized attachment at `tasks/files/tasks-1ece46/delegated-identity-evidence.json`.
   The recovered original dead claim has no surviving native-input capture. Relay
   checks and Stop-policy checks were injected controls. The child Stop input used
   a child session_id and does not model the documented subagent hook shape; it
-  establishes no child lifecycle coverage. Real relay and hook delivery remain unverified.
-- The work-claims spec's Identity section assumes native-ID equality with hook
+  establishes no child lifecycle coverage. Later genuine root-relay acceptance is
+  recorded below; it does not prove worker registration or worker hook delivery.
+- The original work-claims spec's Identity section assumed native-ID equality with hook
   session_id, based on top-level sessions. Relay's design already allows inherited
-  parent variables. Current [official Hooks documentation](https://learn.chatgpt.com/docs/hooks)
-  answers hook session_id: it is the parent's. SubagentStart/SubagentStop also carry
+  parent variables. The [official Hooks documentation](https://learn.chatgpt.com/docs/hooks)
+  checked during that research described hook session_id as the parent's. SubagentStart/SubagentStop also carry
   agent_id and agent_type; SessionEnd and Interrupt exclude subagents. The exact-release
   findings below establish agent_id/thread equality and the no-child-Stop dispatch;
   the synthetic event still supplies no live delivery evidence.
+- Current `claim_guard` still refuses a foreign live close, and the completed
+  acceptance captured that refusal in both controller/worker directions. Neither
+  shared root association nor shared process identity grants delegated closure.
+  tasks-f8c9cc already owns the policy decision for tasks-f27fe3 and tasks-673b21.
+- tasks-b9cbe3 arose during genuine relay acceptance: the root row carried a host
+  PID while the isolated command observed the nearest harness as PID 1. Acquisition
+  refused; the later passing capture used explicitly approved shared host PID
+  visibility. See [the retained acceptance summary](2026-10-06-delegated-identity-acceptance.md).
+  Raw private captures were removed at cleanup, so this pass relies on that historical
+  verdict and current source, not a fresh namespace reproduction.
+- `src/relay/ancestry.rs` reads the caller's proc view; `resolve.rs::resolve` compares
+  host/PID/start, then platform/boot/harness and actor evidence. `snapshot::Handle`
+  carries no namespace identity. Claim ownership proof and liveness also consume
+  process handles; a change only to acquisition would leave an incomplete remedy.
 
 ## Constraints
 
 Preserve sources and separate captured behavior from intended contracts. Claim
 identity, note provenance, delegated closure and controller completion are separate
 contracts. A parent association must not merge ownership or grant authority to close
-its claim. Existing precedence and refusal rules remain until reviewed changes land.
+its claim. Preserve the now-implemented thread identity and foreign-live refusal.
 The completed capture established tasks' reaction to unequal inputs, not an upstream
 export bug. relay-60ae9e is related feedback, not authority over Codex itself.
+Namespace work must preserve the nearest-harness boundary, host/boot/start checks,
+concrete actor checks and fail-closed behavior. It does not imply a worker-registration
+fix (relay-f56e30), delegated closure or Stop aggregation. Native IDs alone are not
+replacement process proof. No change to host permissions is authorized by this brief.
 
 ## Alternatives
+
+The following identity alternatives record the original decision, now implemented:
 
 1. **Adapt tasks to intentional parent/worker semantics.** If Codex defines the
    observed difference deliberately, evaluate thread as worker identity and session
@@ -61,33 +82,51 @@ contract violation was found. This is research input, not approval of a new sche
 controller-closes for controller-owned tasks; evaluate that policy in its own small
 follow-up, not inside the identity design.
 
+For namespaces, compare retaining explicit identity and clearer diagnostics with a
+reviewed namespace-aware process relationship, possibly requiring producer changes.
+Current lean: establish what evidence is available before choosing support; reject
+matching a registry row by native session ID alone or weakening process checks.
+For closure, retain controller-closes as the recommendation on tasks-f8c9cc; the two
+reports add no separate implementation beyond that existing policy task.
+
 ## Unanswered questions
 
-- Which signal identifies the worker and which associates its parent, and how should
-  each identity/provenance/relay contract use them? tasks-5e2472 follows that evidence.
+- The worker/thread and shared-root contracts are settled by tasks-5e2472 and its
+  completed implementation; they are not open design questions for this batch.
 - Is explicit closure delegation needed? tasks-f8c9cc recommends controller-closes
   and records an independent disposition for tasks-f27fe3 and tasks-673b21.
 - How should a controller count separately owned worker claims? tasks-56b450 uses the
   verified root/agent_id mapping and SubagentStop for workers, not a child Stop.
   Actual event delivery remains separate verification.
+- What process relationship can the isolated caller actually verify, and can it
+  remain valid for acquisition, continued ownership and liveness? tasks-fe6c59
+  investigates available namespace evidence and names any producer coordination.
 
 ## Proposed decomposition
 
 - tasks-1ece46: done; preserves the investigation report, attachment and limits.
-- tasks-c0bad3: P1/s/mid/direct source research; findings below unblock tasks-5e2472.
-- tasks-5e2472: P1/m/high/planned identity design and reviewed implementation plan.
+- tasks-c0bad3: completed source research; findings below informed tasks-5e2472.
+- tasks-5e2472: completed identity design and reviewed implementation plan.
   tasks-5745bb, tasks-616cd7, tasks-cf8687, tasks-290fa3, tasks-6e2d15 and
-  tasks-f537a8 share one conflict/fallback acceptance check and close together when
-  its reviewed remedy lands. Preserve their sources; do not scope them individually.
-- tasks-0c2c39: preserve its historical missing-input limit and give it an explicit
-  disposition against the remedy rather than treating that inference as reproduced.
+  tasks-f537a8 closed together with the remedy. Preserve their sources.
+- tasks-0c2c39 closed with its historical missing-input limit explicitly retained;
+  the original incident was not newly reproduced.
 - tasks-f8c9cc: P1/s/mid/direct closure-policy decision for the two closure reports.
+- tasks-f27fe3 and tasks-673b21: proposed drops as covered by tasks-f8c9cc, which
+  remains open. Their reports and original capture remain intact; no drop was executed.
+- tasks-fe6c59: P2/s/mid/direct bounded namespace/process-proof investigation.
+  tasks-b9cbe3 remains an idea and joins this lane; findings must wake it with a
+  task note in the same commit and update this brief before re-scoping. No namespace
+  implementation or additional design task is filed before that evidence.
 - tasks-56b450: existing controller completion-policy decision; reuse it for aggregation.
   tasks-0005a6 is done (`note --stamp`); it cannot repair identity delivery.
   tasks-481fd6 stays shelved until its documented Claude live-check wake condition.
 
 
-## Exact-release findings: tasks-c0bad3
+## Historical exact-release findings: tasks-c0bad3
+
+This section preserves the pre-implementation research and its then-current limits;
+the reviewed remedy below supersedes its implementation descriptions.
 
 Checked 2026-10-06 against OpenAI's `rust-v0.160.1` annotated tag
 `c3e23d4c4385619ecec78408766e46b7fa7dd9ad`, which resolves to commit
