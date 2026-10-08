@@ -1,13 +1,15 @@
 ---
 id: tasks-bde218
 title: Preserve typed Mindful references when scope reads sources
-status: todo
+status: doing
 priority: 1
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-06T19:05:48Z
-updated: 2026-10-08T09:50:36Z
+updated: 2026-10-08T11:10:03Z
+started: 2026-10-08T11:10:02Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, gap, "from:material"]
@@ -32,3 +34,6 @@ The scope skill says to confirm CLI form and use mindful --json show, but does n
 ## Notes
 
 - 2026-10-08T09:50:35Z (main): scope: scoped; P1/s/low/direct; preserve typed Mindful source references and verify canonical lookup before reporting unavailable context; two local historical misses now resolve by typed reference; retain sources and correct those evidence statements during delivery
+- 2026-10-08T11:10:02Z (main): started
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T11:10:03Z (main): Scope confirmed: source normalization guidance in skills/scope/SKILL.md, validation evidence, and historical lookup corrections in the two named briefs; reuse quick-add rule, retain task source strings and historical commands, no product parser or retrieval changes. Main work-selection brief has pre-existing uncommitted scope edits; preserve those during integration.
