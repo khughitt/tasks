@@ -4,7 +4,7 @@ title: A worker authorized by its controller to close a task cannot do so while 
 status: dropped
 priority: 2
 created: 2026-10-04T16:46:02Z
-updated: 2026-10-08T10:06:59Z
+updated: 2026-10-08T14:45:21Z
 depends: []
 parent: tasks-2fa8c6
 tags: [feedback, friction, "from:mind6"]
@@ -22,3 +22,4 @@ agent: codex
   provenance: {"harness_session":"codex:01a11ae3-7bbf-7a31-8e02-65b60d179978","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T10:06:59Z (main): User approved duplicate drop; tasks-f8c9cc retains the controller-owned closure policy decision and original evidence.
   provenance: {"harness_session":"codex:01a11ae3-7bbf-7a31-8e02-65b60d179978","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T14:45:21Z (docs/controller-closure): Disposition: tasks-f8c9cc retains controller-closes; this report remains dropped as covered. A worker reports completion to the live claim owner rather than closing that claim; explicit delegated authorization is not justified by this case. Original capture is retained in the delegated-identity brief.

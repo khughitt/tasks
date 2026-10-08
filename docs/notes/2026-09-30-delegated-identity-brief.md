@@ -6,9 +6,9 @@ Scoping handoff, updated 2026-10-08. Goal: tasks-2fa8c6. Not an approved design.
 
 A worker needs stable claim ownership distinct from its controller. The original
 split-ID fallback defect is resolved by the reviewed remedy and acceptance below.
-The remaining reports concern closing controller-owned tasks and establishing relay
-process identity when the caller and registry producer see different PID namespaces.
-Authorization and process identity need separate decisions.
+Controller-owned closure is settled by tasks-f8c9cc below. The remaining process
+identity question concerns callers and registry producers seeing different PID
+namespaces. Authorization and process identity remain separate contracts.
 
 ## Current behaviour and evidence
 
@@ -38,7 +38,7 @@ Authorization and process identity need separate decisions.
 - Current `claim_guard` still refuses a foreign live close, and the completed
   acceptance captured that refusal in both controller/worker directions. Neither
   shared root association nor shared process identity grants delegated closure.
-  tasks-f8c9cc already owns the policy decision for tasks-f27fe3 and tasks-673b21.
+  tasks-f8c9cc records the controller-closes policy for tasks-f27fe3 and tasks-673b21.
 - tasks-b9cbe3 arose during genuine relay acceptance: the root row carried a host
   PID while the isolated command observed the nearest harness as PID 1. Acquisition
   refused; the later passing capture used explicitly approved shared host PID
@@ -79,22 +79,49 @@ Recommendation: option 1. Codex 0.160.1 explicitly assigns a shared root-session
 identity and a concrete worker-thread identity; SubagentStart/SubagentStop agent_id
 equals the latter. Reject upstream export repair for this captured difference: no
 contract violation was found. This is research input, not approval of a new schema. Keep
-controller-closes for controller-owned tasks; evaluate that policy in its own small
-follow-up, not inside the identity design.
+controller-closes for controller-owned tasks, as settled below independently of
+the identity design.
 
 For namespaces, compare retaining explicit identity and clearer diagnostics with a
 reviewed namespace-aware process relationship, possibly requiring producer changes.
 Current lean: establish what evidence is available before choosing support; reject
 matching a registry row by native session ID alone or weakening process checks.
-For closure, retain controller-closes as the recommendation on tasks-f8c9cc; the two
-reports add no separate implementation beyond that existing policy task.
+For closure, the decision below retains controller-closes; the two reports require
+no separate implementation.
+
+## Closure decision: tasks-f8c9cc (2026-10-08)
+
+The controller closes a task whose live claim it owns. A worker assigned work under
+that claim reports its result and verification to the controller; it does not call
+`done` on the controller's task. The controller inspects the result, performs any
+remaining review or verification, and closes its own claim.
+
+A worker that owns a separate task retains that task's lifecycle responsibility:
+it closes completed work when assigned to do so, or parks it for the controller's
+next action. The controller starts the released task before review edits or closure.
+Neither controller nor worker may close the other's live claim merely because they
+share a root session, a process, or a parent relationship.
+
+Reject explicit delegated closure authority for this task. The captured refusals
+protect the live owner's work, and the existing report-and-close or park-and-start
+handoffs cover the reported cases. Verbal delegation, identity repair and `done
+--force` do not grant authority over a foreign live claim. An authorization feature
+would need a separately scoped need and reviewed design; no such need is established
+by these reports.
+
+Both tasks-f27fe3 and tasks-673b21 remain dropped as covered by this decision; their
+original evidence is retained. No workflow-owner follow-up is needed:
+`skills/tasks/SKILL.md`'s Worker handoff section already states the rule, and
+`src/commands/mod.rs::claim_guard` enforces it. Existing foreign-claim and delegated
+ownership tests cover the implementation. This decision adds no product-code change,
+takeover workaround, Stop aggregation or new authority.
 
 ## Unanswered questions
 
 - The worker/thread and shared-root contracts are settled by tasks-5e2472 and its
   completed implementation; they are not open design questions for this batch.
-- Is explicit closure delegation needed? tasks-f8c9cc recommends controller-closes
-  and records an independent disposition for tasks-f27fe3 and tasks-673b21.
+- Closure delegation is settled by tasks-f8c9cc above; no authorization feature is
+  needed for tasks-f27fe3 or tasks-673b21.
 - How should a controller count separately owned worker claims? tasks-56b450 uses the
   verified root/agent_id mapping and SubagentStop for workers, not a child Stop.
   Actual event delivery remains separate verification.
@@ -111,9 +138,9 @@ reports add no separate implementation beyond that existing policy task.
   tasks-f537a8 closed together with the remedy. Preserve their sources.
 - tasks-0c2c39 closed with its historical missing-input limit explicitly retained;
   the original incident was not newly reproduced.
-- tasks-f8c9cc: P1/s/mid/direct closure-policy decision for the two closure reports.
+- tasks-f8c9cc: closure-policy decision recorded above; controller-closes retained.
 - tasks-f27fe3 and tasks-673b21: dropped with user approval on 2026-10-08 as covered
-  by tasks-f8c9cc, which remains open. Their reports and original capture remain intact.
+  by tasks-f8c9cc. Their reports and original capture remain intact.
 - tasks-fe6c59: P2/s/mid/direct bounded namespace/process-proof investigation.
   tasks-b9cbe3 remains an idea and joins this lane; findings must wake it with a
   task note in the same commit and update this brief before re-scoping. No namespace
