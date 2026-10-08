@@ -1,15 +1,16 @@
 ---
 id: tasks-bde218
 title: Preserve typed Mindful references when scope reads sources
-status: doing
+status: done
 priority: 1
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/tasks-bde218-typed-sources
 created: 2026-10-06T19:05:48Z
-updated: 2026-10-08T11:10:03Z
+updated: 2026-10-08T14:07:40Z
 started: 2026-10-08T11:10:02Z
+completed: 2026-10-08T14:07:39Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, gap, "from:material"]
@@ -37,3 +38,18 @@ The scope skill says to confirm CLI form and use mindful --json show, but does n
 - 2026-10-08T11:10:02Z (main): started
   provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T11:10:03Z (main): Scope confirmed: source normalization guidance in skills/scope/SKILL.md, validation evidence, and historical lookup corrections in the two named briefs; reuse quick-add rule, retain task source strings and historical commands, no product parser or retrieval changes. Main work-selection brief has pre-existing uncommitted scope edits; preserve those during integration.
+- 2026-10-08T11:10:15Z (fix/tasks-bde218-typed-sources): resumed
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T11:13:22Z (fix/tasks-bde218-typed-sources): RED reproduction: both historical bare-UID commands exit 1 no thought matching; canonical thought:<uid> commands exit 0 with archived sources using the current main build by explicit path. PATH mindful instead fails read-model v3/expected v2; classified as tool lookup failure, not missing context, and reported ops-07a4ee. No index rebuild, data mutation or launcher changes.
+- 2026-10-08T11:16:23Z (fix/tasks-bde218-typed-sources): Skill validation GREEN: fresh agent applied amended guidance to four wrapped/already-typed cases; all returned expected canonical ids and available archived content. Agent verified complete source-record hashes unchanged and classified captured tool-version failure separately. Independent assertions passed after correcting a test-only assumption about internal uid vs canonical id; validation note preserves that detail.
+- 2026-10-08T11:19:05Z (fix/tasks-bde218-typed-sources): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6
+- 2026-10-08T11:19:05Z (fix/tasks-bde218-typed-sources): Review disposition: earlier Prism unknown is outside this two-source correction and remains historical; no runtime/test/dependency change. Reviewer independently checked both test logs and diff; fresh-agent trial outputs reviewed from harness reports rather than persistent transcripts. Main draft preservation remains the integration check.
+- 2026-10-08T11:19:05Z (fix/tasks-bde218-typed-sources): parked (waiting on user, decision): User: authorize temporary stash of only docs/notes/2026-09-30-work-selection-brief.md. Agent: preserve the existing draft, close the task in the reviewed code commit, merge fix/tasks-bde218-typed-sources, restore the draft with the dated source correction while retaining its unrelated edits, and verify the merged result.
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T14:07:11Z (fix/tasks-bde218-typed-sources): resumed
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T14:07:39Z (fix/tasks-bde218-typed-sources): User approved 2026-10-08: temporarily stash only the overlapping work-selection brief, merge the reviewed source fix, and restore the pre-existing draft with the dated correction. Preserved original draft and hashes of all 27 existing changed files before integration; main advanced independently with only tools/tt v5.
+- 2026-10-08T14:07:39Z (fix/tasks-bde218-typed-sources): done
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T14:07:39Z (fix/tasks-bde218-typed-sources): Scope preserves typed Mindful references and distinguishes lookup failures from unavailable evidence; corrected two historical brief claims, aligned scope spec and recorded archived wrapped/already-typed validation; independent review accepted, all 1159 fast tests and repository checks passed.
+  provenance: {"harness_session":"codex:01a11b2e-c42e-7073-8fc5-a8a568d4e759","harness_session_source":"CODEX_THREAD_ID"}

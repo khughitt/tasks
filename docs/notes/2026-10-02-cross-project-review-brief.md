@@ -25,7 +25,9 @@ mixed-project handoff contract. Together they form goal tasks-ffdbaa.
   stale-member, and rerun acceptance checks.
 - tasks-c591da retains its original mindful source, but
   `mindful --json show c21c822e191c2e6c5939f9caa1f05a39` returned no matching thought.
-  Its captured body is available; missing source content remains unknown.
+  Correction (2026-10-08, tasks-bde218): the command omitted the `thought:` type.
+  The canonical `thought:c21c822e191c2e6c5939f9caa1f05a39` lookup succeeds and the
+  archived source is available. The historical miss does not establish missing context.
 
 ## Constraints
 
