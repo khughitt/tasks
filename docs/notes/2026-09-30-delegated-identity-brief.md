@@ -124,7 +124,10 @@ takeover workaround, Stop aggregation or new authority.
   needed for tasks-f27fe3 or tasks-673b21.
 - How should a controller count separately owned worker claims? tasks-56b450 uses the
   verified root/agent_id mapping and SubagentStop for workers, not a child Stop.
-  Actual event delivery remains separate verification.
+  The [proposed claim-guard design](../specs/2026-10-08-claim-guard-policy-design.md)
+  keeps the executable in ops, reads hq's validated facts, and separates worker
+  selection from root-controller aggregation. It requires user review; actual
+  event delivery remains separate verification.
 - What process relationship can the isolated caller actually verify, and can it
   remain valid for acquisition, continued ownership and liveness? tasks-fe6c59
   investigates available namespace evidence and names any producer coordination.

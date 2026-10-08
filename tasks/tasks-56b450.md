@@ -6,15 +6,16 @@ priority: 1
 size: s
 complexity: mid
 process: planned
-owner: main
+owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T14:48:23Z
+updated: 2026-10-08T14:54:59Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
 source: ops-cb9749
 agent: claude-code
+spec: docs/specs/2026-10-08-claim-guard-policy-design.md
 ---
 
 Why: ops hooks/claim-guard decides whether a turn may stop given live claims and running children (tasks policy) and carries CHILD_WAKES, WAKING and IN_FLIGHT (capability facts). The agent layer split (ops docs/specs/2026-10-03-agent-layer-split-design.md §4.4, §5.3) dissolves hooks to their owners and leaves this decision to tasks.
@@ -37,3 +38,9 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T14:48:06Z (main): started
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T14:48:23Z (main): Design context: tasks-f8c9cc is complete and controller-closes remains independent of Stop policy. Harness support is now hq (tack alias). Inspect current guard, validated facts API, mirror gates and native hook wiring before choosing ownership and migration order; planned process requires written spec review before a plan.
+- 2026-10-08T14:48:32Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T14:53:10Z (docs/claim-guard-design): Design recommendation: keep the executable in ops under the tasks-owned policy contract; read one validated hq harness-facts list snapshot, remove both mirror halves together, select Codex workers by SubagentStop agent_id and root-controller workers by recorded root_session. No parent ledger, Rust command or delegated authority. Spec drafted; implementation and live activation remain gated.
+- 2026-10-08T14:54:58Z (docs/claim-guard-design): Spec self-review: ownership, event selectors, retry order, unknown/read-failure behavior, coordinated mirror cutover and live-activation gate are explicit; placeholders absent and local links resolve. just test-fast passed (1159 tests, one ignored), tasks check and git diff --check passed. No runtime implementation or fresh live-hook delivery is claimed.
+- 2026-10-08T14:54:58Z (docs/claim-guard-design): parked (waiting on user, review): User reviews .worktrees/claim-guard-design/docs/specs/2026-10-08-claim-guard-policy-design.md; after approval, agent resumes here and writes the implementation plan for separate review.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
