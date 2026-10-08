@@ -1,9 +1,8 @@
 # Claim-guard acceptance — 2026-10-08
 
-Status: candidate implementation verified; private native trust, no-claim
+Status: implemented and activated after explicit approval; private native trust, no-claim
 pre-gates and lifecycle stages A–E passed. Both candidate-home registration smokes passed. Fresh whole-branch review
-required one test-only corrective round, now accepted; approved live cutover
-remains.
+required one test-only corrective round, now accepted; approved live cutover is complete.
 No ops/hq live activation has occurred; cutover remains separately gated.
 
 ## Candidate verification
@@ -186,3 +185,35 @@ Round 2 was a fresh scoped re-review and accepted with no findings. Deferred
 minors: the guard's detached-job warning has a repeated standalone fragment, and
 the wiring regression permits a future matcher despite current stanzas omitting
 it. Live home operation/trust and cutover remain the explicit final approval gate.
+
+## Approved activation
+
+The user approved the concrete cutover. Hq mirror removal `a3662f6` and corrected
+metadata `c9c787b` landed first, then ops main merged the corrected candidate as
+`62556f3`, then hq worker wiring `116b0d7` landed. Current facts bytes remain equal
+to the pre-cutover SHA-256 recorded in the cutover packet. Installed guard and
+reader paths resolve to owner mains; both installed native hook files equal the
+reviewed candidates with one Stop and one no-matcher SubagentStop guard.
+
+Each actual native home presented exactly one new worker hook. Its ordinary
+`/hooks` browser displayed the approved source/command, trusted that definition,
+and showed worker 1/1 plus existing Stop 3/3 active. The saved current trust hash
+was verified in both homes. Hq explicitly tracks hook hashes; the personal UI's
+three-line generated state was committed as `9c7f432`, while work settings remain
+untracked under hq's local layer. No login flow or model task was started. Both
+tracked native browsers exited and their process groups were reaped.
+
+Activated ops main passed 88 focused tests, including five real-reader tests
+without skips, 1,279 fast tests with one existing skip, and hygiene. The two extra
+fast tests come from preserved unrelated main commits. Hq main passed 226 agent
+and 553 hook/tool tests, including live fact validation. Explicit-main disposable
+CLI-generated controls passed worker own/root own+related selection, immediate
+retries, unchanged claims and empty-inventory allowance. These controls are
+synthetic, separate from the genuine private A–E capture already reviewed. Their
+registry/config/state were removed.
+
+The recorded coordinated rollback remains available through the cutover packet
+and pre-cutover commit SHAs. Native trust does not claim broader work-home
+integration or a new capability probe. All plan children and the parent close
+after this activated verification; owned caches and private capture stores may
+be removed after retaining the ledger dispositions and sanitized summary.

@@ -1,15 +1,16 @@
 ---
 id: tasks-56b450
 title: Decide where claim-guard's claim policy lives; read the wake facts from harness support
-status: doing
+status: done
 priority: 1
 size: s
 complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T21:44:27Z
+updated: 2026-10-08T22:58:56Z
 started: 2026-10-08T14:48:06Z
+completed: 2026-10-08T22:58:55Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
@@ -87,4 +88,12 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T21:22:11Z (docs/claim-guard-design): review: impl round 1 — verdict: revise; findings: Important 1, Minor 2; reviewer: codex/gpt-6-astra
 - 2026-10-08T21:35:30Z (docs/claim-guard-design): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
 - 2026-10-08T21:44:27Z (docs/claim-guard-design): parked (waiting on user, approval): User approves the concrete live cutover packet; agent resumes .worktrees/claim-guard-design, integrates mirror removal then direct reader then both native worker registrations, establishes normal live-home trust, verifies and closes records.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T22:38:45Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T22:38:46Z (docs/claim-guard-design): User approved the concrete live cutover packet: hq mirror phase a3662f6/c9c787b, ops bd514215, hq wiring116b0d7, normal native trust in both homes, verification and closeout. Recheck recorded mains/facts/relevant drafts before applying.
+- 2026-10-08T22:58:55Z (docs/claim-guard-design): Verified and activated ownership/facts policy: executable remains in ops under tasks contract; validated hq read replaces constants, both mirror halves removed in order, both native worker registrations trusted and active. Genuine corrected pilot A–E, both selected source smokes, fresh full review plus corrective re-review accepted, merged gates and explicit-main controls pass. Facts unchanged. Ops/hq worktrees removed after ignored-cache, pointer, merged-branch, submodule and timing checks. Complete ledger retained in committed docs before private cleanup; only known scope limits and two deferred minors remain.
+- 2026-10-08T22:58:55Z (docs/claim-guard-design): done
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T22:58:55Z (docs/claim-guard-design): Kept tasks-owned claim policy in ops, switched to validated hq facts and removed mirrors; activated root/worker native guards after reviewed genuine two-turn/handoff/recovery pilot, fresh review and explicit approval.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
