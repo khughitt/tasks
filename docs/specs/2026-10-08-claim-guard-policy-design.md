@@ -28,9 +28,10 @@ On 2026-10-08, the current source shows:
 - Hq's validated `tools/harness-facts list` returns all three facts, including
   explicit `unknown` entries. Its supported command endpoint is
   `~/.agents/bin/harness-facts`; the resolved tool reads its owner's default file.
-- Both native settings currently run the guard on `Stop`. Codex has no guard
-  registration on `SubagentStop`. Relay's current adapters do not support that
-  worker event, so this change uses native wiring directly.
+- Claude settings and both Codex files, hq `codex/hooks.json` and
+  `codex/hooks.work.json`, currently run the guard on `Stop` only. Hq `links.toml`
+  installs the latter into `~/.codex-work`. Relay's current adapters do not support
+  `SubagentStop`, so this change uses native wiring directly.
 - `src/commands/claims.rs` opens no task checkout and enumerates each registered
   claim store. `ClaimInfo` already exposes optional `root_session`. No JSON field
   addition is needed. Task tasks-724c9e owns the disposable enumeration probe;
@@ -41,6 +42,15 @@ On 2026-10-08, the current source shows:
   identify an immediate parent. The [official Hooks documentation](https://learn.chatgpt.com/docs/hooks)
   checked today documents worker identification on `SubagentStop`, continuation
   requests, and the exclusion of workers from `SessionEnd` and `Interrupt`.
+- `src/claims.rs::identity_from` stores the bare native thread ID as `session`,
+  and qualifies only `root_session` with `codex:`; `tagged` is a separate identity
+  representation. `src/commands/mod.rs::claim_guard` persists `me.session`.
+  The native unit test asserts that the raw session matches claims. A disposable
+  worktree-binary check today also obtained controller and worker rows from
+  `tasks claims`, with bare sessions, the same qualified root, no PID and live
+  claims. It used fixed synthetic native exports with relay disabled and isolated
+  config/state; it verifies serialization, not actual harness ID delivery. Both
+  claims were released and all scratch state removed.
 
 Those sources establish the boundary, not fresh live delivery. The fact entries
 also retain their probe-version and observation limits: Codex wake was a bounded
@@ -66,8 +76,9 @@ with its own reviewed installation and rollout contract.
 
 The guard accepts `Stop` for either supported harness, and `SubagentStop` for Codex.
 Require the native `hook_event_name` and a nonempty `session_id`; a Codex worker
-event additionally requires nonempty `agent_id` and `agent_type`. Do not interpret
-a missing event name as `Stop`. Update synthetic test fixtures to the real shapes.
+event additionally requires nonempty `agent_id`. `agent_type` is unused metadata;
+its absence or an empty value does not block selection. Do not interpret a missing
+event name as `Stop`. Update synthetic test fixtures to the real shapes.
 Unsupported or malformed events produce an actionable first refusal.
 
 Selection uses only live rows from the complete `tasks --json claims --all-projects`
@@ -77,9 +88,25 @@ rows fail the read as a whole, rather than disappearing from selection.
 
 | Event | Relevant live claims | Scope of reminder |
 | --- | --- | --- |
-| Claude Code `Stop` | Existing exact session selection, including its qualified spelling | This controller's own claims; preserve current behavior |
-| Codex `Stop` | `session == codex:<session_id>`, or `root_session == codex:<session_id>`; retain the existing unqualified session match | The root controller's claims and recorded worker claims in its whole tree |
-| Codex `SubagentStop` | `session == codex:<agent_id>` | This worker's own claims only |
+| Claude Code `Stop` | Existing exact session selection, including its qualified spelling | This controller's own claims; selection unchanged |
+| Codex `Stop` | Native own match: `session == <session_id>`; related match: `root_session == codex:<session_id>`; also retain the existing exact `session == codex:<session_id>` spelling for qualified identities | The root controller's claims and recorded worker claims in its whole tree |
+| Codex `SubagentStop` | Native match: `session == <agent_id>`; also exact `session == codex:<agent_id>` for qualified identities | This worker's own claims only |
+
+For native root-controller claims, **own** means the bare `session` equals the
+event's `session_id`. **Related worker** means the qualified `root_session` equals
+`codex:<session_id>` and `session` differs. A claim matching the caller's exact
+qualified spelling is also classified as own, before root association is considered;
+relay and explicit overrides can store that spelling. Root metadata on an own
+claim does not turn it into a worker claim. These selections are reminders, not
+proof of authority: the CLI's existing ownership check still governs every write.
+
+The native classification requires the root controller's concrete thread ID to
+equal its hook/root session ID. Tasks-1ece46 observed equal controller native IDs
+at Codex 0.160.1, as recorded in the brief's Current behaviour section; that one
+capture is not a guarantee for other releases or thread shapes. The live pilot
+must compare the root's actual exports, hook ID and emitted claim before activation.
+If they disagree, do not deploy this classification: revise the mapping instead
+of telling a controller that its own claim belongs to a worker.
 
 Do not match every harness prefix for a Codex event. Do not use the worker event's
 shared root ID to select the controller or siblings. No `SubagentStart` ledger is
@@ -96,8 +123,11 @@ selection is outside this design because the checked mapping is Codex-specific.
 
 ## Decision and capability read
 
-Preserve the existing total `decide` function and injected readers for isolated tests.
-Its order is:
+Keep `decide` total and its readers injectable, but deliberately change its decision
+order. Today a qualifying Claude child allows a stop **without reading claims**.
+This design requires a complete inventory before granting that exception: a tracked
+child no longer conceals an unavailable or corrupt claims store. This is a stricter
+policy proposed for review, not preserved behavior. Its order is:
 
 1. Parse the JSON object. An actual boolean `stop_hook_active: true` allows the
    retry immediately, before event validation, claim reads or fact reads.
@@ -117,6 +147,31 @@ parser nor a registry parser. Parse and check its JSON contract at this subproce
 boundary. Missing tool, nonzero exit, malformed output, or timeout is a failed fact
 read, with no constant fallback. Each subprocess retains the guard's ten-second
 timeout; the claim and fact calls can therefore consume twenty seconds in total.
+That adds an inventory read even to qualifying Claude child stops. A failed claim
+read blocks after its own timeout without attempting facts; a successful slow
+claim read followed by a slow fact read can approach the full twenty seconds.
+The retry still allows immediately, so this change remains a one-shot interruption.
+
+In ops `DecideTests`, replace `test_running_child_skips_the_claims_read` with a
+check that the reader runs and a failure blocks despite a known child. Change
+`test_running_child_beside_a_monitor_allows` to supply a successful inventory rather
+than `never_reads`, and add its failed-inventory case. The existing running-child,
+background-command and pending-child allow tests continue to allow with successful
+claim and fact reads. `test_retry_never_reads` remains, covering both readers and
+both supported event shapes. This explicitly replaces the old read-skipping contract.
+
+The private facts reader takes the complete subprocess command as an injected
+argument, alongside the existing subprocess-run seam. Production supplies the
+installed endpoint plus `list`. Real-reader tests supply the explicit hq tool
+path plus `list --file <disposable-file>`. This is a private test seam, not a new
+guard flag or production environment override.
+
+Pure injected-reader tests always run. The real-hq integration class locates hq
+through `tasks --json resolve hq` and skips with a stated reason only when hq is
+not registered, as the current mirror class does. If a registered checkout or
+reader is missing, broken or returns invalid facts, the test fails. Acceptance of
+this implementation and rollout requires that class to execute with no skips;
+an ops checkout without hq cannot supply that acceptance evidence.
 
 A controller's claimed turn may end for tracked work only when all three entries
 are `probed`, wake is the boolean `true`, and the supported `background_tasks`
@@ -136,13 +191,31 @@ Keep using the recorded facts across version upgrades, as the current constants
 do; this consumer adds no version detector or new probe. Messages must describe
 the recorded evidence without claiming verification of the installed release.
 Hq owns refreshing that evidence.
+The installed endpoint reads hq main's working tree: an uncommitted invalid edit
+there would affect the live guard before any commit-time gate. Edit facts in an
+isolated hq worktree and integrate the validated change; never edit the live file
+in place, as hq's agent guide requires.
 
 Controller messages distinguish their own claims from related worker claims.
 For a related worker claim, tell the controller to reconcile the worker's report
 and release, or wait on tracked work when required; do not suggest `done` on a
-foreign live claim. A live claim is not proof that a child is running. Preserve the
-existing continue/park/done guidance for the caller's own claims and the detached-job
-warning. No automatic takeover or worker release is introduced.
+foreign live claim. A live claim is not proof that a child is running. Native Codex
+claims have no PID and can remain live for four hours after their last heartbeat
+on the TTL path (`src/claims.rs::TTL_HOURS`). A worker may finish after the guard's
+one allowed retry without releasing its claim; the controller needs a recovery
+action rather than repeated instructions to wait for that TTL.
+
+Messages point to the existing [Worker handoff recovery](../../skills/tasks/SKILL.md#worker-handoff):
+only after the controller's own completion/wait result for that specific worker
+establishes the assignment has stopped with no pending tool, check or background
+process may it inspect the result and claim, then run
+`tasks start <id> --force --reason "<worker-specific completion evidence>"` in the
+authoritative checkout. Review or close under the acquired claim, and do not resume
+the worker on that task without a new ownership handoff. Timeout, silence, root
+state and a shared PID are insufficient; uncertain or still-running work requires
+reconciliation and waiting. Preserve continue/park/done guidance for the caller's
+own claims and the detached-job warning. Recovery stays explicit; no automatic
+takeover or worker release is introduced.
 
 ## Migration, verification and activation
 
@@ -150,11 +223,16 @@ After spec and plan review, implement with owner-specific tasks and worktrees:
 
 1. In ops, replace the constants with the validated reader, adapt policy and
    event-selection tests, and remove `FactsMirrorTests` and its source-discovery
-   helper. Keep the executable and owner diagnostic at their current location.
+   helper, `ReasonTests.test_child_wakes_matches_the_probe`, and
+   `InFlightTests.test_waking_kinds_match_the_probe`. Adapt other tests referencing
+   the constants to injected facts so their behavior coverage remains. Keep the
+   executable and owner diagnostic at their current location.
 2. In hq, remove the consumer mirror from `.githooks/pre-commit`, the
    `facts-mirror` recipe, its tests and its README instructions. Retain staged
    facts validation through hq's reader. Add the existing guard command to
-   Codex `SubagentStop`; retain the root `Stop` registration.
+   Codex `SubagentStop` in **both** `codex/hooks.json` and
+   `codex/hooks.work.json`; retain each file's root `Stop` registration. Verify
+   their declared homes in `links.toml`, including `~/.codex-work`.
 3. Update ops and hq's active ownership/mirror documentation and the tasks brief.
    Historical specs remain evidence; mark their temporary mirror provision as
    superseded with links rather than rewriting their original findings.
@@ -171,29 +249,53 @@ Required checks include:
   CLI-output tests, with fixtures updated for explicit event names.
 - Native worker selection independent of the root; controller selection of live
   root-associated workers across projects; unrelated, stale and sibling controls;
-  missing-root and intermediate-worker limits; malformed optional fields.
+  missing-root and intermediate-worker limits; malformed optional fields. Generate
+  primary native selection fixtures by running `start` and `tasks claims` with
+  distinct fixed root/thread exports, no explicit/Claude overrides and relay off
+  in a disposable config/state/project. Use the emitted rows rather than a
+  hand-written qualified-session fixture. Assert both own and related roles;
+  keep qualified relay/override controls separate. Synthetic exports establish
+  serialization only; the trusted pilot establishes delivered identities.
 - Facts from a disposable validated file via the real hq tool: true, false,
   unknown, changed sets, invalid/truncated file, missing executable, malformed
   JSON, nonzero exit and timeout. Verify the changed sets affect decisions without
   changing guard code. A retry must still allow when both readers would fail.
 - Worker blocks must never offer closure of the controller's claim; controller
-  blocks about worker claims must preserve the controller-closes policy.
+  blocks about worker claims must preserve the controller-closes policy and name
+  the completion-proven `start --force --reason` recovery, including its refusal
+  to treat timeout, silence or a still-running check as completion.
 - Hq's wiring tests, staged-fact validation tests, and removal of every active
-  mirror call; each owner's normal gates through its test front door.
+  mirror call and constant-pinning assertion; wiring and rollback checks cover
+  both Codex hook files. Each owner runs its normal gates through its test front door.
 
 Complete or reuse tasks-724c9e's disposable enumeration evidence before rollout.
 First run the smallest headless or nested trusted-harness pilot: one controller
-claim and one worker claim, genuine `SubagentStop` selection, one continuation,
-normal park/release, and then an allowed controller stop. Retain the actual event
-and verdict separately from injected policy tests; record the tested versions and
-limits. Native hook registration does not prove live delivery by itself.
+claim and one worker claim in **two separate turns of the same worker thread**.
+Before exercising the guard, compare the root's actual session/thread exports,
+controller `Stop.session_id`, and `tasks claims` row; require the equality and
+stored spellings used by the own/related split above. Then capture genuine
+`SubagentStop` events, worker selection, a first refusal and its allowed retry,
+and the next worker turn's first stop while its claim remains held. That next
+first stop must have a reset flag and be guarded again: the documented description
+"already continued" alone does not establish the flag's lifetime. If the flag
+stays true across turns, block worker-wiring activation and revise this design;
+do not silently claim every worker turn is covered or introduce a persistent ledger.
+
+Finish with normal park/release and an allowed controller stop. Also retain a
+worker-specific final completion result for an intentionally unreleased control
+claim, demonstrate the controller's unforced refusal, then explicit recovery
+under the Worker handoff conditions and release. Retain actual events and verdicts
+separately from injected policy tests; record versions, both native hook-home
+configurations, cleanup and limits. Native registration does not prove delivery.
 
 Any merge changing the live guard or home wiring remains an external-action gate.
 Prepare code, checks, configuration diff and rollback for approval before that
 step. Until activation, run by explicit worktree paths in a disposable harness;
 never repoint a shared launcher at a worktree. No live desktop capture is needed.
-Rollback restores the former executable, registrations and both mirror halves as
-a coordinated set; never restore only the hq mirror call to a deleted ops test.
+Rollback restores the former executable, the former `Stop`-only registrations in
+both hq `codex/hooks.json` and `codex/hooks.work.json`, and both mirror halves as a
+coordinated set. Preserve each home's unrelated hooks; never restore only the hq
+mirror call to a deleted ops test.
 
 Task completion requires the recorded ownership ruling, the direct validated facts
 read and coordinated mirror removal, reviewed worker wiring, passing owner gates,

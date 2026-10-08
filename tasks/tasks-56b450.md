@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T14:54:59Z
+updated: 2026-10-08T15:17:35Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -43,4 +43,13 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T14:53:10Z (docs/claim-guard-design): Design recommendation: keep the executable in ops under the tasks-owned policy contract; read one validated hq harness-facts list snapshot, remove both mirror halves together, select Codex workers by SubagentStop agent_id and root-controller workers by recorded root_session. No parent ledger, Rust command or delegated authority. Spec drafted; implementation and live activation remain gated.
 - 2026-10-08T14:54:58Z (docs/claim-guard-design): Spec self-review: ownership, event selectors, retry order, unknown/read-failure behavior, coordinated mirror cutover and live-activation gate are explicit; placeholders absent and local links resolve. just test-fast passed (1159 tests, one ignored), tasks check and git diff --check passed. No runtime implementation or fresh live-hook delivery is claimed.
 - 2026-10-08T14:54:58Z (docs/claim-guard-design): parked (waiting on user, review): User reviews .worktrees/claim-guard-design/docs/specs/2026-10-08-claim-guard-policy-design.md; after approval, agent resumes here and writes the implementation plan for separate review.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T15:10:49Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T15:10:49Z (docs/claim-guard-design): review: spec round 1 — verdict: revise; findings: Important 6, Minor 4; reviewer: human
+- 2026-10-08T15:10:49Z (docs/claim-guard-design): Review revision scope: correct bare native session selection and own/related classification; state deliberate claims-first behavior and changed tests; document completion-proven recovery, both Codex configs, injected facts command and absent-hq test policy; drop unused agent_type requirement; document worktree-only facts edits, all constant-pinning removals and two-turn retry pilot. No plan or runtime implementation before renewed spec approval.
+- 2026-10-08T15:16:36Z (docs/claim-guard-design): Revision disposition: all six must-fix and four minor findings addressed in the spec; none deferred. Native selectors use bare session IDs, with separate qualified controls and an explicit own/related split. Claims-first is a deliberate proposed change with affected tests and timing cost. Existing recovery, both native Codex homes, injectable real-reader command, narrow missing-hq skip policy, worktree-only facts edits, extra pinning removals and two-turn activation checks are specified.
+- 2026-10-08T15:16:36Z (docs/claim-guard-design): Evidence: an explicit worktree target/debug/tasks disposable native-level probe emitted actual tasks claims rows with distinct bare controller/worker sessions, shared qualified root, live true and no PID; fixed synthetic exports verify serialization only, not live hook delivery or root equality. Both scratch claims released and isolated project/config/state removed. No host settings or shared registry changed.
+- 2026-10-08T15:17:34Z (docs/claim-guard-design): Revision self-check: all ten review dispositions are present; own versus related native claims and qualified controls are distinct, and root equality plus two-turn retry reset remain explicit live activation gates. Spec link/anchor checks, tasks check, git diff --check and just test-fast passed (1159 tests, one ignored). No plan, product code or live hook configuration was changed.
+- 2026-10-08T15:17:34Z (docs/claim-guard-design): parked (waiting on user, review): User re-reviews the revised .worktrees/claim-guard-design/docs/specs/2026-10-08-claim-guard-policy-design.md; after explicit spec approval, agent resumes this worktree and writes the separately reviewed implementation plan.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
