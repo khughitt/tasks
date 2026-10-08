@@ -1,9 +1,8 @@
 # Claim-guard acceptance — 2026-10-08
 
-Status: candidate implementation verified; live pilot stopped before model runs
-and claim acquisition because its three private native hooks need normal trust
-review. No ops/hq live activation has occurred. The author owns continuation after
-that permission, then the separately reviewed cutover.
+Status: candidate implementation verified; private native trust, no-claim
+pre-gates and held-claim Stage A passed. Lifecycle stages are in progress.
+No ops/hq live activation has occurred; cutover remains separately gated.
 
 ## Candidate verification
 
@@ -40,8 +39,9 @@ isolated project/config/state/registry deleted. Details are in the
 The private world is under `.superpowers/sdd/claim-guard-policy/pilot/` in the
 coordination worktree. Only tasks config/state are under `project/.private/`;
 `control/` is a real sibling outside the workspace and temporary roots. It owns
-Codex home, prompts, recorder, author gates and evidence. Three scratch tasks are
-unclaimed; the private inventory and native evidence/gate directories are empty.
+Codex home, prompts, recorder, author gates and evidence. The fresh fixture now holds three native claims after Stage A; its captured
+first blocks and retries are retained outside the model workspace. No author
+gate is needed in the proven resumed-process transport.
 
 Codex is `0.161.0`. The current session's recorded routing is `gpt-6.1-sol` with
 high effort. The private feature report enables hooks and multi-agent support.
@@ -56,9 +56,9 @@ helper controls accept the matching verdict and reject a mismatch. Launcher
 controls verify credential cleanup on failure, isolated environment and bounded
 process cleanup. These are preparation controls, not native delivery evidence.
 
-The native private `/hooks` browser shows three definitions awaiting review,
-zero active. The browser was inspected and exited without trusting hooks or
-submitting a model request; project trust was saved only in the private home.
+After user approval, the ordinary native `/hooks` browser trusted the exact
+three private definitions and showed all active. Only private-home trust was
+changed; the browser was exited and reaped before the model probes.
 The ordinary [native hook trust flow](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks)
 is required by the approved plan. Exact source/command/file fingerprints and
 its credential-owning review command are prepared in private
@@ -72,27 +72,50 @@ remains the next check after trust.
 | Stage | Observed verdict |
 | --- | --- |
 | Recorder/auth/layout controls | PASS, preparation only |
-| Private native trust | BLOCKED, three untrusted definitions |
-| Actual-model write/deny/recorder smoke | Not run |
-| Same-worker resume / fallback smoke | Not run |
-| A: native IDs, held claims and delivered worker event | Not run |
+| Private native trust | PASS, three exact definitions trusted through ordinary `/hooks` |
+| Actual-model write/deny/recorder smoke | PASS, isolated writes and add/note/drop; controls denied `EROFS`; empty claims; genuine first Stop allows |
+| Same-worker resume / fallback smoke | PASS across exec resume, same captured agent ID and distinct turn IDs; fallback unused |
+| A: native IDs, held claims and delivered worker event | PASS, native own/related identities; worker and root first blocks then true retries allow; three live claims retained |
 | B: second separate worker turn and retry reset | Not run |
 | C: normal release and specific worker final result | Not run |
 | D: unforced refusal then completion-proven recovery | Not run |
 | E: own closure, empty inventory, first-stop allow | Not run |
 | Other candidate-home registration smoke | Not run |
 
-No root equality, worker delivery, retry reset, handoff or recovery pass is claimed.
-Neither transport is selected before its pre-gate. The fallback has its own
+Root equality, worker delivery and same-turn retry are verified. The second
+held-claim turn, handoff, recovery and closeout remain unverified. Transport is
+`resumed_processes`, selected only after its no-claim pre-gate. The fallback has its own
 1,800-second foreground budget and 180-second author helpers fully awaited with
 a tool timeout of at least 200 seconds or the same yielded process handle.
 
+## Isolation finding and corrected attempt
+
+Stage A attempt 1 stopped before dependent stages: all three native claims were
+correct, but the actual worker/root first stops allowed. Replaying those same
+captured payloads under the prepared environment blocked correctly. Zsh login
+startup replaced inherited XDG config/state roots with personal paths, so the
+native hook read a different inventory from model commands that explicitly
+restored the scratch paths.
+
+The private launcher now sets child-only `ZDOTDIR` to an empty private startup
+directory. The environment control failed before this change and passed after
+it, preserving both isolated XDG roots and normal HOME for the installed facts
+endpoint. Native hook definitions, recorder and production guard were unchanged.
+The failed harness exited; its three aborted fixture claims were snapshotted,
+then only its isolated config/state was removed. Raw captures and aborted task
+records remain private under `control/attempt-1/`. This is fixture cleanup, not
+worker completion or foreign-claim recovery. Tool feedback: hq-c19b34.
+
+A fresh fixture, controller and worker then repeated all no-claim permission,
+native delivery and restoration gates before taking claims. Corrected Stage A
+passes. It resumes that proven no-claim root with a fresh held-claim worker, so
+the preceding actual Stop belongs to the controller whose equality is checked;
+a different fresh root would not establish that relationship.
+
 ## Cleanup and continuation
 
-The private CLI exited and its process group was reaped. No private credential,
-scratch claim, native capture or author gate remains. The prepared private home,
-scratch task records, prompts and review files are retained for the author to
-resume; they are ignored and never staged. `host-load --section session` reported
-nothing left running. The next action is approval of the exact three private hook
-definitions, normal `/hooks` trust, then the required no-claim smoke. Live cutover
-remains a later, separately prepared approval.
+Each completed foreground slice has exited and its process group is reaped.
+The launcher deletes its private auth copy at every slice exit. Captures and
+claim snapshots remain in author-controlled storage for the staged checks and
+fresh final review; the author owns their cleanup. Stage B continues on the exact
+worker in the proven resumed transport. No live host pointer was changed.

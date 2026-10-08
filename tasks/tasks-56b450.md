@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T18:57:43Z
+updated: 2026-10-08T20:35:19Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -80,3 +80,6 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T18:57:42Z (docs/claim-guard-design): Execution status: candidate Tasks 1–3 and inventory prerequisite complete, isolated ops/hq code suites green, flow-on owner reviews accepted with one wiring-test minor deferred. Task 4 preparation/recorder/auth controls pass; ordinary private native browser lists three new hooks and zero active. Pilot stops at approved plan Task 4 Step 3 exact-definition hook-trust gate before any model run or claim. Review packet, all prepared prompts and tracked cleanup launcher are retained ignored; auth copy removed; no native evidence or gates. After approval agent trusts only these private definitions through /hooks and runs no-claim smoke/transport/lifecycle gates. No live ops/hq integration authorized or performed.
 - 2026-10-08T18:57:42Z (docs/claim-guard-design): parked (waiting on user, approval): User approves exact private pilot hook trust packet; agent resumes .worktrees/claim-guard-design, trusts only those three definitions through normal /hooks, completes staged pilot and fresh whole-branch review, then prepares separately gated live cutover.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T20:35:18Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T20:35:18Z (docs/claim-guard-design): User approved exact three private pilot definitions for normal /hooks trust and staged execution. Approval is limited to the isolated pilot; live ops/hq cutover remains separately gated.
