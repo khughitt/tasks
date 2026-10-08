@@ -179,8 +179,8 @@ tasks-a984f1 supplies the evidence; this pass does not authorize automatic routi
   tasks-6b2867 waits on it.
 - tasks-a984f1 (P2/s/mid/direct): establish safe foreign-note delivery; tasks-955c2a
   remains an idea awaiting its finding. No queue implementation or design task yet.
-- tasks-2337b3: proposed drop as covered by tasks-a20a64 and the completed recovery
-  probe. tasks-ef69c0: proposed drop as covered by tasks-9de6aa. Both retain their reports
-  and idea status pending disposition; no drop was executed in this pass.
+- tasks-2337b3: dropped with user approval on 2026-10-08 as covered by tasks-a20a64
+  and the completed recovery probe. tasks-ef69c0: dropped with the same approval as
+  covered by tasks-9de6aa. Both retain their original reports.
 - Findings update this brief and wake named ideas in the same commit. Changed routing,
   recovery or output contracts require a reviewed design and implementation plan.
