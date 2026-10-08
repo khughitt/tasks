@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T17:03:17Z
+updated: 2026-10-08T17:34:44Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -70,3 +70,9 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T17:03:16Z (docs/claim-guard-design): Revised plan self-review: Tasks 1–3 are byte-for-byte unchanged; all six plan headings and blocked step records remain. Fifteen Python snippets parse, links resolve, tasks check and git diff --check pass. The recorder example passes five mocked temporary-directory checks (start, exact reply, nonzero, timeout, malformed input), including persisted failure evidence. just test-fast passed (1159 tests, one ignored). No credential copy, model invocation, real hook/pilot or repository runtime implementation occurred.
 - 2026-10-08T17:03:16Z (docs/claim-guard-design): parked (waiting on user, review): User re-reviews .worktrees/claim-guard-design/docs/plans/2026-10-08-claim-guard-policy.md after plan round-1 fixes. Once approved, agent resumes here and executes the agreed inline method with fresh final review; all six steps remain blocked until that approval, and live cutover keeps its separate concrete gate.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T17:27:01Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T17:27:02Z (docs/claim-guard-design): review: plan round 2 — verdict: revise; findings: Important 2; reviewer: claude-code/opus-5.5
+- 2026-10-08T17:27:02Z (docs/claim-guard-design): Conditional plan approval: fix the fallback budget and tracked author-gate wait, move gates/Codex home/evidence outside the model-writable pilot project while keeping tasks config/state inside it, then check only these two changes; no further full plan review requested. Preserve agreed inline execution and the separate live cutover approval.
+- 2026-10-08T17:34:43Z (docs/claim-guard-design): review: plan round 3 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-08T17:34:43Z (docs/claim-guard-design): Ruling: user conditional approval is satisfied by the scoped check of the two requested edits; fallback now has 1800 s and fully tracked 180 s helper waits, control files are outside model workspace/temp roots, and callers no longer write them. No new full plan review or execution-method question is needed. Runtime sandbox denial/recorder proof remains a Task 4 pre-gate. Proceed inline; live cutover keeps its separate approval.

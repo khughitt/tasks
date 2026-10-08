@@ -8,9 +8,9 @@
 
 **Tech Stack:** Existing Python standard library, unittest in ops, pytest through hq's Just gate, the installed tasks CLI, and normally trusted Codex command hooks. No new dependency or public CLI.
 
-**Spec:** [Approved design](../specs/2026-10-08-claim-guard-policy-design.md), accepted at `3d627b3` by claude-code/opus-5.5. This plan is proposed and requires separate review.
+**Spec:** [Approved design](../specs/2026-10-08-claim-guard-policy-design.md), accepted at `3d627b3` by claude-code/opus-5.5. Plan accepted 2026-10-08 after the user's conditional approval and a scoped check of the two final fixes; implementation may proceed.
 
-**Execution method:** Inline with a fresh final reviewer, agreed in the plan review. Plan approval is still pending.
+**Execution method:** Inline with a fresh final reviewer, agreed in the plan review.
 
 ## Global Constraints
 
@@ -55,7 +55,7 @@ Commit each owner task record before worktree creation. Use `work-link --ensure 
 
 The reviewed parent spec provides the design for every child (`process: direct`). Children remain blocked while this plan is in review. On acceptance, record the plan review, unblock them, and preserve dependencies. Inline execution is agreed because the tasks share the same guard interfaces and a strict cross-project rollout order; a fresh whole-branch reviewer still runs before activation.
 
-Execute Tasks 1–3, then complete tasks-724c9e's direct enumeration probe before starting Task 4. Tasks 4–5 are bounded pilot slices, not a detached sweep: expect roughly two minutes of preparation and one to three minutes per model turn, with a ten-minute refusal/timeout limit on each slice. No idle desktop is required. A timeout stops the next slice, preserves the completed evidence and requires cleanup of the foreground harness before parking; it is never worker-completion proof for recovery.
+Execute Tasks 1–3, then complete tasks-724c9e's direct enumeration probe before starting Task 4. Ordinary foreground pilot slices have a ten-minute limit. The single-process A/B/C fallback has its own **30-minute (1800 s) limit**, including two author gates of up to 180 s each: budget roughly 24 minutes for model/tool work and six for those waits. No idle desktop is required. A timeout stops dependent stages, preserves evidence and requires cleanup of the tracked harness before parking; it is never worker-completion proof for recovery.
 
 ---
 
@@ -393,7 +393,7 @@ Keep each original `Stop` array and every unrelated event intact. README names b
 
 - [ ] **Step 1: Check the completed enumeration investigation.** The execution setup completes tasks-724c9e under its recorded direct process and trial arm before this dependent child starts. Its disposable main/worktree probe must show that `tasks claims` includes a claimed worktree-only record and a dead claim, while record listings have their documented limits. Use isolated config/state and fixture identities; no actual host claim takeover. Record the comparison, cleanup and verdict on tasks-724c9e and this parent. If inventory is insufficient, stop and revise the remedy before attempting a live pilot.
 
-- [ ] **Step 2: Pin the private world inside the model's writable project.** The pilot git root is `.superpowers/sdd/claim-guard-policy/pilot/project` in the tasks worktree. All writable pilot data goes under that project's gitignored `.private/`: tasks config/state, Codex home, prompts, captures and `pilot.json`. Use real directories, not symlinks to outside state. The model's `-C` is always this root, including resumed runs, so `workspace-write` covers its own task mutations. No `--add-dir` or broader sandbox is needed. Refuse an existing pilot world until its previous evidence and cleanup status have been inspected; do not overwrite a prior auth copy or trust definitions.
+- [ ] **Step 2: Separate model-writable task state from author-controlled files.** The pilot git root is `.superpowers/sdd/claim-guard-policy/pilot/project`. Only tasks config/state live in its gitignored `.private/`. The sibling `pilot/control` holds the Codex home, auth copy, hook definitions, gates, prompts, captures and `pilot.json`. It is outside the model's workspace and outside every sandbox-writable temporary directory. Use real directories, not symlinks back into the project or temp. `-C` always names the project and no `--add-dir` grants control-directory access. The model may read control files but `workspace-write` must deny mutation. The native hook process writes evidence there; recorder checks and the no-claim real-hook smoke establish that separately. Refuse an existing world until its evidence/cleanup status is inspected.
 
 The author's private launcher uses task-specific path variables and sets configuration-home variables only in its child-process environment, never as generic path holders in the parent shell. Keep normal HOME for the installed facts endpoint. Establish these paths before any model run:
 
@@ -403,17 +403,26 @@ from pathlib import Path
 
 CG_CODEX_BIN = shutil.which("codex")
 assert CG_CODEX_BIN is not None, "installed Codex CLI is required"
-CG_PROJECT = Path(".superpowers/sdd/claim-guard-policy/pilot/project").resolve()
+CG_WORLD = Path(".superpowers/sdd/claim-guard-policy/pilot").resolve()
+CG_PROJECT = CG_WORLD / "project"
 CG_PROJECT.mkdir(parents=True, exist_ok=False)
 CG_PRIVATE = CG_PROJECT / ".private"
 CG_PRIVATE.mkdir(mode=0o700)
 (CG_PROJECT / ".gitignore").write_text(".private/\n")
 CG_CONFIG = CG_PRIVATE / "tasks-config"
 CG_STATE = CG_PRIVATE / "tasks-state"
-CG_PILOT_HOME = CG_PRIVATE / "codex-home"
-for path in (CG_CONFIG, CG_STATE, CG_PILOT_HOME, CG_PRIVATE / "evidence"):
+for path in (CG_CONFIG, CG_STATE):
     path.mkdir(mode=0o700)
     assert path.resolve().is_relative_to(CG_PROJECT)
+CG_CONTROL = CG_WORLD / "control"
+CG_CONTROL.mkdir(mode=0o700)
+CG_PILOT_HOME = CG_CONTROL / "codex-home"
+for path in (CG_PILOT_HOME, CG_CONTROL / "gates", CG_CONTROL / "evidence"):
+    path.mkdir(mode=0o700)
+    assert not path.resolve().is_relative_to(CG_PROJECT)
+for temporary_root in (Path("/tmp"), Path("/var/tmp"),
+                       Path(os.environ.get("TMPDIR", "/tmp"))):
+    assert not CG_CONTROL.is_relative_to(temporary_root.resolve())
 subprocess.run(["git", "init", "-q", str(CG_PROJECT)], check=True)
 child_env = os.environ.copy()
 for key in ("TASKS_SESSION", "TASKS_SESSION_PID", "CLAUDE_CODE_SESSION_ID",
@@ -463,7 +472,7 @@ The pilot home's user config enables hooks and multi-agent support, selects the 
 
 The feature block is `[features]` with `hooks = true` and `multi_agent = true`; check `codex features list` in the isolated home before launch. Use only the actual current session's established model/effort values. If that routing or authentication cannot be established without guessing, park the preparation with the missing input; do not silently select another model or copy work-account state.
 
-Initialize the disposable project through the explicit tasks binary under the isolated config/state. Add three unclaimed `direct` tasks: controller, normal worker and recovery control; record their returned ids in `.private/pilot.json`. The actual controller acquires the first, and the same actual worker acquires the other two. The author creates records but never impersonates native owners or starts these live-capture claims under synthetic exports. Prepare no-claim pre-gate prompts and separate stage-A/B/C/D/E prompt files containing their actual scratch ids and explicit paths.
+Initialize the disposable project through the explicit tasks binary under isolated config/state. Add three unclaimed `direct` tasks: controller, normal worker and recovery control; the author records their ids in `CG_CONTROL/pilot.json`. The controller acquires the first and the same worker the other two. The author never impersonates native owners. Put pre-gate/A/B/C/D/E prompts in control, with explicit scratch ids/paths. Actors report bounded native-ID, inventory and verdict observations through tracked tool output; the author retains them outside the project. Actors never write control snapshots, verdicts, definitions or gates.
 
 The recorder captures genuine input and the candidate guard's exact result into private files, but only the guard's original stdout reaches Codex. Create this private `capture.py`; its two absolute arguments come from `pilot.json`:
 
@@ -531,6 +540,13 @@ successful write outcomes, never auth contents. No `tasks start`, escalation or
 claim acquisition is part of this check. If it fails under `-a never`, stop here
 and fix the layout/configuration; stage A has not started.
 
+In the same model sandbox, attempt a harmless sentinel write to `CG_CONTROL/gates`
+and require permission denial with no file created. Do not modify auth or hook
+definitions. Check control files remain readable and an actual no-claim hook
+capture was written by the native recorder in `CG_CONTROL/evidence`. A permitted
+model write or denied recorder write fails preparation. The filesystem boundary,
+not the verdict id or the prompt, prevents actors approving their own gates.
+
 ```sh
 timeout --signal=INT --kill-after=10s 600 "$CG_CODEX_BIN" --no-daemon -C "$CG_PILOT_PROJECT" -a never -s workspace-write exec --json - < "$CG_WRITE_SMOKE_PROMPT"
 ```
@@ -562,8 +578,8 @@ it is not the held-claim pilot worker.
 **Single-process fallback:** start one fresh held-claim pilot worker and run
 stages A, B **and C** in the same foreground exec process. C needs the live worker
 handle too. Do not end/restart the root between those stages. The root performs
-the checks and waits at an author gate between stages; the author inspects actual
-captures and inventory before granting the next gate. After C's specific worker
+checks and reports observations through tracked output; the author records the
+verdict, inspects captures/inventory and grants the gate. After C's specific worker
 final completion, no further `send_input` is needed, so D and E may resume the
 root independently. The preceding no-claim root `Stop` supplies the actual hook
 ID used for the early equality check; require the held-claim root's actual exports
@@ -598,6 +614,13 @@ private pilot harness, not a new guard API or persisted retry ledger.
 Only the outer author publishes the acknowledgment; the pilot controller and
 worker are explicitly forbidden to create or change their own author-gate file.
 
+The fallback prompt gives the helper its full 180-second window: use a tool
+timeout of **at least 200 seconds**, or, if the shell yields early, retain that
+same process/session handle and poll it with the harness's tracked wait until it
+exits or reaches its 180-second deadline. An early tool yield is not a denied
+gate. Never relaunch the helper or end the root turn while it is pending. The
+author keeps the outer **1800-second** exec tracked throughout both waits.
+
 ```python
 temporary_gate = gate.with_suffix(".tmp")
 temporary_gate.write_text(json.dumps({"verdict_id": inspected_verdict_id}))
@@ -605,8 +628,8 @@ temporary_gate.replace(gate)
 ```
 
 Before acquiring any claims in fallback mode, smoke this exact in-process path
-with a throwaway no-claim worker: obtain two separate same-id worker turns, write
-one stage verdict, pause at the bounded author gate, let the author inspect and
+with a throwaway no-claim worker: obtain two separate same-id worker turns, report
+the checks, pause at the bounded author gate, let the author record a verdict and
 acknowledge it, then continue and end cleanly. Require actual captures and empty
 inventory. A denied/timed-out author gate or lost in-process worker is a preparation
 failure and stops here. Do not discover a broken fallback after stage A acquired
@@ -621,12 +644,19 @@ author gate after A instead of ending its process.
 timeout --signal=INT --kill-after=10s 600 "$CG_CODEX_BIN" --no-daemon -C "$CG_PILOT_PROJECT" -a never -s workspace-write exec --json - < "$CG_STAGE_A_PROMPT"
 ```
 
+That command is the resumed-process stage-A slice. The single-process A/B/C
+fallback, including both author waits, uses this separate command and budget:
+
+```sh
+timeout --signal=INT --kill-after=10s 1800 "$CG_CODEX_BIN" --no-daemon -C "$CG_PILOT_PROJECT" -a never -s workspace-write exec --json - < "$CG_STAGE_ABC_PROMPT"
+```
+
 The child environment and prompt paths are prepared in the private launcher; the command is run by explicit path if `PATH` resolves to a different binary than the recorded one. Never set fabricated native IDs for this live capture.
 
 Stage-A controller prompt:
 
 ```text
-This is an isolated claim-guard acceptance probe, not repository implementation. Use the explicit tasks binary and isolated project/state named in .private/pilot.json. Acquire the controller test task under the actual exported native IDs and retain it until stage E. Record only the two native IDs and your tasks claims row in private evidence. Spawn exactly one fresh pilot worker for the normal-worker and recovery-control tasks; it must use its actual exported IDs, acquire both tasks and return a checkpoint under deliberately retained claims. Record its native IDs and emitted claims rows. Do not take over any claim, change exports/hooks, or start recovery. Wait for the worker's tracked result. Tell the worker the retry rule below. In resumed-process mode report the concrete worker id/checkpoint and end this stage. In single-process mode run the stage-A checks, write its verdict, and wait at the stage-A author gate before sending this same worker its stage-B follow-up; do not end the root process.
+This is an isolated claim-guard acceptance probe, not repository implementation. Read the explicit tasks binary and isolated config/state from the author-controlled pilot.json. Acquire the controller task under actual native IDs and retain it until E. Print bounded native-ID and claims observations to tracked tool output; the author retains evidence outside your workspace. Spawn one fresh worker to acquire both normal/control tasks under actual native IDs and report the same bounded observations. Never write the control directory: auth, hooks, evidence, verdicts and gates are author-controlled. Do not take over, change exports/hooks or recover. Wait for the worker's tracked result and give it the retry rule below. In resumed-process mode report its checkpoint and end the slice. In single-process mode perform A's checks and report them, then wait for the author's gate before sending this same worker B. Give await-author.py a tool timeout of at least 200 seconds, or retain and wait on its same yielded handle until its 180-second deadline; never relaunch it or end the root while pending. Continue B and C in this exec with a second fully waited author gate between them, then end after C. The outer fallback budget is 1800 seconds.
 
 CONTROLLED RETRY RULE FOR CONTROLLER AND WORKER: this pilot deliberately retains claims across checkpoints. If a stop hook blocks, reply with exactly one line, "Pilot checkpoint; claims retained; awaiting the next inspected stage.", then end that turn. Run no tool and do not park, done, start, force, refresh or otherwise change any claim in response to that block. The retry should be allowed. Recovery is forbidden before the separately authorized stage D; a guard reminder is not authorization to recover early. This rule is a test-only instruction, not a production handoff rule.
 ```
@@ -689,7 +719,7 @@ address the worker even in this mode is a transport failure, not a sticky-flag v
 Stage-B controller prompt:
 
 ```text
-Continue only the isolated pilot. Send stage B to the exact held-claim worker id in .private/pilot.json; do not spawn a replacement. Ask for a second checkpoint with both existing worker claims retained and no pending tool/check/background work at its report. Keep the controller claim and wait for that worker's specific result. Give both actors the controlled retry rule: on a stop-hook block, reply only "Pilot checkpoint; claims retained; awaiting the next inspected stage." and end that turn with no tool or claim mutation. Do not park, done, start, force or refresh in response to the block. Do not recover before stage D. Record the actual worker id, result and inventory. In resumed-process mode end this stage after the report. In single-process mode write the inspected stage-B verdict and wait at its author gate before C; do not end the root process.
+Continue only the isolated pilot. Read the exact held-claim worker id from the author-controlled pilot.json; do not spawn a replacement. Ask for a second checkpoint with both worker claims retained and no pending work. Keep the controller claim and wait for that worker's result. Give both actors the controlled retry rule: on a stop-hook block, reply only "Pilot checkpoint; claims retained; awaiting the next inspected stage." and end with no tool/claim mutation. No park, done, start, force, refresh or recovery before D. Print bounded id/result/inventory observations to tracked output; never write control files. In resumed-process mode end after the report. In single-process mode wait for the author-recorded B verdict/gate before C, using a tool timeout of at least 200 seconds or the same yielded process handle until the helper's 180-second deadline; never relaunch or end the root while waiting. Both waits share the outer 1800-second budget.
 ```
 
 Require the same worker `agent_id`, a distinct `turn_id`, a reset first-stop flag
@@ -710,7 +740,7 @@ continues C in its existing exec after the author opens B's gate; the same worke
 must complete handoff before that process is allowed to end.
 
 ```text
-Controller: send this instruction to the exact existing held-claim worker, then receive its tracked final completion. Worker: park the normal task to the agent and verify its claim is absent. Report your final result with no pending tool, check or background process. Deliberately leave the separate recovery-control claim held and name it. Never release the controller's task. Controller: after receiving this specific final result, inspect the released task, start it normally and close it after review. Record the final result and inventory privately. If a stop hook blocks either actor, reply only "Pilot checkpoint; claims retained; awaiting the next inspected stage." and end with no further tool or claim mutation. Do not recover the control or close the controller task yet. Stage D alone authorizes recovery. In either transport mode the root may now end; no further worker input is required.
+Controller: send this instruction to the exact existing held-claim worker, then receive its tracked final completion. Worker: park the normal task to the agent and verify its claim is absent. Report your final result with no pending tool, check or background process. Deliberately leave the separate recovery-control claim held and name it. Never release the controller's task. Controller: after receiving this specific final result, inspect the released task, start it normally and close it after review. Print bounded result/inventory observations to tracked output for the author; never write control files. If a stop hook blocks either actor, reply only "Pilot checkpoint; claims retained; awaiting the next inspected stage." and end with no further tool or claim mutation. Do not recover the control or close the controller task yet. Stage D alone authorizes recovery. In either transport mode the root may now end; no further worker input is required.
 ```
 
 Gate: normal release/start/close succeeds, the worker's specific final result says
@@ -797,4 +827,4 @@ Before removing a tree, run `tt-report`, inspect `git status --ignored --porcela
 
 Coverage: ownership and spellings → Task 1; subprocess trust boundary and unknown semantics → Task 1; mirror deletion with retained staged validation → Task 2; both homes and unrelated registrations → Task 3; enumeration/root equality/trusted delivery → Task 4; retry lifetime/release/recovery → Task 5; migration order, external approval, rollback, documentation and closeout → Task 6. All five Review Focus cases have checks in those tasks.
 
-The pilot's stages are sequential gates, each with a written verdict before the next starts. Writable-state and worker-transport checks have no claims; failed setup does not become a guard verdict. A failure preserves its evidence and stops dependent stages; Task 6 cannot turn a blocked pilot into a passing deployment. The spec remains approved; this plan remains unapproved until a separate review is recorded. Agreed execution: inline with a fresh final reviewer, followed by the live cutover approval packet.
+The pilot's stages are sequential gates, each with a written verdict before the next starts. Writable-state and worker-transport checks have no claims; failed setup does not become a guard verdict. A failure preserves its evidence and stops dependent stages; Task 6 cannot turn a blocked pilot into a passing deployment. Spec and plan acceptance are recorded on tasks-56b450. Agreed execution: inline with a fresh final reviewer, followed by the live cutover approval packet.

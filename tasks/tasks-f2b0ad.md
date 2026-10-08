@@ -1,13 +1,13 @@
 ---
 id: tasks-f2b0ad
 title: "Establish pilot isolation, inventory and genuine delivery"
-status: blocked
+status: todo
 priority: 1
 size: m
 complexity: high
 process: direct
 created: 2026-10-08T15:42:33Z
-updated: 2026-10-08T16:56:29Z
+updated: 2026-10-08T17:35:07Z
 depends: [tasks-50f850, tasks-1ffde6, tasks-724c9e]
 parent: tasks-56b450
 tags: []
@@ -25,3 +25,4 @@ Execute Task 4: Establish pilot isolation, inventory and genuine delivery only a
 - 2026-10-08T15:42:33Z (docs/claim-guard-design): Implementation plan awaits separate review; do not execute draft steps.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T16:56:29Z (docs/claim-guard-design): Plan round-1 revision adds project-contained .private config/state/auth/evidence paths, a no-claim workspace-write smoke with -a never, no-claim same-worker restoration probe, and a smoke-tested single-process A/B/C fallback with bounded author gates. Recorder failures persist before exit; personal auth copy is exclusive 0600 and deleted on abort/cleanup. Step remains blocked for plan re-review.
+- 2026-10-08T17:35:06Z (docs/claim-guard-design): Plan accepted after conditional fixes and scoped verification; execute the recorded dependencies.

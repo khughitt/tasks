@@ -1,13 +1,13 @@
 ---
 id: tasks-7b4938
 title: "Verify worker turns, release and completion-proven recovery"
-status: blocked
+status: todo
 priority: 1
 size: m
 complexity: high
 process: direct
 created: 2026-10-08T15:42:33Z
-updated: 2026-10-08T16:56:29Z
+updated: 2026-10-08T17:35:07Z
 depends: [tasks-f2b0ad]
 parent: tasks-56b450
 tags: []
@@ -25,3 +25,4 @@ Execute Task 5: Verify worker turns, release and completion-proven recovery only
 - 2026-10-08T15:42:34Z (docs/claim-guard-design): Implementation plan awaits separate review; do not execute draft steps.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T16:56:29Z (docs/claim-guard-design): Plan round-1 revision requires both worker claims and controller claim retained after hook retry; all actors use a one-line no-mutation retry instruction. Stage B/C resumes only when pre-gate proved worker restoration, otherwise stays in the same process through C. Stage D alone performs unforced refusal and explicit recovery inside actual controller native environment. Step remains blocked for plan re-review.
+- 2026-10-08T17:35:06Z (docs/claim-guard-design): Plan accepted after conditional fixes and scoped verification; execute the recorded dependencies.
