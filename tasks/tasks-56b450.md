@@ -6,15 +6,17 @@ priority: 1
 size: s
 complexity: mid
 process: planned
-owner: main
+owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T14:48:23Z
+updated: 2026-10-08T17:34:44Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
 tags: []
 source: ops-cb9749
 agent: claude-code
+spec: docs/specs/2026-10-08-claim-guard-policy-design.md
+plan: docs/plans/2026-10-08-claim-guard-policy.md
 ---
 
 Why: ops hooks/claim-guard decides whether a turn may stop given live claims and running children (tasks policy) and carries CHILD_WAKES, WAKING and IN_FLIGHT (capability facts). The agent layer split (ops docs/specs/2026-10-03-agent-layer-split-design.md §4.4, §5.3) dissolves hooks to their owners and leaves this decision to tasks.
@@ -37,3 +39,40 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T14:48:06Z (main): started
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T14:48:23Z (main): Design context: tasks-f8c9cc is complete and controller-closes remains independent of Stop policy. Harness support is now hq (tack alias). Inspect current guard, validated facts API, mirror gates and native hook wiring before choosing ownership and migration order; planned process requires written spec review before a plan.
+- 2026-10-08T14:48:32Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T14:53:10Z (docs/claim-guard-design): Design recommendation: keep the executable in ops under the tasks-owned policy contract; read one validated hq harness-facts list snapshot, remove both mirror halves together, select Codex workers by SubagentStop agent_id and root-controller workers by recorded root_session. No parent ledger, Rust command or delegated authority. Spec drafted; implementation and live activation remain gated.
+- 2026-10-08T14:54:58Z (docs/claim-guard-design): Spec self-review: ownership, event selectors, retry order, unknown/read-failure behavior, coordinated mirror cutover and live-activation gate are explicit; placeholders absent and local links resolve. just test-fast passed (1159 tests, one ignored), tasks check and git diff --check passed. No runtime implementation or fresh live-hook delivery is claimed.
+- 2026-10-08T14:54:58Z (docs/claim-guard-design): parked (waiting on user, review): User reviews .worktrees/claim-guard-design/docs/specs/2026-10-08-claim-guard-policy-design.md; after approval, agent resumes here and writes the implementation plan for separate review.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T15:10:49Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T15:10:49Z (docs/claim-guard-design): review: spec round 1 — verdict: revise; findings: Important 6, Minor 4; reviewer: human
+- 2026-10-08T15:10:49Z (docs/claim-guard-design): Review revision scope: correct bare native session selection and own/related classification; state deliberate claims-first behavior and changed tests; document completion-proven recovery, both Codex configs, injected facts command and absent-hq test policy; drop unused agent_type requirement; document worktree-only facts edits, all constant-pinning removals and two-turn retry pilot. No plan or runtime implementation before renewed spec approval.
+- 2026-10-08T15:16:36Z (docs/claim-guard-design): Revision disposition: all six must-fix and four minor findings addressed in the spec; none deferred. Native selectors use bare session IDs, with separate qualified controls and an explicit own/related split. Claims-first is a deliberate proposed change with affected tests and timing cost. Existing recovery, both native Codex homes, injectable real-reader command, narrow missing-hq skip policy, worktree-only facts edits, extra pinning removals and two-turn activation checks are specified.
+- 2026-10-08T15:16:36Z (docs/claim-guard-design): Evidence: an explicit worktree target/debug/tasks disposable native-level probe emitted actual tasks claims rows with distinct bare controller/worker sessions, shared qualified root, live true and no PID; fixed synthetic exports verify serialization only, not live hook delivery or root equality. Both scratch claims released and isolated project/config/state removed. No host settings or shared registry changed.
+- 2026-10-08T15:17:34Z (docs/claim-guard-design): Revision self-check: all ten review dispositions are present; own versus related native claims and qualified controls are distinct, and root equality plus two-turn retry reset remain explicit live activation gates. Spec link/anchor checks, tasks check, git diff --check and just test-fast passed (1159 tests, one ignored). No plan, product code or live hook configuration was changed.
+- 2026-10-08T15:17:34Z (docs/claim-guard-design): parked (waiting on user, review): User re-reviews the revised .worktrees/claim-guard-design/docs/specs/2026-10-08-claim-guard-policy-design.md; after explicit spec approval, agent resumes this worktree and writes the separately reviewed implementation plan.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T15:23:24Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T15:23:24Z (docs/claim-guard-design): review: spec round 2 — verdict: accept; findings: none; reviewer: claude-code/opus-5.5
+- 2026-10-08T15:23:24Z (docs/claim-guard-design): Spec 3d627b3 approved in this session. Write the implementation plan only; split live acceptance into separately checked delivery/identity, worker retry and next-turn, release, and unreleased-claim recovery stages so failures stop early. Inline execution is the recommendation; plan review precedes implementation.
+- 2026-10-08T15:42:34Z (docs/claim-guard-design): Implementation plan drafted with six blocked direct-process children. Native claim fixture tests capture the real CLI before ops Sandbox stubs PATH; hq staged validation remains after mirror deletion. Pilot stages gate inventory/trust/delivery and root equality before first retry, second-turn reset, normal handoff, explicit recovery and closeout. Inline execution is recommended; no code or live activation is authorized by this draft.
+- 2026-10-08T15:53:02Z (docs/claim-guard-design): Plan self-review: six tasks cover every approved spec section and all five Review Focus cases; owner-specific interfaces, real native fixtures, zero-skip reader acceptance, hq staged validation, both native homes, early pilot gates and ordered activation/rollback are specified. Eleven Python snippets parse, local links resolve, all six step records are blocked, tasks check and git diff --check pass, and just test-fast passes (1159 tests, one ignored). No implementation or live pilot ran.
+- 2026-10-08T15:53:02Z (docs/claim-guard-design): parked (waiting on user, review): User reviews .worktrees/claim-guard-design/docs/plans/2026-10-08-claim-guard-policy.md; after separate plan approval, agent resumes this worktree, publishes the approved document records, unblocks the steps and executes inline with fresh final review. Live cutover still needs its concrete approval packet.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T16:26:14Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T16:26:15Z (docs/claim-guard-design): review: plan round 1 — verdict: revise; findings: Important 3, Minor 3; reviewer: claude-code/opus-5.5
+- 2026-10-08T16:26:15Z (docs/claim-guard-design): Plan review revision: pin isolated tasks config/state inside the pilot project, use noninteractive fail-fast approval behavior, add no-claim worker-resume pre-gate with single-process fallback, prescribe claim-preserving hook retry replies and verify retained claims, retain recorder failures, clarify recovery runs only inside stage D, and name private personal-auth copy/cleanup. Tasks 1–3 accepted; inline execution plus fresh final reviewer agreed. No implementation before revised plan review.
+- 2026-10-08T16:51:57Z (docs/claim-guard-design): Plan revision disposition: all Important 3 and Minor 3 findings addressed; none deferred. Tasks config/state and all captures/prompts/Codex home are inside the pilot git root under ignored .private; headless exec uses -a never. No-claim write and same-worker restoration probes select resumed or smoke-tested single-process A/B/C transport. Actor prompts prescribe claim-preserving one-line retry and post-retry inventory checks. Recorder persists timeout/nonzero failures; unforced close occurs only inside stage D. Personal auth.json copy is exclusive 0600, file-store selected, alternative credential exports removed, and copy deleted on abort/cleanup. Inline method preserved; no pilot or implementation ran.
+- 2026-10-08T17:03:16Z (docs/claim-guard-design): Revised plan self-review: Tasks 1–3 are byte-for-byte unchanged; all six plan headings and blocked step records remain. Fifteen Python snippets parse, links resolve, tasks check and git diff --check pass. The recorder example passes five mocked temporary-directory checks (start, exact reply, nonzero, timeout, malformed input), including persisted failure evidence. just test-fast passed (1159 tests, one ignored). No credential copy, model invocation, real hook/pilot or repository runtime implementation occurred.
+- 2026-10-08T17:03:16Z (docs/claim-guard-design): parked (waiting on user, review): User re-reviews .worktrees/claim-guard-design/docs/plans/2026-10-08-claim-guard-policy.md after plan round-1 fixes. Once approved, agent resumes here and executes the agreed inline method with fresh final review; all six steps remain blocked until that approval, and live cutover keeps its separate concrete gate.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T17:27:01Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T17:27:02Z (docs/claim-guard-design): review: plan round 2 — verdict: revise; findings: Important 2; reviewer: claude-code/opus-5.5
+- 2026-10-08T17:27:02Z (docs/claim-guard-design): Conditional plan approval: fix the fallback budget and tracked author-gate wait, move gates/Codex home/evidence outside the model-writable pilot project while keeping tasks config/state inside it, then check only these two changes; no further full plan review requested. Preserve agreed inline execution and the separate live cutover approval.
+- 2026-10-08T17:34:43Z (docs/claim-guard-design): review: plan round 3 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-08T17:34:43Z (docs/claim-guard-design): Ruling: user conditional approval is satisfied by the scoped check of the two requested edits; fallback now has 1800 s and fully tracked 180 s helper waits, control files are outside model workspace/temp roots, and callers no longer write them. No new full plan review or execution-method question is needed. Runtime sandbox denial/recorder proof remains a Task 4 pre-gate. Proceed inline; live cutover keeps its separate approval.
