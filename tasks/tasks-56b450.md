@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T18:57:43Z
+updated: 2026-10-08T21:44:27Z
 started: 2026-10-08T14:48:06Z
 depends: [tasks-c0bad3]
 parent: tasks-2fa8c6
@@ -79,4 +79,12 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
 - 2026-10-08T18:47:18Z (docs/claim-guard-design): Enumeration prerequisite tasks-724c9e verified: tasks claims includes live worktree-only plan steps and dead rows independently of checkout listings. Candidate selector distinguishes explicit own sessions and excludes dead rows. Existing command is sufficient; no API change. Scratch inventory empty and isolated world removed; native root equality and real hook delivery remain pilot gates.
 - 2026-10-08T18:57:42Z (docs/claim-guard-design): Execution status: candidate Tasks 1–3 and inventory prerequisite complete, isolated ops/hq code suites green, flow-on owner reviews accepted with one wiring-test minor deferred. Task 4 preparation/recorder/auth controls pass; ordinary private native browser lists three new hooks and zero active. Pilot stops at approved plan Task 4 Step 3 exact-definition hook-trust gate before any model run or claim. Review packet, all prepared prompts and tracked cleanup launcher are retained ignored; auth copy removed; no native evidence or gates. After approval agent trusts only these private definitions through /hooks and runs no-claim smoke/transport/lifecycle gates. No live ops/hq integration authorized or performed.
 - 2026-10-08T18:57:42Z (docs/claim-guard-design): parked (waiting on user, approval): User approves exact private pilot hook trust packet; agent resumes .worktrees/claim-guard-design, trusts only those three definitions through normal /hooks, completes staged pilot and fresh whole-branch review, then prepares separately gated live cutover.
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T20:35:18Z (docs/claim-guard-design): resumed
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T20:35:18Z (docs/claim-guard-design): User approved exact three private pilot definitions for normal /hooks trust and staged execution. Approval is limited to the isolated pilot; live ops/hq cutover remains separately gated.
+- 2026-10-08T21:05:51Z (docs/claim-guard-design): Verification correction: coordination fast run failed 68 CLI init tests with a git-discovery error; graph_renders_open_tasks focused rerun and unchanged full fast rerun passed (1159 tests, one ignored). Documentation commit was made before its exit status was checked; ledger corrected and gate repeated. No runtime change; feedback tasks-eec7d5 filed for the intermittent fixture failure.
+- 2026-10-08T21:22:11Z (docs/claim-guard-design): review: impl round 1 — verdict: revise; findings: Important 1, Minor 2; reviewer: codex/gpt-6-astra
+- 2026-10-08T21:35:30Z (docs/claim-guard-design): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
+- 2026-10-08T21:44:27Z (docs/claim-guard-design): parked (waiting on user, approval): User approves the concrete live cutover packet; agent resumes .worktrees/claim-guard-design, integrates mirror removal then direct reader then both native worker registrations, establishes normal live-home trust, verifies and closes records.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
