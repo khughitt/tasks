@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: docs/claim-guard-design
 created: 2026-10-04T10:54:36Z
-updated: 2026-10-08T22:58:56Z
+updated: 2026-10-08T23:11:18Z
 started: 2026-10-08T14:48:06Z
 completed: 2026-10-08T22:58:55Z
 depends: [tasks-c0bad3]
@@ -97,3 +97,4 @@ Verified prerequisite: tasks-c0bad3 established SubagentStart/SubagentStop agent
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T22:58:55Z (docs/claim-guard-design): Kept tasks-owned claim policy in ops, switched to validated hq facts and removed mirrors; activated root/worker native guards after reviewed genuine two-turn/handoff/recovery pilot, fresh review and explicit approval.
   provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T23:11:18Z (main): Follow-ups filed at user request: ops-5cc22c warning wording (P3/direct), hq-ee69d9 unrestricted-matcher regression (P3/direct), hq-3cdd68 pre-existing staged fact deletion/rename investigation (P2/direct). Reuse hq-b2515c capability refresh and hq-a558e8 rollout judgment; existing reports hq-c19b34 shell isolation and tasks-eec7d5 transient CLI fixture failure remain for maintainer triage. No new fallback/ancestry/ownership-transfer scope.
