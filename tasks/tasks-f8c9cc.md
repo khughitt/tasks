@@ -1,13 +1,15 @@
 ---
 id: tasks-f8c9cc
 title: Decide closure responsibility for controller-owned tasks
-status: todo
+status: doing
 priority: 1
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-06T10:41:53Z
-updated: 2026-10-06T16:50:05Z
+updated: 2026-10-08T14:43:33Z
+started: 2026-10-08T14:43:11Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -28,3 +30,6 @@ Ideas it wakes: on completion add the decision to tasks-f27fe3 and tasks-673b21 
 ## Notes
 
 - 2026-10-06T16:50:04Z (main): priority: raised to P1 under the adopted agent-identity lane; identity research precedes dependent design, and controller-owned closure stays a separate decision.
+- 2026-10-08T14:43:11Z (main): started
+  provenance: {"harness_session":"codex:01a11bed-fe69-7060-9c93-813a4949349b","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-08T14:43:33Z (main): Scope confirmed: record controller-closes policy in the delegated-identity brief and both already-dropped reports; existing worker-handoff guidance and foreign-live-claim refusal implement the rule, so no authorization code or workflow-owner follow-up is needed.
