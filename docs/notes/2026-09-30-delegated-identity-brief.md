@@ -127,8 +127,10 @@ takeover workaround, Stop aggregation or new authority.
   The [approved claim-guard design](../specs/2026-10-08-claim-guard-policy-design.md)
   keeps the executable in ops, reads hq's validated facts, and separates worker
   selection from root-controller aggregation. The
-  [implementation plan](../plans/2026-10-08-claim-guard-policy.md) requires separate
-  review; actual event delivery remains separate verification.
+  [approved implementation plan](../plans/2026-10-08-claim-guard-policy.md)
+  has produced isolated candidates; actual event delivery remains separate
+  verification, recorded in the
+  [acceptance status](2026-10-08-claim-guard-acceptance.md).
 - What process relationship can the isolated caller actually verify, and can it
   remain valid for acquisition, continued ownership and liveness? tasks-fe6c59
   investigates available namespace evidence and names any producer coordination.
@@ -269,3 +271,30 @@ native controller/worker and deterministic tests, plus a genuine isolated relay
 root/worker capture with normally trusted hook delivery. The accepted implementation was merged locally and reinstalled after those gates
 and final review passed. No worker hook delivery or relay worker registration fix is
 claimed; relay-f56e30, tasks-f8c9cc and tasks-56b450 stay outside the remedy.
+
+## Claim inventory: tasks-724c9e (2026-10-08)
+
+The installed `tasks 0.2.0` CLI was exercised in a disposable main/worktree pair
+with isolated config, state and registry, explicit fixture sessions, one stable
+live probe PID and one impossible PID. No real claim was taken over.
+
+| Fixture | Main `list --status doing` | Worktree listing | `tasks claims` | Guard selection |
+| --- | --- | --- | --- | --- |
+| Registered controller record | Present | Present | Present, live | Controller's own |
+| Worktree-only plan step | Absent | Present | Present, live | Worker's own |
+| Dead controller record | Present | Absent | Present, not live | Excluded |
+
+Every claim row preserved its task ID, project prefix, owner and bare fixture
+session. Claim inventory reads stores without opening task files; record listing
+reads only its selected checkout. Use `tasks claims` and explicit live/session
+selection before stopping. Another listing API is unnecessary for this report.
+Explicit session overrides supply no root association; separately owned workers
+must not be counted as the controller's own. Native `root_session` grouping and
+genuine hook delivery remain separate acceptance gates in tasks-56b450.
+
+The candidate ops selector selected only the live controller row for its fixture
+`Stop`, only the live worker row for its `SubagentStop`, and no related rows from
+these explicitly overridden identities. All fixture claims were released; the
+inventory was empty before the locked scratch worktree was unlocked and removed.
+The disposable registry, config, state and project were deleted. This check changes
+no product code or host state.
