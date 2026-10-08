@@ -1,15 +1,16 @@
 # Claim-guard acceptance — 2026-10-08
 
 Status: candidate implementation verified; private native trust, no-claim
-pre-gates and lifecycle stages A–E passed. Both candidate-home registration smokes also passed; fresh whole-branch
-review and approved live cutover remain.
+pre-gates and lifecycle stages A–E passed. Both candidate-home registration smokes passed. Fresh whole-branch review
+required one test-only corrective round, now accepted; approved live cutover
+remains.
 No ops/hq live activation has occurred; cutover remains separately gated.
 
 ## Candidate verification
 
 | Candidate | Revision | Verification |
 | --- | --- | --- |
-| ops reader and policy | `91984f5` | 87 focused tests; 4 real hq-reader tests without skips; 1,276 fast tests with one existing skip; hygiene passes |
+| ops reader and policy | `91984f5`, corrective tests `bd514215` | 88 focused tests; 5 real hq-reader tests without skips; 1,277 fast tests with one existing skip; hygiene passes |
 | hq mirror removal | `a3662f6`, metadata correction `c9c787b` | 226 agent and 551 hook/tool tests; staged validation preserved; independent flow review accepts |
 | Both native hook registrations | `116b0d7` | 226 agent and 553 hook/tool tests; original Stop/groups/routes preserved; independent flow review accepts |
 
@@ -167,3 +168,21 @@ one ignored, and hygiene. All use their owner test front doors. The one earlier
 coordination suite failure and unchanged passing reruns remain recorded above.
 These checks and the pilot support candidate review; they do not activate the
 host's existing global guard or either native live home.
+
+## Fresh final review
+
+Round 1 (codex/gpt-6-astra) found one Important test-contract issue: disposable
+real-reader fixtures asserted today's live hq values and used literal current-value
+replacements. Runtime policy and native lifecycle had no Critical/Important
+findings. The correction constructs explicit disposable scenario entries while
+still validating the real registered reader/default file. A valid changed-source
+reprobe reproduced two scenario failures against the old tests, then passed all
+four scenarios after the correction. Ops `bd514215` contains only these test
+changes and its owner record: 88 focused, including five real tests without skips;
+1,277 fast tests with one existing skip; hygiene passes. Guard bytes are unchanged,
+so native capture remains applicable.
+
+Round 2 was a fresh scoped re-review and accepted with no findings. Deferred
+minors: the guard's detached-job warning has a repeated standalone fragment, and
+the wiring regression permits a future matcher despite current stanzas omitting
+it. Live home operation/trust and cutover remain the explicit final approval gate.
