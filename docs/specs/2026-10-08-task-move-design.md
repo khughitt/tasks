@@ -1,6 +1,6 @@
 # Moving one task between projects
 
-Status: draft, revised after review round 1 (tasks-bf6b9b)
+Status: draft, revised after review round 2 (tasks-bf6b9b)
 Task: tasks-bf6b9b (lane tasks-a7460c; answers tasks-7ba557)
 Brief: `docs/notes/2026-10-08-project-discovery-movement-brief.md`
 
@@ -180,7 +180,13 @@ repositories, so `git checkout .` cannot erase it. It records:
 - `target_text` and `tombstone_text`: the exact bytes to write, rendered at preflight
   with one move time, so a resume writes identical files
 - `attachments`: `{name, sha256}` for each live attachment
-- `park` and `escalation`: the carried store text, if any
+- `source_park` and `source_escalation`: the source store's entries for the source
+  id, verbatim, if any. The park keeps its original `worktree`, which may be a code
+  worktree of the source project. Undo returns exactly these.
+- `target_park` and `target_escalation`: the entries M5 writes under the new id,
+  rendered at preflight from the source entries. The park's `worktree` is replaced with
+  the destination's `resume_root` (§3.2), and nothing else changes. M5 compares against
+  these, so a resume writes identical entries.
 
 ### 4.2 Phases
 
@@ -201,7 +207,7 @@ refuses rather than writing to a project that has moved.
 | M2 | Write the journal (first mutation) | The journal's presence decides fresh versus resume. |
 | M3 | Copy each attachment to `tasks/files/<new>/`; verify its sha256 | A file that is present with the right digest is skipped. |
 | M4 | Create the destination record exclusively at the journal's id from `target_text` | A file that is present with that digest is skipped. |
-| M5 | Write the park/escalation into the destination store under the new id | An entry that is present and equal is skipped. |
+| M5 | Write `target_park`/`target_escalation` into the destination store under the new id | An entry that is present and equal is skipped. |
 | M6 | Write the tombstone from `tombstone_text` | A file that is present with that digest is skipped. |
 | M7 | Remove the source attachment bytes and the source store entry | Absence is success. |
 | M8 | Remove the journal (last) | — |
@@ -219,6 +225,10 @@ In particular:
 - The source digest differs from both `source_digest` and the tombstone's digest
   (someone edited the source by hand mid-move): refuse.
 - The destination file exists with a digest other than the target's: refuse.
+- A journal attachment has no copy with its journal sha256, in either the source or the
+  destination directory: refuse, naming the attachment. The journal holds digests, not
+  bytes, so no rerun can rebuild it. The journal stays, and with it the freeze, until a
+  verified backup is restored (§4.4).
 - No journal, a tombstone whose `moved_to` names a destination record whose `moved_from`
   points back: `Complete`.
 
@@ -266,14 +276,20 @@ both rename inventories and move journals.
      sha256. Copy it back from the destination copy when the source copy is gone. If
      neither copy has the journal's digest, stop: keep both directories and the
      journal, and report the name.
-  3. Return the park or escalation from the journal into the source store, and confirm
+  3. Return the journal's `source_park` and `source_escalation` verbatim into the
+     source store, keyed by the source id, and confirm
      it reads back equal.
   4. Only now delete the destination store entry, the destination attachment
      directory, and the destination record.
   5. Remove the journal last.
 
-  If any step fails, stop with everything in place. The journal still describes the
-  state, and a rerun of `tasks move` can still complete the move forward instead.
+  If any step fails, stop with everything in place and keep the journal. A rerun of
+  `tasks move` can complete the move forward instead, but only when every journal
+  attachment still has a copy with its journal digest. If step 2 stopped because
+  neither copy matches, neither direction can finish from what is on disk. Restore that
+  file from a verified backup (git history, another host's synced copy) whose sha256
+  equals the journal's. Until then, a rerun refuses, the journal stays, and both
+  projects stay frozen.
 - **Power loss** is out of scope, as it is for rename (no fsync).
 - **Parks on other hosts.** Claim stores are per host. A park for the source id recorded
   on another host stays keyed to the tombstone there. This is the same limit as
@@ -354,6 +370,21 @@ Each case runs in temporary repositories with scratch `XDG_CONFIG_HOME` and
      directory, and `rename dots dx` each refuse with `move_pending`.
    - Neither the registry nor either project changed.
    - A rerun completes the move, and `retire` in `dots` then succeeds.
+
+10. **Undo restores the original park.** Park `dots-a` from a code worktree of `dots`
+    (`dots/.worktrees/x`), then move it with `TASKS_MOVE_STOP_AFTER=store`.
+    - The journal's `source_park.worktree` is the `dots/.worktrees/x` path, and its
+      `target_park.worktree` is `wali`'s `resume_root`.
+    - The destination store holds `target_park`.
+    - Run the §4.4 undo steps from the journal. The `dots` store then holds a park for
+      `dots-a` equal to the original, `worktree` included, and the `wali` record,
+      directory, and store entry are gone.
+11. **Lost attachment bytes.** Stop with `TASKS_MOVE_STOP_AFTER=cleanup`, after M7
+    removed the source bytes, then delete the destination copy too.
+    - A rerun and `--explain` both refuse, naming the attachment.
+    - The journal remains, and writes to both ids and `retire` still refuse with
+      `move_pending`.
+    - Restore the file with the journal's digest, rerun, and the move completes.
 
 ## 7. Out of scope
 
