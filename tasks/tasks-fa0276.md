@@ -1,13 +1,15 @@
 ---
 id: tasks-fa0276
 title: Name the obstructing Git marker when linked discovery fails
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-07T16:57:53Z
-updated: 2026-10-08T10:41:45Z
+updated: 2026-10-09T00:38:48Z
+started: 2026-10-09T00:38:48Z
 depends: []
 parent: tasks-a7460c
 tags: [feedback, friction, "from:ops"]
@@ -30,3 +32,5 @@ git reports 'not a git repository' for a directory under TMPDIR when TMPDIR itse
 ## Notes
 
 - 2026-10-08T10:41:44Z (main): scope: scoped; reproduced empty-marker failure with no-marker, removed-marker, healthy-unborn and corrupt-HEAD controls; chose the requested actionable diagnostic rather than weakening corruption refusal; P2/s/low/direct; parent tasks-a7460c; ceiling semantics stay with tasks-084a9f; brief: docs/notes/2026-10-08-project-discovery-movement-brief.md
+- 2026-10-09T00:38:48Z (main): started
+  provenance: {"harness_session":"claude-code:4b1d7eef-4783-40e0-b224-bba892d8a7e3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
