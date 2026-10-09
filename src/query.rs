@@ -309,6 +309,8 @@ mod tests {
             spec: None,
             plan: None,
             step: None,
+            moved_to: None,
+            moved_from: None,
             body: String::new(),
             notes: vec![],
         }

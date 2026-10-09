@@ -19,6 +19,10 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         }
         Err(error) => return Err(error),
     };
+    match crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(&task.id)) {
+        Err(error @ Error::MovePending(_)) => ctx.warnings.push(error.to_string()),
+        result => result?,
+    }
     let project = recorded.as_ref().unwrap_or(&ctx.project);
     let now = crate::time::parse(&crate::time::now())?;
     let fields = describe(

@@ -89,3 +89,8 @@ prefix-alias mechanism supplies.
   user-reviewed spec and then plan; no implementation or live migration. On completion,
   update this brief and add the finding to tasks-7ba557 in the same commit. Reuse the
   existing lane and identity code; do not create another project-resolution effort.
+
+Outcome: the approved design is `docs/specs/2026-10-08-task-move-design.md` and
+approved implementation plan is `docs/plans/2026-10-09-task-move.md`.
+Goal tasks-7ba557 carried the implementation of `tasks move`, preserving history and
+attachments with a read-only source tombstone and forward recovery.

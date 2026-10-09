@@ -47,6 +47,18 @@ pub struct InitOut {
 }
 
 #[derive(Serialize)]
+pub struct MoveOut {
+    pub id: String,
+    pub from: String,
+    pub recovery: String,
+    pub attachments: Vec<String>,
+    pub park: bool,
+    pub inbound: Vec<String>,
+    pub paths: std::collections::BTreeMap<String, Vec<String>>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct RenameOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
@@ -817,6 +829,7 @@ pub struct Counts {
     pub shelved: usize,
     pub done: usize,
     pub dropped: usize,
+    pub moved: usize,
 }
 
 impl Counts {
@@ -831,13 +844,21 @@ impl Counts {
                 Status::Shelved => counts.shelved += 1,
                 Status::Done => counts.done += 1,
                 Status::Dropped => counts.dropped += 1,
+                Status::Moved => counts.moved += 1,
             }
         }
         counts
     }
 
     pub fn total(&self) -> usize {
-        self.idea + self.todo + self.doing + self.blocked + self.shelved + self.done + self.dropped
+        self.idea
+            + self.todo
+            + self.doing
+            + self.blocked
+            + self.shelved
+            + self.done
+            + self.dropped
+            + self.moved
     }
 }
 
@@ -864,6 +885,7 @@ pub fn count_columns(counts: &Counts, closed: bool) -> Vec<CountColumn> {
     if closed {
         columns.push(count_column("done", counts.done, Status::Done));
         columns.push(count_column("dropped", counts.dropped, Status::Dropped));
+        columns.push(count_column("moved", counts.moved, Status::Moved));
     }
     columns.push(CountColumn {
         label: "total",
@@ -981,6 +1003,7 @@ pub struct CheckOut {
 pub enum Output {
     Init(InitOut),
     Rename(RenameOut),
+    Move(MoveOut),
     Id(IdOut),
     Add(AddOut),
     Root(RootOut),
@@ -1056,6 +1079,13 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             }
             None => format!("{} is not retired", o.prefix),
         },
+        Output::Move(o) => {
+            let mut text = format!("{} → {}", o.from, o.id);
+            for id in &o.inbound {
+                text.push_str(&format!("\n  inbound: {id}"));
+            }
+            text
+        }
         Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Add(o) => o.id.clone(),
@@ -1914,6 +1944,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Init(o) => o.warnings.clone(),
         Output::Retire(o) => o.warnings.clone(),
         Output::Rename(o) => o.warnings.clone(),
+        Output::Move(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),
@@ -1948,6 +1979,29 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::style::ColorMode;
+
+    #[test]
+    fn moved_counts_as_closed_and_in_the_total() {
+        let task = crate::format::parse_task(
+            "---\nid: sci-000001\ntitle: T\nstatus: moved\npriority: 2\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\nmoved_to: wali-00000b\n---\n",
+            "tasks/sci-000001.md",
+        ).unwrap();
+        let counts = Counts::of(&[task]);
+        assert_eq!(counts.moved, 1);
+        assert_eq!(counts.total(), 1);
+        let columns = count_columns(&counts, true);
+        let moved = columns
+            .iter()
+            .find(|column| column.label == "moved")
+            .unwrap();
+        assert_eq!(moved.value, 1);
+        assert!(matches!(moved.style, Some(Style::Status(Status::Moved))));
+        assert!(
+            !count_columns(&counts, false)
+                .iter()
+                .any(|column| column.label == "moved")
+        );
+    }
 
     fn row(id: &str, parallel: bool) -> TaskSummary {
         TaskSummary {

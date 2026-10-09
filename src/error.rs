@@ -35,6 +35,10 @@ pub enum Error {
     #[error("{0}")]
     StaleCopy(String),
     #[error("{0}")]
+    Moved(String),
+    #[error("{0}")]
+    MovePending(String),
+    #[error("{0}")]
     RetiredProject(String),
     #[error("{0}")]
     OpenTasks(String),
@@ -104,6 +108,8 @@ impl Error {
             }
             Error::Claimed(id, detail) => Error::Claimed(id, detail + suffix),
             Error::StaleCopy(detail) => Error::StaleCopy(detail + suffix),
+            Error::Moved(detail) => Error::Moved(detail + suffix),
+            Error::MovePending(detail) => Error::MovePending(detail + suffix),
             Error::RetiredProject(detail) => Error::RetiredProject(detail + suffix),
             Error::OpenTasks(detail) => Error::OpenTasks(detail + suffix),
             Error::UnreadableCheckout(detail) => Error::UnreadableCheckout(detail + suffix),
@@ -145,6 +151,8 @@ impl Error {
             Error::ConcurrentModification(..) => "concurrent_modification",
             Error::Claimed(..) => "claimed",
             Error::StaleCopy(_) => "stale_copy",
+            Error::Moved(_) => "moved",
+            Error::MovePending(_) => "move_pending",
             Error::RetiredProject(_) => "retired_project",
             Error::OpenTasks(_) => "open_tasks",
             Error::UnreadableCheckout(_) => "unreadable_checkout",

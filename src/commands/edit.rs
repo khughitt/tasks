@@ -46,6 +46,11 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
             "completed is stamped by completing the task; it cannot be edited".into(),
         ));
     }
+    if edited.moved_to != original.moved_to || edited.moved_from != original.moved_from {
+        return Err(Error::Validation(
+            "moved_to and moved_from are set by `tasks move`; they cannot be edited".into(),
+        ));
+    }
     if !notes_unchanged_or_trimmed(&original.notes, &edited.notes) {
         return Err(Error::Validation(
             "notes are append-only; use `tasks note` (an edit may only remove a note's trailing spaces and tabs)"
@@ -284,6 +289,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let (original, original_raw) = ctx.project.read_task_with_raw(&id)?;
     super::refuse_stale_copy(&mut ctx, &original, &original_raw, super::Writer::Command)?;
+    super::guard_write(&ctx.registry, &ctx.shorthand, &original)?;
     let editor = std::env::var("EDITOR")
         .ok()
         .filter(|editor| !editor.is_empty())
@@ -335,6 +341,8 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         },
     )?;
 
+    super::guard_write(&ctx.registry, &ctx.shorthand, &original).map_err(keep)?;
+
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
     let mut edited = parse_task(&edited_raw, &tmp_display).map_err(keep)?;
     check_invariants(&original, &edited).map_err(keep)?;
@@ -358,10 +366,21 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ))));
     }
     for dependency in &edited.depends {
-        if resolver.resolve_task(dependency).map_err(keep)?.is_none() {
-            return Err(keep(Error::Validation(format!(
-                "dependency {dependency} is unreachable"
-            ))));
+        let found = resolver
+            .resolve_task(dependency)
+            .map_err(keep)?
+            .ok_or_else(|| {
+                keep(Error::Validation(format!(
+                    "dependency {dependency} is unreachable"
+                )))
+            })?;
+        let canonical = ctx.registry.canonical_id(dependency);
+        if !original
+            .depends
+            .iter()
+            .any(|stored| ctx.registry.canonical_id(stored) == canonical)
+        {
+            crate::tombstone::refuse_reference(&found, "dependency").map_err(keep)?;
         }
     }
     let from_main = resolver.take_warnings();
@@ -495,6 +514,36 @@ fn create_edit_temp(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moved_pointers_are_immutable_in_the_editor() {
+        let record = |extra: &str| {
+            crate::format::parse_task(
+                &format!(
+                    "---\nid: wali-00000b\ntitle: T\nstatus: todo\npriority: 2\n\
+    created: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\n{extra}---\n"
+                ),
+                "tasks/wali-00000b.md",
+            )
+            .unwrap()
+        };
+        let original = record("moved_from: dots-00000a\n");
+        let mut retitled = original.clone();
+        retitled.title = "U".into();
+        assert!(
+            check_invariants(&original, &retitled).is_ok(),
+            "an ordinary edit keeps them"
+        );
+        assert!(check_invariants(&original, &record("")).is_err(), "removal");
+        assert!(
+            check_invariants(&original, &record("moved_from: dots-00000c\n")).is_err(),
+            "replacement"
+        );
+        assert!(
+            check_invariants(&record(""), &record("moved_from: dots-00000a\n")).is_err(),
+            "addition"
+        );
+    }
 
     fn note(text: &str) -> Note {
         Note {

@@ -439,6 +439,21 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   Choose process separately using **Process and workspace**: a small risky change
   can need planning; a large mechanical change can be direct. Record it at scoping
   alongside size and complexity, including on each child; it is never inherited.
+- Move the same work to another project: `tasks move <id> --to <prefix>` from the
+  source's registered checkout. The task must be open, unparented, childless and
+  unclaimed; refusals name the edit or park that settles them, and destination
+  validation still applies. It preserves fields, notes and live attachments, and carries
+  this host's park and escalation. The source becomes a read-only `moved` tombstone;
+  writes and new references refuse with `moved` and name the new id. Existing
+  dependents follow the pointer; their owners swap references with the command in
+  `check`'s `moved_dep` warning. The move commits neither repository: commit each root
+  its `paths` lists. Rerun the same command after interruption; `--explain` diagnoses
+  without writes or locks. While pending, writes to both ids and both projects'
+  lifecycle commands refuse with `move_pending`. Recovery covers process interruption,
+  not power loss; the journal and carried park are host-local. Update every host's
+  binary before moving synced records: older binaries cannot parse the new fields.
+  For counterpart findings or manual undo, see the
+  [recovery limits](../../docs/specs/2026-10-08-task-move-design.md#44-recovery-limits).
 - A screenshot or file for a task: `tasks attach <id> <path>` (or `-` with `--name`, or
   `--clipboard`), with `--caption "<what it shows>"`. `tasks show <id>` prints each
   file's absolute path; read the image from there. `tasks detach <id> <name> "<why>"`
@@ -544,8 +559,10 @@ all moved aliases), and remove the inventory last.
 
 ## Retiring a project
 
-A project that is over declares it: close every task (drop, or re-file in the successor
-with `--source <old id>`), then `tasks retire [--successor <prefix>] --reason "<one line>"`
+A project that is over declares it: settle every open task (close or drop it, or move it
+to the successor with `tasks move <id> --to <successor>`; re-file with
+`--source <old id>` and drop the source when the task should change), then
+`tasks retire [--successor <prefix>] --reason "<one line>"`
 in its registered checkout. Every write to it is refused afterwards with `retired_project`,
 from every checkout; its ids keep resolving, `--all-projects` and `--group` reads leave it
 out, and `--project` reads warn. `tasks unretire` there undoes it. The project lifecycle

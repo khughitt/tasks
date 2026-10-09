@@ -204,7 +204,7 @@ pub fn rerun_line(root: &Path, args: &[String]) -> String {
     words.join(" ")
 }
 
-fn quote(word: &str) -> String {
+pub(crate) fn quote(word: &str) -> String {
     let safe = !word.is_empty()
         && word
             .chars()

@@ -848,24 +848,7 @@ impl Project {
             if path.exists() {
                 continue;
             }
-            let temp = path.with_file_name(format!(".{}.new.tmp", task.id));
-            let mut file = match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp)
-            {
-                Ok(file) => file,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error.into()),
-            };
-            if let Err(error) = file.write_all(serialize_task(task).as_bytes()) {
-                drop(file);
-                let _ = std::fs::remove_file(&temp);
-                return Err(error.into());
-            }
-            drop(file);
-            let linked = std::fs::hard_link(&temp, &path);
-            let _ = std::fs::remove_file(&temp);
+            let linked = self.create_task_file(task);
             match linked {
                 Ok(()) => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -875,6 +858,71 @@ impl Project {
         Err(Error::Validation(
             "could not allocate a free id after 16 attempts".into(),
         ))
+    }
+
+    /// Create the journal's reserved id exclusively; never redraw it on a collision.
+    pub fn create_task_exact(&self, registry: &Registry, task: &Task) -> Result<()> {
+        crate::format::validate_task(task)?;
+        self.validate_docs(task)?;
+        crate::needs::require_declared(&self.needs, &task.needs)?;
+        crate::hierarchy::validate_parent(self, registry, task)?;
+        crate::hierarchy::validate_lanes(self, registry, task)?;
+        crate::hierarchy::validate_periodic(self, registry, task)?;
+        crate::hierarchy::validate_defer(self, registry, task)?;
+        for _ in 0..16 {
+            let temp = self.tasks_dir().join(format!(
+                ".{}.{:06x}.new.tmp",
+                task.id,
+                fastrand::u32(..0x100_0000)
+            ));
+            let file = match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            };
+            return match self.publish_task_file(task, file, &temp) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    Err(Error::Validation(format!("{} already exists", task.id)))
+                }
+                Err(error) => Err(error.into()),
+            };
+        }
+        Err(Error::Io(format!(
+            "could not allocate a creation temp for {} after 16 attempts",
+            task.id
+        )))
+    }
+
+    fn create_task_file(&self, task: &Task) -> std::io::Result<()> {
+        let path = self.task_path(&task.id);
+        let temp = path.with_file_name(format!(".{}.new.tmp", task.id));
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        self.publish_task_file(task, file, &temp)
+    }
+
+    fn publish_task_file(
+        &self,
+        task: &Task,
+        mut file: std::fs::File,
+        temp: &Path,
+    ) -> std::io::Result<()> {
+        if let Err(error) = file.write_all(serialize_task(task).as_bytes()) {
+            drop(file);
+            let _ = std::fs::remove_file(temp);
+            return Err(error);
+        }
+        drop(file);
+        let linked = std::fs::hard_link(temp, self.task_path(&task.id));
+        let _ = std::fs::remove_file(temp);
+        linked
     }
 
     pub fn new_id(&self) -> Result<TaskId> {
@@ -980,6 +1028,8 @@ mod tests {
             spec: None,
             plan: None,
             step: None,
+            moved_to: None,
+            moved_from: None,
             body: String::new(),
             notes: vec![],
         }

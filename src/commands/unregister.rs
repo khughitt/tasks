@@ -8,7 +8,7 @@ pub fn run(prefix: String) -> Result<Output> {
     let _lock = Registry::lock()?;
     let mut registry = Registry::load()?;
     let root = registry.project_root(registry.canonical_prefix(&prefix));
-    super::reject_pending_rename_at(root, &prefix)?;
+    super::reject_pending_operations(root, registry.canonical_prefix(&prefix))?;
     let removed = registry.unregister(&prefix)?;
     registry.save()?;
     let warnings = removed

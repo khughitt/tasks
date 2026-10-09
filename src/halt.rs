@@ -26,10 +26,10 @@ pub fn snapshot(project: &Project, registry: &Registry, local: &[Task]) -> Resul
         .filter(|task| task.tags.iter().any(|tag| tag == "halt") && task.status.is_open())
         .collect();
     halts.sort_by(|a, b| (a.priority, &a.id).cmp(&(b.priority, &b.id)));
-    let allowed = halts
-        .iter()
-        .flat_map(|halt| reachable(halt, local))
-        .collect();
+    let mut allowed = HashSet::new();
+    for halt in &halts {
+        allowed.extend(reachable(halt, local, registry)?);
+    }
     Ok(HaltSnapshot {
         authority,
         halts,
@@ -61,37 +61,49 @@ impl HaltSnapshot {
     }
 }
 
-fn reachable(halt: &Task, local: &[Task]) -> HashSet<TaskId> {
+fn reachable(halt: &Task, local: &[Task], registry: &Registry) -> Result<HashSet<TaskId>> {
+    let resolve = |id: &TaskId| {
+        let id = registry.canonical_id(id);
+        if id.prefix == halt.id.prefix {
+            Ok(local.iter().find(|task| task.id == id).cloned())
+        } else {
+            crate::resolve::resolve_registered(registry, &id)
+        }
+    };
     let mut pending = vec![halt.id.clone()];
-    pending.extend(
-        halt.depends
-            .iter()
-            .filter(|id| id.prefix == halt.id.prefix)
-            .cloned(),
-    );
     let mut visited = HashSet::new();
+    let mut allowed = HashSet::new();
     while let Some(id) = pending.pop() {
+        let id = registry.canonical_id(&id);
         if !visited.insert(id.clone()) {
             continue;
         }
-        if id != halt.id
-            && let Some(task) = local.iter().find(|task| task.id == id)
-        {
-            pending.extend(
-                task.depends
-                    .iter()
-                    .filter(|dep| dep.prefix == id.prefix)
-                    .cloned(),
-            );
+        let first = if id == halt.id {
+            Some(halt.clone())
+        } else {
+            resolve(&id)?
+        };
+        let Some(task) = crate::tombstone::follow(first, resolve)? else {
+            continue;
+        };
+        if task.id.prefix != halt.id.prefix {
+            continue;
         }
+        allowed.insert(task.id.clone());
+        pending.extend(task.depends.iter().map(|id| registry.canonical_id(id)));
         pending.extend(
             local
                 .iter()
-                .filter(|task| task.parent.as_ref() == Some(&id))
-                .map(|task| task.id.clone()),
+                .filter(|child| {
+                    child
+                        .parent
+                        .as_ref()
+                        .is_some_and(|parent| registry.canonical_id(parent) == task.id)
+                })
+                .map(|child| child.id.clone()),
         );
     }
-    visited
+    Ok(allowed)
 }
 
 #[cfg(test)]
@@ -129,6 +141,8 @@ mod tests {
             spec: None,
             plan: None,
             step: None,
+            moved_to: None,
+            moved_from: None,
             body: String::new(),
             notes: vec![],
         }
@@ -143,11 +157,21 @@ mod tests {
         halt.depends.push(dependency.id.clone());
         child.parent = Some(halt.id.clone());
         stale_halt.depends.clear();
-        let ids = reachable(&halt, &[stale_halt, child.clone(), dependency.clone()]);
+        let ids = reachable(
+            &halt,
+            &[stale_halt, child.clone(), dependency.clone()],
+            &Registry::default(),
+        )
+        .unwrap();
         assert!(ids.contains(&halt.id));
         assert!(ids.contains(&child.id));
         assert!(ids.contains(&dependency.id));
-        let ids_without_local_halt = reachable(&halt, &[child.clone(), dependency.clone()]);
+        let ids_without_local_halt = reachable(
+            &halt,
+            &[child.clone(), dependency.clone()],
+            &Registry::default(),
+        )
+        .unwrap();
         assert!(ids_without_local_halt.contains(&dependency.id));
         assert!(ids_without_local_halt.contains(&child.id));
     }
@@ -167,7 +191,9 @@ mod tests {
         let ids = reachable(
             &halt,
             &[child.clone(), dependency.clone(), grandchild.clone()],
-        );
+            &Registry::default(),
+        )
+        .unwrap();
         assert_eq!(ids.len(), 4);
         assert!(ids.contains(&grandchild.id));
         assert!(!ids.contains(&foreign));

@@ -19,11 +19,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use time::OffsetDateTime;
 
 pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Result<Option<Task>> {
-    let id = ctx.registry.canonical_id(id);
-    match all.iter().find(|task| task.id == id) {
-        Some(task) => Ok(Some(task.clone())),
-        None => ctx.resolve_task(&id),
-    }
+    let resolve = |id: &TaskId| {
+        let id = ctx.registry.canonical_id(id);
+        match all.iter().find(|task| task.id == id) {
+            Some(task) => Ok(Some(task.clone())),
+            None => ctx.resolve_task(&id),
+        }
+    };
+    crate::tombstone::follow(resolve(id)?, resolve)
 }
 
 /// `list`, and `search` when `text` is given: the text predicate narrows the same

@@ -1,13 +1,19 @@
 ---
 id: tasks-7ba557
 title: no way to move a task between registered projects
-status: idea
+status: done
 priority: 2
+size: l
+complexity: high
+process: direct
 created: 2026-09-12T09:35:46Z
-updated: 2026-10-08T10:42:11Z
+updated: 2026-10-09T08:27:30Z
+completed: 2026-10-09T08:27:30Z
 depends: []
 parent: tasks-a7460c
 tags: [feedback, gap, "from:dots"]
+spec: docs/specs/2026-10-08-task-move-design.md
+plan: docs/plans/2026-10-09-task-move.md
 ---
 
 Moving five open tasks to a new project meant re-adding each with --source and dropping the original by hand; a move that keeps id history, notes, and cross-project deps would replace that.
@@ -22,3 +28,12 @@ Handoff: docs/notes/2026-10-08-project-discovery-movement-brief.md. Compare keep
 
 - 2026-10-06T16:52:05Z (main): organization: assigned to project location/migration; reuse the canonical identity contract and scope the move's history/dependency semantics before proposing implementation.
 - 2026-10-08T10:42:11Z (main): scope: briefed; canonical ids only rewrite whole project prefixes and cross-project parents are refused; added tasks-bf6b9b to compare add/drop, explicit migration and per-task forwarding with preservation/recovery checks; existing parent and original report retained; brief: docs/notes/2026-10-08-project-discovery-movement-brief.md
+- 2026-10-09T04:58:48Z (task-migration-design): Approved design and implementation plan: docs/specs/2026-10-08-task-move-design.md and docs/plans/2026-10-09-task-move.md; eight direct implementation children will execute in the existing worktree.
+- 2026-10-09T05:05:01Z (task-migration-design): review: plan round 4 — verdict: revise; findings: Important 9; reviewer: codex/gpt-6.1-sol
+- 2026-10-09T07:08:21Z (task-migration-design): review: impl round 1 — verdict: revise; findings: Important 6, Minor 5; reviewer: codex/gpt-6-astra
+- 2026-10-09T08:00:49Z (task-migration-design): review: impl round 2 — verdict: revise; findings: Important 1; reviewer: codex/gpt-6-astra
+- 2026-10-09T08:12:32Z (task-migration-design): review: impl round 3 — verdict: accept; findings: Minor 5; reviewer: codex/gpt-6.1-sol
+- 2026-10-09T08:27:30Z (task-migration-design): done
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T08:27:30Z (task-migration-design): Implemented and reinstalled tasks move with history/attachments, immutable pointers, safe interruption recovery, dependency/cycle/halt integration and docs. Whole-branch Important findings fixed through two reviewed corrective rounds; final just gate 1282 tests passed. Minor diagnostics deferred to tasks-183bfa.
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}

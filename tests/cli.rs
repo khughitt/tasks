@@ -8859,7 +8859,7 @@ fn projects_pretty_reveals_closed_columns_on_request() {
     let opened = env.pretty(nowhere.path(), &["projects", "--closed"]);
     assert_eq!(
         opened.lines().next().unwrap(),
-        "project  idea  todo  doing  blocked  shelved  done  dropped  total  activity"
+        "project  idea  todo  doing  blocked  shelved  done  dropped  moved  total  activity"
     );
 }
 
@@ -8906,7 +8906,7 @@ fn prime_counts_line_uses_the_same_columns_as_projects() {
     let opened = env.pretty(&sci, &["prime", "--closed"]);
     assert_eq!(
         opened.lines().nth(1).unwrap(),
-        "idea 0  todo 1  doing 0  blocked 0  shelved 0  done 1  dropped 0  total 2"
+        "idea 0  todo 1  doing 0  blocked 0  shelved 0  done 1  dropped 0  moved 0  total 2"
     );
 }
 
@@ -12968,12 +12968,14 @@ fn completion_offers_the_fixed_value_sets_and_registry_prefixes() {
             4,
             &["tasks", "edit", "sci-000001", "--status", ""]
         ),
-        ["idea", "todo", "doing", "blocked", "done", "dropped"]
+        [
+            "idea", "todo", "doing", "blocked", "done", "dropped", "moved"
+        ]
     );
     assert_eq!(
         env.complete(&sci, "bash", 3, &["tasks", "list", "--status", ""]),
         [
-            "idea", "todo", "doing", "blocked", "shelved", "done", "dropped"
+            "idea", "todo", "doing", "blocked", "shelved", "done", "dropped", "moved"
         ]
     );
     assert_eq!(

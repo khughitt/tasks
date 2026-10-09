@@ -11,6 +11,12 @@ Response containers such as `tasks: []` and `warnings: []` remain, as does `next
 when nothing is eligible. See
 [the output contract](docs/specs/2026-08-29-tasks-design.md#51-output-contract).
 
+Task objects expose optional `moved_to` (the destination id on a source tombstone)
+and `moved_from` (the source id on the destination). `status` includes `moved`, a
+closed, read-only status; counts include `moved`, and `total` counts every record.
+Only `move` sets the pointer fields. Older binaries cannot parse these records:
+update every host reading synced tasks before the first move.
+
 Design: [`docs/specs/2026-08-29-tasks-design.md`](docs/specs/2026-08-29-tasks-design.md).
 Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-tasks.md).
 
@@ -364,6 +370,8 @@ from a clone):
                                      #   sample, lanes, quiet. Needs no local project.
     tasks groups                     # each group, its members, and whether they are reachable
     tasks group rm vf                # delete the group; its projects stay registered
+    tasks move dots-5760ef --to wali  # preserve the task, notes and attachments in another project
+    tasks move dots-5760ef --to wali --explain  # diagnose without locks or writes
     tasks add "Piece" --project fam  # create in another registered project
     tasks note fam-0c3d7e "…"        # id-taking commands follow the prefix to its project
     tasks show 4f2a9c                # a bare suffix means the current project's task (sci-4f2a9c)
@@ -409,6 +417,39 @@ carries attachments.
 An interrupted `attach` leaves a file that `check` reports as `attachment_unnoted`.
 Rerun it with the same bytes and `--name <name>` to finish, or `detach` the file. An
 interrupted `detach` finishes when rerun.
+
+`tasks move <id> --to <prefix> [--explain]` moves an open, unparented,
+childless, unclaimed task from its registered checkout to another live registered
+project. Destination validation still applies to its spec, plan, needs and dependencies.
+It preserves fields, notes and live attachments, carries this host's park and escalation,
+and leaves a read-only `moved` tombstone. Writes and new references to the tombstone
+refuse with `moved`, naming the destination id. Existing dependents follow the pointer;
+`check` warns `moved_dep` with `tasks dep <id> --on <new> --rm <old>` for their owners.
+`show` displays the tombstone; `resolve` continues to resolve prefixes and paths only.
+
+The move output (`MoveOut`) names the paths to commit in each root; it commits neither:
+
+```json
+{"id": "wali-b0882b", "from": "dots-5760ef", "recovery": "fresh",
+ "attachments": ["shot.png"], "park": true, "inbound": ["ops-1a2b3c"],
+ "paths": {"<dots root>": ["tasks/dots-5760ef.md", "tasks/files/dots-5760ef/shot.png"],
+           "<wali root>": ["tasks/wali-b0882b.md", "tasks/files/wali-b0882b/shot.png"]},
+ "warnings": []}
+```
+
+`recovery` is `fresh`, `resumed`, or `complete`; a rerun after success writes nothing.
+`--explain` returns the same shape without locks or writes, including `refuse` with
+reasons in `warnings`. For an interrupted move, `--explain` reports `resume`;
+performing the recovery reports `resumed`. `id` is empty when refusal happens before
+an id is minted.
+`inbound` reports dependents found in reachable live registered projects; it cannot
+inventory unreachable or retired projects. Rerun the same command after process interruption. A host-local
+journal freezes writes to both ids and both projects' lifecycle commands with
+`move_pending`. Reads remain available. `check` reports `move_pending` for a local
+journal, `move_incomplete` for a reachable missing or mismatched counterpart, and
+`move_counterpart_unreachable` when it cannot inspect the counterpart.
+Recovery covers process interruption, not power loss; parks on other hosts stay keyed
+to the old id. See [recovery limits and manual undo](docs/specs/2026-10-08-task-move-design.md#44-recovery-limits).
 
 Run `tasks --help` for the full command list.
 
