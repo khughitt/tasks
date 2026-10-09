@@ -439,7 +439,9 @@ The move output (`MoveOut`) names the paths to commit in each root; it commits n
 
 `recovery` is `fresh`, `resumed`, or `complete`; a rerun after success writes nothing.
 `--explain` returns the same shape without locks or writes, including `refuse` with
-reasons in `warnings`; `id` is empty when refusal happens before an id is minted.
+reasons in `warnings`. For an interrupted move, `--explain` reports `resume`;
+performing the recovery reports `resumed`. `id` is empty when refusal happens before
+an id is minted.
 `inbound` reports dependents found in reachable live registered projects; it cannot
 inventory unreachable or retired projects. Rerun the same command after process interruption. A host-local
 journal freezes writes to both ids and both projects' lifecycle commands with
