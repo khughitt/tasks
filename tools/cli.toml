@@ -2515,3 +2515,25 @@ summary = "Undo an applied installation from its artifact"
 options = [
   { names = ["--artifact"], value = "path", required = true },
 ]
+
+# Minimal adoption surface; existing ops-projects commands remain outside this inventory.
+[cli.ops-projects]
+project = "ops"
+tier = "automation"
+default_output = "pretty"
+env = "OPS-PROJECTS"
+protocol = "link progress and refusal diagnostics"
+
+[[cli.ops-projects.commands]]
+path = []
+
+[[cli.ops-projects.commands]]
+path = ["link"]
+summary = "Keep project records in the profile overlay and link its checkout"
+args = [{name = "checkout", value = "path", required = true}]
+options = [
+  {names = ["--prefix"], value = "string", required = true},
+  {names = ["--purpose"], value = "string", required = true},
+  {names = ["--name"], value = "string"},
+  {names = ["--explain"], value = "none"},
+]
