@@ -67,7 +67,7 @@ pub struct ScopeArgs {
 /// the parked/periodic/deferred modes, and scope.
 #[derive(Args, Debug)]
 pub struct ListArgs {
-    /// Filter by status (repeatable): idea, todo, doing, blocked, shelved, done, or dropped.
+    /// Filter by status (repeatable): idea, todo, doing, blocked, shelved, done, dropped, or moved.
     #[arg(
         long = "status",
         value_name = "STATUS",
@@ -414,7 +414,7 @@ pub enum Command {
         /// Reverse the chosen order.
         #[arg(long)]
         reverse: bool,
-        /// Also show the done and dropped columns.
+        /// Also show the done, dropped, and moved columns.
         #[arg(long)]
         closed: bool,
         /// Show each project's registered root as a final column.
@@ -744,7 +744,7 @@ pub enum Command {
     Prime {
         #[command(flatten)]
         scope: ScopeArgs,
-        /// Also show the done and dropped counts.
+        /// Also show the done, dropped, and moved counts.
         #[arg(long)]
         closed: bool,
         #[command(flatten)]

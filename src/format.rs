@@ -3,7 +3,7 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Complexity, HarnessProvenance, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 27] = [
+const KEYS: [&str; 29] = [
     "id",
     "title",
     "status",
@@ -31,6 +31,8 @@ const KEYS: [&str; 27] = [
     "spec",
     "plan",
     "step",
+    "moved_to",
+    "moved_from",
 ];
 
 fn perr(file: &str, detail: impl Into<String>) -> Error {
@@ -159,6 +161,14 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         spec: scalar("spec")?,
         plan: scalar("plan")?,
         step: scalar("step")?,
+        moved_to: scalar("moved_to")?
+            .map(|v| TaskId::parse(&v))
+            .transpose()
+            .map_err(|e| perr(file, e.to_string()))?,
+        moved_from: scalar("moved_from")?
+            .map(|v| TaskId::parse(&v))
+            .transpose()
+            .map_err(|e| perr(file, e.to_string()))?,
         body,
         notes,
     };
@@ -412,6 +422,7 @@ pub fn validate_task(t: &Task) -> Result<()> {
             crate::provenance::validate(provenance).map_err(Error::Validation)?;
         }
     }
+    crate::tombstone::validate(t)?;
     Ok(())
 }
 
@@ -493,6 +504,12 @@ pub fn serialize_task(t: &Task) -> String {
     if let Some(v) = &t.step {
         pairs.push(("step".into(), s(v)));
     }
+    if let Some(id) = &t.moved_to {
+        pairs.push(("moved_to".into(), s(&id.to_string())));
+    }
+    if let Some(id) = &t.moved_from {
+        pairs.push(("moved_from".into(), s(&id.to_string())));
+    }
     let mut out = String::from("---\n");
     out.push_str(&frontmatter::serialize(&pairs));
     out.push_str("---\n");
@@ -544,6 +561,60 @@ mod tests {
         assert_eq!(t.body, "");
         assert!(t.notes.is_empty());
         assert_eq!(serialize_task(&t), MINIMAL);
+    }
+
+    #[test]
+    fn moved_record_round_trips_with_its_pointer() {
+        let text = "---\nid: dots-00000a\ntitle: T\nstatus: moved\npriority: 2\n\
+    created: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\n\
+    moved_to: wali-00000b\n---\n";
+        let task = parse_task(text, "tasks/dots-00000a.md").unwrap();
+        assert_eq!(task.status, Status::Moved);
+        assert_eq!(task.moved_to.as_ref().unwrap().to_string(), "wali-00000b");
+        assert_eq!(serialize_task(&task), text);
+    }
+
+    #[test]
+    fn destination_round_trips_moved_from() {
+        let text = "---\nid: wali-00000b\ntitle: T\nstatus: todo\npriority: 2\n\
+    created: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\n\
+    moved_from: dots-00000a\n---\n";
+        let task = parse_task(text, "tasks/wali-00000b.md").unwrap();
+        assert_eq!(task.moved_from.as_ref().unwrap().to_string(), "dots-00000a");
+        assert_eq!(serialize_task(&task), text);
+    }
+
+    #[test]
+    fn pointer_fields_are_validated() {
+        let base = |status: &str, extra: &str| {
+            format!(
+                "---\nid: dots-00000a\ntitle: T\nstatus: {status}\npriority: 2\n\
+    created: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\n{extra}---\n"
+            )
+        };
+        for (status, extra, why) in [
+            ("moved", "", "moved without moved_to"),
+            (
+                "todo",
+                "moved_to: wali-00000b\n",
+                "moved_to on a live record",
+            ),
+            (
+                "moved",
+                "moved_to: dots-00000b\n",
+                "moved_to in the same project",
+            ),
+            (
+                "todo",
+                "moved_from: dots-00000c\n",
+                "moved_from in the same project",
+            ),
+        ] {
+            assert!(
+                parse_task(&base(status, extra), "tasks/dots-00000a.md").is_err(),
+                "{why} must not parse"
+            );
+        }
     }
 
     #[test]

@@ -46,6 +46,11 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
             "completed is stamped by completing the task; it cannot be edited".into(),
         ));
     }
+    if edited.moved_to != original.moved_to || edited.moved_from != original.moved_from {
+        return Err(Error::Validation(
+            "moved_to and moved_from are set by `tasks move`; they cannot be edited".into(),
+        ));
+    }
     if !notes_unchanged_or_trimmed(&original.notes, &edited.notes) {
         return Err(Error::Validation(
             "notes are append-only; use `tasks note` (an edit may only remove a note's trailing spaces and tabs)"
@@ -495,6 +500,36 @@ fn create_edit_temp(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moved_pointers_are_immutable_in_the_editor() {
+        let record = |extra: &str| {
+            crate::format::parse_task(
+                &format!(
+                    "---\nid: wali-00000b\ntitle: T\nstatus: todo\npriority: 2\n\
+    created: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\n{extra}---\n"
+                ),
+                "tasks/wali-00000b.md",
+            )
+            .unwrap()
+        };
+        let original = record("moved_from: dots-00000a\n");
+        let mut retitled = original.clone();
+        retitled.title = "U".into();
+        assert!(
+            check_invariants(&original, &retitled).is_ok(),
+            "an ordinary edit keeps them"
+        );
+        assert!(check_invariants(&original, &record("")).is_err(), "removal");
+        assert!(
+            check_invariants(&original, &record("moved_from: dots-00000c\n")).is_err(),
+            "replacement"
+        );
+        assert!(
+            check_invariants(&record(""), &record("moved_from: dots-00000a\n")).is_err(),
+            "addition"
+        );
+    }
 
     fn note(text: &str) -> Note {
         Note {

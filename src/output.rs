@@ -817,6 +817,7 @@ pub struct Counts {
     pub shelved: usize,
     pub done: usize,
     pub dropped: usize,
+    pub moved: usize,
 }
 
 impl Counts {
@@ -831,13 +832,21 @@ impl Counts {
                 Status::Shelved => counts.shelved += 1,
                 Status::Done => counts.done += 1,
                 Status::Dropped => counts.dropped += 1,
+                Status::Moved => counts.moved += 1,
             }
         }
         counts
     }
 
     pub fn total(&self) -> usize {
-        self.idea + self.todo + self.doing + self.blocked + self.shelved + self.done + self.dropped
+        self.idea
+            + self.todo
+            + self.doing
+            + self.blocked
+            + self.shelved
+            + self.done
+            + self.dropped
+            + self.moved
     }
 }
 
@@ -864,6 +873,7 @@ pub fn count_columns(counts: &Counts, closed: bool) -> Vec<CountColumn> {
     if closed {
         columns.push(count_column("done", counts.done, Status::Done));
         columns.push(count_column("dropped", counts.dropped, Status::Dropped));
+        columns.push(count_column("moved", counts.moved, Status::Moved));
     }
     columns.push(CountColumn {
         label: "total",
@@ -1948,6 +1958,29 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::style::ColorMode;
+
+    #[test]
+    fn moved_counts_as_closed_and_in_the_total() {
+        let task = crate::format::parse_task(
+            "---\nid: sci-000001\ntitle: T\nstatus: moved\npriority: 2\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-02T00:00:00Z\ndepends: []\ntags: []\nmoved_to: wali-00000b\n---\n",
+            "tasks/sci-000001.md",
+        ).unwrap();
+        let counts = Counts::of(&[task]);
+        assert_eq!(counts.moved, 1);
+        assert_eq!(counts.total(), 1);
+        let columns = count_columns(&counts, true);
+        let moved = columns
+            .iter()
+            .find(|column| column.label == "moved")
+            .unwrap();
+        assert_eq!(moved.value, 1);
+        assert!(matches!(moved.style, Some(Style::Status(Status::Moved))));
+        assert!(
+            !count_columns(&counts, false)
+                .iter()
+                .any(|column| column.label == "moved")
+        );
+    }
 
     fn row(id: &str, parallel: bool) -> TaskSummary {
         TaskSummary {

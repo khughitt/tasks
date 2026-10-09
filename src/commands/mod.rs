@@ -1401,6 +1401,11 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     if to == Status::Doing {
         ctx.guard_holds(task, force)?;
     }
+    if to == Status::Moved && task.status != Status::Moved {
+        return Err(Error::Validation(
+            "only `tasks move` sets status moved".into(),
+        ));
+    }
     if to == Status::Done && task.status != Status::Done && !force {
         let open = open_deps(ctx, task)?;
         if !open.is_empty() {
@@ -1600,7 +1605,7 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
                         Status::Dropped => format!("run `tasks drop {id}`"),
                         Status::Blocked => format!("run `tasks block {id}`"),
                         Status::Shelved => format!("run `tasks shelve {id} \"<wake condition>\"`"),
-                        Status::Todo | Status::Idea | Status::Doing => {
+                        Status::Todo | Status::Idea | Status::Doing | Status::Moved => {
                             "the store is unchanged and a same-status edit will not retry cleanup"
                                 .into()
                         }

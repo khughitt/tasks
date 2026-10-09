@@ -3,6 +3,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn moved_is_closed_and_terminal() {
+        assert!(!Status::Moved.is_open());
+        for to in Status::ALL {
+            assert_eq!(
+                Status::can_transition(Status::Moved, to),
+                to == Status::Moved,
+                "{to:?}"
+            );
+        }
+    }
+
+    #[test]
     fn parses_valid_id() {
         let id = TaskId::parse("sci-4f2a9c").unwrap();
         assert_eq!(id.prefix, "sci");
@@ -57,7 +69,7 @@ mod tests {
         for s in Status::ALL {
             assert_eq!(Status::parse(s.as_str()).unwrap(), s);
         }
-        assert_eq!(Status::ALL.len(), 7);
+        assert_eq!(Status::ALL.len(), 8);
         assert_eq!(Status::parse("shelved").unwrap(), Status::Shelved);
         assert!(Status::Idea.is_open());
         assert!(Status::Blocked.is_open());
@@ -145,6 +157,8 @@ mod tests {
             spec: spec.map(Into::into),
             plan: plan.map(Into::into),
             step: step.map(Into::into),
+            moved_to: None,
+            moved_from: None,
             body: String::new(),
             notes: vec![],
         }
@@ -257,10 +271,11 @@ pub enum Status {
     Shelved,
     Done,
     Dropped,
+    Moved,
 }
 
 impl Status {
-    pub const ALL: [Status; 7] = [
+    pub const ALL: [Status; 8] = [
         Status::Idea,
         Status::Todo,
         Status::Doing,
@@ -268,6 +283,7 @@ impl Status {
         Status::Shelved,
         Status::Done,
         Status::Dropped,
+        Status::Moved,
     ];
 
     pub fn parse(s: &str) -> Result<Status> {
@@ -286,16 +302,20 @@ impl Status {
             Status::Shelved => "shelved",
             Status::Done => "done",
             Status::Dropped => "dropped",
+            Status::Moved => "moved",
         }
     }
 
     pub fn is_open(self) -> bool {
-        !matches!(self, Status::Done | Status::Dropped)
+        !matches!(self, Status::Done | Status::Dropped | Status::Moved)
     }
 
     pub fn can_transition(from: Status, to: Status) -> bool {
         if from == to {
             return true;
+        }
+        if from == Status::Moved {
+            return false;
         }
         match (from.is_open(), to.is_open()) {
             (true, _) => true,
@@ -530,6 +550,12 @@ pub struct Task {
     pub plan: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step: Option<String>,
+    /// Set only by `tasks move`; see docs/specs/2026-10-08-task-move-design.md §3.2.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved_to: Option<TaskId>,
+    /// Set only by `tasks move`; see docs/specs/2026-10-08-task-move-design.md §3.2.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<TaskId>,
     pub body: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<Note>,

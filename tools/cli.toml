@@ -375,7 +375,7 @@ path = ["list"]
 verb = "list"
 summary = "List tasks (open by default)"
 options = [
-  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped"], repeatable = true },
+  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped", "moved"], repeatable = true },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"], repeatable = true },
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
@@ -403,7 +403,7 @@ path = ["search"]
 summary = "List tasks whose title or body contains a phrase; takes every list option"
 args = [{ name = "query", value = "string", required = true }]
 options = [
-  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped"], repeatable = true },
+  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped", "moved"], repeatable = true },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"], repeatable = true },
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
@@ -480,7 +480,7 @@ summary = "Edit fields, or open the task in $EDITOR when no field flags are give
 args = [{ name = "id", value = "ref", required = true }]
 options = [
   { names = ["--title"], value = "string" },
-  { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped"], repeatable = false },
+  { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped", "moved"], repeatable = false },
   { shared = "force", value = "none" },
   { names = ["--reason"], value = "string" },
   { names = ["--no-parent"], value = "none" },
@@ -668,7 +668,7 @@ options = [
 path = ["tags"]
 summary = "Tag frequencies (open tasks unless --status), per project"
 options = [
-  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped"], repeatable = true },
+  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped", "moved"], repeatable = true },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
