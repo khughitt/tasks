@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: task-migration-design
 created: 2026-10-09T08:27:30Z
-updated: 2026-10-09T08:28:07Z
+updated: 2026-10-09T10:40:28Z
 started: 2026-10-09T08:28:06Z
 depends: [tasks-7ba557]
 parent: tasks-a7460c
@@ -24,3 +24,6 @@ Prepared branch task-migration-design in .worktrees/task-migration-design: imple
   provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-09T08:28:06Z (task-migration-design): parked (waiting on user, approval): User approves local merge of task-migration-design that activates the global tasks skill; agent then merges into main, verifies merged code, closes tasks-db2c06 and preserves evidence/harvests timings before cleanup.
   provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T10:40:27Z (task-migration-design): resumed
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T10:40:27Z (task-migration-design): User authorized local merge and activation of the globally linked tasks skill. Resume integration only; implementation/reviews are complete.
