@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: task-migration-design
 created: 2026-10-08T10:42:11Z
-updated: 2026-10-09T01:15:54Z
+updated: 2026-10-09T01:16:16Z
 started: 2026-10-09T01:02:06Z
 depends: []
 parent: tasks-a7460c
@@ -35,3 +35,5 @@ Ideas it wakes: on completion, add the approved finding and artifact paths to ta
 - 2026-10-09T01:02:16Z (task-migration-design): resumed
   provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-09T01:15:53Z (task-migration-design): design: old id stays a read-only 'moved' tombstone with a pointer (user choice); inbound depends follow the pointer instead of being rewritten (deviation from the option text, argued in spec §2/§3.4); parent/children/claims refuse; journal+classify recovery modeled on rename; evidence: 9 past add/drop moves, none kept source notes
+- 2026-10-09T01:16:16Z (task-migration-design): parked (waiting on user, review): user reviews docs/specs/2026-10-08-task-move-design.md (in .worktrees/task-migration-design); on approval, agent writes the implementation plan with writing-plans
+  provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
