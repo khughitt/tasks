@@ -1,13 +1,15 @@
 ---
 id: tasks-6b2867
 title: "A park recorded from a worktree survives the task's close from another checkout, and no command clears it: prime keeps listing the closed task as parked"
-status: idea
+status: done
 priority: 2
 created: 2026-10-06T09:08:25Z
-updated: 2026-10-09T13:50:44Z
+updated: 2026-10-09T15:43:28Z
+completed: 2026-10-09T15:43:28Z
 depends: [tasks-6a0050, tasks-081099]
 parent: tasks-984769
 tags: [feedback, gap, "from:material"]
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -30,3 +32,7 @@ Original report (preserved): Task closed with done in the main checkout while it
 - 2026-10-06T11:39:23Z (main): Review finding: prime lists a park on a closed record while list --parked hides it (list.rs::list_parked filters is_open; prime's parked::rows does not), matching this report's second symptom. Added to tasks-b9b10e's question; brief: docs/notes/2026-10-06-record-continuity-brief.md
 - 2026-10-08T10:12:57Z (main): scope: briefed; corrected the unsupported no-recovery premise while preserving the original report; tasks-b9b10e retains removed-worktree, recurrence, ownership and view-consistency checks and will distinguish bare retries from explicit messages; brief: docs/notes/2026-10-06-record-continuity-brief.md
 - 2026-10-09T13:50:43Z (probe/park-recovery): tasks-b9b10e finding: repeated done clears a closed non-recurring park after worktree removal, changing only updated, for both sync and git arrival; a live foreign claim refuses. Gaps: a recurring record's park cannot be cleared once its worktree is gone (tasks-6a0050), and prime lists closed parks that list --parked hides (tasks-081099). Brief: docs/notes/2026-10-06-record-continuity-brief.md
+- 2026-10-09T15:43:28Z (main): done
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T15:43:28Z (main): Resolved: tasks-b9b10e showed repeated done/drop clears a park left on a closed record; tasks-6a0050 made that work for recurring records once the worktree is gone; tasks-081099 makes prime warn with the clearing command instead of listing the park
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
