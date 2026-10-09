@@ -1,6 +1,6 @@
 # Moving one task between projects
 
-Status: approved 2026-10-09 after review round 3; amended by plan review round 1 (§3.3 checkout row, §3.4 aliases and chains); implementation plan next (tasks-bf6b9b)
+Status: implemented (tasks-7ba557)
 Task: tasks-bf6b9b (lane tasks-a7460c; answers tasks-7ba557)
 Brief: `docs/notes/2026-10-08-project-discovery-movement-brief.md`
 
