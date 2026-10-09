@@ -1,6 +1,6 @@
 # Moving one task between projects
 
-Status: draft for review (tasks-bf6b9b)
+Status: draft, revised after review round 1 (tasks-bf6b9b)
 Task: tasks-bf6b9b (lane tasks-a7460c; answers tasks-7ba557)
 Brief: `docs/notes/2026-10-08-project-discovery-movement-brief.md`
 
@@ -77,7 +77,11 @@ The destination record is the source record with these changes:
 - Attachments listed live in the ledger are copied to `tasks/files/<new id>/`. Their
   ledger notes are name-only, so they carry over unchanged.
 - A park and an escalation keyed by the source id, in this host's claim store, move to
-  the destination store under the new id.
+  the destination store under the new id. The carried park keeps its owner, session,
+  host, time, next step, waiting party, reason, needs, minutes and title. Its `worktree`
+  is set to the destination project's `resume_root`. The source's checkout would be the
+  wrong place to resume: `list --parked` and `quiet` offer that path, and only a
+  checkout of the destination project can run `tasks start <new id>`.
 
 The tombstone is the source record with:
 
@@ -124,6 +128,14 @@ needs, docs, lanes, depends). Whatever that refuses, `move` refuses.
   revisits an id or reaches an unreachable record, the dependency counts as open and
   carries a warning, as an unreachable dependency does today. This is one-way forwarding
   for reads; nothing routes writes.
+- **Cycle detection follows the same pointer.** In the dependency graph, a tombstone's
+  only edge is to its `moved_to` record; its own retained `depends` are history, not
+  edges. Both cycle walkers use these edges: the write-time walk (`dep --on`,
+  `add`/`edit --depends`, `ensure_acyclic`) and `check`'s. Otherwise, with B depending
+  on A and A moved to C, `dep C --on B` would pass. The walk would follow A's retained
+  `depends` instead of A → C, so C → B → A → C would be left permanently blocked. A move
+  never creates a cycle itself: the graph after the move is the graph before it, with
+  A renamed to C.
 - **`check`** warns `moved_dep` on every record that depends on a tombstone. The warning
   names the swap: `tasks dep <id> --on <new> --rm <old>`.
 - **`move`'s output** lists `inbound`: the records in reachable registered projects that
@@ -162,7 +174,9 @@ The journal lives at `$XDG_STATE_HOME/tasks/move/<src id>.toml`: outside both
 repositories, so `git checkout .` cannot erase it. It records:
 
 - `source`, `target` (the full new id), `source_root`, `target_root`
-- `source_digest`: sha256 of the source file at preflight
+- `source_text` and `source_digest`: the exact bytes of the source file at preflight
+  and their sha256. Undo restores from this text, never from git, whose committed copy
+  can differ from the file the move read.
 - `target_text` and `tombstone_text`: the exact bytes to write, rendered at preflight
   with one move time, so a resume writes identical files
 - `attachments`: `{name, sha256}` for each live attachment
@@ -170,8 +184,16 @@ repositories, so `git checkout .` cannot erase it. It records:
 
 ### 4.2 Phases
 
-All phases run under both prefix mutation locks, taken in sorted order as rename takes
-them.
+Every phase runs under three locks, taken in the order `rename` uses:
+
+1. both prefixes' mutation locks, in sorted order;
+2. the registry lock.
+
+Under them the move reloads the registry and re-resolves both roots. If either root
+differs from the one the move resolved before locking (or, on resume, from the
+journal's), it releases the locks and retries, up to four times. Then it fails with
+`io`, as rename does. A resume whose registered roots no longer match the journal
+refuses rather than writing to a project that has moved.
 
 | Phase | Action | Idempotent because |
 |---|---|---|
@@ -201,24 +223,57 @@ In particular:
   points back: `Complete`.
 
 While a journal names a task, every write to the source id or the new id refuses with
-`move_pending`, and a rename of either prefix refuses. Reads proceed. `show` warns that
-a move is pending.
+`move_pending`. Reads proceed, and `show` and `check` warn that a move is pending.
+
+The journal also freezes both projects' lifecycle. Each command that can change a
+project's registration, root, prefix, or writability refuses with `move_pending` while
+a journal on this host names that prefix as source or destination:
+
+- `rename` (either side, including `--adopt`);
+- `retire` and `unretire`;
+- `unregister`;
+- `init --force` re-pointing the prefix.
+
+Without the freeze, these would leave the resume facing states §3.3 refuses. A source
+stopped after M6 has no open task left, so `retire` would succeed and M7's cleanup
+would then hit `retired_project`. `unregister` or a re-pointed root would leave the
+journal naming a root the registry no longer routes to. These are the commands that
+call `reject_pending_rename` today. They share one pending-operation check that reads
+both rename inventories and move journals.
 
 ### 4.4 Recovery limits
 
 - **Process interruption.** Rerun the same `tasks move`. It resumes with the journal's
   id and texts.
-- **Other hosts.** The journal is host-local, but records sync. A host that sees only
-  half of a move (a destination record whose `moved_from` source is not a tombstone
-  pointing back, or a tombstone whose destination record is missing) gets a `check`
-  error, `move_incomplete`, naming both ids and the host-agnostic advice: finish the move
-  on the host that started it. These checks need no journal, so the half state is
-  visible everywhere.
-- **Manual undo** (the journal still present): delete the destination record and its
-  attachment directory, restore the source file from git if M6 ran, restore the source
-  attachment bytes from the destination copy if M7 ran, return the store entry, and
-  remove the journal last. Each step restores and verifies before it deletes, as in
-  the prefix rename's manual recovery (its §5.6).
+- **Other hosts.** The journal is host-local, but records sync. `check` compares each
+  `moved_from` and `moved_to` with its counterpart record, without reading a journal.
+  It separates a counterpart that is absent from one it cannot reach:
+
+  | Counterpart | Finding |
+  |---|---|
+  | Project reachable, record present and pointing back | none |
+  | Project reachable, record missing, or present but not pointing back (a destination whose source is not a tombstone naming it, or a tombstone naming a missing destination) | error `move_incomplete`, naming both ids: finish the move on the host that started it |
+  | Project unregistered or unreachable on this host, or its record unparsable | warning `move_counterpart_unreachable`, naming the project; nothing is claimed about the move |
+
+  A successful move whose destination is later unregistered therefore warns, and does
+  not report an incomplete move. Dependencies on the tombstone stay blocked meanwhile
+  (§3.4).
+- **Manual undo** (the journal still present, after an interrupted move). Restore
+  first, delete last, and verify every restoration before deleting anything:
+  1. Restore the source record from the journal's `source_text`, and confirm its
+     sha256 equals `source_digest`.
+  2. Make each journal attachment present in `tasks/files/<src id>/` with its journal
+     sha256. Copy it back from the destination copy when the source copy is gone. If
+     neither copy has the journal's digest, stop: keep both directories and the
+     journal, and report the name.
+  3. Return the park or escalation from the journal into the source store, and confirm
+     it reads back equal.
+  4. Only now delete the destination store entry, the destination attachment
+     directory, and the destination record.
+  5. Remove the journal last.
+
+  If any step fails, stop with everything in place. The journal still describes the
+  state, and a rerun of `tasks move` can still complete the move forward instead.
 - **Power loss** is out of scope, as it is for rename (no fsync).
 - **Parks on other hosts.** Claim stores are per host. A park for the source id recorded
   on another host stays keyed to the tombstone there. This is the same limit as
@@ -259,8 +314,11 @@ Each case runs in temporary repositories with scratch `XDG_CONFIG_HOME` and
 3. **Live claim.**
    - Another live session's claim refuses with `claimed`, and nothing is written.
    - The caller's own claim refuses too, naming `tasks park`.
-   - After a park, the move carries the park: `prime` in `wali` lists `wali-<n>` with the
-     same next step, and the `dots` store no longer holds it.
+   - After a park, the move carries the park. `prime` and `list --parked` in `wali` list
+     `wali-<n>` with the same next step, and the `dots` store no longer holds it.
+   - The carried park's `worktree` is `wali`'s `resume_root`, not `dots`'s.
+   - `quiet` names the `wali` checkout as the place to resume.
+   - `tasks start wali-<n>` there resumes the task.
 4. **Destination collision.** `wali` holds a record with `source: dots-a` (an earlier
    manual re-file). `move dots-a --to wali` refuses with `validation`, naming that record.
    Nothing is written.
@@ -277,9 +335,25 @@ Each case runs in temporary repositories with scratch `XDG_CONFIG_HOME` and
    - `note`, `edit`, `start`, and `dep --on` on `dots-a` refuse with `moved`, naming
      `wali-<n>`.
    - `show dots-a` prints the pointer.
-7. **Unreachable destination at evaluation.** Unregister `wali` after the move.
-   - `ops-x` stays not ready, with the unreachable-dependency warning.
-   - Nothing treats the tombstone as satisfied.
+7. **Unavailable counterpart after a completed move.** Unregister `wali` after the
+   move.
+   - `ops-x` stays not ready, with the unreachable-dependency warning, and nothing
+     treats the tombstone as satisfied.
+   - `check` in `dots` warns `move_counterpart_unreachable` naming `wali`, and reports
+     no `move_incomplete`.
+   - After re-registering `wali`, both findings are gone.
+8. **Cycle through a tombstone.** `dots-b` depends on `dots-a`; move `dots-a` to
+   `wali-<n>`.
+   - `dep wali-<n> --on dots-b` refuses with `cycle`, naming
+     `wali-<n> -> dots-b -> dots-a -> wali-<n>`.
+   - A record written by hand with that edge makes `check` report the same cycle.
+9. **Lifecycle frozen by an interrupted move.** `dots` holds only `dots-a`; set
+   `TASKS_MOVE_STOP_AFTER=tombstone`.
+   - `retire` in `dots` refuses with `move_pending`, although `dots` has no open task.
+   - `unregister wali`, `unregister dots`, `init --prefix wali --force` from another
+     directory, and `rename dots dx` each refuse with `move_pending`.
+   - Neither the registry nor either project changed.
+   - A rerun completes the move, and `retire` in `dots` then succeeds.
 
 ## 7. Out of scope
 
