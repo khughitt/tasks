@@ -289,6 +289,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let (original, original_raw) = ctx.project.read_task_with_raw(&id)?;
     super::refuse_stale_copy(&mut ctx, &original, &original_raw, super::Writer::Command)?;
+    super::guard_write(&ctx.registry, &ctx.shorthand, &original)?;
     let editor = std::env::var("EDITOR")
         .ok()
         .filter(|editor| !editor.is_empty())
@@ -340,6 +341,8 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         },
     )?;
 
+    super::guard_write(&ctx.registry, &ctx.shorthand, &original).map_err(keep)?;
+
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
     let mut edited = parse_task(&edited_raw, &tmp_display).map_err(keep)?;
     check_invariants(&original, &edited).map_err(keep)?;
@@ -363,10 +366,21 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         ))));
     }
     for dependency in &edited.depends {
-        if resolver.resolve_task(dependency).map_err(keep)?.is_none() {
-            return Err(keep(Error::Validation(format!(
-                "dependency {dependency} is unreachable"
-            ))));
+        let found = resolver
+            .resolve_task(dependency)
+            .map_err(keep)?
+            .ok_or_else(|| {
+                keep(Error::Validation(format!(
+                    "dependency {dependency} is unreachable"
+                )))
+            })?;
+        let canonical = ctx.registry.canonical_id(dependency);
+        if !original
+            .depends
+            .iter()
+            .any(|stored| ctx.registry.canonical_id(stored) == canonical)
+        {
+            crate::tombstone::refuse_reference(&found, "dependency").map_err(keep)?;
         }
     }
     let from_main = resolver.take_warnings();

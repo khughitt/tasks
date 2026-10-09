@@ -39,3 +39,30 @@ pub fn validate(task: &Task) -> Result<()> {
     }
     Ok(())
 }
+
+/// The tombstone half of `commands::guard_write`, which every record write passes.
+pub fn refuse_write(task: &Task, spells: impl Fn(&str) -> bool) -> Result<()> {
+    let (Status::Moved, Some(to)) = (task.status, &task.moved_to) else {
+        return Ok(());
+    };
+    let args: Vec<String> = std::env::args()
+        .skip(1)
+        .map(|arg| if spells(&arg) { to.to_string() } else { arg })
+        .collect();
+    Err(Error::Moved(format!(
+        "{} moved to {to}; run `tasks {}` instead",
+        task.id,
+        args.join(" ")
+    )))
+}
+
+/// A new dependency or parent must name the live record, never a tombstone.
+pub fn refuse_reference(task: &Task, role: &str) -> Result<()> {
+    match (task.status, &task.moved_to) {
+        (Status::Moved, Some(to)) => Err(Error::Moved(format!(
+            "{role} {} moved to {to}; name {to} instead",
+            task.id
+        ))),
+        _ => Ok(()),
+    }
+}

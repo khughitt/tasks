@@ -56,8 +56,9 @@ pub fn add_dependencies(
         if dependency == task.id {
             return Err(Error::Cycle(format!("{dependency} -> {dependency}")));
         }
-        if resolver.resolve_task(&dependency)?.is_none() {
-            return Err(Error::UnresolvableId(dependency.to_string()));
+        match resolver.resolve_task(&dependency)? {
+            None => return Err(Error::UnresolvableId(dependency.to_string())),
+            Some(found) => crate::tombstone::refuse_reference(&found, "dependency")?,
         }
         match task
             .depends

@@ -69,6 +69,7 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
         let target_note = format!("halt override: started past {ids} by {session}: {reason}");
         crate::format::validate_note_text(&target_note)?;
         for mut halt in blockers.into_iter().cloned() {
+            super::guard_write(&ctx.registry, &ctx.shorthand, &halt)?;
             append_note(
                 &mut halt,
                 &owner,

@@ -1048,7 +1048,18 @@ pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
         ctx.project
             .read_task_with_raw(&parse_id(&ctx.registry, &ctx.shorthand, id)?)?;
     refuse_stale_copy(ctx, &task, &raw, Writer::Command)?;
+    guard_write(&ctx.registry, &ctx.shorthand, &task)?;
     Ok(task)
+}
+
+/// The guard every record write passes before it mutates (task-move spec §3.4).
+/// `load` calls it; so does each writer that reads a record by other means.
+pub(crate) fn guard_write(registry: &Registry, shorthand: &Shorthand, task: &Task) -> Result<()> {
+    crate::tombstone::refuse_write(task, |arg| {
+        shorthand
+            .parse(registry, arg)
+            .is_ok_and(|given| registry.canonical_id(&given) == task.id)
+    })
 }
 
 /// Who is writing, which decides whether a `-C` retry can be offered (spec §3.2).
@@ -1288,6 +1299,7 @@ pub(crate) fn record_need_overrides(ctx: &mut Ctx, task: &mut Task) -> Result<Op
 pub(crate) fn note_need_holders(ctx: &mut Ctx, holders: HolderNotes) {
     for (holder, need, text) in holders.notes {
         let written = ctx.project.read_task(&holder).and_then(|mut held| {
+            guard_write(&ctx.registry, &ctx.shorthand, &held)?;
             append_note(&mut held, &holders.owner, &text)?;
             held.updated = crate::time::after(&held.updated)?;
             validate_task(&held)?;

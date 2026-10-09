@@ -219,6 +219,12 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         ("status", vec![present::status(t.status)]),
         ("priority", vec![present::priority(t.priority)]),
     ];
+    if let Some(to) = &t.moved_to {
+        rows.push(("moved to", vec![present::id(&to.to_string())]));
+    }
+    if let Some(from) = &t.moved_from {
+        rows.push(("moved from", vec![present::id(&from.to_string())]));
+    }
     if t.size.is_some() {
         rows.push(("size", vec![present::size(t.size)]));
     }

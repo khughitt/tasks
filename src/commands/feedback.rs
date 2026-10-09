@@ -171,6 +171,7 @@ pub fn run(
                 Err(Error::TaskNotFound(_)) => return Err(not_feedback()),
                 Err(error) => return Err(error),
             };
+            super::guard_write(&ctx.registry, &ctx.shorthand, &task)?;
             if !is_open_feedback(&task) {
                 return Err(not_feedback());
             }
@@ -261,11 +262,16 @@ fn recur_into(
                 .into(),
         ));
     }
+    // Record-home spec §3.1: under the target's lock, before anything is appended.
+    let (loaded, raw) = ctx.project.read_task_with_raw(id)?;
+    super::refuse_stale_copy(ctx, &loaded, &raw, super::Writer::Feedback)?;
     // The match was made against a snapshot. Every guarded read re-checks that the task
     // is still open feedback and, for an automatic match, still has the same title, so a
     // task that was closed, retagged, or renamed in between is never appended to.
     let wanted = automatic.then(|| crate::similarity::tokens(summary));
+    let (registry, shorthand) = (&ctx.registry, &ctx.shorthand);
     let eligible = move |task: &Task| -> Result<()> {
+        super::guard_write(registry, shorthand, task)?;
         if !is_open_feedback(task) {
             return Err(Error::Validation(format!(
                 "{} is no longer open feedback; rerun to file afresh",
@@ -282,9 +288,6 @@ fn recur_into(
         }
         Ok(())
     };
-    // Record-home spec §3.1: under the target's lock, before anything is appended.
-    let (loaded, raw) = ctx.project.read_task_with_raw(id)?;
-    super::refuse_stale_copy(ctx, &loaded, &raw, super::Writer::Feedback)?;
     let mut claims = crate::claims::ClaimStore::load(&ctx.project.prefix)?;
     // Fixed author: the reporter's TASKS_OWNER, branch, or user name must not leak into
     // the owner's public file. The reporting project is already in the note text.
