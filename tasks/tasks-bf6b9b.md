@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: task-migration-design
 created: 2026-10-08T10:42:11Z
-updated: 2026-10-09T01:44:55Z
+updated: 2026-10-09T04:38:54Z
 started: 2026-10-09T01:02:06Z
 depends: []
 parent: tasks-a7460c
@@ -47,4 +47,10 @@ Ideas it wakes: on completion, add the approved finding and artifact paths to ta
   provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-09T01:44:52Z (task-migration-design): plan drafted: docs/plans/2026-10-09-task-move.md, 8 tasks (schema; tombstone refusals; pointer-following deps/cycles; check findings; journal+classify; move fresh path; resume/explain/freeze; docs). Step children to be filed after plan review
 - 2026-10-09T01:44:55Z (task-migration-design): parked (waiting on user, review): user reviews docs/plans/2026-10-09-task-move.md (in .worktrees/task-migration-design) and picks an execution method; then agent files the 8 step children under a goal and closes this design task
+  provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T04:29:54Z (task-migration-design): review: plan round 1 — verdict: revise; findings: P1 1, P2 6; reviewer: codex
+- 2026-10-09T04:31:16Z (task-migration-design): resumed
+  provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T04:38:53Z (task-migration-design): plan round 1 addressed: attachment names validated in journal + safe path helper (P1); guard_write covers editor/feedback/halt/holder writers, pending before tombstone; move refuses outside the registered checkout (spec §3.3 row added); pointers canonicalized through aliases; moved_dep swap names the chain end; moved_to/moved_from immutable in editor; freeze is Task 6 and move+resume+explain land together as Task 7
+- 2026-10-09T04:38:53Z (task-migration-design): parked (waiting on user, review): user re-reviews docs/plans/2026-10-09-task-move.md (round 2) in .worktrees/task-migration-design and picks an execution method; then agent files the 8 step children under tasks-7ba557 and closes this design task
   provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

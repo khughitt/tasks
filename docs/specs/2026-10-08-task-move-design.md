@@ -1,6 +1,6 @@
 # Moving one task between projects
 
-Status: approved 2026-10-09 after review round 3; implementation plan next (tasks-bf6b9b)
+Status: approved 2026-10-09 after review round 3; amended by plan review round 1 (§3.3 checkout row, §3.4 aliases and chains); implementation plan next (tasks-bf6b9b)
 Task: tasks-bf6b9b (lane tasks-a7460c; answers tasks-7ba557)
 Brief: `docs/notes/2026-10-08-project-discovery-movement-brief.md`
 
@@ -106,6 +106,7 @@ command that settles it.
 | A spec, plan, or need that does not validate in the destination | `validation` (or `unknown_need`) | `tasks edit <id> --no-spec/--no-plan/--rm-need …`, or declare the need in the destination. |
 | Destination holds a record with `moved_from: <src>` or `source: <src>` | `validation` | Inspect that record. It is an earlier move or a manual re-file: drop one of them, or keep the re-file and drop the source. |
 | Destination unregistered, unreachable, or the same project | `config` | Register or choose another project. |
+| Run inside a checkout of the source project other than its registered one (a git worktree) | `validation` | Rerun from the registered checkout: `tasks -C <registered root> move …`. Foreign readers and `check` read the registered checkout, so a tombstone written only in a worktree would leave dependents evaluating the old record until integration. |
 | Source or destination retired | `retired_project` | Unretire, or move before retiring. |
 | A pending rename or move on either project, or on this task | `move_pending` / existing rename refusal | Resume or finish that operation. |
 | Source changed under a pending journal (§4.3) | `move_pending` | Manual recovery (§4.4). |
@@ -137,7 +138,17 @@ needs, docs, lanes, depends). Whatever that refuses, `move` refuses.
   never creates a cycle itself: the graph after the move is the graph before it, with
   A renamed to C.
 - **`check`** warns `moved_dep` on every record that depends on a tombstone. The warning
-  names the swap: `tasks dep <id> --on <new> --rm <old>`.
+  names the swap: `tasks dep <id> --on <new> --rm <old>`, where `<new>` is the live
+  record at the end of the chain, since `dep --on` refuses a tombstone. When the chain
+  cannot be followed to a live record here, the warning names the first hop and no
+  command.
+- **Pointers survive prefix renames.** A rename rewrites only its own project's ids, so
+  a stored `moved_to` or `moved_from` may carry a retired prefix. Every lookup and
+  comparison of a pointer (`check`'s counterpart test, `move`'s completion and
+  collision tests, dependency evaluation) resolves both sides through the registry's
+  aliases first.
+- **The pointer fields are immutable.** Only `move` sets `moved_to` and `moved_from`;
+  the editor refuses a buffer that removes or changes either.
 - **`move`'s output** lists `inbound`: the records in reachable registered projects that
   depend on the source, under any spelling. Dependents in projects this host cannot
   reach are not found. They are still correct, because they follow the pointer once the
