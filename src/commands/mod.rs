@@ -1055,11 +1055,15 @@ pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
 /// The guard every record write passes before it mutates (task-move spec §3.4).
 /// `load` calls it; so does each writer that reads a record by other means.
 pub(crate) fn guard_write(registry: &Registry, shorthand: &Shorthand, task: &Task) -> Result<()> {
-    crate::tombstone::refuse_write(task, |arg| {
-        shorthand
-            .parse(registry, arg)
-            .is_ok_and(|given| registry.canonical_id(&given) == task.id)
-    })
+    crate::tombstone::refuse_write(
+        task,
+        |arg| {
+            shorthand
+                .parse(registry, arg)
+                .is_ok_and(|given| registry.canonical_id(&given) == task.id)
+        },
+        registry,
+    )
 }
 
 /// Who is writing, which decides whether a `-C` retry can be offered (spec §3.2).

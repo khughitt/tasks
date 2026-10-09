@@ -270,3 +270,220 @@ fn feedback_recurrence_to_a_tombstone_refuses_before_mutating() {
     assert!(detail.contains(&n), "{detail}");
     assert_eq!(std::fs::read_to_string(path).unwrap(), before);
 }
+
+/// Parse the displayed command in a real shell, then run those words with TestEnv's isolation.
+fn retry_words(dir: &std::path::Path, detail: &str, number: usize) -> Vec<String> {
+    let line = detail.split('`').nth(2 * number + 1).unwrap();
+    let words = line.strip_prefix("tasks ").unwrap();
+    let out = std::process::Command::new("sh")
+        .current_dir(dir)
+        .arg("-c")
+        .arg(format!("set -- {words}; printf '%s\\0' \"$@\""))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{line}: {out:?}");
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .split_terminator('\0')
+        .map(str::to_string)
+        .collect()
+}
+
+fn feedback_owner(dir: &std::path::Path) {
+    let path = dir.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        format!("{text}\n[feedback]\nscope = \"shared tooling\"\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn tombstone_retry_preserves_multiword_arguments() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "A", "-p", "2"]));
+    tombstone_by_hand(&dots, &a, &n);
+    let (kind, detail) = fail_detail(&env, &dots, &["note", &a, "two words"]);
+    assert_eq!(kind, "moved");
+    let words = retry_words(&dots, &detail, 0);
+    assert_eq!(words, ["note", &n, "two words"]);
+    let args: Vec<_> = words.iter().map(String::as_str).collect();
+    env.json(&dots, &args);
+    assert_eq!(
+        env.json(&wali, &["show", &n])["task"]["notes"][0]["text"],
+        "two words"
+    );
+}
+
+#[test]
+fn tombstone_retry_keeps_quotes_and_shell_metacharacters_literal() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "A", "-p", "2"]));
+    tombstone_by_hand(&dots, &a, &n);
+    for text in ["it's quoted", "two \"quoted\" words; $(touch injected)"] {
+        let (kind, detail) = fail_detail(&env, &dots, &["note", &a, text]);
+        assert_eq!(kind, "moved");
+        let words = retry_words(&dots, &detail, 0);
+        assert_eq!(words, ["note", &n, text]);
+        assert!(
+            !dots.join("injected").exists(),
+            "payload must remain literal"
+        );
+        let args: Vec<_> = words.iter().map(String::as_str).collect();
+        env.json(&dots, &args);
+        let shown = env.json(&wali, &["show", &n]);
+        assert_eq!(
+            shown["task"]["notes"].as_array().unwrap().last().unwrap()["text"],
+            text
+        );
+    }
+}
+
+#[test]
+fn feedback_retry_retargets_the_owner_for_plain_alias_and_equals_selectors() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    feedback_owner(&dots);
+    feedback_owner(&wali);
+    let a = id_of(env.json(&dots, &["add", "Report", "-p", "2", "--tag", "feedback"]));
+    let n = id_of(env.json(&wali, &["add", "Report", "-p", "2", "--tag", "feedback"]));
+    tombstone_by_hand(&dots, &a, &n);
+    let source_path = dots.join(format!("tasks/{a}.md"));
+    let before = std::fs::read_to_string(&source_path).unwrap();
+    let registry_path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry["aliases"]
+        .as_table_mut()
+        .unwrap()
+        .insert("old".into(), toml::Value::String("dots".into()));
+    std::fs::write(registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    let alias = a.replacen("dots-", "old-", 1);
+    let recur_equals = format!("--recur={alias}");
+    for args in [
+        vec![
+            "feedback",
+            "--project",
+            "dots",
+            "it's still broken",
+            "--category",
+            "gap",
+            "--recur",
+            &a,
+        ],
+        vec![
+            "feedback",
+            "--project",
+            "old",
+            "it's still broken",
+            "--category",
+            "gap",
+            "--recur",
+            &alias,
+        ],
+        vec![
+            "feedback",
+            "--project=dots",
+            "it's still broken",
+            "--category=gap",
+            &recur_equals,
+        ],
+        vec![
+            "feedback",
+            "--project=old",
+            "it's still broken",
+            "--category=gap",
+            &recur_equals,
+        ],
+    ] {
+        let (kind, detail) = fail_detail(&env, &dots, &args);
+        assert_eq!(kind, "moved");
+        let words = retry_words(&dots, &detail, 0);
+        let retry: Vec<_> = words.iter().map(String::as_str).collect();
+        let result = env.json(&dots, &retry);
+        assert_eq!(result["id"], n);
+        assert_eq!(result["action"], "recurred");
+        assert_eq!(std::fs::read_to_string(&source_path).unwrap(), before);
+    }
+    let destination = env.json(&wali, &["show", &n]);
+    let notes = destination["task"]["notes"].as_array().unwrap();
+    assert_eq!(notes.len(), 4);
+    assert!(
+        notes.iter().all(|note| note["by"] == "feedback"
+            && note["text"] == "feedback from dots: it's still broken")
+    );
+}
+
+#[test]
+fn feedback_retry_offers_an_ordinary_note_when_destination_is_not_an_owner() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    feedback_owner(&dots);
+    let a = id_of(env.json(&dots, &["add", "Report", "-p", "2", "--tag", "feedback"]));
+    let n = id_of(env.json(&wali, &["add", "Report", "-p", "2"]));
+    tombstone_by_hand(&dots, &a, &n);
+    let summary = "it's a report; $(touch injected)";
+    let (kind, detail) = fail_detail(
+        &env,
+        &dots,
+        &[
+            "feedback",
+            "--project",
+            "dots",
+            summary,
+            "--category",
+            "gap",
+            "--recur",
+            &a,
+        ],
+    );
+    assert_eq!(kind, "moved");
+    assert!(detail.contains("does not accept feedback"), "{detail}");
+    let words = retry_words(&dots, &detail, 0);
+    let retry: Vec<_> = words.iter().map(String::as_str).collect();
+    assert_eq!(
+        fail_detail(&env, &dots, &retry).0,
+        "validation",
+        "fixed-owner refusal remains"
+    );
+    let words = retry_words(&dots, &detail, 1);
+    assert_eq!(words, ["note", &n, "--", summary]);
+    assert!(!dots.join("injected").exists());
+    let retry: Vec<_> = words.iter().map(String::as_str).collect();
+    env.json(&dots, &retry);
+    assert_eq!(
+        env.json(&wali, &["show", &n])["task"]["notes"][0]["text"],
+        summary
+    );
+}
+
+#[test]
+fn ordinary_tombstone_retry_keeps_feedback_and_flag_words_as_payload() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "A", "-p", "2"]));
+    tombstone_by_hand(&dots, &a, &n);
+    for text in [
+        "feedback",
+        "--recur",
+        "--project=dots",
+        "feedback --recur --project=dots",
+    ] {
+        let (kind, detail) = fail_detail(&env, &dots, &["note", &a, "--", text]);
+        assert_eq!(kind, "moved");
+        let words = retry_words(&dots, &detail, 0);
+        assert_eq!(words, ["note", &n, "--", text]);
+        assert!(!detail.contains("does not accept feedback"), "{detail}");
+    }
+}
