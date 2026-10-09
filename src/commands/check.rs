@@ -374,7 +374,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         let id = ctx.registry.canonical_id(id);
         if let Some(task) = tasks.iter().find(|task| task.id == id) {
             return Ok(Some(
-                task.depends
+                crate::tombstone::edges(task)
                     .iter()
                     .map(|dependency| ctx.registry.canonical_id(dependency))
                     .collect(),
@@ -382,7 +382,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
         match foreign(&id) {
             Ok(Some(task)) => Ok(Some(
-                task.depends
+                crate::tombstone::edges(&task)
                     .iter()
                     .map(|dependency| ctx.registry.canonical_id(dependency))
                     .collect(),

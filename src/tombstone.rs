@@ -2,9 +2,10 @@
 //! docs/specs/2026-10-08-task-move-design.md §3.
 
 use crate::error::{Error, Result};
-use crate::model::{Status, Task};
+use crate::model::{Status, Task, TaskId};
 use crate::registry::Registry;
 use clap::Parser;
+use std::collections::BTreeSet;
 
 /// A tombstone carries exactly one pointer, to another project; a destination names
 /// another project as its source. Anything else is a hand edit outside `tasks move`.
@@ -96,5 +97,88 @@ pub fn refuse_reference(task: &Task, role: &str) -> Result<()> {
             task.id
         ))),
         _ => Ok(()),
+    }
+}
+
+/// The record a dependency on `first` means: itself when live, else the end of its
+/// `moved_to` chain (spec §3.4). `None` when a hop is unreachable or the chain revisits an
+/// id; callers already treat `None` as an open, unreachable dependency.
+pub fn follow(
+    first: Option<Task>,
+    mut resolve: impl FnMut(&TaskId) -> Result<Option<Task>>,
+) -> Result<Option<Task>> {
+    let mut seen = BTreeSet::new();
+    let mut current = first;
+    while let Some(task) = current {
+        let (Status::Moved, Some(to)) = (task.status, task.moved_to.clone()) else {
+            return Ok(Some(task));
+        };
+        if !seen.insert(task.id.clone()) {
+            return Ok(None);
+        }
+        current = resolve(&to)?;
+    }
+    Ok(None)
+}
+
+/// The edges a record contributes to the dependency graph. A tombstone's retained
+/// `depends` are history; its only edge is its pointer (spec §3.4).
+pub fn edges(task: &Task) -> Vec<TaskId> {
+    match (task.status, &task.moved_to) {
+        (Status::Moved, Some(to)) => vec![to.clone()],
+        _ => task.depends.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::TaskId;
+
+    fn task(id: &str, status: Status, to: Option<&str>, depends: &[&str]) -> Task {
+        let text = format!(
+            "---\nid: {id}\ntitle: T\nstatus: {}\npriority: 2\n\
+created: 2026-10-01T00:00:00Z\nupdated: 2026-10-01T00:00:00Z\ndepends: [{}]\ntags: []\n{}---\n",
+            status.as_str(),
+            depends.join(", "),
+            to.map(|to| format!("moved_to: {to}\n")).unwrap_or_default(),
+        );
+        crate::format::parse_task(&text, &format!("tasks/{id}.md")).unwrap()
+    }
+
+    #[test]
+    fn follow_ends_at_the_live_record() {
+        let a = task("dots-00000a", Status::Moved, Some("wali-00000b"), &[]);
+        let b = task("wali-00000b", Status::Moved, Some("ops-00000c"), &[]);
+        let c = task("ops-00000c", Status::Todo, None, &[]);
+        let all = [b.clone(), c.clone()];
+        let got = follow(Some(a), |id| Ok(all.iter().find(|t| &t.id == id).cloned())).unwrap();
+        assert_eq!(got.unwrap().id, c.id);
+    }
+
+    #[test]
+    fn follow_is_none_on_an_unreachable_hop_or_a_revisit() {
+        let a = task("dots-00000a", Status::Moved, Some("wali-00000b"), &[]);
+        assert!(follow(Some(a.clone()), |_| Ok(None)).unwrap().is_none());
+        let b = task("wali-00000b", Status::Moved, Some("dots-00000a"), &[]);
+        let all = [a.clone(), b];
+        assert!(
+            follow(Some(a), |id| Ok(all.iter().find(|t| &t.id == id).cloned()))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_tombstone_has_one_edge_its_pointer() {
+        let a = task(
+            "dots-00000a",
+            Status::Moved,
+            Some("wali-00000b"),
+            &["dots-00000c"],
+        );
+        assert_eq!(edges(&a), vec![TaskId::parse("wali-00000b").unwrap()]);
+        let live = task("dots-00000c", Status::Todo, None, &["dots-00000d"]);
+        assert_eq!(edges(&live), vec![TaskId::parse("dots-00000d").unwrap()]);
     }
 }

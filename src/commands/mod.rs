@@ -1329,7 +1329,9 @@ pub fn open_deps(ctx: &Ctx, task: &Task) -> Result<Vec<String>> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
     let mut open = Vec::new();
     for dependency in &task.depends {
-        match resolver.resolve_task(dependency)? {
+        match crate::tombstone::follow(resolver.resolve_task(dependency)?, |id| {
+            resolver.resolve_task(id)
+        })? {
             Some(task) if !task.status.is_open() => {}
             _ => open.push(dependency.to_string()),
         }

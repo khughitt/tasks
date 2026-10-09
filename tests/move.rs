@@ -487,3 +487,65 @@ fn ordinary_tombstone_retry_keeps_feedback_and_flag_words_as_payload() {
         assert!(!detail.contains("does not accept feedback"), "{detail}");
     }
 }
+
+#[test]
+fn cycle_through_a_tombstone_is_refused_and_reported() {
+    // Spec §6 case 8.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&dots, &["add", "B", "-p", "2", "--depends", &a]));
+    let n = id_of(env.json(&wali, &["add", "A", "-p", "2"]));
+    tombstone_by_hand(&dots, &a, &n);
+    let (kind, detail) = fail_detail(&env, &wali, &["dep", &n, "--on", &b]);
+    assert_eq!(kind, "cycle");
+    assert_eq!(
+        detail,
+        format!("dependency cycle: {n} -> {b} -> {a} -> {n}")
+    );
+    let path = wali.join(format!("tasks/{n}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replacen("depends: []", &format!("depends: [{b}]"), 1),
+    )
+    .unwrap();
+    let out = env.cmd(&wali).args(["check"]).output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "cycle" && f["detail"].as_str().unwrap().contains(&a)),
+        "{report}"
+    );
+}
+
+#[test]
+fn local_dependent_follows_the_pointer() {
+    // Review Focus 2: the dependent and the tombstone share a project.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&dots, &["add", "B", "-p", "2", "--depends", &a]));
+    let n = id_of(env.json(&wali, &["add", "A", "-p", "2"]));
+    tombstone_by_hand(&dots, &a, &n);
+    let ready = |env: &TestEnv| -> Vec<String> {
+        env.json(&dots, &["ready"])["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(
+        !ready(&env).contains(&b),
+        "a moved dependency is not a closed one"
+    );
+    assert_eq!(env.fail(&dots, &["done", &b]), "open_dependencies");
+    env.json(&wali, &["done", &n]);
+    assert!(ready(&env).contains(&b));
+}

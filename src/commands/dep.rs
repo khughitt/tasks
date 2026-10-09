@@ -20,7 +20,7 @@ pub fn ensure_acyclic(ctx: &Ctx, candidate: &Task) -> Result<()> {
             ));
         }
         Ok(resolver.resolve_task(&id)?.map(|task| {
-            task.depends
+            crate::tombstone::edges(&task)
                 .iter()
                 .map(|dependency| ctx.registry.canonical_id(dependency))
                 .collect()
