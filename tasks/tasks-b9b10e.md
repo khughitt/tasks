@@ -1,13 +1,15 @@
 ---
 id: tasks-b9b10e
 title: Establish safe recovery for a park left on a closed task
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-06T09:45:48Z
-updated: 2026-10-08T10:12:58Z
+updated: 2026-10-09T13:46:15Z
+started: 2026-10-09T13:46:15Z
 depends: []
 parent: tasks-984769
 tags: []
@@ -32,3 +34,5 @@ Ideas it wakes: on completion add the finding to tasks-6b2867 with tasks note in
 - 2026-10-06T10:44:19Z (main): attached: tasks-review-park-result.json (610 bytes): Two isolated host stores: repeated done clears local park and changes only updated on a non-recurring record; limits recorded.
 - 2026-10-06T10:59:44Z (main): Attribution correction for the 2026-10-06T10:41:53Z note beginning Human review probe: this was the reviewer's isolated probe performed at the controller's request, not an established human-run probe. Its technical result and cleanup report are unchanged; reviewer harness/model identity was not supplied.
 - 2026-10-08T10:12:57Z (main): Scope refinement: tasks-2c7979 duplicates tasks-6b2867; retain the existing bounded investigation and compare bare done with an explicit message and changed TASKS_MODEL to reconcile the new report with the attached probe. No new recovery command or research task.
+- 2026-10-09T13:46:15Z (main): started
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
