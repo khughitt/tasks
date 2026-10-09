@@ -529,8 +529,12 @@ outcomes are:
 - Error: exit 1 with `{"error":{"kind":"<kind>","detail":"<detail>"}}` on stderr;
   success JSON is on stdout with exit 0.
 
-`holds_records` reports whether the repository tracks a regular `tasks/.config.toml`
-file in `HEAD`, even if it is deleted locally; an unborn branch holds none. Two
+`holds_records` reports whether the repository keeps a project's records. It is true
+when an existing registered root lies in one of the repository's worktrees and shares
+its common git directory, so a registered project counts even on an unborn branch. It
+is also true when the repository tracks a regular `tasks/.config.toml` file in `HEAD`,
+even if that file is deleted locally. An unborn branch with no registered root holds
+none. Two
 projects declaring the same checkout fail with `checkout_conflict`. Init refuses
 writes into a declared code checkout or any of its worktrees.
 
