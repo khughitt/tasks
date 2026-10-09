@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: task-migration-design
 created: 2026-10-08T10:42:11Z
-updated: 2026-10-09T01:30:56Z
+updated: 2026-10-09T01:44:53Z
 started: 2026-10-09T01:02:06Z
 depends: []
 parent: tasks-a7460c
@@ -16,6 +16,7 @@ tags: []
 source: docs/notes/2026-10-08-project-discovery-movement-brief.md
 agent: codex
 spec: docs/specs/2026-10-08-task-move-design.md
+plan: docs/plans/2026-10-09-task-move.md
 ---
 
 Why: tasks-7ba557 needs moving individual tasks between registered projects without losing history or breaking references. Project-wide prefix aliases cannot represent that operation.
@@ -41,3 +42,7 @@ Ideas it wakes: on completion, add the approved finding and artifact paths to ta
 - 2026-10-09T01:25:28Z (task-migration-design): spec round 1 revised: undo restores from journal source_text and deletes last; cycle walks treat a tombstone's only edge as moved_to; carried park worktree = destination resume_root; check splits move_incomplete (reachable) from move_counterpart_unreachable (warning); journal freezes rename/retire/unretire/unregister/init --force, registry lock after sorted prefix locks; acceptance cases 3, 7-9 added
 - 2026-10-09T01:29:50Z (task-migration-design): review: spec round 2 — verdict: revise; findings: P2 2; reviewer: codex
 - 2026-10-09T01:30:56Z (task-migration-design): spec round 2 revised: journal keeps source_park/escalation verbatim plus rendered target entries; undo returns the originals; forward recovery requires a copy matching every attachment digest, else refuse and keep the journal until a verified backup is restored; acceptance cases 10-11 added
+- 2026-10-09T01:32:27Z (task-migration-design): review: spec round 3 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-09T01:35:47Z (task-migration-design): resumed
+  provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T01:44:52Z (task-migration-design): plan drafted: docs/plans/2026-10-09-task-move.md, 8 tasks (schema; tombstone refusals; pointer-following deps/cycles; check findings; journal+classify; move fresh path; resume/explain/freeze; docs). Step children to be filed after plan review

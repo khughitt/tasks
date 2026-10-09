@@ -1,6 +1,6 @@
 # Moving one task between projects
 
-Status: draft, revised after review round 2 (tasks-bf6b9b)
+Status: approved 2026-10-09 after review round 3; implementation plan next (tasks-bf6b9b)
 Task: tasks-bf6b9b (lane tasks-a7460c; answers tasks-7ba557)
 Brief: `docs/notes/2026-10-08-project-discovery-movement-brief.md`
 
