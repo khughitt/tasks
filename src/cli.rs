@@ -385,6 +385,17 @@ pub enum Command {
         #[arg(long)]
         adopt: bool,
     },
+    /// Move one task to another registered project under a new id, leaving a tombstone.
+    Move {
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        /// The destination project's prefix.
+        #[arg(long, value_name = "PREFIX", add = ArgValueCandidates::new(crate::complete::prefixes))]
+        to: String,
+        /// Classify the move and report what it would do, without locks or writes.
+        #[arg(long)]
+        explain: bool,
+    },
     /// Remove a prefix from the registry. Project files are left untouched.
     Unregister {
         #[arg(add = ArgValueCandidates::new(crate::complete::prefixes))]

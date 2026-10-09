@@ -1,6 +1,3 @@
-// Temporary while Tasks 6/7 introduce the staged API's consumers (ruling R5).
-#![allow(dead_code)]
-
 use crate::attachments::validate_name;
 use crate::claims::{Escalation, Park};
 use crate::error::{Error, Result};

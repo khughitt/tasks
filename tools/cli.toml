@@ -265,6 +265,15 @@ options = [
 ]
 
 [[cli.tasks.commands]]
+path = ["move"]
+summary = "Move one task to another registered project under a new id, leaving a tombstone"
+args = [{ name = "id", value = "ref", required = true }]
+options = [
+  { names = ["--to"], value = "string", required = true },
+  { names = ["--explain"], value = "none" },
+]
+
+[[cli.tasks.commands]]
 path = ["rename"]
 summary = "Rename a registered project's prefix and retain its retired names as aliases"
 args = [{ name = "old", value = "ref", required = true }, { name = "new", value = "ref", required = true }]

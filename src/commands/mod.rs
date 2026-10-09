@@ -10,6 +10,7 @@ pub mod group;
 pub mod init;
 pub mod lanes;
 pub mod list;
+mod move_;
 pub mod park;
 pub mod parked;
 pub mod projects;
@@ -1766,6 +1767,7 @@ pub fn run(cli: Cli) -> Result<Output> {
             explain,
             adopt,
         } => rename::run(dir, old, new, explain, adopt),
+        Command::Move { id, to, explain } => move_::run(dir, &id, &to, explain),
         Command::Unregister { prefix } => unregister::run(prefix),
         Command::Retire { successor, reason } => {
             let project = open_ctx(dir)?.project;

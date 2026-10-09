@@ -47,6 +47,18 @@ pub struct InitOut {
 }
 
 #[derive(Serialize)]
+pub struct MoveOut {
+    pub id: String,
+    pub from: String,
+    pub recovery: String,
+    pub attachments: Vec<String>,
+    pub park: bool,
+    pub inbound: Vec<String>,
+    pub paths: std::collections::BTreeMap<String, Vec<String>>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
 pub struct RenameOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
@@ -991,6 +1003,7 @@ pub struct CheckOut {
 pub enum Output {
     Init(InitOut),
     Rename(RenameOut),
+    Move(MoveOut),
     Id(IdOut),
     Add(AddOut),
     Root(RootOut),
@@ -1066,6 +1079,13 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             }
             None => format!("{} is not retired", o.prefix),
         },
+        Output::Move(o) => {
+            let mut text = format!("{} → {}", o.from, o.id);
+            for id in &o.inbound {
+                text.push_str(&format!("\n  inbound: {id}"));
+            }
+            text
+        }
         Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
         Output::Add(o) => o.id.clone(),
@@ -1924,6 +1944,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Init(o) => o.warnings.clone(),
         Output::Retire(o) => o.warnings.clone(),
         Output::Rename(o) => o.warnings.clone(),
+        Output::Move(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),

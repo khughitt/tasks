@@ -1176,3 +1176,817 @@ fn a_pending_journal_freezes_alias_id_and_lifecycle_spellings() {
         "move_pending"
     );
 }
+
+fn store(env: &TestEnv, prefix: &str) -> toml::Value {
+    std::fs::read_to_string(env.claim_store(prefix))
+        .map(|text| toml::from_str(&text).unwrap())
+        .unwrap_or(toml::Value::Table(Default::default()))
+}
+
+#[test]
+fn moving_a_task_with_an_inbound_dependency_and_an_attachment() {
+    // Spec §6 case 1.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let ops = env.init("ops");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2", "-b", "why"]));
+    env.json(&dots, &["note", &a, "first"]);
+    let shot = dots.join("scratch/shot.png");
+    std::fs::create_dir_all(shot.parent().unwrap()).unwrap();
+    std::fs::write(&shot, b"png bytes").unwrap();
+    env.json(&dots, &["attach", &a, shot.to_str().unwrap()]);
+    let x = id_of(env.json(&ops, &["add", "X", "-p", "2", "--depends", &a]));
+    let before = env.json(&dots, &["show", &a])["task"].clone();
+    let ops_before = std::fs::read(ops.join(format!("tasks/{x}.md"))).unwrap();
+
+    let out = env.json(&dots, &["move", &a, "--to", "wali"]);
+    let n = out["id"].as_str().unwrap().to_string();
+    assert!(n.starts_with("wali-"));
+    assert_eq!(out["from"], a);
+    assert_eq!(out["recovery"], "fresh");
+    assert_eq!(out["attachments"], serde_json::json!(["shot.png"]));
+    assert_eq!(out["inbound"], serde_json::json!([x]));
+
+    let moved = env.json(&wali, &["show", &n])["task"].clone();
+    assert_eq!(moved["moved_from"], a);
+    assert_eq!(moved["created"], before["created"]);
+    assert_eq!(moved["body"], before["body"]);
+    let carried = &moved["notes"].as_array().unwrap()[..before["notes"].as_array().unwrap().len()];
+    assert_eq!(
+        carried,
+        before["notes"].as_array().unwrap().as_slice(),
+        "notes carry verbatim"
+    );
+    assert_eq!(
+        moved["notes"].as_array().unwrap().last().unwrap()["text"],
+        format!("moved from {a}")
+    );
+    assert_eq!(
+        std::fs::read(wali.join(format!("tasks/files/{n}/shot.png"))).unwrap(),
+        b"png bytes"
+    );
+
+    let tomb = env.json(&dots, &["show", &a])["task"].clone();
+    assert_eq!(tomb["status"], "moved");
+    assert_eq!(tomb["moved_to"], n);
+    let texts: Vec<&str> = tomb["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["text"].as_str().unwrap())
+        .collect();
+    assert!(
+        texts.contains(&format!("detached: shot.png: moved to {n}").as_str()),
+        "{texts:?}"
+    );
+    assert!(!dots.join(format!("tasks/files/{a}/shot.png")).exists());
+
+    assert_eq!(
+        std::fs::read(ops.join(format!("tasks/{x}.md"))).unwrap(),
+        ops_before
+    );
+    let ready: Vec<String> = env.json(&ops, &["ready"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(!ready.contains(&x));
+    assert!(
+        env.check(&ops)["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "moved_dep")
+    );
+    assert!(env.check(&dots)["errors"].as_array().unwrap().is_empty());
+    assert!(env.check(&wali)["errors"].as_array().unwrap().is_empty());
+    env.json(&wali, &["done", &n]);
+    let ready: Vec<String> = env.json(&ops, &["ready"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(ready.contains(&x));
+
+    let again = env.json(&dots, &["move", &a, "--to", "wali"]);
+    assert_eq!(again["recovery"], "complete");
+    assert_eq!(again["id"], n);
+}
+
+#[test]
+fn parented_and_parent_tasks_refuse_before_any_write() {
+    // Spec §6 case 2.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let g = id_of(env.json(&dots, &["add", "G", "-p", "2"]));
+    let c = id_of(env.json(&dots, &["add", "C", "-p", "2", "--parent", &g]));
+    let (kind, detail) = fail_detail(&env, &dots, &["move", &c, "--to", "wali"]);
+    assert_eq!(kind, "validation");
+    assert!(
+        detail.contains(&g) && detail.contains(&format!("tasks edit {c} --no-parent")),
+        "{detail}"
+    );
+    let (kind, detail) = fail_detail(&env, &dots, &["move", &g, "--to", "wali"]);
+    assert_eq!(kind, "validation");
+    assert!(detail.contains(&c), "{detail}");
+    assert!(!env.home.path().join(".local/state/tasks/move").exists());
+    env.json(&dots, &["edit", &c, "--no-parent"]);
+    env.json(&dots, &["move", &c, "--to", "wali"]);
+}
+
+#[test]
+fn live_claims_refuse_and_a_park_travels_to_the_destination_checkout() {
+    // Spec §6 case 3.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.cmd(&dots)
+        .env("CODEX_SESSION_ID", "other")
+        .env("CODEX_THREAD_ID", "other")
+        .args(["start", &a])
+        .assert()
+        .success();
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "wali"]).0,
+        "claimed"
+    );
+    env.cmd(&dots)
+        .env("CODEX_SESSION_ID", "other")
+        .env("CODEX_THREAD_ID", "other")
+        .args(["park", &a, "resume the parser"])
+        .assert()
+        .success();
+    let out = env.json(&dots, &["move", &a, "--to", "wali"]);
+    let n = out["id"].as_str().unwrap().to_string();
+    assert_eq!(out["park"], true);
+    let parks = store(&env, "wali");
+    let park = &parks["parks"][n.as_str()];
+    assert_eq!(park["next_step"].as_str(), Some("resume the parser"));
+    assert_eq!(park["worktree"].as_str(), Some(wali.to_str().unwrap()));
+    assert!(
+        store(&env, "dots")
+            .get("parks")
+            .and_then(|p| p.get(&a))
+            .is_none()
+    );
+    let parked = env.json(&wali, &["list", "--parked"]);
+    assert!(parked.to_string().contains(&n));
+    env.json(&wali, &["start", &n]);
+}
+
+#[test]
+fn the_callers_own_claim_refuses_naming_park() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.cmd(&dots)
+        .env("TASKS_SESSION", "me")
+        .args(["start", &a])
+        .assert()
+        .success();
+    let out = env
+        .cmd(&dots)
+        .env("TASKS_SESSION", "me")
+        .args(["move", &a, "--to", "wali"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["error"]["kind"], "claimed");
+    assert!(
+        v["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("tasks park")
+    );
+}
+
+#[test]
+fn an_earlier_refile_in_the_destination_refuses() {
+    // Spec §6 case 4.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let r = id_of(env.json(&wali, &["add", "A", "-p", "2", "--source", &a]));
+    let (kind, detail) = fail_detail(&env, &dots, &["move", &a, "--to", "wali"]);
+    assert_eq!(kind, "validation");
+    assert!(detail.contains(&r), "{detail}");
+    assert_eq!(env.json(&dots, &["show", &a])["task"]["status"], "todo");
+    assert_eq!(
+        std::fs::read_dir(wali.join("tasks"))
+            .unwrap()
+            .filter(|e| e
+                .as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|x| x == "md"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn closed_unportable_and_misdirected_moves_refuse() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let done = id_of(env.json(&dots, &["add", "D", "-p", "2"]));
+    env.json(&dots, &["done", &done]);
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &done, "--to", "wali"]).0,
+        "validation"
+    );
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "dots"]).0,
+        "config"
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "nope"]).0,
+        "config"
+    );
+    // A need the destination does not declare: settled by editing the source first.
+    let config = dots.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\n[needs.quiet]\nmeaning = \"an idle host\"\n");
+    std::fs::write(&config, text).unwrap();
+    let q = id_of(env.json(&dots, &["add", "Q", "-p", "2", "--need", "quiet"]));
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &q, "--to", "wali"]).0,
+        "unknown_need"
+    );
+    // A retired destination.
+    let gone = env.init("gone");
+    env.json(&gone, &["retire", "--reason", "over"]);
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "gone"]).0,
+        "retired_project"
+    );
+    assert!(
+        !env.home.path().join(".local/state/tasks/move").exists(),
+        "no refusal writes a journal"
+    );
+}
+
+/// A retired-prefix alias, as `tests/cli.rs::alias_registry` writes one.
+fn alias_registry(env: &TestEnv, alias: &str, target: &str) {
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    registry["aliases"]
+        .as_table_mut()
+        .unwrap()
+        .insert(alias.into(), toml::Value::String(target.into()));
+    std::fs::write(&path, toml::to_string(&registry).unwrap()).unwrap();
+}
+
+#[test]
+fn move_accepts_alias_and_suffix_spellings() {
+    // Review Focus 1.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    alias_registry(&env, "old", "dots");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&dots, &["add", "B", "-p", "2"]));
+    let hex = a.trim_start_matches("dots-").to_string();
+    let n = id_of(env.json(&dots, &["move", &hex, "--to", "wali"]));
+    let (kind, detail) = fail_detail(&env, &dots, &["note", &hex, "x"]);
+    assert_eq!(kind, "moved");
+    assert!(detail.contains(&format!("tasks note {n} x")), "{detail}");
+    let old_b = b.replacen("dots-", "old-", 1);
+    let m = env.json(&dots, &["move", &old_b, "--to", "wali"]);
+    assert_eq!(
+        m["from"], b,
+        "the journal and output use the canonical source"
+    );
+    let (kind, detail) = fail_detail(&env, &dots, &["note", &old_b, "x"]);
+    assert_eq!(kind, "moved");
+    assert!(detail.contains(m["id"].as_str().unwrap()), "{detail}");
+}
+
+#[test]
+fn moving_back_mints_a_fresh_id() {
+    // Review Focus 4.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    let back = id_of(env.json(&wali, &["move", &n, "--to", "dots"]));
+    assert!(back.starts_with("dots-") && back != a);
+    assert_eq!(env.json(&dots, &["show", &back])["task"]["moved_from"], n);
+}
+
+/// Run git in `dir` under a fixed identity, asserting success (as `tests/cli.rs::git`).
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+}
+
+#[test]
+fn move_from_a_source_worktree_refuses() {
+    // Review Focus 5. Foreign readers and `check` read the registered checkout, so a
+    // tombstone written only in a worktree would not be seen until integration.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    git(&dots, &["init", "-q", "-b", "main"]);
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    git(&dots, &["add", "-A"]);
+    git(&dots, &["commit", "-qm", "seed"]);
+    let side = dots.join("wt");
+    git(
+        &dots,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    let (kind, detail) = fail_detail(&env, &side, &["move", &a, "--to", "wali"]);
+    assert_eq!(kind, "validation");
+    assert!(
+        detail.contains(&format!("tasks -C {}", dots.display())),
+        "{detail}"
+    );
+    assert!(!env.home.path().join(".local/state/tasks/move").exists());
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali"])["recovery"],
+        "fresh"
+    );
+}
+
+#[test]
+fn an_unsafe_attachment_entry_refuses_before_any_write() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let shot = dots.join("scratch/shot.png");
+    std::fs::create_dir_all(shot.parent().unwrap()).unwrap();
+    std::fs::write(&shot, b"png bytes").unwrap();
+    env.json(&dots, &["attach", &a, shot.to_str().unwrap()]);
+    let stored = dots.join(format!("tasks/files/{a}/shot.png"));
+    std::fs::remove_file(&stored).unwrap();
+    std::os::unix::fs::symlink(&shot, &stored).unwrap();
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "wali"]).0,
+        "attachment_unsafe"
+    );
+    assert!(!env.home.path().join(".local/state/tasks/move").exists());
+    assert!(!wali.join("tasks/files").exists());
+}
+
+#[test]
+fn a_journal_naming_an_outside_path_is_never_acted_on() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let shot = dots.join("scratch/shot.png");
+    std::fs::create_dir_all(shot.parent().unwrap()).unwrap();
+    std::fs::write(&shot, b"png bytes").unwrap();
+    env.json(&dots, &["attach", &a, shot.to_str().unwrap()]);
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "attachments")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let sentinel = env.home.path().join("keep.txt");
+    std::fs::write(&sentinel, b"keep").unwrap();
+    let path = journal_path(&env, &a);
+    let mut journal: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    journal["attachments"][0]["name"] = toml::Value::String(sentinel.display().to_string());
+    std::fs::write(&path, toml::to_string(&journal).unwrap()).unwrap();
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "wali"]).0,
+        "config"
+    );
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"keep");
+}
+
+#[test]
+fn an_interrupted_move_resumes_with_the_same_id() {
+    // Spec §6 case 5.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "destination")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    assert!(journal_path(&env, &a).is_file());
+    let n = std::fs::read_dir(wali.join("tasks"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .find(|f| f.ends_with(".md"))
+        .unwrap()
+        .trim_end_matches(".md")
+        .to_string();
+    assert_eq!(env.json(&dots, &["show", &a])["task"]["status"], "todo");
+    assert_eq!(
+        fail_detail(&env, &dots, &["note", &a, "x"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &wali, &["note", &n, "x"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali", "--explain"])["recovery"],
+        "resume"
+    );
+    let checked = env.check(&dots);
+    assert!(
+        checked["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "move_pending")
+    );
+    assert_eq!(
+        fail_detail(&env, &wali, &["retire", "--reason", "x"]).0,
+        "move_pending"
+    );
+    // The same records with scratch state: no journal on "this host".
+    let saved = std::fs::read(journal_path(&env, &a)).unwrap();
+    std::fs::remove_file(journal_path(&env, &a)).unwrap();
+    let out = env.cmd(&wali).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("move_incomplete"));
+    std::fs::write(journal_path(&env, &a), saved).unwrap();
+
+    let out = env.json(&dots, &["move", &a, "--to", "wali"]);
+    assert_eq!(out["recovery"], "resumed");
+    assert_eq!(out["id"], n);
+    assert!(!journal_path(&env, &a).exists());
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali"])["recovery"],
+        "complete"
+    );
+}
+
+#[test]
+fn a_hand_edit_mid_move_makes_the_rerun_refuse() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "journal")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let path = dots.join(format!("tasks/{a}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replacen("title: A", "title: B", 1)).unwrap();
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "wali"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali", "--explain"])["recovery"],
+        "refuse"
+    );
+}
+
+#[test]
+fn undo_from_the_journal_restores_the_original_park() {
+    // Spec §6 case 10: the §4.4 manual undo, performed by the test from the journal.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.json(&dots, &["park", &a, "pick up the parser"]);
+    let code_worktree = dots.join(".worktrees/x").display().to_string();
+    let store_path = env.claim_store("dots");
+    let text = std::fs::read_to_string(&store_path).unwrap();
+    let mut parks: toml::Value = toml::from_str(&text).unwrap();
+    parks["parks"][a.as_str()]["worktree"] = toml::Value::String(code_worktree.clone());
+    std::fs::write(&store_path, toml::to_string(&parks).unwrap()).unwrap();
+    let original = parks["parks"][a.as_str()].clone();
+
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "store")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let journal: toml::Value =
+        toml::from_str(&std::fs::read_to_string(journal_path(&env, &a)).unwrap()).unwrap();
+    assert_eq!(
+        journal["source_park"]["worktree"].as_str(),
+        Some(code_worktree.as_str())
+    );
+    assert_eq!(
+        journal["target_park"]["worktree"].as_str(),
+        Some(wali.to_str().unwrap())
+    );
+    let n = journal["target"].as_str().unwrap().to_string();
+    assert_eq!(
+        store(&env, "wali")["parks"][n.as_str()],
+        journal["target_park"]
+    );
+
+    // Undo, restore first and delete last.
+    std::fs::write(
+        dots.join(format!("tasks/{a}.md")),
+        journal["source_text"].as_str().unwrap(),
+    )
+    .unwrap();
+    let mut source_store = store(&env, "dots");
+    source_store["parks"]
+        .as_table_mut()
+        .unwrap()
+        .insert(a.clone(), journal["source_park"].clone());
+    std::fs::write(&store_path, toml::to_string(&source_store).unwrap()).unwrap();
+    assert_eq!(store(&env, "dots")["parks"][a.as_str()], original);
+    let mut target_store = store(&env, "wali");
+    target_store["parks"].as_table_mut().unwrap().remove(&n);
+    std::fs::write(
+        env.claim_store("wali"),
+        toml::to_string(&target_store).unwrap(),
+    )
+    .unwrap();
+    std::fs::remove_file(wali.join(format!("tasks/{n}.md"))).unwrap();
+    std::fs::remove_file(journal_path(&env, &a)).unwrap();
+
+    assert_eq!(env.json(&dots, &["show", &a])["task"]["status"], "todo");
+    assert!(env.check(&dots)["errors"].as_array().unwrap().is_empty());
+    assert!(env.check(&wali)["errors"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn lost_attachment_bytes_block_recovery_until_restored() {
+    // Spec §6 case 11.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let shot = dots.join("scratch/shot.png");
+    std::fs::create_dir_all(shot.parent().unwrap()).unwrap();
+    std::fs::write(&shot, b"png bytes").unwrap();
+    env.json(&dots, &["attach", &a, shot.to_str().unwrap()]);
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "cleanup")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let journal: toml::Value =
+        toml::from_str(&std::fs::read_to_string(journal_path(&env, &a)).unwrap()).unwrap();
+    let n = journal["target"].as_str().unwrap().to_string();
+    let copy = wali.join(format!("tasks/files/{n}/shot.png"));
+    std::fs::remove_file(&copy).unwrap();
+    let (kind, detail) = fail_detail(&env, &dots, &["move", &a, "--to", "wali"]);
+    assert_eq!(kind, "move_pending");
+    assert!(detail.contains("shot.png"), "{detail}");
+    let explained = env.json(&dots, &["move", &a, "--to", "wali", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse");
+    assert!(explained["warnings"].to_string().contains("shot.png"));
+    assert!(journal_path(&env, &a).is_file());
+    assert_eq!(
+        fail_detail(&env, &wali, &["note", &n, "x"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["retire", "--reason", "x"]).0,
+        "move_pending"
+    );
+    std::fs::write(&copy, b"png bytes").unwrap();
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali"])["recovery"],
+        "resumed"
+    );
+}
+
+#[test]
+fn destination_documents_and_step_must_validate_before_journaling() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    for root in [&dots, &wali] {
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::create_dir_all(root.join("docs/plans")).unwrap();
+    }
+    std::fs::write(dots.join("docs/specs/design.md"), "# Design\n").unwrap();
+    std::fs::write(
+        dots.join("docs/plans/plan.md"),
+        "# Plan\n### Task 1: Work\n",
+    )
+    .unwrap();
+    let a = id_of(env.json(
+        &dots,
+        &[
+            "add",
+            "A",
+            "-p",
+            "2",
+            "--spec",
+            "docs/specs/design.md",
+            "--plan",
+            "docs/plans/plan.md",
+            "--step",
+            "Task 1: Work",
+        ],
+    ));
+    let before = std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap();
+    for remedy in ["--no-spec", "--no-plan", "--no-plan"] {
+        let (kind, detail) = fail_detail(&env, &dots, &["move", &a, "--to", "wali"]);
+        assert_eq!(kind, "validation");
+        assert!(
+            detail.contains(&format!("tasks edit {a}")) && detail.contains(remedy),
+            "{detail}"
+        );
+        assert!(!journal_path(&env, &a).exists());
+        assert_eq!(
+            std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap(),
+            before
+        );
+        if remedy == "--no-spec" {
+            std::fs::write(wali.join("docs/specs/design.md"), "# Design\n").unwrap();
+        } else {
+            std::fs::write(wali.join("docs/plans/plan.md"), "# Plan\n").unwrap();
+        }
+    }
+    std::fs::write(wali.join("docs/plans/plan.md"), "### Task 1: Work\n").unwrap();
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    let moved = env.json(&wali, &["show", &n]);
+    assert_eq!(moved["task"]["spec"], "docs/specs/design.md");
+    assert_eq!(moved["task"]["plan"], "docs/plans/plan.md");
+    assert_eq!(moved["task"]["step"], "Task 1: Work");
+}
+
+#[test]
+fn overlapping_project_operations_refuse_fresh_and_resume() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let ops = env.init("ops");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&ops, &["add", "B", "-p", "2"]));
+    for (from, target) in [(&dots, "wali-111111"), (&ops, "wali-111111")] {
+        let other = id_of(env.json(from, &["add", "other", "-p", "2"]));
+        journal_by_hand(&env, from, &other, &wali, target);
+        assert_eq!(
+            fail_detail(&env, &dots, &["move", &a, "--to", "wali"]).0,
+            "move_pending"
+        );
+        assert!(!journal_path(&env, &a).exists());
+        std::fs::remove_file(journal_path(&env, &other)).unwrap();
+    }
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "journal")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let own = std::fs::read(journal_path(&env, &a)).unwrap();
+    journal_by_hand(&env, &ops, &b, &wali, "wali-111111");
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "wali"]).0,
+        "move_pending"
+    );
+    assert_eq!(std::fs::read(journal_path(&env, &a)).unwrap(), own);
+    std::fs::remove_file(journal_path(&env, &b)).unwrap();
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali"])["recovery"],
+        "resumed"
+    );
+}
+
+#[test]
+fn completion_requires_the_requested_immediate_destination() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    env.init("ops");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    env.json(&wali, &["move", &n, "--to", "ops"]);
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &a, "--to", "ops"]).0,
+        "moved"
+    );
+    alias_registry(&env, "alias", "wali");
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "alias"])["recovery"],
+        "complete"
+    );
+}
+
+#[test]
+fn destination_doc_roots_refuse_with_an_actionable_remedy() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    std::fs::write(dots.join("docs/specs/design.md"), "# Design\n").unwrap();
+    let a = id_of(env.json(
+        &dots,
+        &["add", "A", "-p", "2", "--spec", "docs/specs/design.md"],
+    ));
+    let config = wali.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("\nspec_dirs = [\"other/specs\"]\n");
+    std::fs::write(config, text).unwrap();
+    let (kind, detail) = fail_detail(&env, &dots, &["move", &a, "--to", "wali"]);
+    assert_eq!(kind, "validation");
+    assert!(
+        detail.contains(&format!("tasks edit {a} --no-spec")),
+        "{detail}"
+    );
+    assert!(!journal_path(&env, &a).exists());
+}
+
+#[test]
+fn every_move_phase_resumes_and_explain_preserves_records() {
+    for phase in [
+        "journal",
+        "attachments",
+        "destination",
+        "store",
+        "tombstone",
+        "cleanup",
+    ] {
+        let mut env = TestEnv::new();
+        let dots = env.init("dots");
+        let wali = env.init("wali");
+        let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+        env.json(&dots, &["park", &a, "continue"]);
+        std::fs::write(dots.join("image.png"), b"bytes").unwrap();
+        env.json(&dots, &["attach", &a, "image.png"]);
+        let before = std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap();
+        let preview = env.json(&dots, &["move", &a, "--to", "wali", "--explain"]);
+        assert_eq!(preview["recovery"], "fresh");
+        assert!(!journal_path(&env, &a).exists());
+        assert_eq!(
+            std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap(),
+            before
+        );
+        env.cmd(&dots)
+            .env("TASKS_MOVE_STOP_AFTER", phase)
+            .args(["move", &a, "--to", "wali"])
+            .assert()
+            .success();
+        let saved = std::fs::read(journal_path(&env, &a)).unwrap();
+        assert_eq!(
+            env.json(&dots, &["move", &a, "--to", "wali", "--explain"])["recovery"],
+            "resume",
+            "{phase}"
+        );
+        assert_eq!(std::fs::read(journal_path(&env, &a)).unwrap(), saved);
+        let out = env.json(&dots, &["move", &a, "--to", "wali"]);
+        assert_eq!(out["recovery"], "resumed", "{phase}");
+        let n = out["id"].as_str().unwrap();
+        assert_eq!(
+            std::fs::read(wali.join(format!("tasks/files/{n}/image.png"))).unwrap(),
+            b"bytes"
+        );
+        assert!(!journal_path(&env, &a).exists());
+        assert!(!dots.join(format!("tasks/files/{a}")).exists());
+        assert!(env.check(&dots)["errors"].as_array().unwrap().is_empty());
+        assert!(env.check(&wali)["errors"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn pending_renames_on_either_move_project_refuse() {
+    for side in ["dots", "wali"] {
+        let mut env = TestEnv::new();
+        let dots = env.init("dots");
+        let wali = env.init("wali");
+        let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+        let root = if side == "dots" { &dots } else { &wali };
+        env.cmd(root)
+            .env("TASKS_RENAME_STOP_AFTER", "inventory")
+            .args(["rename", side, "changed"])
+            .assert()
+            .success();
+        let (kind, detail) = fail_detail(&env, &dots, &["move", &a, "--to", "wali"]);
+        assert_eq!(kind, "validation");
+        assert!(
+            detail.contains("rename") && detail.contains("unfinished"),
+            "{detail}"
+        );
+        assert!(!journal_path(&env, &a).exists());
+    }
+}

@@ -1,6 +1,3 @@
-// Temporary while Tasks 6/7 introduce the staged API's consumers (ruling R5).
-#![allow(dead_code)]
-
 use super::journal::Journal;
 use crate::claims::{Escalation, Park};
 use crate::rename::inventory::digest;
