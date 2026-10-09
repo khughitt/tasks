@@ -7,7 +7,7 @@ use crate::halt::{self, HaltSnapshot};
 use crate::model::{Status, Task, TaskId};
 use crate::needs::{Vocabularies, Without};
 use crate::output::{
-    Counts, DateColumn, DeferredSummary, HaltRow, ListOut, NextOut, Output, ParkedOut,
+    Counts, DateColumn, DeferredSummary, HaltRow, ListOut, NextOut, Output, ParkedOut, ParkedRow,
     PeriodicSummary, PrimeOut, TaskSummary,
 };
 use crate::query::{
@@ -169,6 +169,35 @@ fn force_hint(id: &str, snapshots: &HashMap<String, HaltSnapshot>) -> String {
         ""
     };
     format!("`tasks start --force {id}{reason}`")
+}
+
+/// A park this host recorded before its record closed, from another host or checkout:
+/// the close came at or after the park, so no parked occurrence can be waiting. A recurring
+/// record's next occurrence parked elsewhere still shows the previous, earlier completion.
+fn closed_after_park(row: &ParkedRow) -> bool {
+    let Some(park) = &row.park else {
+        return false;
+    };
+    let closed = match row.status {
+        Some(Status::Done) => row.completed.as_ref().or(row.updated.as_ref()),
+        Some(Status::Dropped) => row.updated.as_ref(),
+        _ => None,
+    };
+    match (
+        closed.map(|at| crate::time::parse(at)),
+        crate::time::parse(&park.at),
+    ) {
+        (Some(Ok(closed)), Ok(parked)) => closed >= parked,
+        _ => false,
+    }
+}
+
+/// The command that repeats a close, releasing whatever this host still records for it.
+fn closing_hint(id: &str, status: Status) -> String {
+    match status {
+        Status::Dropped => format!("`tasks drop {id} \"<why>\"`"),
+        _ => format!("`tasks done {id}`"),
+    }
 }
 
 /// Ready tasks in ready order; pushes a warning per unreachable dependency.
@@ -674,7 +703,21 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
             .count(),
     };
     let counts = Counts::of(&all);
-    let parked = super::parked::rows(&mut ctx, &all, &claims, now)?;
+    let (left, parked): (Vec<ParkedRow>, Vec<ParkedRow>) =
+        super::parked::rows(&mut ctx, &all, &claims, now)?
+            .into_iter()
+            .partition(closed_after_park);
+    for row in &left {
+        let park = row.park.as_ref().expect("closed_after_park found a park");
+        let status = row.status.expect("closed_after_park found a status");
+        ctx.warnings.push(format!(
+            "{} was {} after this host parked it from {}; {} clears the park",
+            row.id,
+            status.as_str(),
+            park.worktree,
+            closing_hint(&row.id, status)
+        ));
+    }
     let snapshots = halt_snapshots(&mut ctx, &all);
     let mut ready = ready_tasks(
         &mut ctx,
@@ -782,11 +825,27 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
         }
     }
     for (id, claim, why) in claims.stale() {
-        ctx.warnings.push(format!(
-            "{id} has a stale claim from session {} ({why}); {} to take it over",
-            claim.session,
-            force_hint(id, &snapshots)
-        ));
+        // A closed record refuses `start` unless it recurs, so its closing command is what
+        // releases the claim.
+        let closed = all
+            .iter()
+            .find(|task| task.id.to_string() == *id)
+            .filter(|task| {
+                task.status == Status::Dropped
+                    || (task.status == Status::Done && task.every.is_none())
+            });
+        ctx.warnings.push(match closed {
+            Some(task) => format!(
+                "{id} has a stale claim from session {} ({why}); {} to release it",
+                claim.session,
+                closing_hint(id, task.status)
+            ),
+            None => format!(
+                "{id} has a stale claim from session {} ({why}); {} to take it over",
+                claim.session,
+                force_hint(id, &snapshots)
+            ),
+        });
     }
     let colors = ctx.project_colors();
     let mut out = Output::Prime(Box::new(PrimeOut {

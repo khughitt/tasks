@@ -161,7 +161,9 @@ nothing is eligible.
    detached, take the times from the run's own output. Example:
    `run: 69 min (est 40, idle); preflight 1, build 4, smoke 64; hung: trace export`.
    Tools that compare estimates with actuals parse this form, so keep it exact.
-   `prime` lists parked work first with where it was left; `ready` omits work waiting on
+   `prime` lists parked work first with where it was left; a park this host kept after
+   the record closed elsewhere is a warning naming the command that clears it (`tasks done
+   <id>`, or `tasks drop <id> "<why>"`), not a row. `ready` omits work waiting on
    the user; `list --parked` is the picker's feed. `list --parked --waiting-on user
    --all-projects` is the person's queue: everything parked on them, with each next step.
    `--headers` labels the columns of any pretty table.

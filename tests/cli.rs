@@ -9383,6 +9383,138 @@ fn error_of(env: &TestEnv, dir: &std::path::Path, args: &[&str]) -> serde_json::
     serde_json::from_slice(&out.stderr).unwrap()
 }
 
+fn parked_ids(v: &serde_json::Value) -> Vec<String> {
+    v["parked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn prime_warns_about_a_park_left_on_a_record_closed_elsewhere() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let done = id_of(env.json(&sci, &["add", "D", "-p", "2"]));
+    let dropped = id_of(env.json(&sci, &["add", "X", "-p", "2"]));
+    for id in [&done, &dropped] {
+        env.json(&sci, &["start", id]);
+        env.json(&sci, &["park", id, "next"]);
+    }
+    // Another host, with its own claim store, closes both records.
+    let host_b = |args: &[&str]| {
+        env.cmd(&sci)
+            .env("XDG_STATE_HOME", env.home.path().join("host-b"))
+            .args(args)
+            .assert()
+            .success();
+    };
+    host_b(&["done", &done]);
+    host_b(&["drop", &dropped, "not needed"]);
+
+    let v = env.json(&sci, &["prime"]);
+    assert_eq!(parked_ids(&v), Vec::<String>::new(), "{v}");
+    let warnings = warnings_of(&v);
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains(&done) && w.contains(&format!("`tasks done {done}`"))),
+        "{v}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains(&dropped) && w.contains(&format!("`tasks drop {dropped} "))),
+        "{v}"
+    );
+    // list --parked keeps its own rule: closed parks only under a status filter.
+    let listed = env.json(&sci, &["list", "--parked", "--status", "done"]);
+    assert_eq!(listed["tasks"][0]["id"], done.as_str(), "{listed}");
+
+    env.json(&sci, &["done", &done]);
+    let v = env.json(&sci, &["prime"]);
+    assert!(
+        !warnings_of(&v).iter().any(|w| w.contains(&done)),
+        "the advised command clears it: {v}"
+    );
+}
+
+#[test]
+fn prime_keeps_a_parked_next_occurrence_of_a_done_recurring_task() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "R", "-p", "2", "--every", "7d"]));
+    env.json(&main, &["start", &id]);
+    env.json(&main, &["done", &id]);
+    // The previous occurrence closed well before the next one was parked.
+    let path = main.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text: String = text
+        .lines()
+        .map(|line| match line.split_once(": ") {
+            Some(("completed" | "last_done", _)) => {
+                format!(
+                    "{}: 2026-01-01T00:00:00Z\n",
+                    line.split_once(':').unwrap().0
+                )
+            }
+            _ => format!("{line}\n"),
+        })
+        .collect();
+    std::fs::write(&path, text).unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    env.json(&side, &["start", &id]);
+    env.json(&side, &["park", &id, "next"]);
+
+    let v = env.json(&main, &["prime"]);
+    assert_eq!(parked_ids(&v), vec![id.clone()], "{v}");
+    assert!(!warnings_of(&v).iter().any(|w| w.contains(&id)), "{v}");
+}
+
+#[test]
+fn prime_names_the_closing_command_for_a_stale_claim_on_a_closed_record() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let done = id_of(env.json(&sci, &["add", "D", "-p", "2"]));
+    let dropped = id_of(env.json(&sci, &["add", "X", "-p", "2"]));
+    let recurring = id_of(env.json(&sci, &["add", "R", "-p", "2", "--every", "7d"]));
+    env.json(&sci, &["done", &done]);
+    env.json(&sci, &["drop", &dropped, "not needed"]);
+    env.json(&sci, &["start", &recurring]);
+    env.json(&sci, &["done", &recurring]);
+    for id in [&done, &dropped, &recurring] {
+        write_detailed_claim(&env, "sci", id, "agent-a", false);
+    }
+
+    let warnings = warnings_of(&env.json(&sci, &["prime"]));
+    let about = |id: &str| {
+        warnings
+            .iter()
+            .find(|w| w.contains(id) && w.contains("stale claim"))
+            .unwrap_or_else(|| panic!("no stale-claim warning for {id}: {warnings:?}"))
+            .clone()
+    };
+    assert!(about(&done).contains(&format!("`tasks done {done}`")));
+    assert!(about(&dropped).contains(&format!("`tasks drop {dropped} ")));
+    // A recurring record reopens with start, so a takeover is still the way in.
+    assert!(about(&recurring).contains(&format!("`tasks start --force {recurring}`")));
+}
+
 #[test]
 fn prime_lists_parked_before_ready_and_ready_omits_user_parked_work() {
     let mut env = TestEnv::new();

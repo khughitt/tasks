@@ -203,7 +203,10 @@ optionally why:
 | `capability`  | the work needs more reasoning than this session can supply; `--complexity` raises the rating |
 | `quiet`       | the host is in use; the work is prepared, unattended, and needs only an idle machine — `--minutes <n>` (required) and `--needs idle\|headless` record the recipe |
 
-`start` resumes it, and `prime` lists parked work first. Every record also carries two
+`start` resumes it, and `prime` lists parked work first. Parks are host-local, so a park
+can outlive a close made on another host or checkout; `prime` reports such a park as a
+warning naming the command that clears it (repeating the close) rather than as a row,
+while `list --parked` omits it unless given a status filter. Every record also carries two
 stamps written only by status changes: `started`, the first time work began, and
 `completed`, the latest completion (cleared by a reopen). Design:
 `docs/specs/2026-09-11-park-reason-and-stamps-design.md`.
