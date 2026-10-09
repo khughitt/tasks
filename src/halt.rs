@@ -90,12 +90,7 @@ fn reachable(halt: &Task, local: &[Task], registry: &Registry) -> Result<HashSet
             continue;
         }
         allowed.insert(task.id.clone());
-        pending.extend(
-            task.depends
-                .iter()
-                .map(|id| registry.canonical_id(id))
-                .filter(|id| id.prefix == halt.id.prefix),
-        );
+        pending.extend(task.depends.iter().map(|id| registry.canonical_id(id)));
         pending.extend(
             local
                 .iter()

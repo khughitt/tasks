@@ -2754,3 +2754,26 @@ fn correction_i6_halt_canonicalizes_old_prefixes_along_pointer_chain() {
 fn correction_i5_missing_attachment() {
     incoherent_journal_refuses("missing_attachment");
 }
+
+#[test]
+fn correction_i6_foreign_dependency_moved_local_is_ready_and_startable() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&wali, &["add", "Remedy", "-p", "2"]));
+    env.json(
+        &dots,
+        &["add", "Halt", "-p", "0", "--tag", "halt", "--depends", &a],
+    );
+    let local = id_of(env.json(&wali, &["move", &a, "--to", "dots"]));
+    let ready = env.json(&dots, &["ready"]);
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|task| task["id"] == local),
+        "{ready}"
+    );
+    env.json(&dots, &["start", &local]);
+}
