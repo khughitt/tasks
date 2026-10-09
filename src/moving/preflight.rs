@@ -33,18 +33,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
             "{id} has parent {parent}; run `tasks edit {id} --no-parent`, move it, then re-parent it in the destination"
         )));
     }
-    let records = ctx.source.project.scan()?;
-    let children = hierarchy::children(&records, id, &ctx.registry);
-    if !children.is_empty() {
-        return Err(Error::Validation(format!(
-            "{id} has children {}; move or re-parent each child first",
-            children
-                .iter()
-                .map(|t| t.id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
-    }
+    validate_childless(ctx)?;
     let claims = ClaimSnapshot::load(std::iter::once(ctx.source.project.prefix.as_str()))?;
     if let Some(claim) = claims.live(id) {
         return Err(Error::Claimed(
@@ -58,7 +47,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     commands::reject_retired(&ctx.registry, &ctx.source.project)?;
     commands::reject_retired(&ctx.registry, &ctx.target)?;
     super::reject_operations(ctx, None)?;
-    let now = crate::time::now();
+    let now = crate::time::after(&source.updated)?;
     let owner = commands::owner_name(&ctx.source.project)?;
     let mut target = source.clone();
     target.id = ctx.target.new_id()?;
@@ -179,6 +168,23 @@ fn validate_destination_docs(
         return Err(Error::Validation(format!(
             "{source}: heading {step:?} not found in {plan} in {}; run `tasks edit {source} --no-plan` or add the heading there",
             project.prefix
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_childless(ctx: &MoveCtx) -> Result<()> {
+    let id = &ctx.source_id;
+    let records = ctx.source.project.scan()?;
+    let children = hierarchy::children(&records, id, &ctx.registry);
+    if !children.is_empty() {
+        return Err(Error::Validation(format!(
+            "{id} has children {}; move or re-parent each child first",
+            children
+                .iter()
+                .map(|t| t.id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         )));
     }
     Ok(())

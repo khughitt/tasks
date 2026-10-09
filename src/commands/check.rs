@@ -410,7 +410,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 errors.push(finding(Some(task), file.clone(), "deferred_goal", detail));
             }
             // spec §3.2: the status rule lives here and in the writers, not in parsing.
-            if !crate::defer::can_carry(task.status) {
+            if task.status != Status::Moved && !crate::defer::can_carry(task.status) {
                 errors.push(finding(
                     Some(task),
                     file.clone(),

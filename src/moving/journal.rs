@@ -212,6 +212,18 @@ impl Journal {
             }
             validate_digest(path, "attachment sha256", &attachment.sha256)?;
         }
+        if self.source_park.is_some() != self.target_park.is_some() {
+            return Err(Error::Config(format!(
+                "{}: source_park and target_park must both be present or absent",
+                path.display()
+            )));
+        }
+        if self.source_escalation != self.target_escalation {
+            return Err(Error::Config(format!(
+                "{}: source_escalation and target_escalation must match",
+                path.display()
+            )));
+        }
         if let Some(target) = &self.target_park {
             let mut original = target.clone();
             if let Some(source) = &self.source_park {
@@ -222,6 +234,75 @@ impl Journal {
                     "{}: target_park must match source_park except for worktree",
                     path.display()
                 )));
+            }
+        }
+        self.validate_records()
+            .map_err(|error| journal_error(path, error))
+    }
+
+    fn validate_records(&self) -> Result<()> {
+        use crate::attachments::{Ledger, ledger};
+        use crate::format::parse_task;
+        use crate::model::Status;
+        let source = parse_task(&self.source_text, &format!("{}.md", self.source))?;
+        let target = parse_task(&self.target_text, &format!("{}.md", self.target))?;
+        let tombstone = parse_task(&self.tombstone_text, &format!("{}.md", self.source))?;
+        let refuse = || {
+            Error::Validation("journal records do not describe one move preserving the source fields, history and attachment ledger".into())
+        };
+        if source.id != self.source_id()
+            || !source.status.is_open()
+            || source.parent.is_some()
+            || target.updated != tombstone.updated
+            || crate::time::parse(&target.updated)? <= crate::time::parse(&source.updated)?
+        {
+            return Err(refuse());
+        }
+        let attached: BTreeSet<_> = ledger(&source)
+            .into_iter()
+            .filter_map(|(name, state)| (state == Ledger::Attached).then_some(name))
+            .collect();
+        if attached != self.attachments.iter().map(|a| a.name.clone()).collect() {
+            return Err(refuse());
+        }
+        let mut expected_target = source.clone();
+        expected_target.id = self.target_id();
+        expected_target.moved_from = Some(source.id.clone());
+        expected_target.updated.clone_from(&target.updated);
+        let mut expected_tombstone = source.clone();
+        expected_tombstone.status = Status::Moved;
+        expected_tombstone.moved_to = Some(target.id.clone());
+        expected_tombstone.updated.clone_from(&target.updated);
+        for (actual, expected, suffix) in [
+            (
+                &target,
+                &mut expected_target,
+                vec![format!("moved from {}", source.id)],
+            ),
+            (
+                &tombstone,
+                &mut expected_tombstone,
+                std::iter::once(format!("moved to {}", target.id))
+                    .chain(self.attachments.iter().map(|a| {
+                        crate::attachments::detached_note(
+                            &a.name,
+                            &format!("moved to {}", target.id),
+                        )
+                    }))
+                    .collect(),
+            ),
+        ] {
+            if actual.notes.len() != source.notes.len() + suffix.len() {
+                return Err(refuse());
+            }
+            for (note, text) in actual.notes[source.notes.len()..].iter().zip(suffix) {
+                if note.text != text {
+                    return Err(refuse());
+                }
+                expected.notes.push(note.clone());
+            }
+            if actual != expected {
+                return Err(refuse());
             }
         }
         Ok(())
@@ -257,21 +338,34 @@ fn journal_error(path: &Path, error: Error) -> Error {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::claims::WaitingOn;
     use crate::rename::inventory::digest;
 
-    fn sample() -> Journal {
+    pub(in crate::moving) fn sample() -> Journal {
+        use crate::format::{parse_task, serialize_task};
+        let source_text = "---\nid: dots-00000a\ntitle: A\nstatus: todo\npriority: 2\ncreated: 2026-10-01T00:00:00Z\nupdated: 2026-10-01T00:00:00Z\ndepends: []\ntags: []\n---\n".to_string();
+        let source = parse_task(&source_text, "dots-00000a.md").unwrap();
+        let mut target = source.clone();
+        target.id = TaskId::parse("wali-00000b").unwrap();
+        target.moved_from = Some(source.id.clone());
+        target.updated = "2026-10-02T00:00:00Z".into();
+        crate::commands::append_note(&mut target, "owner", "moved from dots-00000a").unwrap();
+        let mut tombstone = source;
+        tombstone.status = crate::model::Status::Moved;
+        tombstone.moved_to = Some(target.id.clone());
+        tombstone.updated.clone_from(&target.updated);
+        crate::commands::append_note(&mut tombstone, "owner", "moved to wali-00000b").unwrap();
         Journal {
             source: "dots-00000a".into(),
             target: "wali-00000b".into(),
             source_root: "/source".into(),
             target_root: "/target".into(),
-            source_text: "a".into(),
-            source_digest: digest(b"a"),
-            target_text: "b".into(),
-            tombstone_text: "c".into(),
+            source_digest: digest(source_text.as_bytes()),
+            source_text,
+            target_text: serialize_task(&target),
+            tombstone_text: serialize_task(&tombstone),
             attachments: vec![],
             source_park: None,
             source_escalation: None,
@@ -364,6 +458,10 @@ mod tests {
         let first = sample();
         let mut second = sample();
         second.source = "dots-00000c".into();
+        second.source_text = second.source_text.replace("dots-00000a", "dots-00000c");
+        second.target_text = second.target_text.replace("dots-00000a", "dots-00000c");
+        second.tombstone_text = second.tombstone_text.replace("dots-00000a", "dots-00000c");
+        second.source_digest = digest(second.source_text.as_bytes());
         second
             .save_to(&state.path().join("dots-00000c.toml"))
             .unwrap();
@@ -449,6 +547,36 @@ mod tests {
             Journal::pending_in(state.path()).unwrap_err().kind(),
             "config"
         );
+    }
+
+    #[test]
+    fn incoherent_record_texts_fail_load_pending_and_save() {
+        for field in ["target_text", "tombstone_text", "source_text"] {
+            let state = tempfile::tempdir().unwrap();
+            let path = state.path().join("dots-00000a.toml");
+            let mut journal = sample();
+            match field {
+                "target_text" => {
+                    journal.target_text = journal.target_text.replace("title: A", "title: Changed")
+                }
+                "tombstone_text" => journal.tombstone_text.clone_from(&journal.source_text),
+                "source_text" => {
+                    journal.source_text = journal
+                        .source_text
+                        .replace("status: todo", "status: dropped");
+                    journal.source_digest = digest(journal.source_text.as_bytes());
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(journal.save_to(&path).unwrap_err().kind(), "config");
+            assert!(!path.exists());
+            std::fs::write(&path, toml::to_string(&journal).unwrap()).unwrap();
+            assert_eq!(Journal::load_from(&path).unwrap_err().kind(), "config");
+            assert_eq!(
+                Journal::pending_in(state.path()).unwrap_err().kind(),
+                "config"
+            );
+        }
     }
 
     #[test]

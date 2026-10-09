@@ -16,6 +16,8 @@ pub struct Snapshot {
     pub target: FileState,
     pub source_files: BTreeMap<String, FileState>,
     pub target_files: BTreeMap<String, FileState>,
+    pub source_park: Option<Park>,
+    pub source_escalation: Option<Escalation>,
     pub target_park: Option<Park>,
     pub target_escalation: Option<Escalation>,
 }
@@ -51,6 +53,16 @@ pub fn classify(s: &Snapshot) -> Recovery {
     }
     for attachment in &j.attachments {
         let want = FileState::Digest(attachment.sha256.clone());
+        for (id, files) in [(&j.source, &s.source_files), (&j.target, &s.target_files)] {
+            if let Some(FileState::Digest(actual)) = files.get(&attachment.name)
+                && actual != &attachment.sha256
+            {
+                return Recovery::Refuse(format!(
+                    "attachment {} in {id} differs from its journal digest",
+                    attachment.name
+                ));
+            }
+        }
         let here = s.source_files.get(&attachment.name) == Some(&want);
         let there = s.target_files.get(&attachment.name) == Some(&want);
         if !here && !there {
@@ -59,6 +71,15 @@ pub fn classify(s: &Snapshot) -> Recovery {
                 attachment.name, j.source, j.target
             ));
         }
+    }
+    if s.source_park.is_some() && s.source_park != j.source_park {
+        return Recovery::Refuse(format!("{}'s park differs from the journal's", j.source));
+    }
+    if s.source_escalation.is_some() && s.source_escalation != j.source_escalation {
+        return Recovery::Refuse(format!(
+            "{}'s escalation differs from the journal's",
+            j.source
+        ));
     }
     if s.target_park.is_some() && s.target_park != j.target_park {
         return Recovery::Refuse(format!(
@@ -83,29 +104,55 @@ mod tests {
     use crate::moving::journal::JournalAttachment;
 
     fn sample() -> Snapshot {
+        let journal = super::super::journal::tests::sample();
         Snapshot {
-            journal: Journal {
-                source: "dots-00000a".into(),
-                target: "wali-00000b".into(),
-                source_root: "/source".into(),
-                target_root: "/target".into(),
-                source_text: "a".into(),
-                source_digest: digest(b"a"),
-                target_text: "b".into(),
-                tombstone_text: "c".into(),
-                attachments: vec![],
-                source_park: None,
-                source_escalation: None,
-                target_park: None,
-                target_escalation: None,
-            },
-            source: FileState::Digest(digest(b"a")),
+            source: FileState::Digest(journal.source_digest.clone()),
+            journal,
             target: FileState::Absent,
             source_files: BTreeMap::new(),
             target_files: BTreeMap::new(),
+            source_park: None,
+            source_escalation: None,
             target_park: None,
             target_escalation: None,
         }
+    }
+
+    fn sample_with_attachment() -> Snapshot {
+        let mut s = sample();
+        let attached = crate::model::Note {
+            at: "2026-10-01T00:00:00Z".into(),
+            by: "owner".into(),
+            text: crate::attachments::attached_note("shot.png", 3, None),
+            provenance: None,
+        };
+        for (text, id, tombstone) in [
+            (&mut s.journal.source_text, "dots-00000a", false),
+            (&mut s.journal.target_text, "wali-00000b", false),
+            (&mut s.journal.tombstone_text, "dots-00000a", true),
+        ] {
+            let mut task = crate::format::parse_task(text, &format!("{id}.md")).unwrap();
+            task.notes.insert(0, attached.clone());
+            if tombstone {
+                crate::commands::append_note(
+                    &mut task,
+                    "owner",
+                    &crate::attachments::detached_note("shot.png", "moved to wali-00000b"),
+                )
+                .unwrap();
+            }
+            *text = crate::format::serialize_task(&task);
+        }
+        s.journal.source_digest = digest(s.journal.source_text.as_bytes());
+        s.source = FileState::Digest(s.journal.source_digest.clone());
+        s.journal.attachments = vec![JournalAttachment {
+            name: "shot.png".into(),
+            sha256: digest(b"png"),
+        }];
+        s.journal
+            .validate(std::path::Path::new("dots-00000a.toml"))
+            .unwrap();
+        s
     }
 
     fn assert_refuses(snapshot: &Snapshot, name: &str) {
@@ -123,15 +170,15 @@ mod tests {
     #[test]
     fn destination_written_resumes() {
         let mut s = sample();
-        s.target = FileState::Digest(digest(b"b"));
+        s.target = FileState::Digest(digest(s.journal.target_text.as_bytes()));
         assert_eq!(classify(&s), Recovery::Resume);
     }
 
     #[test]
     fn tombstone_written_resumes() {
         let mut s = sample();
-        s.source = FileState::Digest(digest(b"c"));
-        s.target = FileState::Digest(digest(b"b"));
+        s.source = FileState::Digest(digest(s.journal.tombstone_text.as_bytes()));
+        s.target = FileState::Digest(digest(s.journal.target_text.as_bytes()));
         assert_eq!(classify(&s), Recovery::Resume);
     }
 
@@ -152,7 +199,7 @@ mod tests {
     #[test]
     fn tombstone_without_destination_refuses() {
         let mut s = sample();
-        s.source = FileState::Digest(digest(b"c"));
+        s.source = FileState::Digest(digest(s.journal.tombstone_text.as_bytes()));
         assert_refuses(&s, "wali-00000b");
     }
 
@@ -165,13 +212,9 @@ mod tests {
 
     #[test]
     fn attachment_with_no_matching_copy_refuses() {
-        let mut s = sample();
-        s.journal.attachments = vec![JournalAttachment {
-            name: "shot.png".into(),
-            sha256: digest(b"png"),
-        }];
-        s.source = FileState::Digest(digest(b"c"));
-        s.target = FileState::Digest(digest(b"b"));
+        let mut s = sample_with_attachment();
+        s.source = FileState::Digest(digest(s.journal.tombstone_text.as_bytes()));
+        s.target = FileState::Digest(digest(s.journal.target_text.as_bytes()));
         s.source_files.insert("shot.png".into(), FileState::Absent);
         s.target_files
             .insert("shot.png".into(), FileState::Digest(digest(b"x")));
@@ -180,12 +223,8 @@ mod tests {
 
     #[test]
     fn attachment_in_either_dir_resumes() {
-        let mut s = sample();
+        let mut s = sample_with_attachment();
         let sha = digest(b"png");
-        s.journal.attachments = vec![JournalAttachment {
-            name: "shot.png".into(),
-            sha256: sha.clone(),
-        }];
         s.source_files
             .insert("shot.png".into(), FileState::Digest(sha.clone()));
         s.target_files.insert("shot.png".into(), FileState::Absent);
@@ -199,7 +238,7 @@ mod tests {
     #[test]
     fn different_destination_park_refuses() {
         let mut s = sample();
-        s.target = FileState::Digest(digest(b"b"));
+        s.target = FileState::Digest(digest(s.journal.target_text.as_bytes()));
         let park = Park {
             owner: "owner".into(),
             session: "codex:test".into(),
@@ -213,6 +252,7 @@ mod tests {
             minutes: None,
             title: "task".into(),
         };
+        s.journal.source_park = Some(park.clone());
         s.journal.target_park = Some(park.clone());
         s.target_park = Some(park);
         assert_eq!(classify(&s), Recovery::Resume);
@@ -228,6 +268,7 @@ mod tests {
             at: "2026-10-09T00:00:00Z".into(),
             session: "codex:test".into(),
         };
+        s.journal.source_escalation = Some(escalation.clone());
         s.journal.target_escalation = Some(escalation.clone());
         s.target_escalation = Some(escalation);
         assert_eq!(classify(&s), Recovery::Resume);

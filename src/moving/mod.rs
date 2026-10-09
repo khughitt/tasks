@@ -71,6 +71,17 @@ fn record_state(path: &Path) -> Result<FileState> {
 }
 
 pub fn snapshot(ctx: &MoveCtx, journal: &Journal) -> Result<Snapshot> {
+    journal.validate(&Journal::path(&ctx.source_id)?)?;
+    preflight::validate_childless(ctx)?;
+    if journal
+        .target_park
+        .as_ref()
+        .is_some_and(|park| park.worktree != ctx.target.resume_root().display().to_string())
+    {
+        return Err(Error::MovePending(
+            "journal target park does not name the destination resume root".into(),
+        ));
+    }
     for (saved, project) in [
         (&journal.source_root, &ctx.source.project),
         (&journal.target_root, &ctx.target),
@@ -108,12 +119,15 @@ pub fn snapshot(ctx: &MoveCtx, journal: &Journal) -> Result<Snapshot> {
         );
     }
     let store = ClaimStore::load(&ctx.target.prefix)?;
+    let source_store = ClaimStore::load(&ctx.source.project.prefix)?;
     Ok(Snapshot {
         journal: journal.clone(),
         source: record_state(&ctx.source.project.task_path(&source_id))?,
         target: record_state(&ctx.target.task_path(&target_id))?,
         source_files,
         target_files,
+        source_park: source_store.park(&source_id).cloned(),
+        source_escalation: source_store.escalation(&source_id).cloned(),
         target_park: store.park(&target_id).cloned(),
         target_escalation: store.escalation(&target_id).cloned(),
     })
@@ -262,7 +276,10 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
         verify_attachment(&ctx.target, &target, attachment)?;
         let path = attachment_path(&ctx.source.project, &source, &attachment.name)?;
         match attachments::entry_state(&path)? {
-            EntryState::File(_) => std::fs::remove_file(path)?,
+            EntryState::File(_) => {
+                verify_attachment(&ctx.source.project, &source, attachment)?;
+                std::fs::remove_file(path)?;
+            }
             EntryState::Absent => {}
             EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),
         }
@@ -274,6 +291,14 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
         }
     }
     let mut store = ClaimStore::load(&ctx.source.project.prefix)?;
+    if (store.park(&source).is_some() && store.park(&source) != journal.source_park.as_ref())
+        || (store.escalation(&source).is_some()
+            && store.escalation(&source) != journal.source_escalation.as_ref())
+    {
+        return Err(Error::MovePending(format!(
+            "{source}'s store entries differ from the journal"
+        )));
+    }
     let park_removed = store.remove_park(&source).is_some();
     let escalation_removed = store.remove_escalation(&source).is_some();
     if park_removed || escalation_removed {

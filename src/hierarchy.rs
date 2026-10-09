@@ -32,6 +32,7 @@ pub fn validate_parent(project: &Project, registry: &Registry, task: &Task) -> R
     // A recurrence or deferred task is never a goal, so nothing may hang beneath one.
     let parent_record = project.read_task(&parent)?;
     crate::tombstone::refuse_reference(&parent_record, "parent")?;
+    crate::moving::journal::refuse_pending_id(&parent)?;
     if parent_record.every.is_some() {
         return Err(Error::Validation(format!(
             "{parent} is a recurrence and cannot have children; clear its cadence with \

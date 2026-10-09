@@ -841,7 +841,7 @@ fn journal_path(env: &TestEnv, id: &str) -> std::path::PathBuf {
 }
 
 /// A journal as `move` writes one after M2, naming `source` in `from` and `target` in
-/// `to`. Its texts are placeholders: nothing in this task resumes it.
+/// `to`, carrying coherent records without publishing them.
 fn journal_by_hand(
     env: &TestEnv,
     from: &std::path::Path,
@@ -851,6 +851,47 @@ fn journal_by_hand(
 ) {
     use sha2::{Digest, Sha256};
     let source_text = std::fs::read_to_string(from.join(format!("tasks/{source}.md"))).unwrap();
+    let moved_text = source_text
+        .lines()
+        .map(|line| {
+            if line.starts_with("updated:") {
+                "updated: 2099-01-01T00:00:00Z"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let note = |mut text: String, message: &str| {
+        if !text.contains("\n## Notes\n") {
+            text.push_str("\n## Notes\n\n");
+        }
+        text.push_str(&format!("- 2099-01-01T00:00:00Z (owner): {message}\n"));
+        text
+    };
+    let target_text = note(
+        moved_text.replacen(
+            &format!("id: {source}\n"),
+            &format!("id: {target}\nmoved_from: {source}\n"),
+            1,
+        ),
+        &format!("moved from {source}"),
+    );
+    let original_status = moved_text
+        .lines()
+        .find(|line| line.starts_with("status:"))
+        .unwrap()
+        .to_string()
+        + "\n";
+    let tombstone_text = note(
+        moved_text.replacen(
+            &original_status,
+            &format!("status: moved\nmoved_to: {target}\n"),
+            1,
+        ),
+        &format!("moved to {target}"),
+    );
     let mut journal = toml::Table::new();
     for (key, value) in [
         ("source", source.to_string()),
@@ -862,8 +903,8 @@ fn journal_by_hand(
             format!("{:x}", Sha256::digest(source_text.as_bytes())),
         ),
         ("source_text", source_text),
-        ("target_text", "target".into()),
-        ("tombstone_text", "tombstone".into()),
+        ("target_text", target_text),
+        ("tombstone_text", tombstone_text),
     ] {
         journal.insert(key.into(), toml::Value::String(value));
     }
@@ -1116,12 +1157,15 @@ fn a_pending_journal_freezes_retired_projects_before_unretire() {
     let wali = env.init("wali");
     let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
     let n = id_of(env.json(&wali, &["add", "N", "-p", "2"]));
+    journal_by_hand(&env, &dots, &a, &wali, &n);
+    let saved = std::fs::read(journal_path(&env, &a)).unwrap();
+    std::fs::remove_file(journal_path(&env, &a)).unwrap();
     env.json(&dots, &["done", &a]);
     env.json(&wali, &["done", &n]);
     for dir in [&dots, &wali] {
         env.json(dir, &["retire", "--reason", "done"]);
     }
-    journal_by_hand(&env, &dots, &a, &wali, &n);
+    std::fs::write(journal_path(&env, &a), saved).unwrap();
     for dir in [&dots, &wali] {
         let path = dir.join("tasks/.config.toml");
         let before = std::fs::read(&path).unwrap();
@@ -2146,4 +2190,567 @@ fn move_explain_classifies_source_worktree_refusal() {
         std::fs::read(side.join(format!("tasks/{a}.md"))).unwrap(),
         raw
     );
+}
+
+#[test]
+fn correction_i1_move_stamp_keeps_identical_sibling_stale() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    git(&dots, &["init", "-q", "-b", "main"]);
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let path = dots.join(format!("tasks/{a}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text = text
+        .lines()
+        .map(|line| {
+            if line.starts_with("updated:") {
+                "updated: 2099-01-01T00:00:00Z"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    std::fs::write(&path, text).unwrap();
+    git(&dots, &["add", "-A"]);
+    git(&dots, &["commit", "-qm", "seed"]);
+    let side = dots.join("wt");
+    git(
+        &dots,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    let moved = env.json(&dots, &["show", &a]);
+    assert!(moved["task"]["updated"].as_str().unwrap() > "2099-01-01T00:00:00Z");
+    assert_eq!(
+        moved["task"]["updated"],
+        env.json(&wali, &["show", &n])["task"]["updated"]
+    );
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali"])["recovery"],
+        "complete"
+    );
+    assert_eq!(env.fail(&side, &["note", &a, "stale write"]), "stale_copy");
+}
+
+#[test]
+fn correction_i2_deferred_move_checks_cleanly_and_stays_immutable() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2", "--defer", "7d"]));
+    let date = env.json(&dots, &["show", &a])["task"]["defer"].clone();
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    assert_eq!(env.json(&wali, &["show", &n])["task"]["defer"], date);
+    assert_eq!(env.json(&dots, &["show", &a])["task"]["defer"], date);
+    for root in [&dots, &wali] {
+        assert!(env.check(root)["errors"].as_array().unwrap().is_empty());
+    }
+    assert_eq!(env.fail(&dots, &["edit", &a, "--no-defer"]), "moved");
+}
+
+fn pending_parent_refuses(phase: &str, reparent: bool) {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let child = id_of(env.json(&dots, &["add", "Child", "-p", "2"]));
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", phase)
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let args = if reparent {
+        vec!["edit", &child, "--parent", &a]
+    } else {
+        vec!["add", "New child", "--parent", &a]
+    };
+    assert_eq!(env.fail(&dots, &args), "move_pending");
+}
+
+#[test]
+fn correction_i3_add_before_destination() {
+    pending_parent_refuses("journal", false);
+}
+#[test]
+fn correction_i3_reparent_before_destination() {
+    pending_parent_refuses("journal", true);
+}
+#[test]
+fn correction_i3_add_after_destination() {
+    pending_parent_refuses("destination", false);
+}
+#[test]
+fn correction_i3_reparent_after_destination() {
+    pending_parent_refuses("destination", true);
+}
+
+#[test]
+fn correction_i3_external_child_refuses_resume_without_mutation() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let child = id_of(env.json(&dots, &["add", "Child", "-p", "2"]));
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "journal")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let path = dots.join(format!("tasks/{child}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replacen("tags:", &format!("parent: {a}\ntags:"), 1),
+    )
+    .unwrap();
+    let before = std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap();
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali", "--explain"])["recovery"],
+        "refuse"
+    );
+    assert_eq!(env.fail(&dots, &["move", &a, "--to", "wali"]), "validation");
+    assert_eq!(
+        std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap(),
+        before
+    );
+    let j: toml::Value =
+        toml::from_str(&std::fs::read_to_string(journal_path(&env, &a)).unwrap()).unwrap();
+    assert!(
+        !wali
+            .join(format!("tasks/{}.md", j["target"].as_str().unwrap()))
+            .exists()
+    );
+}
+
+fn changed_attachment_refuses(phase: &str, changed_source: bool) {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let input = env.home.path().join("shot.png");
+    std::fs::write(&input, b"original").unwrap();
+    env.json(&dots, &["attach", &a, input.to_str().unwrap()]);
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", phase)
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let jp = journal_path(&env, &a);
+    let before = std::fs::read_to_string(&jp).unwrap();
+    let j: toml::Value = toml::from_str(&before).unwrap();
+    let source = dots.join(format!("tasks/files/{a}/shot.png"));
+    let target = wali.join(format!(
+        "tasks/files/{}/shot.png",
+        j["target"].as_str().unwrap()
+    ));
+    let (changed, kept) = if changed_source {
+        (&source, &target)
+    } else {
+        (&target, &source)
+    };
+    std::fs::write(changed, b"unique new bytes").unwrap();
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali", "--explain"])["recovery"],
+        "refuse"
+    );
+    assert_eq!(
+        env.fail(&dots, &["move", &a, "--to", "wali"]),
+        "move_pending"
+    );
+    assert_eq!(std::fs::read(changed).unwrap(), b"unique new bytes");
+    assert_eq!(std::fs::read(kept).unwrap(), b"original");
+    assert_eq!(std::fs::read_to_string(jp).unwrap(), before);
+}
+
+#[test]
+fn correction_i4_source_attachment_before_publish() {
+    changed_attachment_refuses("attachments", true);
+}
+
+#[test]
+fn correction_i4_source_attachment_after_tombstone() {
+    changed_attachment_refuses("tombstone", true);
+}
+
+#[test]
+fn correction_i4_destination_attachment() {
+    changed_attachment_refuses("attachments", false);
+}
+
+fn changed_store_refuses(field: &str) {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.json(&dots, &["park", &a, "continue"]);
+    let sp = env.claim_store("dots");
+    let mut s = store(&env, "dots");
+    s.as_table_mut().unwrap().insert(
+        "escalations".into(),
+        toml::Value::Table(toml::Table::from_iter([(
+            a.clone(),
+            toml::Value::Table(toml::Table::from_iter([
+                ("level".into(), toml::Value::String("high".into())),
+                (
+                    "at".into(),
+                    toml::Value::String("2026-10-09T00:00:00Z".into()),
+                ),
+                ("session".into(), toml::Value::String("codex:test".into())),
+            ])),
+        )])),
+    );
+    std::fs::write(&sp, toml::to_string(&s).unwrap()).unwrap();
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "tombstone")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let mut changed = store(&env, "dots");
+    let key = if field == "parks" {
+        "next_step"
+    } else {
+        "session"
+    };
+    changed[field][a.as_str()][key] = toml::Value::String("unique changed value".into());
+    let bytes = toml::to_string(&changed).unwrap();
+    std::fs::write(&sp, &bytes).unwrap();
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali", "--explain"])["recovery"],
+        "refuse"
+    );
+    assert_eq!(
+        env.fail(&dots, &["move", &a, "--to", "wali"]),
+        "move_pending"
+    );
+    assert_eq!(std::fs::read_to_string(sp).unwrap(), bytes);
+    assert!(journal_path(&env, &a).exists());
+}
+
+#[test]
+fn correction_i4_source_park() {
+    changed_store_refuses("parks");
+}
+
+#[test]
+fn correction_i4_source_escalation() {
+    changed_store_refuses("escalations");
+}
+
+fn incoherent_journal_refuses(change: &str) {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let input = env.home.path().join("shot.png");
+    std::fs::write(&input, b"retained source data").unwrap();
+    env.json(&dots, &["attach", &a, input.to_str().unwrap()]);
+    env.json(&dots, &["park", &a, "continue"]);
+    let sp = env.claim_store("dots");
+    let mut s = store(&env, "dots");
+    s.as_table_mut().unwrap().insert(
+        "escalations".into(),
+        toml::Value::Table(toml::Table::from_iter([(
+            a.clone(),
+            toml::Value::Table(toml::Table::from_iter([
+                ("level".into(), toml::Value::String("high".into())),
+                (
+                    "at".into(),
+                    toml::Value::String("2026-10-09T00:00:00Z".into()),
+                ),
+                ("session".into(), toml::Value::String("codex:test".into())),
+            ])),
+        )])),
+    );
+    std::fs::write(&sp, toml::to_string(&s).unwrap()).unwrap();
+    env.cmd(&dots)
+        .env(
+            "TASKS_MOVE_STOP_AFTER",
+            if change == "tombstone" {
+                "destination"
+            } else {
+                "journal"
+            },
+        )
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let jp = journal_path(&env, &a);
+    let mut j: toml::Value = toml::from_str(&std::fs::read_to_string(&jp).unwrap()).unwrap();
+    let n = j["target"].as_str().unwrap().to_string();
+    let target_path = wali.join(format!("tasks/{n}.md"));
+    let target_before = std::fs::read(&target_path).ok();
+    let target_attachment = wali.join(format!("tasks/files/{n}/shot.png"));
+    let attachment_before = std::fs::read(&target_attachment).ok();
+    match change {
+        "missing_attachment" => {
+            j.as_table_mut().unwrap().remove("attachments");
+        }
+        "missing_park" => {
+            j.as_table_mut().unwrap().remove("target_park");
+        }
+        "missing_escalation" => {
+            j.as_table_mut().unwrap().remove("target_escalation");
+        }
+        "tombstone" => j["tombstone_text"] = j["source_text"].clone(),
+        "target_escalation" => {
+            j["target_escalation"]["session"] = toml::Value::String("changed".into())
+        }
+        "target_back_pointer" => {
+            j["target_text"] = toml::Value::String(
+                j["target_text"]
+                    .as_str()
+                    .unwrap()
+                    .replace(&format!("moved_from: {a}"), "moved_from: dots-ffffff"),
+            )
+        }
+        "tombstone_forward_pointer" => {
+            j["tombstone_text"] = toml::Value::String(
+                j["tombstone_text"]
+                    .as_str()
+                    .unwrap()
+                    .replace(&format!("moved_to: {n}"), "moved_to: wali-ffffff"),
+            )
+        }
+        "target_body" => {
+            j["target_text"] = toml::Value::String(
+                j["target_text"]
+                    .as_str()
+                    .unwrap()
+                    .replace("\n## Notes", "\nChanged body\n\n## Notes"),
+            )
+        }
+        "tombstone_history" => {
+            j["tombstone_text"] = toml::Value::String(
+                j["tombstone_text"]
+                    .as_str()
+                    .unwrap()
+                    .replace("continue", "lost original note"),
+            )
+        }
+        "target_status" => {
+            j["target_text"] = toml::Value::String(
+                j["target_text"]
+                    .as_str()
+                    .unwrap()
+                    .replace("status: todo", "status: blocked"),
+            )
+        }
+        "target_title" => {
+            j["target_text"] = toml::Value::String(
+                j["target_text"]
+                    .as_str()
+                    .unwrap()
+                    .replace("title: A", "title: Changed"),
+            )
+        }
+        "target_note" => {
+            j["target_text"] = toml::Value::String(
+                j["target_text"]
+                    .as_str()
+                    .unwrap()
+                    .replace("continue", "lost original note"),
+            )
+        }
+        "target_worktree" => {
+            j["target_park"]["worktree"] = toml::Value::String(dots.display().to_string())
+        }
+        "attachment_ledger" => {
+            j.as_table_mut().unwrap().insert(
+                "attachments".into(),
+                toml::Value::Array(vec![toml::Value::Table(toml::Table::from_iter([
+                    ("name".into(), toml::Value::String("invented.png".into())),
+                    ("sha256".into(), toml::Value::String("a".repeat(64))),
+                ]))]),
+            );
+        }
+        _ => unreachable!(),
+    }
+    let bytes = toml::to_string(&j).unwrap();
+    std::fs::write(&jp, &bytes).unwrap();
+    let before = std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap();
+    let store_before = std::fs::read(&sp).unwrap();
+    assert_eq!(
+        env.json(&dots, &["move", &a, "--to", "wali", "--explain"])["recovery"],
+        "refuse",
+        "{change}"
+    );
+    let out = env
+        .cmd(&dots)
+        .args(["move", &a, "--to", "wali"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{change}: {out:?}");
+    assert_eq!(
+        std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap(),
+        before
+    );
+    assert_eq!(std::fs::read(sp).unwrap(), store_before);
+    assert_eq!(std::fs::read(target_path).ok(), target_before);
+    assert_eq!(
+        std::fs::read(dots.join(format!("tasks/files/{a}/shot.png"))).unwrap(),
+        b"retained source data"
+    );
+    assert_eq!(std::fs::read(target_attachment).ok(), attachment_before);
+    assert_eq!(std::fs::read_to_string(jp).unwrap(), bytes);
+}
+
+#[test]
+fn correction_i5_missing_park() {
+    incoherent_journal_refuses("missing_park");
+}
+
+#[test]
+fn correction_i5_missing_escalation() {
+    incoherent_journal_refuses("missing_escalation");
+}
+
+#[test]
+fn correction_i5_tombstone() {
+    incoherent_journal_refuses("tombstone");
+}
+
+#[test]
+fn correction_i5_target_title() {
+    incoherent_journal_refuses("target_title");
+}
+
+#[test]
+fn correction_i5_target_note() {
+    incoherent_journal_refuses("target_note");
+}
+
+#[test]
+fn correction_i5_target_worktree() {
+    incoherent_journal_refuses("target_worktree");
+}
+
+#[test]
+fn correction_i5_attachment_ledger() {
+    incoherent_journal_refuses("attachment_ledger");
+}
+
+#[test]
+fn correction_i5_target_back_pointer() {
+    incoherent_journal_refuses("target_back_pointer");
+}
+
+#[test]
+fn correction_i5_tombstone_forward_pointer() {
+    incoherent_journal_refuses("tombstone_forward_pointer");
+}
+
+#[test]
+fn correction_i5_target_body() {
+    incoherent_journal_refuses("target_body");
+}
+
+#[test]
+fn correction_i5_tombstone_history() {
+    incoherent_journal_refuses("tombstone_history");
+}
+
+#[test]
+fn correction_i5_target_escalation() {
+    incoherent_journal_refuses("target_escalation");
+}
+
+#[test]
+fn correction_i5_target_status() {
+    incoherent_journal_refuses("target_status");
+}
+
+#[test]
+fn correction_i6_halt_follows_move_back_and_live_dependencies() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let old_dep = id_of(env.json(&dots, &["add", "Old dependency", "-p", "2"]));
+    let new_dep = id_of(env.json(&dots, &["add", "New dependency", "-p", "2"]));
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2", "--depends", &old_dep]));
+    env.json(
+        &dots,
+        &["add", "Halt", "-p", "0", "--tag", "halt", "--depends", &a],
+    );
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    env.json(&wali, &["dep", &n, "--rm", &old_dep]);
+    let back = id_of(env.json(&wali, &["move", &n, "--to", "dots"]));
+    let ready = env.json(&dots, &["ready"]);
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == back),
+        "{ready}"
+    );
+    env.json(&dots, &["start", &back]);
+    env.json(&dots, &["park", &back, "continue"]);
+    env.json(&dots, &["dep", &back, "--on", &new_dep]);
+    assert_eq!(env.fail(&dots, &["start", &old_dep]), "halted");
+    env.json(&dots, &["start", &new_dep]);
+}
+
+#[test]
+fn correction_i6_foreign_project_keeps_its_own_halt_authority() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.json(
+        &dots,
+        &["add", "Halt", "-p", "0", "--tag", "halt", "--depends", &a],
+    );
+    env.json(
+        &wali,
+        &["add", "Independent halt", "-p", "0", "--tag", "halt"],
+    );
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    assert_eq!(env.fail(&wali, &["start", &n]), "halted");
+}
+
+#[test]
+fn correction_i6_halt_pointer_cycle_does_not_authorize_historical_dependencies() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let dep = id_of(env.json(&dots, &["add", "Dependency", "-p", "2"]));
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2", "--depends", &dep]));
+    env.json(
+        &dots,
+        &["add", "Halt", "-p", "0", "--tag", "halt", "--depends", &a],
+    );
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    tombstone_by_hand(&wali, &n, &a);
+    assert_eq!(env.fail(&dots, &["start", &dep]), "halted");
+}
+
+#[test]
+fn correction_i6_halt_canonicalizes_old_prefixes_along_pointer_chain() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.json(
+        &dots,
+        &["add", "Halt", "-p", "0", "--tag", "halt", "--depends", &a],
+    );
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    let back = id_of(env.json(&wali, &["move", &n, "--to", "dots"]));
+    env.json(&wali, &["rename", "wali", "other"]);
+    env.json(&dots, &["start", &back]);
+}
+
+#[test]
+fn correction_i5_missing_attachment() {
+    incoherent_journal_refuses("missing_attachment");
 }
