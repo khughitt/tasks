@@ -1,13 +1,15 @@
 ---
 id: tasks-e068a2
 title: Keep closed task views readable when a linked plan is missing
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-04T17:51:38Z
-updated: 2026-10-09T11:17:27Z
+updated: 2026-10-09T12:24:01Z
+started: 2026-10-09T12:23:55Z
 depends: []
 parent: tasks-0e432f
 tags: [feedback, friction, "from:tack"]
@@ -28,3 +30,6 @@ Original report: tasks show --json fails whole (io error) for a done task whose 
 
 - 2026-10-06T09:45:47Z (main): scope: scoped; reproduced missing historical plan failure; scoped shared describe-path fix with closed/open and main-checkout checks; P2/s/mid/direct
 - 2026-10-09T11:17:27Z (main): Task-move review D12: include moved tombstones in closed missing-plan coverage. Preserve moved_to/moved_from and historical plan/step links; show should warn when the plan is unavailable while keeping the pointer visible. Reuse the closed-record fix, without weakening live destination checks.
+- 2026-10-09T12:23:55Z (main): started
+  provenance: {"harness_session":"codex:01a12066-6cd3-7793-bec2-ff08cc0f6519","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T12:24:01Z (main): Process direct: implement the scoped historical-plan reader fix and regressions in .worktrees/tasks-e068a2; preserve open-task and unrelated I/O failures.
