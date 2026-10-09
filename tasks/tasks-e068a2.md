@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-04T17:51:38Z
-updated: 2026-10-06T16:49:58Z
+updated: 2026-10-09T11:17:27Z
 depends: []
 parent: tasks-0e432f
 tags: [feedback, friction, "from:tack"]
@@ -27,3 +27,4 @@ Original report: tasks show --json fails whole (io error) for a done task whose 
 ## Notes
 
 - 2026-10-06T09:45:47Z (main): scope: scoped; reproduced missing historical plan failure; scoped shared describe-path fix with closed/open and main-checkout checks; P2/s/mid/direct
+- 2026-10-09T11:17:27Z (main): Task-move review D12: include moved tombstones in closed missing-plan coverage. Preserve moved_to/moved_from and historical plan/step links; show should warn when the plan is unavailable while keeping the pointer visible. Reuse the closed-record fix, without weakening live destination checks.
