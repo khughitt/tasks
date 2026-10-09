@@ -1,15 +1,16 @@
 ---
 id: tasks-db2c06
 title: Integrate reviewed task move implementation
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
-owner: task-migration-design
+owner: main
 created: 2026-10-09T08:27:30Z
-updated: 2026-10-09T10:40:28Z
+updated: 2026-10-09T10:46:38Z
 started: 2026-10-09T08:28:06Z
+completed: 2026-10-09T10:46:38Z
 depends: [tasks-7ba557]
 parent: tasks-a7460c
 tags: []
@@ -27,3 +28,9 @@ Prepared branch task-migration-design in .worktrees/task-migration-design: imple
 - 2026-10-09T10:40:27Z (task-migration-design): resumed
   provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-09T10:40:27Z (task-migration-design): User authorized local merge and activation of the globally linked tasks skill. Resume integration only; implementation/reviews are complete.
+- 2026-10-09T10:41:32Z (main): resumed
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T10:46:38Z (main): done
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T10:46:38Z (main): Merged reviewed task-migration-design into main at 2161635; global tasks skill links activate main, merged fast suite 1281 passed, checks passed, CLI rebuilt from main with committed lockfile. Evidence archived; worktree cleanup follows.
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
