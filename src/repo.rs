@@ -637,6 +637,29 @@ impl Project {
         }
     }
 
+    /// Whether this checkout is a linked worktree whose HEAD already holds `relative` (a
+    /// path under the project root): the record was committed before the branch was made.
+    /// `false` in the main worktree and outside git.
+    pub fn linked_worktree_head_has(&self, relative: &str) -> Result<bool> {
+        let Some(tree) = crate::link::GitTree::of(&self.root)? else {
+            return Ok(false);
+        };
+        if tree.git_dir == tree.common {
+            return Ok(false);
+        }
+        // Without --full-tree, ls-tree reads paths relative to the current directory.
+        let output = self.git(&["ls-tree", "--name-only", "HEAD", "--", relative])?;
+        if !output.status.success() {
+            return Err(Error::Io(format!(
+                "git ls-tree in {} failed ({}): {}",
+                self.root.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Ok(!output.stdout.is_empty())
+    }
+
     pub fn worktree_count(&self) -> Result<Option<usize>> {
         if self.git_toplevel()?.is_none() {
             return Ok(None);

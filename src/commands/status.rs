@@ -130,6 +130,19 @@ fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {
     if !files.contains(&file) {
         return;
     }
+    // A worktree branched after the record was committed holds it already: the change is
+    // this start's own, and there is nothing left to commit before branching.
+    match ctx.project.linked_worktree_head_has(&file) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "task {} was started, but git could not inspect its worktree's HEAD ({error})",
+                task.id
+            ));
+            return;
+        }
+    }
     let listed = match std::process::Command::new("git")
         .args(["worktree", "list", "--porcelain"])
         .env("LC_ALL", "C")

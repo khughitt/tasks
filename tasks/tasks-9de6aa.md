@@ -1,18 +1,20 @@
 ---
 id: tasks-9de6aa
 title: "start warns 'commit it before branching' in the task's own worktree, where the protocol's start just rewrote the committed record"
-status: doing
+status: done
 priority: 3
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/start-warning
 created: 2026-10-02T19:18:21Z
-updated: 2026-10-09T13:38:36Z
+updated: 2026-10-09T13:41:56Z
 started: 2026-10-09T13:38:30Z
+completed: 2026-10-09T13:41:56Z
 depends: []
 parent: tasks-0e432f
 tags: [cli]
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -25,3 +27,11 @@ Done: start stays silent when it runs in a linked worktree whose HEAD already co
 - 2026-10-09T13:38:30Z (main): started
   provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-09T13:38:36Z (main): Same friction reported as tasks-c74a8b and tasks-81d277 (start after worktree creation and on resume); this fix covers both
+- 2026-10-09T13:38:41Z (fix/start-warning): resumed
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T13:41:49Z (fix/start-warning): resumed
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T13:41:56Z (fix/start-warning): done
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T13:41:56Z (fix/start-warning): start stays silent in a linked worktree whose HEAD already holds the record; the main checkout and uncommitted records still warn
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

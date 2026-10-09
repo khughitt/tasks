@@ -3807,6 +3807,38 @@ fn start_warns_when_a_repo_with_several_worktrees_leaves_the_claim_uncommitted()
 }
 
 #[test]
+fn start_in_a_worktree_branched_after_the_record_was_committed_does_not_warn() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let branching = |v: &serde_json::Value| {
+        warnings_of(v)
+            .iter()
+            .any(|w| w.contains("before branching"))
+    };
+
+    let v = env.json(&side, &["start", &id]);
+    assert!(
+        !branching(&v),
+        "the record reached HEAD before branching: {v}"
+    );
+    env.json(&side, &["park", &id, "next"]);
+    let v = env.json(&side, &["start", &id]);
+    assert!(!branching(&v), "a resume in the same worktree: {v}");
+
+    // A record the worktree's HEAD lacks still warns there.
+    let fresh = id_of(env.json(&side, &["add", "U", "-p", "2"]));
+    let v = env.json(&side, &["start", &fresh]);
+    assert!(branching(&v), "{v}");
+
+    // And the main checkout still warns about a record it has not committed.
+    let other = id_of(env.json(&main, &["add", "V", "-p", "2"]));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "add V"]);
+    let v = env.json(&main, &["start", &other]);
+    assert!(branching(&v), "{v}");
+}
+
+#[test]
 fn start_reports_a_git_worktree_inspection_failure_as_a_warning() {
     use std::os::unix::fs::PermissionsExt;
 
