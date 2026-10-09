@@ -753,6 +753,108 @@ fn a_broken_ancestor_dot_git_is_named_for_inspection_never_removal() {
 }
 
 #[test]
+fn a_repository_above_a_git_ceiling_is_no_project() {
+    let env = TestEnv::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let base = scratch.path().canonicalize().unwrap();
+    let repo = code_repo(&base, "repo");
+    let excluded = repo.join("excluded");
+    let child = excluded.join("child");
+    std::fs::create_dir_all(&child).unwrap();
+    let link = base.join("link");
+    std::os::unix::fs::symlink(&excluded, &link).unwrap();
+    // Before an empty entry git resolves symlinks and ignores a relative entry.
+    let through_link = format!("relative/entry:{}", link.display());
+    for ceiling in [excluded.display().to_string(), through_link] {
+        let out = env
+            .cmd(&child)
+            .arg("where")
+            .env("GIT_CEILING_DIRECTORIES", &ceiling)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{ceiling}: {out:?}");
+        let found: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(found["project"].is_null(), "{ceiling}: {found}");
+    }
+
+    // An explicit GIT_DIR is not discovery: a ceiling does not excuse git rejecting it.
+    let missing = base.join("missing-git-dir");
+    let out = env
+        .cmd(&child)
+        .arg("where")
+        .env("GIT_CEILING_DIRECTORIES", &excluded)
+        .env("GIT_DIR", &missing)
+        .output()
+        .unwrap();
+    let detail = io_error(&out);
+    assert!(detail.contains(missing.to_str().unwrap()), "{detail}");
+}
+
+#[test]
+fn ceiling_entries_after_an_empty_entry_bound_discovery_as_written() {
+    let env = TestEnv::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let base = scratch.path().canonicalize().unwrap();
+    let repo = base.join("repo");
+    let marker = repo.join(".git");
+    let excluded = repo.join("excluded");
+    let child = excluded.join("child");
+    std::fs::create_dir_all(&marker).unwrap();
+    std::fs::create_dir_all(&child).unwrap();
+    let run = |ceiling: &str| {
+        env.cmd(&child)
+            .arg("where")
+            .env("GIT_CEILING_DIRECTORIES", ceiling)
+            .output()
+            .unwrap()
+    };
+    let e = excluded.display();
+    // git stops below these, so the empty marker above is never examined.
+    for ceiling in [format!(":{e}"), format!(":{e}/")] {
+        let out = run(&ceiling);
+        assert!(out.status.success(), "{ceiling}: {out:?}");
+        let found: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(found["project"].is_null(), "{ceiling}: {found}");
+    }
+    // git compares these byte for byte, matches nothing, and reaches the marker.
+    for ceiling in [
+        format!(":{e}/../excluded"),
+        format!(":{e}/."),
+        format!(":{e}//"),
+    ] {
+        let detail = io_error(&run(&ceiling));
+        assert!(
+            detail.contains(&format!("{}, is an empty directory", marker.display())),
+            "{ceiling}: {detail}"
+        );
+    }
+}
+
+#[test]
+fn a_marker_below_a_git_ceiling_is_still_named() {
+    let env = TestEnv::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let base = scratch.path().canonicalize().unwrap();
+    let repo = code_repo(&base, "repo");
+    let excluded = repo.join("excluded");
+    let marker = excluded.join("child/.git");
+    let deep = excluded.join("child/deep");
+    std::fs::create_dir_all(&marker).unwrap();
+    std::fs::create_dir_all(&deep).unwrap();
+    let out = env
+        .cmd(&deep)
+        .arg("where")
+        .env("GIT_CEILING_DIRECTORIES", &excluded)
+        .output()
+        .unwrap();
+    let detail = io_error(&out);
+    assert!(
+        detail.contains(&format!("{}, is an empty directory", marker.display())),
+        "{detail}"
+    );
+}
+
+#[test]
 fn a_git_dir_override_is_not_blamed_on_a_healthy_dot_git() {
     let env = TestEnv::new();
     let l = layout(&env);

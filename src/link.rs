@@ -15,9 +15,10 @@ pub struct GitTree {
 }
 
 impl GitTree {
-    /// `None` when git says `dir` is not inside a repository and no ancestor has a
-    /// `.git` marker, or there is no git executable; broken metadata is an `io` error
-    /// naming the nearest marker.
+    /// `None` when git says `dir` is not inside a repository and no ancestor git
+    /// examined (below its ceilings and filesystem boundary) has a `.git` marker, or
+    /// there is no git executable; broken metadata is an `io` error naming the nearest
+    /// marker.
     /// `LC_ALL=C` pins the message matched, as `Project::git_toplevel` does. One line per requested fact, in
     /// the order of the flags.
     pub fn of(dir: &Path) -> Result<Option<GitTree>> {
@@ -47,8 +48,24 @@ impl GitTree {
                 stderr.trim()
             );
             if stderr.contains("not a git repository") {
+                // A failed discovery names its scope `(or any …)`; `not a git repository:
+                // '<path>'` is git rejecting an explicit GIT_DIR, which searched nothing,
+                // so no discovery boundary applies and git's message already names it.
+                let discovery = stderr.contains("not a git repository (or any");
+                let start = dir.canonicalize()?;
+                let mut stops = Vec::new();
+                if discovery {
+                    stops.extend(ceilings(&start));
+                    stops.extend(mount_point(&stderr));
+                }
+                // Only the directories git examined: those strictly below every stop.
+                let examined = start.ancestors().take_while(|ancestor| {
+                    stops
+                        .iter()
+                        .all(|stop| ancestor.starts_with(stop) && ancestor != stop)
+                });
                 let mut marker = None;
-                for ancestor in dir.canonicalize()?.ancestors() {
+                for ancestor in examined {
                     let candidate = ancestor.join(".git");
                     match candidate.symlink_metadata() {
                         Ok(metadata) => {
@@ -62,9 +79,7 @@ impl GitTree {
                 let Some((marker, metadata)) = marker else {
                     return Ok(None);
                 };
-                // Only a failed discovery implicates the marker; `not a git repository:
-                // '<path>'` is git rejecting an explicit GIT_DIR, which it already names.
-                if stderr.contains("not a git repository (or any") {
+                if discovery {
                     return Err(Error::Io(format!(
                         "{failed}; {}",
                         obstruction(&marker, &metadata)
@@ -131,6 +146,61 @@ impl GitTree {
         }
         self.common.parent().map(Path::to_path_buf)
     }
+}
+
+/// `GIT_CEILING_DIRECTORIES` as git's discovery reads it (setup.c): absolute entries,
+/// resolved through symlinks until an empty entry and taken as written after it, where
+/// git compares bytes and forgives one trailing `/`. Git skips an entry it cannot
+/// resolve, and one that is not a proper ancestor of `start` bounds nothing, so neither
+/// is a stop.
+fn ceilings(start: &Path) -> Vec<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let Some(list) = std::env::var_os("GIT_CEILING_DIRECTORIES") else {
+        return Vec::new();
+    };
+    let mut resolve = true;
+    let mut stops = Vec::new();
+    for entry in std::env::split_paths(&list) {
+        if entry.as_os_str().is_empty() {
+            resolve = false;
+            continue;
+        }
+        if !entry.is_absolute() {
+            continue;
+        }
+        let ceiling = if resolve {
+            match entry.canonicalize() {
+                Ok(ceiling) => ceiling,
+                Err(_) => continue,
+            }
+        } else {
+            let written = entry.as_os_str().as_bytes();
+            let written = match written.strip_suffix(b"/") {
+                Some(trimmed) if !trimmed.is_empty() => trimmed,
+                _ => written,
+            };
+            let under = start.as_os_str().as_bytes();
+            let proper = written == b"/"
+                || (under.starts_with(written) && under.get(written.len()) == Some(&b'/'));
+            if !proper {
+                continue;
+            }
+            PathBuf::from(std::ffi::OsStr::from_bytes(written))
+        };
+        if start.starts_with(&ceiling) && start != ceiling {
+            stops.push(ceiling);
+        }
+    }
+    stops
+}
+
+/// The filesystem boundary git stopped at, from its `LC_ALL=C` message
+/// `not a git repository (or any parent up to mount point <dir>)`; git never examined
+/// `<dir>` or anything above it.
+fn mount_point(stderr: &str) -> Option<PathBuf> {
+    let (_, rest) = stderr.split_once("(or any parent up to mount point ")?;
+    let line = rest.lines().next()?;
+    line.strip_suffix(')').map(PathBuf::from)
 }
 
 /// What to do about the `.git` marker git would not read. Only a directory confirmed
@@ -299,6 +369,15 @@ pub fn relative_path(from: &Path, to: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mount_point_comes_from_gits_boundary_message_only() {
+        let stopped = "fatal: not a git repository (or any parent up to mount point /mnt/a b)\n\
+                       Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\n";
+        assert_eq!(mount_point(stopped), Some(PathBuf::from("/mnt/a b")));
+        let searched = "fatal: not a git repository (or any of the parent directories): .git\n";
+        assert_eq!(mount_point(searched), None);
+    }
 
     #[test]
     fn main_checkout_is_the_parent_of_a_dot_git_common_dir_only() {
