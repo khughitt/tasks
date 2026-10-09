@@ -4,8 +4,8 @@ title: "A park recorded from a worktree survives the task's close from another c
 status: idea
 priority: 2
 created: 2026-10-06T09:08:25Z
-updated: 2026-10-08T10:12:58Z
-depends: []
+updated: 2026-10-09T13:50:44Z
+depends: [tasks-6a0050, tasks-081099]
 parent: tasks-984769
 tags: [feedback, gap, "from:material"]
 agent: claude-code/claude-opus-5-5
@@ -29,3 +29,4 @@ Original report (preserved): Task closed with done in the main checkout while it
 - 2026-10-06T10:59:44Z (main): Attribution correction for the 2026-10-06T10:41:53Z note beginning Human review probe: this was the reviewer's isolated probe performed at the controller's request, not an established human-run probe. Its technical result and cleanup report are unchanged; reviewer harness/model identity was not supplied.
 - 2026-10-06T11:39:23Z (main): Review finding: prime lists a park on a closed record while list --parked hides it (list.rs::list_parked filters is_open; prime's parked::rows does not), matching this report's second symptom. Added to tasks-b9b10e's question; brief: docs/notes/2026-10-06-record-continuity-brief.md
 - 2026-10-08T10:12:57Z (main): scope: briefed; corrected the unsupported no-recovery premise while preserving the original report; tasks-b9b10e retains removed-worktree, recurrence, ownership and view-consistency checks and will distinguish bare retries from explicit messages; brief: docs/notes/2026-10-06-record-continuity-brief.md
+- 2026-10-09T13:50:43Z (probe/park-recovery): tasks-b9b10e finding: repeated done clears a closed non-recurring park after worktree removal, changing only updated, for both sync and git arrival; a live foreign claim refuses. Gaps: a recurring record's park cannot be cleared once its worktree is gone (tasks-6a0050), and prime lists closed parks that list --parked hides (tasks-081099). Brief: docs/notes/2026-10-06-record-continuity-brief.md

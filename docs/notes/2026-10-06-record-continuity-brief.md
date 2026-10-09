@@ -1,6 +1,6 @@
 # Task records across checkouts: readers and recovery
 
-Scoping handoff, updated 2026-10-08. Goal: tasks-984769. Not an approved design.
+Scoping handoff, updated 2026-10-09. Goal: tasks-984769. Not an approved design.
 
 ## Problem
 
@@ -54,9 +54,31 @@ in each bullet; original incident captures remain absent.
   shared through Git or file sync. Two isolated-store probes (attached to tasks-b9b10e):
   park under store A, close under store B, and A's `prime` still lists the closed task.
   Plain `done` under A on the closed non-recurring record exits 0, changes only
-  `updated` (completed, model and notes unchanged) and clears A's park. Neither probe
-  removed a Git worktree or exercised recurrence or a foreign live claim. This shows a
-  mechanism, not the original incident's host sequence.
+  `updated` (completed, model and notes unchanged) and clears A's park.
+- **Closed-park safeguards (tasks-b9b10e, 2026-10-09).** A two-host probe (script and
+  full log attached to tasks-b9b10e; tasks 0.2.0 at 42ea5ab, git 2.56.0) built twelve
+  fresh fixtures: host A parks from a Git worktree, the parked record is integrated,
+  host B closes it, and the closed record reaches A either through the shared checkout
+  or through `git pull` from B's own clone. Results:
+  - Non-recurring, worktree removed through Git: bare `done` under A exits 0, the record
+    diff is the one `updated` line, and A's park is gone. Identical for both arrivals and
+    for a closer with the parking session's identity or a distinct one.
+  - An explicit message (`done <id> "<text>"`) also appends that note; a different
+    `TASKS_MODEL` leaves `model` and `completed` untouched. tasks-2c7979's restamping
+    report is not reproduced; its added note matches an explicit-message retry.
+  - Dropped record: `done` refuses `invalid_transition` and writes nothing; `drop <id>
+    "<why>"` clears the park, appending its note.
+  - Recurring record: `done` from the main checkout refuses (`validation`: "has work in
+    <wt>; finish that occurrence in its owning checkout") with the worktree present and
+    after its removal, writing nothing; `park` refuses `invalid_transition`. In the
+    worktree, after merging main, the retry warns "already completed; releasing its
+    claim without recording another occurrence" and changes only `updated`. After
+    removal no command clears it: `start` then `done` records a spurious occurrence
+    (new `completed`, a "completed; next due" note, `model` reset). tasks-6a0050 fixes this.
+  - Foreign claim under A: a live one makes the retry refuse `claimed`, record and store
+    unchanged; a stale one is taken over with a warning, the record diff again only
+    `updated`. prime's stale-claim hint suggests `start --force`, which a closed
+    non-recurring record refuses (source inspection, not run).
 - **Repeated closed-park report (2026-10-08 scope).** tasks-2c7979 reports the same
   view mismatch and says repeating done adds a note and restamps model. Current
   `src/commands/mod.rs::transition` stamps model/completed only on a fresh completion;
@@ -68,11 +90,16 @@ in each bullet; original incident captures remain absent.
 - Park clearing: `claim_guard` records a release intent without persisting;
   `save` removes the park when the destination is done, dropped or shelved
   (`src/commands/mod.rs:532`, `:1554`). The report's claim that no command clears it is
-  therefore incorrect; cleanup-failure guidance already recommends repeating done.
+  therefore incorrect for non-recurring records (verified above); cleanup-failure
+  guidance already recommends repeating done. It holds for a recurring record whose
+  worktree is gone.
 - `prime` and `list --parked` disagree on a closed park: `list_parked` hides a park whose
   record is closed unless a status filter is given (`src/commands/list.rs::list_parked`,
   `is_open`), while prime's `parked::rows` lists it. The shelved case is kept visible
-  deliberately "for cleanup".
+  deliberately "for cleanup". The probe confirms it for both arrivals: prime lists the
+  done or dropped task; `list --parked` omits it; `list --parked --status done` shows
+  a done one. tasks-912279's "list --parked keeps showing" was not reproduced without
+  a status filter.
 - The record-home spec is accepted and implemented under tasks-9949f3; use it and
   current code rather than the older brief's pre-implementation behavior.
 - **Foreign notes (2026-10-08 source inspection, not a new runtime probe).**
@@ -144,8 +171,22 @@ histories:
    Coordinate with active owners before integrating their checkout.
 
 tasks-a20a64 covers guidance and regression protection for this existing contract.
-Closed-park recovery waits on tasks-b9b10e. A recovery remedy is not an alternative
-read authority.
+A recovery remedy is not an alternative read authority.
+
+**Closed parks**
+
+Recovery: keep the repeated close. It is safe for non-recurring records (only `updated`
+changes, a live foreign claim refuses) and needs no new command. The one gap is a
+recurring record whose recorded worktree is gone: tasks-6a0050 lets the existing guard
+release a park or claim whose worktree no longer exists on this host, keeping the
+refusal while it does. Claims and parks are host-local, so absence on this host is
+decisive.
+
+View: change prime, not `list --parked`. `list --parked` is the picker's feed and rightly
+hides closed work; prime shows the closed task as work waiting, which three reports read
+as uncleared live state. tasks-081099 moves such an entry from prime's parked rows to a
+warning naming the clearing command, as prime already does for stale claims. Making
+`list --parked` show them instead would put closed work in a picker's feed.
 
 **Notes sent to an active task**
 
@@ -161,13 +202,6 @@ tasks-a984f1 supplies the evidence; this pass does not authorize automatic routi
 
 ## Unanswered questions
 
-- Does repeated done stay safe once the park's worktree has been removed, on a recurring
-  record, and against a foreign live claim? tasks-b9b10e answers with its two-store
-  probe.
-- Should `prime` hide a park on a closed record as `list --parked` does, or should
-  `list --parked` show it as a cleanup row, as it already does for shelved parks?
-  tasks-b9b10e records both outputs and recommends one; changing either is a JSON/output
-  decision for the user.
 - Is the branch merge after publication clean when the final bytes were published, and
   how is the add/add conflict resolved when they were not? tasks-70f0bc extends the
   tasks-d0d520 probe before writing guidance.
@@ -183,11 +217,11 @@ tasks-a984f1 supplies the evidence; this pass does not authorize automatic routi
 - tasks-29f71f (done): lossless Git recovery verified. tasks-a20a64: guidance follow-up;
   preserve the refusal, explain identical same-stamp siblings, stop blaming every fork
   on write timing.
-- tasks-b9b10e: closed-park safeguards and the `prime`/`list --parked` disagreement.
-  tasks-6b2867 remains briefed and waits on it. tasks-2c7979 is a proposed drop as a
-  duplicate, now grouped under this goal with its original report preserved; it remains
-  an idea until that proposal is accepted. The follow-up also checks the reported
-  note/model restamping against the exact retry invocation.
+- tasks-b9b10e (done): closed-park safeguards verified; see the Closed parks
+  alternative. tasks-6a0050 (P2/s/mid/direct): recurring release after worktree removal.
+  tasks-081099 (P2/s/low/direct): prime warns instead of listing closed parks.
+  tasks-6b2867 waits on both; tasks-2c7979 and tasks-912279 are proposed drops as its
+  duplicates, original reports preserved.
 - tasks-a984f1 (P2/s/mid/direct): establish safe foreign-note delivery; tasks-955c2a
   remains an idea awaiting its finding. No queue implementation or design task yet.
 - tasks-2337b3: dropped with user approval on 2026-10-08 as covered by tasks-a20a64

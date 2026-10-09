@@ -1,19 +1,21 @@
 ---
 id: tasks-b9b10e
 title: Establish safe recovery for a park left on a closed task
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: probe/park-recovery
 created: 2026-10-06T09:45:48Z
-updated: 2026-10-09T13:46:15Z
+updated: 2026-10-09T13:50:43Z
 started: 2026-10-09T13:46:15Z
+completed: 2026-10-09T13:50:43Z
 depends: []
 parent: tasks-984769
 tags: []
 source: tasks-6b2867
+model: claude-opus-5-5
 agent: codex
 ---
 
@@ -35,4 +37,12 @@ Ideas it wakes: on completion add the finding to tasks-6b2867 with tasks note in
 - 2026-10-06T10:59:44Z (main): Attribution correction for the 2026-10-06T10:41:53Z note beginning Human review probe: this was the reviewer's isolated probe performed at the controller's request, not an established human-run probe. Its technical result and cleanup report are unchanged; reviewer harness/model identity was not supplied.
 - 2026-10-08T10:12:57Z (main): Scope refinement: tasks-2c7979 duplicates tasks-6b2867; retain the existing bounded investigation and compare bare done with an explicit message and changed TASKS_MODEL to reconcile the new report with the attached probe. No new recovery command or research task.
 - 2026-10-09T13:46:15Z (main): started
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T13:46:21Z (probe/park-recovery): resumed
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T13:49:42Z (probe/park-recovery): attached: tasks-b9b10e-park-probe.py (12293 bytes): Two-host closed-park probe: 12 fresh fixtures (sync and git arrival, same/distinct closer, message, TASKS_MODEL, drop, recurring, live/stale foreign claim)
+- 2026-10-09T13:49:42Z (probe/park-recovery): attached: tasks-b9b10e-park-result.json (200122 bytes): Probe output with full command log; tasks 0.2.0 at 42ea5ab, git 2.56.0; paths, host and boot id scrubbed
+- 2026-10-09T13:50:43Z (probe/park-recovery): done
+  provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T13:50:43Z (probe/park-recovery): Two-host probe (12 fixtures, attached): repeated done/drop safely clears a closed park, changing only updated; live foreign claims refuse; model is never restamped. Filed tasks-6a0050 (recurring park stuck once its worktree is gone) and tasks-081099 (prime warns instead of listing closed parks); brief updated
   provenance: {"harness_session":"claude-code:b9b50abb-49d0-48fa-8632-4d295da3f9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
