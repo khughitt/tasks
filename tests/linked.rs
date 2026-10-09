@@ -660,6 +660,114 @@ fn a_corrupt_head_ref_is_an_error_not_an_empty_repository() {
     );
 }
 
+/// `tasks <args>` in `dir` fails with an `io` error; its detail.
+fn io_detail(env: &TestEnv, dir: &Path, args: &[&str]) -> String {
+    io_error(&env.cmd(dir).args(args).output().unwrap())
+}
+
+/// A failed run's `io` error detail.
+fn io_error(out: &std::process::Output) -> String {
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(out.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "io", "{error}");
+    error["error"]["detail"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn an_empty_ancestor_dot_git_is_named_with_how_to_clear_it() {
+    let env = TestEnv::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let base = scratch.path().canonicalize().unwrap();
+    let marker = base.join(".git");
+    std::fs::create_dir(&marker).unwrap();
+    let child = base.join("a/b");
+    std::fs::create_dir_all(&child).unwrap();
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let registry_before = std::fs::read(&registry).ok();
+
+    for args in [&["where"][..], &["init", "--prefix", "oops"]] {
+        let detail = io_detail(&env, &child, args);
+        assert!(
+            detail.contains(&format!("{}, is an empty directory", marker.display())),
+            "{args:?}: {detail}"
+        );
+        assert!(
+            detail.contains(&format!("rmdir {}", marker.display())),
+            "{args:?}: {detail}"
+        );
+    }
+    assert!(!child.join("tasks").exists());
+    assert_eq!(std::fs::read(&registry).ok(), registry_before);
+
+    std::fs::remove_dir(&marker).unwrap();
+    assert!(env.json(&child, &["where"])["project"].is_null());
+    git(&child, &["init", "-q"]);
+    assert!(
+        env.json(&child, &["where"])["project"].is_null(),
+        "a healthy unborn repository is no project"
+    );
+}
+
+#[test]
+fn a_broken_ancestor_dot_git_is_named_for_inspection_never_removal() {
+    let env = TestEnv::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let base = scratch.path().canonicalize().unwrap();
+    let marker = base.join(".git");
+    std::fs::create_dir(&marker).unwrap();
+    std::fs::write(marker.join("config"), "kept\n").unwrap();
+    let child = base.join("a/b");
+    std::fs::create_dir_all(&child).unwrap();
+    let inspect = format!("git -C {} status", base.display());
+
+    let detail = io_detail(&env, &child, &["where"]);
+    assert!(
+        detail.contains(&format!(
+            "{}, is not a repository git can read",
+            marker.display()
+        )),
+        "{detail}"
+    );
+    assert!(detail.contains(&inspect), "{detail}");
+    assert!(
+        !detail.contains("empty") && !detail.contains("rmdir"),
+        "{detail}"
+    );
+
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let out = env.cmd(&child).arg("where").output().unwrap();
+    std::fs::set_permissions(&marker, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let detail = io_error(&out);
+    assert!(
+        detail.contains(&format!("{}, could not be read", marker.display())),
+        "{detail}"
+    );
+    assert!(detail.contains(&inspect), "{detail}");
+    assert!(
+        !detail.contains("empty") && !detail.contains("rmdir"),
+        "{detail}"
+    );
+    assert_eq!(std::fs::read(marker.join("config")).unwrap(), b"kept\n");
+}
+
+#[test]
+fn a_git_dir_override_is_not_blamed_on_a_healthy_dot_git() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let missing = l.base.join("missing-git-dir");
+    let out = env
+        .cmd(&l.code)
+        .arg("where")
+        .env("GIT_DIR", &missing)
+        .output()
+        .unwrap();
+    let detail = io_error(&out);
+    assert!(detail.contains(missing.to_str().unwrap()), "{detail}");
+    assert!(!detail.contains("the nearest .git"), "{detail}");
+}
+
 #[test]
 fn where_reports_resolver_errors_as_errors() {
     let env = TestEnv::new();
@@ -939,6 +1047,15 @@ fn corrupt_head_discovery_errors_without_writing_into_linked_checkouts() {
                 assert!(out.stdout.is_empty());
                 let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
                 assert_eq!(error["error"]["kind"], "io");
+                let detail = error["error"]["detail"].as_str().unwrap();
+                // git names a broken gitfile itself; the main tree's marker is named by tasks.
+                let named = if worktree {
+                    format!("{}", root.join(".git").display())
+                } else {
+                    format!("{}, is not a repository", root.join(".git").display())
+                };
+                assert!(detail.contains(&named), "{detail}");
+                assert!(!detail.contains("rmdir"), "{detail}");
             }
             assert!(!dir.join("tasks").exists());
             assert_eq!(std::fs::read(&registry).unwrap(), registry_before);

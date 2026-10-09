@@ -16,7 +16,8 @@ pub struct GitTree {
 
 impl GitTree {
     /// `None` when git says `dir` is not inside a repository and no ancestor has a
-    /// `.git` marker, or there is no git executable; broken metadata is an `io` error.
+    /// `.git` marker, or there is no git executable; broken metadata is an `io` error
+    /// naming the nearest marker.
     /// `LC_ALL=C` pins the message matched, as `Project::git_toplevel` does. One line per requested fact, in
     /// the order of the flags.
     pub fn of(dir: &Path) -> Result<Option<GitTree>> {
@@ -39,28 +40,38 @@ impl GitTree {
         };
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let failed = format!(
+                "git rev-parse in {} failed ({}): {}",
+                dir.display(),
+                output.status,
+                stderr.trim()
+            );
             if stderr.contains("not a git repository") {
-                let mut marker = false;
+                let mut marker = None;
                 for ancestor in dir.canonicalize()?.ancestors() {
-                    match ancestor.join(".git").symlink_metadata() {
-                        Ok(_) => {
-                            marker = true;
+                    let candidate = ancestor.join(".git");
+                    match candidate.symlink_metadata() {
+                        Ok(metadata) => {
+                            marker = Some((candidate, metadata));
                             break;
                         }
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                         Err(error) => return Err(error.into()),
                     }
                 }
-                if !marker {
+                let Some((marker, metadata)) = marker else {
                     return Ok(None);
+                };
+                // Only a failed discovery implicates the marker; `not a git repository:
+                // '<path>'` is git rejecting an explicit GIT_DIR, which it already names.
+                if stderr.contains("not a git repository (or any") {
+                    return Err(Error::Io(format!(
+                        "{failed}; {}",
+                        obstruction(&marker, &metadata)
+                    )));
                 }
             }
-            return Err(Error::Io(format!(
-                "git rev-parse in {} failed ({}): {}",
-                dir.display(),
-                output.status,
-                stderr.trim()
-            )));
+            return Err(Error::Io(failed));
         }
         let text = String::from_utf8_lossy(&output.stdout);
         let mut lines = text.lines().map(|line| PathBuf::from(line).canonicalize());
@@ -119,6 +130,38 @@ impl GitTree {
             return None;
         }
         self.common.parent().map(Path::to_path_buf)
+    }
+}
+
+/// What to do about the `.git` marker git would not read. Only a directory confirmed
+/// empty is offered for removal; anything else may hold repository data, so it is
+/// named for inspection and never treated as absent.
+fn obstruction(marker: &Path, metadata: &std::fs::Metadata) -> String {
+    let parent = marker.parent().unwrap_or(marker);
+    let inspect = format!(
+        "inspect it with `git -C {} status` and repair it; tasks will not treat it as absent",
+        parent.display()
+    );
+    let empty = if metadata.is_dir() {
+        std::fs::read_dir(marker).map(|mut entries| entries.next().is_none())
+    } else {
+        Ok(false)
+    };
+    match empty {
+        Ok(true) => format!(
+            "the nearest .git, {0}, is an empty directory, which git does not take for a \
+             repository; if no repository belongs at {1}, remove it with `rmdir {0}`",
+            marker.display(),
+            parent.display()
+        ),
+        Ok(false) => format!(
+            "the nearest .git, {}, is not a repository git can read; {inspect}",
+            marker.display()
+        ),
+        Err(error) => format!(
+            "the nearest .git, {}, could not be read ({error}); {inspect}",
+            marker.display()
+        ),
     }
 }
 
