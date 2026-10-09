@@ -18,6 +18,7 @@ mod lanes;
 mod link;
 mod locations;
 mod model;
+mod moving;
 mod native;
 mod needs;
 mod output;
