@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: task-migration-design
 created: 2026-10-08T10:42:11Z
-updated: 2026-10-09T01:44:53Z
+updated: 2026-10-09T01:44:55Z
 started: 2026-10-09T01:02:06Z
 depends: []
 parent: tasks-a7460c
@@ -46,3 +46,5 @@ Ideas it wakes: on completion, add the approved finding and artifact paths to ta
 - 2026-10-09T01:35:47Z (task-migration-design): resumed
   provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-09T01:44:52Z (task-migration-design): plan drafted: docs/plans/2026-10-09-task-move.md, 8 tasks (schema; tombstone refusals; pointer-following deps/cycles; check findings; journal+classify; move fresh path; resume/explain/freeze; docs). Step children to be filed after plan review
+- 2026-10-09T01:44:55Z (task-migration-design): parked (waiting on user, review): user reviews docs/plans/2026-10-09-task-move.md (in .worktrees/task-migration-design) and picks an execution method; then agent files the 8 step children under a goal and closes this design task
+  provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
