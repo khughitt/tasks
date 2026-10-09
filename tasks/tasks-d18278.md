@@ -8,7 +8,7 @@ complexity: high
 process: direct
 owner: task-migration-design
 created: 2026-10-09T07:25:24Z
-updated: 2026-10-09T08:03:15Z
+updated: 2026-10-09T08:27:30Z
 started: 2026-10-09T07:36:24Z
 completed: 2026-10-09T08:03:15Z
 depends: []
@@ -18,7 +18,7 @@ agent: codex
 spec: docs/specs/2026-10-08-task-move-design.md
 ---
 
-Fix final review I1–I6 in .superpowers/sdd/2026-10-09-task-move/final-review.md: monotonic move stamps; valid historical deferral; pending-parent and resumed-child guards; preserve changed source attachments/stores; coherent journal contents and park/escalation pairs; pointer-aware local halt remedies. Test each RED→GREEN; full fast/check, reinstall, close in code commit. Do not fold deferred Minor M1–M5 into corrective rounds.
+Fixed whole-branch review I1–I6: monotonic move stamps; valid historical deferral; pending-parent and resumed-child guards; preserve changed source attachments/stores; coherent journal contents and park/escalation pairs; pointer-aware local halt remedies. Each proven RED to GREEN and accepted by scoped reviews; code installed and full final gate passed. Deferred Minor M1–M5 are tracked in tasks-183bfa.
 
 ## Notes
 
