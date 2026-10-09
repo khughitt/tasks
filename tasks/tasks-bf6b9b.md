@@ -1,15 +1,16 @@
 ---
 id: tasks-bf6b9b
 title: Design individual task migration from the project-movement brief
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 owner: task-migration-design
 created: 2026-10-08T10:42:11Z
-updated: 2026-10-09T04:54:23Z
+updated: 2026-10-09T04:59:06Z
 started: 2026-10-09T01:02:06Z
+completed: 2026-10-09T04:59:06Z
 depends: []
 parent: tasks-a7460c
 tags: []
@@ -60,3 +61,11 @@ Ideas it wakes: on completion, add the approved finding and artifact paths to ta
 - 2026-10-09T04:54:21Z (task-migration-design): plan round 2 addressed: recur_into reorders stale-copy check before the eligible closure, which captures explicit shared refs; feedback fixtures use a valid summary; lifecycle test closes A before the final retire
 - 2026-10-09T04:54:21Z (task-migration-design): parked (waiting on user, review): user re-reviews docs/plans/2026-10-09-task-move.md (round 3) in .worktrees/task-migration-design and picks an execution method; then agent files the 8 step children under tasks-7ba557 and closes this design task
   provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-09T04:55:03Z (task-migration-design): review: plan round 3 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-09T04:58:33Z (task-migration-design): resumed
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T04:58:48Z (task-migration-design): User approved implementation with subagent-driven development; plan review round 3 is accepted. Reusing .worktrees/task-migration-design.
+- 2026-10-09T04:59:06Z (task-migration-design): done
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T04:59:06Z (task-migration-design): Reviewed task-move design and plan approved; implementation children filed under tasks-7ba557.
+  provenance: {"harness_session":"codex:01a11f05-c2de-7551-8107-42de0dd6f7a1","harness_session_source":"CODEX_THREAD_ID"}
