@@ -1,6 +1,7 @@
-use super::{open_id_ctx, parse_id};
+use super::{Ctx, open_id_ctx, parse_id};
 use crate::claims::MutationLock;
 use crate::error::{Error, Result};
+use crate::model::TaskId;
 use crate::moving::classify::{self, Recovery};
 use crate::moving::journal::Journal;
 use crate::moving::{self, MoveCtx};
@@ -14,6 +15,10 @@ use std::path::{Path, PathBuf};
 fn open(dir: Option<&Path>, spelling: &str, to: &str) -> Result<MoveCtx> {
     let source = open_id_ctx(dir, spelling)?;
     let source_id = parse_id(&source.registry, &source.shorthand, spelling)?;
+    open_source(source, source_id, to)
+}
+
+fn open_source(source: Ctx, source_id: TaskId, to: &str) -> Result<MoveCtx> {
     let registry = Registry::load()?;
     let target_prefix = registry.canonical_prefix(to);
     if target_prefix == source_id.prefix {
@@ -61,10 +66,21 @@ fn identity(ctx: &MoveCtx) -> Result<(crate::model::TaskId, String, PathBuf, Pat
 }
 
 pub fn run(dir: Option<&Path>, id: &str, to: &str, explain: bool) -> Result<Output> {
-    let mut requested = open(dir, id, to)?;
     if explain {
-        return decide(&mut requested, true).map(Output::Move);
+        let mut from = id.to_string();
+        let result = (|| {
+            let source = open_id_ctx(dir, id)?;
+            let source_id = parse_id(&source.registry, &source.shorthand, id)?;
+            from = source_id.to_string();
+            let mut requested = open_source(source, source_id, to)?;
+            decide(&mut requested, true)
+        })();
+        return Ok(Output::Move(match result {
+            Ok(out) => out,
+            Err(error) => empty_output(from, "refuse", vec![error.to_string()]),
+        }));
     }
+    let mut requested = open(dir, id, to)?;
     for _ in 0..4 {
         let mut prefixes = [&requested.source_id.prefix, &requested.target.prefix];
         prefixes.sort();
@@ -82,32 +98,41 @@ pub fn run(dir: Option<&Path>, id: &str, to: &str, explain: bool) -> Result<Outp
     ))
 }
 
-fn empty_output(ctx: &MoveCtx, recovery: &str) -> MoveOut {
+fn empty_output(from: String, recovery: &str, warnings: Vec<String>) -> MoveOut {
     MoveOut {
         id: String::new(),
-        from: ctx.source_id.to_string(),
+        from,
         recovery: recovery.into(),
         attachments: Vec::new(),
         park: false,
         inbound: Vec::new(),
         paths: BTreeMap::new(),
-        warnings: ctx.source.warnings.clone(),
+        warnings,
     }
 }
 
 fn decide(ctx: &mut MoveCtx, explain: bool) -> Result<MoveOut> {
-    let journal = Journal::load(&ctx.source_id)?;
-    let result = if let Some(journal) = &journal {
-        resume(ctx, journal, explain)
-    } else {
-        fresh_or_complete(ctx, explain)
-    };
+    let mut journal = None;
+    let result = (|| {
+        journal = Journal::load(&ctx.source_id)?;
+        if let Some(journal) = &journal {
+            resume(ctx, journal, explain)
+        } else {
+            fresh_or_complete(ctx, explain)
+        }
+    })();
     match result {
         Err(error) if explain => {
             let mut out = journal
                 .as_ref()
                 .map(|j| moving::output(ctx, j, "refuse"))
-                .unwrap_or_else(|| empty_output(ctx, "refuse"));
+                .unwrap_or_else(|| {
+                    empty_output(
+                        ctx.source_id.to_string(),
+                        "refuse",
+                        ctx.source.warnings.clone(),
+                    )
+                });
             out.warnings.push(error.to_string());
             Ok(out)
         }
@@ -141,7 +166,11 @@ fn fresh_or_complete(ctx: &mut MoveCtx, explain: bool) -> Result<MoveOut> {
                 ctx.source_id
             )));
         }
-        let mut out = empty_output(ctx, "complete");
+        let mut out = empty_output(
+            ctx.source_id.to_string(),
+            "complete",
+            ctx.source.warnings.clone(),
+        );
         out.id = target.to_string();
         return Ok(out);
     }
@@ -160,7 +189,11 @@ fn resume(ctx: &mut MoveCtx, journal: &Journal, explain: bool) -> Result<MoveOut
     super::reject_retired(&ctx.registry, &ctx.target)?;
     match classify::classify(&moving::snapshot(ctx, journal)?) {
         Recovery::Refuse(reason) => Err(Error::MovePending(reason)),
-        Recovery::Resume if explain => Ok(moving::output(ctx, journal, "resume")),
+        Recovery::Resume if explain => {
+            let mut out = moving::output(ctx, journal, "resume");
+            moving::inbound(ctx, &mut out)?;
+            Ok(out)
+        }
         Recovery::Resume => moving::run(ctx, journal.clone()),
     }
 }

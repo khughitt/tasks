@@ -869,30 +869,59 @@ impl Project {
         crate::hierarchy::validate_lanes(self, registry, task)?;
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
-        match self.create_task_file(task) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                Err(Error::Validation(format!("{} already exists", task.id)))
-            }
-            Err(error) => Err(error.into()),
+        for _ in 0..16 {
+            let temp = self.tasks_dir().join(format!(
+                ".{}.{:06x}.new.tmp",
+                task.id,
+                fastrand::u32(..0x100_0000)
+            ));
+            let file = match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+            {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            };
+            return match self.publish_task_file(task, file, &temp) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    Err(Error::Validation(format!("{} already exists", task.id)))
+                }
+                Err(error) => Err(error.into()),
+            };
         }
+        Err(Error::Io(format!(
+            "could not allocate a creation temp for {} after 16 attempts",
+            task.id
+        )))
     }
 
     fn create_task_file(&self, task: &Task) -> std::io::Result<()> {
         let path = self.task_path(&task.id);
         let temp = path.with_file_name(format!(".{}.new.tmp", task.id));
-        let mut file = std::fs::OpenOptions::new()
+        let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&temp)?;
+        self.publish_task_file(task, file, &temp)
+    }
+
+    fn publish_task_file(
+        &self,
+        task: &Task,
+        mut file: std::fs::File,
+        temp: &Path,
+    ) -> std::io::Result<()> {
         if let Err(error) = file.write_all(serialize_task(task).as_bytes()) {
             drop(file);
-            let _ = std::fs::remove_file(&temp);
+            let _ = std::fs::remove_file(temp);
             return Err(error);
         }
         drop(file);
-        let linked = std::fs::hard_link(&temp, &path);
-        let _ = std::fs::remove_file(&temp);
+        let linked = std::fs::hard_link(temp, self.task_path(&task.id));
+        let _ = std::fs::remove_file(temp);
         linked
     }
 

@@ -1990,3 +1990,160 @@ fn pending_renames_on_either_move_project_refuse() {
         assert!(!journal_path(&env, &a).exists());
     }
 }
+
+#[test]
+fn move_recovery_ignores_an_orphaned_publication_temp() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    env.cmd(&dots)
+        .env("TASKS_MOVE_STOP_AFTER", "journal")
+        .args(["move", &a, "--to", "wali"])
+        .assert()
+        .success();
+    let journal: toml::Value =
+        toml::from_str(&std::fs::read_to_string(journal_path(&env, &a)).unwrap()).unwrap();
+    let n = journal["target"].as_str().unwrap();
+    let orphan = wali.join(format!("tasks/.{n}.new.tmp"));
+    std::fs::write(&orphan, b"partial publication").unwrap();
+    let out = env.json(&dots, &["move", &a, "--to", "wali"]);
+    assert_eq!(out["recovery"], "resumed");
+    assert_eq!(out["id"], n);
+    assert_eq!(
+        std::fs::read(&orphan).unwrap(),
+        b"partial publication",
+        "unverified orphan bytes are retained"
+    );
+    assert_eq!(env.json(&wali, &["show", n])["task"]["moved_from"], a);
+    assert!(!journal_path(&env, &a).exists());
+}
+
+#[test]
+fn move_reporting_errors_refuse_before_mutation() {
+    for malformed in ["record", "config"] {
+        let mut env = TestEnv::new();
+        let dots = env.init("dots");
+        let wali = env.init("wali");
+        let ops = env.init("ops");
+        let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+        env.json(&dots, &["park", &a, "continue"]);
+        let raw = std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap();
+        let parked = std::fs::read(env.claim_store("dots")).unwrap();
+        if malformed == "record" {
+            std::fs::write(ops.join("tasks/ops-123456.md"), "invalid record").unwrap();
+        } else {
+            std::fs::write(ops.join("tasks/.config.toml"), "invalid config").unwrap();
+        }
+        let explain = env.json(&dots, &["move", &a, "--to", "wali", "--explain"]);
+        assert_eq!(explain["recovery"], "refuse");
+        let out = env
+            .cmd(&dots)
+            .args(["move", &a, "--to", "wali"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        assert!(!journal_path(&env, &a).exists());
+        assert_eq!(
+            std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap(),
+            raw,
+            "{malformed}"
+        );
+        assert_eq!(std::fs::read(env.claim_store("dots")).unwrap(), parked);
+        assert!(
+            !std::fs::read_dir(wali.join("tasks")).unwrap().any(|e| e
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "md"))
+        );
+    }
+}
+
+#[test]
+fn move_explain_classifies_opening_and_journal_refusals() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    alias_registry(&env, "old", "dots");
+    let alias = a.replacen("dots-", "old-", 1);
+    let raw = std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap();
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let registration = std::fs::read(&registry).unwrap();
+    std::fs::rename(&wali, wali.with_extension("offline")).unwrap();
+    for (to, fragment) in [
+        ("dots", "both"),
+        ("missing", "registered"),
+        ("wali", "unreachable"),
+    ] {
+        let out = env.json(&dots, &["move", &alias, "--to", to, "--explain"]);
+        assert_eq!(out["recovery"], "refuse");
+        assert_eq!(out["from"], a);
+        assert_eq!(out["id"], "");
+        assert_eq!(out["paths"], serde_json::json!({}));
+        assert!(out["warnings"].to_string().contains(fragment), "{out}");
+        assert_eq!(
+            fail_detail(&env, &dots, &["move", &alias, "--to", to]).0,
+            "config"
+        );
+    }
+    std::fs::rename(wali.with_extension("offline"), &wali).unwrap();
+    assert!(!journal_path(&env, &a).exists());
+    let path = journal_path(&env, &a);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "invalid journal").unwrap();
+    let out = env.json(&dots, &["move", &alias, "--to", "wali", "--explain"]);
+    assert_eq!(out["recovery"], "refuse");
+    assert_eq!(out["from"], a);
+    assert_eq!(out["id"], "");
+    assert!(!out["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(
+        fail_detail(&env, &dots, &["move", &alias, "--to", "wali"]).0,
+        "config"
+    );
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "invalid journal");
+    assert_eq!(std::fs::read(&registry).unwrap(), registration);
+    assert_eq!(
+        std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap(),
+        raw
+    );
+}
+
+#[test]
+fn move_explain_classifies_source_worktree_refusal() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    git(&dots, &["init", "-q", "-b", "main"]);
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    git(&dots, &["add", "-A"]);
+    git(&dots, &["commit", "-qm", "seed"]);
+    let side = dots.join("wt");
+    git(
+        &dots,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    let raw = std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap();
+    let out = env.json(&side, &["move", &a, "--to", "wali", "--explain"]);
+    assert_eq!(out["recovery"], "refuse");
+    assert_eq!(out["from"], a);
+    assert_eq!(out["id"], "");
+    assert!(out["warnings"].to_string().contains("registered checkout"));
+    assert!(!journal_path(&env, &a).exists());
+    assert_eq!(
+        std::fs::read(dots.join(format!("tasks/{a}.md"))).unwrap(),
+        raw
+    );
+    assert_eq!(
+        std::fs::read(side.join(format!("tasks/{a}.md"))).unwrap(),
+        raw
+    );
+}

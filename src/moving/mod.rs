@@ -179,6 +179,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     }
     preflight::validate_record(&ctx.target, &ctx.registry, &task)?;
     preflight::validate_record(&ctx.source.project, &ctx.registry, &tombstone)?;
+    inbound(ctx, &mut out)?;
     journal.save()?;
     if stop_after("journal") {
         return Ok(out);
@@ -282,7 +283,6 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
         return Ok(out);
     }
     journal.remove()?;
-    inbound(ctx, &mut out)?;
     Ok(out)
 }
 
