@@ -6,6 +6,41 @@ fn id_of(v: serde_json::Value) -> String {
 }
 
 #[test]
+fn show_moved_record_keeps_missing_historical_plan_and_move_pointers() {
+    let mut env = TestEnv::new();
+    let source = env.init("dots");
+    let destination = env.init("wali");
+    let plan = "docs/plans/history.md";
+    for dir in [&source, &destination] {
+        std::fs::create_dir_all(dir.join("docs/plans")).unwrap();
+        std::fs::write(dir.join(plan), "### Task 1: A\n").unwrap();
+    }
+    let id = id_of(env.json(
+        &source,
+        &["add", "History", "--plan", "history", "--step", "Task 1: A"],
+    ));
+    let moved = id_of(env.json(&source, &["move", &id, "--to", "wali"]));
+    let before = env.json(&source, &["show", &id]);
+    std::fs::remove_file(source.join(plan)).unwrap();
+
+    env.check(&source);
+    let shown = env.json(&source, &["show", &id]);
+    assert_eq!(shown["task"], before["task"]);
+    assert_eq!(shown["task"]["moved_to"], moved);
+    assert_eq!(shown["step_found"], false);
+    assert!(shown["warnings"].as_array().unwrap().iter().any(|w| {
+        let w = w.as_str().unwrap();
+        w.contains(plan) && w.contains("unavailable")
+    }));
+    assert_eq!(
+        env.json(&destination, &["show", &moved])["task"]["moved_from"],
+        id
+    );
+    std::fs::remove_file(destination.join(plan)).unwrap();
+    assert_eq!(env.fail(&destination, &["show", &moved]), "io");
+}
+
+#[test]
 fn moved_status_cannot_be_set_by_edit() {
     let mut env = TestEnv::new();
     let dots = env.init("dots");

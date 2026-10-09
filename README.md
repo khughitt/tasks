@@ -427,6 +427,12 @@ refuse with `moved`, naming the destination id. Existing dependents follow the p
 `check` warns `moved_dep` with `tasks dep <id> --on <new> --rm <old>` for their owners.
 `show` displays the tombstone; `resolve` continues to resolve prefixes and paths only.
 
+Closed records (`done`, `dropped`, and `moved`) keep their historical plan and step
+links. If the plan is absent from both the record's checkout and its main checkout,
+`show` returns the record with a warning that the plan is unavailable and
+`step_found: false` when a step is linked. Available plans still have their steps
+checked; missing plans for open work and other read errors still fail.
+
 The move output (`MoveOut`) names the paths to commit in each root; it commits neither:
 
 ```json
