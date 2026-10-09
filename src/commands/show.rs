@@ -4,7 +4,7 @@ use crate::model::Task;
 use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
-use crate::resolve::{DocKind, Resolver};
+use crate::resolve::{DocKind, Located, Resolver};
 use std::path::Path;
 use time::OffsetDateTime;
 
@@ -117,6 +117,19 @@ pub fn describe(
         }
     }
     let step_found = match (&task.plan, &task.step) {
+        (Some(plan), step)
+            if !task.status.is_open()
+                && matches!(resolver.locate(plan)?, Located::Missing)
+                // Existing non-file paths and metadata errors must not become missing plans.
+                && !project.root.join(plan).try_exists()?
+                && match project.main_checkout_root()? {
+                    Some(main) => !main.join(plan).try_exists()?,
+                    None => true,
+                } =>
+        {
+            warnings.push(format!("historical plan {plan} is unavailable"));
+            step.as_ref().map(|_| false)
+        }
         (Some(plan), Some(step)) => Some(resolver.step_exists(plan, step)?),
         _ => None,
     };

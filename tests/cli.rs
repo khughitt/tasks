@@ -5646,6 +5646,73 @@ fn check_holds_only_open_records_to_their_doc_links() {
 }
 
 #[test]
+fn show_closed_records_keeps_missing_historical_plan_links() {
+    for close in ["done", "drop"] {
+        for step in [false, true] {
+            let mut env = TestEnv::new();
+            let dir = env.init("sci");
+            let plan = "docs/plans/history.md";
+            write_doc(&dir, plan, "### Task 1: A\n");
+            let mut args = vec!["add", "History", "--plan", "history"];
+            if step {
+                args.extend(["--step", "Task 1: A"]);
+            }
+            let id = id_of(env.json(&dir, &args));
+            env.json(&dir, &[close, &id, "finished"]);
+            let before = env.json(&dir, &["show", &id]);
+            std::fs::remove_file(dir.join(plan)).unwrap();
+
+            env.check(&dir);
+            let shown = env.json(&dir, &["show", &id]);
+            assert_eq!(shown["task"], before["task"]);
+            assert_eq!(shown["plan_path"], before["plan_path"]);
+            if step {
+                assert_eq!(shown["step_found"], false);
+            } else {
+                assert!(shown.get("step_found").is_none());
+            }
+            assert!(
+                shown["warnings"].as_array().unwrap().iter().any(|w| {
+                    let w = w.as_str().unwrap();
+                    w.contains(plan) && w.contains("unavailable")
+                }),
+                "{shown}"
+            );
+        }
+    }
+}
+
+#[test]
+fn show_missing_historical_plan_keeps_open_and_read_failures() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let plan = "docs/plans/history.md";
+    write_doc(&dir, plan, "### Task 1: A\n");
+    let linked = |title| {
+        id_of(env.json(
+            &dir,
+            &["add", title, "--plan", "history", "--step", "Task 1: A"],
+        ))
+    };
+    let open = linked("Open");
+    let shelved = linked("Shelved");
+    let closed = linked("Closed");
+    env.json(&dir, &["shelve", &shelved, "later"]);
+    env.json(&dir, &["done", &closed]);
+    std::fs::remove_file(dir.join(plan)).unwrap();
+    for id in [&open, &shelved] {
+        assert_eq!(env.fail(&dir, &["show", id]), "io");
+    }
+    assert_eq!(env.fail(&dir, &["next"]), "io");
+
+    std::fs::write(dir.join(plan), [0xff]).unwrap();
+    assert_eq!(env.fail(&dir, &["show", &closed]), "io");
+    std::fs::remove_file(dir.join(plan)).unwrap();
+    std::fs::create_dir(dir.join(plan)).unwrap();
+    assert_eq!(env.fail(&dir, &["show", &closed]), "io");
+}
+
+#[test]
 fn edit_clears_spec_plan_and_step_links() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
@@ -21432,6 +21499,68 @@ fn main_checkout_warnings(v: &serde_json::Value, main: &std::path::Path) -> Vec<
         .filter(|w| w.contains("main checkout") && w.contains(main.to_str().unwrap()))
         .map(str::to_string)
         .collect()
+}
+
+#[test]
+fn show_closed_record_reads_historical_plan_from_main_before_warning_when_missing() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = worktree_with_excluded_docs(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    env.json(&side, &["done", &id]);
+    let shown = env.json(&side, &["show", &id]);
+    assert_eq!(shown["step_found"], true);
+    assert_eq!(
+        shown["plan_path"],
+        main.join("docs/plans/x.md").to_str().unwrap()
+    );
+    assert_eq!(main_checkout_warnings(&shown, &main).len(), 2);
+
+    write_doc(&main, "docs/plans/x.md", "### Task 2: B\n");
+    let changed = env.json(&side, &["show", &id]);
+    assert_eq!(changed["step_found"], false);
+    assert!(
+        !changed["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("unavailable"))
+    );
+
+    std::fs::remove_file(main.join("docs/plans/x.md")).unwrap();
+    env.check(&side);
+    let missing = env.json(&side, &["show", &id]);
+    assert_eq!(missing["task"], shown["task"]);
+    assert_eq!(missing["step_found"], false);
+    assert!(missing["warnings"].as_array().unwrap().iter().any(|w| {
+        let w = w.as_str().unwrap();
+        w.contains("docs/plans/x.md") && w.contains("unavailable")
+    }));
+}
+
+#[test]
+#[cfg(unix)]
+fn show_historical_plan_keeps_main_checkout_metadata_failures() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut env = TestEnv::new();
+    let (main, side, id) = worktree_with_excluded_docs(&mut env);
+    for dir in [&main, &side] {
+        stamp(dir, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    }
+    env.json(&side, &["done", &id]);
+    let plans = main.join("docs/plans");
+    let permissions = std::fs::metadata(&plans).unwrap().permissions();
+    std::fs::set_permissions(&plans, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let denied = env.cmd(&side).args(["show", &id]).output().unwrap();
+    std::fs::set_permissions(&plans, permissions).unwrap();
+    assert_eq!(denied.status.code(), Some(1), "{denied:?}");
+    assert_eq!(err_kind(&denied), "io");
+
+    std::fs::remove_file(plans.join("x.md")).unwrap();
+    std::fs::create_dir(plans.join("x.md")).unwrap();
+    assert_eq!(env.fail(&side, &["show", &id]), "io");
 }
 
 #[test]

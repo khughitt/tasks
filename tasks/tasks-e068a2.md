@@ -1,15 +1,16 @@
 ---
 id: tasks-e068a2
 title: Keep closed task views readable when a linked plan is missing
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: fix/historical-plan-reads
 created: 2026-10-04T17:51:38Z
-updated: 2026-10-09T12:24:01Z
+updated: 2026-10-09T12:33:56Z
 started: 2026-10-09T12:23:55Z
+completed: 2026-10-09T12:32:59Z
 depends: []
 parent: tasks-0e432f
 tags: [feedback, friction, "from:tack"]
@@ -33,3 +34,16 @@ Original report: tasks show --json fails whole (io error) for a done task whose 
 - 2026-10-09T12:23:55Z (main): started
   provenance: {"harness_session":"codex:01a12066-6cd3-7793-bec2-ff08cc0f6519","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-09T12:24:01Z (main): Process direct: implement the scoped historical-plan reader fix and regressions in .worktrees/tasks-e068a2; preserve open-task and unrelated I/O failures.
+- 2026-10-09T12:24:15Z (fix/historical-plan-reads): resumed
+  provenance: {"harness_session":"codex:01a12066-6cd3-7793-bec2-ff08cc0f6519","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T12:25:20Z (fix/historical-plan-reads): Scope confirmed: shared show::describe serves show and next; Resolver::step_exists also validates edits and must stay strict. Cover done/dropped/moved history, plan-only records, main-checkout fallback, open failures, and unrelated read errors; update README contract.
+- 2026-10-09T12:28:24Z (fix/historical-plan-reads): Verification: just test-one show_closed and moved-history regression failed before the fix; just test-one historical_plan now passes all four tests. just test-fast passed 1,285 tests (one intentionally ignored); just check passed. Read-only implementation review pending.
+- 2026-10-09T12:29:13Z (fix/historical-plan-reads): review: impl round 1 — verdict: revise; findings: Important 1; reviewer: codex
+- 2026-10-09T12:30:25Z (fix/historical-plan-reads): Corrective round 1: main-checkout permission/directory regression failed before fix and passes after checking try_exists at both supported locations; all five historical_plan regressions pass. Resolver remains unchanged; fresh scoped re-review dispatched.
+- 2026-10-09T12:31:40Z (fix/historical-plan-reads): review: impl round 2 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-09T12:31:40Z (fix/historical-plan-reads): Final verification: all five focused historical_plan regressions pass; just test-fast passed 1,286 tests with one intentionally ignored; just check passed. Fresh scoped review accepted the error-handling correction with no remaining or deferred findings.
+- 2026-10-09T12:32:59Z (fix/historical-plan-reads): done
+  provenance: {"harness_session":"codex:01a12066-6cd3-7793-bec2-ff08cc0f6519","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T12:32:59Z (fix/historical-plan-reads): Closed task readers preserve unavailable historical plans and steps with an explicit warning; done, dropped, and moved records remain readable. Main-checkout fallback and open/I/O failures retained; five regressions, 1,286 fast tests, checks, fresh review, and installed CLI smoke passed.
+  provenance: {"harness_session":"codex:01a12066-6cd3-7793-bec2-ff08cc0f6519","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-09T12:33:56Z (fix/historical-plan-reads): Installed CLI smoke: initial disposable fixture stopped at mkdir because init already creates docs/plans; corrected fixture passed unchanged historical record, unavailable-plan warning, false step_found, and open-task I/O failure. No product-code changes followed review.
