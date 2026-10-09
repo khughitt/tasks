@@ -549,3 +549,280 @@ fn local_dependent_follows_the_pointer() {
     env.json(&wali, &["done", &n]);
     assert!(ready(&env).contains(&b));
 }
+
+/// A completed move written by hand: `id` in `from` becomes a tombstone, and a copy
+/// carrying `moved_from` is created in `to_dir`. Returns the new id.
+fn moved_pair_by_hand(
+    env: &TestEnv,
+    from: &std::path::Path,
+    id: &str,
+    to_dir: &std::path::Path,
+) -> String {
+    let n = id_of(env.json(to_dir, &["add", "copy", "-p", "2"]));
+    let path = to_dir.join(format!("tasks/{n}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        text.replacen("tags: []\n", &format!("tags: []\nmoved_from: {id}\n"), 1),
+    )
+    .unwrap();
+    tombstone_by_hand(from, id, &n);
+    n
+}
+
+fn kinds(report: &serde_json::Value, side: &str) -> Vec<String> {
+    report[side]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["kind"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn check_warns_moved_dep_with_the_swap() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let ops = env.init("ops");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let x = id_of(env.json(&ops, &["add", "X", "-p", "2", "--depends", &a]));
+    let n = moved_pair_by_hand(&env, &dots, &a, &wali);
+    let report = env.check(&ops);
+    let finding = report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["kind"] == "moved_dep")
+        .expect("moved_dep");
+    assert_eq!(finding["id"], x);
+    assert!(
+        finding["detail"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("tasks dep {x} --on {n} --rm {a}"))
+    );
+    assert!(kinds(&env.check(&dots), "errors").is_empty());
+    assert!(kinds(&env.check(&wali), "errors").is_empty());
+}
+
+#[test]
+fn half_a_move_is_incomplete_but_an_unreachable_counterpart_only_warns() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&dots, &["add", "B", "-p", "2", "--depends", &a]));
+    let n = moved_pair_by_hand(&env, &dots, &a, &wali);
+    // Unregistering the destination: a warning, never move_incomplete (spec §4.4, case 7).
+    env.json(&dots, &["unregister", "wali"]);
+    let ready = env.json(&dots, &["ready"]);
+    assert!(
+        ready["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["id"] != b),
+        "{ready}"
+    );
+    assert!(
+        ready["warnings"].to_string().contains("unreachable"),
+        "{ready}"
+    );
+    let report = env.check(&dots);
+    assert!(
+        kinds(&report, "warnings").contains(&"move_counterpart_unreachable".into()),
+        "{report}"
+    );
+    assert!(
+        !kinds(&report, "errors").contains(&"move_incomplete".into()),
+        "{report}"
+    );
+    env.json(&wali, &["init", "--prefix", "wali", "--force"]);
+    assert!(
+        env.check(&dots)["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|f| f["kind"] != "move_counterpart_unreachable")
+    );
+    // A reachable destination whose record is missing: move_incomplete.
+    std::fs::remove_file(wali.join(format!("tasks/{n}.md"))).unwrap();
+    let out = env.cmd(&dots).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        kinds(&report, "errors").contains(&"move_incomplete".into()),
+        "{report}"
+    );
+}
+
+#[test]
+fn chained_moves_follow_to_the_end() {
+    // Review Focus 3: the middle record is both a tombstone and a destination.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let ops = env.init("ops");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&dots, &["add", "B", "-p", "2", "--depends", &a]));
+    let n = moved_pair_by_hand(&env, &dots, &a, &wali);
+    let m = moved_pair_by_hand(&env, &wali, &n, &ops);
+    for dir in [&dots, &wali, &ops] {
+        assert!(
+            kinds(&env.check(dir), "errors").is_empty(),
+            "{}",
+            dir.display()
+        );
+    }
+    // The swap names the end of the chain, and running it works: `dep --on` refuses
+    // the middle tombstone, so naming it would be a repair that fails.
+    let report = env.check(&dots);
+    let detail = report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["kind"] == "moved_dep")
+        .expect("moved_dep")["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let swap = format!("tasks dep {b} --on {m} --rm {a}");
+    assert!(detail.contains(&swap), "{detail}");
+    assert!(!detail.contains(&format!("--on {n}")), "{detail}");
+    env.json(&dots, &["dep", &b, "--on", &m, "--rm", &a]);
+    assert!(
+        kinds(&env.check(&dots), "warnings")
+            .iter()
+            .all(|k| k != "moved_dep")
+    );
+    assert_eq!(env.fail(&dots, &["done", &b]), "open_dependencies");
+    env.json(&ops, &["done", &m]);
+    env.json(&dots, &["done", &b]);
+}
+
+#[test]
+fn renaming_either_project_after_a_move_keeps_the_pair_whole() {
+    // A rename rewrites only its own ids, so `moved_from: dots-…` outlives `dots`.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let ops = env.init("ops");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let x = id_of(env.json(&ops, &["add", "X", "-p", "2", "--depends", &a]));
+    let n = moved_pair_by_hand(&env, &dots, &a, &wali);
+    let clean = |env: &TestEnv| {
+        for dir in [&dots, &wali] {
+            let report = env.check(dir);
+            assert!(kinds(&report, "errors").is_empty(), "{report}");
+            assert!(
+                !kinds(&report, "warnings").contains(&"move_counterpart_unreachable".into()),
+                "{report}"
+            );
+        }
+    };
+    env.json(&dots, &["rename", "dots", "dx"]);
+    clean(&env);
+    env.json(&wali, &["rename", "wali", "wx"]);
+    clean(&env);
+    let renamed = n.replacen("wali-", "wx-", 1);
+    let report = env.check(&ops);
+    let moved = report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["kind"] == "moved_dep")
+        .expect("moved_dep");
+    assert!(
+        moved["detail"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("--on {renamed}")),
+        "{report}"
+    );
+    assert_eq!(env.fail(&ops, &["done", &x]), "open_dependencies");
+}
+
+#[test]
+fn check_warns_moved_dep_on_closed_and_shelved_records() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let closed = id_of(env.json(&dots, &["add", "Closed", "-p", "2", "--depends", &a]));
+    let shelved = id_of(env.json(&dots, &["add", "Shelved", "-p", "2", "--depends", &a]));
+    env.json(&dots, &["drop", &closed, "no longer needed"]);
+    env.json(&dots, &["shelve", &shelved, "later"]);
+    let n = moved_pair_by_hand(&env, &dots, &a, &wali);
+    let report = env.check(&dots);
+    for id in [closed, shelved] {
+        let finding = report["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["kind"] == "moved_dep" && f["id"] == id)
+            .unwrap_or_else(|| panic!("missing moved_dep for {id}: {report}"));
+        assert!(
+            finding["detail"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("tasks dep {id} --on {n} --rm {a}"))
+        );
+    }
+}
+
+#[test]
+fn check_checks_both_move_counterparts_without_following_past_them() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = moved_pair_by_hand(&env, &dots, &a, &wali);
+    let source_path = dots.join(format!("tasks/{a}.md"));
+    let destination_path = wali.join(format!("tasks/{n}.md"));
+    let source = std::fs::read_to_string(&source_path).unwrap();
+    let destination = std::fs::read_to_string(&destination_path).unwrap();
+    for (path, original, pointer, replacement, check_dir) in [
+        (
+            &destination_path,
+            &destination,
+            a.as_str(),
+            "dots-000000",
+            &dots,
+        ),
+        (&source_path, &source, n.as_str(), "wali-000000", &wali),
+    ] {
+        std::fs::write(path, original.replace(pointer, replacement)).unwrap();
+        let out = env.cmd(check_dir).args(["check"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(
+            kinds(&report, "errors").contains(&"move_incomplete".into()),
+            "{report}"
+        );
+        std::fs::write(path, original).unwrap();
+        std::fs::write(path, "unparsable").unwrap();
+        let report = env.check(check_dir);
+        assert!(
+            kinds(&report, "warnings").contains(&"move_counterpart_unreachable".into()),
+            "{report}"
+        );
+        assert!(kinds(&report, "errors").is_empty(), "{report}");
+        std::fs::remove_file(path).unwrap();
+        let out = env.cmd(check_dir).args(["check"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(
+            kinds(&report, "errors").contains(&"move_incomplete".into()),
+            "{report}"
+        );
+        std::fs::write(path, original).unwrap();
+    }
+    env.json(&wali, &["unregister", "dots"]);
+    let report = env.check(&wali);
+    assert!(
+        kinds(&report, "warnings").contains(&"move_counterpart_unreachable".into()),
+        "{report}"
+    );
+    assert!(kinds(&report, "errors").is_empty(), "{report}");
+}

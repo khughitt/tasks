@@ -7,6 +7,12 @@ use crate::resolve::{DocKind, Located, Resolver, has_heading, step_headings};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
+enum Counterpart {
+    Present(Box<Task>),
+    Missing,
+    Unreachable,
+}
+
 fn finding(task: Option<&Task>, file: String, kind: &str, detail: String) -> Finding {
     Finding {
         id: task.map(|task| task.id.to_string()),
@@ -76,6 +82,40 @@ pub fn run(ctx: Ctx) -> Result<Output> {
             Err(error) => Err(error.to_string()),
         }
     };
+
+    let record = |id: &TaskId| -> Result<Option<Task>> {
+        let id = ctx.registry.canonical_id(id);
+        if id.prefix == ctx.project.prefix {
+            Ok(tasks
+                .iter()
+                .find(|task| ctx.registry.canonical_id(&task.id) == id)
+                .cloned())
+        } else {
+            resolver.resolve_task(&id)
+        }
+    };
+    let counterpart = |id: &TaskId| -> Result<Counterpart> {
+        let id = ctx.registry.canonical_id(id);
+        if id.prefix == ctx.project.prefix {
+            return Ok(match record(&id)? {
+                Some(task) => Counterpart::Present(Box::new(task)),
+                None => Counterpart::Missing,
+            });
+        }
+        let Some(root) = ctx.registry.project_root(&id.prefix) else {
+            return Ok(Counterpart::Unreachable);
+        };
+        if !crate::scope::is_reachable(root)? {
+            return Ok(Counterpart::Unreachable);
+        }
+        Ok(match foreign(&id) {
+            Ok(Some(task)) => Counterpart::Present(Box::new(task)),
+            Ok(None) => Counterpart::Missing,
+            Err(_) => Counterpart::Unreachable,
+        })
+    };
+    let same =
+        |a: &TaskId, b: &TaskId| ctx.registry.canonical_id(a) == ctx.registry.canonical_id(b);
 
     for task in &tasks {
         let file = format!("tasks/{}.md", task.id);
@@ -166,6 +206,21 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     format!("depends on shelved {dependency}: unshelve it or drop the dependency"),
                 ));
             }
+            if let Ok(Some(dependency_task)) = record(dependency)
+                && dependency_task.status == Status::Moved
+                && let Some(to) = dependency_task.moved_to.clone()
+            {
+                let detail = match crate::tombstone::follow(Some(dependency_task), &record) {
+                    Ok(Some(end)) => format!(
+                        "depends on {dependency}, which moved to {}; run `tasks dep {} --on {} --rm {dependency}`",
+                        end.id, task.id, end.id
+                    ),
+                    Ok(None) | Err(_) => format!(
+                        "depends on {dependency}, which moved to {to}; its chain cannot be followed to a live record here"
+                    ),
+                };
+                warnings.push(finding(Some(task), file.clone(), "moved_dep", detail));
+            }
             if dependency_id.prefix == ctx.project.prefix {
                 if !ctx.project.task_path(&dependency_id).try_exists()? {
                     errors.push(finding(
@@ -229,6 +284,50 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     parent_task.status.as_str()
                 ),
             ));
+        }
+        for (pointer, is_source) in [(&task.moved_to, true), (&task.moved_from, false)] {
+            let Some(pointer) = pointer else { continue };
+            let direction = if is_source { "to" } else { "from" };
+            match counterpart(pointer)? {
+                Counterpart::Present(other)
+                    if if is_source {
+                        other.moved_from.as_ref().is_some_and(|from| same(from, &task.id))
+                    } else {
+                        other.status == Status::Moved
+                            && other.moved_to.as_ref().is_some_and(|to| same(to, &task.id))
+                    } => {}
+                Counterpart::Unreachable => warnings.push(finding(
+                    Some(task),
+                    file.clone(),
+                    "move_counterpart_unreachable",
+                    format!(
+                        "{} moved {direction} {pointer}, whose project {} is not reachable here; dependencies on it stay blocked",
+                        task.id,
+                        ctx.registry.canonical_id(pointer).prefix
+                    ),
+                )),
+                state => {
+                    let problem = match state {
+                        Counterpart::Missing => "is missing".to_string(),
+                        Counterpart::Present(_) if is_source => {
+                            format!("does not name {} as moved_from", task.id)
+                        }
+                        Counterpart::Present(_) => {
+                            format!("is not a tombstone naming {} as moved_to", task.id)
+                        }
+                        Counterpart::Unreachable => unreachable!(),
+                    };
+                    errors.push(finding(
+                        Some(task),
+                        file.clone(),
+                        "move_incomplete",
+                        format!(
+                            "{} moved {direction} {pointer}, but {pointer} {problem}; finish the move on the host that started it",
+                            task.id
+                        ),
+                    ));
+                }
+            }
         }
         // Spec §6: the plan step is the unit of delegation, and rating it is the
         // planner's duty. Elsewhere a missing rating is not a finding, like size.
