@@ -48,9 +48,28 @@ fn record_cycle(
 }
 
 pub fn run(ctx: Ctx) -> Result<Output> {
+    let pending: Vec<_> = crate::moving::journal::Journal::pending()?
+        .into_iter()
+        .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))
+        .collect();
     let (tasks, parse_errors) = ctx.project.scan_lenient();
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
+    for journal in &pending {
+        warnings.push(finding(
+            None,
+            format!(
+                "tasks/{}.md",
+                if journal.source_id().prefix == ctx.project.prefix {
+                    &journal.source
+                } else {
+                    &journal.target
+                }
+            ),
+            "move_pending",
+            journal.pending_error().to_string(),
+        ));
+    }
 
     for error in parse_errors {
         let file = match &error {
@@ -307,6 +326,12 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     ),
                 )),
                 state => {
+                    let (source, target) = if is_source { (&task.id, pointer) } else { (pointer, &task.id) };
+                    if pending.iter().any(|journal| {
+                        same(&journal.source_id(), source) && same(&journal.target_id(), target)
+                    }) {
+                        continue;
+                    }
                     let problem = match state {
                         Counterpart::Missing => "is missing".to_string(),
                         Counterpart::Present(_) if is_source => {

@@ -32,10 +32,19 @@ pub fn run(
     let target_exists = exists(&target_path)?;
     let mut warnings = Vec::new();
     let mut tasks = BTreeSet::new();
-    let mut stage = if let Err(error) =
-        crate::commands::reject_pending_rename_at(Some(&project.root), old)
-            .and_then(|()| crate::commands::reject_pending_rename_at(Some(&project.root), new))
-    {
+    let mut stage = if let Err(error) = crate::commands::reject_pending_operations(
+        Some(&project.root),
+        registry.canonical_prefix(old),
+    )
+    .and_then(|()| {
+        crate::commands::reject_pending_operations(
+            Some(&project.root),
+            registry.canonical_prefix(new),
+        )
+    }) {
+        if !explain && matches!(error, Error::MovePending(_)) {
+            return Err(error);
+        }
         Stage::Refuse(error.to_string())
     } else {
         classify_registry(registry, project, old, new)?

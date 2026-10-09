@@ -50,10 +50,10 @@ pub fn unretire(here: Project) -> Result<()> {
     Ok(())
 }
 
-/// The registered checkout, re-opened under the lock, with the pending-rename freeze
+/// The registered checkout, re-opened under the lock, with the pending-operation freeze
 /// applied as every writer applies it; a linked worktree is refused.
 fn authority(registry: &Registry, here: &Project) -> Result<Project> {
-    super::reject_pending_rename(here)?;
+    super::reject_pending_operations(Some(&here.root), &here.prefix)?;
     let root = registry
         .project_root(&here.prefix)
         .ok_or_else(|| Error::Config(format!("{} is not registered on this host", here.prefix)))?;

@@ -802,6 +802,16 @@ pub fn reject_pending_rename_at(root: Option<&Path>, prefix: &str) -> Result<()>
     Ok(())
 }
 
+pub fn reject_pending_operations(root: Option<&Path>, prefix: &str) -> Result<()> {
+    reject_pending_rename_at(root, prefix)?;
+    for journal in crate::moving::journal::Journal::pending()? {
+        if journal.names_prefix(prefix) {
+            return Err(journal.pending_error());
+        }
+    }
+    Ok(())
+}
+
 /// A read command that takes an id: the id's prefix routes to its registered project, the
 /// way `show` and every write command route. Routing is what the multi-project design
 /// already specifies -- the subtree of an id is read from that id's own project -- and
@@ -1055,6 +1065,7 @@ pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
 /// The guard every record write passes before it mutates (task-move spec §3.4).
 /// `load` calls it; so does each writer that reads a record by other means.
 pub(crate) fn guard_write(registry: &Registry, shorthand: &Shorthand, task: &Task) -> Result<()> {
+    crate::moving::journal::refuse_pending_id(&registry.canonical_id(&task.id))?;
     crate::tombstone::refuse_write(
         task,
         |arg| {

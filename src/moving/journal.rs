@@ -163,6 +163,16 @@ impl Journal {
         self.source == id.to_string() || self.target == id.to_string()
     }
 
+    pub(crate) fn pending_error(&self) -> Error {
+        Error::MovePending(format!(
+            "a move of {} to {} is pending on this host; finish it with `tasks move {} --to {}`",
+            self.source,
+            self.target,
+            self.source,
+            self.target_id().prefix
+        ))
+    }
+
     pub(crate) fn validate(&self, path: &Path) -> Result<()> {
         let source = TaskId::parse(&self.source).map_err(|error| journal_error(path, error))?;
         let target = TaskId::parse(&self.target).map_err(|error| journal_error(path, error))?;
@@ -219,6 +229,15 @@ impl Journal {
         }
         Ok(())
     }
+}
+
+pub fn refuse_pending_id(id: &TaskId) -> Result<()> {
+    for journal in Journal::pending()? {
+        if journal.names_id(id) {
+            return Err(journal.pending_error());
+        }
+    }
+    Ok(())
 }
 
 fn validate_digest(path: &Path, field: &str, value: &str) -> Result<()> {

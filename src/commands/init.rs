@@ -34,7 +34,7 @@ pub fn run(
             )));
         }
     }
-    super::reject_pending_rename_at(Some(&root), &prefix)?;
+    super::reject_pending_operations(Some(&root), registry.canonical_prefix(&prefix))?;
     // The registry is only mutated in memory here: `save` runs after `Project::init`, so
     // an init that fails leaves the registry exactly as it was.
     if force {

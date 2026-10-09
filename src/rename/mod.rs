@@ -28,7 +28,21 @@ pub(crate) fn root_identity(root: &std::path::Path) -> Result<std::path::PathBuf
 /// Observation is repeated here after lock acquisition; explain needs none of the locks.
 pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> Result<RenameOut> {
     let snapshot = observe(registry, invocation, Inventory::load(&invocation.source)?)?;
-    let recovery = classify(&snapshot);
+    let pending = crate::moving::journal::Journal::pending()?
+        .into_iter()
+        .find(|journal| {
+            journal.names_prefix(registry.canonical_prefix(&invocation.source))
+                || journal.names_prefix(registry.canonical_prefix(&invocation.target))
+        });
+    let recovery = if let Some(journal) = pending {
+        let error = journal.pending_error();
+        if !explain {
+            return Err(error);
+        }
+        Recovery::Refuse(error.to_string())
+    } else {
+        classify(&snapshot)
+    };
     let mut warnings = Vec::new();
     let verdict = match &recovery {
         Recovery::Fresh => "fresh",
@@ -125,6 +139,8 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     let project = Project::open(&invocation.root)?;
     authorize(&project, invocation, &mut out.warnings)?;
     let inventory = if recovery == Recovery::Fresh {
+        crate::commands::reject_pending_operations(Some(&project.root), &invocation.source)?;
+        crate::commands::reject_pending_operations(None, &invocation.target)?;
         if registry.is_taken(&invocation.target) {
             return Err(Error::Config(format!(
                 "prefix {:?} is already taken",
@@ -147,7 +163,6 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
                 ids.join(", ")
             )));
         }
-        crate::commands::reject_pending_rename(&project)?;
         if let Some(dirty) = project.uncommitted_task_files()?
             && !dirty.is_empty()
         {

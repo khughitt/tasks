@@ -826,3 +826,353 @@ fn check_checks_both_move_counterparts_without_following_past_them() {
     );
     assert!(kinds(&report, "errors").is_empty(), "{report}");
 }
+
+fn accept_feedback(dir: &std::path::Path, scope: &str) {
+    let path = dir.join("tasks/.config.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(&format!("\n[feedback]\nscope = \"{scope}\"\n"));
+    std::fs::write(path, text).unwrap();
+}
+
+fn journal_path(env: &TestEnv, id: &str) -> std::path::PathBuf {
+    env.home
+        .path()
+        .join(format!(".local/state/tasks/move/{id}.toml"))
+}
+
+/// A journal as `move` writes one after M2, naming `source` in `from` and `target` in
+/// `to`. Its texts are placeholders: nothing in this task resumes it.
+fn journal_by_hand(
+    env: &TestEnv,
+    from: &std::path::Path,
+    source: &str,
+    to: &std::path::Path,
+    target: &str,
+) {
+    use sha2::{Digest, Sha256};
+    let source_text = std::fs::read_to_string(from.join(format!("tasks/{source}.md"))).unwrap();
+    let mut journal = toml::Table::new();
+    for (key, value) in [
+        ("source", source.to_string()),
+        ("target", target.to_string()),
+        ("source_root", from.display().to_string()),
+        ("target_root", to.display().to_string()),
+        (
+            "source_digest",
+            format!("{:x}", Sha256::digest(source_text.as_bytes())),
+        ),
+        ("source_text", source_text),
+        ("target_text", "target".into()),
+        ("tombstone_text", "tombstone".into()),
+    ] {
+        journal.insert(key.into(), toml::Value::String(value));
+    }
+    let path = journal_path(env, source);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, toml::to_string(&journal).unwrap()).unwrap();
+}
+
+#[test]
+fn a_pending_journal_freezes_both_ids_in_every_writer() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    accept_feedback(&dots, "*");
+    let a = id_of(env.json(
+        &wali,
+        &[
+            "feedback",
+            "--project",
+            "dots",
+            "move freeze probe",
+            "--category",
+            "gap",
+        ],
+    ));
+    let n = id_of(env.json(&wali, &["add", "N", "-p", "2"]));
+    journal_by_hand(&env, &dots, &a, &wali, &n);
+    assert_eq!(
+        fail_detail(&env, &dots, &["note", &a, "x"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &wali, &["note", &n, "x"]).0,
+        "move_pending"
+    );
+    let out = env
+        .cmd(&dots)
+        .env("EDITOR", "true")
+        .args(["edit", &a])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["error"]["kind"], "move_pending", "{out:?}");
+    let (kind, _) = fail_detail(
+        &env,
+        &wali,
+        &[
+            "feedback",
+            "--project",
+            "dots",
+            "move freeze probe",
+            "--category",
+            "gap",
+            "--recur",
+            &a,
+        ],
+    );
+    assert_eq!(kind, "move_pending");
+    let warnings = env.json(&dots, &["show", &a])["warnings"].to_string();
+    assert!(warnings.contains("pending"), "{warnings}");
+    let unrelated = id_of(env.json(&dots, &["add", "Unrelated", "-p", "2"]));
+    env.json(&dots, &["note", &unrelated, "allowed"]);
+    let unrelated_target = id_of(env.json(&wali, &["add", "Unrelated", "-p", "2"]));
+    env.json(&wali, &["note", &unrelated_target, "allowed"]);
+    // Pending wins over the tombstone: the same refusal whichever state the move reached.
+    tombstone_by_hand(&dots, &a, &n);
+    assert_eq!(
+        fail_detail(&env, &dots, &["note", &a, "x"]).0,
+        "move_pending"
+    );
+}
+
+#[test]
+fn a_pending_journal_freezes_both_projects_lifecycle() {
+    // Spec §6 case 9, with the journal written by hand.
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "N", "-p", "2"]));
+    journal_by_hand(&env, &dots, &a, &wali, &n);
+    let registry = env.home.path().join(".config/tasks/projects.toml");
+    let before = std::fs::read(&registry).unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    assert_eq!(
+        fail_detail(&env, &dots, &["retire", "--reason", "done"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &wali, &["retire", "--reason", "done"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["unregister", "wali"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["unregister", "dots"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(
+            &env,
+            elsewhere.path(),
+            &["init", "--prefix", "wali", "--force"]
+        )
+        .0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["rename", "dots", "dx"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["rename", "wali", "wx"]).0,
+        "move_pending"
+    );
+    assert_eq!(fail_detail(&env, &dots, &["unretire"]).0, "move_pending");
+    assert_eq!(fail_detail(&env, &wali, &["unretire"]).0, "move_pending");
+    // The new side of a rename is reserved too, even when the old project is unrelated.
+    assert_eq!(std::fs::read(&registry).unwrap(), before);
+    let ops = env.init("ops");
+    let with_ops = std::fs::read(&registry).unwrap();
+    assert_eq!(
+        fail_detail(&env, &ops, &["rename", "ops", "dots"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &ops, &["rename", "ops", "wali"]).0,
+        "move_pending"
+    );
+    for (dir, old, new) in [(&dots, "dots", "dx"), (&ops, "ops", "wali")] {
+        let out = env.json(dir, &["rename", old, new, "--explain"]);
+        assert_eq!(out["recovery"], "refuse");
+        assert!(out["warnings"].to_string().contains("pending"));
+    }
+    // Initializing ops is the only registry mutation in this fixture.
+    assert_ne!(with_ops, before);
+    assert_eq!(std::fs::read(&registry).unwrap(), with_ops);
+    // Retire refuses any open task once the freeze lifts; close A first.
+    std::fs::remove_file(journal_path(&env, &a)).unwrap();
+    env.json(&dots, &["done", &a]);
+    env.json(&dots, &["retire", "--reason", "done"]);
+}
+
+#[test]
+fn a_pending_journal_stands_in_for_move_incomplete() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "N", "-p", "2"]));
+    journal_by_hand(&env, &dots, &a, &wali, &n);
+    tombstone_by_hand(&dots, &a, &n); // M6 done; `n` lacks moved_from, as before M4
+    for dir in [&dots, &wali] {
+        let report = env.check(dir);
+        assert!(
+            kinds(&report, "warnings").contains(&"move_pending".into()),
+            "{report}"
+        );
+        assert!(kinds(&report, "errors").is_empty(), "{report}");
+    }
+    // The same records on a host without the journal: the error stands.
+    std::fs::remove_file(journal_path(&env, &a)).unwrap();
+    let out = env.cmd(&dots).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("move_incomplete"));
+}
+
+#[test]
+fn a_pending_journal_freezes_both_adopt_prefixes() {
+    for frozen_old in [true, false] {
+        let mut env = TestEnv::new();
+        let dots = env.init("dots");
+        let wali = env.init("wali");
+        let ops = env.init("ops");
+        let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+        let n = id_of(env.json(&wali, &["add", "N", "-p", "2"]));
+        let old = if frozen_old { "dots" } else { "ops" };
+        let new = if frozen_old { "ops" } else { "dots" };
+        let adopted = if frozen_old { &ops } else { &dots };
+        // Adoption is reached from the synced checkout already carrying the new prefix.
+        journal_by_hand(&env, &dots, &a, &wali, &n);
+        let registry = env.home.path().join(".config/tasks/projects.toml");
+        let before = std::fs::read(&registry).unwrap();
+        assert_eq!(
+            fail_detail(&env, adopted, &["rename", old, new, "--adopt"]).0,
+            "move_pending"
+        );
+        let out = env.json(adopted, &["rename", old, new, "--adopt", "--explain"]);
+        assert_eq!(out["recovery"], "refuse");
+        assert!(out["warnings"].to_string().contains("pending"));
+        assert_eq!(std::fs::read(&registry).unwrap(), before);
+    }
+}
+
+#[test]
+fn a_pending_journal_does_not_hide_a_different_incomplete_pair() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "N", "-p", "2"]));
+    let b = id_of(env.json(&dots, &["add", "B", "-p", "2"]));
+    let m = id_of(env.json(&wali, &["add", "M", "-p", "2"]));
+    journal_by_hand(&env, &dots, &a, &wali, &n);
+    tombstone_by_hand(&dots, &a, &n);
+    tombstone_by_hand(&dots, &b, &m);
+    let out = env.cmd(&dots).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        kinds(&report, "warnings").contains(&"move_pending".into()),
+        "{report}"
+    );
+    let incomplete: Vec<_> = report["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["kind"] == "move_incomplete")
+        .collect();
+    assert_eq!(incomplete.len(), 1, "{report}");
+    assert_eq!(incomplete[0]["id"], b);
+    // Sharing only one id is not the journal's pair either.
+    let path = dots.join(format!("tasks/{a}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(&format!("moved_to: {n}"), &format!("moved_to: {m}")),
+    )
+    .unwrap();
+    let out = env.cmd(&dots).args(["check"]).output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|finding| finding["kind"] == "move_incomplete")
+            .count(),
+        2,
+        "{report}"
+    );
+}
+
+#[test]
+fn a_pending_journal_freezes_retired_projects_before_unretire() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "N", "-p", "2"]));
+    env.json(&dots, &["done", &a]);
+    env.json(&wali, &["done", &n]);
+    for dir in [&dots, &wali] {
+        env.json(dir, &["retire", "--reason", "done"]);
+    }
+    journal_by_hand(&env, &dots, &a, &wali, &n);
+    for dir in [&dots, &wali] {
+        let path = dir.join("tasks/.config.toml");
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(fail_detail(&env, dir, &["unretire"]).0, "move_pending");
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
+    std::fs::remove_file(journal_path(&env, &a)).unwrap();
+    for dir in [&dots, &wali] {
+        env.json(dir, &["unretire"]);
+        assert!(
+            !std::fs::read_to_string(dir.join("tasks/.config.toml"))
+                .unwrap()
+                .contains("[retired]")
+        );
+    }
+}
+
+#[test]
+fn a_pending_journal_freezes_alias_id_and_lifecycle_spellings() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    let wali = env.init("wali");
+    let old = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let n = id_of(env.json(&wali, &["add", "N", "-p", "2"]));
+    env.json(&dots, &["rename", "dots", "dx"]);
+    let a = old.replacen("dots-", "dx-", 1);
+    journal_by_hand(&env, &dots, &a, &wali, &n);
+    assert_eq!(
+        fail_detail(&env, &dots, &["note", &old, "x"]).0,
+        "move_pending"
+    );
+    assert!(
+        env.json(&dots, &["show", &old])["warnings"]
+            .to_string()
+            .contains("pending")
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["unregister", "dots"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["rename", "dots", "ops", "--adopt"]).0,
+        "move_pending"
+    );
+    assert_eq!(
+        fail_detail(&env, &dots, &["rename", "ops", "dots", "--adopt"]).0,
+        "move_pending"
+    );
+    let other = tempfile::tempdir().unwrap();
+    assert_eq!(
+        fail_detail(&env, other.path(), &["init", "--prefix", "dots", "--force"]).0,
+        "move_pending"
+    );
+}
