@@ -8,6 +8,9 @@ they select. This pass covers tasks-eb2b4e and tasks-ead38f under tasks-cea445;
 shared definitions need design, while the reviewed all-of filter decision can
 be recorded now.
 
+The 2026-10-08 pass adds tasks-b49ef8: recognizable tag colors across list, show,
+prime and tags, with style ownership settled by the same vocabulary design.
+
 ## Current behaviour and evidence
 
 - `src/repo.rs::tag_dictionary` reads an optional project `[tags]` table and
@@ -30,6 +33,14 @@ be recorded now.
   These are captured reports: the foreign incident records and mindful
   implementation were not inspected here. Its source remains
   `user:2026-09-30 thought-sweep session`.
+- Tag rendering groundwork landed with tasks-606552 in `3b58cd7`.
+  `src/present.rs::tags` still returns a single Chrome span for the joined names;
+  task rows in `src/output.rs` and the overview in `src/show_text.rs` use it.
+  `Output::Tags` prints each `row.tag` directly, so changing the shared helper alone
+  would miss that view. Project dictionary values remain plain meaning strings in
+  `src/repo.rs`; no per-tag style schema is implemented. The original screenshot
+  source has no attachment on tasks-b49ef8; this finding is based on current code,
+  not a visual judgement.
 
 ## Constraints
 
@@ -44,6 +55,11 @@ The CLI inventory is vendored from ops. Its header requires changes at the
 authority followed by publication. tasks-964c95 records the prior publication
 workflow; the current authoritative workflow must be inspected before editing.
 Shared definitions do not require changing tag selection.
+
+Tag styles must preserve standalone use, plain output and JSON. Keep the existing
+rendering and vocabulary dependencies on tasks-b49ef8. A color design must account
+for every requested view, tags without assigned styles, malformed style inputs and
+terminal contrast; the user judges a rendered sample before visual acceptance.
 
 ## Alternatives
 
@@ -62,6 +78,12 @@ Lean: compare the first two before choosing a live provider; existing tables or
 a local snapshot may cover the need. Keep all-of tag filtering and annotate its
 vocabulary exception, rather than changing established callers to any-of.
 
+For colors, the captured options are a stable hash-to-palette assignment, optional
+styles in the local/shared vocabulary, or styles imported from mindful. Lean toward
+settling optional vocabulary styles in tasks-6ac7fd before choosing a palette or
+provider. An automatic palette remains an alternative to evaluate, not an approved
+fallback for absent or malformed configuration. Avoid a second independent style store.
+
 ## Unanswered questions
 
 - Who owns a common meaning, and can a project override, narrow, or rename it?
@@ -75,6 +97,9 @@ vocabulary exception, rather than changing established callers to any-of.
 - What happens when an explicitly configured source is missing or malformed?
   Design must specify errors or visible warnings, offline behavior, and snapshot
   freshness while preserving standalone use.
+- Should styles belong to the shared definition, and what wins when the same tag
+  has different styles across projects? tasks-6ac7fd proposes the contract and
+  behavior for unstyled tags; user review settles the intended visual behavior.
 
 ## Proposed decomposition
 
@@ -85,5 +110,8 @@ vocabulary exception, rather than changing established callers to any-of.
   tasks-6ac7fd. Preserve its full captured proposal and questions.
 - tasks-6ac7fd produces a user-reviewed design and implementation plan,
   then files implementation children. On completion it updates this brief and
-  adds a finding note to tasks-eb2b4e in the same commit so scoping can resume.
-
+  adds a finding note to both tasks-eb2b4e and tasks-b49ef8 in the same commit so
+  scoping can resume. Its existing optional-style question is now explicit in its body.
+- tasks-b49ef8 remains an idea, priority 3, briefed against that design. Its rendering
+  prerequisite is done, but style-source decisions remain. Preserve its full original
+  alternatives and source; no new research or design task is needed.

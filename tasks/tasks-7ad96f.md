@@ -7,14 +7,14 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T10:35:27Z
-updated: 2026-10-08T10:09:42Z
+updated: 2026-10-08T10:12:58Z
 depends: []
 parent: tasks-0e7216
 tags: [feedback, friction, "from:sci"]
 agent: claude-code/claude-opus-5-5
 ---
 
-Why: start writes halt-override audit notes through snapshot.authority().write_task rather than the shared load/refuse_stale_copy path. The authority is the registered checkout even when the halt is actively worked in another checkout. Code confirms this deliberate bypass; the reported active-worktree failure and same-stamp fork were not reproduced in this scope pass.
+Why: start writes halt-override audit notes through snapshot.authority().write_task rather than the shared load/refuse_stale_copy path. The authority is the registered checkout even when the halt is actively worked in another checkout. Code confirms this deliberate bypass; the active-worktree failure is now supported by the 2026-10-08 incident note describing an override on 2026-10-05 and the halt owner having to merge its audit note back. This scoping pass inspected code but did not reproduce that incident or the same-stamp fork. The reported decision to record latency verification only after merge avoids a second writer; it does not fix the halt-override writer.
 
 Decision to settle: Reconcile registered-checkout halt decisions and durable attempted-override notes with the rule that writes never fork or overwrite a newer task copy. Keep incident visibility and audit-before-start ordering. Choose the audit write location/refusal policy explicitly, including a halt held by the caller or another live session, stale/equal-stamp copies, an authority-only halt, multiple blockers, and failure after an attempted note. Merely bumping timestamps, weakening stale_copy, or advising the halt owner to reset its copy does not settle ownership.
 
@@ -29,3 +29,4 @@ Original report: start --force --reason run from a worktree writes the halt-over
 - 2026-10-02T14:44:07Z (main): scope: briefed; authority audit writer bypass is confirmed but ownership/refusal contract needs design; waits on tasks-10c968; brief: docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md
 - 2026-10-02T14:55:48Z (main): scope: owns updating superseded spec status when the implementation lands (moved from tasks-10c968, whose Done ends at the reviewed spec and plan)
 - 2026-10-08T10:09:42Z (main): evidence from ops (material-cd7782, 2026-10-05): observed in use. The halt was worked in a worktree; tasks start --force on material-511efe at 08:54Z wrote the halt-override note into the registered checkout's copy, and the halt's own session had to merge that note back by hand at 09:08Z before continuing. ops decided (ops-f33b6a) that tt-latency records its verified: note only after the remedy merges, so verify will not add a second writer of this kind; the override path remains tasks' to fix.
+- 2026-10-08T10:12:57Z (main): scope: briefed; incorporated the new reported halt-owner disruption; current authority writer still bypasses sibling freshness checks; reuse tasks-10c968 for the ownership and audit-ordering design; brief: docs/notes/2026-10-02-worktree-audits-bootstrap-brief.md

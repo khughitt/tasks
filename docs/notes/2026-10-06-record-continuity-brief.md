@@ -7,7 +7,7 @@ Scoping handoff, updated 2026-10-08. Goal: tasks-984769. Not an approved design.
 Dependency decisions and recovery instructions need to agree with the record that
 contains the work. Four reports cover missing worktree dependency records
 (tasks-70f0bc, tasks-562c53), stale-copy merge advice (tasks-a20a64), and a closed
-record still shown as parked (tasks-6b2867). Read authority and local-state recovery
+record still shown as parked (tasks-6b2867, repeated by tasks-2c7979). Read authority and local-state recovery
 need independent decisions.
 
 The latest pass adds tasks-955c2a: recording a finding while another session holds
@@ -57,6 +57,14 @@ in each bullet; original incident captures remain absent.
   `updated` (completed, model and notes unchanged) and clears A's park. Neither probe
   removed a Git worktree or exercised recurrence or a foreign live claim. This shows a
   mechanism, not the original incident's host sequence.
+- **Repeated closed-park report (2026-10-08 scope).** tasks-2c7979 reports the same
+  view mismatch and says repeating done adds a note and restamps model. Current
+  `src/commands/mod.rs::transition` stamps model/completed only on a fresh completion;
+  `src/commands/status.rs::close` can append an explicitly supplied message on a
+  non-recurring retry. The attached bare-retry probe preserved both metadata and notes.
+  The report does not capture its exact invocation or binary, so tasks-b9b10e will
+  compare bare retries, explicit messages and a changed `TASKS_MODEL`; no second
+  investigation or new cleanup command is justified by this report.
 - Park clearing: `claim_guard` records a release intent without persisting;
   `save` removes the park when the destination is done, dropped or shelved
   (`src/commands/mod.rs:532`, `:1554`). The report's claim that no command clears it is
@@ -176,7 +184,10 @@ tasks-a984f1 supplies the evidence; this pass does not authorize automatic routi
   preserve the refusal, explain identical same-stamp siblings, stop blaming every fork
   on write timing.
 - tasks-b9b10e: closed-park safeguards and the `prime`/`list --parked` disagreement.
-  tasks-6b2867 waits on it.
+  tasks-6b2867 remains briefed and waits on it. tasks-2c7979 is a proposed drop as a
+  duplicate, now grouped under this goal with its original report preserved; it remains
+  an idea until that proposal is accepted. The follow-up also checks the reported
+  note/model restamping against the exact retry invocation.
 - tasks-a984f1 (P2/s/mid/direct): establish safe foreign-note delivery; tasks-955c2a
   remains an idea awaiting its finding. No queue implementation or design task yet.
 - tasks-2337b3: dropped with user approval on 2026-10-08 as covered by tasks-a20a64

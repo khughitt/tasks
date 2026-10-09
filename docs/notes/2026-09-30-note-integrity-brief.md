@@ -1,6 +1,6 @@
 # Task note integrity
 
-Scoping handoff, updated 2026-10-06. Goal: tasks-ea2a79. Not an approved design.
+Scoping handoff, updated 2026-10-08. Goal: tasks-ea2a79. Not an approved design.
 
 ## Problem
 
@@ -9,6 +9,9 @@ sensitive history and correcting structured measurements are different needs:
 redacting the current record alone does not sanitize a repository's Git history.
 They share note selection and protected-history constraints, but their decisions
 and delivery need not wait on each other.
+
+This pass adds tasks-45bf05's corrected-reviewer case and dispositions the duplicate
+structured-correction report tasks-c62c8d using the existing design task.
 
 ## Current behaviour and evidence
 
@@ -26,6 +29,17 @@ and delivery need not wait on each other.
 - tasks-d56b72 proposes flat amendments targeting original notes, latest correction
   effective, without amendment chains. Its full proposal remains in the task body;
   selectors, schema and protected-marker rules are not approved.
+- **Reviewer correction (tasks-45bf05).** Reviewer metadata is text within the
+  `review:` convention, not a typed field in `Note`. Current `check_invariants`
+  preserves count, order, timestamps, authors and harness provenance, permitting
+  only trailing-space/tab removal while retaining attachment-ledger meaning.
+  `the_editor_may_only_strip_trailing_whitespace_from_notes` covers the general
+  refusal. A new `note` appends plain text without a correction link. These are
+  source-inspection findings; this pass ran no new reproduction and did not inspect
+  obs's reader. The design already requires a corrected effective reviewer on the
+  same original review round, with the original audit retained.
+- tasks-c62c8d supplies no additional body or distinct acceptance case beyond the
+  structured-correction proposal in tasks-d56b72 and reviewer case in tasks-45bf05.
 
 ## Constraints
 
@@ -55,6 +69,9 @@ choice on obs's correction-reader work.
 Current lean: decide publishing/redaction value within tasks first, with manual
 publishing exceptions a viable alternative. Design shared selection constraints,
 then settle correction and its reader contract with obs. Stage delivery separately.
+Use the shared correction contract for reviewer fixes; a reviewer-specific field or
+second correction design would duplicate the existing work without settling selection
+or downstream interpretation.
 
 ## Unanswered questions
 
@@ -64,6 +81,8 @@ then settle correction and its reader contract with obs. Stage delivery separate
   lifecycle and attachment meaning, and what can a redaction audit safely retain?
 - Can correction readers count exactly one effective run, review and concern, through
   replacement or supersession? tasks-1f6d08 coordinates this later stage with obs.
+  For reviewer corrections, verify that the reader changes the effective reviewer
+  without adding a review round or rewriting protected harness provenance.
 
 ## Proposed decomposition
 
@@ -76,3 +95,8 @@ then settle correction and its reader contract with obs. Stage delivery separate
   implementation plans before code; delivery stages may proceed independently.
 - tasks-cc9a31, tasks-2bb0ba and tasks-d56b72 remain ideas. Findings wake each in the
   same commit and update this brief; preserve the full amendment proposal and sources.
+- tasks-45bf05 remains briefed as the corrected-reviewer acceptance case.
+  tasks-1f6d08 already includes it in both the design checks and completion wake list;
+  no follow-up task is added. tasks-c62c8d was dropped with user approval on
+  2026-10-08 as a duplicate of tasks-d56b72 and tasks-45bf05, covered by
+  tasks-1f6d08; its original report remains in history.

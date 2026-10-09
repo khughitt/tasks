@@ -20,6 +20,13 @@ content failure preventing the task-record commit required before isolation
   confirms the write path; this pass did not reproduce the reported active-halt
   failure or same-stamp fork. Existing tests cover authority-only audit records
   and failed target writes, but not the reported newer active halt copy.
+- **2026-10-08 scope update:** tasks-7ad96f now carries an incident note reporting
+  that an override on 2026-10-05 wrote into registered authority and the halt owner
+  had to merge the note back before continuing. This is reported incident evidence,
+  not a fresh reproduction. Source inspection still finds the bypass introduced in
+  `1d64926`. The reported decision to write latency-verification notes only after
+  merge avoids another writer but leaves the override path unchanged. Reuse
+  tasks-10c968; its existing acceptance case already covers a newer active halt copy.
 - `.githooks/pre-commit` selects a task/guide-only recipe by staged paths. The recipe
   retains hygiene and task consistency; `tools/ops-check` examines tracked content.
   Thus a task-only commit does not necessarily escape an unrelated content failure.
