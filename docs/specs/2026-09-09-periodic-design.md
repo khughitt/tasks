@@ -254,7 +254,9 @@ the claim, it tells the caller to run `tasks done <id>` again to finish the clea
 (claim or park) belongs to the current checkout. An entry from another checkout may
 represent a new occurrence while this checkout still holds the old completion; refuse
 that ambiguous close with a pointer to the owning checkout, preserving both the record
-and the store. For a local cleanup, `done` performs the release it was asked for, warns
+and the store. An entry whose checkout no longer exists on this host is the exception:
+claims and parks are host-local, so no occurrence can be in progress there, and the
+retry releases it as local cleanup (tasks-6a0050). For a local cleanup, `done` performs the release it was asked for, warns
 that the occurrence was already recorded, and touches neither the anchor nor the notes. "Neither
 the notes" includes a message passed to the retry: re-running the original
 `tasks done <id> "<what landed>"` must not append that line a second time.

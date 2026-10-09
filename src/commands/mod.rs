@@ -1409,9 +1409,11 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             .into_iter()
             .chain(store.park(&id).map(|park| &park.worktree))
         {
-            if entry_worktree != &worktree {
+            // Claims and parks are host-local, so a checkout missing here holds no work
+            // of this occurrence: the release below may clear its entry.
+            if entry_worktree != &worktree && Path::new(entry_worktree).try_exists()? {
                 return Err(Error::Validation(format!(
-                    "{id} is already done here but has work in {entry_worktree}; finish that occurrence in its owning checkout"
+                    "{id} is already done here but has work in {entry_worktree}; finish that occurrence in its owning checkout, or, if this closed record already covers it, integrate the record there and run `tasks done {id}` there to release it"
                 )));
             }
         }

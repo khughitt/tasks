@@ -12347,6 +12347,74 @@ fn a_start_left_uncommitted_before_branching_leads_with_the_merge() {
 }
 
 #[test]
+fn a_recurring_park_left_by_a_removed_worktree_is_released_by_done() {
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    let id = id_of(env.json(&main, &["add", "T", "-p", "2", "--every", "7d"]));
+    env.json(&main, &["start", &id]);
+    env.json(&main, &["done", &id]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    let side_arg = side.to_str().unwrap();
+    git(&main, &["worktree", "add", "-q", "-b", "side", side_arg]);
+    // Host A parks the next occurrence in the worktree; the record is integrated into main.
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &side, "agent-a")
+        .args(["park", &id, "next"])
+        .assert()
+        .success();
+    git(&side, &["commit", "-qam", "park"]);
+    git(&main, &["merge", "-q", "--ff-only", "side"]);
+    // Host B, with its own state store, closes that occurrence.
+    env.cmd(&main)
+        .env("XDG_STATE_HOME", env.home.path().join("host-b"))
+        .args(["done", &id])
+        .assert()
+        .success();
+    git(&main, &["commit", "-qam", "close on B"]);
+    let record = main.join(format!("tasks/{id}.md"));
+    let closed = std::fs::read_to_string(&record).unwrap();
+
+    // While the worktree exists, its occurrence may still be live there: refuse, and say
+    // how to release a park this closed record already covers.
+    let detail = error_of(&env, &main, &["done", &id])["error"]["detail"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(detail.contains(side_arg), "{detail}");
+    assert!(detail.contains("integrate"), "{detail}");
+    assert_eq!(std::fs::read_to_string(&record).unwrap(), closed);
+
+    git(&main, &["worktree", "remove", side_arg]);
+    let v = env.json(&main, &["done", &id]);
+    assert!(
+        warnings_of(&v)
+            .iter()
+            .any(|w| w.contains("without recording another occurrence")),
+        "{v}"
+    );
+    let unstamped = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|line| !line.starts_with("updated: "))
+            .map(String::from)
+            .collect()
+    };
+    assert_eq!(
+        unstamped(&std::fs::read_to_string(&record).unwrap()),
+        unstamped(&closed),
+        "only updated changes"
+    );
+    let shown = env.json(&main, &["show", &id]);
+    assert!(shown.get("park").is_none(), "{shown}");
+    assert!(shown.get("claim").is_none(), "{shown}");
+}
+
+#[test]
 fn a_refusal_names_the_newest_sibling_and_lists_the_other_newer_ones() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);
