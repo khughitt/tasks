@@ -1,13 +1,15 @@
 ---
 id: tasks-bf6b9b
 title: Design individual task migration from the project-movement brief
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-10-08T10:42:11Z
-updated: 2026-10-08T10:42:11Z
+updated: 2026-10-09T01:02:06Z
+started: 2026-10-09T01:02:06Z
 depends: []
 parent: tasks-a7460c
 tags: []
@@ -24,3 +26,8 @@ Bound: produce a design spec and then an implementation plan, each reviewed by t
 Done: reviewed design and plan state preserved versus intentionally changed identity/history, the smallest supported move, refusal/recovery behavior and acceptance cases. Include a single task with an inbound foreign dependency and attachment, a parented task, a live claim, a destination collision and interrupted retry. File implementation children only after plan review; retaining a documented add/drop workflow is a valid explicit disposition if it meets the agreed need.
 
 Ideas it wakes: on completion, add the approved finding and artifact paths to tasks-7ba557 with tasks note in the same commit and update the brief so scope can reconsider it.
+
+## Notes
+
+- 2026-10-09T01:02:06Z (main): started
+  provenance: {"harness_session":"claude-code:a4be4ef6-c289-4fd4-ba16-2df145dae2b5","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
