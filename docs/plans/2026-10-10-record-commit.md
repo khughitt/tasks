@@ -1,5 +1,7 @@
 # Record Commit Implementation Plan
 
+Status: approved (review round 2)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** In a project that sets `[git] commit = true`, every tasks write commits the files
@@ -1552,7 +1554,7 @@ grep -n -iE 'same commit|uncommitted|commit the task record|commit it before|com
   - Session protocol step 6: replace "in the same commit as the code" with "on the task's branch before it merges (under `[git] commit` the CLI commits the record itself; otherwise commit it with the code)".
   - The linked-project paragraph ("the matching commit of `<prefix>/tasks/`…"): keep the overlay rule and drop "in the same commit". Records commit in the overlay repository, after the code commit, and under `[git] commit` the CLI makes that commit.
   - **Process and workspace**: after "commit the task record before creating one with `git worktree add`", add "(automatic under `[git] commit`: `add` and `start` commit it)".
-  - Add a short subsection under **Recording work** titled `### Record commits`. It covers the `[git] commit` switch; that each write commits only the files it wrote; the three warning prefixes and what each means; that a write still exits 0 when its commit is skipped; `cleanup needs attention`; and `tasks commit [--project <p>]` as the recovery and backlog sweep. Keep it under 15 lines, in the skill's voice.
+  - Add a short subsection under **Recording work** titled `### Record commits`. It covers the `[git] commit` switch; that each write commits the files it wrote plus whatever the repository's own pre-commit hook stages, and that staging another git process makes while the commit runs can land in it (spec §3.7); the three warning prefixes and what each means; that a write still exits 0 when its commit is skipped; `cleanup needs attention`; and `tasks commit [--project <p>]` as the recovery and backlog sweep. Keep it under 15 lines, in the skill's voice.
   - Feedback, both paragraphs. "The report lands as an uncommitted `idea`" becomes "lands as an `idea` … (committed there when the owner sets `[git] commit`)". In "In a project that accepts feedback", "Uncommitted files under `tasks/` tagged `feedback` are unreviewed reports … then commit" becomes "Ideas tagged `feedback` with no triage note are unreviewed reports: read each, and redact anything that describes a project rather than the tool with `tasks edit` (history keeps the original)".
   - The `move` bullet, "The move commits neither repository: commit each root its `paths` lists", becomes "Under `[git] commit` the move commits each root; otherwise commit each root its `paths` lists".
 - [ ] **Step 2: `skills/scope/SKILL.md`** lines ~140 and ~169: "in the same commit as this result" and "in the same commit" become "before this result's branch merges".
