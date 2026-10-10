@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T15:25:13Z
+updated: 2026-10-10T15:25:43Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
@@ -65,3 +65,5 @@ whichever mechanism lands.
 - 2026-10-10T15:22:18Z (design/record-autocommit): resumed
   provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-10T15:25:12Z (design/record-autocommit): spec drafted: docs/specs/2026-10-10-record-commit-design.md — CLI commits each write by pathspec under opt-in [git] commit; skips with typed warnings when other changes are staged or an operation is in progress; feedback committed (triage marker moves to untriaged feedback ideas); tasks commit for recovery/backlog sweep
+- 2026-10-10T15:25:43Z (design/record-autocommit): parked (waiting on user, review): User reviews docs/specs/2026-10-10-record-commit-design.md in .worktrees/record-autocommit; on approval the agent writes the implementation plan there (writing-plans)
+  provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
