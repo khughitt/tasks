@@ -751,6 +751,12 @@ pub enum Command {
     },
     /// Validate every task file. Prints nothing when there is nothing to report.
     Check,
+    /// Commit every uncommitted file under tasks/ in one commit
+    Commit {
+        /// One registered project, by prefix
+        #[arg(long)]
+        project: Option<String>,
+    },
     /// Session context for agents.
     Prime {
         #[command(flatten)]

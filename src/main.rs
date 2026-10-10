@@ -27,6 +27,7 @@ mod periodic;
 mod present;
 mod provenance;
 mod query;
+mod record_commit;
 mod registry;
 mod relay;
 mod rename;

@@ -1,6 +1,7 @@
 # The shared CLI vocabulary and the inventory of every in-scope CLI's commands.
+# Vendored from https://github.com/khughitt/ops (cli.toml); never edit the copy, see tools/README.md.
 #
-# Design: docs/specs/2026-09-20-cli-conventions-design.md. This file is the authority:
+# Design: ops docs/specs/2026-09-20-cli-conventions-design.md. This file is the authority:
 # each project vendors it byte-identical as tools/cli.toml and has one conformance test
 # that builds its live parser surface and asserts set equality with its rows here. A new
 # option or command anywhere is an edit here first; then each project runs
@@ -627,6 +628,13 @@ options = [
 path = ["check"]
 verb = "check"
 summary = "Validate every task file. Prints nothing when there is nothing to report"
+
+[[cli.tasks.commands]]
+path = ["commit"]
+summary = "Commit every uncommitted file under tasks/ in one commit"
+options = [
+  { shared = "project", role = "select", value = "string", repeatable = false },
+]
 
 [[cli.tasks.commands]]
 path = ["prime"]

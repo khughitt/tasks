@@ -2,6 +2,7 @@ pub mod add;
 pub mod attach;
 pub mod check;
 pub mod claims;
+pub mod commit;
 pub mod dep;
 pub mod edit;
 pub mod feedback;
@@ -1935,6 +1936,21 @@ pub fn run(cli: Cli) -> Result<Output> {
         Command::Dep { id, on, rm } => dep::run(open_id_write_ctx(dir, &id)?, id, on, rm),
         Command::Graph { format, all } => graph::run(open_ctx(dir)?, format, all),
         Command::Check => check::run(open_ctx(dir)?),
+        Command::Commit { project } => {
+            let routing = project.clone().map_or(Routing::Local, Routing::Registered);
+            let mut ctx = match project {
+                Some(prefix) => {
+                    let registry = Registry::load()?;
+                    let project =
+                        crate::scope::open_registered(&registry, &prefix, Origin::Prefix)?;
+                    let shorthand = Shorthand::new(start_dir(dir)?);
+                    Ctx::new(project, registry, routing.clone(), shorthand)
+                }
+                None => open_ctx(dir)?,
+            };
+            lock_and_revalidate(&mut ctx, &routing)?;
+            commit::run(ctx)
+        }
         Command::Tree { id, all, scope } => {
             tree::run(open_id_read_ctx(dir, &scope, id.as_deref())?, id, all)
         }

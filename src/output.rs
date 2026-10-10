@@ -79,6 +79,13 @@ pub struct IdOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct CommitOut {
+    pub committed: usize,
+    pub paths: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
 /// `add`'s own shape: the id plus what happened to it. `add` is the one write that can
 /// decline to write -- a sourced add whose origin and title already exist reuses that
 /// record -- so the caller needs to tell a fresh id from an old one without parsing
@@ -1005,6 +1012,7 @@ pub enum Output {
     Rename(RenameOut),
     Move(MoveOut),
     Id(IdOut),
+    Commit(CommitOut),
     Add(AddOut),
     Root(RootOut),
     Where(WhereOut),
@@ -1088,6 +1096,13 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         }
         Output::Rename(o) => o.prefix.clone(),
         Output::Id(o) => o.id.clone(),
+        Output::Commit(o) => {
+            if o.committed > 0 {
+                format!("committed {} records", o.committed)
+            } else {
+                "nothing to commit".into()
+            }
+        }
         Output::Add(o) => o.id.clone(),
         Output::Root(o) => o.root.clone(),
         Output::Where(o) => match &o.project {
@@ -1946,6 +1961,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Rename(o) => o.warnings.clone(),
         Output::Move(o) => o.warnings.clone(),
         Output::Id(o) => o.warnings.clone(),
+        Output::Commit(o) => o.warnings.clone(),
         Output::Add(o) => o.warnings.clone(),
         Output::Root(o) => o.warnings.clone(),
         Output::Where(o) => o.warnings.clone(),
