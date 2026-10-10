@@ -1,6 +1,6 @@
 # Committing task records as tasks writes them
 
-Status: draft, revised after review round 2 (awaiting review)
+Status: approved (review round 3)
 Task: tasks-6939f6
 
 ## 1. Goal
@@ -28,7 +28,8 @@ Success:
 - A dirty `tasks/` is an exception with a stated cause, and `tasks commit` clears it in
   one command.
 - A person's staged or unstaged work outside the written records is never committed,
-  unstaged, or modified.
+  unstaged, or modified. The one exception is staging another git process makes while
+  the commit runs, which a successful commit carries (§3.7).
 
 Non-goals: pushing; committing anything the command did not write itself (except
 `tasks commit`, §3.5); project administration commands (`init`, `rename`, `retire`,
@@ -80,7 +81,8 @@ commit per root whose config opts in. The commit holds those paths and, besides 
 only what the repository's own pre-commit hook stages while the commit runs (for example
 ops regenerating its guide from the goal list). §3.3 makes that the only other source:
 the CLI commits only when nothing else was staged, and §3.7 keeps other tasks writers
-out while it runs. Commands
+out while it runs. The exception is staging by a separate git process during the commit,
+which §3.7 accepts. Commands
 covered: every command that writes a record, namely `add`, `edit`, `note`, `dep`, the
 status commands (`start`, `park`, `done`, `drop`, `block`, `unblock`, `shelve`,
 `unshelve`), `attach`, `detach`, `feedback` and `move`. A read command never commits.
@@ -174,7 +176,7 @@ A write routed to another project's root commits in that root under that project
 config, with the same preconditions. The writing session does not own that checkout, and
 §3.3 and §3.7 make this safe: the commit is skipped whenever anything is already staged
 there or an operation is in progress, and it carries only the written record and what that
-repository's own hook stages.
+repository's own hook stages, apart from §3.7's concurrent-staging exception.
 
 `feedback` is committed like any other write. Today the protocol uses "uncommitted" as
 the owner's unreviewed queue ("read each, redact anything that describes a project

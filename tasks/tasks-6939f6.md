@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T15:55:55Z
+updated: 2026-10-10T16:05:08Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
@@ -80,3 +80,7 @@ whichever mechanism lands.
 - 2026-10-10T15:55:53Z (design/record-autocommit): spec revised for round 2: failed commit unstages only the command's paths; other staged paths are kept and named under 'cleanup needs attention'; test for outside staging during a refusing hook
 - 2026-10-10T15:55:55Z (design/record-autocommit): parked (waiting on user, review): User reviews revised spec docs/specs/2026-10-10-record-commit-design.md (round 3) in .worktrees/record-autocommit; on approval the agent writes the implementation plan there
   provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-10T16:05:06Z (design/record-autocommit): resumed
+  provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-10T16:05:06Z (design/record-autocommit): review: spec round 3 — verdict: accept; findings: P3 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-10T16:05:06Z (design/record-autocommit): correction: spec rounds 1 and 2 reviewer was codex/gpt-6.1-sol (model supplied by the user)
