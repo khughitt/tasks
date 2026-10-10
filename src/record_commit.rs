@@ -29,6 +29,7 @@ pub fn commit_paths(dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String>
 
 fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
     Command::new("git")
+        .arg("--literal-pathspecs")
         .args(args)
         .env("LC_ALL", "C")
         .current_dir(dir)
@@ -441,6 +442,43 @@ mod tests {
             "chore(tasks): note tst-000001"
         );
         assert_eq!(git(root, &["status", "--porcelain"]).trim(), "M README");
+    }
+
+    #[test]
+    fn a_literal_wildcard_path_commits_without_its_matching_foreign_file() {
+        let dir = repo(true);
+        let root = dir.path();
+        let state = state_home();
+        let record = write(root, "tasks/a*.txt", "ours");
+        write(root, "tasks/ab.txt", "foreign");
+        assert_eq!(commit(root, &[record], state.path()), Vec::<String>::new());
+        assert_eq!(last_files(root).trim(), "tasks/a*.txt");
+        assert_eq!(staged(root), "");
+        assert_eq!(
+            git(root, &["status", "--porcelain"]).trim(),
+            "?? tasks/ab.txt"
+        );
+    }
+
+    #[test]
+    fn literal_wildcard_cleanup_retains_matching_foreign_staging() {
+        for initial_commit in [true, false] {
+            let dir = repo(initial_commit);
+            let root = dir.path();
+            let state = state_home();
+            let record = write(root, "tasks/a*.txt", "ours");
+            let warnings = commit_paths_in(root, &[record], "m", state.path(), &mut || {
+                write(root, "tasks/ab.txt", "foreign");
+                git(root, &["add", "tasks/ab.txt"]);
+            });
+            assert!(warnings[0].starts_with("commit_deferred:"), "{warnings:?}");
+            assert_eq!(staged(root).trim(), "tasks/ab.txt");
+            assert!(
+                warnings[0].contains("cleanup needs attention"),
+                "{warnings:?}"
+            );
+            assert!(root.join("tasks/a*.txt").exists());
+        }
     }
 
     #[test]
