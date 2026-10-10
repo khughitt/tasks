@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T17:51:42Z
+updated: 2026-10-10T18:05:32Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
@@ -110,3 +110,6 @@ whichever mechanism lands.
 - 2026-10-10T17:51:41Z (design/record-autocommit): deferred final-review minors filed: tasks-dd1225 (nested recovery root), tasks-d6f0ed (automatic configuration prose); all Important findings addressed in b3df8aa and scoped re-review accepted
 - 2026-10-10T17:51:41Z (design/record-autocommit): parked (waiting on user, approval): User approves local merge activating globally installed tasks/scope skills; then the agent merges design/record-autocommit, reinstalls CLI from main, executes post-merge Task 4 (tasks-aeeaeb), closes the goal, and safely removes the worktree.
   provenance: {"harness_session":"codex:01a126c1-985a-7180-9638-8c3316f76f55","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-10T18:05:31Z (design/record-autocommit): resumed
+  provenance: {"harness_session":"codex:01a126c1-985a-7180-9638-8c3316f76f55","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-10T18:05:31Z (design/record-autocommit): user approved local merge activating the installed tasks/scope skills, CLI reinstall and post-merge Task 4 rollout filing
