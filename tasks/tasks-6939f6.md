@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T16:52:13Z
+updated: 2026-10-10T17:02:50Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
@@ -100,3 +100,6 @@ whichever mechanism lands.
 - 2026-10-10T16:52:11Z (design/record-autocommit): plan approved after round 2; P3 applied (skill subsection names hook-staged files and the §3.7 outside-staging exception)
 - 2026-10-10T16:52:13Z (design/record-autocommit): parked (waiting on user, decision): Paused by the user with the plan approved. Next: an agent runs ops-166dab (cli.toml row) in ops, then executes the plan subagent-driven from Task 1 (tasks-b479b6) in .worktrees/record-autocommit
   provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-10T17:01:33Z (design/record-autocommit): resumed
+  provenance: {"harness_session":"codex:01a126c1-985a-7180-9638-8c3316f76f55","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-10T17:02:50Z (design/record-autocommit): execution: approved plan resumed subagent-driven in .worktrees/record-autocommit; just test-fast baseline passed; ops-166dab prerequisite assigned before Task 1
