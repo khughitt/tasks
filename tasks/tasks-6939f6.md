@@ -6,13 +6,14 @@ priority: 1
 size: l
 complexity: high
 process: planned
-owner: main
+owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T15:22:05Z
+updated: 2026-10-10T15:25:13Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-10-10-record-commit-design.md
 ---
 
 Agents create and modify task records and rarely commit them, so every project accumulates
@@ -61,3 +62,6 @@ whichever mechanism lands.
 
 - 2026-10-10T15:22:05Z (main): started
   provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-10T15:22:18Z (design/record-autocommit): resumed
+  provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-10T15:25:12Z (design/record-autocommit): spec drafted: docs/specs/2026-10-10-record-commit-design.md — CLI commits each write by pathspec under opt-in [git] commit; skips with typed warnings when other changes are staged or an operation is in progress; feedback committed (triage marker moves to untriaged feedback ideas); tasks commit for recovery/backlog sweep
