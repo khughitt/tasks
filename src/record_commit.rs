@@ -71,7 +71,7 @@ fn discover(dir: &Path) -> Result<Option<Repo>, String> {
         return if tail.contains("not a git repository") {
             Ok(None)
         } else {
-            Err(tail)
+            Err(cause_of("rev-parse", &output))
         };
     }
     let text = String::from_utf8_lossy(&output.stdout);
@@ -112,6 +112,7 @@ fn in_progress(git_dir: &Path) -> Option<&'static str> {
         ("MERGE_HEAD", "a merge"),
         ("CHERRY_PICK_HEAD", "a cherry-pick"),
         ("REVERT_HEAD", "a revert"),
+        ("sequencer", "a cherry-pick or revert sequence"),
         ("BISECT_LOG", "a bisect"),
         ("rebase-merge", "a rebase"),
         ("rebase-apply", "a rebase"),
@@ -129,7 +130,7 @@ fn staged(repo: &Repo) -> Result<BTreeSet<String>, String> {
     )
     .map_err(|error| error.to_string())?;
     if !output.status.success() {
-        return Err(stderr_tail(&output));
+        return Err(cause_of("diff --cached", &output));
     }
     Ok(output
         .stdout
@@ -154,7 +155,7 @@ fn unstage(repo: &Repo, ours: &[String]) -> Result<(), String> {
     args.extend(ours.iter().map(String::as_str));
     match git(&repo.toplevel, &args) {
         Ok(output) if output.status.success() => Ok(()),
-        Ok(output) => Err(stderr_tail(&output)),
+        Ok(output) => Err(cause_of(args[0], &output)),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -236,9 +237,11 @@ pub(crate) fn unavailable(dir: &Path, paths: &[PathBuf]) -> String {
     )
 }
 
-fn cause_of(output: &Output) -> String {
+fn cause_of(operation: &str, output: &Output) -> String {
     let tail = stderr_tail(output);
-    if tail.contains("index.lock") {
+    if tail.is_empty() {
+        format!("git {operation} failed ({})", output.status)
+    } else if tail.contains("index.lock") {
         format!("index locked ({tail})")
     } else {
         tail
@@ -321,7 +324,7 @@ pub(crate) fn commit_paths_in(
         args.extend(group.iter().map(|path| path.as_str()));
         let cause = match git(&repo.toplevel, &args) {
             Ok(output) if output.status.success() => continue,
-            Ok(output) => cause_of(&output),
+            Ok(output) => cause_of(args[0], &output),
             Err(error) => error.to_string(),
         };
         return vec![failed(dir, paths, &cause, cleanup(&repo, &ours))];
@@ -341,7 +344,7 @@ pub(crate) fn commit_paths_in(
     }
     let cause = match git(&repo.toplevel, &["commit", "-q", "-m", message]) {
         Ok(output) if output.status.success() => return Vec::new(),
-        Ok(output) => cause_of(&output),
+        Ok(output) => cause_of("commit", &output),
         Err(error) => error.to_string(),
     };
     vec![failed(dir, paths, &cause, cleanup(&repo, &ours))]
@@ -682,6 +685,77 @@ mod tests {
             warnings[0].starts_with("commit_deferred:") && warnings[0].contains("detached"),
             "{warnings:?}"
         );
+    }
+
+    #[test]
+    fn defers_during_a_sequencer_after_a_manual_resolution_commit() {
+        for operation in ["cherry-pick", "revert"] {
+            let dir = repo(true);
+            let root = dir.path();
+            let state = state_home();
+            git(root, &["checkout", "-q", "-b", "topic"]);
+            write(root, "README", "topic\n");
+            git(root, &["commit", "-q", "-am", "first topic change"]);
+            let first = git(root, &["rev-parse", "HEAD"]);
+            write(root, "other.txt", "second\n");
+            git(root, &["add", "other.txt"]);
+            git(root, &["commit", "-q", "-m", "second topic change"]);
+            let second = git(root, &["rev-parse", "HEAD"]);
+            git(root, &["checkout", "-q", "main"]);
+            write(root, "README", "main\n");
+            git(root, &["commit", "-q", "-am", "conflicting main change"]);
+            let conflict = super::git(root, &[operation, first.trim(), second.trim()]).unwrap();
+            assert!(!conflict.status.success());
+            write(root, "README", "resolved\n");
+            git(root, &["add", "README"]);
+            git(root, &["commit", "-q", "-m", "manual resolution"]);
+            let marker = if operation == "cherry-pick" {
+                "CHERRY_PICK_HEAD"
+            } else {
+                "REVERT_HEAD"
+            };
+            assert!(!root.join(".git").join(marker).exists());
+            let todo = root.join(".git/sequencer/todo");
+            let pending = std::fs::read(&todo).unwrap();
+            assert!(!pending.is_empty());
+            assert_eq!(git(root, &["status", "--porcelain"]), "");
+            let head = git(root, &["rev-parse", "HEAD"]);
+            let record = write(root, "tasks/tst-000001.md", "a");
+            let warnings = commit(root, &[record], state.path());
+            assert!(
+                warnings
+                    .first()
+                    .is_some_and(|warning| warning.starts_with("commit_deferred:")
+                        && warning.contains(operation)),
+                "{operation}: {warnings:?}"
+            );
+            assert_eq!(git(root, &["rev-parse", "HEAD"]), head);
+            assert_eq!(std::fs::read(&todo).unwrap(), pending);
+            assert_eq!(staged(root), "");
+            assert!(root.join("tasks/tst-000001.md").exists());
+        }
+    }
+
+    #[test]
+    fn silent_hook_failures_name_the_git_operation_and_exit_or_signal_status() {
+        for (script, status) in [
+            ("exit 1", "exit status: 1"),
+            (r#"kill -TERM "$PPID""#, "signal: 15"),
+        ] {
+            let dir = repo(true);
+            let root = dir.path();
+            let state = state_home();
+            let head = git(root, &["rev-parse", "HEAD"]);
+            hook(root, script);
+            let record = write(root, "tasks/tst-000001.md", "a");
+            let warnings = commit(root, &[record], state.path());
+            assert!(warnings[0].starts_with("commit_failed:"), "{warnings:?}");
+            assert!(warnings[0].contains("git commit"), "{warnings:?}");
+            assert!(warnings[0].contains(status), "{warnings:?}");
+            assert_eq!(git(root, &["rev-parse", "HEAD"]), head);
+            assert_eq!(staged(root), "");
+            assert!(root.join("tasks/tst-000001.md").exists());
+        }
     }
 
     #[test]

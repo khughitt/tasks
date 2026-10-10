@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T17:02:50Z
+updated: 2026-10-10T17:46:02Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
@@ -103,3 +103,6 @@ whichever mechanism lands.
 - 2026-10-10T17:01:33Z (design/record-autocommit): resumed
   provenance: {"harness_session":"codex:01a126c1-985a-7180-9638-8c3316f76f55","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-10T17:02:50Z (design/record-autocommit): execution: approved plan resumed subagent-driven in .worktrees/record-autocommit; just test-fast baseline passed; ops-166dab prerequisite assigned before Task 1
+- 2026-10-10T17:43:58Z (design/record-autocommit): review: impl round 1 — verdict: revise; findings: Important 2, Minor 2; reviewer: codex/gpt-6-astra
+- 2026-10-10T17:46:01Z (design/record-autocommit): final corrective round 1: fix paused cherry-pick/revert sequencer detection and silent Git/hook diagnostics under spec section 3.3; two Minor recovery/documentation findings remain deferred
+- 2026-10-10T17:46:01Z (design/record-autocommit): integration gate: installed tasks and scope skills resolve to main checkout, so merging activates shared agent guidance; live-global-surface approval required before merge, installation and post-merge rollout filing
