@@ -8,12 +8,13 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T16:05:08Z
+updated: 2026-10-10T16:14:49Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-10-10-record-commit-design.md
+plan: docs/plans/2026-10-10-record-commit.md
 ---
 
 Agents create and modify task records and rarely commit them, so every project accumulates
