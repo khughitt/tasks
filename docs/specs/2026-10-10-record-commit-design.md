@@ -1,6 +1,6 @@
 # Committing task records as tasks writes them
 
-Status: draft (awaiting review)
+Status: draft, revised after review round 1 (awaiting review)
 Task: tasks-6939f6
 
 ## 1. Goal
@@ -76,7 +76,11 @@ A write command collects the paths it wrote, grouped by project root:
   project root.
 
 After the command's writes succeed, and before it prints its result, the CLI makes one
-commit per root whose config opts in. The commit holds exactly those paths. Commands
+commit per root whose config opts in. The commit holds those paths and, besides them,
+only what the repository's own pre-commit hook stages while the commit runs (for example
+ops regenerating its guide from the goal list). §3.3 makes that the only other source:
+the CLI commits only when nothing else was staged, and §3.7 keeps other tasks writers
+out while it runs. Commands
 covered: every command that writes a record, namely `add`, `edit`, `note`, `dep`, the
 status commands (`start`, `park`, `done`, `drop`, `block`, `unblock`, `shelve`,
 `unshelve`), `attach`, `detach`, `feedback` and `move`. A read command never commits.
@@ -96,23 +100,33 @@ For each root, with `LC_ALL=C` like the existing git calls:
    - the root is not in a git repository, or git is missing (`commit_unavailable`);
    - a merge, rebase, cherry-pick, revert or bisect is in progress, or HEAD is detached
      (`commit_deferred`, naming the state);
-   - the index already holds staged changes to any path outside the command's own paths
-     (`commit_deferred: staged changes`, naming up to five of those paths).
+   - the index holds any staged change at all, including to the command's own paths
+     (`commit_deferred: staged changes`, naming up to five staged paths).
 2. Otherwise `git add -A -- <paths>` (which covers new, changed and deleted files), then
-   `git commit -m <message> -- <paths>`. Hooks run. The CLI never passes `--no-verify`.
-3. If `index.lock` is held, retry with backoff for up to 2 s, then warn
-   (`commit_failed: index locked`).
-4. If the commit fails (a hook refused, or any other nonzero exit), unstage the paths
-   step 2 staged (`git reset -q -- <paths>`), so the index is as it was. Then warn with
-   `commit_failed`, the hook's or git's last stderr lines, and the paths.
+   a plain `git commit -m <message>` with **no pathspec**. Hooks run against the real
+   index and may stage derived files, which the commit then carries. The CLI never passes
+   `--no-verify`.
+3. If the commit fails (a hook refused, or any other nonzero exit), restore the index to
+   HEAD for every path now staged (`git reset -q`). That is exact, because step 1
+   guaranteed nothing was staged before step 2. Then warn with `commit_failed`, the hook's
+   or git's last stderr lines, and the paths. A file a hook regenerated in the working
+   tree stays modified there and is reported in the warning.
+4. A failure to take `index.lock` is a `commit_failed: index locked` warning, handled
+   as step 3 handles any failure. Contention among tasks writers is prevented by §3.7, so
+   this lock is not the serialization mechanism. It covers a person or another tool using
+   git at the same instant.
 
-Why the staged-changes precondition, rather than `git commit --only` with a temporary
-index: hooks that regenerate and `git add` a derived file (ops's guide regeneration)
-misbehave under a pathspec commit. The derived file reaches the commit while the
-pre-regeneration copy stays staged in the real index (ops-89d93b). With an index that is
-otherwise clean, a plain commit lets such a hook stage what it needs, and the result is
-correct. A person's staged work is never swept in, because the CLI declines to commit
-next to it.
+Why a plain commit over a clean index, rather than `git commit -- <paths>`: a pathspec
+commit means `--only`, which builds a temporary index. A hook that regenerates and
+`git add`s a derived file (ops's guide regeneration) then puts the new copy in the commit
+while the pre-regeneration copy stays staged in the real index (ops-89d93b, reproduced
+with a disposable repository in review round 1). A plain commit over an index that holds
+only the command's paths lets such a hook stage what it needs and leaves the index clean.
+
+Why defer on *any* staged change, including to the command's own paths: `git add`
+replaces a person's staged version of a record, and after a refused commit no reset can
+bring that version back. Deferring keeps the person's staging intact without snapshotting
+the index.
 
 Warnings use the command's existing JSON `warnings` array and its pretty stderr form.
 Each one names the root, the paths, and the remedy: `tasks commit` after the cause is
@@ -154,8 +168,9 @@ ops rule for new CLI vocabulary.
 
 A write routed to another project's root commits in that root under that project's
 config, with the same preconditions. The writing session does not own that checkout, and
-§3.3 is what makes this safe: only the written record enters the commit, and the commit
-is skipped whenever anything else is staged there or an operation is in progress.
+§3.3 and §3.7 make this safe: the commit is skipped whenever anything is already staged
+there or an operation is in progress, and it carries only the written record and what that
+repository's own hook stages.
 
 `feedback` is committed like any other write. Today the protocol uses "uncommitted" as
 the owner's unreviewed queue ("read each, redact anything that describes a project
@@ -169,26 +184,58 @@ the backlog in place.
 
 ### 3.7 Concurrency and sync
 
-Two sessions writing in one repository serialize on git's `index.lock` (§3.3 step 3). A
-synced `.git` across hosts carries the same risks it does for manual commits today. This
-design neither adds to them nor addresses them.
+git's `index.lock` is held only for each git command, not between `git add` and
+`git commit`. Two writers could both pass the clean-index check, stage separate files, and
+have one plain commit carry both. So the whole procedure of §3.3 (the precondition check,
+add, commit, and any reset) runs under a **repository commit lock**:
+
+- It is a lock file in the tasks state directory, keyed by the canonical git common
+  directory (`git rev-parse --git-common-dir`). Every project, worktree and linked
+  overlay sharing one repository, and so one index per worktree, serializes on it
+  whatever its prefix. The project mutation lock is keyed by prefix and does not cover
+  two projects in one repository.
+- The CLI takes it after the project's mutation lock (and the holds lock, for a command
+  that takes one), while those are still held, so a record cannot change between its write and its commit. It is the
+  innermost lock: the CLI never acquires another lock while holding it.
+- A command that commits in two roots (`move`, a routed write) takes and releases it per
+  root, in turn. Two roots in one repository take it once and make one commit.
+
+This serializes tasks writers only. A person running `git add` in that checkout at the
+same moment can still land in the commit, which is the risk a manual commit runs today.
+The CLI narrows that window by re-reading the staged set right before `git commit`. If
+anything outside its paths has appeared, it resets its own paths and defers, as in step 1.
+
+A synced `.git` across hosts carries the same risks it does for manual commits today.
+This design neither adds to them nor addresses them.
 
 ## 4. Instructions and rollout
 
-Changes that land with the code:
+The commit behaviour is opt-in, so no instruction conflicts with the CLI until a project
+sets `[git] commit`. Every instruction that contradicts §3.4 or §3.6 changes before any
+project turns it on.
 
-- tasks skill: session protocol step 6 ("on the task's branch before it merges"); the
-  "commit the task record before creating one with `git worktree add`" step, now automatic
-  under `[git] commit`; the feedback sections (§3.6); and a line on the commit warnings
-  and `tasks commit`.
-- README: the `[git]` table, the warnings, and `tasks commit`.
+Land with the code, in this repository:
 
-Filed as pieces in other projects after this lands:
+- `skills/tasks/SKILL.md`: session protocol step 6 ("on the task's branch before it
+  merges"), with the linked-overlay wording that follows from it; the "commit the task
+  record before `git worktree add`" step, automatic under `[git] commit`; the feedback
+  sections (an untriaged report is a `feedback` idea without a triage note, and redaction
+  is an `edit`); and the commit warnings and `tasks commit`.
+- `skills/scope/SKILL.md`: the "in the same commit as this result" rule for notes on woken
+  ideas becomes "before the result's branch merges".
+- `AGENTS.md`: the same-commit rule, and "review uncommitted feedback files before
+  committing them".
+- `README.md`: the same-commit lines in the protocol summary, the feedback-review
+  paragraph, the `[git]` table, the warnings, and `tasks commit`.
 
-- lore: the global instructions' feedback paragraph ("lands as an uncommitted idea").
-- ops: turn on `[git] commit` in the personal projects, run `tasks commit` once in each to
-  clear its backlog, and confirm that ops's pre-commit guide regeneration commits
-  correctly under §3.3. The interaction is ops-89d93b.
+Filed in other projects when this lands, in this order:
+
+1. lore: `docs/instruction-provenance.md` rows T12 (done in the same commit) and T21
+   (commit the record before `git worktree add`), plus any assembled instruction that
+   repeats the same-commit rule or the uncommitted-feedback review.
+2. ops, depending on the lore piece: turn on `[git] commit` in the personal projects, run
+   `tasks commit` once in each to clear its backlog, and confirm that ops's pre-commit
+   guide regeneration commits cleanly under §3.3 (ops-89d93b).
 
 ## 5. Testing
 
@@ -202,13 +249,20 @@ Integration tests against temporary git repositories (the pattern in
 - `move` commits in both roots;
 - another file staged: the commit is skipped with `commit_deferred`, and the index and
   the staged file are unchanged;
+- a staged version of the command's own record that differs from the working tree:
+  skipped with `commit_deferred`, and the staged blob is unchanged;
 - unstaged edits to other files: the commit happens, and those edits stay unstaged;
 - merge in progress, and detached HEAD: skipped with `commit_deferred`;
 - a refusing pre-commit hook: `commit_failed` with the hook's output, the record written,
-  and the index restored;
-- a hook that stages a derived file: the commit includes it, and nothing stays staged
-  afterwards;
-- a held `index.lock`: retried, then `commit_failed`;
+  and `git diff --cached` empty afterwards;
+- a hook that regenerates and stages a derived file: the commit includes it, and
+  `git diff --cached` is empty afterwards (the ops-89d93b shape);
+- two writers in one repository, run concurrently against two records (and two projects
+  sharing one repository): two commits, each holding only its own record;
+- a file staged by an outside `git add` between the precondition check and the commit
+  (injected through a hook or test seam): deferred, with that file still staged and the
+  command's paths unstaged;
+- a held `index.lock`: `commit_failed`, and the index unchanged;
 - a routed write into a second registered project commits there;
 - `feedback` commits in the owner's root;
 - a linked project commits in the overlay repository;
