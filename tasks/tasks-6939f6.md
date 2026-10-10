@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T15:43:47Z
+updated: 2026-10-10T15:43:56Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
@@ -71,3 +71,5 @@ whichever mechanism lands.
   provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-10T15:42:10Z (design/record-autocommit): review: spec round 1 — verdict: revise; findings: must-fix 3, should-fix 1; reviewer: unverified (pasted review, harness and model not supplied)
 - 2026-10-10T15:43:47Z (design/record-autocommit): spec revised for round 1: plain commit (no pathspec) over a clean index, hook-staged files allowed in the commit; defer on any staged change; repository commit lock keyed by git common dir held through check/add/commit/reset; rollout lists tasks AGENTS.md, README, scope skill, and lore instruction-provenance T12/T21 before any project enables it
+- 2026-10-10T15:43:56Z (design/record-autocommit): parked (waiting on user, review): User reviews revised spec docs/specs/2026-10-10-record-commit-design.md (round 2) in .worktrees/record-autocommit; on approval the agent writes the implementation plan there
+  provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
