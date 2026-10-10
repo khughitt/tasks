@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T16:52:11Z
+updated: 2026-10-10T16:52:13Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
@@ -98,3 +98,5 @@ whichever mechanism lands.
   provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-10T16:52:01Z (design/record-autocommit): review: plan round 2 — verdict: accept; findings: P3 1; reviewer: codex
 - 2026-10-10T16:52:11Z (design/record-autocommit): plan approved after round 2; P3 applied (skill subsection names hook-staged files and the §3.7 outside-staging exception)
+- 2026-10-10T16:52:13Z (design/record-autocommit): parked (waiting on user, decision): Paused by the user with the plan approved. Next: an agent runs ops-166dab (cli.toml row) in ops, then executes the plan subagent-driven from Task 1 (tasks-b479b6) in .worktrees/record-autocommit
+  provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
