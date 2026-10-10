@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/record-autocommit
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T16:15:23Z
+updated: 2026-10-10T16:35:16Z
 started: 2026-10-10T15:22:05Z
 depends: []
 tags: [cli]
@@ -88,3 +88,7 @@ whichever mechanism lands.
 - 2026-10-10T16:15:22Z (design/record-autocommit): plan written: docs/plans/2026-10-10-record-commit.md, 7 steps (tasks-52539c, -645ead, -b479b6, -fef9bc, -6b4f6c, -de5277, -aeeaeb); spec P3 qualifiers applied in bdbee6c
 - 2026-10-10T16:15:22Z (design/record-autocommit): parked (waiting on user, review): User reviews docs/plans/2026-10-10-record-commit.md in .worktrees/record-autocommit and picks subagent-driven or native execution; then the agent runs Task 1 (tasks-52539c)
   provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-10T16:30:06Z (design/record-autocommit): resumed
+  provenance: {"harness_session":"claude-code:3f1edfe9-f250-48e8-be83-b3bc38bb116f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-10T16:30:06Z (design/record-autocommit): review: plan round 1 — verdict: revise; findings: P2 5; reviewer: codex
+- 2026-10-10T16:35:16Z (design/record-autocommit): plan revised for round 1: 4 tasks (engine + tasks commit; write-command wiring incl. config/journal; docs; rollout) so every commit has callers under clippy -D warnings; cleanup failures reported; one commit per working tree; feedback/start warnings computed after the commit; cli.toml row split to ops-166dab with the ops workspace protocol
