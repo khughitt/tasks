@@ -44,6 +44,7 @@ mod surface;
 mod table;
 mod time;
 mod tombstone;
+mod written;
 
 use clap::{CommandFactory, Parser};
 use output::Format;

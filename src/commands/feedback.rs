@@ -216,11 +216,20 @@ pub fn run(
         ),
     };
     let path = ctx.project.task_path(&task.id);
-    ctx.warnings.push(format!(
-        "filed as uncommitted {} in {}; a maintainer there reviews and commits it",
-        path.display(),
-        ctx.project.root.display()
-    ));
+    let committed = super::finish(&mut ctx);
+    ctx.warnings.push(if committed.contains(&path) {
+        format!(
+            "filed as {} in {} and committed there; a maintainer there triages it",
+            path.display(),
+            ctx.project.root.display()
+        )
+    } else {
+        format!(
+            "filed as uncommitted {} in {}; a maintainer there reviews and commits it",
+            path.display(),
+            ctx.project.root.display()
+        )
+    });
     Ok(Output::Feedback(FeedbackOut {
         id: task.id.to_string(),
         action: action.into(),

@@ -67,6 +67,9 @@ pub const DEFAULT_PLAN_DIRS: &[&str] = &["docs/plans", "docs/superpowers/plans"]
 
 #[derive(Debug, Clone)]
 pub struct Project {
+    /// The `[git] commit` switch: commit each record write as it lands. See
+    /// docs/specs/2026-10-10-record-commit-design.md §3.1.
+    pub commit_records: bool,
     pub root: PathBuf,
     pub prefix: String,
     pub color: Option<crate::palette::Rgb>,
@@ -134,6 +137,8 @@ struct Config {
     retired: Option<RetiredConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkout: Option<CheckoutConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    git: Option<GitConfig>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -153,6 +158,13 @@ pub struct Retirement {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub successor: Option<String>,
     pub reason: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GitConfig {
+    #[serde(default)]
+    commit: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -374,6 +386,7 @@ impl Project {
                 attachments: None,
                 needs: None,
                 retired: None,
+                git: None,
                 checkout: checkout
                     .map(|checkout| {
                         let relative = crate::link::relative_path(&root.canonicalize()?, checkout);
@@ -416,6 +429,7 @@ impl Project {
             root,
             checkout,
             worktree: None,
+            commit_records: config.git.is_some_and(|git| git.commit),
             prefix: config.prefix,
             color: config
                 .color
@@ -594,7 +608,10 @@ impl Project {
         crate::hierarchy::validate_lanes(self, registry, task)?;
         crate::hierarchy::validate_periodic(self, registry, task)?;
         crate::hierarchy::validate_defer(self, registry, task)?;
-        atomic_write(&self.task_path(&task.id), serialize_task(task).as_bytes())
+        let path = self.task_path(&task.id);
+        atomic_write(&path, serialize_task(task).as_bytes())?;
+        crate::written::record(&self.root, &path);
+        Ok(())
     }
 
     fn git(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
@@ -944,6 +961,9 @@ impl Project {
         }
         drop(file);
         let linked = std::fs::hard_link(temp, self.task_path(&task.id));
+        if linked.is_ok() {
+            crate::written::record(&self.root, &self.task_path(&task.id));
+        }
         let _ = std::fs::remove_file(temp);
         linked
     }
@@ -1056,6 +1076,24 @@ mod tests {
             body: String::new(),
             notes: vec![],
         }
+    }
+
+    #[test]
+    fn git_commit_is_off_by_default_and_its_table_is_validated() {
+        let (_dir, project) = project_with_config("prefix = \"tst\"\n");
+        assert!(!project.unwrap().commit_records);
+
+        let (_dir, project) = project_with_config("prefix = \"tst\"\n\n[git]\ncommit = true\n");
+        assert!(project.unwrap().commit_records);
+
+        let (_dir, project) = project_with_config("prefix = \"tst\"\n\n[git]\ncommit = false\n");
+        assert!(!project.unwrap().commit_records);
+
+        let (_dir, project) = project_with_config("prefix = \"tst\"\n\n[git]\npush = true\n");
+        assert!(matches!(project, Err(Error::Config(_))), "{project:?}");
+
+        let (_dir, project) = project_with_config("prefix = \"tst\"\n\n[git]\ncommit = \"yes\"\n");
+        assert!(matches!(project, Err(Error::Config(_))), "{project:?}");
     }
 
     #[test]

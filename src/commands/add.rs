@@ -93,6 +93,7 @@ pub fn run(mut ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Re
                     rest.join(", ")
                 ));
             }
+            super::finish(&mut ctx);
             return Ok(Output::Add(AddOut {
                 id: task.id.to_string(),
                 action: "reused".into(),
@@ -104,6 +105,7 @@ pub fn run(mut ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Re
     let mut task = blank(&ctx.project, title, status, agent)?;
     apply_fields(&mut ctx, &mut task, &fields)?;
     create(&ctx.project, &ctx.registry, &mut task)?;
+    super::finish(&mut ctx);
     Ok(Output::Add(AddOut {
         id: task.id.to_string(),
         action: "created".into(),

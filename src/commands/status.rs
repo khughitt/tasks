@@ -110,6 +110,7 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
     if let Some(notes) = holder_notes {
         super::note_need_holders(&mut ctx, notes);
     }
+    super::finish(&mut ctx);
     warn_if_uncommitted_with_worktrees(&mut ctx, &task);
     Ok(id_out(ctx, &task))
 }

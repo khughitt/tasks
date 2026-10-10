@@ -1224,7 +1224,15 @@ pub(crate) fn follow_holder(
     }
 }
 
-pub fn id_out(ctx: Ctx, task: &Task) -> Output {
+/// Commits what this write command wrote, while its locks are still held (record-commit
+/// spec §3.2, §3.7), and returns the absolute paths committed. Idempotent: the journal is
+/// drained, so a second call commits nothing.
+pub fn finish(ctx: &mut Ctx) -> std::collections::BTreeSet<std::path::PathBuf> {
+    crate::record_commit::commit_written(&mut ctx.warnings)
+}
+
+pub fn id_out(mut ctx: Ctx, task: &Task) -> Output {
+    finish(&mut ctx);
     Output::Id(crate::output::IdOut {
         id: task.id.to_string(),
         warnings: ctx.warnings,
@@ -1755,7 +1763,7 @@ fn raw_owner_name(project: &Project) -> Result<String> {
     }
 }
 
-pub fn run(cli: Cli) -> Result<Output> {
+fn dispatch(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
         Command::Init {
@@ -1983,4 +1991,21 @@ pub fn run(cli: Cli) -> Result<Output> {
             feedback::run(ctx, reporter, project, summary, category, body, recur, new)
         }
     }
+}
+
+pub fn run(cli: Cli) -> Result<Output> {
+    crate::written::begin(cli.command.commit_verb());
+    let result = dispatch(cli);
+    // A command that failed after writing leaves its files uncommitted; `prime` lists
+    // them. A successful one must have reached `finish`: anything left is a write path
+    // that skipped it, which the debug build refuses so the test suite catches it.
+    let left = crate::written::take();
+    if result.is_ok() && left.verb.is_some() {
+        debug_assert!(
+            left.roots.is_empty(),
+            "written but never committed: {:?}",
+            left.roots
+        );
+    }
+    result
 }

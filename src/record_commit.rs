@@ -3,7 +3,7 @@
 //! tasks writer in the repository shares, unstaging only its own paths when it fails and
 //! reporting whatever it could not put back.
 use crate::claims::MutationLock;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -347,8 +347,172 @@ pub(crate) fn commit_paths_in(
     vec![failed(dir, paths, &cause, cleanup(&repo, &ours))]
 }
 
+/// The top level of the working tree `dir` lies in, canonical; `None` outside git or
+/// without a git executable. Record commits group roots by it (spec §3.7).
+pub fn working_tree(dir: &Path) -> Result<Option<PathBuf>, String> {
+    Ok(discover(dir)?.map(|repo| repo.toplevel))
+}
+
+const SUBJECT_MAX: usize = 72;
+
+pub fn message(verb: &str, ids: &[String], title: Option<&str>) -> String {
+    let subject = format!("chore(tasks): {verb} {}", ids.join(" "));
+    let Some(title) = title else {
+        return subject;
+    };
+    let room = SUBJECT_MAX.saturating_sub(subject.chars().count() + 1);
+    if room < 2 {
+        return subject;
+    }
+    let title = if title.chars().count() > room {
+        format!("{}…", title.chars().take(room - 1).collect::<String>())
+    } else {
+        title.to_string()
+    };
+    format!("{subject} {title}")
+}
+
+/// The task ids a root's written paths belong to: `tasks/<id>.md` and
+/// `tasks/files/<id>/…`, sorted and deduplicated. Paths are relative to the project root.
+fn ids_of(paths: &BTreeSet<PathBuf>) -> Vec<String> {
+    let mut ids = BTreeSet::new();
+    for path in paths {
+        let parts: Vec<String> = path
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        match parts.as_slice() {
+            [tasks, file] if tasks == "tasks" => {
+                if let Some(id) = file.strip_suffix(".md") {
+                    ids.insert(id.to_string());
+                }
+            }
+            [tasks, files, id, ..] if tasks == "tasks" && files == "files" => {
+                ids.insert(id.clone());
+            }
+            _ => {}
+        }
+    }
+    ids.into_iter().collect()
+}
+
+/// One working tree's share of a command's writes.
+#[derive(Default)]
+struct Tree {
+    absolute: BTreeSet<PathBuf>,
+    ids: BTreeSet<String>,
+    projects: Vec<crate::repo::Project>,
+}
+
+/// Drains the journal and commits it: the opted-in roots grouped by git working tree, one
+/// commit per working tree, so a move between two projects in one repository is one
+/// commit (spec §3.2, §3.7). Called by a write command's finishing point while its locks
+/// are still held. Returns the absolute paths it committed.
+pub fn commit_written(warnings: &mut Vec<String>) -> BTreeSet<PathBuf> {
+    let written = crate::written::take();
+    let mut committed = BTreeSet::new();
+    let Some(verb) = written.verb else {
+        return committed;
+    };
+    let mut trees: BTreeMap<PathBuf, Tree> = BTreeMap::new();
+    for (root, paths) in written.roots {
+        let project = match crate::repo::Project::open(&root) {
+            Ok(project) => project,
+            Err(error) => {
+                warnings.push(format!(
+                    "commit_failed: {}: cannot read its config ({error})",
+                    root.display()
+                ));
+                continue;
+            }
+        };
+        if !project.commit_records {
+            continue;
+        }
+        match working_tree(&root) {
+            Ok(Some(top)) => {
+                let tree = trees.entry(top).or_default();
+                tree.ids.extend(ids_of(&paths));
+                tree.absolute
+                    .extend(paths.iter().map(|path| root.join(path)));
+                tree.projects.push(project);
+            }
+            Ok(None) => {
+                let paths: Vec<PathBuf> = paths.into_iter().collect();
+                warnings.push(unavailable(&root, &paths));
+            }
+            Err(error) => warnings.push(format!("commit_failed: {}: {error}", root.display())),
+        }
+    }
+    for (top, tree) in trees {
+        let ids: Vec<String> = tree.ids.into_iter().collect();
+        let title = match verb {
+            "add" | "feedback" => ids
+                .first()
+                .and_then(|id| crate::model::TaskId::parse(id).ok())
+                .and_then(|id| {
+                    let project = tree
+                        .projects
+                        .iter()
+                        .find(|project| project.prefix == id.prefix)?;
+                    project.read_task(&id).ok()
+                })
+                .map(|task| task.title),
+            _ => None,
+        };
+        let relative: Vec<PathBuf> = tree
+            .absolute
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&top)
+                    .expect("a root lies under its working tree")
+                    .to_path_buf()
+            })
+            .collect();
+        let refused = commit_paths(&top, &relative, &message(verb, &ids, title.as_deref()));
+        if refused.is_empty() {
+            committed.extend(tree.absolute);
+        } else {
+            warnings.extend(refused);
+        }
+    }
+    committed
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_message_names_verb_and_ids_and_truncates_a_title_to_72() {
+        assert_eq!(
+            message("note", &["tst-000001".into()], None),
+            "chore(tasks): note tst-000001"
+        );
+        let long = "x".repeat(100);
+        let subject = message("add", &["tst-000001".into()], Some(&long));
+        assert_eq!(subject.chars().count(), 72);
+        assert!(subject.starts_with("chore(tasks): add tst-000001 xxx") && subject.ends_with('…'));
+        assert_eq!(
+            message("add", &["tst-000001".into()], Some("Short")),
+            "chore(tasks): add tst-000001 Short"
+        );
+    }
+
+    #[test]
+    fn ids_of_reads_records_and_attachment_dirs() {
+        let paths: BTreeSet<PathBuf> = [
+            "tasks/tst-000002.md",
+            "tasks/files/tst-000001/a b.png",
+            "tasks/tst-000001.md",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+        assert_eq!(
+            ids_of(&paths),
+            vec!["tst-000001".to_string(), "tst-000002".to_string()]
+        );
+    }
+
     use super::*;
     use std::process::Command;
 

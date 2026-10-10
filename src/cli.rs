@@ -887,3 +887,30 @@ pub enum GroupAction {
         name: String,
     },
 }
+
+impl Command {
+    /// The verb a record commit names for this command, or `None` for a command that never
+    /// writes a record (record-commit spec §3.2). `init`, `rename`, `retire`, `unretire` and
+    /// `unregister` keep their own procedures and commit nothing.
+    pub fn commit_verb(&self) -> Option<&'static str> {
+        Some(match self {
+            Command::Add { .. } => "add",
+            Command::Edit { .. } => "edit",
+            Command::Note { .. } => "note",
+            Command::Dep { .. } => "dep",
+            Command::Start { .. } => "start",
+            Command::Park { .. } => "park",
+            Command::Done { .. } => "done",
+            Command::Drop { .. } => "drop",
+            Command::Block { .. } => "block",
+            Command::Unblock { .. } => "unblock",
+            Command::Shelve { .. } => "shelve",
+            Command::Unshelve { .. } => "unshelve",
+            Command::Attach { .. } => "attach",
+            Command::Detach { .. } => "detach",
+            Command::Feedback { .. } => "feedback",
+            Command::Move { .. } => "move",
+            _ => return None,
+        })
+    }
+}

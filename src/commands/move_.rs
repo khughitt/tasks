@@ -89,7 +89,9 @@ pub fn run(dir: Option<&Path>, id: &str, to: &str, explain: bool) -> Result<Outp
         let _registry = Registry::lock()?;
         let mut refreshed = open(dir, id, to)?;
         if identity(&refreshed)? == identity(&requested)? {
-            return decide(&mut refreshed, false).map(Output::Move);
+            let mut out = decide(&mut refreshed, false)?;
+            crate::record_commit::commit_written(&mut out.warnings);
+            return Ok(Output::Move(out));
         }
         requested = refreshed;
     }

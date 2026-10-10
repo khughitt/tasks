@@ -214,6 +214,7 @@ mod tests {
             retired: None,
             checkout: None,
             worktree: None,
+            commit_records: false,
         };
         let target = task("000002");
         for status in Status::ALL {
@@ -241,6 +242,7 @@ mod tests {
             retired: None,
             checkout: None,
             worktree: None,
+            commit_records: false,
         };
         let mut halt = task("000001");
         halt.priority = 0;
