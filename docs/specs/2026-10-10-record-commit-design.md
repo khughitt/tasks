@@ -1,6 +1,6 @@
 # Committing task records as tasks writes them
 
-Status: draft, revised after review round 1 (awaiting review)
+Status: draft, revised after review round 2 (awaiting review)
 Task: tasks-6939f6
 
 ## 1. Goal
@@ -106,11 +106,15 @@ For each root, with `LC_ALL=C` like the existing git calls:
    a plain `git commit -m <message>` with **no pathspec**. Hooks run against the real
    index and may stage derived files, which the commit then carries. The CLI never passes
    `--no-verify`.
-3. If the commit fails (a hook refused, or any other nonzero exit), restore the index to
-   HEAD for every path now staged (`git reset -q`). That is exact, because step 1
-   guaranteed nothing was staged before step 2. Then warn with `commit_failed`, the hook's
-   or git's last stderr lines, and the paths. A file a hook regenerated in the working
-   tree stays modified there and is reported in the warning.
+3. If the commit fails (a hook refused, or any other nonzero exit), unstage only the
+   command's own paths (`git reset -q -- <paths>`). That restores them exactly, because
+   step 1 guaranteed none of them was staged before step 2. Every other path still staged
+   afterwards is left alone, because the CLI cannot tell a file the hook staged from one a
+   person staged while the hook ran. The warning is `commit_failed`, carrying the hook's or
+   git's last stderr lines and the command's paths. When other paths remain staged, it
+   also says `cleanup needs attention` and names them (up to five). A file a hook
+   regenerated in the working tree stays modified there, as it does after a refused
+   manual commit.
 4. A failure to take `index.lock` is a `commit_failed: index locked` warning, handled
    as step 3 handles any failure. Contention among tasks writers is prevented by §3.7, so
    this lock is not the serialization mechanism. It covers a person or another tool using
@@ -204,6 +208,9 @@ This serializes tasks writers only. A person running `git add` in that checkout 
 same moment can still land in the commit, which is the risk a manual commit runs today.
 The CLI narrows that window by re-reading the staged set right before `git commit`. If
 anything outside its paths has appeared, it resets its own paths and defers, as in step 1.
+Staging that arrives while the hook runs cannot be caught that way. A successful commit
+carries it, and a failed one leaves it staged (§3.3 step 3), so the CLI never unstages a
+path it did not stage.
 
 A synced `.git` across hosts carries the same risks it does for manual commits today.
 This design neither adds to them nor addresses them.
@@ -255,6 +262,9 @@ Integration tests against temporary git repositories (the pattern in
 - merge in progress, and detached HEAD: skipped with `commit_deferred`;
 - a refusing pre-commit hook: `commit_failed` with the hook's output, the record written,
   and `git diff --cached` empty afterwards;
+- a refusing hook during which a separate git process stages an unrelated file:
+  `commit_failed` naming that file under `cleanup needs attention`, the file still staged
+  with its staged content, and the command's paths unstaged;
 - a hook that regenerates and stages a derived file: the commit includes it, and
   `git diff --cached` is empty afterwards (the ops-89d93b shape);
 - two writers in one repository, run concurrently against two records (and two projects
