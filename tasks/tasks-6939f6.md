@@ -1,15 +1,16 @@
 ---
 id: tasks-6939f6
 title: "Commit task records as tasks writes them, so sessions stop leaving tasks/ dirty"
-status: doing
+status: done
 priority: 1
 size: l
 complexity: high
 process: planned
-owner: design/record-autocommit
+owner: main
 created: 2026-10-10T15:21:59Z
-updated: 2026-10-10T18:05:32Z
+updated: 2026-10-10T18:11:47Z
 started: 2026-10-10T15:22:05Z
+completed: 2026-10-10T18:11:45Z
 depends: []
 tags: [cli]
 agent: claude-code/claude-opus-5-5
@@ -113,3 +114,11 @@ whichever mechanism lands.
 - 2026-10-10T18:05:31Z (design/record-autocommit): resumed
   provenance: {"harness_session":"codex:01a126c1-985a-7180-9638-8c3316f76f55","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-10T18:05:31Z (design/record-autocommit): user approved local merge activating the installed tasks/scope skills, CLI reinstall and post-merge Task 4 rollout filing
+- 2026-10-10T18:06:40Z (main): resumed
+  provenance: {"harness_session":"codex:01a126c1-985a-7180-9638-8c3316f76f55","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-10T18:11:45Z (main): rollout filed: lore-5d560b, ops-0ccfea
+- 2026-10-10T18:11:45Z (main): integrated into main; CLI reinstalled and scratch smoke passed automatic add/note, preservation of staged work, and tasks commit recovery; Task 4 reviewed and complete; Minor follow-ups tasks-dd1225 and tasks-d6f0ed remain
+- 2026-10-10T18:11:45Z (main): done
+  provenance: {"harness_session":"codex:01a126c1-985a-7180-9638-8c3316f76f55","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-10T18:11:45Z (main): Delivered opt-in record commits and tasks commit, integrated reviewed code/docs into main, reinstalled CLI, and filed lore-5d560b plus dependent ops-0ccfea rollout. 1333 fast tests passed, final main checks and installed-binary smoke passed; Important review findings fixed, two Minor follow-ups filed.
+  provenance: {"harness_session":"codex:01a126c1-985a-7180-9638-8c3316f76f55","harness_session_source":"CODEX_THREAD_ID"}
