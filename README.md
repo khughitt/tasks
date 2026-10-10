@@ -51,7 +51,7 @@ Each step is idempotent.
 
        Work is tracked with `tasks` (see ~/.claude/skills/tasks/SKILL.md). Start every
        session with `tasks prime`, `tasks start <id>` before changing code, `tasks done <id>`
-       in the same commit as the code, and `tasks check` before every commit.
+       on the task's branch before it merges, and `tasks check` before every commit.
 
        Adopt the process and workspace policy in the tasks skill: the task's process
        field, not generic Superpowers triggers, decides whether brainstorming runs.
@@ -71,7 +71,7 @@ Each step is idempotent.
        tasks note <id> "<one line>"     # when scope or understanding changes
        tasks shelve <id> "<wake condition>" # keep open work out of active views
        tasks unshelve <id>              # bring it back as an idea
-       tasks done <id> "<what landed>"  # in the same commit as the code
+       tasks done <id> "<what landed>"  # on the task's branch before it merges
        tasks check                      # before every commit
        tasks feedback --project tasks "<about the tool>" --category friction   # file friction with this tool
 
@@ -392,6 +392,7 @@ from a clone):
     tasks done sci-91be03 "rows emitted"
     tasks done sci-4f2a9c "landed in 1a2b3c"  # open-work rule: closes once its child is closed
     tasks check                      # validate files, links, plan steps, dependencies; silent when clean
+    tasks commit [--project <p>]     # commit every uncommitted file under tasks/, ignoring [git] commit
 
 Commands targeting an existing id, including `show`, `tree <id>`, `note`, and `start`,
 work from outside every project: the prefix selects the registered root. Inside a
@@ -436,7 +437,8 @@ links. If the plan is absent from both the record's checkout and its main checko
 `step_found: false` when a step is linked. Available plans still have their steps
 checked; missing plans for open work and other read errors still fail.
 
-The move output (`MoveOut`) names the paths to commit in each root; it commits neither:
+The move output (`MoveOut`) names the paths written in each root. Under `[git] commit`
+it commits each opted-in root; otherwise commit each root its `paths` lists:
 
 ```json
 {"id": "wali-b0882b", "from": "dots-5760ef", "recovery": "fresh",
@@ -762,9 +764,10 @@ accept. The entry lands as an `idea` in the owner's registered checkout, tagged 
 the category, and `from:<your prefix>`, or `from:unregistered` when filed outside every
 project. A repeat of the same one-liner in the same owner
 appends a note to the open entry instead of creating a duplicate; `--recur <id>` and
-`--new` settle an `ambiguous` result. The command never commits: a person in the owner's
-repository reviews each uncommitted file before it is committed, and this repository is
-public.
+`--new` settle an `ambiguous` result. The record is committed there when the owner sets
+`[git] commit`. In the owner's repository, ideas tagged `feedback` without a triage note are unreviewed reports: read
+each and redact project content with `tasks edit` (history keeps the original). This
+repository is public.
 
 ## Adopting in an existing project
 
@@ -802,9 +805,24 @@ public.
    `tasks check` to automation once the binary has a pinned install source; never skip it
    conditionally when unavailable.
 
+### Record commits
+
+Opt in per project in `tasks/.config.toml`:
+
+    [git]
+    commit = true
+
+- Absent or false keeps manual commits; any other key in `[git]` is a config error.
+- Each write commits its records, attachment changes and configuration, once per git working tree, plus anything the repository's pre-commit hook stages; staging by another git process while the commit runs can land in it.
+- Subjects are `chore(tasks): <verb> <id>[ <id>…]`; `add` and `feedback` append the title, with the subject capped at 72 characters, with no trailer.
+- `commit_unavailable:` means git is missing or the root is outside git; `commit_deferred:` means staged changes, detached HEAD or an in-progress git operation; `commit_failed:` means a git operation or hook failed.
+- A successful write still exits 0 when its commit is skipped or fails; `cleanup needs attention:` means cleanup failed or the index could not be checked, so inspect the named paths and index.
+- Clear the warning's cause, then run `tasks commit [--project <p>]` to recover or sweep every uncommitted file under `tasks/` into one commit; it ignores the switch and exits 1 when it cannot commit.
+- Record commits preserve intermediate task history while code is in progress; code and record commits land on the task's branch before it merges.
+
 ## Layout
 
-    tasks/.config.toml               prefix = "sci"; optional color / spec_dirs / plan_dirs / [tags]
+    tasks/.config.toml               prefix = "sci"; optional color / spec_dirs / plan_dirs / [tags] / [git]
     tasks/sci-4f2a9c.md              one task
     ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live; [groups] name -> prefixes
 

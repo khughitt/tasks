@@ -137,7 +137,7 @@ Question: Does the existing rename API require loading the profile first?
 Where to start: the rename_profile implementation and its panel caller, linked from the brief.
 Bound: Trace that call and reproduce one rename of an unloaded profile; no new UI implementation.
 Expected result: Record the observed behavior and a recommendation on this task and in the brief.
-Ideas it wakes: On completion, run tasks note on each named waiting idea with the finding, in the same commit as this result.
+Ideas it wakes: On completion, run tasks note on each named waiting idea with the finding, before this result's branch merges.
 ```
 
 Replace the example with real paths and waiting ids. Set priority, size, complexity,
@@ -166,7 +166,7 @@ reason, followed by handoff paths. Then include only nonempty groups for drops (
 supporting commit/id), questions (id and text), and shelves (id and wake condition).
 
 When later research completes, its completion must add a finding note to every waiting
-idea named by `Ideas it wakes`, in the same commit, so default selection can reconsider
-them. On an explicit rerun, update the existing handoff, goal, and research tasks; do not
+idea named by `Ideas it wakes`, before this result's branch merges, so default selection
+can reconsider them. On an explicit rerun, update the existing handoff, goal, and research tasks; do not
 replace sources or create duplicates merely because an existing goal was outside the
 selected batch. If unchanged evidence warrants no artifact edit, report that plainly.

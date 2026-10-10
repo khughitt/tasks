@@ -167,7 +167,8 @@ nothing is eligible.
    the user; `list --parked` is the picker's feed. `list --parked --waiting-on user
    --all-projects` is the person's queue: everything parked on them, with each next step.
    `--headers` labels the columns of any pretty table.
-6. `tasks done <id> "<what landed>"` in the same commit as the code. If dependencies are
+6. `tasks done <id> "<what landed>"` on the task's branch before it merges (under `[git] commit`
+   the CLI commits the record itself; otherwise commit it with the code). If dependencies are
    still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
    descendant is open and has no override — drop or reparent the subtree first
@@ -249,9 +250,9 @@ records, specs and plans are read and written in the project root, never in the 
 tree. `tasks where [PATH]` prints which project a path opens (`linked` says whether
 through the link) and whether its repository keeps records; two projects declaring one
 checkout is `checkout_conflict`. The rules that tie a record to the code read through the
-overlay there: "in the same commit as the code" is the matching commit of
-`<prefix>/tasks/` in the overlay repository, made after the code commit, and the record
-committed before `git worktree add` is committed there; the worktree itself is added in
+overlay there: records commit in `<prefix>/tasks/` in the overlay repository after the
+code commit (under `[git] commit` the CLI makes that commit), and the record committed
+before `git worktree add` is committed there; the worktree itself is added in
 the code checkout, and `tasks start <id>` in it moves the claim. Task ids never appear in
 the code repository: its commits, branches, pull requests and docs cite the repository's
 own issue key when there is one, which the task records with `--source`.
@@ -306,8 +307,8 @@ Bounded choices covered by the task do not require that change. Both paths retai
 applicable debugging, testing, verification, and code-review skills.
 
 Both code paths use an isolated task worktree: commit the task record before creating
-one with `git worktree add` under `.worktrees/`, or reuse it on resume. Then run `just
-setup` when defined; otherwise run only the root guide's explicit setup command. Do not
+one with `git worktree add` (automatic under `[git] commit`: `add` and `start` commit it)
+under `.worktrees/`, or reuse it on resume. Then run `just setup` when defined; otherwise run only the root guide's explicit setup command. Do not
 guess an installer. After creating a worktree for a task you have started, run
 `tasks start <id>` there before any other `tasks` command for it: the claim moves there,
 and a later write from the main checkout refuses instead of forking the record.
@@ -373,6 +374,17 @@ without a new ownership handoff. No worker closes a controller's live claim,
 and no controller closes a worker's live claim merely by being its parent.
 
 ## Recording work
+
+### Record commits
+
+Set `[git] commit = true` in `tasks/.config.toml` to opt in; absent or false keeps manual commits.
+Each write commits the files it wrote (records, attachments and configuration), plus whatever the repository's own pre-commit hook stages, once per git working tree. Staging another git process makes while the commit runs can land in it.
+`commit_unavailable:` means git is missing or the root is outside git.
+`commit_deferred:` means staged changes, detached HEAD, or an in-progress git operation prevented the commit; clear the cause first.
+`commit_failed:` means a git operation or hook failed; resolve the cause, using the record-commit routes above for a refusing hook.
+A successful write still exits 0 when its commit is skipped or fails; read its warnings.
+`cleanup needs attention:` means cleanup failed or the index could not be checked; inspect the named paths and index before retrying.
+`tasks commit [--project <p>]` recovers skipped commits or sweeps every uncommitted file under `tasks/` into one commit, regardless of the switch; it exits 1 when it cannot commit.
 
 ### Lifecycle provenance
 
@@ -448,9 +460,9 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   this host's park and escalation. The source becomes a read-only `moved` tombstone;
   writes and new references refuse with `moved` and name the new id. Existing
   dependents follow the pointer; their owners swap references with the command in
-  `check`'s `moved_dep` warning. The move commits neither repository: commit each root
-  its `paths` lists. Rerun the same command after interruption; `--explain` diagnoses
-  without writes or locks. While pending, writes to both ids and both projects'
+  `check`'s `moved_dep` warning. Under `[git] commit` the move commits each opted-in root;
+  otherwise commit each root its `paths` lists. Rerun the same command after interruption;
+  `--explain` diagnoses without writes or locks. While pending, writes to both ids and both projects'
   lifecycle commands refuse with `move_pending`. Recovery covers process interruption,
   not power loss; the journal and carried park are host-local. Update every host's
   binary before moving synced records: older binaries cannot parse the new fields.
@@ -602,11 +614,12 @@ something you needed (`gap`), gave you an idea (`idea`), or worked notably well
 `tasks/.config.toml` has a `[feedback]` table; any other is refused with the list of
 projects that accept, each with its scope. Your agent instructions may say when to
 report and list the owners; the refusal lists them either way. The report lands as an
-uncommitted `idea` in the owner's registered checkout, tagged `feedback`, the category,
+`idea` in the owner's registered checkout (committed there when the owner sets
+`[git] commit`), tagged `feedback`, the category,
 and `from:<your prefix>` (`from:unregistered` outside every project; a linked checkout
 reports its project's prefix). Describe the tool, not the project: no repository names, file
 paths, people, or project content. Do not
-commit in the owner's repository and do not triage your own report. If `ambiguous` comes
+manually commit in the owner's repository and do not triage your own report. If `ambiguous` comes
 back, rerun with `--recur <id>` to join the listed entry or `--new` to insist. `--body`
 detail is kept verbatim on a new entry; recurrence appends it as a single-line note, so
 on recurrence it must be one line. Keep the
@@ -620,9 +633,9 @@ A `[feedback]` table with a one-line `scope` opts the project in:
     [feedback]
     scope = "<what this project owns, for someone deciding where a report goes>"
 
-Uncommitted files under `tasks/` tagged `feedback` are unreviewed reports: read each,
-redact anything that describes a project rather than the tool, then commit. Ideas tagged
-`feedback` are the triage queue; scope, drop, or promote them like any other idea and
+Ideas tagged `feedback` with no triage note are unreviewed reports: read each, and redact
+anything that describes a project rather than the tool with `tasks edit` (history keeps
+the original). Ideas tagged `feedback` are the triage queue; scope, drop, or promote them like any other idea and
 record the outcome in a note. Drop a misfiled report with a note naming the owner it
 belongs to. `check` holds `feedback`, the categories, and any `from:<prefix>` or
 `from:unregistered` as defined

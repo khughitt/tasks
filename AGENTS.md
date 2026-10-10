@@ -9,12 +9,12 @@ This repo tracks itself with the same tool. Design: `docs/specs/2026-08-29-tasks
 - `tasks note <id> "<one line>"` when scope or understanding changes.
 - `tasks park <id> "<next step>" [--waiting-on user]` when setting work down or waiting on the user; `start` resumes it.
 - `tasks shelve <id> "<wake condition>"` for work to keep out of sight; `unshelve` brings it back.
-- `tasks done <id> "<what landed>"` in the same commit as the code. `tasks check` before every commit.
+- `tasks done <id> "<what landed>"` on the task's branch before it merges. `tasks check` before every commit.
 - Recurring sweeps use `--every 30d`; `start` before closing each later occurrence.
 - Decompose goals with `--parent`; close a goal from `prime`'s closeout list.
 - Use `/scope [<id>... | --tag <tag>] [--project <prefix>]` for a deliberate idea review.
 - Never edit `tasks/*.md` by hand; the binary is the only writer. Full protocol: `skills/tasks/SKILL.md`.
-- File tool friction with `tasks feedback --project tasks`; in this repo, review uncommitted feedback files before committing them.
+- File tool friction with `tasks feedback --project tasks`; in this repo, review feedback ideas without a triage note and redact with `tasks edit`.
 - Demoing or smoke-testing `tasks init`? Use `XDG_CONFIG_HOME=$(mktemp -d)` so the scratch
   project does not leave a permanent entry in the real registry.
 
