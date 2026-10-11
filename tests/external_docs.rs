@@ -2,6 +2,152 @@ mod common;
 use common::{TestEnv, docs::DocFixture};
 
 #[test]
+fn external_doc_show_and_next_tolerate_unavailable_open_step() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "### Task 1: one\n");
+    let id = env.json(
+        &dir,
+        &[
+            "add",
+            "Open",
+            "--plan",
+            "stub:alias",
+            "--step",
+            "Task 1: one",
+        ],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    std::fs::write(&docs.script, "printf 'provider down' >&2; exit 7\n").unwrap();
+    for missing in [false, true] {
+        if missing {
+            docs.disconnect();
+        }
+        let shown = env.json(&dir, &["show", &id]);
+        assert_eq!(shown["plan_path"], "stub:canonical");
+        assert!(shown.get("step_found").is_none());
+        assert!(!shown["warnings"].as_array().unwrap().is_empty());
+        let next = env.json(&dir, &["next"]);
+        assert_eq!(next["next"]["task"]["id"], id);
+        assert!(next["next"].get("step_found").is_none());
+    }
+}
+
+#[test]
+fn external_doc_show_history_reads_only_when_stepped() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "### Task 1: one\n");
+    let stepped = env.json(
+        &dir,
+        &[
+            "add",
+            "Stepped",
+            "--plan",
+            "stub:alias",
+            "--step",
+            "Task 1: one",
+        ],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let plain = env.json(&dir, &["add", "Plain", "--plan", "stub:alias"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for id in [&stepped, &plain] {
+        env.json(&dir, &["done", id]);
+    }
+    assert_eq!(env.json(&dir, &["show", &stepped])["step_found"], true);
+    let count = docs.calls().len();
+    let shown = env.json(&dir, &["show", &plain]);
+    assert!(shown.get("step_found").is_none());
+    assert!(shown["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(docs.calls().len(), count);
+    docs.set_body("# No steps\n");
+    assert_eq!(env.json(&dir, &["show", &stepped])["step_found"], false);
+    docs.disconnect();
+    let unavailable = env.json(&dir, &["show", &stepped]);
+    assert_eq!(unavailable["step_found"], false);
+    assert!(
+        unavailable["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning.as_str().unwrap().contains("historical plan"))
+    );
+    assert!(
+        env.json(&dir, &["show", &plain])["warnings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn external_doc_show_malformed_config_stays_fatal() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let _docs = DocFixture::new(&env, "### Task 1: one\n");
+    let id = env.json(
+        &dir,
+        &[
+            "add",
+            "Open",
+            "--plan",
+            "stub:alias",
+            "--step",
+            "Task 1: one",
+        ],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    std::fs::write(
+        env.home.path().join(".config/tasks/config.toml"),
+        "[docs]\nunknown = true\n",
+    )
+    .unwrap();
+    assert_eq!(env.fail(&dir, &["show", &id]), "config");
+}
+
+#[test]
+#[ignore = "production five-second display budget; short budget coverage is in resolver units"]
+fn external_doc_show_production_deadline() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "### Task 1: one\n");
+    let id = env.json(
+        &dir,
+        &[
+            "add",
+            "Open",
+            "--plan",
+            "stub:alias",
+            "--step",
+            "Task 1: one",
+        ],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    std::fs::write(&docs.script, "sleep 60\n").unwrap();
+    let started = std::time::Instant::now();
+    let shown = env.json(&dir, &["show", &id]);
+    assert!(started.elapsed() < std::time::Duration::from_secs(8));
+    assert!(shown.get("step_found").is_none());
+    assert!(
+        shown["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("budget exhausted")
+    );
+}
+
+#[test]
 fn external_doc_check_reads_shared_plan_once_and_reports_drift() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

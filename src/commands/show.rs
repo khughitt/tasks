@@ -4,7 +4,7 @@ use crate::model::Task;
 use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
-use crate::resolve::{DocKind, Located, Resolver};
+use crate::resolve::{DocKind, DocRead, Located, Resolver, has_heading};
 use std::path::Path;
 use time::OffsetDateTime;
 
@@ -88,7 +88,7 @@ pub fn describe(
     warnings: &mut Vec<String>,
     now: OffsetDateTime,
 ) -> Result<ShowFields> {
-    let resolver = Resolver::new(project, registry);
+    let mut resolver = Resolver::new(project, registry);
     let mut depends_on = Vec::new();
     for dependency in &task.depends {
         // The scan the caller already holds answers first, so `next` describes the same
@@ -117,6 +117,29 @@ pub fn describe(
         }
     }
     let step_found = match (&task.plan, &task.step) {
+        (Some(plan), None) if crate::format::external_doc(plan)?.is_some() => None,
+        (Some(plan), Some(step)) if crate::format::external_doc(plan)?.is_some() => {
+            resolver.set_fetch_budget(crate::doc_fetch::OPTIONAL_BUDGET);
+            match resolver.read(DocKind::Plan, plan)? {
+                DocRead::Available(doc) => Some(has_heading(&doc.body, step)),
+                DocRead::Unavailable { reference, cause } => {
+                    warnings.push(format!(
+                        "{}plan {reference} is unavailable: {}",
+                        if task.status.is_open() {
+                            ""
+                        } else {
+                            "historical "
+                        },
+                        cause.detail()
+                    ));
+                    if task.status.is_open() {
+                        None
+                    } else {
+                        Some(false)
+                    }
+                }
+            }
+        }
         (Some(plan), step)
             if !task.status.is_open()
                 && matches!(resolver.locate(plan)?, Located::Missing)
