@@ -3,7 +3,7 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Complexity, HarnessProvenance, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 29] = [
+const KEYS: [&str; 30] = [
     "id",
     "title",
     "status",
@@ -13,6 +13,7 @@ const KEYS: [&str; 29] = [
     "process",
     "parallel",
     "lane",
+    "reviewed",
     "needs",
     "every",
     "defer",
@@ -134,6 +135,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             .map_err(|e| perr(file, e.to_string()))?,
         parallel: boolean("parallel")?,
         lane: boolean("lane")?,
+        reviewed: boolean("reviewed")?,
         needs: optional_list("needs")?,
         every: scalar("every")?
             .map(|value| crate::periodic::Interval::parse(&value))
@@ -479,6 +481,10 @@ pub fn serialize_task(t: &Task) -> String {
     // out of step with every other scalar.
     if t.lane {
         pairs.push(("lane".into(), Value::Raw("true".into())));
+    }
+    // Raw for the same reason as `parallel`.
+    if t.reviewed {
+        pairs.push(("reviewed".into(), Value::Raw("true".into())));
     }
     if !t.needs.is_empty() {
         pairs.push(("needs".into(), Value::List(t.needs.clone())));
@@ -835,6 +841,36 @@ mod tests {
         assert!(parse_task(&MINIMAL.replace("status: idea", "status: soon"), "x").is_err());
         assert!(parse_task(&MINIMAL.replace("depends: []", "depends: [nope]"), "x").is_err());
         assert!(parse_task(&MINIMAL.replace("tags: []", "tags: []\nstep: only"), "x").is_err());
+    }
+
+    #[test]
+    fn reviewed_is_written_only_when_true_and_round_trips() {
+        let text = "---\nid: sci-000001\ntitle: T\nstatus: idea\npriority: 2\nreviewed: true\n\
+                    created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
+                    depends: []\ntags: []\n---\n";
+        let task = parse_task(text, "sci-000001.md").unwrap();
+        assert!(task.reviewed);
+        assert!(serialize_task(&task).contains("\nreviewed: true\n"));
+        let mut cleared = task.clone();
+        cleared.reviewed = false;
+        assert!(!serialize_task(&cleared).contains("reviewed"));
+        assert!(
+            !parse_task(&serialize_task(&cleared), "sci-000001.md")
+                .unwrap()
+                .reviewed
+        );
+    }
+
+    #[test]
+    fn parsing_accepts_reviewed_on_any_status() {
+        // The idea-only rule is the writers' (review-state spec §3.2): a hand-edited record
+        // must still parse so `check` can report it and the editor can transition it.
+        let text = "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\nreviewed: true\n\
+                    created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
+                    depends: []\ntags: []\n---\n";
+        let task = parse_task(text, "sci-000001.md").unwrap();
+        assert!(task.reviewed);
+        assert!(validate_task(&task).is_ok());
     }
 
     #[test]

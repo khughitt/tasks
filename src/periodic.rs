@@ -74,6 +74,7 @@ mod tests {
             process: None,
             parallel: false,
             lane: false,
+            reviewed: false,
             needs: vec![],
             every: every.map(|e| Interval::parse(e).unwrap()),
             defer: None,

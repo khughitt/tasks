@@ -89,6 +89,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     }
     let mut tombstone = source.clone();
     tombstone.status = Status::Moved;
+    tombstone.reviewed = false;
     tombstone.moved_to = Some(target.id.clone());
     tombstone.updated = now;
     append_stamped_note(

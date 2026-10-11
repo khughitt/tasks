@@ -485,6 +485,18 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ));
             }
         }
+        // Review-state spec §3.2: the writers refuse it, so only a hand edit lands here.
+        if task.reviewed && task.status != Status::Idea {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "review_status",
+                format!(
+                    "is {} and carries reviewed; only an idea carries it",
+                    task.status.as_str()
+                ),
+            ));
+        }
         // A merge or a hand edit can leave a lane inside a lane.
         if task.lane
             && let Some(outer) = crate::hierarchy::enclosing_lane(&tasks, task, &ctx.registry)
