@@ -264,14 +264,17 @@ and skills ship, as an operator step in the plan. It uses only the CLI:
   not that it still matches the snapshot. A `note --no-reviewed` from another session
   between the two would be overwritten in effect: the edit would set the flag on a
   record carrying the new finding. So each apply pass, the first run and every
-  rerun, runs inside a writer pause on that project: the operator stops or parks
-  every other session that may write its task records, on every host that reads
+  rerun, runs inside a writer pause on that project: the operator stops every
+  other session that may write its task records, on every host that reads
   them, before the pass, and resumes them after. The plan states the pause as a
-  checklist step and checks it before each pass: no live claim in the project
-  (`tasks list --status doing`) and no other agent session on either host
-  (`host-load --section session`, `tasks` claims). A safe concurrent backfill would
-  need a stamp-checked edit inside the CLI; a one-time migration does not justify
-  that surface.
+  checklist step before each pass with two parts. First, `tasks claims` run on each
+  reading host (claim stores are host-local) shows no live claim on a task in the
+  project. Second, the operator explicitly confirms that every other writer of the
+  project's task records is paused on every host. That confirmation is required
+  because writers need not hold claims: a scope pass, a curate pass, or a plain
+  `tasks note` writes ideas without one, so no command can prove the pause. A safe concurrent
+  backfill would need a stamp-checked edit inside the CLI; a one-time migration
+  does not justify that surface.
 - Each project's writes land in one `chore(tasks)` commit in that project.
 
 The writes bump `updated` on the backfilled ideas. That keeps them out of curate's

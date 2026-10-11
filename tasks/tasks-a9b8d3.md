@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-08T10:53:28Z
-updated: 2026-10-11T13:07:25Z
+updated: 2026-10-11T13:25:50Z
 started: 2026-10-11T12:11:58Z
 depends: []
 parent: tasks-46d207
@@ -50,4 +50,10 @@ Ideas it wakes: On completion, record the approved finding with tasks note on ta
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-11T13:07:23Z (design/tasks-a9b8d3-review-state): spec revised for round 3: §7.2 requires a writer pause on the project, across reading hosts, for every backfill apply pass (first run and reruns), checked before each pass; a stamp-checked edit in the CLI rejected as surface a one-time migration does not justify
 - 2026-10-11T13:07:23Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): Reviewer or user re-reviews the §7.2 writer-pause bullet of docs/specs/2026-10-11-review-state-design.md in .worktrees/tasks-a9b8d3-review-state; on acceptance the agent writes the implementation plan
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T13:09:03Z (design/tasks-a9b8d3-review-state): review: spec round 4 — verdict: revise; findings: P2 1; reviewer: codex
+- 2026-10-11T13:25:37Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T13:25:49Z (design/tasks-a9b8d3-review-state): spec revised for round 4: the pause check is tasks claims on each reading host (no live claim in the project) plus the operator's explicit confirmation that every other record writer is paused, since scope, curate and plain notes write without claims; host-load and tasks list --status doing removed as evidence; parking is no longer named as a way to pause a session
+- 2026-10-11T13:25:49Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): Reviewer or user re-reviews the §7.2 pause checklist of docs/specs/2026-10-11-review-state-design.md in .worktrees/tasks-a9b8d3-review-state; on acceptance the agent writes the implementation plan
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
