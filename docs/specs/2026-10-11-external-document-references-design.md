@@ -1,6 +1,6 @@
 # External plan and spec references
 
-Status: revised after spec rounds 1–2; awaiting user review
+Status: accepted by Keith after spec round 3 (2026-10-11)
 Task: `tasks-91f63b`
 Source: hq `docs/specs/2026-10-10-agent-docs-collection-design.md`, §3–§4
 (accepted in `hq-5a3e12`, spec round 4; its draft header is stale).

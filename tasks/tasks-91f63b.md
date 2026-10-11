@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/tasks-91f63b-external-docs
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-11T11:23:37Z
+updated: 2026-10-11T12:20:40Z
 started: 2026-10-11T09:51:00Z
 depends: []
 tags: []
@@ -42,4 +42,12 @@ Implements §4 of the hq spec (spec round 4 accepted): plan/spec values whose fi
 - 2026-10-11T11:21:14Z (feat/tasks-91f63b-external-docs): latency pilot before planning: mindful-doc is not installed. Measured installed mindful --json show plus in-process id/body projection of one existing thought (warm repeats; excludes future wrapper startup): first read 0.459 s; 20 serial reads 9.476 s, median 0.472 s; 20 reads with concurrency 4 took 2.889 s, median per-call 0.580 s. Concurrency works in this sample; actual wrapper, varied backlog and second-host timings remain rollout gates. CLI Show takes one id, so three separate descriptions can consume 15 s, not one supported multi-id command.
 - 2026-10-11T11:23:36Z (feat/tasks-91f63b-external-docs): spec round 2 revision: bounded concurrency 4 replaces serial check fetching; dispatch stepped open plans, other open plans, open specs, then closed-only plans. Budget-incomplete references get one doc_unchecked summary rather than per-task doc_unreachable. Real-wrapper whole-backlog timing (at least 20 varied references, 3 complete runs per host) gates activation, with ops direct-file fallback if needed; requirement sent to ops-721511. Per-description display budget is explicit; current show accepts one id. No implementation started.
 - 2026-10-11T11:23:37Z (feat/tasks-91f63b-external-docs): parked (waiting on user, review): User reviews .worktrees/tasks-91f63b-external-docs/docs/specs/2026-10-11-external-document-references-design.md after spec round 2 corrections; agent records round 3, revises if needed, then writes the implementation plan after spec acceptance.
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T11:49:39Z (feat/tasks-91f63b-external-docs): resumed
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T11:49:39Z (feat/tasks-91f63b-external-docs): review: spec round 3 — verdict: accept; findings: minor 2; reviewer: claude-code/claude-opus-5-5
+- 2026-10-11T11:49:39Z (feat/tasks-91f63b-external-docs): spec accepted by Keith; planning next. Minor follow-through: document doc_unchecked in the README output contract for consumers such as obs/tui; real-wrapper pilot evidence is linked from ops-721511 without rewriting the dated design measurement.
+- 2026-10-11T12:11:37Z (feat/tasks-91f63b-external-docs): plan drafted at .worktrees/tasks-91f63b-external-docs/docs/plans/2026-10-11-external-document-references.md; seven sequential deliverables cover reader/supervision, changed-link writes/move, concurrent check, tolerant display, CLI export/filter, docs/review, and approved two-host installation. Inline execution recommended. Draft deliberately remains unlinked and has no executable children until user review. Self-review keeps read as the one body reader, isolates test config, includes production deadline cases once outside the fast suite, and preserves the shared-inventory/live-install gates.
+- 2026-10-11T12:20:39Z (feat/tasks-91f63b-external-docs): plan self-review complete: added both apply_fields callers to Task 2, kept one read entry point with a per-description budget setter, supplied isolated fixture/install-smoke code, covered output-contract updates and the doc-root rollout recheck, and made children sequential. Verified ops-721511 depends on tasks-91f63b and mind6-646ca1: actual wrapper pilot remains an ops handoff after binary-task closure, avoiding a reverse dependency. No product edits, baseline tests or step-task creation before plan review.
+- 2026-10-11T12:20:39Z (feat/tasks-91f63b-external-docs): parked (waiting on user, review): User reviews .worktrees/tasks-91f63b-external-docs/docs/plans/2026-10-11-external-document-references.md; agent records the plan review, revises if needed, then files/links the approved sequential steps, runs the deferred worktree baseline, and executes inline unless the user overrides.
   provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
