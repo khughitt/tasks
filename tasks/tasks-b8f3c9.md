@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-11T15:08:58Z
-updated: 2026-10-11T16:52:24Z
+updated: 2026-10-11T17:16:02Z
 started: 2026-10-11T15:09:17Z
 depends: []
 parent: tasks-46d207
@@ -46,3 +46,6 @@ Execute the reviewed docs/plans/2026-10-11-review-state.md with subagent-driven 
 - 2026-10-11T16:50:21Z (design/tasks-a9b8d3-review-state): Rollout preparation: tasks search "Ideas it wakes" --all-projects currently returns 109 open tasks with no warnings; recount old plain-note wakers during the approved rollout. Await explicit host list and all-host writer-pause confirmation; no rollout actions performed.
 - 2026-10-11T16:52:24Z (design/tasks-a9b8d3-review-state): parked (waiting on user, approval): User approves coordinated rollout and names every reading host with all other task-record writers paused; controller then resumes, confirms current main/source contract and host binary targets, merges the reviewed branch, upgrades each reader, releases its own task claim for per-project backfill, verifies and commits every migrated tasks directory unconditionally, recounts old wakers, resumes writers and closes this task. Code is reviewed at cc911ba with 1372 fast tests passing and clean checks; no rollout performed.
   provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T17:15:07Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T17:16:02Z (design/tasks-a9b8d3-review-state): User approved coordinated rollout and requested follow-up recommendations. Await complete reader-host list and explicit writer-pause confirmation before activation/writes. Main now includes external-document work; rebase/integrate, adopt matching current contract, and rerun gates/review before rollout.
