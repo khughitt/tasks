@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T15:13:22Z
-updated: 2026-10-08T10:16:46Z
+updated: 2026-10-09T18:30:29Z
 depends: []
 parent: tasks-cea445
 tags: []
@@ -28,3 +28,4 @@ Ideas it wakes: On completion, add the design finding and approved artifact path
 
 - 2026-10-03T16:55:30Z (main): consider an optional per-tag style (color) in the shared definition; tasks-b49ef8 wants tag colors sourced from the vocabulary, possibly from mindful
 - 2026-10-08T10:16:45Z (main): Scope clarification: promote the existing optional-style note into the design boundary and add tasks-b49ef8 to Ideas it wakes; record style-source semantics before color rendering is scoped. Its rendering prerequisite is done, but the tags command bypasses present::tags, so acceptance must cover every requested view.
+- 2026-10-09T18:30:29Z (main): Data point (2026-10-09): only 3 of 28 registered projects keep a [tags] table; quick-add and cross-project are filed into the others undefined. Both are candidates for shared definitions.
