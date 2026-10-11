@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/tasks-91f63b-external-docs
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-11T10:43:22Z
+updated: 2026-10-11T11:23:37Z
 started: 2026-10-11T09:51:00Z
 depends: []
 tags: []
@@ -35,4 +35,11 @@ Implements §4 of the hq spec (spec round 4 accepted): plan/spec values whose fi
 - 2026-10-11T10:36:10Z (feat/tasks-91f63b-external-docs): review: spec round 1 — verdict: revise; findings: important 4, moderate 1, minor 3; reviewer: claude-code/claude-opus-5-5
 - 2026-10-11T10:42:15Z (feat/tasks-91f63b-external-docs): spec round 1 revision: addressed all 8 findings after checking the cited callers. External link/step reads depend on changed values; show/next return warning plus unknown step_found when unavailable; DocRead/UnavailableCause separate availability from fatal errors; check and optional display reads have fixed 5-second budgets. No-step external display does not fetch, exit-0 fetches terminate pipe-holding descendants before EOF, and doc roots reserve first-segment colons. Binary-before-config and both-binaries-before-records rollout constraint recorded on ops-721511.
 - 2026-10-11T10:43:22Z (feat/tasks-91f63b-external-docs): parked (waiting on user, review): User re-reviews .worktrees/tasks-91f63b-external-docs/docs/specs/2026-10-11-external-document-references-design.md after the spec round 1 corrections; agent records round 2, revises if needed, then writes the implementation plan after spec acceptance.
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T11:18:30Z (feat/tasks-91f63b-external-docs): resumed
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T11:18:30Z (feat/tasks-91f63b-external-docs): review: spec round 2 — verdict: revise; findings: important 1, minor 2; reviewer: claude-code/claude-opus-5-5
+- 2026-10-11T11:21:14Z (feat/tasks-91f63b-external-docs): latency pilot before planning: mindful-doc is not installed. Measured installed mindful --json show plus in-process id/body projection of one existing thought (warm repeats; excludes future wrapper startup): first read 0.459 s; 20 serial reads 9.476 s, median 0.472 s; 20 reads with concurrency 4 took 2.889 s, median per-call 0.580 s. Concurrency works in this sample; actual wrapper, varied backlog and second-host timings remain rollout gates. CLI Show takes one id, so three separate descriptions can consume 15 s, not one supported multi-id command.
+- 2026-10-11T11:23:36Z (feat/tasks-91f63b-external-docs): spec round 2 revision: bounded concurrency 4 replaces serial check fetching; dispatch stepped open plans, other open plans, open specs, then closed-only plans. Budget-incomplete references get one doc_unchecked summary rather than per-task doc_unreachable. Real-wrapper whole-backlog timing (at least 20 varied references, 3 complete runs per host) gates activation, with ops direct-file fallback if needed; requirement sent to ops-721511. Per-description display budget is explicit; current show accepts one id. No implementation started.
+- 2026-10-11T11:23:37Z (feat/tasks-91f63b-external-docs): parked (waiting on user, review): User reviews .worktrees/tasks-91f63b-external-docs/docs/specs/2026-10-11-external-document-references-design.md after spec round 2 corrections; agent records round 3, revises if needed, then writes the implementation plan after spec acceptance.
   provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}

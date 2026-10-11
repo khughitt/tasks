@@ -1,6 +1,6 @@
 # External plan and spec references
 
-Status: revised after spec round 1; awaiting user review
+Status: revised after spec rounds 1–2; awaiting user review
 Task: `tasks-91f63b`
 Source: hq `docs/specs/2026-10-10-agent-docs-collection-design.md`, §3–§4
 (accepted in `hq-5a3e12`, spec round 4; its draft header is stale).
@@ -251,12 +251,25 @@ when a spec and plan have the same reference. Keep findings per affected open
 record, even when the document read is shared.
 
 External fetching in `check` has one fixed five-second monotonic budget per
-invocation, beginning with its first configured fetch attempt. Process distinct
-external references for open tasks in lexical order, then any closed-only plans,
-sharing cached outcomes across these passes. A fetch's deadline is the earlier
-of its 30-second per-fetch limit and the remaining command budget. If the
-command budget ends during a fetch, terminate/clean up that fetch and classify
-the outcome as `Unavailable(BudgetExhausted)`.
+invocation, beginning with its first configured fetch attempt. Fetch at most four
+distinct references concurrently. Dispatch references in this priority order,
+lexical within each tier, assigning a shared reference to its highest tier:
+
+1. Plans linked by an open task with a step.
+2. Other open tasks' plans.
+3. Open tasks' specs.
+4. Closed-only plans.
+
+Use the resolver's existing fetch boundary and command-local outcome cache;
+workers return bounded outcomes to the resolver rather than sharing its
+`RefCell` state across threads. No provider-specific logic or general worker-pool
+framework is introduced. Once a worker completes, dispatch the next highest
+priority uncached reference only if budget remains. Malformed host config is
+validated before starting workers and remains fatal. A fetch's deadline is the
+earlier of its 30-second per-fetch limit and the remaining command budget. If the
+command budget ends, terminate/clean up all in-flight fetches and classify their
+unfinished outcomes as `Unavailable(BudgetExhausted)`. Successful cache entries
+are not discarded. Worker completion order must not change finding order.
 
 After exhaustion, uncached configured references are not spawned: their outcome
 is `Unavailable(BudgetExhausted)`, with cause `budget exhausted`. Existing
@@ -267,18 +280,30 @@ and attachment checks continue normally. The five seconds bounds fetch waiting,
 with the small additional time needed for mandatory process cleanup; it is not
 a deadline for the whole command. There is no public budget option or setting.
 
-This trades incomplete external drift checks for bounded pre-commit latency,
-and surfaces that limit as warnings rather than implying a complete verdict.
+Report all budget-incomplete references with one `doc_unchecked` finding per
+invocation: `id` unset, `file` = `tasks/`, and detail naming `budget exhausted`
+and listing each reference in priority order. Include unfinished attempted
+fetches and those never started, including closed-only plans. Do not also emit
+per-task `doc_unreachable` findings for these references. Missing schemes and
+attempted fetch failures still produce the existing per-record `doc_unreachable`
+warning for open tasks; they are different outcomes from an incomplete check.
+
+Budget exhaustion remains an outage/oversized-backlog safeguard, not accepted
+steady behavior: the rollout pilot below must finish the whole open backlog
+without `doc_unchecked`. The source spec's direct-file fallback belongs in the
+ops fetcher if real-wrapper latency exceeds the budget, preserving its contract.
+No rotating queue, persistent cache or randomly unchecked tail is introduced.
 Explicit `tasks doc` and changed-link writes retain the full per-fetch deadline.
 
 | Condition | Result |
 |---|---|
 | Open task, missing local path | Existing `doc_missing` error |
 | Local document read or host configuration error | Existing fatal typed error |
-| Open task, external scheme missing, fetch failed or budget exhausted | `doc_unreachable` warning, naming reference and cause |
+| Open task, external scheme missing or attempted fetch failed | `doc_unreachable` warning, naming reference and cause |
+| External checks incomplete because the budget ended | One `doc_unchecked` warning listing unfinished/unstarted references |
 | Available plan lacks an open task's step heading | `step_missing` error |
 | Available plan heading has no linking task | Existing `unlinked_step` warning |
-| Closed task alone links an unavailable external plan | No drift finding |
+| Closed-only external plan has a missing scheme or failed fetch | No drift finding |
 
 After an unavailable document, skip dependent heading checks; do not pretend it
 is an empty body. Closed records still count when matching plan headings to
@@ -304,6 +329,9 @@ five-second budget, scoped to that description:
 Local-plan behavior remains unchanged, including strict open-step failures and
 the existing missing-historical-path warning without a step. Malformed host
 config encountered during a fetch is fatal, never an availability warning.
+The budget is per description, not shared across separate commands: three
+separate stepped-task descriptions can wait up to 15 seconds plus cleanup.
+The current `show` accepts one ID; this design does not add a multi-ID command.
 
 ### 5.3 Document export
 
@@ -345,6 +373,7 @@ a separate list schema. Task objects already carry `plan` and `step`.
 
 Document the reference grammar, fetch JSON/config, availability warning,
 unchanged-link edit behavior, optional display reads and five-second check budget,
+four concurrent check fetches and the separate `doc_unchecked` summary,
 `tasks doc` export exception, exact plan filter and additive step field in the
 README. Update the tasks skill's link/read guidance in step with implementation.
 The separate `tasks-00723a` owns the wider agent-document workflow changes.
@@ -379,14 +408,17 @@ state, and local stub fetchers; do not require mindful or the live desktop.
   parameter lets focused unit tests exercise this promptly; production's strict
   per-fetch deadline stays 30 seconds, with no public timeout option. Keep one
   real CLI deadline case to verify production wiring, ignored in the fast set
-  and included in the
-  full suite so each ordinary code commit does not add a 30-second wait.
+  and included in the full suite so each ordinary code commit does not add a
+  30-second wait.
 - Check tests cover both heading findings, warning-only exit 0, missing schemes,
   failed fetches, one fetch for many linking records and failed-read reuse,
   closed-only plans, and existing main-checkout/path I/O behavior. Budget tests
-  use multiple references to prove one shared deadline, deterministic open-first
-  order, no post-budget spawning, cause `budget exhausted`, continued local
-  error detection and bounded pre-commit behavior. Malformed config must be
+  use multiple references to prove one shared deadline, the four-fetch cap,
+  stepped-plan/other-plan/spec/history priority, stable findings despite reversed
+  completion order, no post-budget spawning, cleanup of all in-flight children,
+  and one `doc_unchecked` summary (never `doc_unreachable` for untried references).
+  Also verify cause `budget exhausted`, continued local error detection and
+  bounded pre-commit behavior. Malformed config must be
   fatal in strict and tolerant callers, unlike a missing scheme.
 - Show/next tests cover reference display, historical unavailable plans with and
   without a step, no fetch without an external step, available changed headings,
@@ -406,6 +438,30 @@ for affected tests, `just test-fast` before code commits and `just check` for
 parser-inventory, hygiene, formatting, lint and record consistency. Keep full
 suite execution with the configured hook policy. Install to a disposable Cargo
 root and invoke that binary explicitly for the initial installation smoke.
+
+Latency evidence before planning (2026-10-11, first host): `mindful-doc` is not
+installed yet. A pilot of the installed `mindful --json show` path plus an
+in-process `id`/`body` projection succeeded in 0.459 seconds. Twenty warm repeats
+of the same existing thought took 9.476 seconds serially (median 0.472 seconds)
+and 2.889 seconds at concurrency four (median call 0.580 seconds). This confirms
+startup cost and that concurrent reads work in that sample; it excludes the
+future wrapper's startup, varied documents, cold state and the second host.
+The timing and required real-wrapper pilot are noted on `ops-721511`.
+
+Before activating the external-document workflow, time the implemented
+`mindful-doc` on each host against the actual distinct open-document backlog,
+with at least 20 varied references if the backlog is smaller, and with the
+mindful web app running. Verify per-call timing and the tracker's four-worker
+check end to end: every open reference completes inside five seconds with no
+`doc_unchecked`, repeated across three runs. A failed pilot blocks workflow
+activation. ops must then use source §4.2's direct-thought-file read fallback
+inside `mindful-doc`, preserving canonical IDs, aliases and the `id`/`body`
+JSON contract, and repeat the pilot. Tasks never learns mindful's storage
+format. This changes neither external availability handling nor the fixed
+budget, and avoids accepting a permanently skipped backlog tail.
+If routine checks begin reporting `doc_unchecked` as the backlog grows, treat
+that as a fetch-latency incident: repeat the whole-backlog pilot and remedy the
+fetcher, rather than accepting the warning on every commit.
 
 Old binaries reject both external references at record parse time and the new
 `[docs.schemes]` table at host-config load time. The latter can break ordinary
