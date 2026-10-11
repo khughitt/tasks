@@ -4,7 +4,7 @@
 
 **Goal:** Mark the rows that still need a look in every pretty task table with a left-most `*`, backed by a stored `reviewed` flag on ideas and a derived `needs_review` value for leaf todos with no process.
 
-**Architecture:** One new boolean on the task record (`reviewed`, ideas only), enforced in `format::validate_task` and cleared by every status transition. A pure predicate in a new `src/review.rs` derives `needs_review` for summary rows, filter fields and parked rows. Pretty tables prefix the id cell with `* ` or two spaces, reserved once per output through a new `Marks` value that also carries the existing `||` and type decisions. A one-time Python backfill in `tools/` marks ideas scoped under today's note rule, from a frozen snapshot.
+**Architecture:** One new boolean on the task record (`reviewed`, ideas only), refused on a non-idea at write time (`commands::save`, never at parse, so `check` and the editor still read such a record) and cleared by every status transition. A pure predicate in a new `src/review.rs` derives `needs_review` for summary rows, filter fields and parked rows. Pretty tables prefix the id cell with `* ` or two spaces, reserved once per output through a new `Marks` value that also carries the existing `||` and type decisions. A one-time Python backfill in `tools/` marks ideas scoped under today's note rule, from a frozen snapshot.
 
 **Tech Stack:** Rust (clap, serde, assert_cmd integration tests), Python 3 standard library for the backfill tool.
 
@@ -33,11 +33,11 @@
 
 ## Tracking
 
-tasks-a9b8d3 is the design task and ends when this plan is reviewed. On acceptance, file one implementation task under the same parent: `--process planned --plan 2026-10-11-review-state`, complexity mid, size m, sourced from tasks-a9b8d3, and run this plan under it. The rollout below is that task's last step.
+tasks-a9b8d3 is the design task and ends when this plan is reviewed. Its closeout, on this design branch before it merges, does three things in one commit: files one implementation task under the same parent (`--process planned --plan 2026-10-11-review-state`, complexity mid, size m, sourced from tasks-a9b8d3) to run this plan; adds the approved finding to tasks-e34b99 with a **plain** `tasks note` (the current note rule readmits it; `--no-reviewed` does not exist until the binaries are upgraded); and updates `docs/notes/2026-09-30-work-selection-brief.md` with the decision and the new task id. The rollout below is the implementation task's last step.
 
 ## Concurrent work
 
-tasks-91f63b (external document references) is in progress in another worktree and changes `src/format.rs` (`validate_doc_shape`) and resolution code. Rebase onto main before Task 1 and again before the final review; expect a textual conflict only near `validate_task`.
+tasks-91f63b (external document references) is in progress in another worktree and changes `src/format.rs` (`validate_doc_shape`) and resolution code. Rebase onto main before Task 1 and again before the final review; expect a textual conflict only near `KEYS` and `parse_task`.
 
 ---
 
@@ -47,15 +47,15 @@ tasks-91f63b (external document references) is in progress in another worktree a
 - Create: `src/review.rs`
 - Modify: `src/main.rs` (or `src/lib.rs`, wherever modules are declared: add `mod review;` beside `mod present;`)
 - Modify: `src/model.rs` (the `Task` struct and its test helper `task_with`)
-- Modify: `src/format.rs` (`KEYS`, `parse_task`, `serialize_task`, `validate_task`, unit tests)
-- Modify: `src/commands/mod.rs` (`transition`)
+- Modify: `src/format.rs` (`KEYS`, `parse_task`, `serialize_task`, unit tests). `validate_task` is not touched: `parse_task` calls it (`src/format.rs:175`), and the idea-only rule must not reject a record at read time.
+- Modify: `src/commands/mod.rs` (`save`, `transition`)
 - Modify: `src/moving/preflight.rs:90-93`, `src/moving/journal.rs:272-275` (tombstone)
 - Modify: `src/commands/check.rs` (new `review_status` finding)
 - Modify: every `Task { … }` literal: `src/defer.rs`, `src/halt.rs`, `src/periodic.rs`, `src/lanes.rs`, `src/query.rs`, `src/repo.rs`, `src/hierarchy.rs`, `src/complexity.rs`, `src/similarity.rs`, `src/commands/add.rs`
 - Test: `src/format.rs` unit tests; create `tests/review.rs`
 
 **Interfaces:**
-- Produces: `Task::reviewed: bool`; `crate::review::not_an_idea(task: &Task) -> crate::error::Error`; `check` finding kind `review_status`.
+- Produces: `Task::reviewed: bool`; `crate::review::not_an_idea(task: &Task) -> crate::error::Error`; `crate::review::validate(task: &Task) -> crate::error::Result<()>` (called by `save`); `check` finding kind `review_status`.
 
 - [ ] **Step 1: Write the failing unit test** in `src/format.rs`'s `mod tests`:
 
@@ -75,13 +75,37 @@ tasks-91f63b (external document references) is in progress in another worktree a
     }
 
     #[test]
-    fn validate_task_refuses_reviewed_on_a_non_idea() {
+    fn parsing_accepts_reviewed_on_any_status() {
+        // The idea-only rule is the writers' (review-state spec §3.2): a hand-edited record
+        // must still parse so `check` can report it and the editor can transition it.
         let text = "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\nreviewed: true\n\
                     created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
                     depends: []\ntags: []\n---\n";
         let task = parse_task(text, "sci-000001.md").unwrap();
-        let error = validate_task(&task).unwrap_err().to_string();
+        assert!(task.reviewed);
+        assert!(validate_task(&task).is_ok());
+    }
+```
+
+and in the new `src/review.rs` (Step 3 creates it), a `mod tests` with:
+
+```rust
+    #[test]
+    fn validate_refuses_reviewed_on_a_non_idea_only() {
+        let mut task = crate::format::parse_task(
+            "---\nid: sci-000001\ntitle: T\nstatus: todo\npriority: 2\nreviewed: true\n\
+             created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
+             depends: []\ntags: []\n---\n",
+            "sci-000001.md",
+        )
+        .unwrap();
+        let error = validate(&task).unwrap_err().to_string();
         assert!(error.contains("sci-000001 is todo; only an idea carries reviewed"), "{error}");
+        task.status = crate::model::Status::Idea;
+        assert!(validate(&task).is_ok());
+        task.status = crate::model::Status::Todo;
+        task.reviewed = false;
+        assert!(validate(&task).is_ok());
     }
 ```
 
@@ -96,7 +120,8 @@ In `src/model.rs`, after `pub lane: bool,` in `struct Task`:
 
 ```rust
     /// A scope pass has reviewed this idea and recorded its verdict. Meaningful only on an
-    /// idea: `validate_task` refuses it elsewhere and every status transition clears it.
+    /// idea: `save` refuses it elsewhere (parsing accepts it, for `check` and the editor)
+    /// and every status transition clears it.
     /// See docs/specs/2026-10-11-review-state-design.md §3.
     pub reviewed: bool,
 ```
@@ -120,7 +145,18 @@ pub fn not_an_idea(task: &Task) -> Error {
         task.status.as_str()
     ))
 }
+
+/// The write-time rule (spec §3.2). Never called from parsing: `parse_task` must accept
+/// a hand-edited record so `check` can report it and an editor save can transition it.
+pub fn validate(task: &Task) -> Result<()> {
+    if task.reviewed && task.status != Status::Idea {
+        return Err(not_an_idea(task));
+    }
+    Ok(())
+}
 ```
+
+with `use crate::error::{Error, Result};` and `use crate::model::{Status, Task};` at the top (replacing the narrower imports above).
 
 Declare the module next to the others (`mod review;`).
 
@@ -133,19 +169,19 @@ In `src/format.rs`: change `const KEYS: [&str; 29]` to `[&str; 30]` and insert `
     }
 ```
 
-In `validate_task`, after the `priority` check:
+In `src/commands/mod.rs` `save`, directly after `validate_task(task)?;`:
 
 ```rust
-    if t.reviewed && t.status != Status::Idea {
-        return Err(crate::review::not_an_idea(t));
-    }
+    crate::review::validate(task)?;
 ```
+
+Every record write goes through `save`, the editor included, so a same-status editor save that adds `reviewed` to a non-idea is refused there with its edited text kept (`.map_err(keep)` in `edit.rs`), while a status-changing save reaches `transition` first and is cleared.
 
 Add `reviewed: false,` after `lane: false,` in every `Task { … }` literal listed under Files. `cargo build --all-targets` (run through `just test-one reviewed`) names any you miss.
 
 - [ ] **Step 4: Run the unit tests to verify they pass**
 
-Run: `just test-one reviewed_is_written_only_when_true` then `just test-one validate_task_refuses_reviewed`
+Run: `just test-one reviewed_is_written_only_when_true`, `just test-one parsing_accepts_reviewed`, `just test-one validate_refuses_reviewed`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing integration tests** in a new `tests/review.rs`:
@@ -267,7 +303,7 @@ fn check_reports_reviewed_on_a_non_idea() {
 - [ ] **Step 6: Run them to verify they fail**
 
 Run: `just test-one --test review`
-Expected: `every_status_transition_clears_reviewed` fails (flag kept after the transition is refused by `validate_task`, or kept on disk); the move test fails in `validate_task` or keeps the flag on the tombstone; `check_reports_reviewed_on_a_non_idea` finds no `review_status`. The editor test may already pass: `validate_task` refuses the same-status save.
+Expected: `every_status_transition_clears_reviewed` fails (the transition keeps the flag, so `save` refuses the write); the move test keeps the flag on the tombstone; `check_reports_reviewed_on_a_non_idea` finds no `review_status`. The editor test may already pass: `save` refuses the same-status save.
 
 - [ ] **Step 7: Clear on transition, on the move tombstone, and report in check**
 
@@ -495,9 +531,6 @@ Expected: usage errors (exit 2): `unexpected argument '--reviewed'`.
 - [ ] **Step 3: Add `Review` and `apply`** to `src/review.rs`:
 
 ```rust
-use crate::error::Result;
-use crate::model::Status;
-
 /// What a write does to the `reviewed` flag (spec §3.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Review {
@@ -1229,7 +1262,11 @@ git commit -m "docs(review): teach scope, curate and tasks the review flag"
 **Interfaces:**
 - Consumes: the CLI from Tasks 1–3 (`show`, `list --status idea`, `edit --reviewed`, `claims`, `prime`), all as JSON.
 - Produces: `tools/review-backfill --state DIR [--root ROOT] [--tasks BIN] (--freeze-only | --writers-paused)`. Snapshot file `DIR/<prefix>.json`:
-  `{"prefix": str, "frozen_at": str, "entries": [{"id": str, "updated": str, "done": bool, "outcome": str|null}]}`. Report on stdout: `{"prefix", "frozen": bool, "set": [id], "changed": [{"id", "detail"}], "failed": [{"id", "detail"}], "remaining": int}`. Exit 0 when nothing failed, 1 when an edit failed or the pause check refused, 2 on usage or a corrupt snapshot.
+  `{"prefix": str, "frozen_at": str, "entries": [{"id": str, "updated": str, "done": bool, "outcome": str|null}]}`. Report on stdout: `{"prefix", "frozen": bool, "set": [id], "changed": [{"id", "detail"}], "failed": [{"id", "detail"}], "uncommitted": [{"id", "warning"}], "remaining": int}`.
+  - `changed`: a confirmed change since the freeze (the record is no longer an unreviewed idea with the frozen stamp, or `show` reported `task_not_found`); the entry is done.
+  - `failed`: an operational failure (any other `show` error, or a refused `edit`); the entry stays pending and the next run retries it.
+  - `uncommitted`: the edit landed but the CLI warned `commit_failed:` or `commit_deferred:`; the entry is done (the record is not rewritten) and the operator runs `tasks commit` in that project before resuming writers.
+  - Exit 0 when `failed` and `uncommitted` are empty; 1 otherwise or when the pause check refused; 2 on usage or an invalid snapshot, before any edit.
 
 - [ ] **Step 1: Write the failing tests** in `tests/review_backfill.rs`:
 
@@ -1248,11 +1285,22 @@ fn tool() -> PathBuf {
 
 /// Runs the tool against `dir` with the suite's isolated HOME and the built binary.
 fn backfill(env: &TestEnv, dir: &Path, state: &Path, extra: &[&str]) -> (i32, serde_json::Value) {
+    backfill_with(env, dir, state, &assert_cmd::cargo::cargo_bin("tasks"), extra)
+}
+
+/// As `backfill`, running `tasks` as `bin`.
+fn backfill_with(
+    env: &TestEnv,
+    dir: &Path,
+    state: &Path,
+    bin: &Path,
+    extra: &[&str],
+) -> (i32, serde_json::Value) {
     let out = std::process::Command::new("python3")
         .arg("-I")
         .arg(tool())
         .args(["--state", state.to_str().unwrap(), "--root", dir.to_str().unwrap()])
-        .args(["--tasks", assert_cmd::cargo::cargo_bin("tasks").to_str().unwrap()])
+        .args(["--tasks", bin.to_str().unwrap()])
         .args(extra)
         .env("HOME", env.home.path())
         .env_remove("XDG_CONFIG_HOME")
@@ -1393,15 +1441,116 @@ fn apply_needs_the_operator_s_confirmation_and_no_live_claim() {
 }
 
 #[test]
-fn a_corrupt_snapshot_refuses_before_any_edit() {
+fn an_invalid_snapshot_refuses_before_any_edit() {
+    let mut env = TestEnv::new();
+    let f = fixture(&mut env);
+    let stamp = updated(&env, &f.dir, &f.briefed);
+    let valid = |id: &str, updated: &str| {
+        serde_json::json!({"id": id, "updated": updated, "done": false, "outcome": null})
+    };
+    for (name, body) in [
+        ("invalid json", "{not json".to_string()),
+        (
+            "malformed second entry",
+            serde_json::json!({"prefix": "sci", "frozen_at": "2026-10-11T00:00:00Z",
+                "entries": [valid(&f.briefed, &stamp), {}]})
+            .to_string(),
+        ),
+        (
+            "another project's snapshot",
+            serde_json::json!({"prefix": "lab", "frozen_at": "2026-10-11T00:00:00Z",
+                "entries": [valid(&f.briefed, &stamp)]})
+            .to_string(),
+        ),
+        (
+            "an entry outside the project",
+            serde_json::json!({"prefix": "sci", "frozen_at": "2026-10-11T00:00:00Z",
+                "entries": [valid("lab-000001", &stamp)]})
+            .to_string(),
+        ),
+    ] {
+        let state = tempfile::tempdir().unwrap();
+        std::fs::write(state.path().join("sci.json"), body).unwrap();
+        let (code, _) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);
+        assert_eq!(code, 2, "{name}");
+        assert_eq!(updated(&env, &f.dir, &f.briefed), stamp, "{name}: edited before refusing");
+    }
+}
+
+/// A `tasks` wrapper that fails `show` for one id the way an I/O error would: exit 1 with
+/// a non-`task_not_found` error. Everything else runs the real binary.
+fn flaky_tasks(dir: &Path, fail_id: &str) -> PathBuf {
+    let path = dir.join("flaky-tasks");
+    let real = assert_cmd::cargo::cargo_bin("tasks");
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh
+case \"$*\" in *\"show {fail_id}\"*) \
+             echo '{{\"error\":{{\"kind\":\"io\",\"detail\":\"disk hiccup\"}}}}' >&2; exit 1;; esac\n\
+             exec '{}' \"$@\"\n",
+            real.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    path
+}
+
+#[test]
+fn a_read_failure_stays_pending_and_a_missing_record_is_a_change() {
     let mut env = TestEnv::new();
     let f = fixture(&mut env);
     let state = tempfile::tempdir().unwrap();
-    std::fs::write(state.path().join("sci.json"), "{not json").unwrap();
-    let stamp = updated(&env, &f.dir, &f.briefed);
-    let (code, _) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);
-    assert_eq!(code, 2);
-    assert_eq!(updated(&env, &f.dir, &f.briefed), stamp);
+    backfill(&env, &f.dir, state.path(), &["--freeze-only"]);
+    let flaky = flaky_tasks(state.path(), &f.briefed);
+    std::fs::remove_file(f.dir.join(format!("tasks/{}.md", f.proposed))).unwrap();
+    let (code, report) = backfill_with(&env, &f.dir, state.path(), &flaky, &["--writers-paused"]);
+    assert_eq!(code, 1, "{report}");
+    let failed: Vec<&str> = report["failed"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!(failed, [f.briefed.as_str()], "{report}");
+    let changed: Vec<&str> = report["changed"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!(changed, [f.proposed.as_str()], "{report}");
+    assert_eq!(report["remaining"], 1);
+    // The real binary on the next run sets it.
+    let (code, report) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);
+    assert_eq!(code, 0, "{report}");
+    assert!(reviewed(&env, &f.dir, &f.briefed));
+}
+
+#[test]
+fn a_deferred_commit_is_reported_and_not_rewritten() {
+    let mut env = TestEnv::new();
+    let f = fixture(&mut env);
+    git(&f.dir, &["init", "-q", "-b", "main"]);
+    for (key, value) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
+        git(&f.dir, &["config", key, value]);
+    }
+    let config = f.dir.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{text}\n[git]\ncommit = true\n")).unwrap();
+    git(&f.dir, &["add", "-A"]);
+    git(&f.dir, &["commit", "-q", "-m", "init"]);
+    // A staged change elsewhere defers every record commit (record-commit design §3.3).
+    std::fs::write(f.dir.join("other.txt"), "x").unwrap();
+    git(&f.dir, &["add", "other.txt"]);
+    let state = tempfile::tempdir().unwrap();
+    let (code, report) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);
+    assert_eq!(code, 1, "{report}");
+    let uncommitted: Vec<&str> = report["uncommitted"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert!(uncommitted.contains(&f.briefed.as_str()), "{report}");
+    assert!(report["uncommitted"][0]["warning"].as_str().unwrap().starts_with("commit_deferred:"));
+    assert!(reviewed(&env, &f.dir, &f.briefed));
+    let file = format!("tasks/{}.md", f.briefed);
+    let after = env.read(&f.dir, &file);
+    let (_, rerun) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);
+    assert!(rerun["set"].as_array().unwrap().is_empty() && rerun["uncommitted"].as_array().unwrap().is_empty(), "{rerun}");
+    assert_eq!(env.read(&f.dir, &file), after, "a rerun rewrote a record it had set");
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git").args(args).current_dir(dir).output().unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
 }
 ```
 
@@ -1454,6 +1603,13 @@ def read_json(tasks, root, *args):
     return json.loads(stdout)
 
 
+def error_kind(stderr):
+    try:
+        return json.loads(stderr)["error"]["kind"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
 def eligible(task):
     """Today's scope eligibility rule, inverted: true when a pass has already looked."""
     notes = task.get("notes") or []
@@ -1473,14 +1629,32 @@ def save(path, snapshot):
     os.replace(tmp, path)
 
 
-def load(path):
+def load(path, prefix):
+    """The whole snapshot, validated before anything is applied (no partial runs)."""
+    def bad(why):
+        return Usage(f"{path} is not a valid backfill snapshot for {prefix}: {why}; inspect it before rerunning")
     try:
         with open(path) as handle:
             snapshot = json.load(handle)
-        snapshot["entries"]
-        return snapshot
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
-        raise Usage(f"{path} is not a backfill snapshot ({error}); inspect it before rerunning")
+    except json.JSONDecodeError as error:
+        raise bad(f"invalid JSON ({error})")
+    if not isinstance(snapshot, dict) or snapshot.get("prefix") != prefix:
+        raise bad(f"prefix is {snapshot.get('prefix') if isinstance(snapshot, dict) else None!r}")
+    if not isinstance(snapshot.get("frozen_at"), str) or not isinstance(snapshot.get("entries"), list):
+        raise bad("frozen_at or entries missing")
+    for index, entry in enumerate(snapshot["entries"]):
+        ok = (
+            isinstance(entry, dict)
+            and set(entry) == {"id", "updated", "done", "outcome"}
+            and isinstance(entry["id"], str)
+            and entry["id"].startswith(prefix + "-")
+            and isinstance(entry["updated"], str)
+            and isinstance(entry["done"], bool)
+            and (entry["outcome"] is None or isinstance(entry["outcome"], str))
+        )
+        if not ok:
+            raise bad(f"entry {index} is {entry!r}")
+    return snapshot
 
 
 def freeze(tasks, root, prefix, path):
@@ -1511,8 +1685,13 @@ def apply(tasks, root, path, snapshot, report):
             continue
         code, stdout, stderr = run(tasks, root, "show", entry["id"])
         if code != 0:
-            entry.update(done=True, outcome="changed: record not readable")
-            report["changed"].append({"id": entry["id"], "detail": stderr.strip()})
+            if error_kind(stderr) == "task_not_found":
+                entry.update(done=True, outcome="changed: record gone")
+                report["changed"].append({"id": entry["id"], "detail": "record gone"})
+            else:
+                # Operational: stays pending so the next run retries it.
+                entry["outcome"] = f"failed: show: {stderr.strip()}"
+                report["failed"].append({"id": entry["id"], "detail": f"show: {stderr.strip()}"})
             save(path, snapshot)
             continue
         task = json.loads(stdout)["task"]
@@ -1523,10 +1702,16 @@ def apply(tasks, root, path, snapshot, report):
             report["changed"].append({"id": entry["id"], "detail": detail})
             save(path, snapshot)
             continue
-        code, _, stderr = run(tasks, root, "edit", entry["id"], "--reviewed")
+        code, stdout, stderr = run(tasks, root, "edit", entry["id"], "--reviewed")
         if code == 0:
             entry.update(done=True, outcome="set")
             report["set"].append(entry["id"])
+            # The record is written either way; a missing commit is the operator's to
+            # recover (`tasks commit`) before writers resume, never a reason to rewrite.
+            for warning in json.loads(stdout).get("warnings", []):
+                if warning.startswith(("commit_failed:", "commit_deferred:")):
+                    entry["outcome"] = f"set; {warning}"
+                    report["uncommitted"].append({"id": entry["id"], "warning": warning})
         else:
             entry["outcome"] = f"failed: {stderr.strip()}"
             report["failed"].append({"id": entry["id"], "detail": stderr.strip()})
@@ -1548,9 +1733,9 @@ def main():
         prefix = read_json(args.tasks, args.root, "prime")["prefix"]
         path = os.path.join(args.state, f"{prefix}.json")
         os.makedirs(args.state, exist_ok=True)
-        report = {"prefix": prefix, "frozen": False, "set": [], "changed": [], "failed": [], "remaining": 0}
+        report = {"prefix": prefix, "frozen": False, "set": [], "changed": [], "failed": [], "uncommitted": [], "remaining": 0}
         if os.path.exists(path):
-            snapshot = load(path)
+            snapshot = load(path, prefix)
         else:
             if args.writers_paused:
                 held = live_claims(args.tasks, args.root, prefix)
@@ -1569,7 +1754,7 @@ def main():
             apply(args.tasks, args.root, path, snapshot, report)
         report["remaining"] = sum(1 for e in snapshot["entries"] if not e["done"])
         print(json.dumps(report, indent=1))
-        return 1 if report["failed"] else 0
+        return 1 if report["failed"] or report["uncommitted"] else 0
     except Usage as error:
         print(str(error), file=sys.stderr)
         return 2
@@ -1600,7 +1785,7 @@ git commit -m "feat(review): add the one-time reviewed backfill tool"
 These change live state across hosts. Each step that touches a host other than this one, or writes real records, is confirmed with the user at the time.
 
 1. **Writer pause, merge, binaries.** Pause scope and curate passes and other agent sessions that write task records, on every host that reads synced task records. Merge the branch to main. Run `cargo install --path .` on this host, then on each other reading host (in its synced main checkout once the merge has arrived there). On each host confirm `tasks note --help` lists `--no-reviewed`. The skills are symlinks into the main checkout, so they go live with the merge; the pause covers the window until both binaries are installed (spec §7.0).
-2. **Backfill, per registered project.** With writers still paused: on each host, `tasks claims` shows no live claim in the project; the operator confirms every other writer is paused. Then `tools/review-backfill --state ~/.local/state/tasks/review-backfill --root <project root> --writers-paused`. Read the report: `set`, `changed`, `failed`. Rerun after fixing any `failed` entry, under the same pause. A project without `[git] commit` gets one `chore(tasks): backfill reviewed on ideas` commit of its `tasks/` changes; a project with `[git] commit = true` commits each edit as the CLI does.
-3. **Resume writers.** Resume the paused sessions.
+2. **Backfill, per registered project.** With writers still paused: on each host, `tasks claims` shows no live claim in the project; the operator confirms every other writer is paused. Then `tools/review-backfill --state ~/.local/state/tasks/review-backfill --root <project root> --writers-paused`. Read the report: `set`, `changed`, `failed`, `uncommitted`. Rerun after fixing any `failed` entry, under the same pause. A project without `[git] commit` gets one `chore(tasks): backfill reviewed on ideas` commit of its `tasks/` changes; a project with `[git] commit = true` commits each edit as the CLI does.
+3. **Commits.** If any pass reported `uncommitted`, run `tasks commit` in that project and confirm `git status` shows the records committed before resuming writers.
 4. **Old wakers.** Run `tasks search "Ideas it wakes" --all-projects` and record the count of open research tasks still carrying the plain-note wording on the implementation task (spec §7.3). Their bodies are not rewritten.
-5. **Close out.** Note the approved finding on tasks-e34b99 (`--no-reviewed`, since it wakes it) and update `docs/notes/2026-09-30-work-selection-brief.md` in the same commit (tasks-a9b8d3's "Ideas it wakes").
+5. **Resume writers.** Resume the paused sessions only after steps 2–3 are clean on every project.
