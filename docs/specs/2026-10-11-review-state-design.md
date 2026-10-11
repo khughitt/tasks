@@ -77,10 +77,16 @@ new.
   dropped or moved loses the flag, and a task that comes back to `idea` (unshelve,
   `edit --status idea`) arrives unreviewed. That is intended: a shelf's wake condition
   firing, or a task demoted to an idea, is new evidence that warrants a fresh look.
-- **`check` reports `reviewed` on a non-idea** as a finding. Only a hand edit outside
-  the binary can produce it. The editor path (`tasks edit <id>` with no flags) parses
-  before `transition()` runs, so as with `completed`, the parse accepts it and the
-  transition clears it.
+- **The editor path follows the same rule.** `tasks edit <id>` with no flags parses
+  the saved text before deciding whether the status changed, so the parse accepts
+  `reviewed` on any status. When the save changes the status, `transition()` clears
+  the flag, as the flag forms do. When the status is unchanged, `transition()` does
+  not run (`src/commands/edit.rs`, the `status == original.status` branch), so that
+  branch refuses a non-idea that carries `reviewed`, with the same validation error
+  as the flag forms, and keeps the edited text for retry as other editor refusals do.
+  On an idea, a same-status save may add or remove the flag.
+- **`check` reports `reviewed` on a non-idea** as a finding. With the write paths and
+  the editor refusing it, only a hand edit outside the binary can produce it.
 
 ### 3.3 Setting and clearing
 
@@ -153,6 +159,26 @@ emphasis style. Every caller of `task_columns` (`list`, `ready`, `search`, `samp
 `prime` sections, `tree`, the lanes view) gets the column through the shared
 `task_row`, so the views cannot disagree.
 
+### 5.4 Parked views
+
+`list --parked` and `prime`'s parked section render `ParkedRow` through
+`parked_columns` and `parked_row`, not `task_columns`, so they get the marker
+separately:
+
+- `ParkedRow` gains `reviewed: Option<bool>` and `needs_review: Option<bool>`, filled
+  from the record by `ParkedRow::resolved` and `None` on an unresolved row
+  (`ParkedRow::unresolved`), like the row's other record-derived fields. In JSON both
+  are present when the record resolved and omitted when it did not.
+- `parked_columns` gains the same leading one-character column, reserved under the
+  same any-row rule. An unresolved row shows a space: with no record there is nothing
+  to judge.
+- `--parked --needs-review` filters through `Fields::of_row`, which gains
+  `needs_review`. An unresolved row has no `Fields`, and the existing rule in
+  `list_parked` already hides such a row whenever any filter is set; this design
+  keeps that rule.
+
+### 5.5 Show
+
 `show` adds a `reviewed  yes` overview row on a reviewed idea, next to the existing
 `lane` and `parallel` rows. An unassessed todo already shows `process: unassessed`.
 
@@ -171,6 +197,22 @@ emphasis style. Every caller of `task_columns` (`list`, `ready`, `search`, `samp
   so repeated reviews need no richer type.
 
 ## 7. Rollout
+
+### 7.0 Every reading host first
+
+The record parser rejects unknown frontmatter keys (`src/format.rs`, `KEYS`), so a
+binary built before this change cannot read a record carrying `reviewed: true`. Task
+records sync between hosts, so the first such write on one host would break `tasks`
+on every host still running an older binary.
+
+The first write of the flag on any project (a `note --reviewed`, an
+`edit --reviewed`, an editor save, or the backfill) therefore waits until every host
+that reads synced task records runs the new binary. The plan names the hosts and
+checks each one's `tasks --version` (or the installed binary's build) before that
+first write. The skills that write the flag (§7.1) are installed on a host only
+after its binary. The README states the constraint beside the existing one for
+`move`: "Older binaries cannot parse records carrying `reviewed`: update every host
+reading synced tasks before the first review write."
 
 ### 7.1 Skills
 
@@ -195,13 +237,21 @@ Without a backfill, every briefed idea would show `*` and the column would misle
 from the first day. The backfill runs once per registered project, after the binary
 and skills ship, as an operator step in the plan. It uses only the CLI:
 
-- For each open idea whose latest note starts with `scope:`, or is a `curate:` or
-  `scope:` note carrying a pending `proposal:` (today's eligibility rule), run
-  `tasks edit <id> --reviewed`.
-- It only ever sets the flag, so a rerun changes nothing new. An idea readmitted
-  since the first run has a newer note that is not a scope note, so a rerun leaves
-  it unreviewed.
-- It skips a live-claimed idea and reports it, like any edit would refuse.
+- **Ledger.** The backfill keeps one ledger per project outside the project
+  checkouts (the plan names the path, under the operator's state directory): the ids
+  it has already set. An id enters the ledger only after its `tasks edit <id>
+  --reviewed` succeeded.
+- **Candidates.** An open idea is a candidate when it is not in the ledger, its
+  `reviewed` is false, and its latest note starts with `scope:` or is a `curate:` or
+  `scope:` note carrying a pending `proposal:` (today's eligibility rule). For each
+  candidate it runs `tasks edit <id> --reviewed`.
+- **Reruns.** A rerun retries only candidates, so it never rewrites a record that is
+  already reviewed and never bumps `updated` twice. An idea readmitted after the
+  first run is in the ledger, so a rerun leaves it unreviewed whether it was
+  readmitted with a note (`note --no-reviewed`) or without one
+  (`edit --no-reviewed`, whose latest note can still be the old `scope:` note).
+- It skips a live-claimed idea and reports it, like any edit would refuse; that idea
+  stays out of the ledger and is retried on the next run.
 - Each project's writes land in one `chore(tasks)` commit in that project.
 
 The writes bump `updated` on the backfilled ideas. That keeps them out of curate's
@@ -237,22 +287,32 @@ Tests in `tests/cli.rs` and the record/model unit tests, without new tooling:
    loses the flag. Unshelve and `edit --status idea` return it unreviewed.
    `edit --reviewed` and `note --reviewed` on a todo fail and leave the file
    byte-identical.
-8. **Todos:** a leaf todo without process is marked; setting `--process` clears the
+8. **Editor:** a same-status editor save that adds `reviewed` to a todo is refused
+   and the file is unchanged; an editor save that moves a reviewed idea to todo
+   drops the flag; a same-status save on an idea may add or remove it.
+9. **Todos:** a leaf todo without process is marked; setting `--process` clears the
    mark; a goal todo without process is not marked; a doing task without process is
    not marked; a blocked leaf without process is marked.
-9. **Agreement:** for one fixture project, the ids with `*` in `list --pretty`, the
+10. **Agreement:** for one fixture project, the ids with `*` in `list --pretty`, the
    ids with `needs_review: true` in JSON, and the ids returned by `--needs-review` are
    the same set, in `list`, `ready` and `tree`.
-10. **Column reservation:** a listing with no marked row renders exactly as before
+11. **Column reservation:** a listing with no marked row renders exactly as before
     (no leading column); one marked row reserves it for all rows.
-11. **Check:** a hand-written `reviewed: true` on a todo is a `check` finding.
-12. **Guards:** on a task live-claimed by another session, and from a stale copy,
+12. **Check:** a hand-written `reviewed: true` on a todo is a `check` finding.
+13. **Guards:** on a task live-claimed by another session, and from a stale copy,
     `note --reviewed` behaves exactly as a plain `note` does today and
     `edit --reviewed` exactly as another `edit` flag does: same refusal or same
     success, with the flag written only when the write itself succeeds.
-13. **Backfill rerun:** in a fixture project, running the backfill twice gives the
-    same records as running it once, and an idea readmitted between runs stays
-    unreviewed.
+14. **Backfill rerun:** in a fixture project, a second run rewrites no record (byte-
+    identical files, unchanged `updated`); an idea readmitted between runs with
+    `note --no-reviewed`, and one readmitted with `edit --no-reviewed` while its
+    latest note is still `scope:`, both stay unreviewed; an idea skipped for a live
+    claim on the first run is set on the second.
+15. **Parked agreement:** for a fixture with a parked unreviewed idea, a parked
+    reviewed idea and an unresolved park, `list --parked --pretty` marks only the
+    first; JSON carries `needs_review: true`, `false` and no field respectively;
+    `--parked --needs-review` returns only the first; `prime`'s parked section marks
+    the same row.
 
 ## 9. Out of scope
 
