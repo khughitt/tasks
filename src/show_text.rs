@@ -240,6 +240,9 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     if t.parallel {
         rows.push(("parallel", vec![Span::plain("yes")]));
     }
+    if t.reviewed {
+        rows.push(("reviewed", vec![Span::plain("yes")]));
+    }
     if !t.needs.is_empty() {
         rows.push(("needs", vec![Span::plain(t.needs.join(", "))]));
     }

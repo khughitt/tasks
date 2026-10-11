@@ -151,12 +151,14 @@ the scope pass, and nothing else selects by the flag.
 
 ### 5.3 Pretty tables
 
-`task_columns` gains a one-character column ahead of `id`, holding `*` for a row that
-needs review and a space otherwise. Like `||` and `type`, it is reserved only when at
-least one row in the output needs it (`any_needs_review`, `any_needs_review_tree`),
-so a fully reviewed listing renders as today. The header is `*`. The mark uses the
-emphasis style. Every caller of `task_columns` (`list`, `ready`, `search`, `sample`,
-`prime` sections, `tree`, the lanes view) gets the column through the shared
+`task_row` gains a two-character prefix of the id cell, `* ` for a row that needs
+review and two spaces otherwise. Like `||` and `type`, it is reserved only when at
+least one row in the output needs it (`Marks::of`, `Marks::of_tree`),
+so a fully reviewed listing renders as today. The id column keeps its header;
+`prime` shares the id width across its sections through column 0 and `tree` already
+indents inside the id cell, so a prefix keeps both intact. The mark uses the emphasis
+style. Every caller of `task_columns` (`list`, `ready`, `search`, `sample`,
+`prime` sections, `tree`) gets the prefix through the shared
 `task_row`, so the views cannot disagree.
 
 ### 5.4 Parked views
@@ -169,9 +171,8 @@ separately:
   from the record by `ParkedRow::resolved` and `None` on an unresolved row
   (`ParkedRow::unresolved`), like the row's other record-derived fields. In JSON both
   are present when the record resolved and omitted when it did not.
-- `parked_columns` gains the same leading one-character column, reserved under the
-  same any-row rule. An unresolved row shows a space: with no record there is nothing
-  to judge.
+- `parked_row` gains the same id-cell prefix, reserved under the same any-row rule.
+  An unresolved row shows two spaces: with no record there is nothing to judge.
 - `--parked --needs-review` filters through `Fields::of_row`, which gains
   `needs_review`. An unresolved row has no `Fields`, and the existing rule in
   `list_parked` already hides such a row whenever any filter is set; this design

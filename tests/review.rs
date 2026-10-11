@@ -478,3 +478,93 @@ fn parked_rows_carry_needs_review_and_filter_on_it() {
         .collect();
     assert_eq!(filtered, [unreviewed]);
 }
+
+/// The first two characters of each pretty row that names `id`.
+fn prefix_of(pretty: &str, id: &str) -> String {
+    let line = pretty
+        .lines()
+        .find(|l| l.contains(id))
+        .unwrap_or_else(|| panic!("{id} not in:\n{pretty}"));
+    line.chars().take(2).collect()
+}
+
+#[test]
+fn pretty_list_marks_exactly_the_rows_json_marks() {
+    let mut env = TestEnv::new();
+    let (dir, marked, unmarked) = mixed_project(&mut env);
+    let pretty = env.pretty(&dir, &["list"]);
+    for id in &marked {
+        assert_eq!(prefix_of(&pretty, id), "* ", "{id}:\n{pretty}");
+    }
+    for id in &unmarked {
+        assert_eq!(prefix_of(&pretty, id), "  ", "{id}:\n{pretty}");
+    }
+    let ready = env.pretty(&dir, &["ready"]);
+    assert_eq!(prefix_of(&ready, &marked[1]), "* ");
+    let tree = env.pretty(&dir, &["tree"]);
+    assert_eq!(prefix_of(&tree, &marked[0]), "* ");
+}
+
+#[test]
+fn a_fully_reviewed_listing_renders_without_the_prefix() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "A", "--process", "direct"]));
+    let pretty = env.pretty(&dir, &["list"]);
+    assert!(pretty.starts_with(&id), "{pretty}");
+}
+
+#[test]
+fn the_mark_stays_left_of_a_tree_indent() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    let child = id_of(env.json(&dir, &["add", "Child", "--parent", &goal]));
+    let tree = env.pretty(&dir, &["tree"]);
+    let line = tree.lines().find(|l| l.contains(&child)).unwrap();
+    assert!(line.starts_with(&format!("*   {child}")), "{tree}");
+    assert!(
+        tree.lines()
+            .find(|l| l.contains(&goal))
+            .unwrap()
+            .starts_with(&format!("  {goal}"))
+    );
+}
+
+#[test]
+fn parked_views_mark_the_same_rows_as_their_json() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let unreviewed = id_of(env.json(&dir, &["add", "U", "--status", "idea"]));
+    let reviewed_idea = id_of(env.json(&dir, &["add", "R", "--status", "idea"]));
+    env.json(
+        &dir,
+        &["note", &reviewed_idea, "--reviewed", "scope: briefed"],
+    );
+    write_park(&env, "sci", &unreviewed);
+    write_park(&env, "sci", &reviewed_idea);
+    write_park(&env, "sci", "sci-abcdef");
+    let parked = env.pretty(&dir, &["list", "--parked"]);
+    assert_eq!(prefix_of(&parked, &unreviewed), "* ");
+    assert_eq!(prefix_of(&parked, &reviewed_idea), "  ");
+    assert_eq!(prefix_of(&parked, "sci-abcdef"), "  ");
+    let prime = env.pretty(&dir, &["prime"]);
+    let section = prime.split("parked:").nth(1).unwrap();
+    assert_eq!(prefix_of(section, &unreviewed), "* ");
+}
+
+#[test]
+fn show_names_a_reviewed_idea() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    assert!(!env.pretty(&dir, &["show", &id]).contains("reviewed"));
+    env.json(&dir, &["note", &id, "--reviewed", "scope: briefed"]);
+    let shown = env.pretty(&dir, &["show", &id]);
+    assert!(
+        shown
+            .lines()
+            .any(|l| l.starts_with("reviewed") && l.trim_end().ends_with("yes")),
+        "{shown}"
+    );
+}

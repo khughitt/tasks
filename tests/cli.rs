@@ -1632,7 +1632,7 @@ fn ordinary_pretty_tables_mark_a_quiet_park_until_it_is_resumed_or_reparked() {
     };
     let row = |text: String| -> String {
         text.lines()
-            .find(|line| line.starts_with(&id))
+            .find(|line| line.starts_with(&id) || line.starts_with(&format!("* {id}")))
             .unwrap_or_else(|| panic!("no row for {id} in {text}"))
             .to_string()
     };
@@ -1645,7 +1645,11 @@ fn ordinary_pretty_tables_mark_a_quiet_park_until_it_is_resumed_or_reparked() {
         "--minutes",
         "40",
     ]);
-    assert!(row(env.pretty(&sci, &["list"])).contains(idle));
+    let listed = row(env.pretty(&sci, &["list"]));
+    assert!(
+        listed.starts_with(&format!("* {id}")) && listed.contains(idle),
+        "{listed}"
+    );
     let prime = env.pretty(&sci, &["prime"]);
     let roadmap = &prime[prime.find("roadmap:").unwrap()..prime.find("parked:").unwrap()];
     assert!(row(roadmap.to_string()).contains(idle), "{prime}");
@@ -27547,7 +27551,11 @@ fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
             .args(args)
             .output()
             .unwrap();
-        assert!(out.status.success(), "{args:?}");
+        assert!(
+            out.status.success(),
+            "COLUMNS={width} {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8(out.stdout).unwrap()
     };
     for width in ["80", "120", "236"] {

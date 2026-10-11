@@ -58,6 +58,19 @@ pub fn row_id(id: &str, project: Option<Rgb>) -> Span {
     }
 }
 
+/// The review prefix of an id cell: marked, reserved, or absent.
+pub fn review_mark(needs_review: bool, reserved: bool) -> Span {
+    let text = match (reserved, needs_review) {
+        (false, _) => "",
+        (true, true) => "* ",
+        (true, false) => "  ",
+    };
+    Span {
+        text: text.into(),
+        style: needs_review.then_some(Style::Emphasis),
+    }
+}
+
 /// A title in a row: the project's color when it has one, else plain.
 pub fn title(title: &str, project: Option<Rgb>) -> Span {
     Span {
