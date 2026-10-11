@@ -60,21 +60,247 @@ fn every_status_transition_clears_reviewed() {
     assert!(!reviewed(&env, &dir, &id));
 }
 
+fn transaction_state(
+    env: &TestEnv,
+    projects: &[&Path],
+) -> std::collections::BTreeMap<std::path::PathBuf, Option<Vec<u8>>> {
+    fn collect(
+        path: &Path,
+        state: &mut std::collections::BTreeMap<std::path::PathBuf, Option<Vec<u8>>>,
+    ) {
+        if path.is_dir() {
+            state.insert(path.to_path_buf(), None);
+            for entry in std::fs::read_dir(path).unwrap() {
+                collect(&entry.unwrap().path(), state);
+            }
+        } else if path.exists() {
+            state.insert(path.to_path_buf(), Some(std::fs::read(path).unwrap()));
+        }
+    }
+    let mut state = std::collections::BTreeMap::new();
+    for project in projects {
+        collect(&project.join("tasks"), &mut state);
+    }
+    for relative in [
+        ".config/tasks/projects.toml",
+        ".local/state/tasks/move",
+        ".local/state/tasks/rename",
+    ] {
+        collect(&env.home.path().join(relative), &mut state);
+    }
+    state
+}
+
+fn refuse_review_write(env: &TestEnv, project: &Path, args: &[&str]) {
+    let output = env.cmd(project).args(args).output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("only an idea carries reviewed")
+    );
+}
+
+fn attach_review_fixture(env: &TestEnv, project: &Path, id: &str) {
+    let file = project.join("payload.txt");
+    std::fs::write(&file, b"preserve these bytes").unwrap();
+    env.json(project, &["attach", id, file.to_str().unwrap()]);
+}
+
+fn review_digest(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(text.as_bytes()))
+}
+
 #[test]
-fn a_moved_idea_leaves_an_unreviewed_tombstone_and_a_reviewed_destination() {
+fn fresh_move_refuses_reviewed_todo_without_transaction_writes() {
     let mut env = TestEnv::new();
     let source = env.init("dots");
-    env.init("wali");
-    let id = id_of(env.json(&source, &["add", "I", "--status", "idea"]));
+    let destination = env.init("wali");
+    let id = id_of(env.json(&source, &["add", "T"]));
+    attach_review_fixture(&env, &source, &id);
     seed_reviewed(&source, &id);
-    let moved = id_of(env.json(&source, &["move", &id, "--to", "wali"]));
-    let tombstone = env.json(&source, &["show", &id]);
-    assert_eq!(tombstone["task"]["status"], "moved");
-    assert_eq!(tombstone["task"]["reviewed"], false);
-    assert_eq!(
-        env.json(&source, &["show", &moved])["task"]["reviewed"],
-        true
-    );
+    assert!(reviewed(&env, &source, &id)); // Invalid records remain readable.
+    let before = transaction_state(&env, &[&source, &destination]);
+    refuse_review_write(&env, &source, &["move", &id, "--to", "wali"]);
+    assert_eq!(transaction_state(&env, &[&source, &destination]), before);
+}
+
+#[test]
+fn resumed_move_refuses_reviewed_todo_without_transaction_writes() {
+    for stop in ["journal", "destination"] {
+        let mut env = TestEnv::new();
+        let source = env.init("dots");
+        let destination = env.init("wali");
+        let id = id_of(env.json(&source, &["add", "I", "--status", "idea"]));
+        attach_review_fixture(&env, &source, &id);
+        seed_reviewed(&source, &id);
+        env.cmd(&source)
+            .env("TASKS_MOVE_STOP_AFTER", stop)
+            .args(["move", &id, "--to", "wali"])
+            .assert()
+            .success();
+        // Model a coherent journal published by a writer without the review invariant.
+        let path = env
+            .home
+            .path()
+            .join(format!(".local/state/tasks/move/{id}.toml"));
+        let mut journal: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for key in ["source_text", "target_text"] {
+            journal[key] = toml::Value::String(
+                journal[key]
+                    .as_str()
+                    .unwrap()
+                    .replace("status: idea", "status: todo"),
+            );
+        }
+        journal["source_digest"] =
+            toml::Value::String(review_digest(journal["source_text"].as_str().unwrap()));
+        std::fs::write(
+            source.join(format!("tasks/{id}.md")),
+            journal["source_text"].as_str().unwrap(),
+        )
+        .unwrap();
+        let target = journal["target"].as_str().unwrap();
+        if stop == "destination" {
+            std::fs::write(
+                destination.join(format!("tasks/{target}.md")),
+                journal["target_text"].as_str().unwrap(),
+            )
+            .unwrap();
+        }
+        std::fs::write(&path, toml::to_string(&journal).unwrap()).unwrap();
+        let before = transaction_state(&env, &[&source, &destination]);
+        refuse_review_write(&env, &source, &["move", &id, "--to", "wali"]);
+        assert_eq!(
+            transaction_state(&env, &[&source, &destination]),
+            before,
+            "{stop}"
+        );
+    }
+}
+
+#[test]
+fn fresh_rename_refuses_reviewed_todo_without_transaction_writes() {
+    let mut env = TestEnv::new();
+    let source = env.init("dots");
+    let id = id_of(env.json(&source, &["add", "T"]));
+    attach_review_fixture(&env, &source, &id);
+    seed_reviewed(&source, &id);
+    let before = transaction_state(&env, &[&source]);
+    refuse_review_write(&env, &source, &["rename", "dots", "wali"]);
+    assert_eq!(transaction_state(&env, &[&source]), before);
+}
+
+#[test]
+fn resumed_rename_refuses_reviewed_todo_without_transaction_writes() {
+    for stop in ["config", "inventory", "file:0", "files", "registry"] {
+        let mut env = TestEnv::new();
+        let source = env.init("dots");
+        let id = id_of(env.json(&source, &["add", "I", "--status", "idea"]));
+        attach_review_fixture(&env, &source, &id);
+        seed_reviewed(&source, &id);
+        env.cmd(&source)
+            .env("TASKS_RENAME_STOP_AFTER", stop)
+            .args(["rename", "dots", "wali"])
+            .assert()
+            .success();
+        let old = source.join(format!("tasks/{id}.md"));
+        let new_id = id.replace("dots-", "wali-");
+        let new = source.join(format!("tasks/{new_id}.md"));
+        let text = std::fs::read_to_string(if old.exists() { &old } else { &new }).unwrap();
+        let old_text = text
+            .replace("status: idea", "status: todo")
+            .replace(&format!("id: {new_id}"), &format!("id: {id}"));
+        let new_text = old_text.replace(&format!("id: {id}"), &format!("id: {new_id}"));
+        if old.exists() {
+            std::fs::write(&old, &old_text).unwrap();
+        }
+        if new.exists() {
+            std::fs::write(&new, &new_text).unwrap();
+        }
+        // Keep the old writer's inventory consistent with its invalid records.
+        let path = env.home.path().join(".local/state/tasks/rename/dots.toml");
+        let mut inventory: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        inventory["entries"][0]["from"] = toml::Value::String(review_digest(&old_text));
+        inventory["entries"][0]["to"] = toml::Value::String(review_digest(&new_text));
+        std::fs::write(&path, toml::to_string(&inventory).unwrap()).unwrap();
+        let before = transaction_state(&env, &[&source]);
+        refuse_review_write(&env, &source, &["rename", "dots", "wali"]);
+        assert_eq!(transaction_state(&env, &[&source]), before, "{stop}");
+    }
+}
+
+#[test]
+fn a_moved_idea_leaves_an_unreviewed_tombstone_and_a_reviewed_destination() {
+    for stop in [
+        None,
+        Some("journal"),
+        Some("destination"),
+        Some("tombstone"),
+    ] {
+        let mut env = TestEnv::new();
+        let source = env.init("dots");
+        let destination = env.init("wali");
+        let id = id_of(env.json(&source, &["add", "I", "--status", "idea"]));
+        attach_review_fixture(&env, &source, &id);
+        seed_reviewed(&source, &id);
+        if let Some(stop) = stop {
+            env.cmd(&source)
+                .env("TASKS_MOVE_STOP_AFTER", stop)
+                .args(["move", &id, "--to", "wali"])
+                .assert()
+                .success();
+        }
+        let moved = id_of(env.json(&source, &["move", &id, "--to", "wali"]));
+        let tombstone = env.json(&source, &["show", &id]);
+        assert_eq!(tombstone["task"]["status"], "moved");
+        assert_eq!(tombstone["task"]["reviewed"], false);
+        assert!(reviewed(&env, &destination, &moved));
+        assert_eq!(
+            env.read(&destination, &format!("tasks/files/{moved}/payload.txt")),
+            "preserve these bytes"
+        );
+        env.check(&source);
+        env.check(&destination);
+    }
+}
+
+#[test]
+fn a_renamed_idea_keeps_reviewed() {
+    for stop in [
+        None,
+        Some("inventory"),
+        Some("file:0"),
+        Some("config"),
+        Some("registry"),
+    ] {
+        let mut env = TestEnv::new();
+        let source = env.init("dots");
+        let id = id_of(env.json(&source, &["add", "I", "--status", "idea"]));
+        attach_review_fixture(&env, &source, &id);
+        seed_reviewed(&source, &id);
+        if let Some(stop) = stop {
+            env.cmd(&source)
+                .env("TASKS_RENAME_STOP_AFTER", stop)
+                .args(["rename", "dots", "wali"])
+                .assert()
+                .success();
+        }
+        env.json(&source, &["rename", "dots", "wali"]);
+        let renamed = id.replace("dots-", "wali-");
+        assert!(reviewed(&env, &source, &renamed));
+        assert_eq!(
+            env.read(&source, &format!("tasks/files/{renamed}/payload.txt")),
+            "preserve these bytes"
+        );
+        env.check(&source);
+    }
 }
 
 #[test]

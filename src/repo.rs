@@ -875,6 +875,7 @@ impl Project {
         task: &mut Task,
         mut candidate: impl FnMut() -> u32,
     ) -> Result<()> {
+        crate::review::validate(task)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
         crate::hierarchy::validate_lanes(self, registry, task)?;
         // A new record has no children, so these refuse only a lane.
@@ -904,6 +905,7 @@ impl Project {
     /// Create the journal's reserved id exclusively; never redraw it on a collision.
     pub fn create_task_exact(&self, registry: &Registry, task: &Task) -> Result<()> {
         crate::format::validate_task(task)?;
+        crate::review::validate(task)?;
         self.validate_docs(task)?;
         crate::needs::require_declared(&self.needs, &task.needs)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
@@ -1281,6 +1283,48 @@ mod tests {
                 .to_string_lossy()
                 .ends_with(".tmp")
         }));
+    }
+
+    #[test]
+    fn create_task_refuses_reviewed_non_ideas_before_creating_files() {
+        let (_dir, p) = temp_project();
+        let registry = Registry::default();
+        let mut task = sample(&p);
+        task.reviewed = true;
+        assert!(matches!(
+            p.create_task(&registry, &mut task),
+            Err(Error::Validation(_))
+        ));
+        assert!(!p.task_path(&task.id).exists());
+        assert!(
+            std::fs::read_dir(p.tasks_dir())
+                .unwrap()
+                .all(|entry| entry.unwrap().file_name() == ".config.toml")
+        );
+        task.status = Status::Idea;
+        p.create_task(&registry, &mut task).unwrap();
+        assert_eq!(p.read_task(&task.id).unwrap(), task);
+    }
+
+    #[test]
+    fn create_task_exact_refuses_reviewed_non_ideas_before_creating_files() {
+        let (_dir, p) = temp_project();
+        let registry = Registry::default();
+        let mut task = sample(&p);
+        task.reviewed = true;
+        assert!(matches!(
+            p.create_task_exact(&registry, &task),
+            Err(Error::Validation(_))
+        ));
+        assert!(!p.task_path(&task.id).exists());
+        assert!(
+            std::fs::read_dir(p.tasks_dir())
+                .unwrap()
+                .all(|entry| entry.unwrap().file_name() == ".config.toml")
+        );
+        task.status = Status::Idea;
+        p.create_task_exact(&registry, &task).unwrap();
+        assert_eq!(p.read_task(&task.id).unwrap(), task);
     }
 
     #[test]

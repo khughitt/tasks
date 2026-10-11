@@ -138,6 +138,12 @@ pub fn run(registry: &mut Registry, invocation: &Invocation, explain: bool) -> R
     }
     let project = Project::open(&invocation.root)?;
     authorize(&project, invocation, &mut out.warnings)?;
+    if recovery != Recovery::Fresh {
+        // Resumed records may already use the target prefix and skip the file-write pass.
+        for path in inventory::task_paths(&project.tasks_dir())? {
+            inventory::validate_task_file(&path, &std::fs::read_to_string(&path)?)?;
+        }
+    }
     let inventory = if recovery == Recovery::Fresh {
         crate::commands::reject_pending_operations(Some(&project.root), &invocation.source)?;
         crate::commands::reject_pending_operations(None, &invocation.target)?;
