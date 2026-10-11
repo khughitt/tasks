@@ -966,7 +966,7 @@ and the real-wrapper pilot contract to `ops-721511` after this task closes.
 This operational task does not imply approval to alter host binaries/configuration,
 push, publish, change profile rules or open a live desktop window.
 
-- [ ] **1. Present the concrete live-install action for approval.** Name the verified
+- [x] **1. Present the concrete live-install action for approval.** Name the verified
   commit/binary/hash, actual executable resolution on each host, destinations and
   how to restore the prior binary. The binary smoke and branch review must already
   be complete. Recheck registered projects' configured doc roots and existing
@@ -975,7 +975,7 @@ push, publish, change profile rules or open a live desktop window.
   If the second host is unavailable, park with the named host check
   as the agent's next action; retain the worktree and root task open.
 
-- [ ] **2. Install the approved binary on both hosts, then verify host-config order.**
+- [x] **2. Install the approved binary on both hosts, then verify host-config order.**
   Install a standalone binary, never a launcher/symlink pointing into this worktree.
   Use the normal Cargo destination and existing host controls, not a new installer.
   For a compatible second host, use the same reviewed artifact; if it must rebuild,
@@ -985,7 +985,7 @@ push, publish, change profile rules or open a live desktop window.
   `ops-721511` add its scheme table in its later rollout. Do not add that table in
   this task. Remove it before any old-binary rollback if ops has since installed it.
 
-- [ ] **3. Record the real-wrapper activation handoff on ops.** The wrapper is
+- [x] **3. Record the real-wrapper activation handoff on ops.** The wrapper is
   absent at planning time, so no live mindful integration success is claimed here.
   `ops-721511` depends on this task and `mind6-646ca1`; requiring its completed
   pilot here would create a cycle. This step passes the evidence/requirements,
@@ -1005,7 +1005,7 @@ push, publish, change profile rules or open a live desktop window.
   Explicit body reads and changed-link writes remain strict. Test a provider
   outage with the isolated fixture, not by shutting down the user's live service.
 
-- [ ] **4. Record the completion boundary accurately and integrate locally.** Both
+- [x] **4. Record the completion boundary accurately and integrate locally.** Both
   host binary installations are required to close `tasks-91f63b`. If ops's wrapper
   pilot remains pending, note that the binary is ready but external workflow
   activation remains owned by `ops-721511`; no first real external link is written

@@ -1,15 +1,16 @@
 ---
 id: tasks-91f63b
 title: "External document references: scheme-prefixed plan/spec, fetched per scheme from host config"
-status: doing
+status: done
 priority: 1
 size: l
 complexity: high
 process: planned
 owner: feat/tasks-91f63b-external-docs
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-11T16:04:51Z
+updated: 2026-10-11T16:52:42Z
 started: 2026-10-11T09:51:00Z
+completed: 2026-10-11T16:52:42Z
 depends: []
 tags: []
 source: "hq:docs/specs/2026-10-10-agent-docs-collection-design.md"
@@ -68,4 +69,13 @@ Implements §4 of the hq spec (spec round 4 accepted): plan/spec values whose fi
 - 2026-10-11T15:52:54Z (feat/tasks-91f63b-external-docs): review: impl round 1 — verdict: revise; findings: important 3; reviewer: codex/gpt-6-astra
 - 2026-10-11T16:02:28Z (feat/tasks-91f63b-external-docs): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
 - 2026-10-11T16:04:51Z (feat/tasks-91f63b-external-docs): parked (waiting on user, review): Keith: approve the pending both-host binary installation; then Codex resumes tasks-bcfe85 in .worktrees/tasks-91f63b-external-docs, installs the reviewed standalone artifact and verifies both hosts, records ops-721511 activation handoff, closes children/root, and merges locally.
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T16:45:08Z (feat/tasks-91f63b-external-docs): resumed
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T16:50:05Z (feat/tasks-91f63b-external-docs): attached: binary-installation-evidence.json (2281 bytes): Reviewed binary installation, hashes, both-host corpus/smoke verification and ops activation boundary
+- 2026-10-11T16:51:32Z (feat/tasks-91f63b-external-docs): detached: binary-installation-evidence.json: Replace own evidence JSON with neutral host keys; preserve actual host mapping in task notes to meet hygiene. Original bytes retained in execution workspace.
+- 2026-10-11T16:51:32Z (feat/tasks-91f63b-external-docs): attached: binary-installation-evidence.json (2419 bytes): Installation verification: host_1 is titan, host_2 is europa; both use the reviewed artifact
+- 2026-10-11T16:52:42Z (feat/tasks-91f63b-external-docs): done
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T16:52:42Z (feat/tasks-91f63b-external-docs): External plan/spec references implemented and accepted in implementation review round 2 after three RED→GREEN fixes. Fast suite 1375 passed, all production deadlines/lint/release smokes passed. Approved artifact fef13d3 SHA-256 b150cb229f76819a38b5d709d5baeefc776cd1be678131e986db225829b29fdb installed and verified on titan and europa; proof attached. ops-721511 owns mindful-doc/config and the required real-wrapper pilot before external workflow activation.
   provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
