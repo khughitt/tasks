@@ -1,6 +1,6 @@
 # External plan and spec references
 
-Status: draft for user review
+Status: revised after spec round 1; awaiting user review
 Task: `tasks-91f63b`
 Source: hq `docs/specs/2026-10-10-agent-docs-collection-design.md`, §3–§4
 (accepted in `hq-5a3e12`, spec round 4; its draft header is stale).
@@ -36,6 +36,8 @@ The present boundaries that need to change are:
 - `src/format.rs`: document shape and configured-root validation, reached by
   record parsing and `Project::validate_docs`.
 - `src/config.rs`: host config currently contains only the identity table.
+- `src/repo.rs::doc_root`: reserve a colon in the first segment for external
+  references, including at configured-root validation.
 - `src/resolve.rs`: bare-name/path resolution, `step_exists`, display paths and
   warnings for documents read from the main checkout.
 - `src/commands/mod.rs` and `edit.rs`: flag writes and editor saves;
@@ -70,6 +72,15 @@ config. `validate_doc_path` skips configured roots only for that form. Use one
 shared classifier at these boundaries and in the resolver; a malformed
 colon-bearing first segment cannot fall through to bare-name lookup.
 
+`doc_root` rejects a colon in the first segment of `spec_dirs` or `plan_dirs`
+with `Error::Config`; a later segment may contain one. This prevents a configured
+root such as `notes:x` from silently turning repository paths into external
+references. It tightens an existing permissive config rule. No registered
+project currently uses these roots, per the review's corpus check; recheck this
+before rollout. A conflicting custom root must be renamed before upgrading,
+rather than being reinterpreted. Default roots and stored ordinary paths retain
+their meaning.
+
 ### 3.2 Host configuration
 
 ```toml
@@ -98,8 +109,29 @@ struct Doc {
     body: String,
 }
 
-Resolver::read(kind: DocKind, value: &str) -> Result<Doc>
+enum UnavailableCause {
+    MissingScheme { scheme: String, config: PathBuf },
+    FetchFailed(String),
+    BudgetExhausted,
+}
+
+enum DocRead {
+    Available(Doc),
+    Unavailable { reference: String, cause: UnavailableCause },
+}
+
+Resolver::read(kind: DocKind, value: &str) -> Result<DocRead>
+DocRead::required(self) -> Result<Doc>
 ```
+
+`Ok(Unavailable)` represents an external document this host could not reach;
+it is never a substitute for a body. `Err` retains malformed/unreadable host
+config, invalid input and local I/O failures. Strict callers use `required`:
+`MissingScheme` maps to `Error::Config`, while `FetchFailed` and
+`BudgetExhausted` map to `Error::DocNotFound`, with reference and cause.
+`check` and descriptive reads consume the outcome directly and emit warnings.
+This internal distinction leaves existing public error kinds intact and avoids
+matching error text. Local-file reads never return `Unavailable`.
 
 For a stored repository path, use existing lookup followed by `read_to_string`;
 `reference` is the stored relative path. Preserve worktree-first lookup, the main
@@ -110,8 +142,9 @@ document. Keep the existing distinction between path resolution on writes
 
 For an external reference, run its configured fetcher and return the original
 scheme plus the canonical remainder returned by it, with the fetched body.
-`resolve_doc` preserves local path/name resolution; for an external input it
-uses the fetch result's `reference`. `step_exists` checks `read(Plan, value).body`.
+`resolve_doc` preserves local path/name resolution; for a changed external input
+it requires the fetch result and uses its `reference`. Strict `step_exists`
+checks the required body; `describe` uses `read` directly to handle unavailability.
 `abs` returns an external reference verbatim without fetching or adding a
 main-checkout warning.
 
@@ -144,34 +177,61 @@ Use a fixed 2 MiB stdout cap, the existing clipboard default, independent of
 project attachment settings. Retain only the first 200 bytes of stderr while
 draining the rest; render that prefix with lossy UTF-8 decoding. Read stdout and
 stderr concurrently, with bounded retention. Reuse the capped-read pattern but
-map overflow to `DocNotFound`, without attachment-specific diagnostics.
+report overflow as `Unavailable(FetchFailed)`, without attachment diagnostics.
 
-A 30-second monotonic deadline covers child execution and both pipe reads.
+A 30-second monotonic per-fetch deadline covers child execution and both pipe reads;
+an optional command budget can shorten it (§5.2).
 Putting the deadline after a blocking read is insufficient. Overflow, timeout,
-spawn/read failure and nonzero exit return `DocNotFound` identifying the
+spawn/pipe-read failure, invalid fetch JSON and nonzero exit return
+`Unavailable(FetchFailed)` identifying the
 reference and cause; include the bounded stderr prefix when available.
 
-On Unix, start the shell in its own process group. On failure terminate the
-group, wait for the direct child and finish both readers. On success terminate
-any remaining descendants before returning as well. A shell that exits
-while a descendant holds a pipe is still subject to the deadline. Finish cleanup
+On Unix, start the shell in its own process group. Once the shell exits, on
+success or failure, forcibly terminate remaining members of that group and
+finish both readers within the deadline. On exit 0, drain buffered stdout to
+EOF after terminating descendants, then validate the complete JSON; do not wait
+for a background child's natural exit. A valid complete response can therefore
+succeed even if a descendant had kept a pipe open. For overflow, deadline expiry
+or pipe failure while the shell is alive, terminate the group and wait for the
+direct child before finishing the readers. Finish cleanup
 before returning; the fetch protocol permits no surviving background jobs.
 Implement this locally with the standard library and existing `libc` dependency,
 without adding a generic subprocess framework or touching the clipboard runner.
 
-A missing configured scheme is `Error::Config` naming `[docs.schemes]`, the
-scheme and the host config location. Fetch failures use `Error::DocNotFound`.
-The consuming commands distinguish those expected availability failures from
-malformed host configuration and local I/O errors without parsing error strings.
+A missing configured scheme returns `Unavailable(MissingScheme)`, retaining
+`[docs.schemes]`, the scheme and the host config location for its strict error
+or warning. Malformed/unreadable host config remains `Err`, not an availability
+outcome. The typed split in §4.1 applies to cached outcomes as well.
 
 ## 5. Command behavior
 
 ### 5.1 Writes and movement
 
-Flag-based `add`/`edit` and editor saves fetch external links and store the
-canonical reference before writing. Editor validation currently discards
-`resolve_doc`'s return value; assign it back to `edited.spec`/`edited.plan`.
-Validate any step against the same fetched body. A failed fetch or missing
+`add` fetches supplied external links and stores canonical references before
+creating the record. For flag edits, retain the original link/step values before
+clearing flags mutate the working record. For both flag edits and editor saves,
+compare the proposed final spec, plan and step values against that original,
+before canonicalization:
+
+- Fetch/canonicalize an external spec only when its value changes to a present
+  value, and an external plan only when its value changes to a present value.
+- When an external plan remains linked and a step is present, require a plan
+  body and verify the heading only if the plan or step value changed.
+- Unchanged links and steps are not fetched, even if explicitly supplied with
+  the same stored value. A title, priority, body or other unrelated edit thus
+  works without the scheme or fetcher. Removing a link/step needs no fetch;
+  keep the existing requirement that a step cannot remain without a plan.
+
+An alias different from the stored ID counts as a changed input and must resolve;
+the tracker cannot know they are equivalent before fetching. Changing only the
+step does not rewrite the unchanged plan's reference. Changed-link
+canonicalization and heading verification share the fetched body. Keep local
+path validation and local step rechecks as today; this availability rule applies
+to external links. Shape, project and other record validation still run.
+
+The editor compares against `original` and assigns a changed link's
+`resolve_doc` return value back to `edited.spec`/`edited.plan`; currently it
+discards that result. A failed fetch or missing
 heading leaves the record unchanged; editor errors retain the edited file as
 today. Existing source-idempotent adds retain their reuse behavior.
 
@@ -190,11 +250,32 @@ for both `step_missing` and `unlinked_step`. Share external reads across kinds
 when a spec and plan have the same reference. Keep findings per affected open
 record, even when the document read is shared.
 
+External fetching in `check` has one fixed five-second monotonic budget per
+invocation, beginning with its first configured fetch attempt. Process distinct
+external references for open tasks in lexical order, then any closed-only plans,
+sharing cached outcomes across these passes. A fetch's deadline is the earlier
+of its 30-second per-fetch limit and the remaining command budget. If the
+command budget ends during a fetch, terminate/clean up that fetch and classify
+the outcome as `Unavailable(BudgetExhausted)`.
+
+After exhaustion, uncached configured references are not spawned: their outcome
+is `Unavailable(BudgetExhausted)`, with cause `budget exhausted`. Existing
+cached bodies remain usable and cached failures remain unchanged. Host config
+validation and missing-scheme classification still occur without spawning, so
+malformed config never becomes a budget warning. All local, task, dependency
+and attachment checks continue normally. The five seconds bounds fetch waiting,
+with the small additional time needed for mandatory process cleanup; it is not
+a deadline for the whole command. There is no public budget option or setting.
+
+This trades incomplete external drift checks for bounded pre-commit latency,
+and surfaces that limit as warnings rather than implying a complete verdict.
+Explicit `tasks doc` and changed-link writes retain the full per-fetch deadline.
+
 | Condition | Result |
 |---|---|
 | Open task, missing local path | Existing `doc_missing` error |
 | Local document read or host configuration error | Existing fatal typed error |
-| Open task, external scheme missing or fetch failed | `doc_unreachable` warning, naming reference and cause |
+| Open task, external scheme missing, fetch failed or budget exhausted | `doc_unreachable` warning, naming reference and cause |
 | Available plan lacks an open task's step heading | `step_missing` error |
 | Available plan heading has no linking task | Existing `unlinked_step` warning |
 | Closed task alone links an unavailable external plan | No drift finding |
@@ -206,12 +287,23 @@ uncovered-heading check; an unavailable closed-only external plan is skipped.
 Warnings alone keep `check` at exit 0. Preserve `doc_in_main_checkout` findings.
 
 `show`/shared `describe` keeps the external reference in `spec_path`/`plan_path`.
-A closed task's unavailable external plan gives the existing historical-plan
-warning and `step_found: false` when it has a step; otherwise omit that field.
-An available plan reports its actual heading result. Ordinary record scans
-remain possible without the fetcher; an open task's requested step validation
-retains strict failure behavior, as for local plans. Malformed host config is
-fatal rather than being labelled an unavailable historical plan.
+For an external plan with a step, read opportunistically with the same fixed
+five-second budget, scoped to that description:
+
+- An available body reports the actual heading result, including `false` if
+  the heading is absent.
+- An open task's unavailable plan emits a warning naming the reference and
+  cause and omits `step_found`; unknown is not reported as `false`. `show` and
+  `next` still succeed and describe the chosen task.
+- A closed task's unavailable plan emits the historical-plan warning (with
+  cause) and `step_found: false`, preserving its established historical result.
+- Without a step, neither open nor closed external plans are fetched, and no
+  historical availability warning is attempted. External specs are display-only
+  here as well; `abs` never fetches them.
+
+Local-plan behavior remains unchanged, including strict open-step failures and
+the existing missing-historical-path warning without a step. Malformed host
+config encountered during a fetch is fatal, never an availability warning.
 
 ### 5.3 Document export
 
@@ -252,6 +344,7 @@ a separate list schema. Task objects already carry `plan` and `step`.
 ## 6. Documentation and shared inventory
 
 Document the reference grammar, fetch JSON/config, availability warning,
+unchanged-link edit behavior, optional display reads and five-second check budget,
 `tasks doc` export exception, exact plan filter and additive step field in the
 README. Update the tasks skill's link/read guidance in step with implementation.
 The separate `tasks-00723a` owns the wider agent-document workflow changes.
@@ -270,22 +363,36 @@ Use the existing isolated integration environment with scratch XDG config and
 state, and local stub fetchers; do not require mindful or the live desktop.
 
 - Shape/config units cover valid and invalid schemes, slash/colon boundaries,
-  opaque arguments, no-config parsing, config defaults and unknown keys.
+  opaque arguments, no-config parsing, config defaults, unknown keys and
+  colon-bearing first segments of configured roots (but allowed later colons).
 - Writes cover canonicalization for add, flag edit and editor save; heading
   presence/absence; atomic failure; and unchanged source-idempotent reuse.
+  On a no-scheme host, prove title/priority and editor body edits of a task with
+  an external spec, plan and step succeed without fetching. With a counting
+  fetcher, verify identical explicit links/steps and clearing values do not
+  fetch, while a changed spec, plan or step fetches only required documents.
 - Fetch tests cover exact argument delivery with shell metacharacters, valid
   empty bodies, malformed JSON/fields/IDs, nonzero exit, bounded stdout/stderr,
-  a hung command, and a shell descendant holding a pipe after the shell exits.
-  Assert child cleanup, not merely the timeout error. A private deadline
-  parameter lets focused unit tests exercise this promptly; production stays
-  fixed at 30 seconds, with no public timeout option. Keep one real CLI deadline
-  case to verify production wiring, ignored in the fast set and included in the
+  a hung command, and an exit-0 shell with complete JSON and a descendant holding
+  a pipe. The last case succeeds promptly after descendant cleanup rather than
+  timing out. Assert child cleanup, not merely the result. A private deadline
+  parameter lets focused unit tests exercise this promptly; production's strict
+  per-fetch deadline stays 30 seconds, with no public timeout option. Keep one
+  real CLI deadline case to verify production wiring, ignored in the fast set
+  and included in the
   full suite so each ordinary code commit does not add a 30-second wait.
 - Check tests cover both heading findings, warning-only exit 0, missing schemes,
   failed fetches, one fetch for many linking records and failed-read reuse,
-  closed-only plans, and existing main-checkout/path I/O behavior.
+  closed-only plans, and existing main-checkout/path I/O behavior. Budget tests
+  use multiple references to prove one shared deadline, deterministic open-first
+  order, no post-budget spawning, cause `budget exhausted`, continued local
+  error detection and bounded pre-commit behavior. Malformed config must be
+  fatal in strict and tolerant callers, unlike a missing scheme.
 - Show/next tests cover reference display, historical unavailable plans with and
-  without a step, available changed headings and strict open-step reads.
+  without a step, no fetch without an external step, available changed headings,
+  successful open-step descriptions with unknown/omitted `step_found` when no
+  scheme or fetcher is available, and bounded optional reads. Preserve local
+  strict failures and historical behavior.
 - Export tests assert byte-exact stdout (with and without a final newline),
   stderr warnings in all formats, unset link, selector usage, foreign/shorthand
   IDs and local/main/overlay/recorded-checkout reads.
@@ -300,10 +407,24 @@ parser-inventory, hygiene, formatting, lint and record consistency. Keep full
 suite execution with the configured hook policy. Install to a disposable Cargo
 root and invoke that binary explicitly for the initial installation smoke.
 
-An old binary rejects these references at parse time. Before the first external
-link is written into synced records, install the reviewed new binary on both
-hosts and verify version/help plus a no-scheme record read/check on the second
-host. Record each host's evidence; an unavailable host leaves rollout pending.
+Old binaries reject both external references at record parse time and the new
+`[docs.schemes]` table at host-config load time. The latter can break ordinary
+claim/identity commands even before any external record exists, because
+`relay::enabled()` loads `HostConfig` from those paths. Roll out in this order:
+
+1. On each host, install and verify the reviewed new tasks binary while leaving
+   its existing host config unchanged.
+2. Only after that host is running the new binary, ops installs/configures its
+   fetcher and writes `[docs.schemes]` there. Verify ordinary claim/identity
+   commands with the new table. Do not downgrade that host's binary while the
+   table remains: remove the table first if a rollback is required.
+3. Only after both hosts have the new binary, write the first external reference
+   into synced records. A host may still lack a scheme or have its fetcher down;
+   verify its ordinary edits, `show`, `next` and warning-only `check` continue
+   working, while explicit body reads and changed-link validation fail clearly.
+
+Pass this config-order requirement to the ops rollout task `ops-721511`.
+Record each host's evidence; an unavailable host leaves rollout pending.
 Live installation is a separately approved host action, with no worktree pointer
 repointing. ops supplies `mindful-doc` and its host config in its rollout task.
 
