@@ -1,8 +1,10 @@
 use crate::resolve::{Doc, DocRead, UnavailableCause};
 use std::io::{Read, Result as IoResult};
+use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 pub(crate) const MAX_STDOUT: u64 = 2 * 1024 * 1024;
@@ -107,17 +109,42 @@ enum PipeResult {
     Stderr(IoResult<Vec<u8>>),
 }
 
-fn stderr_prefix(mut reader: impl Read) -> IoResult<Vec<u8>> {
-    let mut prefix = Vec::new();
-    let mut buffer = [0; 4096];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            return Ok(prefix);
-        }
-        let keep = count.min(200 - prefix.len());
-        prefix.extend_from_slice(&buffer[..keep]);
+fn read_pipe(
+    mut reader: impl Read + AsRawFd,
+    limit: usize,
+    drain: bool,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> IoResult<Vec<u8>> {
+    let fd = reader.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(std::io::Error::last_os_error());
     }
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 4096];
+    while !cancelled.load(Ordering::Relaxed) && Instant::now() < deadline {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => {
+                let keep = count.min(limit - bytes.len());
+                bytes.extend_from_slice(&buffer[..keep]);
+                if !drain && bytes.len() == limit {
+                    break;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(5)),
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(bytes)
 }
 
 pub(crate) fn fetch(request: FetchRequest, deadline: Instant) -> DocRead {
@@ -171,21 +198,32 @@ fn fetch_inner(
     let pid = child.id() as libc::pid_t;
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let out_cancelled = Arc::clone(&cancelled);
+    let err_cancelled = Arc::clone(&cancelled);
     let (sender, receiver) = mpsc::channel();
     let out_sender = sender.clone();
     let stdout_reader = match std::thread::Builder::new().spawn(move || {
-        let mut bytes = Vec::new();
-        let result = stdout
-            .take(MAX_STDOUT + 1)
-            .read_to_end(&mut bytes)
-            .map(|_| bytes);
+        let result = read_pipe(
+            stdout,
+            (MAX_STDOUT + 1) as usize,
+            false,
+            deadline,
+            &out_cancelled,
+        );
         let _ = out_sender.send(PipeResult::Stdout(result));
     }) {
         Ok(reader) => reader,
         Err(error) => return unavailable(format!("failed to start stdout reader: {error}")),
     };
     let stderr_reader = match std::thread::Builder::new().spawn(move || {
-        let _ = sender.send(PipeResult::Stderr(stderr_prefix(stderr)));
+        let _ = sender.send(PipeResult::Stderr(read_pipe(
+            stderr,
+            200,
+            true,
+            deadline,
+            &err_cancelled,
+        )));
     }) {
         Ok(reader) => reader,
         Err(error) => {
@@ -193,6 +231,7 @@ fn fetch_inner(
             let cleanup = group.stop(&mut observer);
             #[cfg(not(test))]
             let cleanup = group.stop();
+            cancelled.store(true, Ordering::Relaxed);
             let joined = stdout_reader.join();
             return unavailable(format!(
                 "failed to start stderr reader: {error}; cleanup: {cleanup:?}; stdout reader: {joined:?}"
@@ -205,14 +244,14 @@ fn fetch_inner(
     let mut failure = None;
     let mut timed_out = false;
     loop {
-        if status.is_some() && output.is_some() && stderr.is_some() {
-            break;
-        }
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
             timed_out = true;
             failure = Some("fetch deadline exceeded".to_string());
             break;
         };
+        if status.is_some() && output.is_some() && stderr.is_some() {
+            break;
+        }
         if status.is_none() {
             match peek_exit(pid) {
                 Ok(true) => {
@@ -271,6 +310,7 @@ fn fetch_inner(
     if let Err(error) = stopped {
         failure = Some(format!("fetch cleanup: {error}"));
     }
+    cancelled.store(true, Ordering::Relaxed);
     let stdout_joined = stdout_reader.join();
     let stderr_joined = stderr_reader.join();
     if stdout_joined.is_err() || stderr_joined.is_err() {
@@ -301,11 +341,18 @@ fn fetch_inner(
         id: String,
         body: String,
     }
-    let payload: Payload =
-        match serde_json::from_slice(&output.expect("completed fetch has stdout")) {
-            Ok(payload) => payload,
-            Err(error) => return failed(format!("invalid fetch JSON: {error}")),
-        };
+    let output = output.expect("completed fetch has stdout");
+    if output
+        .iter()
+        .find(|byte| !matches!(byte, b' ' | b'\n' | b'\r' | b'\t'))
+        != Some(&b'{')
+    {
+        return failed("invalid fetch JSON: expected an object".into());
+    }
+    let payload: Payload = match serde_json::from_slice(&output) {
+        Ok(payload) => payload,
+        Err(error) => return failed(format!("invalid fetch JSON: {error}")),
+    };
     let (scheme, _) = request
         .reference
         .split_once(':')
@@ -345,6 +392,7 @@ mod tests {
     fn payload_requires_one_object_and_valid_id() {
         for text in [
             "not json",
+            r##"["canonical", "# Body"]"##,
             "{}",
             r#"{"id":1,"body":""}"#,
             r#"{"id":"","body":""}"#,
@@ -482,6 +530,57 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(1));
         let pid = std::fs::read_to_string(pidfile).unwrap().parse().unwrap();
         assert_not_running(pid);
+    }
+
+    #[test]
+    fn escaped_pipe_holder_cannot_extend_deadline() {
+        for budget_limited in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            let stop = root.join("stop");
+            let pidfile = root.join("pid");
+            let command = format!(
+                "setsid sh -c 'printf %s $$ > \"{0}/pid\"; while [ ! -e \"{0}/stop\" ]; do sleep 0.01; done' & while [ ! -e '{0}/pid' ]; do sleep 0.01; done; printf '%s' '{{\"id\":\"test\",\"body\":\"ok\"}}'; exit 0; :",
+                root.display()
+            );
+            std::thread::scope(|scope| {
+                let stop_path = stop.clone();
+                let cleanup = scope.spawn(move || {
+                    let until = Instant::now() + Duration::from_millis(800);
+                    while !stop_path.exists() && Instant::now() < until {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    std::fs::write(stop_path, "").unwrap();
+                });
+                let mut request = request(&command, "input");
+                request.budget_limited = budget_limited;
+                let started = Instant::now();
+                let result = fetch(request, started + Duration::from_millis(150));
+                let elapsed = started.elapsed();
+                std::fs::write(&stop, "").unwrap();
+                cleanup.join().unwrap();
+                let pid = std::fs::read_to_string(&pidfile).unwrap().parse().unwrap();
+                assert_not_running(pid);
+                assert!(elapsed < Duration::from_millis(600), "{elapsed:?}");
+                if budget_limited {
+                    assert!(matches!(
+                        result,
+                        DocRead::Unavailable {
+                            cause: UnavailableCause::BudgetExhausted,
+                            ..
+                        }
+                    ));
+                } else {
+                    assert!(
+                        result
+                            .required()
+                            .unwrap_err()
+                            .to_string()
+                            .contains("deadline")
+                    );
+                }
+            });
+        }
     }
 
     #[test]

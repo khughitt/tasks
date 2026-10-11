@@ -305,9 +305,20 @@ impl<'a> Resolver<'a> {
 
     fn cache_doc(&self, value: &str, result: DocRead) {
         let mut cache = self.docs.borrow_mut();
-        if let DocRead::Available(doc) = &result {
-            cache.insert(doc.reference.clone(), result.clone());
+        if matches!(cache.get(value), Some(DocRead::Available(_))) {
+            return;
         }
+        let result = if let DocRead::Available(doc) = &result {
+            match cache.get(&doc.reference) {
+                Some(existing @ DocRead::Available(_)) => existing.clone(),
+                _ => {
+                    cache.insert(doc.reference.clone(), result.clone());
+                    result
+                }
+            }
+        } else {
+            result
+        };
         cache.insert(value.into(), result);
     }
 
@@ -356,6 +367,10 @@ impl<'a> Resolver<'a> {
                 let mut active = 0;
                 loop {
                     while active < 4 && next < requests.len() {
+                        if self.docs.borrow().contains_key(&requests[next].reference) {
+                            next += 1;
+                            continue;
+                        }
                         let (deadline, budget_limited) = self.fetch_limit();
                         if Instant::now() >= deadline {
                             break;
@@ -391,6 +406,9 @@ impl<'a> Resolver<'a> {
                     self.cache_doc(&reference, result);
                 }
                 for request in &requests[next..] {
+                    if self.docs.borrow().contains_key(&request.reference) {
+                        continue;
+                    }
                     self.cache_doc(
                         &request.reference,
                         DocRead::Unavailable {
@@ -614,6 +632,75 @@ mod tests {
             }
             worker.join().unwrap();
         });
+    }
+
+    #[test]
+    fn prefetch_external_alias_collision_preserves_available_body() {
+        for (queued, alias_first) in [(true, true), (false, true), (false, false)] {
+            let (temp, project, registry, _) = prefetch_fixture();
+            let root = temp.path().to_owned();
+            let script = root.join("fetch.sh");
+            std::fs::write(&script, format!(
+                "printf '%s' $$ > '{0}/started/'\"$1\"\nwhile [ ! -e '{0}/released/'\"$1\" ]; do sleep 0.01; done\ncase \"$1\" in old) printf '%s' '{{\"id\":\"new\",\"body\":\"### Task 1: one\\n\"}}' ;; new) exit 7 ;; *) printf '{{\"id\":\"%s\",\"body\":\"ok\"}}' \"$1\" ;; esac\n", root.display()
+            )).unwrap();
+            let names = if queued {
+                vec!["old", "a", "b", "c", "new", "probe"]
+            } else {
+                vec!["old", "new", "a", "b", "probe"]
+            };
+            let refs: Vec<String> = names.iter().map(|name| format!("stub:{name}")).collect();
+            std::thread::scope(|scope| {
+                let command = format!("sh '{}'", script.display());
+                let worker = scope.spawn(move || {
+                    let mut resolver = Resolver::new(&project, &registry);
+                    resolver
+                        .host
+                        .set(crate::config::HostConfig {
+                            relay_identity: false,
+                            docs_schemes: [("stub".into(), command)].into(),
+                        })
+                        .unwrap();
+                    resolver.set_fetch_budget(Duration::from_secs(3));
+                    assert!(resolver.prefetch_external(&refs).unwrap().is_empty());
+                    for reference in ["stub:old", "stub:new"] {
+                        assert!(
+                            resolver.step_exists(reference, "Task 1: one").unwrap(),
+                            "{reference}"
+                        );
+                    }
+                    resolver.cache_doc(
+                        "stub:new",
+                        DocRead::Unavailable {
+                            reference: "stub:new".into(),
+                            cause: UnavailableCause::BudgetExhausted,
+                        },
+                    );
+                    assert!(resolver.step_exists("stub:new", "Task 1: one").unwrap());
+                });
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while std::fs::read_dir(root.join("started")).unwrap().count() < 4 {
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let first = if alias_first { "old" } else { "new" };
+                std::fs::write(root.join("released").join(first), "").unwrap();
+                // A refill proves the first result has been cached by the resolver.
+                while !root.join("started/probe").exists() {
+                    if queued {
+                        std::fs::write(root.join("released/new"), "").unwrap();
+                    }
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                for name in &names {
+                    std::fs::write(root.join("released").join(name), "").unwrap();
+                }
+                worker.join().unwrap();
+                if queued {
+                    assert!(!root.join("started/new").exists());
+                }
+            });
+        }
     }
 
     #[test]

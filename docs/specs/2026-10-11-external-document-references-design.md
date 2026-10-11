@@ -197,6 +197,10 @@ succeed even if a descendant had kept a pipe open. For overflow, deadline expiry
 or pipe failure while the shell is alive, terminate the group and wait for the
 direct child before finishing the readers. Finish cleanup
 before returning; the fetch protocol permits no surviving background jobs.
+Providers must keep descendants in the shell's process group and must not
+daemonize or start new groups (for example with `setsid`). Tasks terminates the
+original group, not escaped groups; independently deadline-bounded, cancellable
+pipe readers still prevent a violating provider from extending the read deadline.
 Implement this locally with the standard library and existing `libc` dependency,
 without adding a generic subprocess framework or touching the clipboard runner.
 

@@ -656,7 +656,10 @@ one literal argument. The command must return one UTF-8 JSON object with string
 fields are allowed. Tasks stores `<scheme>:<id>` after a successful write.
 Each fetch has a 30-second deadline, a 2 MiB stdout limit and a diagnostic
 prefix of at most 200 stderr bytes. Remaining processes in its group are
-terminated when the shell exits or a limit is reached.
+terminated when the shell exits or a limit is reached. Providers must keep
+children in that group and must not daemonize; escaped jobs are their
+responsibility. Pipe reads remain deadline-bounded even if a provider violates
+that restriction.
 
 Writes fetch only changed external links and verify an external step only when
 its plan or step changed. Unrelated title, priority or body edits work without
