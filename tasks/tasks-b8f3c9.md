@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-11T15:08:58Z
-updated: 2026-10-11T15:20:37Z
+updated: 2026-10-11T15:25:33Z
 started: 2026-10-11T15:09:17Z
 depends: []
 parent: tasks-46d207
@@ -26,3 +26,4 @@ Execute the reviewed docs/plans/2026-10-11-review-state.md with subagent-driven 
   provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-11T15:17:09Z (design/tasks-a9b8d3-review-state): review: impl round 1 — verdict: revise; findings: Important 1; reviewer: codex/gpt-6.1-sol
 - 2026-10-11T15:20:37Z (design/tasks-a9b8d3-review-state): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-11T15:25:33Z (design/tasks-a9b8d3-review-state): Scope prerequisite discovered: new flags require source-first ops cli.toml changes and vendored adoption. ops-8689c6 prepares the shared contract; tasks-f4dbe1 is blocked only on conformance/adoption, with its focused behavior tests green. Feedback ops-50d6de records the missing prerequisite.
