@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-08T10:53:28Z
-updated: 2026-10-11T12:47:15Z
+updated: 2026-10-11T12:56:01Z
 started: 2026-10-11T12:11:58Z
 depends: []
 parent: tasks-46d207
@@ -38,3 +38,7 @@ Ideas it wakes: On completion, record the approved finding with tasks note on ta
 - 2026-10-11T12:47:13Z (design/tasks-a9b8d3-review-state): spec revised for round 1: backfill keeps a per-project ledger of set ids and retries only unreviewed, unledgered candidates (no record rewritten twice; edit --no-reviewed readmission survives reruns); every host reading synced records runs the new binary before the first reviewed write, with a README line beside move's; same-status editor saves refuse reviewed on a non-idea; parked views get reviewed/needs_review on ParkedRow (None when unresolved), the marker column, and --parked --needs-review via Fields::of_row; acceptance 8, 14, 15 added or extended
 - 2026-10-11T12:47:13Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): User (or reviewer) re-reviews the revised docs/specs/2026-10-11-review-state-design.md in .worktrees/tasks-a9b8d3-review-state; on acceptance the agent writes the implementation plan
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T12:54:29Z (design/tasks-a9b8d3-review-state): review: spec round 2 — verdict: revise; findings: P1 1; reviewer: codex
+- 2026-10-11T12:55:55Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T12:56:01Z (design/tasks-a9b8d3-review-state): reviewer correction (user, 2026-10-11): the spec round 2 reviewer is codex/gpt-6.1-sol; the round 2 review line above records the harness alone. Round 1's model is not confirmed. Notes cannot be amended (tasks-d56b72).

@@ -237,21 +237,28 @@ Without a backfill, every briefed idea would show `*` and the column would misle
 from the first day. The backfill runs once per registered project, after the binary
 and skills ship, as an operator step in the plan. It uses only the CLI:
 
-- **Ledger.** The backfill keeps one ledger per project outside the project
-  checkouts (the plan names the path, under the operator's state directory): the ids
-  it has already set. An id enters the ledger only after its `tasks edit <id>
-  --reviewed` succeeded.
-- **Candidates.** An open idea is a candidate when it is not in the ledger, its
-  `reviewed` is false, and its latest note starts with `scope:` or is a `curate:` or
-  `scope:` note carrying a pending `proposal:` (today's eligibility rule). For each
-  candidate it runs `tasks edit <id> --reviewed`.
-- **Reruns.** A rerun retries only candidates, so it never rewrites a record that is
-  already reviewed and never bumps `updated` twice. An idea readmitted after the
-  first run is in the ledger, so a rerun leaves it unreviewed whether it was
-  readmitted with a note (`note --no-reviewed`) or without one
-  (`edit --no-reviewed`, whose latest note can still be the old `scope:` note).
-- It skips a live-claimed idea and reports it, like any edit would refuse; that idea
-  stays out of the ledger and is retried on the next run.
+- **Freeze once.** The first run on a project derives the candidates from notes and
+  writes them, with each record's `updated` stamp, to a snapshot file outside the
+  project checkouts (the plan names the path, under the operator's state directory).
+  A candidate is an open idea whose `reviewed` is false and whose latest note starts
+  with `scope:` or is a `curate:` or `scope:` note carrying a pending `proposal:`
+  (today's eligibility rule). The snapshot is written once and never re-derived: a
+  later run that finds it reads it instead of reading notes.
+- **Apply only to unchanged records.** For each snapshot entry not yet marked done,
+  a run reads the record. When it is still an idea, still unreviewed, and its
+  `updated` equals the frozen stamp, the run executes `tasks edit <id> --reviewed`
+  and marks the entry done. Otherwise it leaves the record alone and reports it as
+  changed since the freeze, with its current status and `reviewed` value, and marks
+  the entry done so later runs do not report it again.
+- **Why this holds.** No run after the first decides eligibility from notes, so an
+  idea that someone readmitted, scoped, or otherwise touched after the freeze is
+  never marked by the backfill. That covers an interrupted run (the edit landed but
+  the entry was not yet marked done: the next run sees a changed `updated` and
+  reports it, so a later `edit --no-reviewed` stands) and an idea reviewed by an
+  ordinary scope pass (not a candidate if reviewed before the freeze; reported as
+  changed if reviewed after it). A rerun never rewrites a record it already set.
+- A live-claimed idea is skipped and reported, like any edit would refuse; its entry
+  stays not done and is retried on the next run under the same unchanged-record test.
 - Each project's writes land in one `chore(tasks)` commit in that project.
 
 The writes bump `updated` on the backfilled ideas. That keeps them out of curate's
@@ -303,11 +310,16 @@ Tests in `tests/cli.rs` and the record/model unit tests, without new tooling:
     `note --reviewed` behaves exactly as a plain `note` does today and
     `edit --reviewed` exactly as another `edit` flag does: same refusal or same
     success, with the flag written only when the write itself succeeds.
-14. **Backfill rerun:** in a fixture project, a second run rewrites no record (byte-
-    identical files, unchanged `updated`); an idea readmitted between runs with
-    `note --no-reviewed`, and one readmitted with `edit --no-reviewed` while its
-    latest note is still `scope:`, both stay unreviewed; an idea skipped for a live
-    claim on the first run is set on the second.
+14. **Backfill rerun:** in a fixture project, a second run rewrites no record
+    (byte-identical files, unchanged `updated`) and re-derives nothing from notes.
+    Each of these leaves the idea unreviewed after a later run: readmission between
+    runs with `note --no-reviewed`; readmission with `edit --no-reviewed` while the
+    latest note is still `scope:`; a run interrupted after its edit but before
+    marking the entry done, followed by `edit --no-reviewed`; and an idea reviewed
+    by an ordinary `note --reviewed` after the freeze, followed by
+    `edit --no-reviewed`. The last two are reported as changed since the freeze. An
+    idea skipped for a live claim on the first run, and untouched since, is set on
+    the second.
 15. **Parked agreement:** for a fixture with a parked unreviewed idea, a parked
     reviewed idea and an unresolved park, `list --parked --pretty` marks only the
     first; JSON carries `needs_review: true`, `false` and no field respectively;
