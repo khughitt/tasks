@@ -3,9 +3,49 @@ use crate::error::{Error, Result};
 use crate::model::{Status, Task, TaskId};
 use crate::output::{CheckOut, Finding, Output};
 use crate::query::find_cycle;
-use crate::resolve::{DocKind, Located, Resolver, has_heading, step_headings};
+use crate::resolve::{
+    DocKind, DocRead, Located, Resolver, UnavailableCause, has_heading, step_headings,
+};
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+fn external_check_order(tasks: &[Task]) -> Result<Vec<String>> {
+    let mut tiers = BTreeMap::<String, u8>::new();
+    let mut add = |reference: &str, tier: u8| -> Result<()> {
+        if crate::format::external_doc(reference)?.is_some() {
+            tiers
+                .entry(reference.into())
+                .and_modify(|current| *current = (*current).min(tier))
+                .or_insert(tier);
+        }
+        Ok(())
+    };
+    for task in tasks {
+        if let Some(plan) = &task.plan {
+            add(
+                plan,
+                if !task.status.is_open() {
+                    3
+                } else if task.step.is_some() {
+                    0
+                } else {
+                    1
+                },
+            )?;
+        }
+        if task.status.is_open()
+            && let Some(spec) = &task.spec
+        {
+            add(spec, 2)?;
+        }
+    }
+    let mut ordered: Vec<_> = tiers.into_iter().collect();
+    ordered.sort_by(|(a_ref, a_tier), (b_ref, b_tier)| (a_tier, a_ref).cmp(&(b_tier, b_ref)));
+    Ok(ordered
+        .into_iter()
+        .map(|(reference, _)| reference)
+        .collect())
+}
 
 enum Counterpart {
     Present(Box<Task>),
@@ -93,7 +133,30 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         ));
     }
 
-    let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let mut resolver = Resolver::new(&ctx.project, &ctx.registry);
+    resolver.set_fetch_budget(crate::doc_fetch::OPTIONAL_BUDGET);
+    let unchecked = resolver.prefetch_external(&external_check_order(&tasks)?)?;
+    if !unchecked.is_empty() {
+        warnings.push(finding(
+            None,
+            "tasks/".into(),
+            "doc_unchecked",
+            format!(
+                "external fetch budget exhausted; unchecked references: {}",
+                unchecked.join(", ")
+            ),
+        ));
+    }
+    let linked_plans: BTreeSet<_> = tasks.iter().filter_map(|task| task.plan.as_ref()).collect();
+    let mut plan_bodies = BTreeMap::new();
+    for plan in linked_plans {
+        if (crate::format::external_doc(plan)?.is_some()
+            || resolver.locate(plan)?.into_path().is_some())
+            && let DocRead::Available(doc) = resolver.read(DocKind::Plan, plan)?
+        {
+            plan_bodies.insert(plan.clone(), doc.body);
+        }
+    }
     let foreign = |id: &TaskId| -> std::result::Result<Option<Task>, String> {
         match resolver.resolve_task(id) {
             Ok(task) => Ok(task),
@@ -458,6 +521,19 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         if task.status.is_open() {
             for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
                 let Some(path) = path else { continue };
+                if crate::format::external_doc(path)?.is_some() {
+                    if let DocRead::Unavailable { reference, cause } = resolver.read(kind, path)?
+                        && !matches!(cause, UnavailableCause::BudgetExhausted)
+                    {
+                        warnings.push(finding(
+                            Some(task),
+                            file.clone(),
+                            "doc_unreachable",
+                            format!("{} {reference}: {}", kind.name(), cause.detail()),
+                        ));
+                    }
+                    continue;
+                }
                 match resolver.locate(path)? {
                     Located::Here(_) => {}
                     Located::Main { root, .. } => warnings.push(finding(
@@ -479,8 +555,8 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 }
             }
             if let (Some(plan), Some(step)) = (&task.plan, &task.step)
-                && let Some(path) = resolver.locate(plan)?.into_path()
-                && !has_heading(&std::fs::read_to_string(path)?, step)
+                && let Some(body) = plan_bodies.get(plan)
+                && !has_heading(body, step)
             {
                 errors.push(finding(
                     Some(task),
@@ -541,16 +617,8 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         }
     }
 
-    let mut linked_plans: Vec<&String> =
-        tasks.iter().filter_map(|task| task.plan.as_ref()).collect();
-    linked_plans.sort();
-    linked_plans.dedup();
-    for plan in linked_plans {
-        let Some(path) = resolver.locate(plan)?.into_path() else {
-            continue; // already an error above
-        };
-        let text = std::fs::read_to_string(path)?;
-        for heading in step_headings(&text) {
+    for (plan, text) in &plan_bodies {
+        for heading in step_headings(text) {
             let linked = tasks.iter().any(|task| {
                 task.plan.as_ref() == Some(plan) && task.step.as_deref() == Some(&heading)
             });
@@ -579,4 +647,41 @@ pub fn run(ctx: Ctx) -> Result<Output> {
     }
 
     Ok(Output::Check(CheckOut { errors, warnings }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task(plan: Option<&str>, spec: Option<&str>, step: Option<&str>, status: &str) -> Task {
+        let mut text = format!(
+            "---\nid: xx-000001\ntitle: Test\nstatus: {status}\npriority: 2\ncreated: 2026-10-11T00:00:00Z\nupdated: 2026-10-11T00:00:00Z\ndepends: []\ntags: []\n"
+        );
+        for (name, value) in [("plan", plan), ("spec", spec), ("step", step)] {
+            if let Some(value) = value {
+                text.push_str(&format!(
+                    "{name}: {}\n",
+                    serde_json::to_string(value).unwrap()
+                ));
+            }
+        }
+        text.push_str("---\n");
+        crate::format::parse_task(&text, "fixture").unwrap()
+    }
+
+    #[test]
+    fn external_check_order_prioritizes_stepped_plans_and_shared_references() {
+        let mut tasks = vec![
+            task(None, Some("stub:a"), None, "todo"),
+            task(Some("stub:c"), None, None, "done"),
+            task(Some("stub:b"), None, None, "todo"),
+            task(Some("stub:z"), None, Some("Task 1: x"), "todo"),
+            task(None, Some("stub:z"), None, "todo"),
+            task(None, Some("stub:ignored"), None, "done"),
+        ];
+        let expected = ["stub:z", "stub:b", "stub:a", "stub:c"];
+        assert_eq!(external_check_order(&tasks).unwrap(), expected);
+        tasks.reverse();
+        assert_eq!(external_check_order(&tasks).unwrap(), expected);
+    }
 }

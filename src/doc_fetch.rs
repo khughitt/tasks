@@ -7,11 +7,14 @@ use std::time::{Duration, Instant};
 
 pub(crate) const MAX_STDOUT: u64 = 2 * 1024 * 1024;
 pub(crate) const STRICT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const OPTIONAL_BUDGET: Duration = Duration::from_secs(5);
 
+#[derive(Clone)]
 pub(crate) struct FetchRequest {
     pub reference: String,
     pub command: String,
     pub rest: String,
+    pub budget_limited: bool,
 }
 
 #[cfg(test)]
@@ -138,7 +141,14 @@ fn fetch_inner(
         cause: UnavailableCause::FetchFailed(cause),
     };
     if Instant::now() >= deadline {
-        return unavailable("fetch deadline exceeded before launch".into());
+        return if request.budget_limited {
+            DocRead::Unavailable {
+                reference: request.reference.clone(),
+                cause: UnavailableCause::BudgetExhausted,
+            }
+        } else {
+            unavailable("fetch deadline exceeded before launch".into())
+        };
     }
     let child = match Command::new("sh")
         .args([
@@ -193,11 +203,13 @@ fn fetch_inner(
     let mut stderr = None;
     let mut status = None;
     let mut failure = None;
+    let mut timed_out = false;
     loop {
         if status.is_some() && output.is_some() && stderr.is_some() {
             break;
         }
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            timed_out = true;
             failure = Some("fetch deadline exceeded".to_string());
             break;
         };
@@ -272,6 +284,12 @@ fn fetch_inner(
     let prefix = String::from_utf8_lossy(stderr.as_deref().unwrap_or_default());
     let failed = |error: String| unavailable(format!("{error}; stderr: {prefix}"));
     if let Some(error) = failure {
+        if timed_out && request.budget_limited {
+            return DocRead::Unavailable {
+                reference: request.reference,
+                cause: UnavailableCause::BudgetExhausted,
+            };
+        }
         return failed(error);
     }
     let status = status.expect("completed fetch has an exit status");
@@ -312,6 +330,7 @@ mod tests {
             reference: "stub:test".into(),
             command: command.into(),
             rest: rest.into(),
+            budget_limited: false,
         }
     }
 

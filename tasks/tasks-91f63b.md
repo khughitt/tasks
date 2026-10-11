@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/tasks-91f63b-external-docs
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-11T13:36:07Z
+updated: 2026-10-11T14:59:09Z
 started: 2026-10-11T09:51:00Z
 depends: []
 tags: []
@@ -62,3 +62,4 @@ Implements §4 of the hq spec (spec round 4 accepted): plan/spec values whose fi
   provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-11T13:27:07Z (feat/tasks-91f63b-external-docs): review: plan round 2 — verdict: accept; findings: none; reviewer: human
 - 2026-10-11T13:36:07Z (feat/tasks-91f63b-external-docs): setup complete: tasks baseline passed; ops inventory patch 98f26ac prepared in ops .worktrees/ops-95f8ac-doc-inventory (ops-95f8ac), focused 17 and fast 1456 tests passed (1 skipped), commit checks passed with pre-existing shelved_dep warning. Separate shared-inventory merge approval requested asynchronously before Task 1; proceed with Tasks 1–4 while it is pending.
+- 2026-10-11T14:59:09Z (feat/tasks-91f63b-external-docs): Tasks 1 and 2 committed and verified; approved ops inventory merged. Entering Task 3 concurrent drift checks with shared deadlines and truthful doc_unchecked summaries.
