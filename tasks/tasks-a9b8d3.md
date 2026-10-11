@@ -6,9 +6,9 @@ priority: 2
 size: m
 complexity: high
 process: planned
-owner: main
+owner: design/tasks-a9b8d3-review-state
 created: 2026-10-08T10:53:28Z
-updated: 2026-10-11T12:11:58Z
+updated: 2026-10-11T12:47:15Z
 started: 2026-10-11T12:11:58Z
 depends: []
 parent: tasks-46d207
@@ -26,4 +26,15 @@ Ideas it wakes: On completion, record the approved finding with tasks note on ta
 ## Notes
 
 - 2026-10-11T12:11:58Z (main): started
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T12:12:11Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T12:22:00Z (design/tasks-a9b8d3-review-state): spec drafted: docs/specs/2026-10-11-review-state-design.md. User 2026-10-11 chose the marker scope: ideas (stored reviewed flag, set by note/edit --reviewed, cleared by --no-reviewed and every status transition) plus leaf todo/blocked with no process (derived needs_review); goals and doing never marked. Rejected note-derived marks and a review-state enum. Backfill via CLI per project; proposals stay note-based.
+- 2026-10-11T12:22:00Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): User reviews docs/specs/2026-10-11-review-state-design.md (worktree .worktrees/tasks-a9b8d3-review-state, branch design/tasks-a9b8d3-review-state); then the agent revises it or writes the implementation plan
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T12:44:27Z (design/tasks-a9b8d3-review-state): review: spec round 1 — verdict: revise; findings: P1 2, P2 2; reviewer: codex
+- 2026-10-11T12:47:13Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T12:47:13Z (design/tasks-a9b8d3-review-state): spec revised for round 1: backfill keeps a per-project ledger of set ids and retries only unreviewed, unledgered candidates (no record rewritten twice; edit --no-reviewed readmission survives reruns); every host reading synced records runs the new binary before the first reviewed write, with a README line beside move's; same-status editor saves refuse reviewed on a non-idea; parked views get reviewed/needs_review on ParkedRow (None when unresolved), the marker column, and --parked --needs-review via Fields::of_row; acceptance 8, 14, 15 added or extended
+- 2026-10-11T12:47:13Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): User (or reviewer) re-reviews the revised docs/specs/2026-10-11-review-state-design.md in .worktrees/tasks-a9b8d3-review-state; on acceptance the agent writes the implementation plan
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
