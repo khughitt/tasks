@@ -940,7 +940,7 @@ PY
   This uses scratch HOME/XDG config+state and no live registry. Confirm exact
   export bytes and new help; no external link enters the real synced corpus.
 
-- [ ] **4. Commit docs and obtain the whole-branch review.**
+- [x] **4. Commit docs and obtain the whole-branch review.**
 
 ```sh
 tasks check

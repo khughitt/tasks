@@ -1,8 +1,8 @@
 # External plan and spec references
 
 Status: accepted by Keith after spec round 3 (2026-10-11)
-Implementation: Tasks 1–5 implemented and verified on the task branch; whole-branch
-review and approved host installation remain before completion.
+Implementation: Tasks 1–6 implemented, verified and accepted after corrective
+implementation review round 2. Approved host installation remains before completion.
 Task: `tasks-91f63b`
 Source: hq `docs/specs/2026-10-10-agent-docs-collection-design.md`, §3–§4
 (accepted in `hq-5a3e12`, spec round 4; its draft header is stale).
