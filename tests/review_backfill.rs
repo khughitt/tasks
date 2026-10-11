@@ -211,6 +211,25 @@ fn apply_needs_the_operator_s_confirmation_and_no_live_claim() {
 }
 
 #[test]
+fn a_claim_refusal_reports_pending_snapshot_entries_without_editing_them() {
+    let mut env = TestEnv::new();
+    let f = fixture(&mut env);
+    let state = tempfile::tempdir().unwrap();
+    let (code, report) = backfill(&env, &f.dir, state.path(), &["--freeze-only"]);
+    assert_eq!(code, 0, "{report}");
+    let briefed_stamp = updated(&env, &f.dir, &f.briefed);
+    let proposed_stamp = updated(&env, &f.dir, &f.proposed);
+
+    env.json(&f.dir, &["start", &f.untouched]);
+    let (code, report) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);
+    assert_eq!(code, 1, "{report}");
+    assert_eq!(report["remaining"], 2, "{report}");
+    assert!(report["set"].as_array().unwrap().is_empty(), "{report}");
+    assert_eq!(updated(&env, &f.dir, &f.briefed), briefed_stamp);
+    assert_eq!(updated(&env, &f.dir, &f.proposed), proposed_stamp);
+}
+
+#[test]
 fn an_invalid_snapshot_refuses_before_any_edit() {
     let mut env = TestEnv::new();
     let f = fixture(&mut env);

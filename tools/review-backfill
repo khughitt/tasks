@@ -180,6 +180,7 @@ def main():
                     return 1
             snapshot = freeze(args.tasks, args.root, prefix, path)
             report["frozen"] = True
+        report["remaining"] = sum(1 for e in snapshot["entries"] if not e["done"])
         if args.writers_paused:
             held = live_claims(args.tasks, args.root, prefix)
             if held:
