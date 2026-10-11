@@ -8,13 +8,14 @@ complexity: high
 process: planned
 owner: feat/tasks-91f63b-external-docs
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-11T12:58:34Z
+updated: 2026-10-11T13:33:18Z
 started: 2026-10-11T09:51:00Z
 depends: []
 tags: []
 source: "hq:docs/specs/2026-10-10-agent-docs-collection-design.md"
 agent: claude-code/claude-fable-5-1
 spec: docs/specs/2026-10-11-external-document-references-design.md
+plan: docs/plans/2026-10-11-external-document-references.md
 ---
 
 Implements §4 of the hq spec (spec round 4 accepted): plan/spec values whose first path segment contains a colon are external references (`mindful:thought:<32 hex>`); parse succeeds without scheme config; the host config `[docs.schemes] <scheme> = "<command>"` names the fetcher, run as `sh -c "<cmd> \"\$1\"" -- <rest>` returning `{"id","body"}` JSON on stdout (capped, 30 s); one `Resolver::read(kind, value)` behind step_exists, check reads and historical plans; `tasks doc <id> --plan|--spec` prints the body; `tasks list --plan <value>` exact filter with rows carrying `step`; errors Config/DocNotFound, check warning `doc_unreachable`, show warns on an unavailable historical plan; tests per §4.6. The resolver is a design decision in this project's terms, hence planned. Install the binary on both hosts.
@@ -57,3 +58,6 @@ Implements §4 of the hq spec (spec round 4 accepted): plan/spec values whose fi
 - 2026-10-11T12:57:09Z (feat/tasks-91f63b-external-docs): plan round 1 revision: exit observation uses waitid WEXITED|WNOHANG|WNOWAIT (verified Linux documentation and installed libc bindings), keeps shell/PGID pinned until group kill, then reaps/disarms the guard; kernel-backed ordering test added. Ops inventory preparation/validation and async integration approval request move to execution setup. Rust-suite fetch stubs use sh with Rust-encoded JSON bodies; the documented shell stub passed five body/quoted-path cases in a disposable manual check. Check and display share set_fetch_budget plus one resolver deadline; intermediate check/show limitations are recorded in the execution ledger. Inline execution preference preserved; no product code changed.
 - 2026-10-11T12:58:34Z (feat/tasks-91f63b-external-docs): parked (waiting on user, review): User re-reviews .worktrees/tasks-91f63b-external-docs/docs/plans/2026-10-11-external-document-references.md after plan round 1 corrections; agent records round 2 and, after acceptance, runs the deferred baseline, prepares/validates ops inventory and requests its integration approval at setup, then executes the sequential plan inline.
   provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T13:27:07Z (feat/tasks-91f63b-external-docs): resumed
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T13:27:07Z (feat/tasks-91f63b-external-docs): review: plan round 2 — verdict: accept; findings: none; reviewer: human

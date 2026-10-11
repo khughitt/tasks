@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (the recommended inline method for this plan) or superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Status: revised after plan round 1; awaiting user review
+Status: accepted by Keith after plan round 2 (2026-10-11)
 
 **Goal:** Resolve external plan/spec links through host fetch commands while ordinary
 task operations remain usable without the provider.
