@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+pub mod docs;
 use assert_cmd::Command;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;

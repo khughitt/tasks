@@ -301,10 +301,34 @@ pub fn validate_owner(o: &str) -> Result<()> {
     }
     Ok(())
 }
-/// A doc link must be a normalized repo-relative `.md` path (no empty, `.`, or `..`
-/// segments). Which roots it may live under is the project's decision (`Project::validate_docs`).
+pub fn valid_doc_scheme(scheme: &str) -> bool {
+    let mut bytes = scheme.bytes();
+    matches!(bytes.next(), Some(b'a'..=b'z'))
+        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// Colons in the first segment reserve external references; later colons are path data.
+pub fn external_doc(value: &str) -> Result<Option<(&str, &str)>> {
+    if !value.split('/').next().unwrap_or_default().contains(':') {
+        return Ok(None);
+    }
+    let (scheme, rest) = value
+        .split_once(':')
+        .expect("first segment contains a colon");
+    if !valid_doc_scheme(scheme) || rest.is_empty() || value.contains(['\n', '\r', '\0']) {
+        return Err(Error::Validation(format!(
+            "document {value:?} must be <scheme>:<nonempty reference>, with scheme [a-z][a-z0-9-]*"
+        )));
+    }
+    Ok(Some((scheme, rest)))
+}
+
+/// Local document links are normalized `.md` paths; external links have an opaque remainder.
 pub fn validate_doc_shape(kind: &str, rel: &str) -> Result<()> {
     validate_line(kind, rel)?;
+    if external_doc(rel)?.is_some() {
+        return Ok(());
+    }
     let normalized = rel
         .split('/')
         .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
@@ -318,6 +342,9 @@ pub fn validate_doc_shape(kind: &str, rel: &str) -> Result<()> {
 
 pub fn validate_doc_path(kind: &str, dirs: &[String], rel: &str) -> Result<()> {
     validate_doc_shape(kind, rel)?;
+    if external_doc(rel)?.is_some() {
+        return Ok(());
+    }
     let under_root = dirs.iter().any(|dir| {
         rel.strip_prefix(dir.as_str())
             .is_some_and(|rest| rest.starts_with('/'))
@@ -975,6 +1002,32 @@ mod tests {
                 "accepted {path}"
             );
         }
+    }
+
+    #[test]
+    fn external_doc_shape_is_host_independent() {
+        for value in [
+            "x:y",
+            "mindful:thought:abc",
+            "x:/item",
+            "x:folder/item",
+            "x:a ' b:$()",
+        ] {
+            assert!(validate_doc_shape("plan", value).is_ok(), "{value}");
+            assert!(validate_doc_path("plan", &["docs/plans".into()], value).is_ok());
+        }
+        for value in [
+            ":y",
+            "x:",
+            "Docs:plan.md",
+            "9x:y",
+            "x:a\0b",
+            "x:a\nb",
+            "x:a\rb",
+        ] {
+            assert!(validate_doc_shape("plan", value).is_err(), "{value:?}");
+        }
+        assert!(validate_doc_shape("plan", "docs/plans/x:y.md").is_ok());
     }
 
     #[test]

@@ -3,7 +3,57 @@ use crate::model::{Task, TaskId};
 use crate::registry::Registry;
 use crate::repo::Project;
 use std::cell::{OnceCell, RefCell};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+#[derive(Debug, Clone)]
+pub struct Doc {
+    pub reference: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum UnavailableCause {
+    MissingScheme { scheme: String, config: PathBuf },
+    FetchFailed(String),
+}
+
+impl UnavailableCause {
+    pub fn detail(&self) -> String {
+        match self {
+            Self::MissingScheme { scheme, config } => format!(
+                "{}: [docs.schemes] has no {scheme}; a record may reference it, but this host cannot resolve it",
+                config.display()
+            ),
+            Self::FetchFailed(detail) => detail.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum DocRead {
+    Available(Doc),
+    Unavailable {
+        reference: String,
+        cause: UnavailableCause,
+    },
+}
+
+impl DocRead {
+    pub fn required(self) -> Result<Doc> {
+        match self {
+            Self::Available(doc) => Ok(doc),
+            Self::Unavailable { reference, cause } => {
+                let detail = format!("{reference}: {}", cause.detail());
+                Err(match cause {
+                    UnavailableCause::MissingScheme { .. } => Error::Config(detail),
+                    UnavailableCause::FetchFailed(_) => Error::DocNotFound(detail),
+                })
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocKind {
@@ -46,6 +96,8 @@ pub struct Resolver<'a> {
     main: OnceCell<Option<PathBuf>>,
     /// One line per document read from the main checkout, for the caller's warnings.
     from_main: RefCell<Vec<String>>,
+    host: OnceCell<crate::config::HostConfig>,
+    docs: RefCell<HashMap<String, DocRead>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -55,6 +107,8 @@ impl<'a> Resolver<'a> {
             registry,
             main: OnceCell::new(),
             from_main: RefCell::new(Vec::new()),
+            host: OnceCell::new(),
+            docs: RefCell::new(HashMap::new()),
         }
     }
 
@@ -135,6 +189,9 @@ impl<'a> Resolver<'a> {
     /// here, in the main checkout's.
     pub fn resolve_doc(&self, kind: DocKind, name_or_path: &str) -> Result<String> {
         crate::format::validate_line(kind.name(), name_or_path)?;
+        if crate::format::external_doc(name_or_path)?.is_some() {
+            return Ok(self.read(kind, name_or_path)?.required()?.reference);
+        }
         let dirs = self.dirs(kind);
         if name_or_path.contains('/') || name_or_path.ends_with(".md") {
             crate::format::validate_doc_path(kind.name(), dirs, name_or_path)?;
@@ -179,14 +236,62 @@ impl<'a> Resolver<'a> {
 
     /// A plan absent from both checkouts is the read error it always was.
     pub fn step_exists(&self, plan_rel: &str, step: &str) -> Result<bool> {
-        let path = self
-            .find(DocKind::Plan, plan_rel)?
-            .unwrap_or_else(|| self.project.root.join(plan_rel));
-        Ok(has_heading(&std::fs::read_to_string(path)?, step))
+        Ok(has_heading(
+            &self.read(DocKind::Plan, plan_rel)?.required()?.body,
+            step,
+        ))
+    }
+
+    pub fn read(&self, kind: DocKind, value: &str) -> Result<DocRead> {
+        let Some((scheme, rest)) = crate::format::external_doc(value)? else {
+            let path = self
+                .find(kind, value)?
+                .unwrap_or_else(|| self.project.root.join(value));
+            return Ok(DocRead::Available(Doc {
+                reference: value.into(),
+                body: std::fs::read_to_string(path)?,
+            }));
+        };
+        if let Some(cached) = self.docs.borrow().get(value) {
+            return Ok(cached.clone());
+        }
+        if self.host.get().is_none() {
+            let loaded = crate::config::HostConfig::load()?;
+            self.host
+                .set(loaded)
+                .expect("host config is initialized once");
+        }
+        let host = self.host.get().expect("host config was initialized");
+        let result = match host.docs_schemes.get(scheme) {
+            None => DocRead::Unavailable {
+                reference: value.into(),
+                cause: UnavailableCause::MissingScheme {
+                    scheme: scheme.into(),
+                    config: crate::config::HostConfig::path()?,
+                },
+            },
+            Some(command) => crate::doc_fetch::fetch(
+                crate::doc_fetch::FetchRequest {
+                    reference: value.into(),
+                    command: command.clone(),
+                    rest: rest.into(),
+                },
+                Instant::now() + crate::doc_fetch::STRICT_TIMEOUT,
+            ),
+        };
+        let mut cache = self.docs.borrow_mut();
+        if let DocRead::Available(doc) = &result {
+            cache.insert(doc.reference.clone(), result.clone());
+        }
+        cache.insert(value.into(), result.clone());
+        Ok(result)
     }
 
     /// Where `rel` is read from; this checkout's path when it is in neither.
     pub fn abs(&self, kind: DocKind, rel: &str) -> Result<String> {
+        if crate::format::external_doc(rel)?.is_some() {
+            return Ok(rel.into());
+        }
         let path = self
             .find(kind, rel)?
             .unwrap_or_else(|| self.project.root.join(rel));
