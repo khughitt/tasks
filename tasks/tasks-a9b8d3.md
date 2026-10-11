@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-08T10:53:28Z
-updated: 2026-10-11T14:02:07Z
+updated: 2026-10-11T14:44:20Z
 started: 2026-10-11T12:11:58Z
 depends: []
 parent: tasks-46d207
@@ -69,4 +69,10 @@ Ideas it wakes: On completion, record the approved finding with tasks note on ta
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-11T14:02:06Z (design/tasks-a9b8d3-review-state): plan revised for round 1: the idea-only rule moves from validate_task (called by parse_task) to save via review::validate, parse stays permissive; the backfill validates the whole snapshot (prefix, every entry) before applying, keeps operational show failures pending under failed while task_not_found is a change, and reports commit_failed/commit_deferred edits under uncommitted (exit 1, no rewrite, tasks commit before writers resume); design closeout now files the implementation task, plain-notes tasks-e34b99 and updates the brief in one commit
 - 2026-10-11T14:02:06Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): Reviewer or user re-reviews docs/plans/2026-10-11-review-state.md in .worktrees/tasks-a9b8d3-review-state and picks an execution method; on acceptance run the Tracking closeout (file the implementation task, plain note on tasks-e34b99, brief update) and close tasks-a9b8d3
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T14:17:11Z (design/tasks-a9b8d3-review-state): review: plan round 2 — verdict: revise; findings: P2 2; reviewer: codex
+- 2026-10-11T14:44:17Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T14:44:19Z (design/tasks-a9b8d3-review-state): plan revised for round 2: snapshot ids must match <prefix>-[0-9a-f]{6} (test adds sci-bad-id after a valid candidate); rollout step 3 checks git status of tasks/ in every migrated project and commits until clean, independent of any report
+- 2026-10-11T14:44:19Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): Reviewer or user re-reviews docs/plans/2026-10-11-review-state.md in .worktrees/tasks-a9b8d3-review-state and picks an execution method; on acceptance run the Tracking closeout and close tasks-a9b8d3
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
