@@ -79,6 +79,12 @@ pub struct IdOut {
     pub warnings: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct DocOut {
+    pub body: String,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct CommitOut {
     pub committed: usize,
@@ -402,6 +408,8 @@ pub struct TaskSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
@@ -611,6 +619,7 @@ impl TaskSummary {
             completed: task.completed.clone(),
             tags: task.tags.clone(),
             source: task.source.clone(),
+            step: task.step.clone(),
             model: task.model.clone(),
             agent: task.agent.clone(),
             depends: task.depends.iter().map(ToString::to_string).collect(),
@@ -670,6 +679,8 @@ pub struct ParkedRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
@@ -716,6 +727,7 @@ impl ParkedRow {
             completed: summary.completed,
             tags: summary.tags,
             source: summary.source,
+            step: summary.step,
             model: summary.model,
             agent: summary.agent,
             depends: summary.depends,
@@ -750,6 +762,7 @@ impl ParkedRow {
             completed: None,
             tags: Vec::new(),
             source: None,
+            step: None,
             model: None,
             agent: None,
             depends: Vec::new(),
@@ -1021,6 +1034,7 @@ pub enum Output {
     Group(GroupOut),
     Groups(GroupsOut),
     Show(Box<ShowOut>),
+    Doc(DocOut),
     Next(Box<NextOut>),
     List(ListOut),
     Parked(ParkedOut),
@@ -1044,6 +1058,9 @@ pub fn render(
     painter: &Painter,
     layout: &crate::table::Layout,
 ) -> String {
+    if let Output::Doc(doc) = out {
+        return doc.body.clone();
+    }
     match format {
         Format::Json => serde_json::to_string(out).expect("output serializes"),
         Format::Pretty => pretty(out, painter, layout),
@@ -1209,6 +1226,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             crate::table::render(&columns, &rows, &always, None, painter)
         }
         Output::Show(o) => crate::show_text::render(&o.fields, painter, layout.width),
+        Output::Doc(o) => o.body.clone(),
         Output::Next(o) => format!(
             "{}{}",
             halt_line(&o.halts),
@@ -1970,6 +1988,7 @@ pub fn warnings_of(out: &Output) -> Vec<String> {
         Output::Groups(o) => o.warnings.clone(),
         Output::Projects(o) => o.warnings.clone(),
         Output::Show(o) => o.warnings.clone(),
+        Output::Doc(o) => o.warnings.clone(),
         Output::Next(o) => o.warnings.clone(),
         Output::List(o) => o.warnings.clone(),
         Output::Parked(o) => o.warnings.clone(),
@@ -2036,6 +2055,7 @@ mod tests {
             completed: None,
             tags: vec![],
             source: None,
+            step: None,
             model: None,
             agent: None,
             depends: vec![],

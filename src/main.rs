@@ -7,6 +7,7 @@ mod complete;
 mod complexity;
 mod config;
 mod defer;
+mod doc_fetch;
 mod error;
 mod filter;
 mod format;
@@ -216,6 +217,7 @@ fn main() {
                 | cli::Command::Where { .. }
                 | cli::Command::Resolve { .. }
                 | cli::Command::Show { .. }
+                | cli::Command::Doc { .. }
                 | cli::Command::List { .. }
                 | cli::Command::Search { .. }
                 | cli::Command::Ready { .. }
@@ -236,6 +238,23 @@ fn main() {
     }
     match commands::run(cli) {
         Ok(out) => {
+            if let output::Output::Doc(doc) = &out {
+                let warnings = output::pretty_warnings(&doc.warnings, &stderr_painter, None);
+                if let Err(error) = write_to(std::io::stdout().lock(), &doc.body)
+                    && error.kind() != std::io::ErrorKind::BrokenPipe
+                {
+                    to_stderr(&warnings);
+                    to_stderr(&format!(
+                        "{}\n",
+                        output::render_error(&error::Error::Io(format!(
+                            "failed writing to stdout: {error}"
+                        )))
+                    ));
+                    std::process::exit(1);
+                }
+                to_stderr(&warnings);
+                return;
+            }
             // A clean `check` says nothing in JSON mode: it ends every project's pre-commit
             // hook, the exit status carries the verdict, and nothing parses an empty
             // report. Pretty mode still prints `ok` for a person at a terminal.

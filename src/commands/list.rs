@@ -33,6 +33,7 @@ pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Re
 /// selection, pools, order, and output.
 pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result<Output> {
     let ListArgs {
+        plan,
         statuses,
         filter,
         sort,
@@ -47,7 +48,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     let mut filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
     if parked {
         let waiting_on = waiting_on.as_deref().map(WaitingOn::parse).transpose()?;
-        return list_parked(ctx, filter, waiting_on, text.as_ref());
+        return list_parked(ctx, filter, waiting_on, text.as_ref(), plan);
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -65,6 +66,9 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
         periodic_ok
             && deferred_ok
             && pool_ok
+            && plan
+                .as_deref()
+                .is_none_or(|wanted| task.plan.as_deref() == Some(wanted))
             && filter.matches(&Fields::of_task(task, &claims, &ctx.registry))
             && text.as_ref().is_none_or(|text| text.matches(task))
     });
@@ -112,6 +116,7 @@ fn list_parked(
     mut filter: TaskFilter,
     waiting_on: Option<WaitingOn>,
     text: Option<&TextQuery>,
+    plan: Option<String>,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -126,6 +131,12 @@ fn list_parked(
     filter.resolve_under(&all, &ctx.registry)?;
     let tasks = rows
         .into_iter()
+        .filter(|(_, task)| {
+            plan.as_deref().is_none_or(|wanted| {
+                task.as_ref()
+                    .is_some_and(|task| task.plan.as_deref() == Some(wanted))
+            })
+        })
         .filter(|(_, task)| match (text, task) {
             // The text matches the copy the row shows; an unresolved park has none.
             (Some(text), Some(task)) => text.matches(task),

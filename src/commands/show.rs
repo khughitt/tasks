@@ -4,25 +4,14 @@ use crate::model::Task;
 use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
-use crate::resolve::{DocKind, Located, Resolver};
+use crate::resolve::{DocKind, DocRead, Located, Resolver, has_heading};
 use std::path::Path;
 use time::OffsetDateTime;
 
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
-    let (recorded, task, all) = match ctx.project.read_task(&id) {
-        Ok(task) => (None, task, ctx.project.scan()?),
-        Err(Error::TaskNotFound(_)) => {
-            let (project, task, all) = recorded_elsewhere(&id, &claims, &mut ctx.warnings)?;
-            (Some(project), task, all)
-        }
-        Err(error) => return Err(error),
-    };
-    match crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(&task.id)) {
-        Err(error @ Error::MovePending(_)) => ctx.warnings.push(error.to_string()),
-        result => result?,
-    }
+    let (recorded, task, all) = read_record(&mut ctx, &id, &claims)?;
     let project = recorded.as_ref().unwrap_or(&ctx.project);
     let now = crate::time::parse(&crate::time::now())?;
     let fields = describe(
@@ -38,6 +27,26 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         fields,
         warnings: ctx.warnings,
     })))
+}
+
+pub(super) fn read_record(
+    ctx: &mut Ctx,
+    id: &crate::model::TaskId,
+    claims: &crate::claims::ClaimSnapshot,
+) -> Result<(Option<Project>, Task, Vec<Task>)> {
+    let found = match ctx.project.read_task(id) {
+        Ok(task) => (None, task, ctx.project.scan()?),
+        Err(Error::TaskNotFound(_)) => {
+            let (project, task, all) = recorded_elsewhere(id, claims, &mut ctx.warnings)?;
+            (Some(project), task, all)
+        }
+        Err(error) => return Err(error),
+    };
+    match crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(&found.1.id)) {
+        Err(error @ Error::MovePending(_)) => ctx.warnings.push(error.to_string()),
+        result => result?,
+    }
+    Ok(found)
 }
 
 /// Record-home spec §6.1: a record this checkout lacks is read from the checkout named by
@@ -88,7 +97,7 @@ pub fn describe(
     warnings: &mut Vec<String>,
     now: OffsetDateTime,
 ) -> Result<ShowFields> {
-    let resolver = Resolver::new(project, registry);
+    let mut resolver = Resolver::new(project, registry);
     let mut depends_on = Vec::new();
     for dependency in &task.depends {
         // The scan the caller already holds answers first, so `next` describes the same
@@ -117,6 +126,29 @@ pub fn describe(
         }
     }
     let step_found = match (&task.plan, &task.step) {
+        (Some(plan), None) if crate::format::external_doc(plan)?.is_some() => None,
+        (Some(plan), Some(step)) if crate::format::external_doc(plan)?.is_some() => {
+            resolver.set_fetch_budget(crate::doc_fetch::OPTIONAL_BUDGET);
+            match resolver.read(DocKind::Plan, plan)? {
+                DocRead::Available(doc) => Some(has_heading(&doc.body, step)),
+                DocRead::Unavailable { reference, cause } => {
+                    warnings.push(format!(
+                        "{}plan {reference} is unavailable: {}",
+                        if task.status.is_open() {
+                            ""
+                        } else {
+                            "historical "
+                        },
+                        cause.detail()
+                    ));
+                    if task.status.is_open() {
+                        None
+                    } else {
+                        Some(false)
+                    }
+                }
+            }
+        }
         (Some(plan), step)
             if !task.status.is_open()
                 && matches!(resolver.locate(plan)?, Located::Missing)

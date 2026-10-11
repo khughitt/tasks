@@ -3,7 +3,61 @@ use crate::model::{Task, TaskId};
 use crate::registry::Registry;
 use crate::repo::Project;
 use std::cell::{OnceCell, RefCell};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone)]
+pub struct Doc {
+    pub reference: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum UnavailableCause {
+    MissingScheme { scheme: String, config: PathBuf },
+    FetchFailed(String),
+    BudgetExhausted,
+}
+
+impl UnavailableCause {
+    pub fn detail(&self) -> String {
+        match self {
+            Self::MissingScheme { scheme, config } => format!(
+                "{}: [docs.schemes] has no {scheme}; a record may reference it, but this host cannot resolve it",
+                config.display()
+            ),
+            Self::FetchFailed(detail) => detail.clone(),
+            Self::BudgetExhausted => "budget exhausted".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum DocRead {
+    Available(Doc),
+    Unavailable {
+        reference: String,
+        cause: UnavailableCause,
+    },
+}
+
+impl DocRead {
+    pub fn required(self) -> Result<Doc> {
+        match self {
+            Self::Available(doc) => Ok(doc),
+            Self::Unavailable { reference, cause } => {
+                let detail = format!("{reference}: {}", cause.detail());
+                Err(match cause {
+                    UnavailableCause::MissingScheme { .. } => Error::Config(detail),
+                    UnavailableCause::FetchFailed(_) | UnavailableCause::BudgetExhausted => {
+                        Error::DocNotFound(detail)
+                    }
+                })
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocKind {
@@ -46,6 +100,10 @@ pub struct Resolver<'a> {
     main: OnceCell<Option<PathBuf>>,
     /// One line per document read from the main checkout, for the caller's warnings.
     from_main: RefCell<Vec<String>>,
+    host: OnceCell<crate::config::HostConfig>,
+    docs: RefCell<HashMap<String, DocRead>>,
+    fetch_budget: Option<Duration>,
+    fetch_deadline: OnceCell<Instant>,
 }
 
 impl<'a> Resolver<'a> {
@@ -55,6 +113,10 @@ impl<'a> Resolver<'a> {
             registry,
             main: OnceCell::new(),
             from_main: RefCell::new(Vec::new()),
+            host: OnceCell::new(),
+            docs: RefCell::new(HashMap::new()),
+            fetch_budget: None,
+            fetch_deadline: OnceCell::new(),
         }
     }
 
@@ -135,6 +197,9 @@ impl<'a> Resolver<'a> {
     /// here, in the main checkout's.
     pub fn resolve_doc(&self, kind: DocKind, name_or_path: &str) -> Result<String> {
         crate::format::validate_line(kind.name(), name_or_path)?;
+        if crate::format::external_doc(name_or_path)?.is_some() {
+            return Ok(self.read(kind, name_or_path)?.required()?.reference);
+        }
         let dirs = self.dirs(kind);
         if name_or_path.contains('/') || name_or_path.ends_with(".md") {
             crate::format::validate_doc_path(kind.name(), dirs, name_or_path)?;
@@ -179,14 +244,202 @@ impl<'a> Resolver<'a> {
 
     /// A plan absent from both checkouts is the read error it always was.
     pub fn step_exists(&self, plan_rel: &str, step: &str) -> Result<bool> {
-        let path = self
-            .find(DocKind::Plan, plan_rel)?
-            .unwrap_or_else(|| self.project.root.join(plan_rel));
-        Ok(has_heading(&std::fs::read_to_string(path)?, step))
+        Ok(has_heading(
+            &self.read(DocKind::Plan, plan_rel)?.required()?.body,
+            step,
+        ))
+    }
+
+    pub fn read(&self, kind: DocKind, value: &str) -> Result<DocRead> {
+        let Some((scheme, rest)) = crate::format::external_doc(value)? else {
+            let path = self
+                .find(kind, value)?
+                .unwrap_or_else(|| self.project.root.join(value));
+            return Ok(DocRead::Available(Doc {
+                reference: value.into(),
+                body: std::fs::read_to_string(path)?,
+            }));
+        };
+        if let Some(cached) = self.docs.borrow().get(value) {
+            return Ok(cached.clone());
+        }
+        let host = self.host_config()?;
+        let result = match host.docs_schemes.get(scheme) {
+            None => self.missing_scheme(value, scheme)?,
+            Some(command) => {
+                let (deadline, budget_limited) = self.fetch_limit();
+                crate::doc_fetch::fetch(
+                    crate::doc_fetch::FetchRequest {
+                        reference: value.into(),
+                        command: command.clone(),
+                        rest: rest.into(),
+                        budget_limited,
+                    },
+                    deadline,
+                )
+            }
+        };
+        self.cache_doc(value, result.clone());
+        Ok(result)
+    }
+
+    fn host_config(&self) -> Result<&crate::config::HostConfig> {
+        if self.host.get().is_none() {
+            let loaded = crate::config::HostConfig::load()?;
+            self.host
+                .set(loaded)
+                .expect("host config is initialized once");
+        }
+        Ok(self.host.get().expect("host config was initialized"))
+    }
+
+    fn missing_scheme(&self, value: &str, scheme: &str) -> Result<DocRead> {
+        Ok(DocRead::Unavailable {
+            reference: value.into(),
+            cause: UnavailableCause::MissingScheme {
+                scheme: scheme.into(),
+                config: crate::config::HostConfig::path()?,
+            },
+        })
+    }
+
+    fn cache_doc(&self, value: &str, result: DocRead) {
+        let mut cache = self.docs.borrow_mut();
+        if matches!(cache.get(value), Some(DocRead::Available(_))) {
+            return;
+        }
+        let result = if let DocRead::Available(doc) = &result {
+            match cache.get(&doc.reference) {
+                Some(existing @ DocRead::Available(_)) => existing.clone(),
+                _ => {
+                    cache.insert(doc.reference.clone(), result.clone());
+                    result
+                }
+            }
+        } else {
+            result
+        };
+        cache.insert(value.into(), result);
+    }
+
+    pub fn set_fetch_budget(&mut self, budget: Duration) {
+        self.fetch_budget = Some(budget);
+    }
+
+    fn fetch_limit(&self) -> (Instant, bool) {
+        let now = Instant::now();
+        let strict = now + crate::doc_fetch::STRICT_TIMEOUT;
+        match self.fetch_budget {
+            None => (strict, false),
+            Some(budget) => {
+                let shared = *self.fetch_deadline.get_or_init(|| now + budget);
+                (shared.min(strict), shared <= strict)
+            }
+        }
+    }
+
+    pub fn prefetch_external(&self, references: &[String]) -> Result<Vec<String>> {
+        if references.is_empty() {
+            return Ok(vec![]);
+        }
+        let host = self.host_config()?;
+        let mut requests = Vec::new();
+        for reference in references {
+            if self.docs.borrow().contains_key(reference) {
+                continue;
+            }
+            let (scheme, rest) =
+                crate::format::external_doc(reference)?.expect("prefetch references are external");
+            match host.docs_schemes.get(scheme) {
+                None => self.cache_doc(reference, self.missing_scheme(reference, scheme)?),
+                Some(command) => requests.push(crate::doc_fetch::FetchRequest {
+                    reference: reference.clone(),
+                    command: command.clone(),
+                    rest: rest.into(),
+                    budget_limited: false,
+                }),
+            }
+        }
+        if !requests.is_empty() {
+            std::thread::scope(|scope| -> Result<()> {
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let mut next = 0;
+                let mut active = 0;
+                loop {
+                    while active < 4 && next < requests.len() {
+                        if self.docs.borrow().contains_key(&requests[next].reference) {
+                            next += 1;
+                            continue;
+                        }
+                        let (deadline, budget_limited) = self.fetch_limit();
+                        if Instant::now() >= deadline {
+                            break;
+                        }
+                        let mut request = requests[next].clone();
+                        request.budget_limited = budget_limited;
+                        next += 1;
+                        let reference = request.reference.clone();
+                        let sent = sender.clone();
+                        match std::thread::Builder::new().spawn_scoped(scope, move || {
+                            let result = crate::doc_fetch::fetch(request, deadline);
+                            let _ = sent.send((reference, result));
+                        }) {
+                            Ok(_) => active += 1,
+                            Err(error) => self.cache_doc(
+                                &requests[next - 1].reference,
+                                DocRead::Unavailable {
+                                    reference: requests[next - 1].reference.clone(),
+                                    cause: UnavailableCause::FetchFailed(format!(
+                                        "failed to start fetch worker: {error}"
+                                    )),
+                                },
+                            ),
+                        }
+                    }
+                    if active == 0 {
+                        break;
+                    }
+                    let (reference, result) = receiver.recv().map_err(|error| {
+                        Error::Io(format!("fetch worker disconnected: {error}"))
+                    })?;
+                    active -= 1;
+                    self.cache_doc(&reference, result);
+                }
+                for request in &requests[next..] {
+                    if self.docs.borrow().contains_key(&request.reference) {
+                        continue;
+                    }
+                    self.cache_doc(
+                        &request.reference,
+                        DocRead::Unavailable {
+                            reference: request.reference.clone(),
+                            cause: UnavailableCause::BudgetExhausted,
+                        },
+                    );
+                }
+                Ok(())
+            })?;
+        }
+        Ok(references
+            .iter()
+            .filter(|reference| {
+                matches!(
+                    self.docs.borrow().get(*reference),
+                    Some(DocRead::Unavailable {
+                        cause: UnavailableCause::BudgetExhausted,
+                        ..
+                    })
+                )
+            })
+            .cloned()
+            .collect())
     }
 
     /// Where `rel` is read from; this checkout's path when it is in neither.
     pub fn abs(&self, kind: DocKind, rel: &str) -> Result<String> {
+        if crate::format::external_doc(rel)?.is_some() {
+            return Ok(rel.into());
+        }
         let path = self
             .find(kind, rel)?
             .unwrap_or_else(|| self.project.root.join(rel));
@@ -278,6 +531,201 @@ pub fn step_headings(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    fn prefetch_fixture() -> (tempfile::TempDir, Project, Registry, String) {
+        let temp = tempfile::tempdir().unwrap();
+        let project = Project::init(temp.path(), "xx", None).unwrap();
+        std::fs::create_dir(temp.path().join("started")).unwrap();
+        std::fs::create_dir(temp.path().join("released")).unwrap();
+        let script = temp.path().join("fetch.sh");
+        std::fs::write(&script, format!("printf '%s' \"$$\" > '{0}/started/'\"$1\"\nwhile [ ! -f '{0}/released/'\"$1\" ]; do sleep 0.01; done\nprintf '{{\"id\":\"%s\",\"body\":\"ok\"}}' \"$1\"\n", temp.path().display())).unwrap();
+        let command = format!("sh '{}'", script.display());
+        (temp, project, Registry::default(), command)
+    }
+
+    #[test]
+    fn prefetch_external_budget_is_shared_and_unstarted_refs_are_cached() {
+        let (temp, project, registry, command) = prefetch_fixture();
+        let mut resolver = Resolver::new(&project, &registry);
+        resolver
+            .host
+            .set(crate::config::HostConfig {
+                relay_identity: false,
+                docs_schemes: [("stub".into(), command)].into(),
+            })
+            .unwrap();
+        resolver.set_fetch_budget(Duration::from_millis(150));
+        let refs: Vec<String> = ["a", "b", "c", "d", "e", "f"]
+            .iter()
+            .map(|name| format!("stub:{name}"))
+            .collect();
+        let started = Instant::now();
+        assert_eq!(resolver.prefetch_external(&refs).unwrap(), refs);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        for reference in &refs {
+            assert!(matches!(
+                resolver.read(DocKind::Plan, reference).unwrap(),
+                DocRead::Unavailable {
+                    cause: UnavailableCause::BudgetExhausted,
+                    ..
+                }
+            ));
+        }
+        let files: Vec<_> = std::fs::read_dir(temp.path().join("started"))
+            .unwrap()
+            .collect();
+        assert_eq!(files.len(), 4);
+        for entry in files {
+            let pid = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            let state = std::fs::read_to_string(format!("/proc/{pid}/stat"));
+            assert!(state.is_err() || state.unwrap().rsplit_once(") ").unwrap().1.starts_with('Z'));
+        }
+    }
+
+    #[test]
+    fn prefetch_external_starts_at_most_four_then_refills() {
+        let (temp, project, registry, command) = prefetch_fixture();
+        let root = temp.path().to_owned();
+        let refs: Vec<String> = ["a", "b", "c", "d", "e", "f"]
+            .iter()
+            .map(|name| format!("stub:{name}"))
+            .collect();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                let mut resolver = Resolver::new(&project, &registry);
+                resolver
+                    .host
+                    .set(crate::config::HostConfig {
+                        relay_identity: false,
+                        docs_schemes: [("stub".into(), command)].into(),
+                    })
+                    .unwrap();
+                resolver.set_fetch_budget(Duration::from_secs(3));
+                assert!(resolver.prefetch_external(&refs).unwrap().is_empty());
+                for reference in refs {
+                    assert_eq!(
+                        resolver
+                            .read(DocKind::Plan, &reference)
+                            .unwrap()
+                            .required()
+                            .unwrap()
+                            .body,
+                        "ok"
+                    );
+                }
+            });
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while std::fs::read_dir(root.join("started")).unwrap().count() < 4 {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(std::fs::read_dir(root.join("started")).unwrap().count(), 4);
+            std::fs::write(root.join("released/a"), "").unwrap();
+            while !root.join("started/e").exists() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!root.join("started/f").exists());
+            for name in ["b", "c", "d", "e", "f"] {
+                std::fs::write(root.join("released").join(name), "").unwrap();
+            }
+            worker.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn prefetch_external_alias_collision_preserves_available_body() {
+        for (queued, alias_first) in [(true, true), (false, true), (false, false)] {
+            let (temp, project, registry, _) = prefetch_fixture();
+            let root = temp.path().to_owned();
+            let script = root.join("fetch.sh");
+            std::fs::write(&script, format!(
+                "printf '%s' $$ > '{0}/started/'\"$1\"\nwhile [ ! -e '{0}/released/'\"$1\" ]; do sleep 0.01; done\ncase \"$1\" in old) printf '%s' '{{\"id\":\"new\",\"body\":\"### Task 1: one\\n\"}}' ;; new) exit 7 ;; *) printf '{{\"id\":\"%s\",\"body\":\"ok\"}}' \"$1\" ;; esac\n", root.display()
+            )).unwrap();
+            let names = if queued {
+                vec!["old", "a", "b", "c", "new", "probe"]
+            } else {
+                vec!["old", "new", "a", "b", "probe"]
+            };
+            let refs: Vec<String> = names.iter().map(|name| format!("stub:{name}")).collect();
+            std::thread::scope(|scope| {
+                let command = format!("sh '{}'", script.display());
+                let worker = scope.spawn(move || {
+                    let mut resolver = Resolver::new(&project, &registry);
+                    resolver
+                        .host
+                        .set(crate::config::HostConfig {
+                            relay_identity: false,
+                            docs_schemes: [("stub".into(), command)].into(),
+                        })
+                        .unwrap();
+                    resolver.set_fetch_budget(Duration::from_secs(3));
+                    assert!(resolver.prefetch_external(&refs).unwrap().is_empty());
+                    for reference in ["stub:old", "stub:new"] {
+                        assert!(
+                            resolver.step_exists(reference, "Task 1: one").unwrap(),
+                            "{reference}"
+                        );
+                    }
+                    resolver.cache_doc(
+                        "stub:new",
+                        DocRead::Unavailable {
+                            reference: "stub:new".into(),
+                            cause: UnavailableCause::BudgetExhausted,
+                        },
+                    );
+                    assert!(resolver.step_exists("stub:new", "Task 1: one").unwrap());
+                });
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while std::fs::read_dir(root.join("started")).unwrap().count() < 4 {
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                let first = if alias_first { "old" } else { "new" };
+                std::fs::write(root.join("released").join(first), "").unwrap();
+                // A refill proves the first result has been cached by the resolver.
+                while !root.join("started/probe").exists() {
+                    if queued {
+                        std::fs::write(root.join("released/new"), "").unwrap();
+                    }
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                for name in &names {
+                    std::fs::write(root.join("released").join(name), "").unwrap();
+                }
+                worker.join().unwrap();
+                if queued {
+                    assert!(!root.join("started/new").exists());
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn prefetch_external_missing_scheme_is_not_budget_exhaustion() {
+        let (_, project, registry, _) = prefetch_fixture();
+        let mut resolver = Resolver::new(&project, &registry);
+        resolver
+            .host
+            .set(crate::config::HostConfig::default())
+            .unwrap();
+        resolver.set_fetch_budget(Duration::ZERO);
+        assert!(
+            resolver
+                .prefetch_external(&["absent:x".into()])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(matches!(
+            resolver.read(DocKind::Plan, "absent:x").unwrap(),
+            DocRead::Unavailable {
+                cause: UnavailableCause::MissingScheme { .. },
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn step_headings_match_only_the_task_n_convention() {

@@ -1,13 +1,15 @@
 use crate::error::{Error, Result};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The host-local configuration, `$XDG_CONFIG_HOME/tasks/config.toml` or
-/// `$HOME/.config/tasks/config.toml`. Host-local deliberately: relay availability is a
-/// property of a machine, and the per-project `tasks/.config.toml` is committed and syncs
+/// `$HOME/.config/tasks/config.toml`. Relay identity and document commands belong to a
+/// machine, while the per-project `tasks/.config.toml` is committed and syncs
 /// between hosts.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HostConfig {
     pub relay_identity: bool,
+    pub docs_schemes: BTreeMap<String, String>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -19,9 +21,18 @@ struct FileIdentity {
 
 #[derive(serde::Deserialize, Default)]
 #[serde(deny_unknown_fields)]
+struct FileDocs {
+    #[serde(default)]
+    schemes: BTreeMap<String, String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct FileShape {
     #[serde(default)]
     identity: FileIdentity,
+    #[serde(default)]
+    docs: FileDocs,
 }
 
 impl HostConfig {
@@ -52,8 +63,21 @@ impl HostConfig {
     pub fn parse(text: &str, path: &str) -> Result<HostConfig> {
         let file: FileShape =
             toml::from_str(text).map_err(|error| Error::Config(format!("{path}: {error}")))?;
+        for (scheme, command) in &file.docs.schemes {
+            if !crate::format::valid_doc_scheme(scheme) {
+                return Err(Error::Config(format!(
+                    "{path}: [docs.schemes] key {scheme:?} must match [a-z][a-z0-9-]*"
+                )));
+            }
+            if command.trim().is_empty() || command.contains('\0') {
+                return Err(Error::Config(format!(
+                    "{path}: [docs.schemes] command for {scheme} must be nonblank and NUL-free"
+                )));
+            }
+        }
         Ok(HostConfig {
             relay_identity: file.identity.relay,
+            docs_schemes: file.docs.schemes,
         })
     }
 }
@@ -63,17 +87,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn external_doc_config_keeps_identity_and_validates_commands() {
+        let config = HostConfig::parse(
+            "[identity]\nrelay = true\n[docs.schemes]\nx = 'printf'\n",
+            "c.toml",
+        )
+        .unwrap();
+        assert!(config.relay_identity);
+        assert!(HostConfig::parse("[docs.schemes]\n", "c.toml").is_ok());
+        for text in [
+            "[docs]\nunknown = true\n",
+            "[docs.schemes]\nDocs = 'cat'\n",
+            "[docs.schemes]\nx = ''\n",
+            "[docs.schemes]\nx = '   '\n",
+            "[docs.schemes]\nx = 1\n",
+        ] {
+            assert!(HostConfig::parse(text, "c.toml").is_err(), "{text:?}");
+        }
+    }
+
+    #[test]
     fn a_config_without_the_key_leaves_relay_off() {
         assert_eq!(
             HostConfig::parse("", "c.toml").unwrap(),
             HostConfig {
-                relay_identity: false
+                relay_identity: false,
+                ..HostConfig::default()
             }
         );
         assert_eq!(
             HostConfig::parse("[identity]\n", "c.toml").unwrap(),
             HostConfig {
-                relay_identity: false
+                relay_identity: false,
+                ..HostConfig::default()
             }
         );
     }
@@ -83,13 +129,15 @@ mod tests {
         assert_eq!(
             HostConfig::parse("[identity]\nrelay = true\n", "c.toml").unwrap(),
             HostConfig {
-                relay_identity: true
+                relay_identity: true,
+                ..HostConfig::default()
             }
         );
         assert_eq!(
             HostConfig::parse("[identity]\nrelay = false\n", "c.toml").unwrap(),
             HostConfig {
-                relay_identity: false
+                relay_identity: false,
+                ..HostConfig::default()
             }
         );
     }

@@ -317,9 +317,9 @@ fn doc_root(key: &str, raw: &str) -> Result<String> {
         && dir
             .split('/')
             .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
-    if !normalized {
+    if !normalized || dir.split('/').next().unwrap_or_default().contains(':') {
         return Err(Error::Config(format!(
-            "{CONFIG_REL}: {key} entry {raw:?} must be a normalized relative path"
+            "{CONFIG_REL}: {key} entry {raw:?} must be a normalized relative path with no colon in its first segment"
         )));
     }
     Ok(dir.to_string())
@@ -987,6 +987,13 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_doc_roots_reserve_first_segment_colons() {
+        assert!(doc_root("plan_dirs", "notes:x").is_err());
+        assert!(doc_root("spec_dirs", "notes:x/sub/").is_err());
+        assert_eq!(doc_root("plan_dirs", "notes/x:y/").unwrap(), "notes/x:y");
+    }
     use crate::model::*;
 
     fn project_with_config(text: &str) -> (tempfile::TempDir, Result<Project>) {

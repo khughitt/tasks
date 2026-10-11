@@ -21667,6 +21667,115 @@ fn worktree_with_excluded_docs(
 }
 
 #[test]
+fn doc_reads_local_and_main_only_documents_with_stderr_warnings() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = worktree_with_excluded_docs(&mut env);
+    let expected = std::fs::read(main.join("docs/plans/x.md")).unwrap();
+    for dir in [&main, &side] {
+        let out = env.cmd(dir).args(["doc", &id, "--plan"]).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, expected);
+        if dir == &side {
+            assert!(String::from_utf8_lossy(&out.stderr).contains("main checkout"));
+        }
+    }
+    let suffix = id.rsplit_once('-').unwrap().1;
+    let out = env
+        .cmd(&main)
+        .args(["doc", suffix, "--spec"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"# X\n");
+}
+
+#[test]
+fn doc_reads_recorded_checkout_and_foreign_project() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    write_doc(&side, "docs/plans/only.md", "# Only there");
+    let id = id_of(env.json(&side, &["add", "There", "--plan", "only"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let caller = env.init("fam");
+    for dir in [&main, &caller] {
+        let out = env.cmd(dir).args(["doc", &id, "--plan"]).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, b"# Only there");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("exists only"));
+    }
+}
+
+#[test]
+fn doc_plan_filter_parked_uses_recorded_copy() {
+    let mut env = TestEnv::new();
+    let (main, side, _) = repo_with_worktree(&mut env);
+    for plan in ["first", "second"] {
+        write_doc(&side, &format!("docs/plans/{plan}.md"), "# Plan\n");
+    }
+    let id = id_of(env.json(&side, &["add", "There", "--plan", "first"]));
+    as_agent(&env, &side, "agent-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &side, "agent-a")
+        .args(["park", &id, "continue here"])
+        .assert()
+        .success();
+    assert_eq!(
+        env.json(
+            &main,
+            &["list", "--parked", "--plan", "docs/plans/first.md"]
+        )["tasks"][0]["id"],
+        id
+    );
+    assert!(
+        env.json(
+            &main,
+            &["list", "--parked", "--plan", "docs/plans/second.md"]
+        )["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    // A present local copy takes precedence over the record a park names.
+    std::fs::copy(
+        side.join(format!("tasks/{id}.md")),
+        main.join(format!("tasks/{id}.md")),
+    )
+    .unwrap();
+    let record = main.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&record)
+        .unwrap()
+        .replace("docs/plans/first.md", "docs/plans/second.md");
+    std::fs::write(record, text).unwrap();
+    assert!(
+        env.json(
+            &main,
+            &["list", "--parked", "--plan", "docs/plans/first.md"]
+        )["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        env.json(
+            &main,
+            &[
+                "search",
+                "There",
+                "--parked",
+                "--plan",
+                "docs/plans/second.md"
+            ]
+        )["tasks"][0]["id"],
+        id
+    );
+}
+
+#[test]
 fn check_in_a_worktree_reads_git_excluded_docs_from_the_main_checkout() {
     let mut env = TestEnv::new();
     let (main, side, id) = worktree_with_excluded_docs(&mut env);
