@@ -67,6 +67,9 @@ pub struct ScopeArgs {
 /// the parked/periodic/deferred modes, and scope.
 #[derive(Args, Debug)]
 pub struct ListArgs {
+    /// Only tasks whose stored plan exactly matches this value; never fetched or resolved.
+    #[arg(long)]
+    pub plan: Option<String>,
     /// Filter by status (repeatable): idea, todo, doing, blocked, shelved, done, dropped, or moved.
     #[arg(
         long = "status",
@@ -483,6 +486,16 @@ pub enum Command {
     Show {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
+    },
+    /// Print a linked plan or spec body.
+    #[command(group(clap::ArgGroup::new("doc_kind").args(["plan", "spec"]).required(true)))]
+    Doc {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        #[arg(long)]
+        plan: bool,
+        #[arg(long)]
+        spec: bool,
     },
     /// List tasks (open by default).
     #[command(

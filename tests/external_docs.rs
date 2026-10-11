@@ -2,6 +2,190 @@ mod common;
 use common::{TestEnv, docs::DocFixture};
 
 #[test]
+fn external_doc_export_is_byte_exact_in_every_format() {
+    for body in ["", "No final newline", "### Task 1: one\n"] {
+        let mut env = TestEnv::new();
+        let dir = env.init("sci");
+        let _docs = DocFixture::new(&env, body);
+        let id = env.json(&dir, &["add", "Doc", "--plan", "stub:alias"])["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for flags in [
+            vec![],
+            vec!["--json"],
+            vec!["--pretty"],
+            vec!["--pretty", "--color=always", "--headers"],
+        ] {
+            let out = env
+                .cmd(&dir)
+                .args(flags)
+                .args(["doc", &id, "--plan"])
+                .env("COLUMNS", "invalid")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+            assert_eq!(out.stdout, body.as_bytes());
+        }
+        let out = env
+            .cmd(&dir)
+            .env("TASKS_FORMAT", "pretty")
+            .args(["doc", &id, "--plan"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert_eq!(out.stdout, body.as_bytes());
+    }
+}
+
+#[test]
+fn external_doc_export_selects_only_requested_link_and_validates_selectors() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "# Spec\n");
+    let id = env.json(
+        &dir,
+        &["add", "Doc", "--spec", "stub:spec", "--plan", "stub:plan"],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let calls = docs.calls().len();
+    let original = std::fs::read_to_string(&docs.script).unwrap();
+    std::fs::write(
+        &docs.script,
+        "[ \"$1\" != plan ] || { printf 'plan down' >&2; exit 7; }\n".to_owned() + &original,
+    )
+    .unwrap();
+    let out = env.cmd(&dir).args(["doc", &id, "--spec"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, b"# Spec\n");
+    assert_eq!(docs.calls().len(), calls + 1);
+    assert_eq!(env.fail(&dir, &["doc", &id, "--plan"]), "doc_not_found");
+    env.usage(&dir, &["doc", &id]);
+    env.usage(&dir, &["doc", &id, "--plan", "--spec"]);
+    let plain = env.json(&dir, &["add", "Plain"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(env.fail(&dir, &["doc", &plain, "--plan"]), "doc_not_found");
+    docs.disconnect();
+    assert_eq!(env.fail(&dir, &["doc", &id, "--spec"]), "config");
+}
+
+#[test]
+fn external_doc_filter_matches_exact_plan_across_parents_and_carries_steps() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "### Task 1: one\n### Task 2: two\n");
+    let mut completed = Vec::new();
+    for (title, step) in [("Goal A", "Task 1: one"), ("Goal B", "Task 2: two")] {
+        let parent = env.json(&dir, &["add", title])["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let child = env.json(
+            &dir,
+            &[
+                "add",
+                "Completed step",
+                "--parent",
+                &parent,
+                "--plan",
+                "stub:plan",
+                "--step",
+                step,
+                "-p",
+                "1",
+            ],
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        env.json(&dir, &["done", &child]);
+        completed.push(child);
+    }
+    let open = env.json(
+        &dir,
+        &[
+            "add",
+            "Open step",
+            "--plan",
+            "stub:plan",
+            "--step",
+            "Task 1: one",
+        ],
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let unstepped = env.json(&dir, &["add", "Unstepped", "--plan", "stub:plan"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let calls = docs.calls();
+    docs.disconnect();
+    let listed = env.json(
+        &dir,
+        &["list", "--plan", "stub:plan", "--status", "done", "-p", "1"],
+    );
+    let rows = listed["tasks"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(
+        |row| completed.contains(&row["id"].as_str().unwrap().to_owned())
+            && row["step"].as_str().is_some()
+    ));
+    assert!(
+        env.json(&dir, &["list", "--plan", "stub:alias"])["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        env.json(&dir, &["search", "Open", "--plan", "stub:plan"])["tasks"][0]["id"],
+        open
+    );
+    env.json(&dir, &["park", &unstepped, "later"]);
+    let parked = env.json(&dir, &["list", "--parked", "--plan", "stub:plan"]);
+    assert_eq!(parked["tasks"][0]["id"], unstepped);
+    assert!(parked["tasks"][0].get("step").is_none());
+    assert_eq!(docs.calls(), calls);
+}
+
+#[test]
+fn external_doc_export_completion_does_not_fetch() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "# Doc\n");
+    let id = env.json(&dir, &["add", "Doc", "--plan", "stub:alias"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let before = docs.calls();
+    assert!(
+        env.complete_values(&dir, "bash", 2, &["tasks", "doc", "sci-"])
+            .contains(&id)
+    );
+    assert_eq!(docs.calls(), before);
+}
+
+#[test]
+fn external_doc_export_closed_pipe_is_successful() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let _docs = DocFixture::new(&env, &"x".repeat(100000));
+    let id = env.json(&dir, &["add", "Doc", "--plan", "stub:alias"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut child = env.raw(&dir).args(["doc", &id, "--plan"]).spawn().unwrap();
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
 fn external_doc_show_and_next_tolerate_unavailable_open_step() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");

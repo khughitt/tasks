@@ -92,6 +92,22 @@ fn layout(env: &TestEnv) -> Layout {
 }
 
 #[test]
+fn doc_reads_selected_document_from_linked_overlay() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    std::fs::write(l.nexc.join("docs/specs/overlay.md"), "# Overlay spec").unwrap();
+    let id = env.json(&l.wt, &["add", "Doc", "--spec", "overlay"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for dir in [&l.nexc, &l.code, &l.wt] {
+        let out = env.cmd(dir).args(["doc", &id, "--spec"]).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(out.stdout, b"# Overlay spec");
+    }
+}
+
+#[test]
 fn a_linked_checkout_opens_its_overlay_project_from_every_tree() {
     let env = TestEnv::new();
     let l = layout(&env);

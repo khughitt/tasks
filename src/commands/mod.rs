@@ -4,6 +4,7 @@ pub mod check;
 pub mod claims;
 pub mod commit;
 pub mod dep;
+pub mod doc;
 pub mod edit;
 pub mod feedback;
 pub mod graph;
@@ -1864,6 +1865,11 @@ fn dispatch(cli: Cli) -> Result<Output> {
             add::run(ctx, title, status, fields)
         }
         Command::Show { id } => show::run(open_id_ctx(dir, &id)?, id),
+        Command::Doc { id, plan, spec: _ } => doc::run(
+            open_id_ctx(dir, &id)?,
+            id,
+            if plan { DocKind::Plan } else { DocKind::Spec },
+        ),
         Command::List { list: args } => list::list(open_read_ctx(dir, &args.scope)?, args, None),
         Command::Search { query, list: args } => {
             // Validated before the scan, so an empty query never reads a project.

@@ -11,18 +11,7 @@ use time::OffsetDateTime;
 pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
-    let (recorded, task, all) = match ctx.project.read_task(&id) {
-        Ok(task) => (None, task, ctx.project.scan()?),
-        Err(Error::TaskNotFound(_)) => {
-            let (project, task, all) = recorded_elsewhere(&id, &claims, &mut ctx.warnings)?;
-            (Some(project), task, all)
-        }
-        Err(error) => return Err(error),
-    };
-    match crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(&task.id)) {
-        Err(error @ Error::MovePending(_)) => ctx.warnings.push(error.to_string()),
-        result => result?,
-    }
+    let (recorded, task, all) = read_record(&mut ctx, &id, &claims)?;
     let project = recorded.as_ref().unwrap_or(&ctx.project);
     let now = crate::time::parse(&crate::time::now())?;
     let fields = describe(
@@ -38,6 +27,26 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         fields,
         warnings: ctx.warnings,
     })))
+}
+
+pub(super) fn read_record(
+    ctx: &mut Ctx,
+    id: &crate::model::TaskId,
+    claims: &crate::claims::ClaimSnapshot,
+) -> Result<(Option<Project>, Task, Vec<Task>)> {
+    let found = match ctx.project.read_task(id) {
+        Ok(task) => (None, task, ctx.project.scan()?),
+        Err(Error::TaskNotFound(_)) => {
+            let (project, task, all) = recorded_elsewhere(id, claims, &mut ctx.warnings)?;
+            (Some(project), task, all)
+        }
+        Err(error) => return Err(error),
+    };
+    match crate::moving::journal::refuse_pending_id(&ctx.registry.canonical_id(&found.1.id)) {
+        Err(error @ Error::MovePending(_)) => ctx.warnings.push(error.to_string()),
+        result => result?,
+    }
+    Ok(found)
 }
 
 /// Record-home spec §6.1: a record this checkout lacks is read from the checkout named by
