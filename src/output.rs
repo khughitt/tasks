@@ -393,6 +393,10 @@ pub struct TaskSummary {
     pub parallel: bool,
     /// Marked as a lane; always present, like `parallel`.
     pub lane: bool,
+    /// The stored review flag; always present, like `parallel`.
+    pub reviewed: bool,
+    /// The row needs a look (review-state spec §4). Computed from the scan, never stored.
+    pub needs_review: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -600,6 +604,7 @@ impl TaskSummary {
         registry: &Registry,
         now: OffsetDateTime,
     ) -> TaskSummary {
+        let child_count = crate::hierarchy::children(all, &task.id, registry).len();
         TaskSummary {
             id: task.id.to_string(),
             title: task.title.clone(),
@@ -611,6 +616,14 @@ impl TaskSummary {
             process: task.process,
             parallel: task.parallel,
             lane: task.lane,
+            reviewed: task.reviewed,
+            needs_review: crate::review::needs_review(
+                task.status,
+                task.reviewed,
+                task.process,
+                task.lane,
+                child_count,
+            ),
             needs: task.needs.clone(),
             owner: task.owner.clone(),
             created: task.created.clone(),
@@ -625,7 +638,7 @@ impl TaskSummary {
             depends: task.depends.iter().map(ToString::to_string).collect(),
             parent: task.parent.as_ref().map(ToString::to_string),
             in_lane: crate::hierarchy::lane_of(all, task, registry),
-            child_count: crate::hierarchy::children(all, &task.id, registry).len(),
+            child_count,
             open_descendant_count: crate::hierarchy::open_descendants(all, &task.id, registry)
                 .len(),
             claim: claims
@@ -662,6 +675,11 @@ pub struct ParkedRow {
     pub parallel: bool,
     /// Marked as a lane; always present, like `parallel`.
     pub lane: bool,
+    /// From the record; omitted on an unresolved row (review-state spec §5.4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub needs_review: Option<bool>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -719,6 +737,8 @@ impl ParkedRow {
             process: summary.process,
             parallel: summary.parallel,
             lane: summary.lane,
+            reviewed: Some(summary.reviewed),
+            needs_review: Some(summary.needs_review),
             needs: summary.needs,
             owner: summary.owner,
             created: Some(summary.created),
@@ -754,6 +774,8 @@ impl ParkedRow {
             process: None,
             parallel: false,
             lane: false,
+            reviewed: None,
+            needs_review: None,
             needs: Vec::new(),
             owner: None,
             created: None,
@@ -2071,6 +2093,8 @@ mod tests {
             needs: vec![],
             parallel,
             lane: false,
+            reviewed: false,
+            needs_review: false,
         }
     }
 

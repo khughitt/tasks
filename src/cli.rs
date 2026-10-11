@@ -183,6 +183,10 @@ pub struct FilterArgs {
     /// Only tasks marked safe to run beside each other.
     #[arg(long)]
     pub parallel: bool,
+    /// Only rows that need review: ideas no scope pass has reviewed, and leaf todo or
+    /// blocked tasks with no process.
+    #[arg(long)]
+    pub needs_review: bool,
 }
 
 /// The needs this session cannot meet, shared by the pickers (lanes-needs spec §4.3).

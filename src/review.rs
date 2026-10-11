@@ -2,7 +2,24 @@
 //! See docs/specs/2026-10-11-review-state-design.md.
 
 use crate::error::{Error, Result};
-use crate::model::{Status, Task};
+use crate::model::{Process, Status, Task};
+
+/// Whether a row needs a look (spec §4): an idea no scope pass has reviewed, or a leaf
+/// todo or blocked task whose process is unassessed. Goals, lanes and everything in hand
+/// or out of sight never do.
+pub fn needs_review(
+    status: Status,
+    reviewed: bool,
+    process: Option<Process>,
+    lane: bool,
+    child_count: usize,
+) -> bool {
+    match status {
+        Status::Idea => !reviewed,
+        Status::Todo | Status::Blocked => process.is_none() && !lane && child_count == 0,
+        _ => false,
+    }
+}
 
 /// The refusal for `reviewed` on anything but an idea (spec §3.2).
 pub fn not_an_idea(task: &Task) -> Error {
@@ -67,6 +84,23 @@ pub fn apply(task: &mut Task, review: Review, warnings: &mut Vec<String>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Process;
+
+    #[test]
+    fn needs_review_follows_spec_section_4() {
+        use Status::*;
+        assert!(needs_review(Idea, false, None, false, 0));
+        assert!(!needs_review(Idea, true, None, false, 0));
+        assert!(needs_review(Todo, false, None, false, 0));
+        assert!(needs_review(Blocked, false, None, false, 0));
+        assert!(!needs_review(Todo, false, Some(Process::Direct), false, 0));
+        assert!(!needs_review(Todo, false, None, false, 2), "a goal");
+        assert!(!needs_review(Todo, false, None, true, 0), "a lane");
+        for status in [Doing, Shelved, Done, Dropped, Moved] {
+            assert!(!needs_review(status, false, None, false, 0), "{status:?}");
+        }
+    }
+
     #[test]
     fn validate_refuses_reviewed_on_a_non_idea_only() {
         let mut task = crate::format::parse_task(

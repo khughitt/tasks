@@ -346,3 +346,135 @@ fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str) {
     ));
     std::fs::write(&path, text).unwrap();
 }
+
+fn rows(v: &serde_json::Value) -> Vec<(String, bool)> {
+    v["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            (
+                r["id"].as_str().unwrap().to_string(),
+                r["needs_review"].as_bool().unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// One of each kind spec §4 distinguishes, returned as (marked ids, unmarked ids).
+fn mixed_project(env: &mut TestEnv) -> (std::path::PathBuf, Vec<String>, Vec<String>) {
+    let dir = env.init("sci");
+    let new_idea = id_of(env.json(&dir, &["add", "New", "--status", "idea"]));
+    let briefed = id_of(env.json(&dir, &["add", "Briefed", "--status", "idea"]));
+    env.json(&dir, &["note", &briefed, "--reviewed", "scope: briefed"]);
+    let raw_todo = id_of(env.json(&dir, &["add", "Raw"]));
+    let assessed = id_of(env.json(&dir, &["add", "Assessed", "--process", "direct"]));
+    let goal = id_of(env.json(&dir, &["add", "Goal"]));
+    let child = id_of(env.json(
+        &dir,
+        &["add", "Child", "--parent", &goal, "--process", "direct"],
+    ));
+    let blocked = id_of(env.json(&dir, &["add", "Blocked"]));
+    env.json(&dir, &["block", &blocked, "waiting"]);
+    let doing = id_of(env.json(&dir, &["add", "Doing"]));
+    env.json(&dir, &["start", &doing]);
+    (
+        dir,
+        vec![new_idea, raw_todo, blocked],
+        vec![briefed, assessed, goal, child, doing],
+    )
+}
+
+#[test]
+fn needs_review_marks_exactly_spec_section_4_in_json_and_the_filter() {
+    let mut env = TestEnv::new();
+    let (dir, marked, unmarked) = mixed_project(&mut env);
+    let json = env.json(&dir, &["list"]);
+    let listed = rows(&json);
+    for row in json["tasks"].as_array().unwrap() {
+        assert_eq!(row["reviewed"], row["id"] == unmarked[0]);
+    }
+    for id in &marked {
+        assert!(
+            listed.contains(&(id.clone(), true)),
+            "{id} should need review: {listed:?}"
+        );
+    }
+    for id in &unmarked {
+        assert!(
+            listed.contains(&(id.clone(), false)),
+            "{id} should not: {listed:?}"
+        );
+    }
+    let filtered: Vec<String> = rows(&env.json(&dir, &["list", "--needs-review"]))
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    let mut want = marked.clone();
+    want.sort();
+    let mut got = filtered.clone();
+    got.sort();
+    assert_eq!(got, want);
+    // `ready` never shows ideas, so its filter narrows to the unassessed todo.
+    let ready: Vec<String> = rows(&env.json(&dir, &["ready", "--needs-review"]))
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(ready, [marked[1].clone()]);
+    // `show` carries the stored flag.
+    assert_eq!(
+        env.json(&dir, &["show", &unmarked[0]])["task"]["reviewed"],
+        true
+    );
+}
+
+/// A park entry written straight into the store, for a task or for an id with no record.
+fn write_park(env: &TestEnv, prefix: &str, id: &str) {
+    let path = env.claim_store(prefix);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&format!(
+        "[parks.\"{id}\"]\nowner = \"someone\"\nsession = \"s\"\nhost = \"h\"\n\
+         worktree = \"/elsewhere\"\nat = \"2026-01-02T00:00:00Z\"\nnext_step = \"next\"\n\
+         waiting_on = \"user\"\ntitle = \"T\"\n"
+    ));
+    std::fs::write(&path, text).unwrap();
+}
+
+#[test]
+fn parked_rows_carry_needs_review_and_filter_on_it() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let unreviewed = id_of(env.json(&dir, &["add", "U", "--status", "idea"]));
+    let reviewed_idea = id_of(env.json(&dir, &["add", "R", "--status", "idea"]));
+    env.json(
+        &dir,
+        &["note", &reviewed_idea, "--reviewed", "scope: briefed"],
+    );
+    write_park(&env, "sci", &unreviewed);
+    write_park(&env, "sci", &reviewed_idea);
+    write_park(&env, "sci", "sci-abcdef");
+    let parked = env.json(&dir, &["list", "--parked"]);
+    let by_id = |id: &str| {
+        parked["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} missing: {parked}"))
+    };
+    assert_eq!(by_id(&unreviewed)["needs_review"], true);
+    assert_eq!(by_id(&unreviewed)["reviewed"], false);
+    assert_eq!(by_id(&reviewed_idea)["needs_review"], false);
+    assert_eq!(by_id(&reviewed_idea)["reviewed"], true);
+    assert!(by_id("sci-abcdef").get("needs_review").is_none());
+    assert!(by_id("sci-abcdef").get("reviewed").is_none());
+    let filtered: Vec<String> = env.json(&dir, &["list", "--parked", "--needs-review"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(filtered, [unreviewed]);
+}

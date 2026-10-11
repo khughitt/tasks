@@ -69,7 +69,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             && plan
                 .as_deref()
                 .is_none_or(|wanted| task.plan.as_deref() == Some(wanted))
-            && filter.matches(&Fields::of_task(task, &claims, &ctx.registry))
+            && filter.matches(&Fields::of_task(task, &all, &claims, &ctx.registry))
             && text.as_ref().is_none_or(|text| text.matches(task))
     });
     for task in &tasks {
@@ -225,7 +225,8 @@ pub fn ready_tasks(
     let selected: Vec<&Task> = all
         .iter()
         .filter(|task| {
-            is_candidate(task, now) && filter.matches(&Fields::of_task(task, claims, &ctx.registry))
+            is_candidate(task, now)
+                && filter.matches(&Fields::of_task(task, all, claims, &ctx.registry))
         })
         .collect();
     for task in &selected {
