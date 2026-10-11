@@ -145,3 +145,42 @@ fn check_reports_reviewed_on_a_non_idea() {
         .collect();
     assert!(kinds.contains(&"review_status"), "{report}");
 }
+
+#[test]
+fn feedback_recurrence_refuses_reviewed_on_a_non_idea_without_rewriting_it() {
+    let mut env = TestEnv::new();
+    let target = env.init("tasks");
+    let config = env.read(&target, "tasks/.config.toml");
+    std::fs::write(
+        target.join("tasks/.config.toml"),
+        format!("{config}\n[feedback]\nscope = \"The task tracker.\"\n"),
+    )
+    .unwrap();
+    let reporter = env.init("sci");
+    let id = id_of(env.json(&target, &["add", "T", "--tag", "feedback"]));
+    seed_reviewed(&target, &id);
+    let file = format!("tasks/{id}.md");
+    let before = env.read(&target, &file);
+    let out = env
+        .cmd(&reporter)
+        .args([
+            "feedback",
+            "--project",
+            "tasks",
+            "T again",
+            "--category",
+            "gap",
+            "--recur",
+            &id,
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "validation");
+    assert_eq!(
+        error["error"]["detail"],
+        format!("{id} is todo; only an idea carries reviewed")
+    );
+    assert_eq!(env.read(&target, &file), before);
+}

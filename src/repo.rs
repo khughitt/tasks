@@ -604,6 +604,7 @@ impl Project {
     }
 
     pub fn write_task(&self, registry: &Registry, task: &Task) -> Result<()> {
+        crate::review::validate(task)?;
         crate::hierarchy::validate_parent(self, registry, task)?;
         crate::hierarchy::validate_lanes(self, registry, task)?;
         crate::hierarchy::validate_periodic(self, registry, task)?;
