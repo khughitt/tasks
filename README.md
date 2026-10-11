@@ -25,6 +25,12 @@ closed, read-only status; counts include `moved`, and `total` counts every recor
 Only `move` sets the pointer fields. Older binaries cannot parse these records:
 update every host reading synced tasks before the first move.
 
+Ideas carry an optional `reviewed` flag (set by `note --reviewed` and `edit --reviewed`,
+cleared by `--no-reviewed` and by every status change), and summary rows carry a derived
+`needs_review`; `--needs-review` filters on it and pretty tables mark it with `*`. Older
+binaries cannot parse records carrying `reviewed`: update every host reading synced
+tasks before the first review write.
+
 Design: [`docs/specs/2026-08-29-tasks-design.md`](docs/specs/2026-08-29-tasks-design.md).
 Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-tasks.md).
 

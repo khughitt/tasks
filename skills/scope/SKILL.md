@@ -16,13 +16,16 @@ review pass, and each idea must remain unclaimed until its verdict is written.
 
 Explicit ids are the exact batch. Otherwise discover candidates with:
 
-    tasks list --status idea [--tag <tag>] [--project <prefix>]
+    tasks list --status idea --needs-review [--tag <tag>] [--project <prefix>]
 
-List rows omit notes. Run `show` before deciding eligibility: exclude an idea when its
-latest note starts with `scope:`, or when that latest note contains a pending
-`proposal:`. A later note readmits it. Existing briefs, goals, or research do not by
-themselves exclude an idea whose latest note readmits it. An explicit id bypasses only
-this prior-note exclusion; it must still be an unclaimed idea at revalidation, and the
+Select with `tasks list --status idea --needs-review [--tag <tag>] [--project <prefix>]`:
+it returns exactly the ideas no scope pass has reviewed, without reading notes. An idea
+leaves that list when a pass writes its audit note with `--reviewed`, and returns only
+when a waking finding is noted with `--no-reviewed` or the idea comes back to `idea`
+from another status. Incidental notes (curate, comments) do not readmit it. Existing
+briefs, goals, or research do not by themselves exclude an idea that `--needs-review`
+returns. An explicit id bypasses only
+this review-state exclusion; it must still be an unclaimed idea at revalidation, and the
 pass still has the three-document ceiling.
 
 Fix one root before member reads, and use `tasks -C <root> ...` for every later task
@@ -90,9 +93,13 @@ host, the owner's judgement), record it with `--need <name>` on the task you sco
 create. Never invent a name: an undeclared one is refused. Propose the vocabulary entry in
 the handoff brief instead.
 
-Every successfully processed member receives exactly one audit note:
+Every successfully processed member receives exactly one audit note. For `briefed`,
+`question` and `drop` it sets the flag in the same write:
 
-    scope: <verdict>; <what changed>[; brief: <path>][; proposal: <text>]
+    tasks -C <root> note <id> --reviewed "scope: <verdict>; <what changed>[; brief: <path>][; proposal: <text>]"
+
+`scoped` and `shelved` change the status first, which clears the flag; their audit note
+is a plain `tasks note` (`--reviewed` is refused on a non-idea).
 
 Use `proposal:` only for `drop`. A shelf also retains the separate note written by
 `shelve`. Never execute `tasks drop` or add `--parallel`.
@@ -137,7 +144,7 @@ Question: Does the existing rename API require loading the profile first?
 Where to start: the rename_profile implementation and its panel caller, linked from the brief.
 Bound: Trace that call and reproduce one rename of an unloaded profile; no new UI implementation.
 Expected result: Record the observed behavior and a recommendation on this task and in the brief.
-Ideas it wakes: On completion, run tasks note on each named waiting idea with the finding, before this result's branch merges.
+Ideas it wakes: On completion, run `tasks note <id> --no-reviewed "<finding>"` on each named waiting idea, before this result's branch merges.
 ```
 
 Replace the example with real paths and waiting ids. Set priority, size, complexity,
@@ -165,7 +172,7 @@ Report the cluster and why, then one line per selected member with its verdict o
 reason, followed by handoff paths. Then include only nonempty groups for drops (id and
 supporting commit/id), questions (id and text), and shelves (id and wake condition).
 
-When later research completes, its completion must add a finding note to every waiting
+When later research completes, its completion must add a finding note with `--no-reviewed` to every waiting
 idea named by `Ideas it wakes`, before this result's branch merges, so default selection
 can reconsider them. On an explicit rerun, update the existing handoff, goal, and research tasks; do not
 replace sources or create duplicates merely because an existing goal was outside the

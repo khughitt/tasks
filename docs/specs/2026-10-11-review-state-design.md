@@ -1,6 +1,6 @@
 # Review state: which ideas and todos still need a look
 
-Status: accepted (plan pending)
+Status: implemented (plan docs/plans/2026-10-11-review-state.md); rollout pending
 Task: tasks-a9b8d3 (lane tasks-46d207; answers tasks-e34b99)
 Brief: `docs/notes/2026-09-30-work-selection-brief.md`
 
@@ -260,6 +260,7 @@ and skills ship, as an operator step in the plan. It uses only the CLI:
   changed if reviewed after it). A rerun never rewrites a record it already set.
 - A live-claimed idea is skipped and reported, like any edit would refuse; its entry
   stays not done and is retried on the next run under the same unchanged-record test.
+- `tools/review-backfill` also refuses a whole pass while this host's claim store holds a live claim in the project, as the pause check requires; the next pass after the claim is released applies the untouched entries.
 - **No other writers during an apply pass.** The stamp test and the edit are two
   commands, and `edit` checks only that the file did not change during its own run,
   not that it still matches the snapshot. A `note --no-reviewed` from another session
@@ -276,7 +277,7 @@ and skills ship, as an operator step in the plan. It uses only the CLI:
   `tasks note` writes ideas without one, so no command can prove the pause. A safe concurrent
   backfill would need a stamp-checked edit inside the CLI; a one-time migration
   does not justify that surface.
-- Each project's writes land in one `chore(tasks)` commit in that project.
+- A project without `[git] commit` gets one `chore(tasks)` commit of the run's writes; a project with `[git] commit = true` commits each edit as the CLI does (record-commit design §3.2).
 
 The writes bump `updated` on the backfilled ideas. That keeps them out of curate's
 `sample` age window for a while, which matches tasks-ec3ff9's complaint that sample
