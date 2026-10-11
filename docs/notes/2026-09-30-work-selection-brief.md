@@ -76,6 +76,15 @@ Existing groups, calendar and cross-project designs retain their own review gate
   non-idea transitions and return to idea; filter naming; atomic note-plus-reset;
   safe rerunnable backfill; proposal handling versus user-waiting parks. Preserve
   audit history and specify whether incidental notes can still readmit ideas.
+
+Resolved 2026-10-11: the accepted review-state spec and reviewed implementation
+plan use `reviewed` on ideas, explicit atomic `note --no-reviewed` wakes, and
+`needs_review` for unreviewed ideas and unassessed leaf todo/blocked rows. Incidental
+notes keep an idea reviewed; pending proposals remain note-based. The left-most
+`*` mark follows the same predicate as JSON and `--needs-review`. Implementation
+is tasks-b8f3c9, following `docs/plans/2026-10-11-review-state.md`; rollout requires
+upgrading every reading host before the first flag write and pausing writers for
+the frozen-snapshot backfill. The current note rule remains active until rollout.
 - **Quiet-discovery investigator:** do list/ready need filters answer preparation
   and idle-session selection, including TASKS_WITHOUT, claims and holds? If not,
   identify the missing view and its rows without inventing estimates or recipes.
