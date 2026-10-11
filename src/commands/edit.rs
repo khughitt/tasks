@@ -143,6 +143,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
 
     let mut task = load(&mut ctx, &id)?;
+    let original = task.clone();
     let original_needs = task.needs.clone();
     let was_lane = task.lane;
     if args.fields.body.as_deref() == Some("-") {
@@ -235,7 +236,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
             )));
         }
     }
-    apply_fields(&mut ctx, &mut task, &args.fields)?;
+    apply_fields(&mut ctx, &mut task, &args.fields, Some(&original))?;
     // Lanes/needs design §4.4: needs change under no live claim or the caller's own, and
     // under the caller's own the claim's holds follow in the same save.
     // The target's override notes are appended here and land with its save. The
@@ -352,13 +353,19 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     edited.updated = original.updated.clone();
 
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
-    if let Some(spec) = &edited.spec {
-        resolver.resolve_doc(DocKind::Spec, spec).map_err(keep)?;
-    }
-    if let Some(plan) = &edited.plan {
-        resolver.resolve_doc(DocKind::Plan, plan).map_err(keep)?;
+    let plan_or_step_changed = edited.plan != original.plan || edited.step != original.step;
+    for (kind, link, before) in [
+        (DocKind::Spec, &mut edited.spec, &original.spec),
+        (DocKind::Plan, &mut edited.plan, &original.plan),
+    ] {
+        if let Some(value) = link.as_ref()
+            && (crate::format::external_doc(value).map_err(keep)?.is_none() || link != before)
+        {
+            *link = Some(resolver.resolve_doc(kind, value).map_err(keep)?);
+        }
     }
     if let (Some(plan), Some(step)) = (&edited.plan, &edited.step)
+        && (crate::format::external_doc(plan).map_err(keep)?.is_none() || plan_or_step_changed)
         && !resolver.step_exists(plan, step).map_err(keep)?
     {
         return Err(keep(Error::Validation(format!(

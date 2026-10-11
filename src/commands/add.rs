@@ -103,7 +103,7 @@ pub fn run(mut ctx: Ctx, title: String, status: String, fields: FieldArgs) -> Re
     }
     let agent = super::creation_agent(fields.agent.as_deref())?;
     let mut task = blank(&ctx.project, title, status, agent)?;
-    apply_fields(&mut ctx, &mut task, &fields)?;
+    apply_fields(&mut ctx, &mut task, &fields, None)?;
     create(&ctx.project, &ctx.registry, &mut task)?;
     super::finish(&mut ctx);
     Ok(Output::Add(AddOut {

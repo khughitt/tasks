@@ -942,8 +942,17 @@ pub fn owner_name(project: &Project) -> Result<String> {
 }
 
 /// Applies the field flags present in `fields` to `task`, validating each against the repo.
-pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs) -> Result<()> {
+pub fn apply_fields(
+    ctx: &mut Ctx,
+    task: &mut Task,
+    fields: &FieldArgs,
+    original: Option<&Task>,
+) -> Result<()> {
     let resolver = Resolver::new(&ctx.project, &ctx.registry);
+    let plan_changed =
+        fields.plan.as_ref().or(task.plan.as_ref()) != original.and_then(|task| task.plan.as_ref());
+    let step_changed =
+        fields.step.as_ref().or(task.step.as_ref()) != original.and_then(|task| task.step.as_ref());
     if let Some(body) = &fields.body {
         validate_body(body)?;
         task.body = body.clone();
@@ -1020,17 +1029,36 @@ pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs) -> Resul
         task.agent = Some(agent.clone());
     }
     if let Some(spec) = &fields.spec {
-        task.spec = Some(resolver.resolve_doc(DocKind::Spec, spec)?);
+        task.spec = Some(
+            if crate::format::external_doc(spec)?.is_some()
+                && Some(spec) == original.and_then(|task| task.spec.as_ref())
+            {
+                spec.clone()
+            } else {
+                resolver.resolve_doc(DocKind::Spec, spec)?
+            },
+        );
     }
     if let Some(plan) = &fields.plan {
-        task.plan = Some(resolver.resolve_doc(DocKind::Plan, plan)?);
+        task.plan = Some(
+            if crate::format::external_doc(plan)?.is_some()
+                && Some(plan) == original.and_then(|task| task.plan.as_ref())
+            {
+                plan.clone()
+            } else {
+                resolver.resolve_doc(DocKind::Plan, plan)?
+            },
+        );
     }
     if let Some(step) = &fields.step {
         task.step = Some(step.clone());
     }
     match (&task.plan, &task.step) {
         (None, Some(_)) => return Err(Error::Validation("--step requires a plan".into())),
-        (Some(plan), Some(step)) if !resolver.step_exists(plan, step)? => {
+        (Some(plan), Some(step))
+            if (crate::format::external_doc(plan)?.is_none() || plan_changed || step_changed)
+                && !resolver.step_exists(plan, step)? =>
+        {
             return Err(Error::Validation(format!(
                 "heading {step:?} not found in {plan}"
             )));

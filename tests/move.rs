@@ -1,6 +1,68 @@
 mod common;
 use common::TestEnv;
 
+#[test]
+fn external_doc_move_without_step_does_not_fetch() {
+    let mut env = TestEnv::new();
+    let source = env.init("dots");
+    let destination = env.init("wali");
+    let docs = common::docs::DocFixture::new(&env, "# Document\n");
+    let id = id_of(env.json(
+        &source,
+        &[
+            "add",
+            "External",
+            "--spec",
+            "stub:spec",
+            "--plan",
+            "stub:alias",
+        ],
+    ));
+    let calls = docs.calls();
+    docs.disconnect();
+    let moved = id_of(env.json(&source, &["move", &id, "--to", "wali"]));
+    assert_eq!(docs.calls(), calls);
+    let shown = env.json(&destination, &["show", &moved]);
+    assert_eq!(shown["task"]["spec"], "stub:spec");
+    assert_eq!(shown["task"]["plan"], "stub:canonical");
+}
+
+#[test]
+fn external_doc_move_step_failure_is_atomic() {
+    let mut env = TestEnv::new();
+    let source = env.init("dots");
+    let destination = env.init("wali");
+    let docs = common::docs::DocFixture::new(&env, "### Task 1: one\n");
+    let id = id_of(env.json(
+        &source,
+        &[
+            "add",
+            "External",
+            "--plan",
+            "stub:alias",
+            "--step",
+            "Task 1: one",
+        ],
+    ));
+    let record = source.join(format!("tasks/{id}.md"));
+    let before = std::fs::read(&record).unwrap();
+    docs.set_body("# no heading\n");
+    assert_eq!(
+        env.fail(&source, &["move", &id, "--to", "wali"]),
+        "validation"
+    );
+    assert_eq!(std::fs::read(&record).unwrap(), before);
+    docs.disconnect();
+    assert_eq!(env.fail(&source, &["move", &id, "--to", "wali"]), "config");
+    assert_eq!(std::fs::read(record).unwrap(), before);
+    assert!(
+        env.json(&destination, &["list"])["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
 fn id_of(v: serde_json::Value) -> String {
     v["id"].as_str().unwrap().to_string()
 }

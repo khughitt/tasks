@@ -158,7 +158,9 @@ fn validate_destination_docs(
 ) -> Result<()> {
     let resolver = Resolver::new(project, registry);
     for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
-        if let Some(path) = path {
+        if let Some(path) = path
+            && crate::format::external_doc(path)?.is_none()
+        {
             resolver.resolve_doc(kind, path).map_err(|error| Error::Validation(format!("{source}: {error} in {}; run `tasks edit {source} --no-{}` or make the document valid there", project.prefix, kind.name())))?;
         }
     }
