@@ -153,6 +153,70 @@ fn external_doc_filter_matches_exact_plan_across_parents_and_carries_steps() {
 }
 
 #[test]
+fn external_doc_plan_filter_composes_with_needs_review() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "# Plan\n");
+    let mut wanted = Vec::new();
+    for (title, plan, flags, needs_review) in [
+        (
+            "Target pending idea",
+            "stub:plan",
+            vec!["--status", "idea"],
+            true,
+        ),
+        (
+            "Target reviewed idea",
+            "stub:plan",
+            vec!["--status", "idea"],
+            false,
+        ),
+        (
+            "Target other idea",
+            "stub:other",
+            vec!["--status", "idea"],
+            false,
+        ),
+        ("Target unassessed todo", "stub:plan", vec![], true),
+        (
+            "Target assessed todo",
+            "stub:plan",
+            vec!["--process", "direct"],
+            false,
+        ),
+    ] {
+        let mut args = vec!["add", title, "--plan", plan];
+        args.extend(flags);
+        let id = env.json(&dir, &args)["id"].as_str().unwrap().to_owned();
+        if title == "Target reviewed idea" {
+            env.json(&dir, &["note", &id, "--reviewed", "reviewed"]);
+        }
+        env.json(&dir, &["park", &id, "later"]);
+        if needs_review {
+            wanted.push(id);
+        }
+    }
+    wanted.sort();
+    docs.disconnect();
+    for mut args in [
+        vec!["list"],
+        vec!["search", "Target"],
+        vec!["list", "--parked"],
+    ] {
+        args.extend(["--plan", "stub:plan", "--needs-review"]);
+        let listed = env.json(&dir, &args);
+        let mut ids: Vec<_> = listed["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_owned())
+            .collect();
+        ids.sort();
+        assert_eq!(ids, wanted, "{args:?}");
+    }
+}
+
+#[test]
 fn external_doc_export_completion_does_not_fetch() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
