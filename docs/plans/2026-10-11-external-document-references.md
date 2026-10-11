@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (the recommended inline method for this plan) or superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-Status: draft for user review
+Status: revised after plan round 1; awaiting user review
 
 **Goal:** Resolve external plan/spec links through host fetch commands while ordinary
 task operations remain usable without the provider.
@@ -22,8 +22,8 @@ The CLI exposes exact body export and an exact plan filter without provider know
 `feat/tasks-91f63b-external-docs`. Run commands there; file paths below are relative
 to that checkout. User-facing links include the `.worktrees/` prefix.
 
-**Execution recommendation:** Inline. The six code/document steps share resolver,
-command and output interfaces, so sequential implementation avoids repeated context
+**Execution method:** Inline (accepted by Keith in plan round 1). The six
+code/document steps share resolver, command and output interfaces, so sequential implementation avoids repeated context
 and overlapping edits. Use a fresh whole-branch reviewer after implementation.
 Spec approval does not approve this plan or live installation.
 
@@ -37,8 +37,11 @@ Spec approval does not approve this plan or live installation.
   Response: one JSON object with string `id` and `body`; empty body is valid.
 - Limits: stdout 2 MiB; stderr retained prefix 200 bytes, remainder drained;
   strict per-fetch deadline 30 seconds. No public timeout or budget setting.
-- Own a process group for every fetch. After shell exit, kill remaining members
-  before waiting for pipe EOF. Reap the direct child and join readers on every return.
+- Own a process group for every fetch. Observe shell exit with
+  `waitid(P_PID, pid, WEXITED | WNOHANG | WNOWAIT)`, retaining the unreaped child
+  until the group kill. Never call `try_wait` or reap before that kill, and never
+  signal the old group after reaping. Reap the direct child and join readers on
+  every return before waiting indefinitely on pipe EOF.
 - `check`: at most four concurrent fetches; one five-second fetch budget. Priority:
   open stepped plans, other open plans, open specs, closed-only plans; lexical per tier.
   Each shared reference belongs to its highest tier.
@@ -103,10 +106,25 @@ Start each child and run `trial-arm` as required. No children are filed while th
 plan is unreviewed. Record the plan-review verdict before acting on it.
 
 The shared CLI inventory is a prerequisite for Task 5, not for Tasks 1–4.
-Prepare its small update under its own scoped direct ops task/worktree, observing
-ops's profile and agent guide. Validate the concrete change before requesting
-approval to integrate that shared global surface. Only after it lands in ops main
-may this branch adopt it. Do not edit `tools/cli.toml` here or waive conformance.
+During execution setup, before Task 1, prepare its small update under its own
+scoped direct ops task/worktree, observing ops's profile and agent guide. Use the
+exact rows and validation commands in Task 5 step 1 to make the change concrete.
+Once validated, immediately request approval to integrate that shared global
+surface; do not wait until Task 4 completes to ask. Use an asynchronous approval
+request when available, so Tasks 1–4 can proceed while the user considers it.
+Approval is required only for integration, not for those independent code steps.
+Record the owning ops task, commit/check evidence and pending approval on this
+task. Integrate only after explicit approval, then verify it landed in ops main.
+Task 5 requires that observed landed result; elapsed time is not approval.
+Do not edit `tools/cli.toml` here or waive conformance.
+
+The execution ledger also records the intentionally temporary intermediate
+behavior: Tasks 1–2 introduce external link parsing/writes before Tasks 3–4
+teach check/show their availability rules. Those intermediate commits are not
+feature-complete: check may report such links as `doc_missing`, and show may
+fail hard. All fixture records are isolated; no real record acquires an external
+link and no intermediate binary is installed. Tasks 3–4 resolve that gap before
+the whole-branch review and rollout.
 
 ---
 
@@ -176,7 +194,7 @@ fn external_doc_shape_is_host_independent() {
 
 ```rust
 use super::TestEnv;
-use std::{fs, path::PathBuf};
+use std::{fs, path::{Path, PathBuf}};
 
 pub struct DocFixture {
     config: PathBuf, response: PathBuf, calls: PathBuf, pub script: PathBuf,
@@ -187,28 +205,30 @@ impl DocFixture {
         fs::create_dir_all(&root).unwrap();
         let fixture = Self {
             config: env.home.path().join(".config/tasks/config.toml"),
-            response: root.join("response.json"), calls: root.join("calls"),
-            script: root.join("fetch.py"),
+            response: root.join("body.json"), calls: root.join("calls"),
+            script: root.join("fetch.sh"),
         };
-        let calls = serde_json::to_string(&fixture.calls.to_string_lossy()).unwrap();
-        let response = serde_json::to_string(&fixture.response.to_string_lossy()).unwrap();
-        fs::write(&fixture.script, format!(r#"import json, sys
-with open({calls}, "a") as stream:
-    stream.write(sys.argv[1] + "\n")
-with open({response}) as stream:
-    document = json.load(stream)
-document["id"] = "canonical" if sys.argv[1] == "alias" else sys.argv[1]
-print(json.dumps(document))
+        let quote = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+        let calls = quote(&fixture.calls);
+        let response = quote(&fixture.response);
+        // shortcut: fixture IDs are simple names; use a preencoded reply for arbitrary-ID cases.
+        fs::write(&fixture.script, format!(r#"#!/bin/sh
+printf '%s\n' "$1" >> {calls}
+case "$1" in
+    alias) id=canonical ;;
+    *) id="$1" ;;
+esac
+printf '{{"id":"%s","body":%s}}' "$id" "$(cat {response})"
 "#)).unwrap();
-        let quoted = format!("'{}'", fixture.script.to_string_lossy().replace('\'', "'\\''"));
-        let config = serde_json::json!({"docs":{"schemes":{"stub":format!("python3 {quoted}")}}});
+        let quoted = quote(&fixture.script);
+        let config = serde_json::json!({"docs":{"schemes":{"stub":format!("sh {quoted}")}}});
         fs::create_dir_all(fixture.config.parent().unwrap()).unwrap();
         fs::write(&fixture.config, toml::to_string(&config).unwrap()).unwrap();
         fixture.set_body(body);
         fixture
     }
     pub fn set_body(&self, body: &str) {
-        fs::write(&self.response, serde_json::to_vec(&serde_json::json!({"body":body})).unwrap()).unwrap();
+        fs::write(&self.response, serde_json::to_vec(body).unwrap()).unwrap();
     }
     pub fn calls(&self) -> Vec<String> {
         match fs::read_to_string(&self.calls) {
@@ -224,7 +244,12 @@ print(json.dumps(document))
   Use existing `TestEnv`; no live registry or mindful. Add `mod common;` and
   `use common::{TestEnv, docs::DocFixture};` to `tests/external_docs.rs`.
   Tests needing a failed/hung/changing provider overwrite `fixture.script`;
-  no additional configuration API is needed.
+  no additional configuration API is needed. The body is a Rust-encoded JSON
+  string, inserted with `printf`, not interpreted as shell syntax. For arbitrary
+  argument/ID tests, log the exact argument with quoted `printf '%s' "$1"` and
+  `cat` a complete Rust-serialized reply instead of using this simple-ID template.
+  Unit/integration fetch fixtures require only `sh` and existing basic utilities,
+  not Python. The one-off installation smoke can still use Python.
 
 - [ ] **2. Run RED through the front door.**
 
@@ -237,13 +262,52 @@ just test-one config::tests
   root and host-table parsing. The docs tables have their own unknown-field checks.
 
 - [ ] **3. Write fetch/reader RED tests before the implementation.** Unit tests use
-  `fetch` with a short absolute deadline and controlled shell/Python fixtures.
+  `fetch` with a short absolute deadline and controlled shell fixtures.
   Cover valid/empty body, exact single-argument delivery of spaces/quotes/`$()` and
   semicolons, invalid JSON/UTF-8/ID/field types, trailing output, nonzero exit,
   stdout `MAX_STDOUT + 1`, stderr well beyond 200 bytes before valid stdout, a hung
   shell, and complete JSON plus an exit-0 shell's sleeping pipe-holder. Assert the
   sleeping PID no longer lives after both timeout and successful cleanup. Test
   the `DocRead` strict mappings and that malformed config is `Err`, not unavailable.
+  Add `shell_remains_unreaped_until_group_kill`: a test-only supervisor observer
+  checks `waitid(... WNOWAIT)` still reports the exited owned shell immediately
+  before and after the group-kill operation; only then may the reap event occur.
+  Assert the event order and exactly one reap, and that the group guard performs
+  no later kill on scope exit. Exercise the real OS wait state, not only a mocked
+  action log; PID exhaustion/reuse simulation is unnecessary.
+
+  A private test-only observer reports `BeforeGroupKill(pid)`, `AfterGroupKill(pid)`
+  and `Reaped(pid)` as `CleanupEvent`. `fetch_observed(request, deadline,
+  observer: &mut dyn FnMut(CleanupEvent)) -> DocRead` uses the same supervisor
+  with that observer; callbacks also cover guard cleanup. The ordering test is:
+
+```rust
+#[test]
+fn shell_remains_unreaped_until_group_kill() {
+    let mut order = Vec::new();
+    let mut pinned = Vec::new();
+    let mut observe = |event| match event {
+        CleanupEvent::BeforeGroupKill(pid) => {
+            order.push("before kill");
+            pinned.push(matches!(peek_exit(pid), Ok(true)));
+        }
+        CleanupEvent::AfterGroupKill(pid) => {
+            order.push("after kill");
+            pinned.push(matches!(peek_exit(pid), Ok(true)));
+        }
+        CleanupEvent::Reaped(_) => order.push("reaped"),
+    };
+    let request = FetchRequest {
+        reference: "stub:test".into(), command: "printf '%s'".into(),
+        rest: r#"{"id":"test","body":""}"#.into(),
+    };
+    let doc = fetch_observed(request, Instant::now() + Duration::from_secs(1),
+                             &mut observe).required().unwrap();
+    assert_eq!(doc.body, "");
+    assert_eq!(order, ["before kill", "after kill", "reaped"]);
+    assert_eq!(pinned, [true, true]);
+}
+```
 
 ```rust
 let request = FetchRequest {
@@ -264,11 +328,39 @@ just test-one resolve::tests
 - [ ] **4. Implement the fetch boundary and wire the reader.** Start `sh` with
   `CommandExt::process_group(0)`. Two readers send bounded stdout/stderr results
   over a channel; stderr drains in chunks, retaining only its prefix. The controller
-  alternates `try_wait` with `recv_timeout(min(remaining, 10 ms))`; it never blocks
-  on stdout or a reader join while the child/group can still run. On shell exit,
-  kill remaining group members immediately; on deadline/overflow/pipe error,
-  kill the group then wait. Join both readers after cleanup. Handle an already
-  empty process group normally, but surface other cleanup failures in the cause.
+  alternates a non-reaping `waitid` peek with
+  `recv_timeout(min(remaining, 10 ms))`; it never blocks on stdout or a reader
+  join while the child/group can still run. Initialize `siginfo_t` to zero before
+  each peek; a zero `si_pid` means no exited child yet. Retry `EINTR` within the
+  deadline; other observation failures become a fetch error.
+
+  On observed exit, leave the child unreaped, kill remaining group members,
+  and only then call `Child::wait`. Deadline/overflow/pipe-error cleanup uses
+  the same kill-before-reap order. Accept `ESRCH` only while the owned child is
+  still unreaped; its pinned PID cannot have become another group's ID. Disarm
+  the group guard when reaped, including before subsequent parsing/error paths,
+  so Drop never signals a recycled PGID. If child ownership is lost (`ECHILD`),
+  fail without signaling that stale PGID; do not recover by calling `kill`.
+  Join both readers after cleanup. Other cleanup failures appear in the cause.
+
+```rust
+fn peek_exit(pid: libc::pid_t) -> std::io::Result<bool> {
+    // Zero initializes the C record and its no-exit sentinel.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let result = unsafe {
+        libc::waitid(libc::P_PID, pid as libc::id_t, &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT)
+    };
+    if result == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { info.si_pid() } != 0)
+}
+```
+
+  The controller handles this private helper's errors as described above.
+  Semantics reference:
+  [Linux waitid documentation](https://www.man7.org/linux/man-pages/man2/waitpid.2.html).
 
 ```rust
 let mut command = std::process::Command::new("sh");
@@ -301,6 +393,7 @@ struct Payload { id: String, body: String }
 
 ```sh
 just test-one doc_fetch::tests
+just test-one shell_remains_unreaped_until_group_kill
 just test-one external_doc
 just test-one --test cli show_missing_historical_plan_keeps_open_and_read_failures
 just test-fast
@@ -410,7 +503,8 @@ git commit -m 'fix: validate external links only when edits change them'
 
 ```rust
 // resolve.rs: cache population is confined to the caller/controller thread.
-pub fn prefetch_external(&self, references: &[String], budget: Duration)
+pub fn set_fetch_budget(&mut self, budget: Duration);
+pub fn prefetch_external(&self, references: &[String])
     -> Result<Vec<String>>; // unfinished references, in supplied priority order
 
 // check.rs: private tier builder, deduplicates a reference at its minimum tier.
@@ -420,6 +514,9 @@ fn external_check_order(tasks: &[Task]) -> Result<Vec<String>>;
   `prefetch_external` is a Resolver method, not a free reader. Task 1's lazy config
   is validated before workers; missing schemes cache `MissingScheme` without
   consuming a worker. `read` subsequently consumes the available/unavailable cache.
+  `set_fetch_budget` configures one resolver-owned lazy absolute deadline, shared
+  by `read` and `prefetch_external`; it is called before any fetch. No second
+  scheduler budget or clock is introduced.
 
 - [ ] **1. Write RED tier, cache and real-worker budget tests.** The tier builder's
   expected output for interleaved inputs is stepped plan `stub:z`, other plan
@@ -435,7 +532,8 @@ fn external_check_order(tasks: &[Task]) -> Result<Vec<String>>;
   stderr and stdout limits in Task 1, not duplicate parser tests here.
 
 ```rust
-let unfinished = resolver.prefetch_external(&references, Duration::from_millis(150))?;
+resolver.set_fetch_budget(Duration::from_millis(150));
+let unfinished = resolver.prefetch_external(&references)?;
 assert_eq!(unfinished, references);
 for reference in &references {
     assert!(matches!(resolver.read(DocKind::Plan, reference)?,
@@ -464,6 +562,8 @@ just test-one prefetch_external
   each own a Task 1 `FetchRequest`; the controller starts at most four at a time,
   receives `(queue_index, DocRead)` and updates the cache itself. All workers
   receive the same absolute deadline, initialized at the first configured fetch.
+  Check calls `resolver.set_fetch_budget(OPTIONAL_BUDGET)` before that prefetch;
+  ordinary/strict readers on an unconfigured resolver retain the 30-second limit.
   Launch no new fetch after it; unfinished/not-started refs get `BudgetExhausted`.
   Join active workers after their group cleanup before returning. Do not clone
   Error globally or make Resolver thread-safe to accommodate workers.
@@ -524,7 +624,7 @@ git commit -m 'feat: check external document drift within a shared fetch budget'
 historical/routing regressions remain in `tests/cli.rs` and `tests/move.rs`.
 
 **Interfaces:** Consume `DocRead`/`UnavailableCause::detail` and Task 1's reader.
-Add `Resolver::set_fetch_budget(&mut self, budget: Duration)`, an internal
+Use Task 3's `Resolver::set_fetch_budget(&mut self, budget: Duration)`, the internal
 command limit initialized on its first configured fetch. `read` stays the single
 body reader and honors that deadline; no second provider reader is added.
 Strict `step_exists` remains for writes/moves whose resolvers have no shorter limit.
@@ -605,8 +705,8 @@ Promote show's shared record selection to
 -> Result<(Option<Project>, Task, Vec<Task>)>`; both commands select through it.
 This factors existing lookup only, preserving its warnings and failure cases.
 
-- [ ] **1. Complete the shared inventory prerequisite before parser edits.** In the
-  owning ops task/worktree, add this exact command row and one nonrepeatable
+- [ ] **1. Verify/adopt the inventory prepared during execution setup.** Setup's
+  owning ops task/worktree adds this exact command row and one nonrepeatable
   `{ names = ["--plan"], value = "string" }` option to both list and search:
 
 ```toml
@@ -626,8 +726,11 @@ options = [
   `output = "raw"`, which its validator rejects. Ops verifies with
   `just test-one tests.test_cli tests.test_cli_surface`, `just test-fast` and its
   normal checks; its own guide/profile controls the worktree and integration.
-  Prepare the change, then obtain permission for the shared global integration.
-  Record its owning task ID on `tasks-91f63b`. Once landed, from this worktree:
+  This preparation/validation and the approval request happen before Task 1,
+  not at this step. Verify explicit approval and the observed commit on ops main;
+  if still pending, stop here and park for that approval without changing the
+  parser or vendored copy. Record the owning task ID on `tasks-91f63b`.
+  Once landed, from this worktree:
 
 ```sh
 TASKS_DOC_OPS_ROOT=$(tasks resolve ops | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["root"])')
