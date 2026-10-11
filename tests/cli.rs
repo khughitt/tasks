@@ -12239,6 +12239,25 @@ fn a_write_from_a_copy_behind_another_checkout_refuses_and_prints_the_retry() {
 }
 
 #[test]
+fn reviewed_writes_from_a_stale_copy_refuse_like_their_plain_forms() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let file = format!("tasks/{id}.md");
+    let before = env.read(&main, &file);
+    for args in [
+        vec!["note", id.as_str(), "--reviewed", "x"],
+        vec!["note", id.as_str(), "--no-reviewed", "x"],
+        vec!["edit", id.as_str(), "--reviewed"],
+        vec!["edit", id.as_str(), "--no-reviewed"],
+    ] {
+        stale_detail(&env, &main, &args);
+        assert_eq!(env.read(&main, &file), before, "{args:?}");
+    }
+}
+
+#[test]
 fn a_linked_worktree_behind_the_main_checkout_leads_with_the_merge() {
     let mut env = TestEnv::new();
     let (main, side, id) = repo_with_worktree(&mut env);

@@ -112,6 +112,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_parallel
         || fields.lane
         || args.no_lane
+        || args.reviewed
+        || args.no_reviewed
         || fields.every.is_some()
         || args.no_every
         || fields.defer.is_some()
@@ -266,6 +268,15 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
             }
             transition(&mut ctx, &mut task, to, args.force)?;
         }
+    }
+    // Review-state spec §3.3: after any status change, so `--status idea --reviewed`
+    // sets it and `--status todo --reviewed` is refused.
+    if args.reviewed || args.no_reviewed {
+        crate::review::apply(
+            &mut task,
+            crate::review::Review::from_flags(args.reviewed, args.no_reviewed),
+            &mut ctx.warnings,
+        )?;
     }
     if args.fields.complexity.is_some() || args.no_complexity {
         // `task.complexity` already carries what was given: `--no-complexity` cleared it

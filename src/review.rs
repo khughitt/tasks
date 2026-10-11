@@ -22,6 +22,48 @@ pub fn validate(task: &Task) -> Result<()> {
     Ok(())
 }
 
+/// What a write does to the `reviewed` flag (spec §3.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Review {
+    Keep,
+    Set,
+    Clear,
+}
+
+impl Review {
+    /// clap's `conflicts_with` keeps both from arriving together.
+    pub fn from_flags(set: bool, clear: bool) -> Review {
+        match (set, clear) {
+            (true, _) => Review::Set,
+            (_, true) => Review::Clear,
+            _ => Review::Keep,
+        }
+    }
+}
+
+/// Applies `review` before anything is written, so a refusal leaves the file untouched.
+/// `Keep` on a reviewed idea warns: the write does not readmit it.
+pub fn apply(task: &mut Task, review: Review, warnings: &mut Vec<String>) -> Result<()> {
+    match review {
+        Review::Set => {
+            if task.status != Status::Idea {
+                return Err(not_an_idea(task));
+            }
+            task.reviewed = true;
+        }
+        Review::Clear => task.reviewed = false,
+        Review::Keep => {
+            if task.reviewed {
+                warnings.push(format!(
+                    "{} stays reviewed; add --no-reviewed to readmit it for scope",
+                    task.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

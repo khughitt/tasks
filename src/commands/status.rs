@@ -179,8 +179,15 @@ fn warn_if_uncommitted_with_worktrees(ctx: &mut Ctx, task: &Task) {
     }
 }
 
-pub fn note(mut ctx: Ctx, id: String, text: String, stamp: bool) -> Result<Output> {
+pub fn note(
+    mut ctx: Ctx,
+    id: String,
+    text: String,
+    stamp: bool,
+    review: crate::review::Review,
+) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
+    crate::review::apply(&mut task, review, &mut ctx.warnings)?;
     let owner = owner_name(&ctx.project)?;
     if stamp {
         append_stamped_note(&mut ctx, &mut task, &owner, &text)?;

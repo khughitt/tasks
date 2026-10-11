@@ -1921,9 +1921,19 @@ fn dispatch(cli: Cli) -> Result<Output> {
             max_complexity,
             scope,
         } => lanes::run(open_read_ctx(dir, &scope)?, without, max_complexity),
-        Command::Note { id, text, stamp } => {
-            status::note(open_id_write_ctx(dir, &id)?, id, text, stamp)
-        }
+        Command::Note {
+            id,
+            text,
+            stamp,
+            reviewed,
+            no_reviewed,
+        } => status::note(
+            open_id_write_ctx(dir, &id)?,
+            id,
+            text,
+            stamp,
+            crate::review::Review::from_flags(reviewed, no_reviewed),
+        ),
         Command::Attach {
             id,
             source,

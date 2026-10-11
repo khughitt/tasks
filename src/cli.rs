@@ -307,6 +307,12 @@ pub struct EditArgs {
     /// Clear the lane marker.
     #[arg(long, conflicts_with = "lane")]
     pub no_lane: bool,
+    /// Mark this idea reviewed: a scope pass has recorded its verdict. Ideas only.
+    #[arg(long, conflicts_with = "no_reviewed")]
+    pub reviewed: bool,
+    /// Readmit this idea for review.
+    #[arg(long)]
+    pub no_reviewed: bool,
     /// Stop the recurrence, clearing both the cadence and its anchor.
     #[arg(long, conflicts_with = "every")]
     pub no_every: bool,
@@ -595,6 +601,12 @@ pub enum Command {
         /// Stamp the note with this session's harness provenance, as lifecycle notes are.
         #[arg(long)]
         stamp: bool,
+        /// Mark the idea reviewed in the same write: a scope pass's verdict note.
+        #[arg(long, conflicts_with = "no_reviewed")]
+        reviewed: bool,
+        /// Readmit the idea for review in the same write: a finding that wakes it.
+        #[arg(long)]
+        no_reviewed: bool,
     },
     /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note.
     #[command(
