@@ -1,15 +1,16 @@
 ---
 id: tasks-f4dbe1
 title: "Task 2: Writing the flag: `note` and `edit`"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-11T15:09:49Z
-updated: 2026-10-11T15:41:37Z
+updated: 2026-10-11T15:51:54Z
 started: 2026-10-11T15:21:48Z
+completed: 2026-10-11T15:51:54Z
 depends: []
 parent: tasks-b8f3c9
 tags: []
@@ -31,4 +32,10 @@ Execute this reviewed plan step, with TDD and task review. No live reviewed writ
   provenance: {"harness_session":"codex:01a12b8d-7680-7bd3-bea2-d96b7419a0ac","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-11T15:39:01Z (design/tasks-a9b8d3-review-state): Source contract adopted at a877be0; review flag rows match, but parser surface still refuses newer doc and list/search --plan rows absent from this task branch. Controller coordinating source-base drift; no contract override.
 - 2026-10-11T15:41:37Z (design/tasks-a9b8d3-review-state): parked (waiting on agent): Controller adopts staged source contract for this parser; worker resumes surface and fast verification, commits implementation and contract, then closes step
+  provenance: {"harness_session":"codex:01a12b8d-7680-7bd3-bea2-d96b7419a0ac","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T15:50:39Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"codex:01a12b8d-7680-7bd3-bea2-d96b7419a0ac","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T15:51:54Z (design/tasks-a9b8d3-review-state): done
+  provenance: {"harness_session":"codex:01a12b8d-7680-7bd3-bea2-d96b7419a0ac","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-11T15:51:54Z (design/tasks-a9b8d3-review-state): af2740e implements atomic note/edit reviewed set/clear; matching source contract adopted; focused regressions and fast suite pass (1348 tests, 1 ignored)
   provenance: {"harness_session":"codex:01a12b8d-7680-7bd3-bea2-d96b7419a0ac","harness_session_source":"CODEX_THREAD_ID"}
