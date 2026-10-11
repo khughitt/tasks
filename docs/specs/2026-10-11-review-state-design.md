@@ -259,6 +259,19 @@ and skills ship, as an operator step in the plan. It uses only the CLI:
   changed if reviewed after it). A rerun never rewrites a record it already set.
 - A live-claimed idea is skipped and reported, like any edit would refuse; its entry
   stays not done and is retried on the next run under the same unchanged-record test.
+- **No other writers during an apply pass.** The stamp test and the edit are two
+  commands, and `edit` checks only that the file did not change during its own run,
+  not that it still matches the snapshot. A `note --no-reviewed` from another session
+  between the two would be overwritten in effect: the edit would set the flag on a
+  record carrying the new finding. So each apply pass, the first run and every
+  rerun, runs inside a writer pause on that project: the operator stops or parks
+  every other session that may write its task records, on every host that reads
+  them, before the pass, and resumes them after. The plan states the pause as a
+  checklist step and checks it before each pass: no live claim in the project
+  (`tasks list --status doing`) and no other agent session on either host
+  (`host-load --section session`, `tasks` claims). A safe concurrent backfill would
+  need a stamp-checked edit inside the CLI; a one-time migration does not justify
+  that surface.
 - Each project's writes land in one `chore(tasks)` commit in that project.
 
 The writes bump `updated` on the backfilled ideas. That keeps them out of curate's

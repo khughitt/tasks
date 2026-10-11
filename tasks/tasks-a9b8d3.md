@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-08T10:53:28Z
-updated: 2026-10-11T12:56:27Z
+updated: 2026-10-11T13:07:25Z
 started: 2026-10-11T12:11:58Z
 depends: []
 parent: tasks-46d207
@@ -44,4 +44,10 @@ Ideas it wakes: On completion, record the approved finding with tasks note on ta
 - 2026-10-11T12:56:01Z (design/tasks-a9b8d3-review-state): reviewer correction (user, 2026-10-11): the spec round 2 reviewer is codex/gpt-6.1-sol; the round 2 review line above records the harness alone. Round 1's model is not confirmed. Notes cannot be amended (tasks-d56b72).
 - 2026-10-11T12:56:26Z (design/tasks-a9b8d3-review-state): spec revised for round 2: the backfill freezes its candidates and their updated stamps once, applies the flag only to entries still unreviewed ideas with an unchanged stamp, reports changed entries instead of re-deriving eligibility from notes; acceptance 14 covers the interrupted-run and post-freeze-scope sequences
 - 2026-10-11T12:56:26Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): Reviewer (codex/gpt-6.1-sol) or the user re-reviews §7.2 and acceptance 14 of docs/specs/2026-10-11-review-state-design.md in .worktrees/tasks-a9b8d3-review-state; on acceptance the agent writes the implementation plan
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T13:05:38Z (design/tasks-a9b8d3-review-state): review: spec round 3 — verdict: revise; findings: P2 1; reviewer: codex
+- 2026-10-11T13:07:23Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T13:07:23Z (design/tasks-a9b8d3-review-state): spec revised for round 3: §7.2 requires a writer pause on the project, across reading hosts, for every backfill apply pass (first run and reruns), checked before each pass; a stamp-checked edit in the CLI rejected as surface a one-time migration does not justify
+- 2026-10-11T13:07:23Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): Reviewer or user re-reviews the §7.2 writer-pause bullet of docs/specs/2026-10-11-review-state-design.md in .worktrees/tasks-a9b8d3-review-state; on acceptance the agent writes the implementation plan
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
