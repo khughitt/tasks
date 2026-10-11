@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-08T10:53:28Z
-updated: 2026-10-11T13:25:50Z
+updated: 2026-10-11T13:27:09Z
 started: 2026-10-11T12:11:58Z
 depends: []
 parent: tasks-46d207
@@ -57,3 +57,7 @@ Ideas it wakes: On completion, record the approved finding with tasks note on ta
 - 2026-10-11T13:25:49Z (design/tasks-a9b8d3-review-state): spec revised for round 4: the pause check is tasks claims on each reading host (no live claim in the project) plus the operator's explicit confirmation that every other record writer is paused, since scope, curate and plain notes write without claims; host-load and tasks list --status doing removed as evidence; parking is no longer named as a way to pause a session
 - 2026-10-11T13:25:49Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): Reviewer or user re-reviews the §7.2 pause checklist of docs/specs/2026-10-11-review-state-design.md in .worktrees/tasks-a9b8d3-review-state; on acceptance the agent writes the implementation plan
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T13:26:39Z (design/tasks-a9b8d3-review-state): review: spec round 5 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-11T13:27:08Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T13:27:08Z (design/tasks-a9b8d3-review-state): User 2026-10-11: spec accepted for planning (after reviewer round 5 accept).
