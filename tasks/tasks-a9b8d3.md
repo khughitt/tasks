@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-08T10:53:28Z
-updated: 2026-10-11T13:40:50Z
+updated: 2026-10-11T14:02:07Z
 started: 2026-10-11T12:11:58Z
 depends: []
 parent: tasks-46d207
@@ -63,4 +63,10 @@ Ideas it wakes: On completion, record the approved finding with tasks note on ta
 - 2026-10-11T13:27:08Z (design/tasks-a9b8d3-review-state): User 2026-10-11: spec accepted for planning (after reviewer round 5 accept).
 - 2026-10-11T13:40:49Z (design/tasks-a9b8d3-review-state): plan drafted: docs/plans/2026-10-11-review-state.md, six tasks (record field, note/edit writers, derived needs_review + filter, pretty marker + show, skills/README, backfill tool) plus an operator rollout. Plan-level deviations folded into the spec by its own tasks: the mark is an id-cell prefix (prime shares id width through column 0), the backfill refuses a whole pass under a live local claim, and auto-commit projects commit per edit.
 - 2026-10-11T13:40:49Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): User (or reviewer) reviews docs/plans/2026-10-11-review-state.md in .worktrees/tasks-a9b8d3-review-state and picks an execution method; on acceptance file the implementation task named in the plan's Tracking section, note the finding on tasks-e34b99, and close tasks-a9b8d3
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T13:47:32Z (design/tasks-a9b8d3-review-state): review: plan round 1 — verdict: revise; findings: P1 1, P2 4; reviewer: codex
+- 2026-10-11T13:59:57Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-11T14:02:06Z (design/tasks-a9b8d3-review-state): plan revised for round 1: the idea-only rule moves from validate_task (called by parse_task) to save via review::validate, parse stays permissive; the backfill validates the whole snapshot (prefix, every entry) before applying, keeps operational show failures pending under failed while task_not_found is a change, and reports commit_failed/commit_deferred edits under uncommitted (exit 1, no rewrite, tasks commit before writers resume); design closeout now files the implementation task, plain-notes tasks-e34b99 and updates the brief in one commit
+- 2026-10-11T14:02:06Z (design/tasks-a9b8d3-review-state): parked (waiting on user, review): Reviewer or user re-reviews docs/plans/2026-10-11-review-state.md in .worktrees/tasks-a9b8d3-review-state and picks an execution method; on acceptance run the Tracking closeout (file the implementation task, plain note on tasks-e34b99, brief update) and close tasks-a9b8d3
   provenance: {"harness_session":"claude-code:9761865f-f4ce-4ed0-a4e3-b8a7a1ee1115","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
