@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/tasks-91f63b-external-docs
 created: 2026-10-10T23:02:26Z
-updated: 2026-10-11T16:02:28Z
+updated: 2026-10-11T16:04:51Z
 started: 2026-10-11T09:51:00Z
 depends: []
 tags: []
@@ -67,3 +67,5 @@ Implements §4 of the hq spec (spec round 4 accepted): plan/spec values whose fi
 - 2026-10-11T15:48:50Z (feat/tasks-91f63b-external-docs): Task 6 verification passed; whole-branch review dispatched to fresh gpt-6-astra reviewer. Corpus preflight via tasks projects: titan 32 projects/4908 records, no conflicting roots or first-segment-colon links; Europa evidence captured separately. No live binary/config changes.
 - 2026-10-11T15:52:54Z (feat/tasks-91f63b-external-docs): review: impl round 1 — verdict: revise; findings: important 3; reviewer: codex/gpt-6-astra
 - 2026-10-11T16:02:28Z (feat/tasks-91f63b-external-docs): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
+- 2026-10-11T16:04:51Z (feat/tasks-91f63b-external-docs): parked (waiting on user, review): Keith: approve the pending both-host binary installation; then Codex resumes tasks-bcfe85 in .worktrees/tasks-91f63b-external-docs, installs the reviewed standalone artifact and verifies both hosts, records ops-721511 activation handoff, closes children/root, and merges locally.
+  provenance: {"harness_session":"codex:01a12a32-51fc-79a0-b2db-a72d9a089cc1","harness_session_source":"CODEX_THREAD_ID"}
