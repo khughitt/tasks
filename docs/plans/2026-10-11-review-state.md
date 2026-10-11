@@ -1265,7 +1265,7 @@ git commit -m "docs(review): teach scope, curate and tasks the review flag"
   `{"prefix": str, "frozen_at": str, "entries": [{"id": str, "updated": str, "done": bool, "outcome": str|null}]}`. Report on stdout: `{"prefix", "frozen": bool, "set": [id], "changed": [{"id", "detail"}], "failed": [{"id", "detail"}], "uncommitted": [{"id", "warning"}], "remaining": int}`.
   - `changed`: a confirmed change since the freeze (the record is no longer an unreviewed idea with the frozen stamp, or `show` reported `task_not_found`); the entry is done.
   - `failed`: an operational failure (any other `show` error, or a refused `edit`); the entry stays pending and the next run retries it.
-  - `uncommitted`: the edit landed but the CLI warned `commit_failed:` or `commit_deferred:`; the entry is done (the record is not rewritten) and the operator runs `tasks commit` in that project before resuming writers.
+  - `uncommitted`: the edit landed but the CLI warned `commit_failed:` or `commit_deferred:`; the entry is done (the record is not rewritten). This is a signal, not the recovery record: the rollout verifies every migrated project's `tasks/` is committed regardless of any report (Rollout step 3).
   - Exit 0 when `failed` and `uncommitted` are empty; 1 otherwise or when the pause check refused; 2 on usage or an invalid snapshot, before any edit.
 
 - [ ] **Step 1: Write the failing tests** in `tests/review_backfill.rs`:
@@ -1463,6 +1463,12 @@ fn an_invalid_snapshot_refuses_before_any_edit() {
             .to_string(),
         ),
         (
+            "a malformed id after a valid candidate",
+            serde_json::json!({"prefix": "sci", "frozen_at": "2026-10-11T00:00:00Z",
+                "entries": [valid(&f.briefed, &stamp), valid("sci-bad-id", &stamp)]})
+            .to_string(),
+        ),
+        (
             "an entry outside the project",
             serde_json::json!({"prefix": "sci", "frozen_at": "2026-10-11T00:00:00Z",
                 "entries": [valid("lab-000001", &stamp)]})
@@ -1579,6 +1585,7 @@ the tool also refuses while this host's claim store holds a live claim in the pr
 """
 import argparse
 import json
+import re
 import os
 import subprocess
 import sys
@@ -1647,7 +1654,7 @@ def load(path, prefix):
             isinstance(entry, dict)
             and set(entry) == {"id", "updated", "done", "outcome"}
             and isinstance(entry["id"], str)
-            and entry["id"].startswith(prefix + "-")
+            and re.fullmatch(re.escape(prefix) + r"-[0-9a-f]{6}", entry["id"])
             and isinstance(entry["updated"], str)
             and isinstance(entry["done"], bool)
             and (entry["outcome"] is None or isinstance(entry["outcome"], str))
@@ -1785,7 +1792,7 @@ git commit -m "feat(review): add the one-time reviewed backfill tool"
 These change live state across hosts. Each step that touches a host other than this one, or writes real records, is confirmed with the user at the time.
 
 1. **Writer pause, merge, binaries.** Pause scope and curate passes and other agent sessions that write task records, on every host that reads synced task records. Merge the branch to main. Run `cargo install --path .` on this host, then on each other reading host (in its synced main checkout once the merge has arrived there). On each host confirm `tasks note --help` lists `--no-reviewed`. The skills are symlinks into the main checkout, so they go live with the merge; the pause covers the window until both binaries are installed (spec §7.0).
-2. **Backfill, per registered project.** With writers still paused: on each host, `tasks claims` shows no live claim in the project; the operator confirms every other writer is paused. Then `tools/review-backfill --state ~/.local/state/tasks/review-backfill --root <project root> --writers-paused`. Read the report: `set`, `changed`, `failed`, `uncommitted`. Rerun after fixing any `failed` entry, under the same pause. A project without `[git] commit` gets one `chore(tasks): backfill reviewed on ideas` commit of its `tasks/` changes; a project with `[git] commit = true` commits each edit as the CLI does.
-3. **Commits.** If any pass reported `uncommitted`, run `tasks commit` in that project and confirm `git status` shows the records committed before resuming writers.
+2. **Backfill, per registered project.** With writers still paused: on each host, `tasks claims` shows no live claim in the project; the operator confirms every other writer is paused. Then `tools/review-backfill --state ~/.local/state/tasks/review-backfill --root <project root> --writers-paused`. Read the report: `set`, `changed`, `failed`, `uncommitted`. Rerun after fixing any `failed` entry, under the same pause. A project with `[git] commit = true` commits each edit as the CLI does; step 3 verifies every project either way.
+3. **Commits, for every migrated project, unconditionally.** Whatever the reports said (a run can stop after recording an entry done and before printing its report, so a rerun shows nothing), run `git -C <project root> status --porcelain -- tasks/` for every project the backfill touched. Where it lists anything, run `tasks commit` there and check again; continue only when it prints nothing for every project. A project without `[git] commit` gets its one `chore(tasks): backfill reviewed on ideas` commit here.
 4. **Old wakers.** Run `tasks search "Ideas it wakes" --all-projects` and record the count of open research tasks still carrying the plain-note wording on the implementation task (spec §7.3). Their bodies are not rewritten.
 5. **Resume writers.** Resume the paused sessions only after steps 2–3 are clean on every project.
