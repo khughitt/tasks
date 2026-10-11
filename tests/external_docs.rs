@@ -754,3 +754,31 @@ fn external_doc_fetch_failure_leaves_no_record() {
             .is_empty()
     );
 }
+
+#[test]
+#[ignore = "production thirty-second strict deadline; short supervisor cases run in the fast suite"]
+fn external_doc_strict_production_deadline() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "# Plan\n");
+    let id = env.json(&dir, &["add", "Strict", "--plan", "stub:plan"])["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    std::fs::write(&docs.script, "sleep 60\n").unwrap();
+    let started = std::time::Instant::now();
+    let out = env.cmd(&dir).args(["doc", &id, "--plan"]).output().unwrap();
+    let elapsed = started.elapsed();
+    assert!(elapsed >= std::time::Duration::from_secs(29), "{elapsed:?}");
+    assert!(elapsed < std::time::Duration::from_secs(35), "{elapsed:?}");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "doc_not_found");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("deadline exceeded")
+    );
+}

@@ -171,7 +171,7 @@ pub(crate) const OPTIONAL_BUDGET: std::time::Duration = std::time::Duration::fro
 pub(crate) fn fetch(request: FetchRequest, deadline: std::time::Instant) -> DocRead;
 ```
 
-- [ ] **1. Write reference/config RED cases and the integration fixture.** Add unit
+- [x] **1. Write reference/config RED cases and the integration fixture.** Add unit
   cases for external forms, malformed first segments, later-segment colons, NUL,
   root reservation, empty scheme table, valid identity+docs config and unknown keys.
   Keep classifier/config tests next to their production modules. Representative:
@@ -251,7 +251,7 @@ printf '{{"id":"%s","body":%s}}' "$id" "$(cat {response})"
   Unit/integration fetch fixtures require only `sh` and existing basic utilities,
   not Python. The one-off installation smoke can still use Python.
 
-- [ ] **2. Run RED through the front door.**
+- [x] **2. Run RED through the front door.**
 
 ```sh
 just test-one external_doc_shape_is_host_independent
@@ -261,7 +261,7 @@ just test-one config::tests
   Confirm missing behavior, not a fixture/import error; then implement shape,
   root and host-table parsing. The docs tables have their own unknown-field checks.
 
-- [ ] **3. Write fetch/reader RED tests before the implementation.** Unit tests use
+- [x] **3. Write fetch/reader RED tests before the implementation.** Unit tests use
   `fetch` with a short absolute deadline and controlled shell fixtures.
   Cover valid/empty body, exact single-argument delivery of spaces/quotes/`$()` and
   semicolons, invalid JSON/UTF-8/ID/field types, trailing output, nonzero exit,
@@ -325,7 +325,7 @@ just test-one doc_fetch::tests
 just test-one resolve::tests
 ```
 
-- [ ] **4. Implement the fetch boundary and wire the reader.** Start `sh` with
+- [x] **4. Implement the fetch boundary and wire the reader.** Start `sh` with
   `CommandExt::process_group(0)`. Two readers send bounded stdout/stderr results
   over a channel; stderr drains in chunks, retaining only its prefix. The controller
   alternates a non-reaping `waitid` peek with
@@ -387,7 +387,7 @@ struct Payload { id: String, body: String }
   and strict `step_exists` through `read`; local `read` uses existing `find` and
   `read_to_string`, preserving `Io`. `abs` returns external references directly.
 
-- [ ] **5. Verify GREEN and commit this coherent reader change.** Add a fixture
+- [x] **5. Verify GREEN and commit this coherent reader change.** Add a fixture
   integration test proving an external record can be listed after disconnecting
   the host scheme. Preserve existing local/main-root tests.
 
@@ -418,7 +418,7 @@ pub fn apply_fields(ctx: &mut Ctx, task: &mut Task, fields: &FieldArgs,
                     original: Option<&Task>) -> Result<()>;
 ```
 
-- [ ] **1. Write RED tests for no-scheme edits and canonicalization.** With the fixture,
+- [x] **1. Write RED tests for no-scheme edits and canonicalization.** With the fixture,
   add an external spec/plan and step; disconnect, change title/priority, and assert
   the log is unchanged. Check the changed fields via `list`/raw record, without
   depending on Task 4's tolerant display. Include editor body-only changes,
@@ -453,7 +453,7 @@ fn external_doc_unrelated_edit_does_not_fetch() {
 just test-one --test external_docs external_doc_unrelated_edit_does_not_fetch
 ```
 
-- [ ] **2. Apply only required external reads, preserving local checks.** Add's empty
+- [x] **2. Apply only required external reads, preserving local checks.** Add's empty
   baseline means supplied links are new; edits compare the final proposed values
   with the saved original before resolution. The core predicates are:
 
@@ -471,7 +471,7 @@ let validate_external_step = proposed_step.is_some() && (plan_changed || step_ch
   local step rechecks still run. Reject a remaining step with no plan before save.
   Editor assigns changed-link resolution results, retaining its `keep` error path.
 
-- [ ] **3. Prove move semantics RED→GREEN.** Extend `tests/move.rs`: a childless,
+- [x] **3. Prove move semantics RED→GREEN.** Extend `tests/move.rs`: a childless,
   unparented task with external links but no step moves after removing the scheme;
   a stepped move requires its heading, and unavailable/missing-heading refusals
   leave source bytes unchanged and create no destination record.
@@ -518,7 +518,7 @@ fn external_check_order(tasks: &[Task]) -> Result<Vec<String>>;
   by `read` and `prefetch_external`; it is called before any fetch. No second
   scheduler budget or clock is introduced.
 
-- [ ] **1. Write RED tier, cache and real-worker budget tests.** The tier builder's
+- [x] **1. Write RED tier, cache and real-worker budget tests.** The tier builder's
   expected output for interleaved inputs is stepped plan `stub:z`, other plan
   `stub:b`, spec `stub:a`, closed-only plan `stub:c`; a spec also used as a stepped
   plan appears once at the stepped tier. Permute task input order to verify stability.
@@ -555,7 +555,7 @@ just test-one external_check_order
 just test-one prefetch_external
 ```
 
-- [ ] **2. Implement the priority queue and bounded scheduler.** Build a
+- [x] **2. Implement the priority queue and bounded scheduler.** Build a
   `BTreeMap<String, u8>` from records, taking the minimum tier for shared refs;
   sort its entries by `(tier, reference)`. Skip external specs on closed records.
   Pass the resulting refs into `prefetch_external` once. Scoped worker threads
@@ -568,7 +568,7 @@ just test-one prefetch_external
   Join active workers after their group cleanup before returning. Do not clone
   Error globally or make Resolver thread-safe to accommodate workers.
 
-- [ ] **3. Move check's body consumers behind `read`, and write integration RED cases.**
+- [x] **3. Move check's body consumers behind `read`, and write integration RED cases.**
   Keep local spec existence checks and their existing `Located` warnings; do not
   newly read local spec bodies just to prove existence. Read each distinct local
   plan once into check's own body map, preserving missing/non-file/read failures
@@ -629,7 +629,7 @@ command limit initialized on its first configured fetch. `read` stays the single
 body reader and honors that deadline; no second provider reader is added.
 Strict `step_exists` remains for writes/moves whose resolvers have no shorter limit.
 
-- [ ] **1. Write RED show/next tests.** Create a stepped external task, disconnect
+- [x] **1. Write RED show/next tests.** Create a stepped external task, disconnect
   the host config and assert both commands succeed, preserve the plan reference,
   emit an availability warning and omit `step_found`. Repeat with a failing
   configured fetcher. Close the record: unavailable stepped history gives `false`;
@@ -655,7 +655,7 @@ assert!(next["next"].get("step_found").is_none());
 just test-one --test external_docs external_doc_show
 ```
 
-- [ ] **2. Handle only external stepped plans opportunistically.** Classify before
+- [x] **2. Handle only external stepped plans opportunistically.** Classify before
   `locate`'s local historical branch. With no external step, do not call the
   reader. For a stepped external plan:
 
@@ -705,7 +705,7 @@ Promote show's shared record selection to
 -> Result<(Option<Project>, Task, Vec<Task>)>`; both commands select through it.
 This factors existing lookup only, preserving its warnings and failure cases.
 
-- [ ] **1. Verify/adopt the inventory prepared during execution setup.** Setup's
+- [x] **1. Verify/adopt the inventory prepared during execution setup.** Setup's
   owning ops task/worktree adds this exact command row and one nonrepeatable
   `{ names = ["--plan"], value = "string" }` option to both list and search:
 
@@ -738,7 +738,7 @@ python3 "$TASKS_DOC_OPS_ROOT/bin/vendored" adopt cli.toml
 git diff --stat -- tools/cli.toml
 ```
 
-- [ ] **2. Write RED byte-export and selector/routing tests.** Use `env.cmd(...).output()`
+- [x] **2. Write RED byte-export and selector/routing tests.** Use `env.cmd(...).output()`
   because `env.json` requires JSON. Assert exact bytes for empty body, no trailing
   newline and a body with one. Test default/`--json`/`--pretty`/`TASKS_FORMAT=pretty`
   and color/header flags. Neither/both selectors use `env.usage`; absent selected
@@ -766,7 +766,7 @@ for flags in [vec![], vec!["--json"], vec!["--pretty"]] {
 just test-one --test external_docs external_doc_export
 ```
 
-- [ ] **3. Implement selectors, routing and raw output.** Use a required,
+- [x] **3. Implement selectors, routing and raw output.** Use a required,
   nonmultiple clap argument group for `plan` and `spec`, ordinary task-ID
   completion, and the exact summary registered above. Dispatch with
   `open_id_ctx`; parse the ID and load its claim snapshot as show does. Select
@@ -789,7 +789,7 @@ let doc = resolver.read(kind, value)?.required()?;
   Output matches (warnings/render/pretty), and keep raw rendering consistent;
   no serializer is used on the CLI raw path.
 
-- [ ] **4. Write RED exact-filter and row-contract cases, then implement.** Create
+- [x] **4. Write RED exact-filter and row-contract cases, then implement.** Create
   completed steps under different parents plus an open step and an unstepped task.
   `list --plan stub:canonical --status done` returns only the linked completed
   rows, carrying their step. Near-match/alias input returns empty without fetching.
@@ -836,7 +836,7 @@ records are written only through the CLI.
 agent-document workflow guidance. Real-wrapper evidence is linked on
 `ops-721511`, not substituted into the dated spec measurement.
 
-- [ ] **1. Update README's opening output contract as well as command/check sections.**
+- [x] **1. Update README's opening output contract as well as command/check sections.**
   Include this explicit consumer-facing distinction near the existing JSON contract:
 
 ```text
@@ -857,7 +857,7 @@ its warnings go to stderr, and it does not wrap the body in JSON.
   summary `step`, external `spec_path`/`plan_path` and unknown `step_found`
   descriptions at the same output boundary without rewriting historical addenda.
 
-- [ ] **2. Run the required full-feature evidence.**
+- [x] **2. Run the required full-feature evidence.**
 
 ```sh
 just test-one --test external_docs external_doc
@@ -879,7 +879,7 @@ just test-one --test external_docs production_deadline -- --ignored
   The installed
   pre-push hook carries the complete suite; no direct test runner or hook bypass.
 
-- [ ] **3. Smoke a real standalone release install without replacing the live CLI.**
+- [x] **3. Smoke a real standalone release install without replacing the live CLI.**
 
 ```sh
 TASKS_DOC_INSTALL_ROOT=$(mktemp -d)
@@ -925,7 +925,8 @@ with tempfile.TemporaryDirectory() as temporary:
                               stderr=subprocess.PIPE, check=True, timeout=10)
     run("init", "--prefix", "smoke")
     task_id = json.loads(run("add", "Smoke", "--plan", "stub:alias",
-                             "--step", "Task 1: smoke", "--process", "direct").stdout)["id"]
+                             "--step", "Task 1: smoke", "--process", "direct",
+                             "--complexity", "low").stdout)["id"]
     assert run("check").stdout == b""
     assert run("doc", task_id, "--plan").stdout == body.encode()
     rows = json.loads(run("list", "--plan", "stub:canonical").stdout)["tasks"]

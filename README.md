@@ -11,6 +11,14 @@ Response containers such as `tasks: []` and `warnings: []` remain, as does `next
 when nothing is eligible. See
 [the output contract](docs/specs/2026-08-29-tasks-design.md#51-output-contract).
 
+`check` warnings distinguish `doc_unreachable` (this host could not resolve a
+reference) from `doc_unchecked` (one summary listing external checks unfinished
+because the shared fetch budget ended). Warning-only checks exit 0; a warning
+does not verify a document. Finding consumers, including obs and the TUI, must
+recognize both kinds. Summary and parked rows include `step` only when set.
+`tasks doc` exports exact UTF-8 body bytes in every format, with warnings on
+stderr and no JSON envelope.
+
 Task objects expose optional `moved_to` (the destination id on a source tombstone)
 and `moved_from` (the source id on the destination). `status` includes `moved`, a
 closed, read-only status; counts include `moved`, and `total` counts every record.
@@ -435,7 +443,8 @@ Closed records (`done`, `dropped`, and `moved`) keep their historical plan and s
 links. If the plan is absent from both the record's checkout and its main checkout,
 `show` returns the record with a warning that the plan is unavailable and
 `step_found: false` when a step is linked. Available plans still have their steps
-checked; missing plans for open work and other read errors still fail.
+checked; missing local plans for open work and other local read errors still fail.
+External availability follows the contract below.
 
 The move output (`MoveOut`) names the paths written in each root. Under `[git] commit`
 it commits each opted-in root; otherwise commit each root its `paths` lists:
@@ -623,6 +632,76 @@ rows with replacement characters in `input` and decoding details; a stdin read e
 adds an invalid diagnostic and stops reading, preserving earlier rows. Unavailable
 relative-path bases also produce invalid rows. Only registry problems fail command
 execution with the usual error envelope on stderr and exit 1.
+
+## External documents
+
+`--spec` and `--plan` also accept `<scheme>:<remainder>`, for example
+`mindful:thought:abc`. The scheme matches `[a-z][a-z0-9-]*`; the nonempty
+remainder is opaque and may contain further colons, slashes, spaces and quotes,
+but no newline, carriage return or NUL. A colon in the first path segment
+reserves the external form; `docs/plans/x:y.md` remains local. Configured
+`spec_dirs` and `plan_dirs` cannot contain a colon in their first segment.
+
+Configure fetch commands on each host in `~/.config/tasks/config.toml`:
+
+```toml
+[docs.schemes]
+mindful = "mindful-doc"
+```
+
+The command is trusted host configuration. Tasks invokes
+`sh -c '<command> "$1"' -- <remainder>` with closed stdin, so the reference is
+one literal argument. The command must return one UTF-8 JSON object with string
+`id` and `body` fields; `id` is nonempty and single-line, without NUL. Extra
+fields are allowed. Tasks stores `<scheme>:<id>` after a successful write.
+Each fetch has a 30-second deadline, a 2 MiB stdout limit and a diagnostic
+prefix of at most 200 stderr bytes. Remaining processes in its group are
+terminated when the shell exits or a limit is reached.
+
+Writes fetch only changed external links and verify an external step only when
+its plan or step changed. Unrelated title, priority or body edits work without
+the scheme. Changing an alias counts as a change. Adding links, exporting a
+document and moving a task with an external step require successful reads.
+A move without a step preserves external references without fetching.
+
+`check` uses up to four concurrent fetches within one five-second budget. It
+prioritizes open plans with steps, other open plans, open specs, then closed-only
+plans; within each tier references sort lexically. A shared reference belongs
+to its highest tier and is read once. Missing schemes or attempted provider
+failures produce per-task `doc_unreachable` warnings for open work. Budget
+exhaustion produces one `doc_unchecked` summary listing unfinished references
+in priority order. Local checks continue; available plans still produce errors
+for missing steps. Malformed host configuration remains fatal.
+
+`show` and `next` spend at most five seconds fetching a stepped external plan.
+An unavailable open plan gives a warning and omits `step_found`; a closed task
+uses `step_found: false` with a historical warning. Without a step they do not
+fetch the external plan, and spec links do not trigger fetches. Displayed
+`spec_path` and `plan_path` are the stored external references; local links
+remain absolute paths.
+
+```sh
+tasks doc <id> --plan       # exactly one of --plan or --spec is required
+tasks doc <id> --spec
+tasks list --plan mindful:thought:abc --status done
+tasks search "phrase" --plan mindful:thought:abc
+```
+
+`doc` returns only the selected document's exact body, even with `--json` or
+`--pretty`, and adds no newline, color or headers. `--plan` on list/search is
+an exact comparison against the stored reference: no fetch, alias resolution
+or parent restriction. Local paths use the same exact comparison. Optional
+`step` is exposed in JSON rows without adding a pretty table column.
+
+Upgrade each host's binary before adding `[docs.schemes]` on that host: older
+binaries reject the table. Upgrade every host reading synced records before
+the first external link. Roll back by removing the table before restoring an
+older binary, and remove external links before reverting every reader.
+The workflow activation pilot must show three clean full-backlog checks on
+each host with its real wrapper and web app running, under five seconds with
+no `doc_unchecked`. Failed pilots require a faster provider before activation;
+later `doc_unchecked` findings are latency incidents. Provider rollout and pilot
+evidence belong to the ops rollout task, `ops-721511`.
 
 ## Choosing a process
 

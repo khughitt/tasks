@@ -528,6 +528,10 @@ tasks feedback <summary> --category friction|gap|idea|positive [-b|--body TEXT]
 
 - stdout carries the result; stderr carries nothing on success in JSON mode. In `--pretty`
   mode, warnings go to stderr.
+- `doc <id> --plan|--spec` is the export exception: stdout is the exact UTF-8
+  document body in every format, without a JSON envelope or added newline;
+  warnings go to stderr even in JSON mode. See the
+  [external document contract](2026-10-11-external-document-references-design.md).
 - Errors: a single JSON object `{"error": {"kind": "<snake_case>", "detail": "<text>"}}` on
   stderr, exit 1. Clap usage errors exit 2. `check` exits 1 when it has errors, 0 with
   warnings only.
@@ -572,13 +576,13 @@ Task = {
 ClaimInfo = { owner, session, host, pid, worktree, started, seen, live }
 
 TaskSummary = { id, title, status, priority, size, parallel: bool, owner, created, updated,
-                tags, source, depends, claim: ClaimInfo|null }
+                tags, source, depends, step: string|null, claim: ClaimInfo|null }
 
 show   -> { task: Task,
             claim: ClaimInfo|null,
-            spec_path: string|null,    absolute
-            plan_path: string|null,    absolute
-            step_found: bool|null,     omitted when no step
+            spec_path: string|null,    absolute local path or stored external reference
+            plan_path: string|null,    absolute local path or stored external reference
+            step_found: bool|null,     omitted with no step or unavailable open external plan
             depends_on: [{ id, title: string|null, status: string|null, resolved: bool }],
             warnings: [string] }
 list   -> { tasks: [TaskSummary], warnings }

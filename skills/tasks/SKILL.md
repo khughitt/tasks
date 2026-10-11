@@ -11,7 +11,12 @@ nothing when it has nothing to report).
 Task objects omit unset optional fields and empty collections; treat missing optional
 keys as unset and missing task arrays as empty. `false`, `0`, and empty strings remain.
 Response containers (`tasks`, `warnings`, etc.) remain present; `next: null` still means
-nothing is eligible.
+nothing is eligible. `tasks doc <id> --plan|--spec` is the exception: exact UTF-8
+body bytes on stdout in every format, with warnings on stderr and no JSON wrapper.
+Summary and parked rows expose `step` only when set. `check` distinguishes
+`doc_unreachable` (an unavailable reference) from `doc_unchecked` (one summary of
+external checks unfinished at the shared budget); warning-only exit 0 does not
+mean those documents were verified.
 
 ## Session protocol
 
@@ -581,6 +586,25 @@ in its registered checkout. Every write to it is refused afterwards with `retire
 from every checkout; its ids keep resolving, `--all-projects` and `--group` reads leave it
 out, and `--project` reads warn. `tasks unretire` there undoes it. The project lifecycle
 runbook in ops has the whole procedure.
+
+## Document links and reads
+
+`--spec` and `--plan` accept local paths/bare names or a host-configured external
+reference `<scheme>:<opaque remainder>`. Successful changed-link writes store the
+provider's canonical reference. Unrelated edits preserve existing external links
+without fetching; changing the plan or step requires step verification.
+Use `tasks doc <id> --plan` or `--spec` to read the selected body through the same
+resolver, including linked projects and worktree/main-checkout fallback.
+Use `tasks list --plan <stored reference> --status done` to find completed steps
+across parents; list/search compare the stored value exactly and never fetch.
+
+`show` and `next` warn and omit `step_found` for an unavailable open external
+plan; absence means unknown, not a missing heading. No step means no external
+fetch. `check` prioritizes stepped open plans within a shared five-second budget
+and reports unfinished references once as `doc_unchecked`. Local missing files
+and steps remain errors; malformed host configuration remains fatal. See the
+[README's external document contract](../../README.md#external-documents) for
+fetch configuration, limits and binary-before-config rollout order.
 
 ## With superpowers
 
