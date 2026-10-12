@@ -3,8 +3,9 @@ id: tasks-cc9a31
 title: "Notes are append-only with no redaction path: removing a name or path from past notes before publishing a repo needs a direct file edit the skill forbids"
 status: idea
 priority: 2
+reviewed: true
 created: 2026-09-28T09:46:15Z
-updated: 2026-09-30T09:54:01Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-ea2a79
 tags: [feedback, gap, "from:tack"]

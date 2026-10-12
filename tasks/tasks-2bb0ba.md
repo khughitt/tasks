@@ -3,8 +3,9 @@ id: tasks-2bb0ba
 title: "A run: note entered with a wrong total cannot be corrected: notes are append-only, and a free-text correction note is invisible to the parsers that read run: notes, so estimate-vs-actual measures keep the wrong figure"
 status: idea
 priority: 2
+reviewed: true
 created: 2026-09-30T09:10:59Z
-updated: 2026-09-30T09:54:02Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-ea2a79
 tags: [feedback, gap, "from:material"]

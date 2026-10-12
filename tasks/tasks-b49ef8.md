@@ -3,8 +3,9 @@ id: tasks-b49ef8
 title: "Color tags consistently, with styles drawn from the tag vocabulary"
 status: idea
 priority: 3
+reviewed: true
 created: 2026-10-03T16:55:26Z
-updated: 2026-10-08T10:17:41Z
+updated: 2026-10-12T18:22:33Z
 depends: [tasks-606552, tasks-6ac7fd]
 parent: tasks-cea445
 tags: [cli]

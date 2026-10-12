@@ -6,8 +6,9 @@ priority: 2
 size: m
 complexity: high
 process: planned
+reviewed: true
 created: 2026-09-30T14:23:41Z
-updated: 2026-10-02T15:14:13Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-cea445
 tags: [cross-project]

@@ -3,8 +3,9 @@ id: tasks-00bac8
 title: tasks quiet lists unclaimed work that needs an exclusive host resource
 status: idea
 priority: 3
+reviewed: true
 created: 2026-10-03T16:36:11Z
-updated: 2026-10-08T10:53:55Z
+updated: 2026-10-12T18:22:33Z
 depends: []
 parent: tasks-46d207
 tags: []

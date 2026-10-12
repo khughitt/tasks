@@ -6,8 +6,9 @@ priority: 2
 size: m
 complexity: high
 process: planned
+reviewed: true
 created: 2026-09-28T08:31:43Z
-updated: 2026-09-30T10:05:32Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-46d207
 tags: [feedback, gap, "from:ops"]

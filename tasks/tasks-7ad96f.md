@@ -6,8 +6,9 @@ priority: 2
 size: m
 complexity: high
 process: planned
+reviewed: true
 created: 2026-10-02T10:35:27Z
-updated: 2026-10-08T10:12:58Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-0e7216
 tags: [feedback, friction, "from:sci"]

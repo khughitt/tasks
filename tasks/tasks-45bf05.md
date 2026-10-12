@@ -3,8 +3,9 @@ id: tasks-45bf05
 title: "Task review metadata cannot be corrected through the CLI: edit rejects reviewer-only corrections because notes are append-only, but outcome measures consume the original reviewer field."
 status: idea
 priority: 2
+reviewed: true
 created: 2026-09-30T10:40:35Z
-updated: 2026-10-08T10:21:33Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-ea2a79
 tags: [feedback, gap, "from:material"]

@@ -3,8 +3,9 @@ id: tasks-d56b72
 title: "Notes are append-only with no way to amend one: a mislabelled structured note (concerns:, review:, run:) can only be contradicted by a later free-text note that parsers don't link back"
 status: idea
 priority: 2
+reviewed: true
 created: 2026-10-05T09:10:39Z
-updated: 2026-10-06T09:45:48Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-ea2a79
 tags: [feedback, idea, "from:material"]

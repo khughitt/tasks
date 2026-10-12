@@ -3,8 +3,9 @@ id: tasks-d40e8e
 title: "Lifecycle hooks: run something on done or after a merge"
 status: idea
 priority: 2
+reviewed: true
 created: 2026-09-07T10:25:11Z
-updated: 2026-10-08T10:59:00Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-46d207
 tags: [quick-add, cli]

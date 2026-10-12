@@ -3,8 +3,9 @@ id: tasks-955c2a
 title: "tasks note refuses with stale_copy when another live session holds a newer copy of the record, though notes are append-only and cannot conflict; the only offered paths are waiting for that branch to merge or merging its copy"
 status: idea
 priority: 2
+reviewed: true
 created: 2026-10-07T17:45:57Z
-updated: 2026-10-08T09:44:40Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-984769
 tags: [feedback, friction, "from:flows"]

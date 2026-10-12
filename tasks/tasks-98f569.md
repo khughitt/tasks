@@ -3,8 +3,9 @@ id: tasks-98f569
 title: graph --format is a hand-parsed value set with no completion
 status: idea
 priority: 3
+reviewed: true
 created: 2026-09-05T23:00:36Z
-updated: 2026-10-08T10:16:45Z
+updated: 2026-10-12T18:22:33Z
 depends: []
 tags: [cli]
 spec: docs/specs/2026-09-05-shell-completions-design.md

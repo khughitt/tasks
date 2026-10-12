@@ -3,8 +3,9 @@ id: tasks-b2e718
 title: "check warns unlinked_step as soon as a plan is linked, so a plan awaiting review must either stay unlinked or have step tasks filed that the pickers then offer before the plan is approved"
 status: idea
 priority: 2
+reviewed: true
 created: 2026-09-29T11:33:42Z
-updated: 2026-10-06T16:52:04Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-46d207
 tags: [feedback, friction, "from:mind6"]

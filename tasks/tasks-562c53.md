@@ -3,8 +3,9 @@ id: tasks-562c53
 title: "Cross-project dependencies read an older registered task record after a preparation task closes in its worktree, blocking the next native step until task records are integrated separately from runtime activation."
 status: idea
 priority: 2
+reviewed: true
 created: 2026-10-05T12:35:22Z
-updated: 2026-10-06T11:25:34Z
+updated: 2026-10-12T18:22:32Z
 depends: []
 parent: tasks-984769
 tags: [feedback, gap, "from:lore"]
