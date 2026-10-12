@@ -291,6 +291,7 @@ mod tests {
             process: None,
             parallel: false,
             lane: false,
+            reviewed: false,
             needs: vec![],
             every: None,
             defer: None,

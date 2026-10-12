@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""One-time backfill of the `reviewed` flag (docs/specs/2026-10-11-review-state-design.md §7.2).
+
+The first run on a project freezes its candidates -- open, unreviewed ideas whose latest
+note starts with `scope:` or is a `curate:`/`scope:` note carrying a pending `proposal:`
+-- with each record's `updated` stamp. Every run applies the flag only to entries whose
+record is still an unreviewed idea with an unchanged stamp, and reports the rest. Notes
+are read only at the freeze.
+
+Run every apply pass inside a writer pause: no other session may write the project's
+task records on any host (spec §7.2). --writers-paused is the operator's confirmation;
+the tool also refuses while this host's claim store holds a live claim in the project.
+"""
+import argparse
+import json
+import re
+import os
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+
+class Usage(Exception):
+    pass
+
+
+def run(tasks, root, *args):
+    env = dict(os.environ, TASKS_FORMAT="json")
+    out = subprocess.run([tasks, "-C", root, *args], capture_output=True, text=True, env=env)
+    return out.returncode, out.stdout, out.stderr
+
+
+def read_json(tasks, root, *args):
+    code, stdout, stderr = run(tasks, root, *args)
+    if code != 0:
+        raise RuntimeError(f"tasks {' '.join(args)} failed: {stderr.strip()}")
+    return json.loads(stdout)
+
+
+def error_kind(stderr):
+    try:
+        return json.loads(stderr)["error"]["kind"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def eligible(task):
+    """Today's scope eligibility rule, inverted: true when a pass has already looked."""
+    notes = task.get("notes") or []
+    if not notes:
+        return False
+    text = notes[-1]["text"]
+    if text.startswith("scope:"):
+        return True
+    return text.startswith("curate:") and "proposal:" in text
+
+
+def save(path, snapshot):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".review-backfill-")
+    with os.fdopen(fd, "w") as handle:
+        json.dump(snapshot, handle, indent=1)
+        handle.write("\n")
+    os.replace(tmp, path)
+
+
+def load(path, prefix):
+    """The whole snapshot, validated before anything is applied (no partial runs)."""
+    def bad(why):
+        return Usage(f"{path} is not a valid backfill snapshot for {prefix}: {why}; inspect it before rerunning")
+    try:
+        with open(path) as handle:
+            snapshot = json.load(handle)
+    except json.JSONDecodeError as error:
+        raise bad(f"invalid JSON ({error})")
+    if not isinstance(snapshot, dict) or snapshot.get("prefix") != prefix:
+        raise bad(f"prefix is {snapshot.get('prefix') if isinstance(snapshot, dict) else None!r}")
+    if not isinstance(snapshot.get("frozen_at"), str) or not isinstance(snapshot.get("entries"), list):
+        raise bad("frozen_at or entries missing")
+    for index, entry in enumerate(snapshot["entries"]):
+        ok = (
+            isinstance(entry, dict)
+            and set(entry) == {"id", "updated", "done", "outcome"}
+            and isinstance(entry["id"], str)
+            and re.fullmatch(re.escape(prefix) + r"-[0-9a-f]{6}", entry["id"])
+            and isinstance(entry["updated"], str)
+            and isinstance(entry["done"], bool)
+            and (entry["outcome"] is None or isinstance(entry["outcome"], str))
+        )
+        if not ok:
+            raise bad(f"entry {index} is {entry!r}")
+    return snapshot
+
+
+def freeze(tasks, root, prefix, path):
+    entries = []
+    for row in read_json(tasks, root, "list", "--status", "idea")["tasks"]:
+        if row.get("reviewed"):
+            continue
+        task = read_json(tasks, root, "show", row["id"])["task"]
+        if task["status"] == "idea" and not task.get("reviewed") and eligible(task):
+            entries.append({"id": task["id"], "updated": task["updated"], "done": False, "outcome": None})
+    snapshot = {
+        "prefix": prefix,
+        "frozen_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "entries": entries,
+    }
+    save(path, snapshot)
+    return snapshot
+
+
+def live_claims(tasks, root, prefix):
+    claims = read_json(tasks, root, "claims")["claims"]
+    return [c["id"] for c in claims if c.get("prefix") == prefix and c.get("live")]
+
+
+def apply(tasks, root, path, snapshot, report):
+    for entry in snapshot["entries"]:
+        if entry["done"]:
+            continue
+        code, stdout, stderr = run(tasks, root, "show", entry["id"])
+        if code != 0:
+            if error_kind(stderr) == "task_not_found":
+                entry.update(done=True, outcome="changed: record gone")
+                report["changed"].append({"id": entry["id"], "detail": "record gone"})
+            else:
+                # Operational: stays pending so the next run retries it.
+                entry["outcome"] = f"failed: show: {stderr.strip()}"
+                report["failed"].append({"id": entry["id"], "detail": f"show: {stderr.strip()}"})
+            save(path, snapshot)
+            continue
+        task = json.loads(stdout)["task"]
+        if task["status"] != "idea" or task.get("reviewed") or task["updated"] != entry["updated"]:
+            detail = (f"status {task['status']}, reviewed {str(bool(task.get('reviewed'))).lower()}, "
+                      f"updated {task['updated']} (frozen {entry['updated']})")
+            entry.update(done=True, outcome=f"changed: {detail}")
+            report["changed"].append({"id": entry["id"], "detail": detail})
+            save(path, snapshot)
+            continue
+        code, stdout, stderr = run(tasks, root, "edit", entry["id"], "--reviewed")
+        if code == 0:
+            entry.update(done=True, outcome="set")
+            report["set"].append(entry["id"])
+            # The record is written either way; a missing commit is the operator's to
+            # recover (`tasks commit`) before writers resume, never a reason to rewrite.
+            for warning in json.loads(stdout).get("warnings", []):
+                if warning.startswith(("commit_failed:", "commit_deferred:")):
+                    entry["outcome"] = f"set; {warning}"
+                    report["uncommitted"].append({"id": entry["id"], "warning": warning})
+        else:
+            entry["outcome"] = f"failed: {stderr.strip()}"
+            report["failed"].append({"id": entry["id"], "detail": stderr.strip()})
+        save(path, snapshot)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--state", required=True, help="directory holding <prefix>.json snapshots")
+    parser.add_argument("--root", default=".", help="project checkout (default: current directory)")
+    parser.add_argument("--tasks", default="tasks", help="the tasks binary to run")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--freeze-only", action="store_true", help="write the snapshot and stop")
+    mode.add_argument("--writers-paused", action="store_true",
+                      help="confirm every other writer of this project's records is paused on every host")
+    args = parser.parse_args()
+
+    try:
+        prefix = read_json(args.tasks, args.root, "prime")["prefix"]
+        path = os.path.join(args.state, f"{prefix}.json")
+        os.makedirs(args.state, exist_ok=True)
+        report = {"prefix": prefix, "frozen": False, "set": [], "changed": [], "failed": [], "uncommitted": [], "remaining": 0}
+        if os.path.exists(path):
+            snapshot = load(path, prefix)
+        else:
+            if args.writers_paused:
+                held = live_claims(args.tasks, args.root, prefix)
+                if held:
+                    report["failed"] = [{"id": i, "detail": "live claim; pause its writer first"} for i in held]
+                    print(json.dumps(report, indent=1))
+                    return 1
+            snapshot = freeze(args.tasks, args.root, prefix, path)
+            report["frozen"] = True
+        report["remaining"] = sum(1 for e in snapshot["entries"] if not e["done"])
+        if args.writers_paused:
+            held = live_claims(args.tasks, args.root, prefix)
+            if held:
+                report["failed"] = [{"id": i, "detail": "live claim; pause its writer first"} for i in held]
+                print(json.dumps(report, indent=1))
+                return 1
+            apply(args.tasks, args.root, path, snapshot, report)
+        report["remaining"] = sum(1 for e in snapshot["entries"] if not e["done"])
+        print(json.dumps(report, indent=1))
+        return 1 if report["failed"] or report["uncommitted"] else 0
+    except Usage as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

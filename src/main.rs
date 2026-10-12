@@ -34,6 +34,7 @@ mod relay;
 mod rename;
 mod repo;
 mod resolve;
+mod review;
 mod scope;
 mod shorthand;
 mod show_text;

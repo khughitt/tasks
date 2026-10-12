@@ -139,6 +139,7 @@ mod tests {
             process: None,
             parallel: false,
             lane: false,
+            reviewed: false,
             needs: vec![],
             every: None,
             defer: None,
@@ -491,6 +492,11 @@ pub struct Task {
     /// below it. Hand-set by `add`/`edit --lane`, cleared by `--no-lane`. See
     /// docs/specs/2026-10-03-lanes-needs-groups-design.md §3.
     pub lane: bool,
+    /// A scope pass has reviewed this idea and recorded its verdict. Meaningful only on an
+    /// idea: `save` refuses it elsewhere (parsing accepts it, for `check` and the editor)
+    /// and every status transition clears it.
+    /// See docs/specs/2026-10-11-review-state-design.md §3.
+    pub reviewed: bool,
     /// Shared resources the work uses, each declared in the project's `[needs]`
     /// vocabulary. Checked against it on write and by `check`, carried as-is on read.
     /// See docs/specs/2026-10-03-lanes-needs-groups-design.md §4.2.

@@ -144,6 +144,7 @@ mod tests {
             process: None,
             parallel: false,
             lane: false,
+            reviewed: false,
             needs: vec![],
             every: None,
             defer: defer.map(|date| Defer::parse(date).unwrap()),

@@ -29,6 +29,7 @@ pub struct TaskFilter {
     source: Option<String>,
     parent: Option<TaskId>,
     parallel: bool,
+    needs_review: bool,
     under: Option<TaskId>,
     /// `under`'s descendants, filled from the scan by `resolve_under`.
     subtree: Option<HashSet<TaskId>>,
@@ -51,6 +52,7 @@ pub struct Fields<'a> {
     /// Canonical, so a retired prefix and its live one compare equal.
     pub parent: Option<TaskId>,
     pub parallel: bool,
+    pub needs_review: bool,
 }
 
 fn optional<T>(value: &str, parse: impl Fn(&str) -> Result<T>) -> Result<Option<T>> {
@@ -105,6 +107,7 @@ impl TaskFilter {
                 .map(|id| crate::commands::parse_id(registry, shorthand, id))
                 .transpose()?,
             parallel: args.parallel,
+            needs_review: args.needs_review,
             under: args
                 .under
                 .as_deref()
@@ -151,6 +154,7 @@ impl TaskFilter {
             && self.source.is_none()
             && self.parent.is_none()
             && !self.parallel
+            && !self.needs_review
             && self.under.is_none()
     }
 
@@ -175,6 +179,7 @@ impl TaskFilter {
                 .as_ref()
                 .is_none_or(|parent| fields.parent.as_ref() == Some(parent))
             && (!self.parallel || fields.parallel)
+            && (!self.needs_review || fields.needs_review)
             && match (&self.under, &self.subtree) {
                 (None, _) => true,
                 (Some(_), Some(subtree)) => subtree.contains(&fields.id),
@@ -186,7 +191,12 @@ impl TaskFilter {
 }
 
 impl<'a> Fields<'a> {
-    pub fn of_task(task: &'a Task, claims: &ClaimSnapshot, registry: &Registry) -> Fields<'a> {
+    pub fn of_task(
+        task: &'a Task,
+        all: &[Task],
+        claims: &ClaimSnapshot,
+        registry: &Registry,
+    ) -> Fields<'a> {
         Fields {
             id: registry.canonical_id(&task.id),
             status: task.status,
@@ -203,6 +213,13 @@ impl<'a> Fields<'a> {
                 .as_ref()
                 .map(|parent| registry.canonical_id(parent)),
             parallel: task.parallel,
+            needs_review: crate::review::needs_review(
+                task.status,
+                task.reviewed,
+                task.process,
+                task.lane,
+                crate::hierarchy::children(all, &task.id, registry).len(),
+            ),
         }
     }
 
@@ -228,6 +245,7 @@ impl<'a> Fields<'a> {
                 .and_then(|parent| TaskId::parse(parent).ok())
                 .map(|id| registry.canonical_id(&id)),
             parallel: row.parallel,
+            needs_review: row.needs_review?,
         })
     }
 }
@@ -286,6 +304,7 @@ mod tests {
             source: None,
             parent: None,
             parallel: false,
+            needs_review: false,
         }
     }
 

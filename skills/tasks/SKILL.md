@@ -55,6 +55,9 @@ mean those documents were verified.
    and `--parallel` is a switch. `--need` is all-of, like `--tag`. `--complexity` is a selection over the effective rating,
    not the session cutoff: a session under a cutoff still picks only through `ready` and
    `next`.
+   `--needs-review` keeps rows that still need a look: ideas no scope pass has reviewed
+   (`reviewed` unset) and leaf todo or blocked tasks with no process. Pretty tables mark
+   those rows with a leading `*`.
    `tasks search "<phrase>"` is `list` narrowed to tasks whose title or body contains the
    phrase (literal, case-insensitive; notes are not searched) and takes every `list`
    option, so `tasks search "<phrase>" --all-projects` (open work, shelved aside) is the

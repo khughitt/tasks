@@ -232,7 +232,7 @@ pub fn candidates(
     let mut deferred = Vec::new();
     let mut paused = Vec::new();
     for task in all {
-        if !filter.matches(&Fields::of_task(task, claims, &ctx.registry)) {
+        if !filter.matches(&Fields::of_task(task, all, claims, &ctx.registry)) {
             continue;
         }
         let Some(park) = claims.park(&task.id) else {

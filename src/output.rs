@@ -393,6 +393,10 @@ pub struct TaskSummary {
     pub parallel: bool,
     /// Marked as a lane; always present, like `parallel`.
     pub lane: bool,
+    /// The stored review flag; always present, like `parallel`.
+    pub reviewed: bool,
+    /// The row needs a look (review-state spec §4). Computed from the scan, never stored.
+    pub needs_review: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -600,6 +604,7 @@ impl TaskSummary {
         registry: &Registry,
         now: OffsetDateTime,
     ) -> TaskSummary {
+        let child_count = crate::hierarchy::children(all, &task.id, registry).len();
         TaskSummary {
             id: task.id.to_string(),
             title: task.title.clone(),
@@ -611,6 +616,14 @@ impl TaskSummary {
             process: task.process,
             parallel: task.parallel,
             lane: task.lane,
+            reviewed: task.reviewed,
+            needs_review: crate::review::needs_review(
+                task.status,
+                task.reviewed,
+                task.process,
+                task.lane,
+                child_count,
+            ),
             needs: task.needs.clone(),
             owner: task.owner.clone(),
             created: task.created.clone(),
@@ -625,7 +638,7 @@ impl TaskSummary {
             depends: task.depends.iter().map(ToString::to_string).collect(),
             parent: task.parent.as_ref().map(ToString::to_string),
             in_lane: crate::hierarchy::lane_of(all, task, registry),
-            child_count: crate::hierarchy::children(all, &task.id, registry).len(),
+            child_count,
             open_descendant_count: crate::hierarchy::open_descendants(all, &task.id, registry)
                 .len(),
             claim: claims
@@ -662,6 +675,11 @@ pub struct ParkedRow {
     pub parallel: bool,
     /// Marked as a lane; always present, like `parallel`.
     pub lane: bool,
+    /// From the record; omitted on an unresolved row (review-state spec §5.4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub needs_review: Option<bool>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -719,6 +737,8 @@ impl ParkedRow {
             process: summary.process,
             parallel: summary.parallel,
             lane: summary.lane,
+            reviewed: Some(summary.reviewed),
+            needs_review: Some(summary.needs_review),
             needs: summary.needs,
             owner: summary.owner,
             created: Some(summary.created),
@@ -754,6 +774,8 @@ impl ParkedRow {
             process: None,
             parallel: false,
             lane: false,
+            reviewed: None,
+            needs_review: None,
             needs: Vec::new(),
             owner: None,
             created: None,
@@ -1240,7 +1262,13 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             halt_line(&o.halts),
             task_table(&o.tasks, o.date, painter, layout)
         ),
-        Output::Parked(o) => parked_table(&o.tasks, painter, layout, None),
+        Output::Parked(o) => parked_table(
+            &o.tasks,
+            painter,
+            layout,
+            None,
+            o.tasks.iter().any(|row| row.needs_review == Some(true)),
+        ),
         Output::Quiet(o) => quiet_table(&o.tasks, painter, layout),
         Output::Claims(o) => {
             use crate::table::{Column, Row};
@@ -1267,18 +1295,15 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                 .to_string()
         }
         Output::Prime(o) => {
-            let parallel = any_parallel(&o.closeout)
-                || any_parallel_tree(&o.roadmap)
-                || any_parallel(&o.ready)
-                || any_parallel(&o.doing);
-            let kind = any_type(&o.closeout)
-                || any_type_tree(&o.roadmap)
-                || any_type(&o.ready)
-                || any_type(&o.doing);
-            let columns = task_columns(parallel, kind);
+            let mut marks = Marks::of(&o.closeout)
+                .or(Marks::of_tree(&o.roadmap))
+                .or(Marks::of(&o.ready))
+                .or(Marks::of(&o.doing));
+            marks.review |= o.parked.iter().any(|row| row.needs_review == Some(true));
+            let columns = task_columns(marks);
             let rows_of = |rows: &[TaskSummary]| -> Vec<crate::table::Row> {
                 rows.iter()
-                    .map(|row| task_row(row, DateColumn::Updated, painter, parallel, kind, 0))
+                    .map(|row| task_row(row, DateColumn::Updated, painter, marks, 0))
                     .collect()
             };
             let closeout = rows_of(&o.closeout);
@@ -1288,14 +1313,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             let mut listed_under_ready = 0;
             for node in &o.roadmap {
                 if node.summary.child_count > 0 {
-                    tree_rows(
-                        std::slice::from_ref(node),
-                        0,
-                        painter,
-                        parallel,
-                        kind,
-                        &mut roadmap,
-                    );
+                    tree_rows(std::slice::from_ref(node), 0, painter, marks, &mut roadmap);
                 } else if ready_ids.contains(node.summary.id.as_str()) {
                     listed_under_ready += 1;
                 } else {
@@ -1303,8 +1321,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                         &node.summary,
                         DateColumn::Updated,
                         painter,
-                        parallel,
-                        kind,
+                        marks,
                         0,
                     ));
                 }
@@ -1316,14 +1333,21 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                 &[&closeout, &roadmap, &ready, &doing],
                 layout.headers,
             );
+            let pad = if marks.review { 2 } else { 0 };
             let id = shared
                 .id()
                 .unwrap_or(0)
-                .max(o.parked.iter().map(|row| row.id.len()).max().unwrap_or(0))
+                .max(
+                    o.parked
+                        .iter()
+                        .map(|row| row.id.len() + pad)
+                        .max()
+                        .unwrap_or(0),
+                )
                 .max(
                     o.lanes
                         .iter()
-                        .map(|row| row.lane.id.len())
+                        .map(|row| row.lane.id.len() + pad)
                         .max()
                         .unwrap_or(0),
                 );
@@ -1396,6 +1420,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                     layout,
                     Some(&crate::table::Widths::id_only(id, 4)),
                     false,
+                    marks.review,
                 ));
             }
             rendered.push_str(&format!(
@@ -1415,6 +1440,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                 painter,
                 layout,
                 Some(&crate::table::Widths::id_only(id, 7)),
+                marks.review,
             ));
             rendered.push_str(&format!("\n{}\n", painter.paint(Style::Emphasis, "ready:")));
             rendered.push_str(&section(&ready));
@@ -1422,7 +1448,7 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             rendered.push_str(&section(&doing));
             rendered
         }
-        Output::Lanes(o) => lane_table(&o.lanes, painter, layout, None, true),
+        Output::Lanes(o) => lane_table(&o.lanes, painter, layout, None, true, false),
         Output::Graph(o) => o.text.clone(),
         Output::Check(o) => {
             let mut rendered = String::new();
@@ -1441,11 +1467,10 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
             rendered
         }
         Output::Tree(o) => {
-            let parallel = any_parallel_tree(&o.nodes);
-            let kind = any_type_tree(&o.nodes);
+            let marks = Marks::of_tree(&o.nodes);
             let mut rows = Vec::new();
-            tree_rows(&o.nodes, 0, painter, parallel, kind, &mut rows);
-            crate::table::render(&task_columns(parallel, kind), &rows, layout, None, painter)
+            tree_rows(&o.nodes, 0, painter, marks, &mut rows);
+            crate::table::render(&task_columns(marks), &rows, layout, None, painter)
         }
         Output::Tags(o) => {
             let mut rendered = String::new();
@@ -1487,6 +1512,7 @@ fn lane_table(
     layout: &crate::table::Layout,
     widths: Option<&crate::table::Widths>,
     detail: bool,
+    pad: bool,
 ) -> String {
     use crate::table::{Column, Detail, Row};
     let columns = [
@@ -1529,7 +1555,11 @@ fn lane_table(
                 LaneState::Empty => painter.paint(Style::Emphasis, "empty"),
             };
             let mut built = Row::new(vec![
-                present::row_id(&row.lane.id, row.lane.project_color).paint(painter),
+                format!(
+                    "{}{}",
+                    if pad { "  " } else { "" },
+                    present::row_id(&row.lane.id, row.lane.project_color).paint(painter)
+                ),
                 present::priority(row.lane.priority).paint(painter),
                 present::title(&row.lane.title, row.lane.project_color).paint(painter),
                 state,
@@ -1572,6 +1602,50 @@ fn waiting_text(causes: &Causes) -> String {
         .map(|(cause, count)| format!("{count} {cause}"))
         .collect();
     format!("waiting: {}", parts.join(", "))
+}
+
+/// The optional marks a pretty task table reserves, decided once per command output so a
+/// per-section decision cannot shift columns between adjacent sections.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Marks {
+    /// The `* ` prefix on the id cell (review-state spec §5.3).
+    pub review: bool,
+    /// The `||` column.
+    pub parallel: bool,
+    /// The type column.
+    pub kind: bool,
+}
+
+impl Marks {
+    pub fn of(rows: &[TaskSummary]) -> Marks {
+        Marks {
+            review: rows.iter().any(|row| row.needs_review),
+            parallel: any_parallel(rows),
+            kind: any_type(rows),
+        }
+    }
+
+    pub fn of_tree(nodes: &[TreeNode]) -> Marks {
+        Marks {
+            review: any_needs_review_tree(nodes),
+            parallel: any_parallel_tree(nodes),
+            kind: any_type_tree(nodes),
+        }
+    }
+
+    pub fn or(self, other: Marks) -> Marks {
+        Marks {
+            review: self.review || other.review,
+            parallel: self.parallel || other.parallel,
+            kind: self.kind || other.kind,
+        }
+    }
+}
+
+pub fn any_needs_review_tree(nodes: &[TreeNode]) -> bool {
+    nodes
+        .iter()
+        .any(|node| node.summary.needs_review || any_needs_review_tree(&node.children))
 }
 
 /// Whether a pretty rendering must reserve the parallel column. Decided once per command
@@ -1692,7 +1766,7 @@ fn terminal_attached_width() -> Option<usize> {
     }
 }
 
-pub fn task_columns(parallel: bool, kind: bool) -> Vec<crate::table::Column> {
+pub fn task_columns(marks: Marks) -> Vec<crate::table::Column> {
     use crate::table::Column;
     let mut columns = vec![
         Column::fixed("id"),
@@ -1702,10 +1776,10 @@ pub fn task_columns(parallel: bool, kind: bool) -> Vec<crate::table::Column> {
         Column::fixed("process"),
         Column::fixed("status"),
     ];
-    if parallel {
+    if marks.parallel {
         columns.push(Column::fixed("||"));
     }
-    if kind {
+    if marks.kind {
         columns.push(Column::fixed("type"));
     }
     columns.push(Column::fixed("date"));
@@ -1717,8 +1791,7 @@ pub fn task_row(
     row: &TaskSummary,
     date: DateColumn,
     painter: &Painter,
-    parallel: bool,
-    kind: bool,
+    marks: Marks,
     indent: usize,
 ) -> crate::table::Row {
     let date = match date {
@@ -1738,7 +1811,8 @@ pub fn task_row(
     .unwrap_or_else(|| "-".into());
     let mut cells = vec![
         format!(
-            "{}{}",
+            "{}{}{}",
+            present::review_mark(row.needs_review, marks.review).paint(painter),
             "  ".repeat(indent),
             present::row_id(&row.id, row.project_color).paint(painter)
         ),
@@ -1748,14 +1822,14 @@ pub fn task_row(
         present::process(row.process, "-").paint(painter),
         present::status(row.status).paint(painter),
     ];
-    if parallel {
+    if marks.parallel {
         cells.push(if row.parallel {
             "||".into()
         } else {
             String::new()
         });
     }
-    if kind {
+    if marks.kind {
         cells.push(
             type_letter(row)
                 .map(|letter| painter.paint(Style::Emphasis, &letter.to_string()))
@@ -1836,8 +1910,7 @@ pub fn tree_rows(
     nodes: &[TreeNode],
     depth: usize,
     painter: &Painter,
-    parallel: bool,
-    kind: bool,
+    marks: Marks,
     rows: &mut Vec<crate::table::Row>,
 ) {
     for node in nodes {
@@ -1845,11 +1918,10 @@ pub fn tree_rows(
             &node.summary,
             DateColumn::Updated,
             painter,
-            parallel,
-            kind,
+            marks,
             depth,
         ));
-        tree_rows(&node.children, depth + 1, painter, parallel, kind, rows);
+        tree_rows(&node.children, depth + 1, painter, marks, rows);
     }
 }
 
@@ -1859,13 +1931,12 @@ fn task_table(
     painter: &Painter,
     layout: &crate::table::Layout,
 ) -> String {
-    let parallel = any_parallel(rows);
-    let kind = any_type(rows);
+    let marks = Marks::of(rows);
     let built: Vec<crate::table::Row> = rows
         .iter()
-        .map(|row| task_row(row, date, painter, parallel, kind, 0))
+        .map(|row| task_row(row, date, painter, marks, 0))
         .collect();
-    crate::table::render(&task_columns(parallel, kind), &built, layout, None, painter)
+    crate::table::render(&task_columns(marks), &built, layout, None, painter)
 }
 
 pub fn parked_columns() -> Vec<crate::table::Column> {
@@ -1881,10 +1952,14 @@ pub fn parked_columns() -> Vec<crate::table::Column> {
     ]
 }
 
-pub fn parked_row(row: &ParkedRow, painter: &Painter) -> crate::table::Row {
+pub fn parked_row(row: &ParkedRow, painter: &Painter, review: bool) -> crate::table::Row {
     let park = row.park.as_ref().expect("a parked row carries its park");
     crate::table::Row::new(vec![
-        present::row_id(&row.id, row.project_color).paint(painter),
+        format!(
+            "{}{}",
+            present::review_mark(row.needs_review == Some(true), review).paint(painter),
+            present::row_id(&row.id, row.project_color).paint(painter)
+        ),
         present::status_of(row.status).paint(painter),
         row.phase
             .map(crate::model::Phase::as_str)
@@ -1902,11 +1977,12 @@ pub fn parked_table(
     painter: &Painter,
     layout: &crate::table::Layout,
     widths: Option<&crate::table::Widths>,
+    review: bool,
 ) -> String {
     let built: Vec<crate::table::Row> = rows
         .iter()
         .filter(|row| row.park.is_some())
-        .map(|row| parked_row(row, painter))
+        .map(|row| parked_row(row, painter, review))
         .collect();
     crate::table::render(&parked_columns(), &built, layout, widths, painter)
 }
@@ -2071,6 +2147,8 @@ mod tests {
             needs: vec![],
             parallel,
             lane: false,
+            reviewed: false,
+            needs_review: false,
         }
     }
 
@@ -2100,17 +2178,16 @@ mod tests {
         kind: bool,
         layout: crate::table::Layout,
     ) -> String {
+        let marks = Marks {
+            parallel,
+            kind,
+            ..Marks::of(rows)
+        };
         let built: Vec<_> = rows
             .iter()
-            .map(|row| task_row(row, date, painter, parallel, kind, 0))
+            .map(|row| task_row(row, date, painter, marks, 0))
             .collect();
-        crate::table::render(
-            &task_columns(parallel, kind),
-            &built,
-            &layout,
-            None,
-            painter,
-        )
+        crate::table::render(&task_columns(marks), &built, &layout, None, painter)
     }
 
     fn render_tree(
@@ -2120,15 +2197,14 @@ mod tests {
         kind: bool,
         layout: crate::table::Layout,
     ) -> String {
+        let marks = Marks {
+            parallel,
+            kind,
+            ..Marks::of_tree(nodes)
+        };
         let mut built = Vec::new();
-        tree_rows(nodes, 0, painter, parallel, kind, &mut built);
-        crate::table::render(
-            &task_columns(parallel, kind),
-            &built,
-            &layout,
-            None,
-            painter,
-        )
+        tree_rows(nodes, 0, painter, marks, &mut built);
+        crate::table::render(&task_columns(marks), &built, &layout, None, painter)
     }
 
     fn plain() -> Painter {
@@ -2460,10 +2536,15 @@ mod tests {
         };
         let built: Vec<crate::table::Row> = [long_row()]
             .iter()
-            .map(|row| task_row(row, DateColumn::Updated, &plain(), false, false, 0))
+            .map(|row| task_row(row, DateColumn::Updated, &plain(), Marks::default(), 0))
             .collect();
-        let text =
-            crate::table::render(&task_columns(false, false), &built, &layout, None, &plain());
+        let text = crate::table::render(
+            &task_columns(Marks::default()),
+            &built,
+            &layout,
+            None,
+            &plain(),
+        );
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines.len() > 1, "{text}");
         let title = lines[0].find("alpha").unwrap();
@@ -2492,9 +2573,9 @@ mod tests {
             children: vec![child],
         };
         let mut built = Vec::new();
-        tree_rows(&[root], 0, &plain(), false, false, &mut built);
+        tree_rows(&[root], 0, &plain(), Marks::default(), &mut built);
         let text = crate::table::render(
-            &task_columns(false, false),
+            &task_columns(Marks::default()),
             &built,
             &crate::table::Layout::default(),
             None,
@@ -2685,7 +2766,13 @@ mod tests {
             width: Some(100),
             headers: false,
         };
-        let text = parked_table(&[parked_with("next step", None)], &plain(), &layout, None);
+        let text = parked_table(
+            &[parked_with("next step", None)],
+            &plain(),
+            &layout,
+            None,
+            false,
+        );
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines.len() > 1, "{text}");
         let title_start = lines[0].find("alpha").unwrap();
@@ -2702,7 +2789,13 @@ mod tests {
             parked_with("a", Some(crate::claims::Reason::Quiet)),
             parked_with("b", Some(crate::claims::Reason::Review)),
         ];
-        let text = parked_table(&rows, &plain(), &crate::table::Layout::default(), None);
+        let text = parked_table(
+            &rows,
+            &plain(),
+            &crate::table::Layout::default(),
+            None,
+            false,
+        );
         let dates: Vec<usize> = text
             .lines()
             .map(|line| line.find("2026-09-06").unwrap())
@@ -2718,7 +2811,13 @@ mod tests {
             width: Some(160),
             headers: false,
         };
-        let text = parked_table(&[parked_with(LONG_STEP, None)], &plain(), &layout, None);
+        let text = parked_table(
+            &[parked_with(LONG_STEP, None)],
+            &plain(),
+            &layout,
+            None,
+            false,
+        );
         let lines: Vec<&str> = text.lines().collect();
         assert!(
             lines[0].contains("alpha") && lines[0].contains("Agent:"),
@@ -2740,7 +2839,13 @@ mod tests {
             width: Some(100),
             headers: false,
         };
-        let text = parked_table(&[parked_with(LONG_STEP, None)], &plain(), &layout, None);
+        let text = parked_table(
+            &[parked_with(LONG_STEP, None)],
+            &plain(),
+            &layout,
+            None,
+            false,
+        );
         assert!(text.contains("        next:   Agent:"), "{text}");
     }
 
@@ -2749,7 +2854,13 @@ mod tests {
         let mut row = parked_with("x", None);
         row.status = None;
         row.phase = None;
-        let text = parked_table(&[row], &plain(), &crate::table::Layout::default(), None);
+        let text = parked_table(
+            &[row],
+            &plain(),
+            &crate::table::Layout::default(),
+            None,
+            false,
+        );
         assert!(text.starts_with("xx-000001  ?  -  user"), "{text}");
     }
 

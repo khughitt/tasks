@@ -105,6 +105,10 @@ the decision with `tasks note <id> "<decision>"` whether they acted on the propo
 declined it. A `keep` or `refined` task simply re-enters the pool after the age window;
 reviewing it again is the maintenance.
 
+A curate note does not readmit an idea for scope: only `tasks note <id> --no-reviewed`
+does, so write that form only when the note is new evidence that warrants another
+scope pass.
+
 ## Bounds
 
 - Zero new tasks per pass. Curation improves what exists; adding is a proposal.

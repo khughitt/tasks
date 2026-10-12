@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T14:29:35Z
-updated: 2026-10-02T14:29:35Z
+updated: 2026-10-11T17:16:47Z
 depends: []
 parent: tasks-ffdbaa
 tags: []
@@ -19,3 +19,7 @@ Where to start: docs/notes/2026-10-02-cross-project-review-brief.md; skills/scop
 Bound: Define --all-projects discovery and explicit mixed IDs, bounded eligibility/clustering and tie-breaks, one fixed root per project, deterministic handoff placement and portable references, supported cross-project goal associations, per-member revalidation, partial-write reporting, and reuse on rerun. Preserve existing local/worktree and --project behavior. Propose acceptance packets covering two projects, a local worktree whose registered main differs, an already-parented idea, a stale/claimed member, and a rerun without duplicate artifacts. Compare a simple explicit workflow with a separate discovery service; prefer the workflow. Project groups, semantic indexes, and new background services are outside this task.
 Done: Obtain user review of the written spec, then user review of the implementation plan before changing the shipped skill. Plain CLI listing can support the design, so neither tasks-af97da nor project-group design is a prerequisite.
 Ideas it wakes: Record the approved finding on tasks-c591da and tasks-4e8cef and update the brief in the same commit, then re-scope those ideas against the accepted contract.
+
+## Notes
+
+- 2026-10-11T17:16:47Z (design/tasks-a9b8d3-review-state): Review-state implementation tasks-b8f3c9 is reviewed; when scoping this design, use list --status idea --needs-review eligibility and atomic note --reviewed/--no-reviewed audit/wake commands. Live activation is still awaiting coordinated rollout. Reuse this existing design task rather than file a duplicate.

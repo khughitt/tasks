@@ -290,10 +290,9 @@ pub fn render(
         }
         return rendered;
     }
-    // Fixed columns never wrap and a row with details starts with a non-blank first cell,
-    // so a row's first line starts with that cell and its continuation lines with the
-    // cell's blank padding.
-    let blocks = row_blocks(&lines[header_lines..]);
+    // Fixed first cells never wrap; continuations have a blank id column, even when
+    // real rows carry leading review padding or tree indentation.
+    let blocks = row_blocks(&lines[header_lines..], natural[0]);
     assert_eq!(
         blocks.len(),
         rows.len(),
@@ -320,11 +319,12 @@ pub fn render(
     rendered
 }
 
-fn row_blocks(lines: &[String]) -> Vec<Vec<&String>> {
+fn row_blocks(lines: &[String], id_width: usize) -> Vec<Vec<&String>> {
+    let blank_id = " ".repeat(id_width);
     let mut blocks: Vec<Vec<&String>> = Vec::new();
     for line in lines {
         match blocks.last_mut() {
-            Some(block) if line.starts_with(' ') || line.is_empty() => block.push(line),
+            Some(block) if line.starts_with(&blank_id) || line.is_empty() => block.push(line),
             _ => blocks.push(vec![line]),
         }
     }
@@ -710,6 +710,40 @@ mod tests {
         assert_eq!(strip(&text), plain_text);
         for line in text.lines() {
             assert!(visible_width(line) <= 100, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn leading_id_padding_keeps_wrapped_rows_and_their_details_separate() {
+        let columns = [Column::fixed("id"), Column::wrap("title", 20, None)];
+        for painter in [plain(), colored()] {
+            let mut rows = vec![];
+            for (id, next) in [
+                ("  sci-000001", "first next"),
+                ("  sci-000002", "second next"),
+            ] {
+                let mut row = Row::new(vec![
+                    format!("  {}", painter.paint(Style::Chrome, id.trim())),
+                    LONG.into(),
+                ]);
+                row.details.push(("next", Detail::Wrap(next.into())));
+                rows.push(row);
+            }
+            let text = render(&columns, &rows, &at(40), None, &painter);
+            let visible = strip(&text);
+            let first = visible.find("  sci-000001").unwrap();
+            let first_next = visible.find("next:   first next").unwrap();
+            let second = visible.find("  sci-000002").unwrap();
+            let second_next = visible.find("next:   second next").unwrap();
+            assert!(
+                first < first_next && first_next < second && second < second_next,
+                "{text}"
+            );
+            assert_eq!(visible.matches("omega").count(), 2, "{text}");
+            assert!(
+                visible.lines().all(|line| visible_width(line) <= 40),
+                "{text}"
+            );
         }
     }
 

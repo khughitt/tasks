@@ -1632,7 +1632,7 @@ fn ordinary_pretty_tables_mark_a_quiet_park_until_it_is_resumed_or_reparked() {
     };
     let row = |text: String| -> String {
         text.lines()
-            .find(|line| line.starts_with(&id))
+            .find(|line| line.starts_with(&id) || line.starts_with(&format!("* {id}")))
             .unwrap_or_else(|| panic!("no row for {id} in {text}"))
             .to_string()
     };
@@ -1645,7 +1645,11 @@ fn ordinary_pretty_tables_mark_a_quiet_park_until_it_is_resumed_or_reparked() {
         "--minutes",
         "40",
     ]);
-    assert!(row(env.pretty(&sci, &["list"])).contains(idle));
+    let listed = row(env.pretty(&sci, &["list"]));
+    assert!(
+        listed.starts_with(&format!("* {id}")) && listed.contains(idle),
+        "{listed}"
+    );
     let prime = env.pretty(&sci, &["prime"]);
     let roadmap = &prime[prime.find("roadmap:").unwrap()..prime.find("parked:").unwrap()];
     assert!(row(roadmap.to_string()).contains(idle), "{prime}");
@@ -12236,6 +12240,25 @@ fn a_write_from_a_copy_behind_another_checkout_refuses_and_prints_the_retry() {
     let detail = stale_detail(&env, &main, &["note", &id, "it's naïve"]);
     env.cmd(&main).args(retry_words(&detail)).assert().success();
     assert!(env.read(&side, &file).contains("it's naïve"));
+}
+
+#[test]
+fn reviewed_writes_from_a_stale_copy_refuse_like_their_plain_forms() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let file = format!("tasks/{id}.md");
+    let before = env.read(&main, &file);
+    for args in [
+        vec!["note", id.as_str(), "--reviewed", "x"],
+        vec!["note", id.as_str(), "--no-reviewed", "x"],
+        vec!["edit", id.as_str(), "--reviewed"],
+        vec!["edit", id.as_str(), "--no-reviewed"],
+    ] {
+        stale_detail(&env, &main, &args);
+        assert_eq!(env.read(&main, &file), before, "{args:?}");
+    }
 }
 
 #[test]
@@ -27528,7 +27551,11 @@ fn every_table_view_fits_where_it_can_and_keeps_text_whole_where_it_cannot() {
             .args(args)
             .output()
             .unwrap();
-        assert!(out.status.success(), "{args:?}");
+        assert!(
+            out.status.success(),
+            "COLUMNS={width} {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8(out.stdout).unwrap()
     };
     for width in ["80", "120", "236"] {

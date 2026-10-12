@@ -89,6 +89,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     }
     let mut tombstone = source.clone();
     tombstone.status = Status::Moved;
+    tombstone.reviewed = false;
     tombstone.moved_to = Some(target.id.clone());
     tombstone.updated = now;
     append_stamped_note(
@@ -142,6 +143,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
 
 pub(super) fn validate_record(project: &Project, registry: &Registry, task: &Task) -> Result<()> {
     validate_task(task)?;
+    crate::review::validate(task)?;
     project.validate_docs(task)?;
     crate::needs::require_declared(&project.needs, &task.needs)?;
     hierarchy::validate_parent(project, registry, task)?;

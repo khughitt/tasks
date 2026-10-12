@@ -1513,6 +1513,9 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     if task.status != to {
         // spec §2.2: a deferral is spent by a status change.
         task.defer = None;
+        // Review-state spec §3.2: a status change spends a review; a return to idea
+        // arrives unreviewed.
+        task.reviewed = false;
     }
     task.status = to;
     if completing && let Some(every) = task.every {
@@ -1562,6 +1565,7 @@ fn escalation_retry_hint(id: &TaskId, given: Option<Complexity>) -> String {
 pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
     task.updated = crate::time::after(&task.updated)?;
     validate_task(task)?;
+    crate::review::validate(task)?;
     ctx.project.validate_docs(task)?;
     crate::hierarchy::validate_parent(&ctx.project, &ctx.registry, task)?;
     crate::hierarchy::validate_lanes(&ctx.project, &ctx.registry, task)?;
@@ -1917,9 +1921,19 @@ fn dispatch(cli: Cli) -> Result<Output> {
             max_complexity,
             scope,
         } => lanes::run(open_read_ctx(dir, &scope)?, without, max_complexity),
-        Command::Note { id, text, stamp } => {
-            status::note(open_id_write_ctx(dir, &id)?, id, text, stamp)
-        }
+        Command::Note {
+            id,
+            text,
+            stamp,
+            reviewed,
+            no_reviewed,
+        } => status::note(
+            open_id_write_ctx(dir, &id)?,
+            id,
+            text,
+            stamp,
+            crate::review::Review::from_flags(reviewed, no_reviewed),
+        ),
         Command::Attach {
             id,
             source,
