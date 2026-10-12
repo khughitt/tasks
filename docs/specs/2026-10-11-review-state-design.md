@@ -1,6 +1,6 @@
 # Review state: which ideas and todos still need a look
 
-Status: implemented (plan docs/plans/2026-10-11-review-state.md); rollout pending
+Status: implemented (plan docs/plans/2026-10-11-review-state.md); rollout complete 2026-10-12 (evidence attached to tasks-b8f3c9)
 Task: tasks-a9b8d3 (lane tasks-46d207; answers tasks-e34b99)
 Brief: `docs/notes/2026-09-30-work-selection-brief.md`
 
