@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: design/tasks-a9b8d3-review-state
 created: 2026-10-11T15:08:58Z
-updated: 2026-10-11T17:31:53Z
+updated: 2026-10-12T18:01:10Z
 started: 2026-10-11T15:09:17Z
 depends: []
 parent: tasks-46d207
@@ -53,3 +53,8 @@ Execute the reviewed docs/plans/2026-10-11-review-state.md with subagent-driven 
 - 2026-10-11T17:31:51Z (design/tasks-a9b8d3-review-state): Approved rollout preparation is integrated with external-document main7566389 at63fafed. Independent scoped integration review accepts; just test-fast1415 passed0failed4ignored, just check clean. Current local claims also show prism-dac509/prism-f15cbf live. Reader-host list and all-other-writer pause still unconfirmed; no merge/install/SSH/real reviewed/backfill performed. Follow-up tasks-297e1e filed; existing tasks-91c622 and ops-46b5ab/ops-d9cbad reused.
 - 2026-10-11T17:31:51Z (design/tasks-a9b8d3-review-state): parked (waiting on user, decision): User supplies complete reader-host list and confirms every other task-record writer paused with live claims released; controller then resumes approved rollout from the reviewed integrated branch, verifies current main/contract, merges, upgrades each reader, releases this task claim for backfill, verifies/commits every migrated tasks directory unconditionally, recounts old wakers, resumes writers and closes task. No further rollout permission needed; approval already received.
   provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-12T10:31:46Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-12T18:01:09Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-12T18:01:09Z (design/tasks-a9b8d3-review-state): User confirmed titan and europa are the reading hosts and all other writers paused. Current claim audit shows no live foreign claims on either host. Rollout approved; verify/install both readers before any real reviewed writes. Europa Git index preflight needs diagnosis; no deployment or backfill yet.
