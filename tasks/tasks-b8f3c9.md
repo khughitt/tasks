@@ -6,9 +6,9 @@ priority: 2
 size: m
 complexity: mid
 process: planned
-owner: design/tasks-a9b8d3-review-state
+owner: main
 created: 2026-10-11T15:08:58Z
-updated: 2026-10-12T18:01:10Z
+updated: 2026-10-12T18:11:43Z
 started: 2026-10-11T15:09:17Z
 depends: []
 parent: tasks-46d207
@@ -58,3 +58,8 @@ Execute the reviewed docs/plans/2026-10-11-review-state.md with subagent-driven 
 - 2026-10-12T18:01:09Z (design/tasks-a9b8d3-review-state): resumed
   provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-12T18:01:09Z (design/tasks-a9b8d3-review-state): User confirmed titan and europa are the reading hosts and all other writers paused. Current claim audit shows no live foreign claims on either host. Rollout approved; verify/install both readers before any real reviewed writes. Europa Git index preflight needs diagnosis; no deployment or backfill yet.
+- 2026-10-12T18:04:04Z (main): resumed
+  provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-12T18:11:42Z (main): Merged review-state branch at2a32b16 and installed matching release binaries on titan/europa. Both binaries SHA25668647380e2d957a5a8c334a06230179e7b533f58066dd740ed7be709f14b399c;93 source files equal, note --help exposes --no-reviewed. Isolated installed-binary freeze/apply/rerun/readmission pilots passed on both hosts. User confirmed all other writers paused; no live foreign claims. Europa missing index restored from HEAD without changing files; feedback ops-b3fd2c.
+- 2026-10-12T18:11:42Z (main): parked (waiting on agent): Controller performs approved per-project frozen-snapshot backfill under the confirmed titan/europa pause, verifies and commits every migrated tasks directory unconditionally, records old-waker count, resumes/finishes this task and final closeout. Parent claim deliberately released so tasks project can migrate.
+  provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
