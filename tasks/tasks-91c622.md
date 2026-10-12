@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T14:29:35Z
-updated: 2026-10-11T17:16:47Z
+updated: 2026-10-12T19:18:37Z
 depends: []
 parent: tasks-ffdbaa
 tags: []
@@ -23,3 +23,4 @@ Ideas it wakes: Record the approved finding on tasks-c591da and tasks-4e8cef and
 ## Notes
 
 - 2026-10-11T17:16:47Z (design/tasks-a9b8d3-review-state): Review-state implementation tasks-b8f3c9 is reviewed; when scoping this design, use list --status idea --needs-review eligibility and atomic note --reviewed/--no-reviewed audit/wake commands. Live activation is still awaiting coordinated rollout. Reuse this existing design task rather than file a duplicate.
+- 2026-10-12T19:18:37Z (main): Review-state rollout tasks-b8f3c9 is now complete on both reading hosts; this supersedes the earlier activation-pending note. Use list --status idea --needs-review for eligibility, note --reviewed for scope decisions, and note --no-reviewed for findings that readmit an idea. Evidence: tasks/files/tasks-b8f3c9/review-state-rollout.json. No separate cross-project review-state task is needed.
