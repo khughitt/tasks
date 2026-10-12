@@ -1,0 +1,374 @@
+{
+  "task": "tasks-b8f3c9",
+  "rollout_date": "2026-10-12",
+  "hosts": [
+    "host_1",
+    "host_2"
+  ],
+  "user_confirmation": "Both hosts read synced records; all other writers paused",
+  "merged_runtime_commit": "2a32b16b337b57d86b3078d6a039e2b0b734b477",
+  "binary_sha256": "68647380e2d957a5a8c334a06230179e7b533f58066dd740ed7be709f14b399c",
+  "binary_target": "~/.cargo/bin/tasks",
+  "matching_source_files": 93,
+  "installed_binary_pilots": [
+    "freeze/apply",
+    "byte-identical rerun",
+    "readmission preserved"
+  ],
+  "fast_suite": {
+    "passed": 1415,
+    "failed": 0,
+    "ignored": 4
+  },
+  "backfill": {
+    "snapshot_directory": "~/.local/state/tasks/review-backfill",
+    "registered_projects": {
+      "host_1": 32,
+      "host_2": 27
+    },
+    "ideas_marked": 197,
+    "failed": 0,
+    "remaining": 0,
+    "rerun_rewrites": 0,
+    "byte_identical_records_on_host_2": 197,
+    "all_task_directories_committed_and_clean": true,
+    "project_reports": [
+      {
+        "prefix": "atoms",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "autonomy",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "beliefs",
+        "set": 6,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 12.16
+      },
+      {
+        "prefix": "dots",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.11
+      },
+      {
+        "prefix": "fam",
+        "set": 3,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 1.9
+      },
+      {
+        "prefix": "flows",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.08
+      },
+      {
+        "prefix": "forge",
+        "set": 5,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 122.28
+      },
+      {
+        "prefix": "glean",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.08
+      },
+      {
+        "prefix": "hq",
+        "set": 6,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 1.25
+      },
+      {
+        "prefix": "lit",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.1
+      },
+      {
+        "prefix": "lore",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.08
+      },
+      {
+        "prefix": "material",
+        "set": 32,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 6.52
+      },
+      {
+        "prefix": "mind3",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "mind6",
+        "set": 51,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 4.6
+      },
+      {
+        "prefix": "mm",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.11
+      },
+      {
+        "prefix": "nexc",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.11
+      },
+      {
+        "prefix": "nexp",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.13
+      },
+      {
+        "prefix": "nodes",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "nrp",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "ns",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.11
+      },
+      {
+        "prefix": "obs",
+        "set": 6,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.29
+      },
+      {
+        "prefix": "ops",
+        "set": 55,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 57.22
+      },
+      {
+        "prefix": "prism",
+        "set": 11,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 8.87
+      },
+      {
+        "prefix": "quarry",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "rad",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.12
+      },
+      {
+        "prefix": "relay",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "sci",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.11
+      },
+      {
+        "prefix": "sun",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "tasks",
+        "set": 17,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 1.93
+      },
+      {
+        "prefix": "tui",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "vdocs",
+        "set": 0,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.09
+      },
+      {
+        "prefix": "wali",
+        "set": 4,
+        "changed": 0,
+        "failed": 0,
+        "uncommitted": 0,
+        "remaining": 0,
+        "task_directory_clean": true,
+        "seconds": 0.22
+      }
+    ]
+  },
+  "legacy_wakers": {
+    "open_matches": 108,
+    "plain_note_count": 108,
+    "explicit_clear_count": 0,
+    "bodies_rewritten": false
+  },
+  "repository_metadata_repairs": {
+    "host_2_tasks_missing_index": "Restored index from HEAD without changing working files",
+    "host_2_task_index_refreshes": "Backed up stale indexes; refreshed only tasks paths after canonical content matched HEAD",
+    "host_2_material_missing_blob": "Copied verified immutable blob b2e3537a350cfc078e0a75f38a8ac235a66584ac from host_1",
+    "lfs_validation": "Canonical clean-filter hashes used; image files unchanged"
+  },
+  "feedback": [
+    "ops-b3fd2c"
+  ],
+  "follow_up": "tasks-297e1e"
+}

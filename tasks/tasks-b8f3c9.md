@@ -1,15 +1,16 @@
 ---
 id: tasks-b8f3c9
 title: Implement explicit idea review state and pretty review markers
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: design/tasks-a9b8d3-review-state
 created: 2026-10-11T15:08:58Z
-updated: 2026-10-12T18:11:43Z
+updated: 2026-10-12T18:50:32Z
 started: 2026-10-11T15:09:17Z
+completed: 2026-10-12T18:44:05Z
 depends: []
 parent: tasks-46d207
 tags: []
@@ -63,3 +64,14 @@ Execute the reviewed docs/plans/2026-10-11-review-state.md with subagent-driven 
 - 2026-10-12T18:11:42Z (main): Merged review-state branch at2a32b16 and installed matching release binaries on titan/europa. Both binaries SHA25668647380e2d957a5a8c334a06230179e7b533f58066dd740ed7be709f14b399c;93 source files equal, note --help exposes --no-reviewed. Isolated installed-binary freeze/apply/rerun/readmission pilots passed on both hosts. User confirmed all other writers paused; no live foreign claims. Europa missing index restored from HEAD without changing files; feedback ops-b3fd2c.
 - 2026-10-12T18:11:42Z (main): parked (waiting on agent): Controller performs approved per-project frozen-snapshot backfill under the confirmed titan/europa pause, verifies and commits every migrated tasks directory unconditionally, records old-waker count, resumes/finishes this task and final closeout. Parent claim deliberately released so tasks project can migrate.
   provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-12T18:42:43Z (design/tasks-a9b8d3-review-state): resumed
+  provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-12T18:44:05Z (design/tasks-a9b8d3-review-state): attached: review-state-rollout.json (8585 bytes): Both-host installation, migration, commit and rerun verification
+- 2026-10-12T18:44:05Z (design/tasks-a9b8d3-review-state): Rollout complete on titan/europa: matching installed binary checksum68647380e2d957a5a8c334a06230179e7b533f58066dd740ed7be709f14b399c;197 legacy ideas marked across12 nonempty projects in32-project union;0 failures/remaining;rerun0 rewrites and197 records byte-identical on europa. All32 titan/27 europa task directories verified committed/clean, using canonical Git filters for LFS attachments. Paused sessions may resume. See attached review-state-rollout.json for exact old-waker count and evidence.
+- 2026-10-12T18:44:05Z (design/tasks-a9b8d3-review-state): done
+  provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-12T18:44:05Z (design/tasks-a9b8d3-review-state): Implemented, reviewed, merged and rolled out explicit reviewed/needs_review state on titan/europa.197 ideas backfilled, every migrated task directory committed/clean, reruns byte-identical. Both installed release pilots and1415 fast tests passed. Follow-up tasks-297e1e filed; existing scoping/tooling tasks reused. Rollout evidence attached.
+  provenance: {"harness_session":"codex:01a12b81-144c-78a3-bd98-49287aa47ed3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-12T18:50:30Z (design/tasks-a9b8d3-review-state): detached: review-state-rollout.json: Replace machine-specific host names with portable host labels required by hygiene
+- 2026-10-12T18:50:30Z (design/tasks-a9b8d3-review-state): attached: review-state-rollout.json (8588 bytes): Verified rollout; host_1=titan, host_2=europa
+- 2026-10-12T18:50:30Z (design/tasks-a9b8d3-review-state): Rollout evidence host mapping: host_1=titan and host_2=europa.108 open research tasks still contain the old plain-note wake form; bodies were intentionally not rewritten. New plain notes on reviewed ideas warn to add --no-reviewed.
