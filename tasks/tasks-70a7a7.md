@@ -1,11 +1,22 @@
 ---
 id: tasks-70a7a7
-title: "A correction handed back after a step completion makes start fail with invalid transition done -> doing, without naming the edit-to-todo command that permits the correction claim."
-status: idea
+title: Name the reopen command when start refuses a done or dropped task
+status: todo
 priority: 2
+size: xs
+complexity: low
+process: direct
 created: 2026-10-12T11:48:42Z
-updated: 2026-10-12T11:48:42Z
+updated: 2026-10-13T10:48:00Z
 depends: []
-tags: [feedback, friction, "from:mind6"]
+tags: [feedback, friction, "from:mind6", cli]
 agent: codex
 ---
+
+Why: reopening a closed task for a correction (a reviewer hands back a step after `tasks done`) needs `tasks edit <id> --status todo` before `tasks start`, because `Status::can_transition` allows a closed status back only to todo. `start` on a done or dropped task fails with the bare `invalid transition done -> doing` and does not say so, while the shelved case already names its fix (`doing (\`tasks unshelve {id}\` first)` in src/commands/status.rs::start).
+
+Done: `tasks start <id>` on a done or dropped task (without `every`) still fails with kind `invalid_transition`, and its message names `tasks edit <id> --status todo` as the step before `start`, in the same `(... first)` form as the shelved hint. A moved task keeps its current refusal (it cannot reopen). Cadence reopening (done -> doing with `every`) is unchanged. RED→GREEN integration tests in tests/cli.rs for done, dropped, and the unchanged moved and cadence cases; `just test-one`, `just test-fast`, `just check`. Mention the reopen path in skills/tasks/SKILL.md near the `edit --status todo` text if it is not already explicit.
+
+Where to look: src/commands/status.rs::start (shelved hint at the top), src/commands/mod.rs::transition, src/model.rs::Status::can_transition, src/error.rs InvalidTransition.
+
+Original report (preserved): A correction handed back after a step completion makes start fail with invalid transition done -> doing, without naming the edit-to-todo command that permits the correction claim.
