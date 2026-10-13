@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-11T12:31:33Z
-updated: 2026-10-13T10:48:21Z
+updated: 2026-10-13T10:48:22Z
 depends: []
 tags: [feedback, friction, "from:ops", cli]
 agent: codex
@@ -22,3 +22,7 @@ Done: a flagless edit with stdin not a terminal exits non-zero with kind `editor
 Where to look: src/commands/edit.rs::run (the `has_flags` check that calls `editor`) and `editor`; src/cli.rs EditArgs; src/error.rs Editor; tests/cli.rs `editor_script` and its callers.
 
 Original report (preserved): The task CLI launches an interactive editor for a flagless edit even when the automation caller uses pipes, so an accidental invocation can stall silently instead of refusing with an actionable message. The caller mistakenly omitted edit flags; the CLI then launched the configured editor from a piped subprocess and waited indefinitely without output. Explicit edit flags are the recovery. Consider refusing interactive editor mode when the caller has no usable terminal, with a diagnostic naming editor mode and the required explicit flags.
+
+## Notes
+
+- 2026-10-13T10:48:22Z (main): scope: scoped; chose refuse-when-stdin-not-a-terminal plus an explicit --editor override (rejected env var and /dev/tty probe); editor path is edit.rs::run -> editor, no terminal check today (checked at d698a36); P2/s/low/direct
