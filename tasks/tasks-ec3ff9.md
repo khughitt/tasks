@@ -1,14 +1,13 @@
 ---
 id: tasks-ec3ff9
 title: "sample draws uniformly, so a pass spends draws on tasks a scope pass briefed days ago while long-untouched tasks wait"
-status: idea
+status: todo
 priority: 2
 size: s
 complexity: mid
 process: direct
-reviewed: true
 created: 2026-10-08T20:35:39Z
-updated: 2026-10-13T09:55:48Z
+updated: 2026-10-13T09:55:49Z
 depends: []
 parent: tasks-5408fe
 tags: [feedback, idea, "from:ops"]
