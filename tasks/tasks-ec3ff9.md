@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-08T20:35:39Z
-updated: 2026-10-13T09:55:49Z
+updated: 2026-10-13T09:55:50Z
 depends: []
 parent: tasks-5408fe
 tags: [feedback, idea, "from:ops"]
@@ -25,3 +25,4 @@ Original report: In a pass of 5 (small sample), the two tasks untouched for five
 ## Notes
 
 - 2026-10-13T09:21:13Z (main): scope: briefed; parented under goal tasks-5408fe; brief compares an age-weighted draw (lean), a longer window for reviewed ideas, and a wider default --older-than; waits on the user's ruling; brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md
+- 2026-10-13T09:55:50Z (main): scope: scoped; user ruled 2026-10-13 to weight sample's draw by time since last activity; todo P2/s/mid/direct; body rewritten with done/check including the curation spec's uniform-sampling non-goal; brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md
