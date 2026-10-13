@@ -6,9 +6,9 @@ priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: scope-dep-edge
 created: 2026-10-08T20:35:39Z
-updated: 2026-10-13T09:58:44Z
+updated: 2026-10-13T09:58:54Z
 started: 2026-10-13T09:58:44Z
 depends: []
 parent: tasks-5408fe
@@ -28,4 +28,6 @@ Original report: One curation pass of 5 found three ideas (two projects) whose s
 
 - 2026-10-13T09:20:49Z (main): scope: scoped; todo P2/xs/low/direct under goal tasks-5408fe; body rewritten with done/check and a premise correction (ready never lists ideas); original report kept; brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md
 - 2026-10-13T09:58:44Z (main): started
+  provenance: {"harness_session":"claude-code:c1a5e1cd-ac8c-454a-8e68-436d7130a52e","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-13T09:58:54Z (scope-dep-edge): resumed
   provenance: {"harness_session":"claude-code:c1a5e1cd-ac8c-454a-8e68-436d7130a52e","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
