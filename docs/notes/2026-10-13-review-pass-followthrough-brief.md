@@ -83,7 +83,7 @@ cluster goal is tasks-5408fe, inside the work-discovery lane tasks-46d207.
   owning project without a ruling (1A); tasks-91c622 carries this as a design input.
 - Settled 2026-10-13 by the user: sample weights its draw by time since last activity
   (2A). A few curate passes after the change can show whether yield improves.
-- Unshelve tasks-22f407 now? The user rules on the tasks-84d2a9 drop proposal.
+- Settled 2026-10-13 by the user: tasks-84d2a9 dropped and tasks-22f407 unshelved.
 
 ## Proposed decomposition
 
@@ -91,5 +91,5 @@ cluster goal is tasks-5408fe, inside the work-discovery lane tasks-46d207.
 - tasks-82725f — scoped, direct: curate and scope say how a pass commits per project.
 - tasks-19d4fe — scoped after the ruling, direct: a `refile` verdict in the scope skill.
 - tasks-ec3ff9 — scoped after the ruling, direct: an age-weighted draw in `sample`.
-- tasks-84d2a9 — drop proposed in favour of tasks-22f407 (unshelve it).
-- tasks-e34b99 — drop proposed; delivered by `2a32b16`.
+- tasks-84d2a9 — dropped in favour of tasks-22f407, now unshelved as an idea.
+- tasks-e34b99 — dropped; delivered by `2a32b16`.
