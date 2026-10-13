@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-12T11:48:42Z
-updated: 2026-10-13T10:48:00Z
+updated: 2026-10-13T10:48:02Z
 depends: []
 tags: [feedback, friction, "from:mind6", cli]
 agent: codex
@@ -20,3 +20,7 @@ Done: `tasks start <id>` on a done or dropped task (without `every`) still fails
 Where to look: src/commands/status.rs::start (shelved hint at the top), src/commands/mod.rs::transition, src/model.rs::Status::can_transition, src/error.rs InvalidTransition.
 
 Original report (preserved): A correction handed back after a step completion makes start fail with invalid transition done -> doing, without naming the edit-to-todo command that permits the correction claim.
+
+## Notes
+
+- 2026-10-13T10:48:02Z (main): scope: scoped; start's done/dropped refusal gains the edit --status todo hint, matching the shelved hint in status.rs::start; checked against main d698a36 (tasks 0.2.0); P2/xs/low/direct
