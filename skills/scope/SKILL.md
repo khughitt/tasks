@@ -75,7 +75,7 @@ overlaps; batch membership does not make the same unanswered question new work.
 | Verdict | Use when | Required result |
 |---|---|---|
 | `scoped` | Approach and context are established and correctness has a check | Rewrite the body to say why, done, and where to look; set `todo`, priority, size, complexity, and process by the tasks skill rubrics; decompose into children under that idea if needed |
-| `briefed` | Decisions remain that a brief can frame | Keep `idea`; cover it in the handoff and add research or design follow-ups only when needed |
+| `briefed` | Decisions remain that a brief can frame | Keep `idea`; cover it in the handoff and add research or design follow-ups only when needed; make it depend on each follow-up that wakes it (§5) |
 | `question` | Only the user can resolve it and a brief adds no value | Keep status; collect the questions under one `## Open questions` body heading |
 | `shelved` | Worth keeping, but not worth reviewing now | Run `tasks -C <root> shelve <id> "<wake condition>"` |
 | `drop` | It landed, its premise is gone, or another task covers it | Keep status; propose the drop with the supporting commit or id |
@@ -179,6 +179,12 @@ and process from the tasks skill rubrics; investigation can be mid or high. File
 high-complexity `Design <topic> from the brief` task only when unresolved questions require design, and make it
 depend on prerequisite research. One measurement question does not also need a design
 task.
+
+In the same pass that files or reuses a follow-up, record each wait as an edge: run
+`tasks -C <root> dep <idea> --on <follow-up>` for every idea its `Ideas it wakes` names.
+The edge puts the wait in the record (`show`'s `depends_on`) and keeps the block when
+the idea is later promoted to `todo`. It does not readmit the idea, so the wake note
+stays.
 
 ## 6. Revalidate, write, and record
 
