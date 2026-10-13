@@ -4,7 +4,7 @@ title: "Decisions queue: list tasks with an unanswered curate proposal"
 status: idea
 priority: 2
 created: 2026-09-09T11:36:50Z
-updated: 2026-10-13T09:58:28Z
+updated: 2026-10-13T09:58:29Z
 depends: []
 tags: [curation, cli]
 spec: docs/specs/2026-09-08-task-curation-design.md
@@ -18,3 +18,4 @@ A curate pass leaves proposals (drop, merge, priority, children, questions) as t
 - 2026-09-30T10:05:33Z (main): shelved: Revisit when repeated curation/scope passes show unanswered proposals being missed or the existing sample --limit 0 --older-than 0d --all-projects view no longer suffices.
 - 2026-09-30T10:05:33Z (main): scope: shelved; the latest prior review found only two pending proposals and no need for a command; this checkout currently reports none via sample --limit 0 --older-than 0d; revisit on missed decisions or an inadequate existing view; brief: docs/notes/2026-09-30-work-selection-brief.md
 - 2026-10-13T09:58:28Z (main): unshelved
+- 2026-10-13T09:58:29Z (main): Wake condition met (scope pass 2026-10-13, user-approved): sample --limit 0 --older-than 0d --all-projects reports 13 pending proposals across 8 projects, against 2 when shelved; duplicate report tasks-84d2a9 (from ops) dropped into this task. Brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md
