@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-09-09T11:36:50Z
-updated: 2026-10-13T11:10:10Z
+updated: 2026-10-13T11:10:11Z
 depends: []
 tags: [curation, cli]
 spec: docs/specs/2026-09-08-task-curation-design.md
@@ -35,3 +35,4 @@ Where: src/commands/sample.rs (`pending_proposal`), src/commands/list.rs, src/cl
 - 2026-09-30T10:05:33Z (main): scope: shelved; the latest prior review found only two pending proposals and no need for a command; this checkout currently reports none via sample --limit 0 --older-than 0d; revisit on missed decisions or an inadequate existing view; brief: docs/notes/2026-09-30-work-selection-brief.md
 - 2026-10-13T09:58:28Z (main): unshelved
 - 2026-10-13T09:58:29Z (main): Wake condition met (scope pass 2026-10-13, user-approved): sample --limit 0 --older-than 0d --all-projects reports 13 pending proposals across 8 projects, against 2 when shelved; duplicate report tasks-84d2a9 (from ops) dropped into this task. Brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md
+- 2026-10-13T11:10:11Z (main): scope: scoped; chose a list --pending filter plus an optional proposal field on list rows over a new command; queue at 12 pending proposals (sample --limit 0 --older-than 0d --all-projects, 2026-10-13); s/low/direct, P2 unchanged; brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md
