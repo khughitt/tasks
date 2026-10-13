@@ -79,17 +79,17 @@ cluster goal is tasks-5408fe, inside the work-discovery lane tasks-46d207.
 
 ## Unanswered questions
 
-- May a scope pass move a record into another project without a ruling (1A), or must a
-  refile stay a proposal (1B)? The user decides; tasks-91c622's contract must agree.
-- Which selection rule should sample use (2A, 2B, 2C)? The user decides; a few curate
-  passes after the change can show whether yield improves.
+- Settled 2026-10-13 by the user: a scope pass may move a misfiled record into its
+  owning project without a ruling (1A); tasks-91c622 carries this as a design input.
+- Settled 2026-10-13 by the user: sample weights its draw by time since last activity
+  (2A). A few curate passes after the change can show whether yield improves.
 - Unshelve tasks-22f407 now? The user rules on the tasks-84d2a9 drop proposal.
 
 ## Proposed decomposition
 
 - tasks-a309e0 — scoped, direct: scope §5 adds `tasks dep <idea> --on <research>`.
 - tasks-82725f — scoped, direct: curate and scope say how a pass commits per project.
-- tasks-19d4fe — briefed; waits on the user's ruling on question 1.
-- tasks-ec3ff9 — briefed; waits on the user's ruling on question 2.
+- tasks-19d4fe — scoped after the ruling, direct: a `refile` verdict in the scope skill.
+- tasks-ec3ff9 — scoped after the ruling, direct: an age-weighted draw in `sample`.
 - tasks-84d2a9 — drop proposed in favour of tasks-22f407 (unshelve it).
 - tasks-e34b99 — drop proposed; delivered by `2a32b16`.
