@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-12T10:50:38Z
-updated: 2026-10-13T09:55:26Z
+updated: 2026-10-13T09:55:35Z
 depends: []
 parent: tasks-5408fe
 tags: [feedback, gap, "from:ops"]
@@ -16,7 +16,7 @@ agent: claude-code/claude-opus-5-5
 
 Why: a scope pass that finds a report whose remedy belongs to another project can only propose a drop, so the record stays open in the wrong tracker and the refile waits for a later turn.
 Ruling (user, 2026-10-13): a scope pass may move a record into the owning project without asking first.
-Done: skills/scope/SKILL.md gains a `refile` verdict. When the whole remedy belongs to one other registered project whose `[feedback] scope` (in its tasks/.config.toml) covers it, the pass runs `tasks -C <root> move --explain --to <owner> <id>`, then the move, and records the new id in its summary. When only part of the remedy belongs elsewhere, it files that part in the owner project (`tasks add --project <owner>`, keeping the source) and treats the rest by the existing verdicts, proposing a drop when nothing remains. Drops of landed or duplicate work stay proposals. Say how the audit note is kept: the moved record carries it, written before the move, as a plain note since move takes it out of `idea` here. State that the move is the one write a pass makes outside its fixed root. Update the summary format (a refiles group: old id → new id) and keep the curate skill unchanged unless it already promises the same thing.
+Done: skills/scope/SKILL.md gains a `refile` verdict. When the whole remedy belongs to one other registered project whose `[feedback] scope` (in its tasks/.config.toml) covers it, the pass runs `tasks -C <root> move --explain --to <owner> <id>`, then the move, and records the new id in its summary. When only part of the remedy belongs elsewhere, it files that part in the owner project (`tasks add --project <owner>`, keeping the source) and treats the rest by the existing verdicts, proposing a drop when nothing remains. Drops of landed or duplicate work stay proposals. Write the audit note (`note --reviewed "scope: refile; <owner> owns it"`) before the move so the moved record carries it, and check whether move preserves the reviewed flag. State that the move is the one write a pass makes outside its fixed root. Update the summary format (a refiles group: old id → new id) and keep the curate skill unchanged unless it already promises the same thing.
 Check: read the verdict table and §6 against `tasks move --help` and one `--explain` run on a real misfiled idea; tasks-91c622's cross-project contract does not contradict it.
 Where to look: docs/notes/2026-10-13-review-pass-followthrough-brief.md; skills/scope/SKILL.md §3, §6, §7; src/commands/move_.rs; tasks-91c622. Coordinate with tasks-4d7a32, which edits the same skill.
 
