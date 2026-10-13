@@ -1,13 +1,15 @@
 ---
 id: tasks-4d7a32
 title: "Scope skill: a defined re-scope path for scoped todos (re-check premises, narrow, re-rate)"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-13T09:04:51Z
-updated: 2026-10-13T09:11:16Z
+updated: 2026-10-13T09:11:20Z
+started: 2026-10-13T09:11:20Z
 depends: []
 tags: [feedback, gap, "from:hq"]
 agent: claude-code/claude-opus-5-5
@@ -27,3 +29,5 @@ Where to look: skills/scope/SKILL.md §1 (select), §3 (verdicts), §6 (revalida
 ## Notes
 
 - 2026-10-13T09:11:14Z (main): scope: scoped; title and body rewritten from the hq-4ba161 hand re-scope (original title: scope skill processes only idea records, so re-scoping a scoped todo had no defined path); todo, P2, s, low, direct: a skill-text change whose verdicts and note form are settled in the body, checked by reading the skill against the hq-4ba161 case
+- 2026-10-13T09:11:20Z (main): started
+  provenance: {"harness_session":"claude-code:5c5a1fb6-0ada-43d8-817d-dc1f5b986503","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
