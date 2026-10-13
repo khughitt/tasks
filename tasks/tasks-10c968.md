@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T14:44:07Z
-updated: 2026-10-13T09:21:39Z
+updated: 2026-10-13T09:23:28Z
 depends: []
 parent: tasks-0e7216
 tags: []
@@ -23,3 +23,4 @@ Ideas it wakes: On design completion, record the approved finding on tasks-7ad96
 ## Notes
 
 - 2026-10-02T14:44:07Z (main): concerns: tasks-c543ae defect — halt override audit writes bypass sibling freshness checks and can fork the actively worked halt record
+- 2026-10-13T09:23:28Z (main): Record-commit rollout (ops-0e9b40): finding-note wording migrated to before-branch-merge; automatic record commits are on.
