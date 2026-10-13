@@ -116,7 +116,7 @@ test the premises, not to do the task. Choose one verdict:
 | Verdict | Use when | Required result |
 |---|---|---|
 | `rescoped` | Premises hold, or the evidence establishes the replacement for a failed one, and work remains | Rewrite the body in its existing shape (why/done/where, or §5's five fields for research, `Ideas it wakes` intact): keep every fact, mark what is now established so the next session does not re-derive it, and narrow what remains; re-rate size, complexity and process; status unchanged; decompose as for `scoped` |
-| `confirmed` | Premises hold and nothing narrows | No edit |
+| `confirmed` | Premises hold and nothing narrows | No body edit; set `--process` if it is missing |
 | `briefed` or `question` | A premise failed and a decision remains | `tasks -C <root> edit <id> --status idea` first, then the idea rules above apply, including the `--reviewed` audit note |
 | `shelved` | As for an idea | As for an idea; `unshelve` returns it as an idea, so the wake condition says it was scoped |
 | `drop` | As for an idea | Status unchanged; proposal in a plain note |
@@ -186,7 +186,7 @@ Immediately before each member's first write, run `tasks -C <root> show <id>` ag
 Compare top-level `claim.live`, `task.status`, and `task.updated` with the first show.
 Skip the member without any write or audit note if it changed, has a live claim, or is
 no longer in the status it had at the first show (an idea, or a `todo` or `blocked`
-task named for re-scope). Documents may name skipped members only as related context; do
+task, a re-scope). Documents may name skipped members only as related context; do
 not say they were processed. If every member is skipped, create no goal or document.
 
 Write task records only through the CLI and documents through explicit paths under the
