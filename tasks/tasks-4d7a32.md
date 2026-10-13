@@ -1,15 +1,16 @@
 ---
 id: tasks-4d7a32
 title: "Scope skill: a defined re-scope path for scoped todos (re-check premises, narrow, re-rate)"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: tasks-4d7a32
 created: 2026-10-13T09:04:51Z
-updated: 2026-10-13T09:19:56Z
+updated: 2026-10-13T09:20:13Z
 started: 2026-10-13T09:11:20Z
+completed: 2026-10-13T09:20:12Z
 depends: []
 tags: [feedback, gap, "from:hq"]
 agent: claude-code/claude-opus-5-5
@@ -35,3 +36,8 @@ Where to look: skills/scope/SKILL.md §1 (select), §3 (verdicts), §6 (revalida
   provenance: {"harness_session":"claude-code:5c5a1fb6-0ada-43d8-817d-dc1f5b986503","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-13T09:17:13Z (tasks-4d7a32): review: impl round 1 — verdict: revise; findings: Important 2, Minor 8; reviewer: claude-code
 - 2026-10-13T09:19:56Z (tasks-4d7a32): review: impl round 2 — verdict: accept; findings: Minor 2; reviewer: claude-code
+- 2026-10-13T09:20:12Z (tasks-4d7a32): minor (deferred): parked todo/blocked tasks pass revalidation and a rescoped body could contradict the park's next step; where settled findings go when the task's source is a brief; README/AGENTS still call /scope idea review; no curate pointer to /scope <id> for shifted premises
+- 2026-10-13T09:20:12Z (tasks-4d7a32): done
+  provenance: {"harness_session":"claude-code:5c5a1fb6-0ada-43d8-817d-dc1f5b986503","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-13T09:20:12Z (tasks-4d7a32): scope skill gains a re-scope path for explicit todo/blocked ids: rescoped (body in its existing shape, research fields intact, established findings marked, re-rated), confirmed, briefed/question via demotion to idea, shelved, drop; plain scope: audit note; tasks skill pointer and scope-pass design §4.8. Two review rounds, accepted.
+  provenance: {"harness_session":"claude-code:5c5a1fb6-0ada-43d8-817d-dc1f5b986503","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
