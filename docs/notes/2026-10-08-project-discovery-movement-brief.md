@@ -87,7 +87,7 @@ prefix-alias mechanism supplies.
 - tasks-7ba557: **briefed**, stays an idea with its original report preserved.
 - tasks-bf6b9b: P2/m/high/planned, design individual task migration. Produce a
   user-reviewed spec and then plan; no implementation or live migration. On completion,
-  update this brief and add the finding to tasks-7ba557 in the same commit. Reuse the
+  update this brief and add the finding to tasks-7ba557 before the result's branch merges. Reuse the
   existing lane and identity code; do not create another project-resolution effort.
 
 Outcome: the approved design is `docs/specs/2026-10-08-task-move-design.md` and

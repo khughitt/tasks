@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-09-30T09:53:57Z
-updated: 2026-10-06T16:54:21Z
+updated: 2026-10-13T09:21:39Z
 depends: []
 parent: tasks-ea2a79
 tags: []
@@ -26,7 +26,7 @@ Bound: stage the design within this task, with design and implementation-plan re
 
 Expected result: a reviewed decision on mutation versus supersession, necessary consumer coordination and checks, and executable child tasks only after plan review. A correction check must show one attempt with a corrected total and one effective review/concern after amendment, including a corrected reviewer consumed by the downstream measure, retaining the original audit history; if redaction is selected, its check removes selected text from the current record without copying it into an audit event or damaging protected history, and explicitly shows why that alone does not sanitize repository history for publication.
 
-Ideas it wakes: on completion, add a finding note to tasks-cc9a31, tasks-2bb0ba, tasks-d56b72, tasks-45bf05 and tasks-c62c8d in the same commit and update the brief; then rerun scope on them.
+Ideas it wakes: on completion, add a finding note to tasks-cc9a31, tasks-2bb0ba, tasks-d56b72, tasks-45bf05 and tasks-c62c8d before the result's branch merges and update the brief; then rerun scope on them.
 
 ## Notes
 

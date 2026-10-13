@@ -164,6 +164,6 @@ hooks need none from ops beyond ops-d50aa5's message. tasks-850488 carries that 
   status belongs to the re-scoped tasks-7ad96f when its implementation lands.
 
 All remaining members and both follow-ups are children of tasks-0e7216. Follow-up completion
-updates this brief and records a finding on its waiting idea in the same commit.
+updates this brief and records a finding on its waiting idea before the result's branch merges.
 The new follow-ups record their relationship to the delivered halt and bootstrap work
 through `concerns:` notes; they do not reopen the closed goals.

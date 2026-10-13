@@ -76,7 +76,7 @@ CLI reads already exist, including completed tasks-6d33e6.
 - tasks-4e8cef — **briefed**, remains an idea: mixed-project root and handoff safety.
 - tasks-91c622 — P2/m/high/planned: one shared scope design and implementation plan,
   both reviewed before changing the skill. Completion records the approved finding
-  on both waiting ideas and updates this brief in the same commit.
+  on both waiting ideas and updates this brief before the result's branch merges.
 
 All four are children of tasks-ffdbaa. Search and scope design can progress
 independently; existing CLI reads suffice for the design. No separate research task

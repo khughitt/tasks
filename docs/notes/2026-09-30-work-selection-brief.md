@@ -96,10 +96,10 @@ the frozen-snapshot backfill. The current note rule remains active until rollout
 
 - **tasks-a9b8d3** — P2/m/high/planned: design explicit idea review state, then a
   reviewed implementation plan. Wakes **tasks-e34b99** with the approved finding
-  and a brief update in the same commit. Original report and input note stay intact.
+  and a brief update before the result's branch merges. Original report and input note stay intact.
 - **tasks-b65dbc** — P3/s/mid/direct: bounded command/fixture comparison for
   unprepared quiet-host work. Wakes **tasks-00bac8** with evidence and a recommendation
-  in the same commit as the result and brief update. No speculative design child yet.
+  before the result's branch merges, with the brief update. No speculative design child yet.
 - **tasks-157d05** — existing P2/m/high/planned calendar design; wakes tasks-44b889.
 - **tasks-91c622** — existing cross-project scope design, under tasks-ffdbaa and its
   separate review brief; coordinate eligibility wording with tasks-a9b8d3. This pass

@@ -227,5 +227,5 @@ tasks-a984f1 supplies the evidence; this pass does not authorize automatic routi
 - tasks-2337b3: dropped with user approval on 2026-10-08 as covered by tasks-a20a64
   and the completed recovery probe. tasks-ef69c0: dropped with the same approval as
   covered by tasks-9de6aa. Both retain their original reports.
-- Findings update this brief and wake named ideas in the same commit. Changed routing,
+- Findings update this brief and wake named ideas before the result's branch merges. Changed routing,
   recovery or output contracts require a reviewed design and implementation plan.

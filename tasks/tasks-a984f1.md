@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-08T09:43:57Z
-updated: 2026-10-08T09:43:57Z
+updated: 2026-10-13T09:21:39Z
 depends: []
 parent: tasks-984769
 tags: []
@@ -23,4 +23,4 @@ Bound: One disposable main/worktree pair with isolated XDG_CONFIG_HOME and XDG_S
 
 Expected result: Attach a reproducible transcript and recommend supported guidance or a narrowly stated contract gap; update the brief. Explain why whole-record serialization matters despite append-only notes. If a queue is necessary, identify durability, retry/deduplication, absent-owner delivery, visibility and host-sync questions before filing planned design. Coordinate any routing recommendation with tasks-10c968, without expanding halt-audit scope. P2/s/mid/direct: bounded evidence collection with fixed checks; no product implementation.
 
-Ideas it wakes: On completion, run tasks note tasks-955c2a with the finding in the same commit as the result, update the brief, and re-scope that idea.
+Ideas it wakes: On completion, run tasks note tasks-955c2a with the finding before the result's branch merges, update the brief, and re-scope that idea.

@@ -64,7 +64,7 @@ This investigation needs no shared host resource or global hook changes.
 
 - **tasks-d4e73d**, P2/s/mid/direct: determine whether completion follow-ups require
   native task hooks; produce an event/coverage table and recommendation. Update this
-  brief and add a finding note to **tasks-d40e8e** in the same commit as the result.
+  brief and add a finding note to **tasks-d40e8e** before the result's branch merges.
 - **tasks-d40e8e** remains an idea with a briefed verdict, under the existing work
   discovery lane. Preserve its full body and original source. No speculative hook
   implementation or design child is filed until the investigation establishes need.

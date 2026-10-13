@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-08T09:57:57Z
-updated: 2026-10-08T09:57:57Z
+updated: 2026-10-13T09:21:39Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -23,4 +23,4 @@ Bound: Trace the three proof consumers and the current handle schema. Use one di
 
 Expected result: attach sanitized evidence, enumerate which handle/proof assumptions fail, and recommend either a bounded diagnostic/documentation remedy or separately reviewed namespace-aware design, identifying any relay-producer coordination. State what requires a later genuine harness capture; existing native thread identity is not a substitute for a missing process relationship. Check for overlapping related-owner work before filing any cross-project follow-up. Update the brief. P2/s/mid/direct: bounded investigation with explicit controls, not implementation approval.
 
-Ideas it wakes: On completion, run tasks note tasks-b9cbe3 with the finding in the same commit as the evidence, update the brief and re-scope the report.
+Ideas it wakes: On completion, run tasks note tasks-b9cbe3 with the finding before the evidence's branch merges, update the brief and re-scope the report.

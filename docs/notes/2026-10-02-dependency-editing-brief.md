@@ -70,7 +70,7 @@ unnecessary for the reported confusion.
 - tasks-8efda8 — **briefed**, remains an idea: waits on tasks-e9af16.
 - tasks-e9af16 — P2/m/high/planned: design safe `edit --depends` semantics; obtain
   spec and plan reviews before implementation. Completion records the approved
-  finding on tasks-8efda8 in the same commit so it can be re-scoped.
+  finding on tasks-8efda8 before the result's branch merges so it can be re-scoped.
 
 All four are children of tasks-671956. No separate research task is needed: the
 remaining work is choosing a public mutation contract, with local caller inspection

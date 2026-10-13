@@ -149,7 +149,7 @@ takeover workaround, Stop aggregation or new authority.
   by tasks-f8c9cc. Their reports and original capture remain intact.
 - tasks-fe6c59: P2/s/mid/direct bounded namespace/process-proof investigation.
   tasks-b9cbe3 remains an idea and joins this lane; findings must wake it with a
-  task note in the same commit and update this brief before re-scoping. No namespace
+  task note before the result's branch merges and update this brief before re-scoping. No namespace
   implementation or additional design task is filed before that evidence.
 - tasks-56b450: existing controller completion-policy decision; reuse it for aggregation.
   tasks-0005a6 is done (`note --stamp`); it cannot repair identity delivery.

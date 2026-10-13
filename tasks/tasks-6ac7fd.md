@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T15:13:22Z
-updated: 2026-10-09T18:30:29Z
+updated: 2026-10-13T09:21:39Z
 depends: []
 parent: tasks-cea445
 tags: []
@@ -22,7 +22,7 @@ Bound: Produce a design spec and then an implementation plan, each reviewed by t
 
 Done: Reviewed spec and plan identify acceptance checks for standalone/local behavior, duplicate meanings, global-only entries, malformed inputs, offline use, feedback-generated tags, and unchanged tag filtering. File implementation children with explicit process and complexity under the cluster goal before closing.
 
-Ideas it wakes: On completion, add the design finding and approved artifact paths to both tasks-eb2b4e and tasks-b49ef8 with tasks note in the same commit, and update docs/notes/2026-10-02-tag-vocabulary-brief.md.
+Ideas it wakes: On completion, add the design finding and approved artifact paths to both tasks-eb2b4e and tasks-b49ef8 with tasks note before the result's branch merges, and update docs/notes/2026-10-02-tag-vocabulary-brief.md.
 
 ## Notes
 

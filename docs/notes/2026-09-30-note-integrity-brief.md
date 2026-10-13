@@ -93,8 +93,8 @@ or downstream interpretation.
   redaction versus manual publishing handling without waiting on obs; share note
   selection constraints, then coordinate structured correction. Review design and
   implementation plans before code; delivery stages may proceed independently.
-- tasks-cc9a31, tasks-2bb0ba and tasks-d56b72 remain ideas. Findings wake each in the
-  same commit and update this brief; preserve the full amendment proposal and sources.
+- tasks-cc9a31, tasks-2bb0ba and tasks-d56b72 remain ideas. Findings wake each before the
+  result's branch merges and update this brief; preserve the full amendment proposal and sources.
 - tasks-45bf05 remains briefed as the corrected-reviewer acceptance case.
   tasks-1f6d08 already includes it in both the design checks and completion wake list;
   no follow-up task is added. tasks-c62c8d was dropped with user approval on

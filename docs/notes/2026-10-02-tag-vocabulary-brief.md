@@ -110,7 +110,7 @@ fallback for absent or malformed configuration. Avoid a second independent style
   tasks-6ac7fd. Preserve its full captured proposal and questions.
 - tasks-6ac7fd produces a user-reviewed design and implementation plan,
   then files implementation children. On completion it updates this brief and
-  adds a finding note to both tasks-eb2b4e and tasks-b49ef8 in the same commit so
+  adds a finding note to both tasks-eb2b4e and tasks-b49ef8 before the result's branch merges so
   scoping can resume. Its existing optional-style question is now explicit in its body.
 - tasks-b49ef8 remains an idea, priority 3, briefed against that design. Its rendering
   prerequisite is done, but style-source decisions remain. Preserve its full original
