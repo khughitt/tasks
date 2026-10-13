@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-10T13:22:07Z
-updated: 2026-10-13T10:55:30Z
+updated: 2026-10-13T10:55:42Z
 depends: []
 tags: [feedback, gap, "from:mind6", cli]
 agent: codex
@@ -28,3 +28,4 @@ Original report (preserved): Attachment size cap requires a separate archive and
 - 2026-10-13T10:49:07Z (main): scope: question; traced to mind6 5f736e8 (4.6 MB worktree-ignored archive over the 2 MiB per-file cap, kept in host storage with an attached manifest); open question whether bulk archives belong in git (raise mind6 max_bytes, drop) or need a documented/first-class out-of-repo reference
 - 2026-10-13T10:52:18Z (main): Archive contents checked: 11 review screenshots from .impeccable/review/ (gitignored in mind6; 293-616 KB each, ~4.6 MB total), the 2026-09-18 TUI design+plan (identical copies already in mind6's main checkout, locally excluded), .codex/config.toml and an sdd .gitignore (regenerable). Every file fits the 2 MiB per-file cap; only the bundled tar exceeded it.
 - 2026-10-13T10:55:30Z (main): scope: scoped; user resolved the open question 2026-10-13: keep the per-file cap, no outside store; narrowed to multi-path attach (all-or-nothing, JSON file -> files[]); cleanup-rule triage goes to lore feedback; P2/s/mid/direct
+- 2026-10-13T10:55:42Z (main): Cleanup-rule triage filed to lore as lore-da5aae.
