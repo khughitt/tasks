@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-09T14:58:40Z
-updated: 2026-10-13T11:10:30Z
+updated: 2026-10-13T11:10:31Z
 depends: []
 tags: [quick-add]
 source: "mindful:thought:f489a269e04a438ab5732282730531aa"
@@ -28,3 +28,7 @@ Done:
 - Tests in tests/cli.rs: a local dependent is listed; a different-prefix dependent appears only with `--all-projects`; an alias spelling of the id still counts; no `dependents` key when none.
 
 Where: src/commands/show.rs (`describe`, `run`), src/output.rs (`ShowFields`, `Related`, pretty show), src/moving/mod.rs (`inbound`), src/scope.rs (`open_all`), src/cli.rs (show args), src/commands/list.rs (`next` calls `describe`).
+
+## Notes
+
+- 2026-10-13T11:10:31Z (main): scope: scoped; only incoming depends edges are missing (children already shown, parents are same-project); dependents from show's existing scan, cross-project behind show --all-projects since an all-project scan measured ~1.3 s vs ~0.03 s for show; s/mid/direct, P2 unchanged
