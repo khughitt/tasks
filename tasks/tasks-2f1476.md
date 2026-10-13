@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-08T20:35:39Z
-updated: 2026-10-13T10:13:03Z
+updated: 2026-10-13T10:13:04Z
 depends: []
 tags: [feedback, idea, "from:ops"]
 agent: claude-code/claude-opus-5-5
@@ -25,3 +25,7 @@ Done:
 Where: src/cli.rs (edit and note args), src/commands/edit.rs, src/commands/status.rs::note, src/commands/mod.rs::load, src/error.rs, docs/specs/2026-08-29-tasks-design.md error table, the three skills above.
 
 Verification: tests/cli.rs cases: a matching stamp writes; a mismatched stamp refuses stamp_mismatch with record bytes and git HEAD unchanged; a start between show and edit makes the edit refuse; stdin --body input is not consumed on refusal. just test-one for each, then just test-fast; reinstall with cargo install --path . after the change.
+
+## Notes
+
+- 2026-10-13T10:13:04Z (main): scope: scoped; strictly increasing per-write stamps (tasks-cff04e) make an updated-stamp precondition exact; scoped --if-updated on edit and note with a stamp_mismatch error and the curate/scope revalidation rewritten to use it; P2/m/mid/direct
