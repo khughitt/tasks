@@ -4,7 +4,7 @@ title: Define supported repair for pending transactions with invalid review stat
 status: shelved
 priority: 2
 created: 2026-10-11T17:16:47Z
-updated: 2026-10-13T11:10:41Z
+updated: 2026-10-13T11:10:42Z
 depends: []
 parent: tasks-a7460c
 tags: []
@@ -17,3 +17,4 @@ Evidence: the final review-state regressions reproduce pending move/rename snaps
 ## Notes
 
 - 2026-10-13T11:10:41Z (main): shelved: Wake when a pending move or rename journal is actually refused for reviewed on a non-idea, or a supported writer is found that can put reviewed on a non-idea (it was scoped as unreachable after the 2026-10-12 rollout)
+- 2026-10-13T11:10:42Z (main): scope: shelved; the condition needs a writer without the review invariant, but binaries older than the change cannot parse reviewed (src/format.rs KEYS, review-state spec §7.0), both hosts run the new binary since the 2026-10-12 rollout (tasks-b8f3c9), and a pending journal blocks ordinary writes, so only a matching hand edit of record, journal and digest can produce it; no move/rename journals pending on this host
