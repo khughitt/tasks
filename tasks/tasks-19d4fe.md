@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-12T10:50:38Z
-updated: 2026-10-13T09:55:25Z
+updated: 2026-10-13T09:55:26Z
 depends: []
 parent: tasks-5408fe
 tags: [feedback, gap, "from:ops"]
@@ -25,3 +25,4 @@ Original report: The scope skill has no verdict for a misfiled report whose reme
 ## Notes
 
 - 2026-10-13T09:21:13Z (main): scope: briefed; parented under goal tasks-5408fe; brief frames a refile verdict via tasks move --to <owner> gated on the owner's [feedback] scope (lean) against a refile proposal under the fixed root, and needs the user's ruling consistent with tasks-91c622's cross-project contract; brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md
+- 2026-10-13T09:55:26Z (main): scope: scoped; user ruled 2026-10-13 that a pass may move a misfiled record without approval; todo P2/s/mid/direct; body rewritten with done/check; brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md
