@@ -27,7 +27,7 @@ from another status. Incidental notes (curate, comments) do not readmit it. Exis
 briefs, goals, or research do not by themselves exclude an idea that `--needs-review`
 returns. An explicit id bypasses only
 this review-state exclusion; it must still be an unclaimed idea at revalidation, or an
-unclaimed `todo` or `blocked` task named for re-scope, and the pass still has the
+unclaimed `todo` or `blocked` task, which makes it a re-scope, and the pass still has the
 three-document ceiling. Default selection never returns a non-idea.
 
 Fix one root before member reads, and use `tasks -C <root> ...` for every later task
@@ -108,22 +108,28 @@ Use `proposal:` only for `drop`. A shelf also retains the separate note written 
 
 ### Re-scope a scoped task
 
-An explicit `todo` or `blocked` id asks for a re-scope: re-check the premises its body
-rests on against the current code, tools and linked work, then narrow it to what is
-still open. A `doing` task belongs to its session and is skipped. Gather evidence as in
-§2, and choose one verdict:
+Every explicit `todo` or `blocked` id is a re-scope: re-check the premises its body rests
+on against the current code, tools and linked work, then narrow it to what is still open.
+A `doing` task belongs to its session and is skipped. Gather evidence as in §2, enough to
+test the premises, not to do the task. Choose one verdict:
 
 | Verdict | Use when | Required result |
 |---|---|---|
-| `rescoped` | Premises hold and the evidence settles part of the work | Rewrite the body: keep every fact and the why/done/where shape, mark what is now established so the next session does not re-derive it, and narrow what remains; re-rate size, complexity and process; status unchanged; decompose as for `scoped` |
+| `rescoped` | Premises hold, or the evidence establishes the replacement for a failed one, and work remains | Rewrite the body in its existing shape (why/done/where, or §5's five fields for research, `Ideas it wakes` intact): keep every fact, mark what is now established so the next session does not re-derive it, and narrow what remains; re-rate size, complexity and process; status unchanged; decompose as for `scoped` |
 | `confirmed` | Premises hold and nothing narrows | No edit |
 | `briefed` or `question` | A premise failed and a decision remains | `tasks -C <root> edit <id> --status idea` first, then the idea rules above apply, including the `--reviewed` audit note |
-| `shelved` or `drop` | As for an idea | As for an idea; status unchanged for `drop` |
+| `shelved` | As for an idea | As for an idea; `unshelve` returns it as an idea, so the wake condition says it was scoped |
+| `drop` | As for an idea | Status unchanged; proposal in a plain note |
 
-The audit note for `rescoped`, `confirmed`, `shelved` and `drop` is a plain
-`tasks -C <root> note <id> "scope: <verdict>; <what changed>[; proposal: <text>]"`,
-naming the evidence (versions, commits) the premises were checked against. A
-re-scoped task's priority changes only with the user's say.
+When the evidence answers the whole task (common for research), the verdict is still
+`rescoped`: record the finding in the body and narrow the remaining work to recording the
+result and running its `Ideas it wakes` notes, so the task closes through `done`.
+
+The audit note for every verdict except `briefed` and `question` is a plain
+`tasks -C <root> note <id> "scope: <verdict>; <what changed>[; proposal: <text>]"`
+(`--reviewed` is refused on a non-idea), naming the evidence (versions, commits) the
+premises were checked against. A re-scoped task's priority changes only with the user's
+say.
 
 ## 4. Write the handoff
 

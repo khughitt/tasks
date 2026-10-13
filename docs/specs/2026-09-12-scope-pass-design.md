@@ -148,7 +148,8 @@ Completion candidates for `--status` and the status column in `--pretty` rows in
 ### 4.1 Batch selection
 
 Explicit ids are the batch, exactly, and the only way to revisit a cluster whose
-previous pass is still waiting on something. Otherwise the skill reads every `idea` in
+previous pass is still waiting on something; an explicit `todo` or `blocked` id is a
+re-scope (§4.8). Otherwise the skill reads every `idea` in
 the project (`tasks list --status idea`, narrowed by `--tag` when given) and drops from
 the pool every idea a previous pass already handled: one whose most recent note starts
 with `scope:` (any verdict), and one carrying a pending `proposal:`. An idea re-enters
@@ -186,7 +187,7 @@ record or the brief, not narrated in chat.
 
 ### 4.3 Verdicts
 
-Exactly one per idea.
+Exactly one per idea; a re-scoped task's verdicts are in §4.8.
 
 | verdict | when | writes |
 |---|---|---|
@@ -206,8 +207,8 @@ the allowed writes, plus `add` for the goal and the research or design tasks of 
 Never `drop`, never `--parallel`, never `tasks/*.md` by hand.
 
 Immediately before the first write to a member, `show` it again and skip it (writing
-nothing, reporting the reason) if its status is no longer `idea`, it carries a live
-claim, or `updated` moved. Same check, same caveat as `curate` step 4.
+nothing, reporting the reason) if its status is no longer `idea` (for a re-scope, its
+first status), it carries a live claim, or `updated` moved. Same check, same caveat as `curate` step 4.
 
 ### 4.4 The brief
 
@@ -303,11 +304,14 @@ Added by tasks-4d7a32 (2026-10-13), after a re-scope of a research todo was impr
 a body edit and a free-form note. An explicit id may name a `todo` or `blocked` task;
 default selection still returns ideas only, and a `doing` task is skipped. The pass
 re-checks the premises the body rests on and leaves one verdict: `rescoped` (premises
-hold; the body records what is now established and narrows the rest; size, complexity
-and process re-rated; status unchanged), `confirmed` (nothing narrows; no edit),
-`briefed` or `question` (a premise failed: back to `idea` first, then §4.3's idea rules),
-or `shelved` and `drop` as in §4.3. The audit note is a plain `scope:` note, since the
-review flag is idea-only; revalidation compares against the status at the first show.
+hold, or a failed one's replacement is established; the body, in its existing shape,
+records what is now established and narrows the rest; size, complexity and process
+re-rated; status unchanged; a fully answered task narrows to recording its result),
+`confirmed` (nothing narrows; no edit), `briefed` or `question` (a premise failed and a
+decision remains: back to `idea` first, then §4.3's idea rules, `--reviewed` note
+included), or `shelved` and `drop` as in §4.3. Every other verdict's audit note is a
+plain `scope:` note, since the review flag is idea-only; revalidation compares against
+the status at the first show.
 
 ## 5. Documentation and protocol
 
