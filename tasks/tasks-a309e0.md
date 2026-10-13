@@ -1,15 +1,16 @@
 ---
 id: tasks-a309e0
 title: "scope briefs record 'X waits on research Y' in prose and wake notes, never as a depends edge, so ready/tree show the waiting idea as unblocked"
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
 owner: scope-dep-edge
 created: 2026-10-08T20:35:39Z
-updated: 2026-10-13T09:58:54Z
+updated: 2026-10-13T10:00:12Z
 started: 2026-10-13T09:58:44Z
+completed: 2026-10-13T10:00:12Z
 depends: []
 parent: tasks-5408fe
 tags: [feedback, friction, "from:ops"]
@@ -30,4 +31,8 @@ Original report: One curation pass of 5 found three ideas (two projects) whose s
 - 2026-10-13T09:58:44Z (main): started
   provenance: {"harness_session":"claude-code:c1a5e1cd-ac8c-454a-8e68-436d7130a52e","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-13T09:58:54Z (scope-dep-edge): resumed
+  provenance: {"harness_session":"claude-code:c1a5e1cd-ac8c-454a-8e68-436d7130a52e","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-13T10:00:12Z (scope-dep-edge): done
+  provenance: {"harness_session":"claude-code:c1a5e1cd-ac8c-454a-8e68-436d7130a52e","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-13T10:00:12Z (scope-dep-edge): scope skill §3 briefed row and §5 now run tasks dep <idea> --on <follow-up> for every idea a follow-up's Ideas it wakes names; wake note kept. Probed in a scratch project: dep accepts an idea, show reports depends_on, and the promoted todo stays out of ready until the research closes.
   provenance: {"harness_session":"claude-code:c1a5e1cd-ac8c-454a-8e68-436d7130a52e","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
