@@ -1,6 +1,6 @@
 ---
 name: scope
-description: Use when asked to scope captured ideas, review an idea backlog for next actions, or run /scope.
+description: Use when asked to scope captured ideas, review an idea backlog for next actions, re-scope an already scoped task, or run /scope.
 ---
 
 # scope
@@ -11,6 +11,7 @@ Turn one bounded idea cluster into evidence-backed next actions and handoffs. In
 
 Do not ask the user to choose a cluster. Do not `tasks start` selected ideas: this is a
 review pass, and each idea must remain unclaimed until its verdict is written.
+Explicit ids may also name scoped tasks to re-scope (see "Re-scope a scoped task").
 
 ## 1. Select and fix the root
 
@@ -25,8 +26,9 @@ when a waking finding is noted with `--no-reviewed` or the idea comes back to `i
 from another status. Incidental notes (curate, comments) do not readmit it. Existing
 briefs, goals, or research do not by themselves exclude an idea that `--needs-review`
 returns. An explicit id bypasses only
-this review-state exclusion; it must still be an unclaimed idea at revalidation, and the
-pass still has the three-document ceiling.
+this review-state exclusion; it must still be an unclaimed idea at revalidation, or an
+unclaimed `todo` or `blocked` task named for re-scope, and the pass still has the
+three-document ceiling. Default selection never returns a non-idea.
 
 Fix one root before member reads, and use `tasks -C <root> ...` for every later task
 command and that root for every evidence read and document write:
@@ -104,6 +106,25 @@ is a plain `tasks note` (`--reviewed` is refused on a non-idea).
 Use `proposal:` only for `drop`. A shelf also retains the separate note written by
 `shelve`. Never execute `tasks drop` or add `--parallel`.
 
+### Re-scope a scoped task
+
+An explicit `todo` or `blocked` id asks for a re-scope: re-check the premises its body
+rests on against the current code, tools and linked work, then narrow it to what is
+still open. A `doing` task belongs to its session and is skipped. Gather evidence as in
+§2, and choose one verdict:
+
+| Verdict | Use when | Required result |
+|---|---|---|
+| `rescoped` | Premises hold and the evidence settles part of the work | Rewrite the body: keep every fact and the why/done/where shape, mark what is now established so the next session does not re-derive it, and narrow what remains; re-rate size, complexity and process; status unchanged; decompose as for `scoped` |
+| `confirmed` | Premises hold and nothing narrows | No edit |
+| `briefed` or `question` | A premise failed and a decision remains | `tasks -C <root> edit <id> --status idea` first, then the idea rules above apply, including the `--reviewed` audit note |
+| `shelved` or `drop` | As for an idea | As for an idea; status unchanged for `drop` |
+
+The audit note for `rescoped`, `confirmed`, `shelved` and `drop` is a plain
+`tasks -C <root> note <id> "scope: <verdict>; <what changed>[; proposal: <text>]"`,
+naming the evidence (versions, commits) the premises were checked against. A
+re-scoped task's priority changes only with the user's say.
+
 ## 4. Write the handoff
 
 For unresolved cluster decisions, write or update one roughly one-page brief at
@@ -158,8 +179,9 @@ task.
 Immediately before each member's first write, run `tasks -C <root> show <id>` again.
 Compare top-level `claim.live`, `task.status`, and `task.updated` with the first show.
 Skip the member without any write or audit note if it changed, has a live claim, or is
-not an idea. Documents may name skipped members only as related context; do not say they
-were processed. If every member is skipped, create no goal or document.
+no longer in the status it had at the first show (an idea, or a `todo` or `blocked`
+task named for re-scope). Documents may name skipped members only as related context; do
+not say they were processed. If every member is skipped, create no goal or document.
 
 Write task records only through the CLI and documents through explicit paths under the
 fixed root. Preserve the exact successful operations when a later command fails, report
@@ -169,8 +191,9 @@ is not a lock; propagate a CLI race failure. There is no per-member approval che
 ## 7. Summarize and rerun
 
 Report the cluster and why, then one line per selected member with its verdict or skip
-reason, followed by handoff paths. Then include only nonempty groups for drops (id and
-supporting commit/id), questions (id and text), and shelves (id and wake condition).
+reason (a re-scoped member also names what is now established), followed by handoff
+paths. Then include only nonempty groups for drops (id and supporting commit/id),
+questions (id and text), and shelves (id and wake condition).
 
 When later research completes, its completion must add a finding note with `--no-reviewed` to every waiting
 idea named by `Ideas it wakes`, before this result's branch merges, so default selection

@@ -441,7 +441,8 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
 - A thought to revisit later: `tasks add "<title>" --status idea --defer 60d` (or a date,
   `--defer 2026-11-10`); every status change clears the date, so scope it with
   `edit --status todo` first and defer it in a second command when both are wanted.
-- Deliberate idea review: `/scope [<id>... | --tag <tag>] [--project <prefix>]`.
+- Deliberate idea review: `/scope [<id>... | --tag <tag>] [--project <prefix>]`. The same
+  skill re-scopes a `todo` or `blocked` task named by id: re-check its premises, then narrow it.
 - Not now, but kept: `tasks shelve <id> "<what would bring it back>"`. Shelved work is open
   (it still blocks dependents and holds its goal open) but hidden from `list`, `ready`, and
   `prime`'s roadmap and ready sections. A surviving shelved park overlay remains visible in

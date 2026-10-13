@@ -297,6 +297,18 @@ omitting empty groups: **drops** (id and the commit or duplicate id), **question
 and the questions written), **shelved** (id and the wake condition, so a wrong shelf
 costs one `unshelve`). Nothing else.
 
+### 4.8 Re-scoping a scoped task
+
+Added by tasks-4d7a32 (2026-10-13), after a re-scope of a research todo was improvised as
+a body edit and a free-form note. An explicit id may name a `todo` or `blocked` task;
+default selection still returns ideas only, and a `doing` task is skipped. The pass
+re-checks the premises the body rests on and leaves one verdict: `rescoped` (premises
+hold; the body records what is now established and narrows the rest; size, complexity
+and process re-rated; status unchanged), `confirmed` (nothing narrows; no edit),
+`briefed` or `question` (a premise failed: back to `idea` first, then §4.3's idea rules),
+or `shelved` and `drop` as in §4.3. The audit note is a plain `scope:` note, since the
+review flag is idea-only; revalidation compares against the status at the first show.
+
 ## 5. Documentation and protocol
 
 - `skills/tasks/SKILL.md`: the session protocol's "never pick an `idea`; scope it first"
