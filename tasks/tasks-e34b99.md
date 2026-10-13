@@ -1,11 +1,10 @@
 ---
 id: tasks-e34b99
 title: "tasks list cannot show whether an idea has been through scope: the scope skill's verdict (briefed, question, pending drop proposal, readmitted) lives only in the latest note, so a briefed idea and a never-reviewed one look identical in list rows; wanted a derived scope-state column and a filter such as --unscoped that applies the skill's eligibility rule, and the waiting-on task id for briefed ideas"
-status: idea
+status: dropped
 priority: 2
-reviewed: true
 created: 2026-10-08T10:43:40Z
-updated: 2026-10-13T09:21:14Z
+updated: 2026-10-13T09:58:27Z
 depends: []
 parent: tasks-46d207
 tags: [feedback, gap, "from:hq"]
@@ -17,3 +16,7 @@ tags: [feedback, gap, "from:hq"]
 - 2026-10-08T10:53:55Z (main): scope: briefed; joined work-discovery lane tasks-46d207; tasks-a9b8d3 will design the requested boolean and unread marker, separating explicit re-review from note history and plan approval; original report and user-input note retained; brief: docs/notes/2026-09-30-work-selection-brief.md
 - 2026-10-11T15:08:58Z (design/tasks-a9b8d3-review-state): Approved review-state design: reviewed boolean on ideas, explicit atomic --no-reviewed wakes, needs_review derived for unassessed leaf todo/blocked rows, and left-most * mark. Spec docs/specs/2026-10-11-review-state-design.md and plan docs/plans/2026-10-11-review-state.md are reviewed; implementation follows separately, with all-host upgrades before live writes.
 - 2026-10-13T09:21:14Z (main): scope: drop; delivered by 2a32b16 (reviewed flag, * marker, list --needs-review) under docs/specs/2026-10-11-review-state-design.md; its waiting-on id ask is tasks-a309e0 and pending drop proposals are tasks-22f407 via tasks-84d2a9; brief: docs/notes/2026-10-13-review-pass-followthrough-brief.md; proposal: drop as delivered by 2a32b16
+- 2026-10-13T09:58:27Z (main): dropped
+  provenance: {"harness_session":"claude-code:2eb13aff-cc4d-4588-8a68-0eae29a8b542","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-13T09:58:27Z (main): Dropped (user-approved 2026-10-13) as delivered by 2a32b16 (reviewed flag, * marker, list --needs-review); waiting-on edges are tasks-a309e0, pending proposals tasks-22f407.
+  provenance: {"harness_session":"claude-code:2eb13aff-cc4d-4588-8a68-0eae29a8b542","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
