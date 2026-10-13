@@ -7,8 +7,8 @@ size: s
 complexity: mid
 process: planned
 created: 2026-10-13T18:30:32Z
-updated: 2026-10-13T18:30:32Z
-depends: []
+updated: 2026-10-13T18:30:33Z
+depends: [ops-554eb9]
 tags: []
 source: relay-4dfc10 tailnet hostname leak (2026-10-13)
 agent: claude-code/claude-opus-5-5
