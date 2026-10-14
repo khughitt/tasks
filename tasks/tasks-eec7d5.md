@@ -1,13 +1,15 @@
 ---
 id: tasks-eec7d5
 title: Make the test suite immune to a stray .git above TMPDIR
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-08T21:02:30Z
-updated: 2026-10-13T10:48:39Z
+updated: 2026-10-14T15:29:24Z
+started: 2026-10-14T15:29:24Z
 depends: []
 tags: [feedback, friction, "from:tasks", tests]
 agent: codex
@@ -29,3 +31,5 @@ Original report (preserved): Fast-suite CLI fixtures intermittently reject init 
 
 - 2026-10-09T00:42:57Z (fa0276-git-marker): Likely cause: tasks-fa0276's report says a host process recreates an empty .git in TMPDIR every minute or two, and git-discovery io on init in temp dirs is that failure; intermittent because the marker comes and goes. fa0276 makes the error name the marker path; it does not stop the flake.
 - 2026-10-13T10:48:39Z (main): scope: scoped; fa0276 (diagnostic) and 084a9f (ceiling/mount stop) landed but don't cover $TMPDIR/.git below the mount; fix is a GIT_CEILING_DIRECTORIES=temp_dir in the test helpers, checked with an empty $TMPDIR/.git under a scratch TMPDIR; host process creating the marker left uninvestigated; P2/s/low/direct
+- 2026-10-14T15:29:24Z (main): started
+  provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
