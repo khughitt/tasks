@@ -301,7 +301,9 @@ checks have stopped; silence, a timeout and the shared PID do not establish it.
 
 Relay process matching also requires hooks and task commands to share a PID
 namespace. A sandbox exposing the Codex ancestor as PID 1 cannot match relay's
-published host PID; this currently refuses acquisition (tracked as tasks-b9cbe3).
+published host PID; this refuses acquisition, and no process evidence inside such a
+sandbox can prove the session (tasks-fe6c59). Claim liveness judged across PID views is
+tracked as tasks-860db2.
 Exact legitimate-owner `TASKS_SESSION` recovery remains available. The live
 acceptance capture used a separately approved host-PID invocation.
 

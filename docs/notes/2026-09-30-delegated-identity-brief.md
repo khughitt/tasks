@@ -1,6 +1,6 @@
 # Delegated session identity
 
-Scoping handoff, updated 2026-10-08. Goal: tasks-2fa8c6. Not an approved design.
+Scoping handoff, updated 2026-10-14. Goal: tasks-2fa8c6. Not an approved design.
 
 ## Problem
 
@@ -43,8 +43,8 @@ namespaces. Authorization and process identity remain separate contracts.
   PID while the isolated command observed the nearest harness as PID 1. Acquisition
   refused; the later passing capture used explicitly approved shared host PID
   visibility. See [the retained acceptance summary](2026-10-06-delegated-identity-acceptance.md).
-  Raw private captures were removed at cleanup, so this pass relies on that historical
-  verdict and current source, not a fresh namespace reproduction.
+  Raw private captures were removed at cleanup. tasks-fe6c59 reproduced the refusal
+  afresh under `unshare` and the genuine `codex sandbox` (section at the end).
 - `src/relay/ancestry.rs` reads the caller's proc view; `resolve.rs::resolve` compares
   host/PID/start, then platform/boot/harness and actor evidence. `snapshot::Handle`
   carries no namespace identity. Claim ownership proof and liveness also consume
@@ -132,8 +132,9 @@ takeover workaround, Stop aggregation or new authority.
   cutover approval, recorded in the
   [acceptance status](2026-10-08-claim-guard-acceptance.md).
 - What process relationship can the isolated caller actually verify, and can it
-  remain valid for acquisition, continued ownership and liveness? tasks-fe6c59
-  investigates available namespace evidence and names any producer coordination.
+  remain valid for acquisition, continued ownership and liveness? Answered by
+  tasks-fe6c59 below: none from inside a private-/proc namespace. Explicit identity
+  stays the supported path there; liveness across views is a separate defect.
 
 ## Proposed decomposition
 
@@ -147,10 +148,11 @@ takeover workaround, Stop aggregation or new authority.
 - tasks-f8c9cc: closure-policy decision recorded above; controller-closes retained.
 - tasks-f27fe3 and tasks-673b21: dropped with user approval on 2026-10-08 as covered
   by tasks-f8c9cc. Their reports and original capture remain intact.
-- tasks-fe6c59: P2/s/mid/direct bounded namespace/process-proof investigation.
-  tasks-b9cbe3 remains an idea and joins this lane; findings must wake it with a
-  task note before the result's branch merges and update this brief before re-scoping. No namespace
-  implementation or additional design task is filed before that evidence.
+- tasks-fe6c59: done; namespace/process-proof findings below. tasks-b9cbe3 is
+  shelved until a verifiable cross-namespace relationship exists. Filed:
+  tasks-860db2 (P1, planned: judge claim liveness only from the PID view that
+  recorded it) and tasks-19b244 (P2, direct: name the namespace cause in relay
+  refusals). No namespace-aware matching is filed.
 - tasks-56b450: existing controller completion-policy decision; reuse it for aggregation.
   tasks-0005a6 is done (`note --stamp`); it cannot repair identity delivery.
   tasks-481fd6 stays shelved until its documented Claude live-check wake condition.
@@ -298,3 +300,91 @@ these explicitly overridden identities. All fixture claims were released; the
 inventory was empty before the locked scratch worktree was unlocked and removed.
 The disposable registry, config, state and project were deleted. This check changes
 no product code or host state.
+
+## PID-namespace process proof: tasks-fe6c59 (2026-10-14)
+
+Evidence: `tasks/files/tasks-fe6c59/pidns-proof-evidence.json` (23 cases) and the
+probe that produced it, `pidns-probe.sh`. The relay registry rows are synthetic
+fixtures written from each actor's host-view handle. No relay producer ran, so
+nothing here is genuine producer delivery. Namespaces came from unprivileged
+`unshare` and from the genuine `codex sandbox` of Codex 0.162.1 (private
+`CODEX_HOME`, no model call). Config, state and registry were private and deleted
+afterwards.
+
+**What the caller can see.** Codex's workspace-write sandbox runs `bwrap --as-pid-1`.
+Inside, pid 1 is a `codex-linux-sandbox` helper with comm `codex` and ppid 0. The
+helper is a new process for every command, started one tick before the command, and
+is not the session process relay publishes. The session process sits outside the
+namespace, and a private /proc hides it entirely. Hostname, boot id and uid are
+shared with the host. `NSpid` lists only the namespace-local pid, and no kernel
+interface inside maps the helper to its host ancestor. Two sandboxes started a
+minute apart reported the same namespace inode: inodes are reused.
+
+**Three proof consumers.**
+
+| Consumer | Code | Behavior across a private-/proc namespace |
+| --- | --- | --- |
+| Acquisition | `relay::resolve::resolve` | Nearest harness is pid 1 (the helper); no row matches; refuses. Fail-closed. |
+| Continued ownership | `claims::proves_ownership` | Compares the helper's pid 1 with the claim's host pid; fails; the owner's own sandboxed `park` refuses. Fail-closed. |
+| Liveness | `claims::liveness_with`, `ClaimStore::prune_dead` | Reads a host pid in the namespace view: a live claim reads as gone, and any claim write prunes it silently. A namespace-local pid reads as reused from the host. **Not fail-closed.** |
+
+The handle schema (`snapshot::Handle`, and a claim's `pid`, `pid_start` and
+`boot_id`) records no PID view. Relay's handle is always in the producer's (host)
+view.
+
+**Controls.** Each control held in the host view:
+- Wrong start token and wrong boot refuse.
+- A registered sibling cannot close the owner's live claim.
+- The sibling's process carrying the owner's thread id refuses at acquisition and
+  fails proof-only ownership.
+- The owner proves ownership with the registry removed.
+- An unregistered codex nested under the owner, inheriting its environment, is
+  refused at the nearest-harness boundary.
+
+**Variants.**
+- With a child namespace but the host /proc kept, matching works when no helper
+  intervenes. Visibility, not the namespace itself, breaks the match.
+- With a codex-named helper in between, the helper is the nearest harness even in
+  the host view. Sharing /proc alone would not fix the Codex shape.
+- With a non-harness pid 1 and a private /proc, the truncated chain reads as Outside.
+  Relay is skipped and the native Codex level claims a pid-less raw thread key.
+  That is a silent fallback, carried into tasks-860db2's design.
+
+**Candidate matches rejected.**
+- Map a namespace pid 1 with ppid 0 to the unique row named by the native thread.
+  Any process that can set `CODEX_THREAD_ID` could then take the session's
+  identity. The forged-hint control shows process evidence is what refuses it, and
+  native IDs are not process proof.
+- Relate the helper's start time to the session's. The two are unrelated, and the
+  helper changes with every command.
+- Key on the namespace inode. The namespace is created per command, after relay
+  registered the session, and inodes are reused.
+
+A host-side peer-credential oracle is the one kernel-backed path. A unix-socket
+server receives the sandboxed caller's host pid through `SO_PEERCRED` and can walk
+the host chain to the session; this worked under `unshare`. Codex's sandbox refuses
+that `connect` with EPERM, and the oracle would also have to skip the
+`codex-linux-sandbox` helper when choosing the nearest harness.
+
+**Recommendation.** Keep explicit identity for sandboxed callers, with a
+namespace-specific refusal (tasks-19b244). That refusal must not suggest
+`TASKS_SESSION_PID`: a namespace-local pid becomes a claim the host takes over
+without `--force`. Fix liveness and pruning across views first (tasks-860db2). That
+defect is independent of relay and needs no relay change. It affects every claim
+that carries a pid: relay, explicit, `CLAUDE_PID` and `sid:` claims. A host whose
+Codex profile makes the claim store writable from the sandbox is exposed.
+
+Namespace-aware matching needs no relay-producer change today, because none would
+help. It would need Codex to allow a sandboxed command to reach a host-side oracle,
+plus a relay- or tasks-owned oracle and a reviewed nearest-harness amendment. That
+is a separate design, not filed.
+
+**Still needs a genuine capture.** The probe used `codex sandbox`, not a model
+session's tool call. Three things remain unverified in a real session:
+- that a session's commands go through the same helper shape (the 2026-10-06
+  acceptance observed pid 1, which is consistent);
+- that a sandboxed session's claim write prunes another session's live claim;
+- relay's real handle for the session.
+
+Existing native thread identity does not substitute for the missing process
+relationship.
