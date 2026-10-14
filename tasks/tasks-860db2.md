@@ -1,13 +1,15 @@
 ---
 id: tasks-860db2
 title: Judge claim liveness only from the PID view that recorded it
-status: todo
+status: doing
 priority: 1
 size: m
 complexity: mid
 process: planned
+owner: main
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T19:35:16Z
+updated: 2026-10-14T19:36:56Z
+started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -34,3 +36,5 @@ Tests: inject the view the way `liveness_with` injects stat.
 ## Notes
 
 - 2026-10-14T19:35:16Z (main): revised from review of tasks-fe6c59: a cross-view or unknown view is insufficient evidence for takeover, prune or hold release (TTL fallback rejected; a live >4h claim must survive); PID view is the procfs mount's numbering, not /proc/self/ns/pid; inherited-host-/proc and private-/proc cases required
+- 2026-10-14T19:36:56Z (main): started
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
