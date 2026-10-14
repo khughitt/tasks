@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: planned
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T19:05:20Z
+updated: 2026-10-14T19:35:14Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -21,4 +21,12 @@ Defect found by tasks-fe6c59 (evidence: tasks/files/tasks-fe6c59/pidns-proof-evi
 
 Exposure: a host whose Codex permission profile makes the claim store writable from the sandbox, while Claude Code claims carry CLAUDE_PID host pids. This repository's author host has both. Not yet observed in a real model session.
 
-Design questions to settle: how a claim records its pid view (the pid-namespace inode from /proc/self/ns/pid; the initial namespace is 4026531836; inodes are reused once a namespace dies, so pair it with the start check); legacy claims without a view; whether a cross-view verdict falls to the TTL and is never pruned (the lean: yes, fail closed); whether to refuse TASKS_SESSION_PID from a non-initial namespace. Also whether a relay walk that ends Outside at a pid 1 in a non-initial namespace should refuse instead of silently falling to the native level (truncated ancestry; case ns-plain-private-proc). Tests: inject the view the way liveness_with injects stat.
+Design questions to settle (revised after review of tasks-fe6c59):
+
+- Verdict when views differ or are unknown. Falling back to the TTL is not fail-closed. The TTL expires four hours after `seen`, while a verified live process stays live indefinitely, and a Stale verdict permits takeover without --force (`claim_guard`), pruning (`prune_dead`) and the release of exclusive holds (`holds.rs`). A host session running one long command would lose protection from a sandboxed caller after four hours, even with pruning disabled. A mismatched or unknown PID view must therefore be insufficient evidence for automatic takeover, pruning or hold release. It is neither Live-by-proof nor Stale, which probably means a third liveness verdict. Explicit `--force` stays the takeover path; decide whether the recording view alone reaps such claims. Test: a live claim whose `seen` is older than four hours, judged from a different view, is neither taken over, pruned nor released.
+- Which view a PID belongs to. `/proc/self/ns/pid` names the caller's namespace, not the /proc view. Linux numbers /proc by the PID namespace of the procfs mount. Case ns-plain-host-proc shows a child-namespace caller reading host-numbered PIDs through an inherited /proc (`NSpid: <host> 3`). Establish separately (a) which namespace numbered the recorded PID: relay's handle comes from the producer's procfs view, `CLAUDE_PID`/`TASKS_SESSION_PID` from whichever process exported them, and `sid:` from the caller's `/proc/self/stat`; and (b) which namespace supplies the /proc lookup at evaluation time. Candidate signal to verify: the number of `NSpid` entries in `/proc/self/status`, where one entry means the procfs numbers PIDs in the caller's own namespace and more means an ancestor's. Compare like with like, so compatible views are not misclassified and incompatible ones are not compared. Cases: same view; inherited host /proc in a child namespace (compatible with host-numbered PIDs); private /proc (incompatible); and a PID recorded inside a namespace evaluated from the host.
+- Identity for a view. Namespace inodes are reused once a namespace dies, so pair any view identity with the start-time check. Settle legacy claims without a recorded view under the same rule: an unknown view is not evidence of death.
+- Whether to refuse `TASKS_SESSION_PID` that names a PID outside the evaluating views' common numbering.
+- Whether a relay walk that ends Outside at a pid 1 in a non-initial namespace should refuse instead of silently falling to the native level (truncated ancestry; case ns-plain-private-proc).
+
+Tests: inject the view the way `liveness_with` injects stat.
