@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T21:49:00Z
+updated: 2026-10-14T22:05:01Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -16,6 +16,7 @@ tags: []
 source: tasks-fe6c59
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-10-14-claim-pid-view-design.md
+plan: docs/plans/2026-10-14-claim-pid-view.md
 ---
 
 Defect found by tasks-fe6c59 (evidence: tasks/files/tasks-fe6c59/pidns-proof-evidence.json, cases prune-*, codex-*, ns-explicit-pid1, host-view-of-ns-pid).
