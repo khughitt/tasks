@@ -183,6 +183,9 @@ mean those documents were verified.
 6. `tasks done <id> "<what landed>"` on the task's branch before it merges (under `[git] commit`
    the CLI commits the record itself; otherwise commit it with the code). If dependencies are
    still open, do not `--force` unless the dependency is genuinely irrelevant; say why in the message.
+   To reopen a done or dropped task (a correction handed back after close), run
+   `tasks edit <id> --status todo`, then `tasks start <id>`; `start` alone refuses and names
+   that edit.
    `done` refuses while any descendant is open (`--force` overrides); `drop` refuses while any
    descendant is open and has no override — drop or reparent the subtree first
    (`tasks drop <child> "<why>"` / `tasks edit <child> --no-parent`).

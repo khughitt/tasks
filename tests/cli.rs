@@ -18627,6 +18627,39 @@ fn shelve_requires_a_wake_condition_and_unshelve_requires_shelved() {
 }
 
 #[test]
+fn start_on_a_closed_task_names_the_reopen_edit() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let done = id_of(env.json(&sci, &["add", "Done"]));
+    env.json(&sci, &["done", &done]);
+    let dropped = id_of(env.json(&sci, &["add", "Dropped"]));
+    env.json(&sci, &["drop", &dropped, "not needed"]);
+
+    for (id, status) in [(&done, "done"), (&dropped, "dropped")] {
+        let err = error_of(&env, &sci, &["start", id]);
+        assert_eq!(err["error"]["kind"], "invalid_transition");
+        assert_eq!(
+            err["error"]["detail"],
+            format!("invalid transition {status} -> doing (`tasks edit {id} --status todo` first)")
+        );
+        assert_eq!(env.json(&sci, &["show", id])["task"]["status"], status);
+        // The named edit is the reopen path.
+        env.json(&sci, &["edit", id, "--status", "todo"]);
+        env.json(&sci, &["start", id]);
+        assert_eq!(env.json(&sci, &["show", id])["task"]["status"], "doing");
+    }
+
+    // A closed recurrence still reopens straight to doing.
+    let cadence = id_of(env.json(&sci, &["add", "Sweep", "--every", "30d"]));
+    env.json(&sci, &["done", &cadence]);
+    env.json(&sci, &["start", &cadence]);
+    assert_eq!(
+        env.json(&sci, &["show", &cadence])["task"]["status"],
+        "doing"
+    );
+}
+
+#[test]
 fn shelve_follows_the_claim_rules_and_clears_a_park_and_its_escalation() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

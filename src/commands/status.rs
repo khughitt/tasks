@@ -14,6 +14,18 @@ pub fn start(mut ctx: Ctx, id: String, force: bool, reason: Option<String>) -> R
             format!("doing (`tasks unshelve {id}` first)"),
         ));
     }
+    // A closed task reopens only to todo; a closed recurrence reopens straight to doing.
+    let reopens_to_todo = match task.status {
+        Status::Done => task.every.is_none(),
+        Status::Dropped => true,
+        _ => false,
+    };
+    if reopens_to_todo {
+        return Err(Error::InvalidTransition(
+            task.status.as_str().into(),
+            format!("doing (`tasks edit {id} --status todo` first)"),
+        ));
+    }
     if reason.is_some() && !force {
         return Err(Error::Validation("--reason requires --force".into()));
     }
