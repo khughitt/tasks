@@ -1,15 +1,16 @@
 ---
 id: tasks-70a7a7
 title: Name the reopen command when start refuses a done or dropped task
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: fix/reopen-hint
 created: 2026-10-12T11:48:42Z
-updated: 2026-10-14T18:45:55Z
+updated: 2026-10-14T18:48:58Z
 started: 2026-10-14T18:45:55Z
+completed: 2026-10-14T18:48:58Z
 depends: []
 tags: [feedback, friction, "from:mind6", cli]
 agent: codex
@@ -27,4 +28,11 @@ Original report (preserved): A correction handed back after a step completion ma
 
 - 2026-10-13T10:48:02Z (main): scope: scoped; start's done/dropped refusal gains the edit --status todo hint, matching the shelved hint in status.rs::start; checked against main d698a36 (tasks 0.2.0); P2/xs/low/direct
 - 2026-10-14T18:45:55Z (main): started
+  provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T18:45:57Z (fix/reopen-hint): resumed
+  provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T18:48:57Z (fix/reopen-hint): RED: new cli test saw bare 'invalid transition done -> doing'; GREEN after the status.rs hint. Moved stays refused at load (kind moved, tests/move.rs); cadence reopen asserted in the new test and cli.rs recurrence test. just test-fast and just check exit 0.
+- 2026-10-14T18:48:58Z (fix/reopen-hint): done
+  provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T18:48:58Z (fix/reopen-hint): start on a done or dropped (non-recurring) task now fails invalid_transition naming `tasks edit <id> --status todo` first; SKILL.md step 6 names the reopen path.
   provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
