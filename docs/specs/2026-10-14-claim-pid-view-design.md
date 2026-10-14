@@ -1,8 +1,10 @@
 # Claim liveness judged only from the PID view that recorded it
 
-Task: tasks-860db2. Status: draft for review, revision 2. Revision 1 failed review
+Task: tasks-860db2. Status: draft for review, revision 3. Revision 1 failed review
 (spec round 1): it identified a view by procfs `st_dev`, it recorded the writer's view
 for exported PIDs it had not established, and it called mixed versions safe.
+Revision 2 failed spec round 2: it took ancestry membership as proof of an exported
+pid's namespace.
 Source: tasks-fe6c59, whose attached `pidns-proof-evidence.json` holds the cases cited
 below.
 
@@ -121,6 +123,11 @@ Pid claims written there carry no view, and every pid claim evaluated there read
 `Unverifiable`. Nothing is misjudged; such claims clear only through §4's paths. The
 Codex sandbox has a private `/proc`, so this cost does not reach it.
 
+A second cost follows from §2. Outside the initial PID namespace, in a container or
+sandbox, claims from exported pids (`CLAUDE_PID`, `TASKS_SESSION_PID`) record no view.
+They stay protected after their session dies, until §4's paths clear them. Relay and
+`sid:` claims still record a view there.
+
 ### 2. Recording
 
 `Claim` gains `pid_view: Option<String>`, the identity formatted `"<dev>:<ino>"`,
@@ -128,17 +135,36 @@ serialized only when present. A claim write records a view only when it
 **establishes** the pid in the writer's current view, and only when that view is
 known:
 
-- **Relay level.** The handle was matched by walking the writer's own `/proc`
-  ancestry and comparing the start time, so the pid is established in the writer's
-  view.
+- **Relay level.** The match is made by walking the writer's own `/proc` ancestry. The
+  matched process is the writer's nearest harness boundary in that view, and its pid,
+  start time and harness name all equal the registry row's. The claim then tracks
+  that process, the writer's own session in this view. It does not depend on where
+  the registry numbered the pid. A row from another namespace could match only with
+  the same pid, start tick and harness name. Even then the tracked process is still
+  the writer's own nearest harness.
 - **Unix session fallback (`sid:<pid>`).** The session id comes from
   `/proc/self/stat`, which the kernel translates into the procfs's namespace. It is
   established when it is nonzero and `proc_stat` finds it.
-- **Exported pids (`TASKS_SESSION_PID`, `CLAUDE_PID`).** An inherited export can hold
-  a pid from another namespace, and the number can exist in this view as an unrelated
-  process. The pid is established only when it appears in the writer's ancestry walk
-  through `relay::ancestry`, read through the same `/proc`. Otherwise the claim keeps
-  the pid and the start time if one was read, and records no view.
+- **Exported pids (`TASKS_SESSION_PID`, `CLAUDE_PID`).** An export can be inherited
+  across a namespace boundary, so its number may belong to an outer namespace. That
+  number can also exist in this view as an unrelated process, even one of the
+  writer's ancestors. Spec round 2 reproduced this. Numeric matches, ancestry
+  membership included, therefore establish nothing. An exported pid is established
+  only when the writer's known view is the **initial PID namespace** and `proc_stat`
+  finds the pid there:
+  - A process's ancestors live in its own namespace or in ancestor namespaces, and the
+    initial namespace has no ancestor. So any process that passed the value down
+    through the environment numbered pids the same way.
+  - The initial namespace is recognized by its nsfs inode, the kernel constant
+    `PROC_PID_INIT_INO` (`0xEFFFFFFC`, 4026531836 in the evidence). If a kernel ever
+    changed that constant, the check would fail toward no view, which is protective.
+  - Anywhere else the claim keeps the pid, and the start time if one was read, and
+    records no view.
+  - Residual: a value carried into the initial namespace outside process inheritance,
+    for example a namespace-local pid typed or sourced from a file, is outside this
+    guarantee. Such a claim would be judged as a host pid. The README says
+    `TASKS_SESSION_PID` must name a process in the namespace of the command that sets
+    it.
 
 A claim with a pid and no view reads `Unverifiable` everywhere (§3). It is protected,
 not misjudged.
@@ -288,12 +314,17 @@ Unit tests on `liveness_with`, injecting the view as the tests already inject `s
 - Known boot mismatch: `Stale` whatever the view.
 - Pid-less claim: TTL as today, whatever the view.
 
-Unit tests on the evidence rules (§2), with injected ancestry and view:
+Unit tests on the evidence rules (§2), with the view injected:
 
 - A relay-level write records the view.
 - A `sid:` write whose pid `proc_stat` finds records the view.
-- An exported pid that is in the ancestry records the view.
-- An exported pid not in the ancestry, or whose `proc_stat` fails, records no view.
+- An exported pid that `proc_stat` finds records the view when the view is the
+  initial PID namespace.
+- An exported pid records no view in any other known view, even when `proc_stat`
+  finds it and it is the writer's ancestor.
+- An exported pid records no view when `proc_stat` fails, or when the view is
+  unknown.
+- The initial-namespace test matches only `PROC_PID_INIT_INO` with one `NSpid` entry.
 - Heartbeats: each of the four rows in §2's table.
 
 Call-site tests:
@@ -317,13 +348,25 @@ tasks-fe6c59's probe does.
   `host-view-of-ns-pid`. The host claim must survive the sandboxed write, and the
   host must refuse the takeover without `--force`.
 - **Procfs unmount and reuse.** A claim is written in namespace A (private `/proc`)
-  while A's pid 1 stays alive. Then A's `/proc` is unmounted, and namespace B mounts a
+  through the Unix session fallback, so it records A's view, while A's pid 1 stays
+  alive. Then A's `/proc` is unmounted, and namespace B mounts a
   procfs, reusing the device number if the kernel allows. A write from B must leave
   A's claim in place. Record whether the device was actually reused. The case still
   passes if it was not, because the identity never reads the device.
 - **Exported host pid.** In a private-`/proc` child, `TASKS_SESSION_PID` is set to a
   live host pid absent from the child's `/proc`. The claim must record no view. A
   second write in the child must leave it in place.
+- **Colliding ancestor (spec round 2).** Use nested PID namespaces. The intended
+  owner is pid 2 in the outer namespace and launches the inner one. In the inner
+  namespace a different ancestor also has pid 2, and `TASKS_SESSION_PID=2` is
+  inherited. Check five things:
+  - The inner claim records no view.
+  - After the inner ancestor exits while the outer owner lives, an inner write
+    leaves the claim in place.
+  - Another inner session's `start` refuses `claimed`.
+  - An inner heartbeat of an owner claim recorded in the outer namespace keeps the
+    outer evidence.
+  - `NSpid` has one entry inside, as the reviewer observed.
 - **Heartbeat from a sandbox.** The owner's claim is written on the host with a view,
   then heartbeated from a private-`/proc` child with an unestablished pid equal to the
   recorded one. The host view must still be recorded afterwards.
@@ -333,9 +376,12 @@ no model call.
 
 ## Documentation
 
-- The README paragraph on PID namespaces: claims record the PID view they were
-  established in, and evaluators in other or unknown views protect a claim but do not
-  judge it.
+- The README paragraph on PID namespaces covers three points:
+  - Claims record the PID view they were established in. Evaluators in other or
+    unknown views protect such a claim but do not judge it.
+  - Exported pids establish a view only in the initial PID namespace.
+  - `TASKS_SESSION_PID` must name a process in the namespace of the command that
+    sets it.
 - The README's Upgrading paragraph: the coordinated-upgrade requirement in §7.
 - The README's `tasks claims` entry: `live` means held, and `unverified` gives the
   reason a held claim could not be judged.
