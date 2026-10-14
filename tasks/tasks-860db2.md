@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T20:41:11Z
+updated: 2026-10-14T20:41:12Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -50,3 +50,5 @@ Tests: inject the view the way `liveness_with` injects stat.
 - 2026-10-14T20:08:10Z (fix/claim-pid-view): parked (waiting on user, review): user reviews spec revision 2 (docs/specs/2026-10-14-claim-pid-view-design.md in .worktrees/claim-pid-view); on approval the agent writes the implementation plan
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-14T20:41:11Z (fix/claim-pid-view): review: spec round 2 — verdict: revise; findings: P1 1; reviewer: human
+- 2026-10-14T20:41:12Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
