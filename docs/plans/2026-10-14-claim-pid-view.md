@@ -1,6 +1,6 @@
 # Claim PID View Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task, inline (the execution method chosen at plan round 1), then dispatch one fresh read-only reviewer for the whole branch. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Judge a claim's pid only from the PID view it was established in, and give every other judgement a protective `Unverifiable` verdict that nothing prunes, takes over without `--force`, or releases holds on.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - The claim field is `pid_view: Option<String>`, formatted `"<dev>:<ino>"`, serialized only when present (spec §2).
-- A view is known only when `/proc/self/status` has exactly one `NSpid` entry and `/proc/self/ns/pid` stats. Any failed read means unknown (spec §1).
+- A view is known only when `/proc/self/status` has exactly one `NSpid` entry, that entry parses as a positive pid, and `/proc/self/ns/pid` stats. Anything else, including any failed read, means unknown (spec §1).
 - The initial PID namespace is recognized by nsfs inode `PROC_PID_INIT_INO` = `0xEFFFFFFC` (4026531836) (spec §2).
 - Exported pids (`TASKS_SESSION_PID`, `CLAUDE_PID`) establish a view only when the writer's known view is the initial namespace and `proc_stat` finds the pid. Numeric or ancestry matches never establish one (spec §2).
 - Verdict order for a claim with a pid: a known differing boot gives `Stale`; then an absent recorded view, an unknown current view or differing views give `Unverifiable`; then today's checks run (spec §3).
@@ -22,6 +22,9 @@
 - JSON: `ClaimInfo.live` is `true` for `Live` and `Unverifiable`. The new optional `unverified` holds the reason, present only for `Unverifiable` (spec §5).
 - The takeover note wording is `unverifiable, forced`, and the claim description wording is `unverifiable: <why>` (spec §4).
 - No new warnings (spec §4).
+- Every claim write by its holder applies `claims::evidence`: `claim_guard` (start and other moves to doing) and `follow_holder` (note, edit, dep, attach, detach, feedback recurrence). Proof-only ownership keeps the claim's evidence (spec §2).
+- The crate version becomes `0.3.0`. The README names 0.3.0 as the minimum for every `tasks` that touches a host's claim stores (spec §7).
+- `just test-one` takes one test-name filter per invocation.
 - Tests go through `just test-one <args>` and `just test-fast`; never `cargo test` directly (AGENTS.md).
 - Conventional commits, no AI-attribution trailers.
 
@@ -56,7 +59,7 @@ Task tasks-860db2 owns this plan. One child per `### Task N:` heading. Each chil
   - `continuation_identity` (lines 906-923);
   - a new `PidSource`, `Evidence` and `evidence`, placed after `boot_id()` (around line 815);
   - every `Claim { … }` literal in tests.
-- Modify: `src/commands/mod.rs:520-550` (the `ClaimIntent::Acquire` construction in `claim_guard`)
+- Modify: `src/commands/mod.rs`: the `ClaimIntent::Acquire` construction in `claim_guard` (lines 520-550), and `follow_holder` (lines 1198-1255)
 - Modify: `src/output.rs`, the three `crate::claims::Claim { … }` test literals (add `pid_view: None`)
 - Test: unit tests in `src/pidview.rs` and `src/claims.rs`; integration tests in `tests/cli.rs`
 
@@ -108,6 +111,9 @@ mod tests {
         assert_eq!(from_parts(None, Some((5, 1))), None, "status unreadable");
         assert_eq!(from_parts(Some("Name:\tx\n"), Some((5, 1))), None, "no NSpid line");
         assert_eq!(from_parts(Some("NSpid:\t\n"), Some((5, 1))), None, "empty NSpid");
+        assert_eq!(from_parts(Some("NSpid:\tgarbage\n"), Some((5, 1))), None, "not a pid");
+        assert_eq!(from_parts(Some("NSpid:\t0\n"), Some((5, 1))), None, "pid 0 is no process");
+        assert_eq!(from_parts(Some("NSpid:\t-4\n"), Some((5, 1))), None, "negative");
         assert_eq!(from_parts(Some(ONE), None), None, "namespace link unreadable");
     }
 
@@ -165,10 +171,13 @@ impl std::fmt::Display for PidView {
 /// `status` is `/proc/self/status`; `ns` is the `(st_dev, st_ino)` of `/proc/self/ns/pid`,
 /// following the link. `NSpid` lists the caller's pid from the procfs's namespace down to
 /// its own, so exactly one entry means the procfs numbers in the caller's namespace. Any
-/// other count, or any failed read, is unknown (spec §1).
+/// other count, an entry that is not a positive pid, or any failed read, is unknown
+/// (spec §1).
 pub fn from_parts(status: Option<&str>, ns: Option<(u64, u64)>) -> Option<PidView> {
     let nspid = status?.lines().find_map(|line| line.strip_prefix("NSpid:"))?;
-    if nspid.split_whitespace().count() != 1 {
+    let mut entries = nspid.split_whitespace();
+    let pid: u32 = entries.next()?.parse().ok()?;
+    if pid == 0 || entries.next().is_some() {
         return None;
     }
     let (dev, ino) = ns?;
@@ -433,20 +442,28 @@ Expected: all pass, including the 11 new tests.
 
 - [ ] **Step 9: Write the failing integration tests**
 
-In `tests/cli.rs`, near `write_claim`, add the helper:
+In `tests/cli.rs`, near `write_claim`, add the helpers:
 
 ```rust
 /// This test process's PID view, read as `src/pidview.rs` reads it: the namespace its
-/// `/proc` numbers pids in, and `None` unless `NSpid` has exactly one entry.
+/// `/proc` numbers pids in, and `None` unless `NSpid` is exactly one positive pid.
 fn test_pid_view() -> Option<String> {
     use std::os::unix::fs::MetadataExt;
     let status = std::fs::read_to_string("/proc/self/status").ok()?;
     let nspid = status.lines().find_map(|line| line.strip_prefix("NSpid:"))?;
-    if nspid.split_whitespace().count() != 1 {
+    let mut entries = nspid.split_whitespace();
+    let pid: u32 = entries.next()?.parse().ok()?;
+    if pid == 0 || entries.next().is_some() {
         return None;
     }
     let ns = std::fs::metadata("/proc/self/ns/pid").ok()?;
     Some(format!("{}:{}", ns.dev(), ns.ino()))
+}
+
+/// The view an exported pid establishes from this test process: its own, only when that
+/// is the initial PID namespace (claim PID-view design §2).
+fn exported_pid_view() -> Option<String> {
+    test_pid_view().filter(|view| view.ends_with(":4026531836"))
 }
 
 fn stored_claim(env: &TestEnv, prefix: &str, id: &str) -> toml::Value {
@@ -454,13 +471,17 @@ fn stored_claim(env: &TestEnv, prefix: &str, id: &str) -> toml::Value {
         toml::from_str(&std::fs::read_to_string(env.claim_store(prefix)).unwrap()).unwrap();
     store["claims"][id].clone()
 }
+
+fn pid_view_of(claim: &toml::Value) -> Option<String> {
+    claim.get("pid_view").and_then(|v| v.as_str()).map(str::to_string)
+}
 ```
 
-And the tests:
+The tests all carry `pid_view` in their names, so one filter selects them:
 
 ```rust
 #[test]
-fn an_exported_pid_records_its_pid_view_only_in_the_initial_namespace() {
+fn pid_view_of_an_exported_pid_is_recorded_only_in_the_initial_namespace() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
@@ -472,16 +493,11 @@ fn an_exported_pid_records_its_pid_view_only_in_the_initial_namespace() {
         .success();
     let claim = stored_claim(&env, "sci", &id);
     // The test process is the binary's parent, so the binary shares its view.
-    let expected = test_pid_view().filter(|view| view.ends_with(":4026531836"));
-    assert_eq!(
-        claim.get("pid_view").and_then(|v| v.as_str()).map(str::to_string),
-        expected,
-        "{claim}"
-    );
+    assert_eq!(pid_view_of(&claim), exported_pid_view(), "{claim}");
 }
 
 #[test]
-fn a_heartbeat_with_a_missing_pid_records_it_without_a_view() {
+fn pid_view_heartbeat_with_a_missing_pid_records_it_without_a_view() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
@@ -495,19 +511,62 @@ fn a_heartbeat_with_a_missing_pid_records_it_without_a_view() {
     }
     let claim = stored_claim(&env, "sci", &id);
     assert_eq!(claim["pid"].as_integer(), Some(4194303), "{claim}");
-    assert!(claim.get("pid_view").is_none(), "{claim}");
+    assert_eq!(pid_view_of(&claim), None, "{claim}");
     assert!(claim.get("pid_start").is_none(), "{claim}");
+}
+
+#[test]
+fn pid_view_follows_a_new_pid_reported_through_a_note() {
+    // Plan round 1, P1: an ordinary write by the holder is a heartbeat too, and must
+    // apply the evidence rules rather than keep tracking the old process.
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    let before = stored_claim(&env, "sci", &id);
+
+    // Same pid: the recorded evidence stays.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["note", &id, "same process"])
+        .assert()
+        .success();
+    let same = stored_claim(&env, "sci", &id);
+    for field in ["pid", "pid_start", "boot_id", "pid_view"] {
+        assert_eq!(same.get(field), before.get(field), "{field}: {same}");
+    }
+
+    // A different pid this write cannot establish: tracked, with no view.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", "4194303")
+        .args(["note", &id, "new process"])
+        .assert()
+        .success();
+    let moved = stored_claim(&env, "sci", &id);
+    assert_eq!(moved["pid"].as_integer(), Some(4194303), "{moved}");
+    assert_eq!(pid_view_of(&moved), None, "{moved}");
+    assert!(moved.get("pid_start").is_none(), "{moved}");
 }
 ```
 
 - [ ] **Step 10: Run them to verify they fail**
 
 Run: `just test-one --test cli pid_view`
-Expected: `an_exported_pid_records_…` FAILS on a host whose test process is in the initial namespace (left `None`, right `Some("…:4026531836")`). `a_heartbeat_with_a_missing_pid_…` may already pass, since today's write drops `pid_start` for a missing pid. It stays as the heartbeat-row-3 guard.
+Expected outcomes:
+- `pid_view_of_an_exported_pid_…` FAILS on a host whose test process is in the initial namespace: left `None`, right `Some("…:4026531836")`.
+- `pid_view_follows_a_new_pid_reported_through_a_note` FAILS: `follow_holder` keeps the old pid, so `pid` is still the test process's.
+- `pid_view_heartbeat_with_a_missing_pid_…` may already pass, since today's write drops `pid_start` for a missing pid. It stays as the guard for heartbeat row 3.
 
 - [ ] **Step 11: Record the evidence in `claim_guard`**
 
-In `src/commands/mod.rs`, inside `claim_guard`, replace the `pid_start`, `boot_id` and `pid` fields of the `ClaimIntent::Acquire(crate::claims::Claim { … })` literal (lines 523-545) with values from `evidence`. Before the literal, after `let started = …;`:
+In `src/commands/mod.rs`, inside `claim_guard`, the `ClaimIntent::Acquire(crate::claims::Claim { … })` literal (lines 523-545) sets `pid_start`, `boot_id` and `pid`. Replace those three fields with values from `evidence`. Before the literal, after `let started = …;`:
 
 ```rust
             let evidence = crate::claims::evidence(
@@ -525,19 +584,60 @@ In the literal:
                     pid_start: evidence.pid_start,
                     boot_id: evidence.boot_id,
                     pid_view: evidence.pid_view,
-                    // `host` is unchanged: the proof's host, else this host.
-                    …
                     pid: evidence.pid,
 ```
 
-Keep `host`, `session`, `root_session`, `worktree`, `started`, `seen` and `holds` as they are. `me` is used after this point only for `me.session`, so move it in after computing `evidence`, as today.
+Keep `host`, `session`, `root_session`, `worktree`, `started`, `seen` and `holds` as they are; `host` stays the proof's host, else this host. `evidence` only borrows `me`, so `session: me.session` still moves it afterwards, as today.
 
-- [ ] **Step 12: Run the integration tests and the fast suite**
+- [ ] **Step 12: Record the evidence in `follow_holder`**
 
-Run: `just test-one --test cli pid_view`, then `just test-fast`
-Expected: both new tests pass; the fast suite passes. No liveness behaviour has changed yet, because `liveness_with` does not read `pid_view` until Task 2.
+`follow_holder` (src/commands/mod.rs:1198) is the heartbeat of every other write by the holder: `note`, `edit`, `dep`, `attach`, `detach`, and a feedback recurrence. Today it copies the whole claim (`..claim`), so a new pid the owner reports never reaches the claim. Replace the ownership match and the `moved` literal with:
 
-- [ ] **Step 13: Lint and commit**
+```rust
+    let identity = match ownership(&claim, me) {
+        Ok(Ownership::Foreign) => return,
+        // Proof-only ownership records the claim's own identity (spec §6.4 of the relay
+        // design), whose pid this write did not supply, so its evidence is kept.
+        Ok(Ownership::ByProof) => crate::claims::continuation_identity(&claim),
+        Ok(Ownership::ByIdentity) => me
+            .identity()
+            .expect("ownership by identity means the identity resolved")
+            .clone(),
+        Err(error) => {
+            ctx.warnings.push(format!(
+                "{landed}, but whether this session holds the claim on {id} could not be \
+                 established ({error})"
+            ));
+            return;
+        }
+    };
+    // Claim PID-view design §2: a heartbeat applies the evidence rules too.
+    let evidence = crate::claims::evidence(
+        &identity,
+        Some(&claim),
+        crate::pidview::current().as_ref(),
+        crate::claims::boot_id(),
+        crate::claims::proc_stat,
+    );
+    let moved = crate::claims::Claim {
+        worktree: ctx.project.resume_root().display().to_string(),
+        seen: crate::time::now(),
+        pid: evidence.pid,
+        pid_start: evidence.pid_start,
+        boot_id: evidence.boot_id,
+        pid_view: evidence.pid_view,
+        ..claim
+    };
+```
+
+`Identity` must derive `Clone`; it already does (`#[derive(Debug, Clone, PartialEq, Eq)]`).
+
+- [ ] **Step 13: Run the integration tests and the fast suite**
+
+Run `just test-one --test cli pid_view`, then `just test-fast`.
+Expected: the three new tests pass, and the fast suite passes. No liveness behaviour has changed yet, because `liveness_with` does not read `pid_view` until Task 2.
+
+- [ ] **Step 14: Lint and commit**
 
 ```bash
 just check
@@ -564,7 +664,8 @@ git commit -m "feat(claims): record the PID view a claim's pid was established i
   - `refuse_foreign_live_claim` (213-219);
   - `update_holds` (234);
   - `guard_holds` (388);
-  - `claim_guard` takeover match (472-497).
+  - `claim_guard` takeover match (472-497);
+  - `occupants` (1167-1191).
 - Modify: `src/commands/park.rs:58-66`, `src/commands/retire.rs:75-76`, `src/rename/mod.rs:319-320`, `src/rename/adopt.rs:154-155`
 - Modify: `src/commands/list.rs:274,280,302,649,752,828`, `src/lanes.rs:287,367`, `src/commands/show.rs:60`, `src/commands/sample.rs:53`, `src/moving/preflight.rs:38` (`.live(` becomes `.held(`)
 - Modify: `src/output.rs:443-473` (`ClaimInfo`) and `:1288` (claims table); `src/present.rs:143-150`
@@ -580,7 +681,121 @@ git commit -m "feat(claims): record the PID view a claim's pid was established i
   - `HoldSnapshot::load_from_paths(stores, now, boot_id, view: Option<&PidView>, stat)`;
   - `ClaimInfo.unverified: Option<String>`.
 
-- [ ] **Step 1: Write the failing verdict tests**
+- [ ] **Step 1: Make the fixtures record a view, and write the integration tests**
+
+In `tests/cli.rs`, both fixtures record the test process's view, so their claims are judged as before:
+
+- `write_claim` (line 911): after the `seen = …` line of the format string, append `pid_view` when `test_pid_view()` is `Some`:
+
+```rust
+    let view = test_pid_view()
+        .map(|view| format!("pid_view = \"{view}\"\n"))
+        .unwrap_or_default();
+```
+
+  Then add `{view}` at the end of the pushed text.
+
+- `write_detailed_claim` (line 10444): the same, for both its live and its gone-pid variants. A gone pid in the recording view must stay `Stale`, which the leak tests rely on.
+
+Add fixture writers that set the recorded view:
+
+```rust
+/// Rewrites one stored claim's `pid_view`, leaving the rest as written.
+fn set_pid_view(env: &TestEnv, prefix: &str, id: &str, view: &str) {
+    let path = env.claim_store(prefix);
+    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    store["claims"][id]
+        .as_table_mut()
+        .unwrap()
+        .insert("pid_view".into(), toml::Value::String(view.into()));
+    std::fs::write(&path, toml::to_string(&store).unwrap()).unwrap();
+}
+
+/// A claim held by this test process but recorded in `view`.
+fn write_claim_in_view(env: &TestEnv, prefix: &str, id: &str, session: &str, view: &str) {
+    write_claim(env, prefix, id, session, true);
+    set_pid_view(env, prefix, id, view);
+}
+```
+
+Then add the integration tests:
+
+```rust
+#[test]
+fn an_unverifiable_claim_is_held_not_pruned_or_taken() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let held = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    let other = id_of(env.json(&sci, &["add", "Other", "-p", "2"]));
+    write_claim_in_view(&env, "sci", &held, "sandboxed", "0:1");
+
+    // An unrelated claim write prunes nothing.
+    env.cmd(&sci).env("TASKS_SESSION", "bystander").args(["start", &other]).assert().success();
+    assert!(stored_claim(&env, "sci", &held).get("session").is_some());
+
+    // Another session cannot take it without --force.
+    let out = env.cmd(&sci).env("TASKS_SESSION", "bystander").args(["start", &held]).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("\"claimed\"")
+        || String::from_utf8_lossy(&out.stderr).contains("claimed"));
+
+    // tasks claims reports it held, with the reason.
+    let claims = env.json(&sci, &["claims"]);
+    let row = claims["claims"].as_array().unwrap().iter().find(|row| row["id"] == held).unwrap().clone();
+    assert_eq!(row["live"], true, "{row}");
+    assert_eq!(row["unverified"], "recorded in another PID view", "{row}");
+
+    // --force takes it over, and the note says how.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "bystander")
+        .args(["start", "--force", "--reason", "sandbox gone", &held])
+        .assert()
+        .success();
+    let shown = env.json(&sci, &["show", &held]);
+    assert!(shown.to_string().contains("unverifiable, forced"), "{shown}");
+}
+
+#[test]
+fn pretty_claims_name_an_unverifiable_claim() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    write_claim_in_view(&env, "sci", &id, "sandboxed", "0:1");
+    let out = env.cmd(&sci).env("TASKS_FORMAT", "pretty").args(["claims"]).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("unverifiable"), "{text}");
+    assert!(!text.contains("stale"), "{text}");
+}
+
+#[test]
+fn an_unverifiable_claim_still_occupies_its_worktree() {
+    // Plan round 1: `occupants` must count a held claim, not only a Live one, or the
+    // stale-copy refusal offers a rerun or merge instead of naming the holder.
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let other = id_of(env.json(&side, &["add", "Other work", "-p", "2"]));
+    as_agent(&env, &side, "agent-b")
+        .args(["start", &other])
+        .assert()
+        .success();
+    set_pid_view(&env, "sci", &other, "0:1");
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert!(detail.contains(&other) && detail.contains("agent-b"), "{detail}");
+    assert!(detail.contains("Wait for that branch to merge"), "{detail}");
+}
+```
+
+- [ ] **Step 2: Run the integration tests against today's verdict**
+
+Run: `just test-one --test cli unverifiable`
+Expected outcomes:
+- `an_unverifiable_claim_is_held_not_pruned_or_taken` FAILS: the claim reads live, so `unverified` is null.
+- `pretty_claims_name_an_unverifiable_claim` FAILS: the table says `live`.
+- `an_unverifiable_claim_still_occupies_its_worktree` passes today, because the claim reads `Live`. It guards against the regression a third variant would bring through `occupants`' `== Live`.
+
+- [ ] **Step 3: Write the failing verdict tests**
 
 In `src/claims.rs` tests:
 - Change `sample()` to set `pid_view: Some(INIT.to_string())` (the `INIT` constant comes from Task 1).
@@ -679,12 +894,12 @@ Then add:
     }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [ ] **Step 4: Run them to verify they fail**
 
 Run: `just test-one claims::tests`
 Expected: compile errors: `liveness_with` takes 4 arguments, no variant `Unverifiable`, no method `is_stale`.
 
-- [ ] **Step 3: Implement the verdict**
+- [ ] **Step 5: Implement the verdict**
 
 In `src/claims.rs`:
 
@@ -771,12 +986,9 @@ The `match stat(pid)` that follows stays as it is.
 
 In `stale()`, make the non-stale arm `_ => None`.
 
-- [ ] **Step 4: Run the unit tests**
+The crate does not compile again until Steps 6-8 update the callers, so no tests run until Step 9.
 
-Run: `just test-one claims::tests`
-Expected: claims tests pass. The crate still fails to compile elsewhere (holds, the commands, `.live(` callers); Steps 5-7 fix those.
-
-- [ ] **Step 5: Update the hold snapshot**
+- [ ] **Step 6: Update the hold snapshot**
 
 In `src/holds.rs` `load`, pass `crate::pidview::current().as_ref()` after the boot id. In `load_from_paths`, add the parameter `view: Option<&crate::pidview::PidView>` after `boot_id`. The check at line 101 becomes:
 
@@ -832,7 +1044,7 @@ Pass `Some(&HERE)` as the new fourth argument of every `HoldSnapshot::load_from_
     }
 ```
 
-- [ ] **Step 6: Update the commands**
+- [ ] **Step 7: Update the commands**
 
 `src/commands/mod.rs`:
 
@@ -891,9 +1103,11 @@ The `guard_holds` condition at line 388: `&& !crate::claims::liveness(&existing)
 
 `src/commands/list.rs:649`: `if liveness.is_stale() { continue; }`.
 
+`occupants` (src/commands/mod.rs:1174): the first condition becomes `!liveness.is_stale()`, so a held claim still names its session in the stale-copy refusal.
+
 Rename every `claims.live(` / `.live(&` call on a `ClaimSnapshot` to `.held(` in `list.rs`, `lanes.rs`, `show.rs`, `sample.rs` and `moving/preflight.rs`. `grep -rn '\.live(' src` must then list nothing.
 
-- [ ] **Step 7: Update the JSON and the pretty output**
+- [ ] **Step 8: Update the JSON and the pretty output**
 
 `src/output.rs` `ClaimInfo`: add after `live`:
 
@@ -963,94 +1177,24 @@ Add to the `src/output.rs` tests, beside the existing `ClaimInfo` serialization 
     }
 ```
 
-- [ ] **Step 8: Run the unit tests**
+- [ ] **Step 9: Run the unit tests, one filter per invocation**
 
-Run: `just test-one claims:: holds:: output::`
-Expected: all pass, and the crate compiles.
+Run `just test-one claims::`, then `just test-one holds::`, then `just test-one output::`.
+Expected: the crate compiles and all three pass. `test-one` forwards to `cargo test`, which accepts one test-name filter, so these cannot share one invocation.
 
-- [ ] **Step 9: Update the integration fixtures**
+- [ ] **Step 10: Run the integration tests, and search for leftover comparisons**
 
-In `tests/cli.rs`, both fixtures record the test process's view, so their claims are judged as before:
+Run: `just test-one --test cli unverifiable`
+Expected: all three pass. If one fails, fix the code, not the test.
 
-- `write_claim` (line 911): after the `seen = …` line of the format string, append `pid_view` when `test_pid_view()` is `Some`:
+Then run these two searches:
 
-```rust
-    let view = test_pid_view()
-        .map(|view| format!("pid_view = \"{view}\"\n"))
-        .unwrap_or_default();
+```bash
+grep -rn '\.live(' src
+grep -rnE '[!=]= *&?\*?(crate::claims::)?Liveness::Live|matches!\([^)]*Liveness::Live\)' src
 ```
 
-  Then add `{view}` at the end of the pushed text.
-
-- `write_detailed_claim` (line 10444): the same, for both its live and its gone-pid variants. A gone pid in the recording view must stay `Stale`, which the leak tests rely on.
-
-Add a fixture writer with an explicit view:
-
-```rust
-/// A claim held by this test process but recorded in `view`.
-fn write_claim_in_view(env: &TestEnv, prefix: &str, id: &str, session: &str, view: &str) {
-    write_claim(env, prefix, id, session, true);
-    let path = env.claim_store(prefix);
-    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    store["claims"][id]
-        .as_table_mut()
-        .unwrap()
-        .insert("pid_view".into(), toml::Value::String(view.into()));
-    std::fs::write(&path, toml::to_string(&store).unwrap()).unwrap();
-}
-```
-
-- [ ] **Step 10: Write the failing integration tests**
-
-```rust
-#[test]
-fn a_claim_from_another_pid_view_is_held_not_pruned_or_taken() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let held = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
-    let other = id_of(env.json(&sci, &["add", "Other", "-p", "2"]));
-    write_claim_in_view(&env, "sci", &held, "sandboxed", "0:1");
-
-    // An unrelated claim write prunes nothing.
-    env.cmd(&sci).env("TASKS_SESSION", "bystander").args(["start", &other]).assert().success();
-    assert!(stored_claim(&env, "sci", &held).get("session").is_some());
-
-    // Another session cannot take it without --force.
-    let out = env.cmd(&sci).env("TASKS_SESSION", "bystander").args(["start", &held]).output().unwrap();
-    assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stdout).contains("\"claimed\"")
-        || String::from_utf8_lossy(&out.stderr).contains("claimed"));
-
-    // tasks claims reports it held, with the reason.
-    let claims = env.json(&sci, &["claims"]);
-    let row = claims["claims"].as_array().unwrap().iter().find(|row| row["id"] == held).unwrap().clone();
-    assert_eq!(row["live"], true, "{row}");
-    assert_eq!(row["unverified"], "recorded in another PID view", "{row}");
-
-    // --force takes it over, and the note says how.
-    env.cmd(&sci)
-        .env("TASKS_SESSION", "bystander")
-        .args(["start", "--force", "--reason", "sandbox gone", &held])
-        .assert()
-        .success();
-    let shown = env.json(&sci, &["show", &held]);
-    assert!(shown.to_string().contains("unverifiable, forced"), "{shown}");
-}
-
-#[test]
-fn pretty_claims_name_an_unverifiable_claim() {
-    let mut env = TestEnv::new();
-    let sci = env.init("sci");
-    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
-    write_claim_in_view(&env, "sci", &id, "sandboxed", "0:1");
-    let out = env.cmd(&sci).env("TASKS_FORMAT", "pretty").args(["claims"]).output().unwrap();
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("unverifiable"), "{text}");
-    assert!(!text.contains("stale"), "{text}");
-}
-```
-
-Run: `just test-one --test cli unverifiable pid_view`. Before Steps 1-9 these tests failed. Now expect both to pass. If either fails, fix the code, not the test.
+Expected: both print nothing. Any remaining `Liveness::Live` is a constructor, or a match arm in a `match` that also names `Unverifiable`.
 
 - [ ] **Step 11: Run the fast suite and resolve the expected fixture fallout**
 
@@ -1077,6 +1221,7 @@ nothing prunes, takes over without --force, or releases holds on."
 ### Task 3: Document the views and run the namespace acceptance
 
 **Files:**
+- Modify: `Cargo.toml` (version) and `Cargo.lock` (the `tasks` entry follows)
 - Modify: `README.md`:
   - the PID-namespace paragraph (around line 302, "Relay process matching also requires…");
   - the Upgrading paragraph (around line 309);
@@ -1086,9 +1231,20 @@ nothing prunes, takes over without --force, or releases holds on."
 
 **Interfaces:**
 - Consumes: the built worktree binary (`target/debug/tasks` after `cargo build`, or the path `just` builds), with Tasks 1 and 2 merged into it.
-- Produces: documentation and attached evidence; no code.
+- Produces: `tasks --version` prints `tasks 0.3.0`; documentation; attached evidence.
 
-- [ ] **Step 1: Update the README**
+- [ ] **Step 1: Bump the version, so the upgrade check can tell the builds apart**
+
+Both the old and the new build would otherwise report `tasks 0.2.0`, and the coordinated-upgrade check in spec §7 would pass falsely. In `Cargo.toml`, `version = "0.2.0"` becomes `version = "0.3.0"`. Run `just check` once; its build updates `Cargo.lock`'s `tasks` entry. Then:
+
+```bash
+git diff Cargo.lock
+target/debug/tasks --version
+```
+
+Expected: the diff shows only the `tasks` package's version line changing from `0.2.0` to `0.3.0`, and the binary prints `tasks 0.3.0`.
+
+- [ ] **Step 2: Update the README**
 
 Replace the sentence "Claim liveness judged across PID views is tracked as tasks-860db2." with:
 
@@ -1107,11 +1263,12 @@ name a process in the namespace of the command that sets it.
 Add to the Upgrading paragraph:
 
 ```markdown
-Claims judged by PID view need every `tasks` that reads or writes a host's claim stores
-at the same version or later: each `tasks` on `PATH` in each harness's environment,
-including one a sandbox can execute. An older binary judges every pid through its own
-`/proc`. It can prune a claim that another view holds, it drops the recorded view when
-it saves, and it reports that claim as stale. Check `tasks --version` for each.
+tasks 0.3.0 judges claims by PID view. Its protection holds only when every `tasks`
+that reads or writes a host's claim stores is 0.3.0 or later: each `tasks` on `PATH`
+in each harness's environment, including one a sandbox can execute. An older binary
+judges every pid through its own `/proc`. It can prune a claim that another view holds,
+it drops the recorded view when it saves, and it reports that claim as stale. Check
+`tasks --version` for each.
 ```
 
 Extend the `tasks claims` line's comment to read:
@@ -1120,7 +1277,7 @@ Extend the `tasks claims` line's comment to read:
     tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads
 ```
 
-- [ ] **Step 2: Update the skill**
+- [ ] **Step 3: Update the skill**
 
 After the sentence ending "`tasks start --force <id>` takes it over and records that in the task's notes." in `skills/tasks/SKILL.md`, add:
 
@@ -1130,18 +1287,24 @@ After the sentence ending "`tasks start --force <id>` takes it over and records 
    Its own view, its owner, a reboot or `start --force` releases it.
 ```
 
-- [ ] **Step 3: Write and run the acceptance script**
+- [ ] **Step 4: Write and run the acceptance script**
 
 Write the acceptance script at `$TMPDIR/pidview-acceptance.sh`, outside the repository. Model it on tasks-fe6c59's `pidns-probe.sh`; `tasks show tasks-fe6c59` prints its path. The script must:
 - use a private `HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `RELAY_STATE_DIR` under a `mktemp -d` directory, and delete them on exit (`trap … EXIT INT TERM`);
 - run the worktree binary by explicit path;
-- use only unprivileged `unshare --user --map-current-user --pid --fork [--mount-proc]`, with no `codex sandbox`, no model call and no live desktop.
+- use only unprivileged user namespaces: `unshare --user --map-current-user --pid --fork [--mount-proc]`, or `--map-root-user` in place of `--map-current-user` where a case needs root inside its own user namespace (case 3). No `codex sandbox`, no model call and no live desktop.
 
 It must run these cases. Each prints `case`, `expected`, `observed` and `verdict` as one JSON object per line:
 
 1. **prune-from-sandbox.** On the host, `TASKS_SESSION=A TASKS_SESSION_PID=$$ tasks start T1`; `pid_view` must be recorded. In a private-`/proc` child, `TASKS_SESSION=B tasks start T2`. Back on the host, T1's claim must still exist, and `TASKS_SESSION=C tasks start T1` must fail with `claimed`.
 2. **ns-explicit-pid1.** In a private-`/proc` child, `TASKS_SESSION=N TASKS_SESSION_PID=1 tasks start T3`, with the child kept alive by `sleep` in the background. The claim must record no `pid_view`. On the host, `tasks claims` shows it `live: true` with `unverified`, and `TASKS_SESSION=C tasks start T3` fails with `claimed`.
-3. **procfs unmount and reuse.** Namespace A: a private-`/proc` child whose pid 1 runs `sleep 120`. In A, a claim on T4 through the Unix session fallback (no `TASKS_SESSION`) records A's view. Record `stat -c %d /proc` and A's namespace inode. Unmount A's `/proc` (`umount /proc` inside A's mount namespace). Start namespace B with `--mount-proc` and record its `/proc` device, and whether it equals A's. From B, `TASKS_SESSION=B tasks start T5`. T4's claim must still exist while A's pid 1 lives.
+3. **procfs unmount and reuse.** Plan round 1 found that `--map-current-user` cannot run this case: the session id reads 0 and `umount` needs root. So:
+   - Start namespace A with `unshare --user --map-root-user --pid --fork --mount-proc`. Its pid 1 keeps A alive (`sleep 120 &`, then `wait`).
+   - Inside A, run the claim write under `setsid`, so that the Unix session fallback has a session id in A's view (the reviewer observed SID 1): `setsid tasks start T4`, with no `TASKS_SESSION`, `CLAUDE_CODE_SESSION_ID` or Codex variables.
+   - **Assert before continuing** that T4's stored claim has a `pid_view` equal to A's namespace identity (`stat -L -c '%d:%i' /proc/self/ns/pid` inside A). If it does not, the case's verdict is `fail`, not `unavailable`: the setup, not the environment, is wrong.
+   - Record `stat -c %d /proc` in A, then unmount A's `/proc` (`umount /proc` inside A).
+   - Start namespace B the same way, record its `/proc` device and whether it equals A's.
+   - From B, `TASKS_SESSION=B tasks start T5`. T4's claim must still exist while A's pid 1 lives.
 4. **exported host pid.** In a private-`/proc` child, `TASKS_SESSION=E TASKS_SESSION_PID=<a live host pid, the script's own $$>` with `tasks start T6`. The claim must record no view. A second child write (`TASKS_SESSION=F tasks start T7`) must leave it in place.
 5. **colliding ancestor.** Outer namespace O: `unshare … --mount-proc sh -c 'sleep 300 & …'`, so that the intended owner is pid 2 in O. O launches inner namespace I with `--mount-proc`. In I, arrange an ancestor at pid 2 that exits later (`sh -c 'sh -c "…" ; sleep 1'`, with the inner pid noted from `NSpid`). Run with `TASKS_SESSION=O2 TASKS_SESSION_PID=2` inherited.
    - I's `tasks start T8` records no view.
@@ -1153,7 +1316,7 @@ It must run these cases. Each prints `case`, `expected`, `observed` and `verdict
 
 Run it once and redirect the output to `$TMPDIR/pidview-acceptance-evidence.json`. Every verdict must be `pass`. A case the environment cannot run, such as a refused `umount`, is reported as `unavailable` with the error. Record it in a task note; do not weaken the case to pass.
 
-- [ ] **Step 4: Attach the evidence**
+- [ ] **Step 5: Attach the evidence**
 
 ```bash
 tasks attach tasks-860db2 "$TMPDIR/pidview-acceptance.sh" --caption "Disposable acceptance script for the PID-view design: unshare cases, private config/state, deleted after"
@@ -1163,15 +1326,15 @@ tasks note tasks-860db2 "acceptance: <n> pass, <m> unavailable (<which, why>)"
 
 Fill in `<n>`, `<m>` and the reasons from the run.
 
-- [ ] **Step 5: Gate and commit**
+- [ ] **Step 6: Gate and commit**
 
 ```bash
 just check
 just test-fast
-git add README.md skills/tasks/SKILL.md tasks/
-git commit -m "docs: claims judged by PID view, coordinated upgrade, unverifiable claims"
+git add Cargo.toml Cargo.lock README.md skills/tasks/SKILL.md tasks/
+git commit -m "chore: tasks 0.3.0; document claims judged by PID view and the coordinated upgrade"
 ```
 
-- [ ] **Step 6: Reinstall the CLI**
+- [ ] **Step 7: Reinstall the CLI**
 
 AGENTS.md requires reinstalling after CLI changes so the tracker in use is the code under test. This replaces the host's `tasks` binary, a host-wide action. Do it only after the final whole-branch review passes and the branch merges, together with every other `tasks` the host runs (spec §7). Until then the worktree binary runs by explicit path.
