@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/reopen-hint
 created: 2026-10-12T11:48:42Z
-updated: 2026-10-14T18:45:57Z
+updated: 2026-10-14T18:48:57Z
 started: 2026-10-14T18:45:55Z
 depends: []
 tags: [feedback, friction, "from:mind6", cli]
@@ -30,3 +30,4 @@ Original report (preserved): A correction handed back after a step completion ma
   provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-14T18:45:57Z (fix/reopen-hint): resumed
   provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T18:48:57Z (fix/reopen-hint): RED: new cli test saw bare 'invalid transition done -> doing'; GREEN after the status.rs hint. Moved stays refused at load (kind moved, tests/move.rs); cadence reopen asserted in the new test and cli.rs recurrence test. just test-fast and just check exit 0.
