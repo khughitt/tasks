@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T20:41:12Z
+updated: 2026-10-14T20:42:12Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -52,3 +52,4 @@ Tests: inject the view the way `liveness_with` injects stat.
 - 2026-10-14T20:41:11Z (fix/claim-pid-view): review: spec round 2 — verdict: revise; findings: P1 1; reviewer: human
 - 2026-10-14T20:41:12Z (fix/claim-pid-view): resumed
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T20:42:12Z (fix/claim-pid-view): spec revision 3: exported pids establish a view only when the writer's known view is the initial PID namespace (PROC_PID_INIT_INO), never by numeric/ancestry match; colliding-ancestor acceptance case added
