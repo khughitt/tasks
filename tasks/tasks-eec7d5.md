@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/tmpdir-git-ceiling
 created: 2026-10-08T21:02:30Z
-updated: 2026-10-14T15:29:31Z
+updated: 2026-10-14T15:31:46Z
 started: 2026-10-14T15:29:24Z
 depends: []
 tags: [feedback, friction, "from:tasks", tests]
@@ -35,3 +35,4 @@ Original report (preserved): Fast-suite CLI fixtures intermittently reject init 
   provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-14T15:29:31Z (fix/tmpdir-git-ceiling): resumed
   provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T15:31:46Z (fix/tmpdir-git-ceiling): Scope change: the RED run (empty .git in a scratch TMPDIR) fails 5 unit tests in src/ (link, scope, shorthand) before any integration binary runs; unit tests spawn git in-process, so helper-only env cannot fix them. Setting GIT_CEILING_DIRECTORIES=realpath(TMPDIR) once in the justfile's test commands instead covers unit and integration tests by inheritance.
