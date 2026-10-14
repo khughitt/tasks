@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: investigate/pidns-proof
 created: 2026-10-08T09:57:57Z
-updated: 2026-10-14T19:04:25Z
+updated: 2026-10-14T19:04:40Z
 started: 2026-10-14T18:52:07Z
 depends: []
 parent: tasks-2fa8c6
@@ -34,3 +34,4 @@ Ideas it wakes: On completion, run tasks note tasks-b9cbe3 with the finding befo
 - 2026-10-14T18:52:15Z (investigate/pidns-proof): resumed
   provenance: {"harness_session":"claude-code:8bec6b41-4900-4f8f-80dc-6b5e19c5efa3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-14T19:04:25Z (investigate/pidns-proof): attached: pidns-proof-evidence.json (22373 bytes): Sanitized probe results: 23 cases (controls, unshare namespaces, genuine codex sandbox) with verdicts; synthetic registry rows
+- 2026-10-14T19:04:40Z (investigate/pidns-proof): attached: pidns-probe.sh (12820 bytes): Disposable probe that produced the evidence: private config/state/registry, synthetic relay rows, optional genuine codex sandbox cases
