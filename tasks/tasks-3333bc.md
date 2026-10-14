@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-14T12:53:25Z
-updated: 2026-10-14T13:22:48Z
+updated: 2026-10-14T13:22:59Z
 depends: []
 tags: [feedback, friction, "from:ops"]
 ---
