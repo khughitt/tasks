@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: planned
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T19:35:14Z
+updated: 2026-10-14T19:35:16Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -30,3 +30,7 @@ Design questions to settle (revised after review of tasks-fe6c59):
 - Whether a relay walk that ends Outside at a pid 1 in a non-initial namespace should refuse instead of silently falling to the native level (truncated ancestry; case ns-plain-private-proc).
 
 Tests: inject the view the way `liveness_with` injects stat.
+
+## Notes
+
+- 2026-10-14T19:35:16Z (main): revised from review of tasks-fe6c59: a cross-view or unknown view is insufficient evidence for takeover, prune or hold release (TTL fallback rejected; a live >4h claim must survive); PID view is the procfs mount's numbering, not /proc/self/ns/pid; inherited-host-/proc and private-/proc cases required
