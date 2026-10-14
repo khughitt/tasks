@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: investigate/pidns-proof
 created: 2026-10-08T09:57:57Z
-updated: 2026-10-14T18:52:07Z
+updated: 2026-10-14T18:52:15Z
 started: 2026-10-14T18:52:07Z
 depends: []
 parent: tasks-2fa8c6
@@ -30,4 +30,6 @@ Ideas it wakes: On completion, run tasks note tasks-b9cbe3 with the finding befo
 ## Notes
 
 - 2026-10-14T18:52:07Z (main): started
+  provenance: {"harness_session":"claude-code:8bec6b41-4900-4f8f-80dc-6b5e19c5efa3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T18:52:15Z (investigate/pidns-proof): resumed
   provenance: {"harness_session":"claude-code:8bec6b41-4900-4f8f-80dc-6b5e19c5efa3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
