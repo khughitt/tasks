@@ -57,12 +57,17 @@ mean those documents were verified.
    `next`.
    `--needs-review` keeps rows that still need a look: ideas no scope pass has reviewed
    (`reviewed` unset) and leaf todo or blocked tasks with no process. Pretty tables mark
-   those rows with a leading `*`.
+   those rows with a leading `*`; together they are the scope queue, which `/scope` with
+   no ids draws from, ideas first. Status and process tell the two kinds apart.
    `tasks search "<phrase>"` is `list` narrowed to tasks whose title or body contains the
    phrase (literal, case-insensitive; notes are not searched) and takes every `list`
    option, so `tasks search "<phrase>" --all-projects` (open work, shelved aside) is the
    duplicate check before filing.
    Never pick a task with children; those are goals. `ready` already omits them.
+   A parent must be in the same project, so a goal whose pieces live in other projects
+   holds them as `depends` and is a leaf to the tool: `ready` offers it once its pieces
+   close, for the closeout. Rate it as that closeout (usually `--process direct`), which
+   also takes it out of the `*` queue.
    A lane (`lane: true`) is a goal too, even before it has children, and every row names
    its lane in `in_lane` (the nearest lane at or above it). A session committed to one
    lane picks with `tasks next --under <lane>`; `--under` also narrows `list` and `ready`
