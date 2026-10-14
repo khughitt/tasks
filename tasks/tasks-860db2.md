@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T20:06:40Z
+updated: 2026-10-14T20:08:09Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -46,3 +46,4 @@ Tests: inject the view the way `liveness_with` injects stat.
 - 2026-10-14T20:06:38Z (fix/claim-pid-view): review: spec round 1 — verdict: revise; findings: must-fix 2, should-fix 1; reviewer: human
 - 2026-10-14T20:06:40Z (fix/claim-pid-view): resumed
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T20:08:09Z (fix/claim-pid-view): spec revision 2: view = procfs's pid namespace (nsfs dev:ino via NSpid==1), unknown otherwise; exported pids establish a view only through the ancestry walk; heartbeats keep established evidence; mixed versions documented unsafe
