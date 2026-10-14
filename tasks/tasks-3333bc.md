@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-14T12:53:25Z
-updated: 2026-10-14T13:22:47Z
+updated: 2026-10-14T13:22:48Z
 depends: []
 tags: [feedback, friction, "from:ops"]
 ---
@@ -19,3 +19,7 @@ Decided at scoping: take the selection half; no CLI or JSON change. Rows already
 Done: skills/scope/SKILL.md §1 discovers with `tasks list --needs-review [--tag] [--project]`; unreviewed ideas form the batch when any are eligible, else process-less todo/blocked rows do, each a re-scope (§"Re-scope a scoped task", whose `confirmed` verdict already sets a missing process). Drop "Default selection never returns a non-idea". skills/tasks/SKILL.md's `--needs-review` line says '*' is the scope queue. docs/specs/2026-10-11-review-state-design.md §5.2/§7.1 get a dated amendment.
 
 Where: skills/scope/SKILL.md §1 and the re-scope section; skills/tasks/SKILL.md (~line 58); the review-state spec.
+
+## Notes
+
+- 2026-10-14T13:22:48Z (main): scope: scoped; todo P2 xs/low/direct; selection half taken (scope default selection reads all of --needs-review, ideas first, then process-less todo/blocked as re-scopes); pretty relabel and JSON reason field declined: status, process and reviewed already distinguish the kinds
