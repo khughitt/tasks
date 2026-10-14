@@ -1,13 +1,15 @@
 ---
 id: tasks-fe6c59
 title: Establish the process-proof boundary for relay across PID namespaces
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-08T09:57:57Z
-updated: 2026-10-13T09:21:39Z
+updated: 2026-10-14T18:52:07Z
+started: 2026-10-14T18:52:07Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -24,3 +26,8 @@ Bound: Trace the three proof consumers and the current handle schema. Use one di
 Expected result: attach sanitized evidence, enumerate which handle/proof assumptions fail, and recommend either a bounded diagnostic/documentation remedy or separately reviewed namespace-aware design, identifying any relay-producer coordination. State what requires a later genuine harness capture; existing native thread identity is not a substitute for a missing process relationship. Check for overlapping related-owner work before filing any cross-project follow-up. Update the brief. P2/s/mid/direct: bounded investigation with explicit controls, not implementation approval.
 
 Ideas it wakes: On completion, run tasks note tasks-b9cbe3 with the finding before the evidence's branch merges, update the brief and re-scope the report.
+
+## Notes
+
+- 2026-10-14T18:52:07Z (main): started
+  provenance: {"harness_session":"claude-code:8bec6b41-4900-4f8f-80dc-6b5e19c5efa3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
