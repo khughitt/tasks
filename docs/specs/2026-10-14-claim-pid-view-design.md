@@ -1,6 +1,7 @@
 # Claim liveness judged only from the PID view that recorded it
 
-Task: tasks-860db2. Status: draft for review, revision 3. Revision 1 failed review
+Task: tasks-860db2. Status: accepted 2026-10-14 at revision 3 (spec round 3, reviewer
+human); implementation requires a separately reviewed plan. Revision 1 failed review
 (spec round 1): it identified a view by procfs `st_dev`, it recorded the writer's view
 for exported PIDs it had not established, and it called mixed versions safe.
 Revision 2 failed spec round 2: it took ancestry membership as proof of an exported
