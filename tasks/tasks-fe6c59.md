@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: investigate/pidns-proof
 created: 2026-10-08T09:57:57Z
-updated: 2026-10-14T19:07:01Z
+updated: 2026-10-14T19:34:51Z
 started: 2026-10-14T18:52:07Z
 completed: 2026-10-14T19:07:01Z
 depends: []
@@ -41,3 +41,4 @@ Ideas it wakes: On completion, run tasks note tasks-b9cbe3 with the finding befo
   provenance: {"harness_session":"claude-code:8bec6b41-4900-4f8f-80dc-6b5e19c5efa3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-14T19:07:01Z (investigate/pidns-proof): Namespace process-proof boundary established: no verifiable cross-namespace relationship (Codex helper pid 1, hidden session, reused ns inodes, peer-cred blocked); acquisition/proof fail closed, liveness/prune across views does not (tasks-860db2); diagnostics tasks-19b244; evidence attached; brief and README updated
   provenance: {"harness_session":"claude-code:8bec6b41-4900-4f8f-80dc-6b5e19c5efa3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T19:34:51Z (main): review: impl round 1 — verdict: revise; findings: P1 1, P2 1; reviewer: human
