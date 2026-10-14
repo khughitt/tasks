@@ -1,7 +1,10 @@
 # Claim liveness judged only from the PID view that recorded it
 
-Task: tasks-860db2. Status: draft for review. Source: tasks-fe6c59, whose attached
-`pidns-proof-evidence.json` holds the cases cited below.
+Task: tasks-860db2. Status: draft for review, revision 2. Revision 1 failed review
+(spec round 1): it identified a view by procfs `st_dev`, it recorded the writer's view
+for exported PIDs it had not established, and it called mixed versions safe.
+Source: tasks-fe6c59, whose attached `pidns-proof-evidence.json` holds the cases cited
+below.
 
 ## Outcome and scope
 
@@ -18,13 +21,18 @@ follow:
   (`TASKS_SESSION_PID=1`) reads as "reused" from the host, which then takes the claim
   over without `--force` (cases `ns-explicit-pid1`, `host-view-of-ns-pid`).
 
-After this change a claim records the view its pid was read through. An evaluator
-in another view, or one that cannot tell, gives a third verdict, `Unverifiable`.
-That verdict protects the claim as `Live` does: nothing prunes it, takes it over
-without `--force`, or releases its holds. Pid-less (TTL) claims are unaffected.
+After this change a claim records the view its pid was established in, when the
+writer can establish one. An evaluator in another view, or one where either side is
+unknown, gives a third verdict, `Unverifiable`. That verdict protects the claim as
+`Live` does: nothing prunes it, takes it over without `--force`, or releases its
+holds. Pid-less (TTL) claims are unaffected.
 
-In scope: the claim field, the verdict, every call site's treatment of it, the
-`tasks claims`/`ClaimInfo` JSON, and the README paragraph on PID namespaces.
+In scope:
+- the claim field and the rules for writing it;
+- the new verdict and how every call site treats it;
+- the `tasks claims`/`ClaimInfo` JSON;
+- the README paragraphs on PID namespaces and upgrading.
+
 Out of scope: relay matching and process proof, which already fail closed across
 namespaces (tasks-fe6c59); the refusal wording, which is tasks-19b244.
 
@@ -35,23 +43,33 @@ On 2026-10-14, against the worktree base `f23487b`:
 - `claims::liveness_with` (src/claims.rs) checks the pid, boot and start time with no
   notion of view. `ClaimStore::prune_dead` keeps only `Live`. The claim write in
   `commands/mod.rs` records `pid_start` from the relay proof, or else by reading
-  `proc_stat(pid)` in the writer's own `/proc`.
+  `proc_stat(pid)` in the writer's own `/proc`. It accepts the pid even when that read
+  fails, and then records no start time.
 - About 30 call sites read `Liveness`. Most ask `== Live` (protect only `Live`); some
   ask `!= Live` (act on anything else): `holds.rs` releasing holds, `update_holds`,
   and `claimed_elsewhere` in `commands/list.rs`.
 - ops `hooks/claim-guard` requires `live` to be a bool in `tasks claims`, and treats
   `live: true` rows as held.
 - `StoreFile` and `Claim` do not deny unknown fields, so an older binary loads a store
-  with a new field. It drops that field when it saves.
+  with a new field. Before it saves, its own `prune_dead` judges every pid through its
+  own `/proc`, and it drops the new field when it saves.
+- `relay::ancestry` already walks the caller's ppid chain through `/proc`.
 - This host has three claims across all stores; one carries a pid.
 
-PID-view probe on this host (kernel 7.2.2, unprivileged `unshare`):
+PID-view probes on this host (kernel 7.2.2, unprivileged `unshare`):
 
-| caller | `/proc` `st_dev` | `NSpid` |
-|---|---|---|
-| host | 24 | one entry |
-| child PID namespace, inherited host `/proc` | 24 | two entries |
-| child PID namespace, private `/proc` | 38 | one entry |
+| caller | `/proc` `st_dev` | `NSpid` entries | `/proc/self/ns/pid` | `/proc/1/ns/pid` |
+|---|---|---|---|---|
+| host | 24 | 1 | dev 5, ino 4026531836 | n/a |
+| child namespace, inherited host `/proc` | 24 | 2 | readable | permission denied |
+| child namespace, private `/proc` | 38 | 1 | readable, its own inode | n/a |
+
+Reviewer probes (spec round 1):
+
+- A procfs device number (38) was reused by another namespace while the first
+  namespace's pid 1 was still alive.
+- A live host pid exported into a private-`/proc` child was absent from the child's
+  `/proc`.
 
 ## Design
 
@@ -60,48 +78,88 @@ PID-view probe on this host (kernel 7.2.2, unprivileged `unshare`):
 Linux numbers `/proc/<pid>` by the PID namespace of the procfs mount, not by the
 caller's namespace. Case `ns-plain-host-proc` shows a child-namespace caller reading
 host pids through an inherited `/proc`. A pid therefore means something only together
-with the procfs it was read through.
+with the namespace its procfs numbers in.
 
-**A PID view is the `st_dev` of `/proc`**, read with `std::fs::metadata("/proc")`.
-Each procfs superblock has its own device number. An inherited host `/proc` shares
-the host's device, so it is the same view, which is correct because it numbers pids
-the same way. A private `/proc` gets a new device. Two procfs mounts of one namespace
-would read as different views. That errs toward `Unverifiable`, the protective
-verdict, never toward a wrong `Stale`.
+**A PID view is the PID namespace that the caller's `/proc` numbers pids in,
+identified by the `(st_dev, st_ino)` of its nsfs file.** namespaces(7) names that pair
+as a namespace's identity. Reading the current view:
+
+1. Read `/proc/self/status` and count the `NSpid` entries. The kernel lists them from
+   the procfs's namespace down to the caller's. One entry means the procfs numbers in
+   the caller's own namespace. A caller cannot see itself in a procfs of an unrelated
+   or descendant namespace (`/proc/self` does not resolve there), so any failed read
+   means the view is unknown.
+2. If there is exactly one entry, the view is the `(st_dev, st_ino)` of
+   `stat("/proc/self/ns/pid")`, following the link.
+3. Otherwise, or if any read fails, the view is **unknown**. With two or more entries
+   the procfs belongs to an ancestor namespace. Naming that namespace would mean
+   reading `/proc/1/ns/pid`, which an unprivileged caller is refused (table above).
+   `NS_GET_PARENT` returns `EPERM` outside the caller's scope.
+
+**Why this identity cannot be reused under a live owner.** A namespace's inode
+number is freed only when the namespace itself is destroyed. A process in a namespace,
+or in any descendant namespace, holds the namespace alive. The recorded pid was valid
+in the view's procfs, so its process lived in that namespace or below it. While that
+process lives, no other namespace can carry the same identity. If a view's identity
+turns up again, the recording process is dead, and `Stale` is the right verdict.
+Unmounting a procfs does not end its namespace, so the identity does not depend on
+any mount.
 
 Rejected alternatives:
 
-- **`/proc/self/ns/pid`** names the caller's namespace, not the procfs's. It would
-  misjudge the inherited-host-`/proc` case.
-- **The `NSpid` entry count**, the task's candidate signal. One entry means the
-  procfs numbers pids in the caller's namespace, but the host and a private sandbox
-  `/proc` both show one entry (table above). It cannot tell them apart.
-- **The procfs's pid-namespace inode**, from the `NSpid` count plus `/proc/self/ns/pid`,
-  or `/proc/1/ns/pid` for an ancestor. Reading `/proc/1/ns/pid` on the host's init
-  needs ptrace access that an unprivileged sandbox lacks, and `NS_GET_PARENT` returns
-  `EPERM` outside the caller's scope. The inherited-`/proc` case would always read
-  unknown.
+- **The procfs `st_dev`** (revision 1). A device number is freed when the superblock
+  goes, not when the namespace ends. The reviewer reproduced a reuse while the
+  original namespace's pid 1 lived. A matching device then let a differing start time
+  read as `Stale` and delete a live owner's claim.
+- **`/proc/self/ns/pid` without the `NSpid` check.** It names the caller's namespace,
+  not the procfs's, so it would misjudge an inherited host `/proc`.
+- **The `NSpid` count alone.** The host and a private sandbox `/proc` both show one
+  entry.
 
-**Reuse.** A device number, like a namespace inode, is reused after its procfs is
-gone. A reused view is not evidence of anything. Its old processes are gone, so a
-recorded pid there reads as absent or reused (`Stale`, correctly). A false match
-would need the same pid and the same start time, which the existing `pid_start`
-check already rules out. A claim with a pid but no `pid_start` keeps today's
-behaviour within its view.
+**Cost.** In a child namespace that keeps the host `/proc`, every view reads unknown.
+Pid claims written there carry no view, and every pid claim evaluated there reads
+`Unverifiable`. Nothing is misjudged; such claims clear only through §4's paths. The
+Codex sandbox has a private `/proc`, so this cost does not reach it.
 
 ### 2. Recording
 
-`Claim` gains `pid_view: Option<u64>`, serialized only when present.
+`Claim` gains `pid_view: Option<String>`, the identity formatted `"<dev>:<ino>"`,
+serialized only when present. A claim write records a view only when it
+**establishes** the pid in the writer's current view, and only when that view is
+known:
 
-- Whenever a claim write records `pid`, it also records the writer's current view.
-  On the native path the writer has just read `proc_stat(pid)` through that view. On
-  the relay path, the match was made by walking the writer's own `/proc` ancestry, so
-  the handle's pid is valid in the writer's view too.
-- A pid-less claim records no view.
-- If `/proc`'s metadata cannot be read, the field is absent. The claim is then
-  `Unverifiable` everywhere (§3), which protects it and does not misjudge it.
-- Every write by the owner refreshes `seen` and rewrites the claim, so the view
-  follows the owner's latest write.
+- **Relay level.** The handle was matched by walking the writer's own `/proc`
+  ancestry and comparing the start time, so the pid is established in the writer's
+  view.
+- **Unix session fallback (`sid:<pid>`).** The session id comes from
+  `/proc/self/stat`, which the kernel translates into the procfs's namespace. It is
+  established when it is nonzero and `proc_stat` finds it.
+- **Exported pids (`TASKS_SESSION_PID`, `CLAUDE_PID`).** An inherited export can hold
+  a pid from another namespace, and the number can exist in this view as an unrelated
+  process. The pid is established only when it appears in the writer's ancestry walk
+  through `relay::ancestry`, read through the same `/proc`. Otherwise the claim keeps
+  the pid and the start time if one was read, and records no view.
+
+A claim with a pid and no view reads `Unverifiable` everywhere (§3). It is protected,
+not misjudged.
+
+**Heartbeats keep established evidence.** The owner's writes refresh `seen`. They
+change the process evidence (`pid`, `pid_start`, `boot_id`, `pid_view`) only under
+these rules:
+
+| This write's pid | Evidence written |
+|---|---|
+| established in a known view | all four fields from this write |
+| equal to the recorded pid, not established | the existing evidence, unchanged |
+| different from the recorded pid, not established | the new pid, any start read, no view |
+| absent | the existing evidence, unchanged |
+
+The third row cannot keep the old evidence. That evidence names a process the owner
+no longer reports, and once it dies its own view would read it `Stale` while the
+session lives. Recording the new pid with no view keeps the claim protected.
+
+A takeover or a fresh acquisition has no existing evidence of its own to keep, and
+writes this write's evidence.
 
 ### 3. The verdict
 
@@ -113,29 +171,28 @@ pub enum Liveness {
 }
 ```
 
-`liveness_with` gains an injected current view, `Option<u64>`, beside the injected
+`liveness_with` gains an injected current view, `Option<String>`, beside the injected
 `stat`. For a claim with a pid it decides in this order:
 
 1. A known, differing `boot_id` gives `Stale("recorded on an earlier boot")`. A
    reboot ends every view, so this needs no view check and stays first.
-2. If the recorded view is absent, the current view unreadable, or the two differ,
-   the verdict is `Unverifiable`. The reason names which case applies: "recorded in
-   another PID view", "recorded before PID views were tracked", or "this command
-   cannot read its PID view". The reason carries no pid or device values.
+2. If the recorded view is absent, the current view unknown, or the two differ, the
+   verdict is `Unverifiable`. The reason names the case: "recorded in another PID
+   view", "PID view not established when recorded", or "this command cannot
+   establish its PID view". The reason carries no pid or namespace values.
 3. Otherwise the checks run as today: unknown boot, the stat result, the zombie test,
    the start time and the TTL fallback.
 
 A pid-less claim takes the TTL path exactly as today.
 
 `Unverifiable` never decays into `Stale` with age. A live owner running one long
-command keeps its claim past four hours, even against a sandboxed caller (the test
-in §6).
+command keeps its claim past four hours, even against a sandboxed caller (Testing).
 
 ### 4. Call sites
 
 The rule: **only `Stale` permits automatic action.** `Unverifiable` gets `Live`'s
-protection and its own wording. A helper, `Liveness::is_stale()`, replaces the `== Live` /
-`!= Live` comparisons, so each site states its intent.
+protection and its own wording. A helper, `Liveness::is_stale()`, replaces the
+`== Live` / `!= Live` comparisons, so each site states its intent.
 
 | Site | Today | With `Unverifiable` |
 |---|---|---|
@@ -152,15 +209,16 @@ protection and its own wording. A helper, `Liveness::is_stale()`, replaces the `
 
 **Who removes an `Unverifiable` claim:**
 
-- The recording view, where the verdict is ordinary `Live` or `Stale`, so its writes
-  prune the claim when the owner is dead.
+- An evaluator in the recording view, where the verdict is ordinary `Live` or
+  `Stale`, so its writes prune the claim once the owner is dead. This needs a
+  recorded view.
 - A reboot.
 - The owner's own `park` or `done`.
 - An explicit `start --force`, recorded as `unverifiable, forced`.
 
-A claim whose recording view has itself disappeared, such as a finished sandbox,
-therefore stays until reboot or `--force`. Wrongly deleting a live claim costs more
-than that.
+A claim recorded without a view, or in a sandbox that has since exited, therefore
+stays until reboot, the owner's release, or `--force`. Wrongly deleting a live claim
+costs more than that.
 
 No new warnings. Inside a sandbox every host pid claim reads `Unverifiable`, so a
 warning per claim would be noise on every command. `tasks claims` and `show` carry
@@ -170,73 +228,117 @@ the reason.
 
 `ClaimInfo` keeps `live: bool`, defined as "held": `true` for `Live` and
 `Unverifiable`. It gains an optional `unverified: "<reason>"`, present only for
-`Unverifiable`. Consumers that read `live: false` as "may be taken", ops `claim-guard`
-among them, stay safe without a change. The rejected alternative, `live: false`
-plus the new field, would tell every older consumer that a protected claim is
-free. The addition is additive. The README documents both fields where it lists
-`tasks claims`, which has no field-level contract today.
+`Unverifiable`. Consumers that read `live: false` as "may be taken", ops
+`claim-guard` among them, stay safe without a change. The rejected alternative,
+`live: false` plus the new field, would tell every older consumer that a protected
+claim is free. The addition is additive. The README documents both fields where it
+lists `tasks claims`, which has no field-level contract today.
 
 ### 6. Decisions on the task's remaining questions
 
 - **Refusing `TASKS_SESSION_PID` outside a common numbering:** no. No evaluator can
-  know another view's numbering. With the view recorded, a namespace-local pid reads
-  `Unverifiable` from the host, which closes `host-view-of-ns-pid` without a refusal.
+  know another view's numbering. An exported pid that the writer cannot establish
+  records no view (§2), so it reads `Unverifiable` rather than reused or gone. That
+  closes `host-view-of-ns-pid` without a refusal.
 - **A relay walk that ends at a pid 1 with ppid 0 in a non-initial namespace:** no
   change. With a plain sandbox helper the walk ends Outside, and the native Codex
   level records a pid-less TTL claim (`ns-plain-private-proc`). That claim does not
   depend on any view. Its one harm was the prune, which §4 removes. The Codex-helper
   shape already refuses; tasks-19b244 names the cause.
 - **Legacy claims (a pid and no view):** `Unverifiable` under §3 rule 2, in every
-  view. Only the owner's next write or `--force` clears one. One such claim exists
-  on this host today.
+  view. They clear through §4's paths. The heartbeat rules in §2 give one a view at
+  the owner's next write that establishes its pid. One such claim exists on this
+  host today.
 
-### 7. Compatibility
+### 7. Mixed versions are unsafe; upgrade every binary together
 
-The store change is additive. An older binary loads it and drops `pid_view` on
-save, which turns that claim into a legacy claim: protected, not misjudged. Claims
-are host-local, so the skew lasts only while one host runs two binaries. The JSON
-change is the optional `unverified` field.
+The store field is additive, but an older binary still judges every pid through its
+own `/proc`:
+- its `prune_dead` can delete a protected claim before it saves;
+- it drops `pid_view` when it saves;
+- its read commands report a protected claim as stale.
+
+The protection holds only when **every `tasks` binary that reads or writes a host's
+claim stores runs this version or later**. That covers each `tasks` on `PATH` in each
+harness's environment, including one a sandbox can execute. The README's Upgrading
+paragraph states this requirement, as it does for relay registry schema 2, with the
+same `tasks --version` check.
+
+Rejected: making older binaries fail on the new store. No serde-compatible change
+makes an older binary refuse only writes. Any change it cannot parse also breaks its
+read commands in every project on the host. The relay precedent documents the
+requirement instead.
 
 ## Testing
+
+Unit tests for the view reader, on injected `/proc/self/status` text and `stat`
+results:
+- one `NSpid` entry with a readable link gives the `"<dev>:<ino>"` identity;
+- two entries give unknown;
+- a missing or unparsable `NSpid` line gives unknown;
+- an unreadable link gives unknown.
 
 Unit tests on `liveness_with`, injecting the view as the tests already inject `stat`:
 
 - Same view: live, gone, zombie and reused give today's verdicts.
 - Different view: a claim that would read gone or reused gives `Unverifiable`.
 - Different view, `seen` older than four hours: `Unverifiable`, not `Stale`.
-- Recorded view absent with a pid: `Unverifiable`. Current view unreadable:
+- Recorded view absent with a pid: `Unverifiable`. Current view unknown:
   `Unverifiable`.
 - Known boot mismatch: `Stale` whatever the view.
 - Pid-less claim: TTL as today, whatever the view.
 
-Call-site tests:
+Unit tests on the evidence rules (§2), with injected ancestry and view:
 
+- A relay-level write records the view.
+- A `sid:` write whose pid `proc_stat` finds records the view.
+- An exported pid that is in the ancestry records the view.
+- An exported pid not in the ancestry, or whose `proc_stat` fails, records no view.
+- Heartbeats: each of the four rows in §2's table.
+
+Call-site tests:
 - `prune_with`/`prune_dead` keeps an `Unverifiable` claim.
 - The hold snapshot keeps its holds.
 - `ClaimInfo` gives `live: true` and `unverified`.
-- `takeover_summary` and `describe_claim` wording.
+- `takeover_summary` and `describe_claim` give the new wording.
 
-Integration tests in `tests/cli.rs`, with the store written as fixtures so no
-environment backdoor is needed. A claim carries the test process's pid and start
-time and a `pid_view` that cannot match.
-
-- An unrelated `start` leaves that claim in place.
+Integration tests in `tests/cli.rs` write the store as fixtures, so no environment
+backdoor is needed. The fixture claim carries the test process's pid and start time
+and a `pid_view` that cannot match:
+- An unrelated `start` leaves it in place.
 - Another session's `start` refuses `claimed`.
 - `start --force --reason` takes it over with an `unverifiable, forced` note.
 - `tasks claims` reports it as `live: true` with `unverified`.
 
-Acceptance: rerun the tasks-fe6c59 probe's unshare cases `prune-*`,
-`ns-explicit-pid1` and `host-view-of-ns-pid` against the worktree build. Expect the
-host claim to survive the sandboxed write. Expect the host to refuse the takeover
-without `--force`. The genuine `codex sandbox` cases are optional and need the
-installed Codex CLI with no model call.
+Acceptance runs against the worktree build, using unprivileged `unshare` as
+tasks-fe6c59's probe does.
+
+- **The probe's own cases.** Rerun `prune-*`, `ns-explicit-pid1` and
+  `host-view-of-ns-pid`. The host claim must survive the sandboxed write, and the
+  host must refuse the takeover without `--force`.
+- **Procfs unmount and reuse.** A claim is written in namespace A (private `/proc`)
+  while A's pid 1 stays alive. Then A's `/proc` is unmounted, and namespace B mounts a
+  procfs, reusing the device number if the kernel allows. A write from B must leave
+  A's claim in place. Record whether the device was actually reused. The case still
+  passes if it was not, because the identity never reads the device.
+- **Exported host pid.** In a private-`/proc` child, `TASKS_SESSION_PID` is set to a
+  live host pid absent from the child's `/proc`. The claim must record no view. A
+  second write in the child must leave it in place.
+- **Heartbeat from a sandbox.** The owner's claim is written on the host with a view,
+  then heartbeated from a private-`/proc` child with an unestablished pid equal to the
+  recorded one. The host view must still be recorded afterwards.
+
+The genuine `codex sandbox` cases are optional. They need the installed Codex CLI and
+no model call.
 
 ## Documentation
 
-- The README paragraph on PID namespaces: claims record their PID view, and other
-  views protect but do not judge.
+- The README paragraph on PID namespaces: claims record the PID view they were
+  established in, and evaluators in other or unknown views protect a claim but do not
+  judge it.
+- The README's Upgrading paragraph: the coordinated-upgrade requirement in §7.
 - The README's `tasks claims` entry: `live` means held, and `unverified` gives the
   reason a held claim could not be judged.
 - The tasks skill, in step: one sentence in the claim paragraph saying that a claim
-  another PID view recorded is held until its own view, a reboot or `--force`
-  releases it.
+  this command cannot judge is held until its own view, its owner, a reboot or
+  `--force` releases it.
