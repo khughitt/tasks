@@ -1,13 +1,15 @@
 ---
 id: tasks-70a7a7
 title: Name the reopen command when start refuses a done or dropped task
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-12T11:48:42Z
-updated: 2026-10-13T10:48:02Z
+updated: 2026-10-14T18:45:55Z
+started: 2026-10-14T18:45:55Z
 depends: []
 tags: [feedback, friction, "from:mind6", cli]
 agent: codex
@@ -24,3 +26,5 @@ Original report (preserved): A correction handed back after a step completion ma
 ## Notes
 
 - 2026-10-13T10:48:02Z (main): scope: scoped; start's done/dropped refusal gains the edit --status todo hint, matching the shelved hint in status.rs::start; checked against main d698a36 (tasks 0.2.0); P2/xs/low/direct
+- 2026-10-14T18:45:55Z (main): started
+  provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
