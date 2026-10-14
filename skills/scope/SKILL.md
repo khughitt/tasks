@@ -1,6 +1,6 @@
 ---
 name: scope
-description: Use when asked to scope captured ideas, review an idea backlog for next actions, re-scope an already scoped task, or run /scope.
+description: Use when asked to scope captured ideas, review an idea backlog for next actions, re-scope an already scoped task, clear the `*` review queue, or run /scope.
 ---
 
 # scope
@@ -17,18 +17,24 @@ Explicit ids may also name scoped tasks to re-scope (see "Re-scope a scoped task
 
 Explicit ids are the exact batch. Otherwise discover candidates with:
 
-    tasks list --status idea --needs-review [--tag <tag>] [--project <prefix>]
+    tasks list --needs-review [--tag <tag>] [--project <prefix>]
 
-Select with `tasks list --status idea --needs-review [--tag <tag>] [--project <prefix>]`:
-it returns exactly the ideas no scope pass has reviewed, without reading notes. An idea
-leaves that list when a pass writes its audit note with `--reviewed`, and returns only
-when a waking finding is noted with `--no-reviewed` or the idea comes back to `idea`
-from another status. Incidental notes (curate, comments) do not readmit it. Existing
-briefs, goals, or research do not by themselves exclude an idea that `--needs-review`
-returns. An explicit id bypasses only
-this review-state exclusion; it must still be an unclaimed idea at revalidation, or an
-unclaimed `todo` or `blocked` task, which makes it a re-scope, and the pass still has the
-three-document ceiling. Default selection never returns a non-idea.
+It returns the scope queue, the rows pretty tables mark `*`, without reading notes:
+ideas no scope pass has reviewed, and leaf `todo` or `blocked` tasks whose process is
+unassessed. Unreviewed ideas come first: when any is eligible, the batch is drawn from
+ideas alone. Only when none is does the pass draw from the process-less rows, each a
+re-scope (see "Re-scope a scoped task"). A goal whose pieces live in other projects
+holds them as `depends`, so it appears among those rows as a leaf; rate it as its
+closeout, usually `--process direct`.
+
+An idea leaves the queue when a pass writes its audit note with `--reviewed`, and
+returns only when a waking finding is noted with `--no-reviewed` or the idea comes back
+to `idea` from another status. Incidental notes (curate, comments) do not readmit it. A
+todo or blocked row leaves when a re-scope sets its process. Existing briefs, goals, or
+research do not by themselves exclude an idea that `--needs-review` returns. An
+explicit id bypasses only this review-state exclusion; it must still be an unclaimed
+idea at revalidation, or an unclaimed `todo` or `blocked` task, which makes it a
+re-scope, and the pass still has the three-document ceiling.
 
 Fix one root before member reads, and use `tasks -C <root> ...` for every later task
 command and that root for every evidence read and document write:
@@ -41,7 +47,7 @@ command and that root for every evidence read and document write:
 Foreign ids in an unscoped batch, or no local project for an unscoped pass, require a
 corrected invocation before any write.
 
-From eligible ideas, choose the largest coherent group sharing a parent, source, tag,
+From the eligible rows, choose the largest coherent group sharing a parent, source, tag,
 or subsystem; break ties by oldest creation. Take roughly 3–5. If no pair exists, take
 the oldest three singletons. A smaller pool yields a smaller pass. An empty pool gets a
 short result and no writes.
@@ -108,7 +114,7 @@ Use `proposal:` only for `drop`. A shelf also retains the separate note written 
 
 ### Re-scope a scoped task
 
-Every explicit `todo` or `blocked` id is a re-scope: re-check the premises its body rests
+Every `todo` or `blocked` member, explicit or drawn from the queue, is a re-scope: re-check the premises its body rests
 on against the current code, tools and linked work, then narrow it to what is still open.
 A `doing` task belongs to its session and is skipped. Gather evidence as in §2, enough to
 test the premises, not to do the task. Choose one verdict:

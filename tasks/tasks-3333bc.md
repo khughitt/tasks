@@ -1,15 +1,16 @@
 ---
 id: tasks-3333bc
 title: Scope's default selection reads the whole --needs-review queue
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: docs/review-queue
 created: 2026-10-14T12:53:25Z
-updated: 2026-10-14T13:23:23Z
+updated: 2026-10-14T13:26:41Z
 started: 2026-10-14T13:23:23Z
+completed: 2026-10-14T13:26:41Z
 depends: []
 tags: [feedback, friction, "from:ops"]
 ---
@@ -26,4 +27,10 @@ Where: skills/scope/SKILL.md §1 and the re-scope section; skills/tasks/SKILL.md
 
 - 2026-10-14T13:22:48Z (main): scope: scoped; todo P2 xs/low/direct; selection half taken (scope default selection reads all of --needs-review, ideas first, then process-less todo/blocked as re-scopes); pretty relabel and JSON reason field declined: status, process and reviewed already distinguish the kinds
 - 2026-10-14T13:23:23Z (main): started
+  provenance: {"harness_session":"claude-code:aed18628-206d-45dd-9c97-7356132c8cfa","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T13:23:32Z (docs/review-queue): resumed
+  provenance: {"harness_session":"claude-code:aed18628-206d-45dd-9c97-7356132c8cfa","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T13:26:41Z (docs/review-queue): done
+  provenance: {"harness_session":"claude-code:aed18628-206d-45dd-9c97-7356132c8cfa","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T13:26:41Z (docs/review-queue): scope skill §1 selects from tasks list --needs-review (ideas first, then process-less todo/blocked as re-scopes); tasks skill names '*' the scope queue; spec amended; no CLI/JSON change
   provenance: {"harness_session":"claude-code:aed18628-206d-45dd-9c97-7356132c8cfa","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

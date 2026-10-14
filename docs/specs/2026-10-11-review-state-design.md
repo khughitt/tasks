@@ -3,6 +3,11 @@
 Status: implemented (plan docs/plans/2026-10-11-review-state.md); rollout complete 2026-10-12 (evidence attached to tasks-b8f3c9)
 Task: tasks-a9b8d3 (lane tasks-46d207; answers tasks-e34b99)
 Brief: `docs/notes/2026-09-30-work-selection-brief.md`
+Amended 2026-10-14 (tasks-3333bc, tasks-753842): the scope skill's default selection
+reads all of `--needs-review`, unreviewed ideas first, then process-less todo and
+blocked rows as re-scopes, so `*` is the scope queue (§7.1). A goal whose pieces live
+in other projects holds them as `depends`, is a leaf to §4's rule, and is rated as its
+closeout, usually `process: direct` (§4). The rule in `src/review.rs` is unchanged.
 
 ## 1. Goal
 
@@ -123,8 +128,11 @@ A row needs review when either holds:
   and `process` is unset.
 
 Goals never need review by this rule: their empty size, complexity and process are
-expected. `doing` tasks are in hand, and shelved and closed tasks are out of sight,
-so none of them are marked.
+expected. A goal whose pieces live in other projects is the exception: a parent
+must be in the same project, so it holds them as `depends` and is a leaf here. `ready`
+offers it once its pieces close, and its process is that closeout's, so its mark clears
+when a re-scope rates it (amended 2026-10-14). `doing` tasks are in hand, and shelved
+and closed tasks are out of sight, so none of them are marked.
 
 The value is computed in `TaskSummary::of` from fields the summary already has. It is
 never stored.
@@ -219,7 +227,9 @@ reading synced tasks before the first review write."
 
 - **scope** (`skills/scope/SKILL.md`): select with
   `tasks list --status idea --needs-review [--tag] [--project]` instead of reading
-  latest notes. An explicit id still bypasses this. Write the audit note with
+  latest notes. (Amended 2026-10-14: default selection reads `tasks list --needs-review`; it
+  draws ideas when any is eligible, else process-less todo and blocked rows as
+  re-scopes.) An explicit id still bypasses this. Write the audit note with
   `--reviewed` for the `briefed`, `question` and `drop` verdicts. `scoped` and
   `shelved` change the status first, so their audit note is a plain note: the
   transition already cleared the flag, and `--reviewed` would be refused on a
