@@ -17,8 +17,13 @@ tt := "python3 tools/tt"
 # it does have are the ones the baseline showed being used. `test-one` accepts runner
 # arguments; `test-fast` runs the fixed non-ignored set: the exhaustive rename::classify
 # enumeration alone costs ~7 s in debug. `test` runs everything, ignored included.
-fast_cmd := "cargo test"
-test_cmd := "cargo test -- --include-ignored"
+#
+# Every test command first stops git discovery at the temp directory, so a stray `.git`
+# in $TMPDIR (some host process leaves an empty one) cannot fail the fixtures' temp
+# projects; tests that set their own ceiling still override it.
+test_env := "ceiling=$(realpath -e -- \"${TMPDIR:-/tmp}\") && GIT_CEILING_DIRECTORIES=$ceiling"
+fast_cmd := test_env + " cargo test"
+test_cmd := test_env + " cargo test -- --include-ignored"
 check_cmd := "python3 tools/ops-check && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
 
 # README and design documents stay on the full check; only guide/task records skip Rust checks.
@@ -30,7 +35,7 @@ ci_suite_refs := ""
 ci_remote := "origin"
 # Fixed non-ignored set: this single crate has no base-aware affected selection.
 push_fast_cmd := fast_cmd
-one_cmd := "cargo test"
+one_cmd := test_env + " cargo test"
 
 # The inner loop: the whole non-ignored suite, with no arguments.
 test-fast:

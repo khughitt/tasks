@@ -1,15 +1,16 @@
 ---
 id: tasks-eec7d5
 title: Make the test suite immune to a stray .git above TMPDIR
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/tmpdir-git-ceiling
 created: 2026-10-08T21:02:30Z
-updated: 2026-10-14T15:29:24Z
+updated: 2026-10-14T15:33:30Z
 started: 2026-10-14T15:29:24Z
+completed: 2026-10-14T15:33:30Z
 depends: []
 tags: [feedback, friction, "from:tasks", tests]
 agent: codex
@@ -32,4 +33,13 @@ Original report (preserved): Fast-suite CLI fixtures intermittently reject init 
 - 2026-10-09T00:42:57Z (fa0276-git-marker): Likely cause: tasks-fa0276's report says a host process recreates an empty .git in TMPDIR every minute or two, and git-discovery io on init in temp dirs is that failure; intermittent because the marker comes and goes. fa0276 makes the error name the marker path; it does not stop the flake.
 - 2026-10-13T10:48:39Z (main): scope: scoped; fa0276 (diagnostic) and 084a9f (ceiling/mount stop) landed but don't cover $TMPDIR/.git below the mount; fix is a GIT_CEILING_DIRECTORIES=temp_dir in the test helpers, checked with an empty $TMPDIR/.git under a scratch TMPDIR; host process creating the marker left uninvestigated; P2/s/low/direct
 - 2026-10-14T15:29:24Z (main): started
+  provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T15:29:31Z (fix/tmpdir-git-ceiling): resumed
+  provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T15:31:46Z (fix/tmpdir-git-ceiling): Scope change: the RED run (empty .git in a scratch TMPDIR) fails 5 unit tests in src/ (link, scope, shorthand) before any integration binary runs; unit tests spawn git in-process, so helper-only env cannot fix them. Setting GIT_CEILING_DIRECTORIES=realpath(TMPDIR) once in the justfile's test commands instead covers unit and integration tests by inheritance.
+- 2026-10-14T15:33:25Z (fix/tmpdir-git-ceiling): RED (main's recipes, TMPDIR=$(mktemp -d) with empty $TMPDIR/.git): just test-fast exit 101, unit binary 536 passed 5 failed (link::outside_a_repository_there_is_no_tree, 3 scope::open_all/resolution, shorthand::outside_every_project) on git rev-parse 'not a git repository'; cargo stopped before integration binaries.
+- 2026-10-14T15:33:26Z (fix/tmpdir-git-ceiling): GREEN (same setup, ceiling in test_env): just test-fast exit 0, all 11 test binaries ok; plain just test-fast and just check exit 0; linked ceiling tests 3/3 pass.
+- 2026-10-14T15:33:30Z (fix/tmpdir-git-ceiling): done
+  provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T15:33:30Z (fix/tmpdir-git-ceiling): justfile test_env sets GIT_CEILING_DIRECTORIES=realpath(TMPDIR) for test-fast, test-one and test (and the hooks); covers unit tests too, which helper-only env could not. RED/GREEN recorded in notes.
   provenance: {"harness_session":"claude-code:2943584c-eb0b-4cf1-b9ce-0209355d5649","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

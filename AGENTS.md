@@ -53,8 +53,9 @@ required. Run `just test-fast` before committing; it accepts no arguments and ru
 non-ignored suite. `just test` includes the slow `#[ignore]`d exhaustive enumeration.
 No CI workflow runs the full suite on push (`ci_suite_refs` is empty), so the pre-push
 hook carries it. Run `just test` yourself only if hooks are not installed or the fast
-set does not cover affected behavior. Never run `cargo test` directly: the recipe runs
-the same command and records it. `just check` runs hygiene, `cargo fmt --check`,
+set does not cover affected behavior. Never run `cargo test` directly: the recipe records
+the run and stops git discovery at `$TMPDIR`, so a stray `.git` there cannot fail the
+fixtures. `just check` runs hygiene, `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, and `tasks check`. Every recipe runs through
 the vendored timing wrapper `tools/tt`, which records the run for the cross-project test
 and CI audit (ops `docs/specs/2026-09-04-test-ci-audit-design.md`). The git hooks in
