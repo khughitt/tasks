@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T22:05:13Z
+updated: 2026-10-14T23:32:59Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -61,3 +61,4 @@ Tests: inject the view the way `liveness_with` injects stat.
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-14T22:05:13Z (fix/claim-pid-view): parked (waiting on user, review): user reviews docs/plans/2026-10-14-claim-pid-view.md in .worktrees/claim-pid-view and picks the execution method; then the agent runs the Setup baseline and starts tasks-56d39d (Task 1)
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T23:32:59Z (fix/claim-pid-view): review: plan round 1 — verdict: revise; findings: P1 1, P2 5; reviewer: human
