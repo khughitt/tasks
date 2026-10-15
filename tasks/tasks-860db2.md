@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-15T01:57:25Z
+updated: 2026-10-15T02:00:12Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -85,4 +85,6 @@ Tests: inject the view the way `liveness_with` injects stat.
 - 2026-10-15T01:49:15Z (fix/claim-pid-view): corrective round 1: fixed Important 1 in 0990ce4 (heartbeat keeps recorded evidence only when it does not read Stale here; spec §2 amended), suite 1451/1451; minors deferred, follow-ups tasks-f11052 (sid:0) and tasks-ea23de (pretty reason); scoped re-review dispatched
 - 2026-10-15T01:53:19Z (fix/claim-pid-view): review: impl round 2 — verdict: accept; findings: Minor 4; reviewer: claude-code/claude-opus-5-5
 - 2026-10-15T01:57:25Z (fix/claim-pid-view): parked (waiting on user, decision): user picks integration for fix/claim-pid-view (.worktrees/claim-pid-view): merge to main locally (changes the live tasks skill via the main checkout link), push+PR, or keep; after a merge, the agent runs tasks done, then the user upgrades every tasks binary on the host together (cargo install --path ., plus any sandbox-reachable copies) per spec §7
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T02:00:12Z (fix/claim-pid-view): resumed
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
