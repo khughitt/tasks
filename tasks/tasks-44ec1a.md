@@ -6,9 +6,9 @@ priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: trim-comma
 created: 2026-10-15T17:41:58Z
-updated: 2026-10-15T17:42:04Z
+updated: 2026-10-15T17:42:10Z
 started: 2026-10-15T17:42:04Z
 depends: []
 tags: [cli]
@@ -30,4 +30,6 @@ Verification: unit cases for comma and mixed runs; CLI cases for a full id, a ba
 ## Notes
 
 - 2026-10-15T17:42:04Z (main): started
+  provenance: {"harness_session":"claude-code:44479c9f-7072-4fa9-b91b-fca918212e9f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T17:42:10Z (trim-comma): resumed
   provenance: {"harness_session":"claude-code:44479c9f-7072-4fa9-b91b-fca918212e9f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
