@@ -34,10 +34,11 @@ impl Shorthand {
     }
 
     /// A user-typed id: a bare suffix takes the local prefix; anything else is a full id.
-    /// Trailing periods are sentence punctuation either way. A checkout found here for the
-    /// first time is held to the same stale-prefix rule as one opened as the local project.
+    /// Trailing periods and commas are sentence punctuation either way. A checkout found
+    /// here for the first time is held to the same stale-prefix rule as one opened as the
+    /// local project.
     pub fn parse(&self, registry: &Registry, input: &str) -> Result<TaskId> {
-        let trimmed = input.trim_end_matches('.');
+        let trimmed = TaskId::trim_input(input);
         if !is_bare_suffix(trimmed) {
             return TaskId::parse_input(input);
         }

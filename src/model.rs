@@ -23,10 +23,14 @@ mod tests {
     }
 
     #[test]
-    fn parses_input_trims_trailing_periods_only() {
+    fn parses_input_trims_trailing_periods_and_commas_only() {
         for (input, expected) in [
             ("tasks-2578c3.", "tasks-2578c3"),
             ("tasks-2578c3..", "tasks-2578c3"),
+            ("tasks-2578c3,", "tasks-2578c3"),
+            ("tasks-2578c3,,", "tasks-2578c3"),
+            ("tasks-2578c3.,", "tasks-2578c3"),
+            ("tasks-2578c3,.", "tasks-2578c3"),
             ("tasks-2578c3", "tasks-2578c3"),
         ] {
             assert_eq!(
@@ -38,9 +42,12 @@ mod tests {
             "tasks-.2578c3",
             "tasks-2578c3. ",
             " tasks-2578c3.",
-            "tasks-2578c3,",
+            "tasks-2578c3, ",
+            "tasks-,2578c3",
+            "tasks-2578c3;",
             "tasks-2578. ",
             ".",
+            ",",
         ] {
             assert!(
                 TaskId::parse_input(bad).is_err(),
@@ -206,11 +213,17 @@ pub struct TaskId {
 }
 
 impl TaskId {
-    /// The input form of an id, as typed on the command line: one or more trailing
-    /// ASCII periods are sentence punctuation, not part of the id. Embedded dots,
-    /// other punctuation, and whitespace are left for `parse` to reject.
+    /// The input form of an id, as typed on the command line: a trailing run of ASCII
+    /// periods and commas is sentence punctuation, not part of the id. Embedded or
+    /// leading punctuation, other punctuation, and whitespace are left for `parse` to
+    /// reject.
     pub fn parse_input(s: &str) -> Result<TaskId> {
-        Self::parse(s.trim_end_matches('.'))
+        Self::parse(Self::trim_input(s))
+    }
+
+    /// Strip the trailing sentence punctuation `parse_input` accepts.
+    pub fn trim_input(s: &str) -> &str {
+        s.trim_end_matches(['.', ','])
     }
 
     pub fn parse(s: &str) -> Result<TaskId> {

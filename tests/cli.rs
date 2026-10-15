@@ -3050,7 +3050,7 @@ fn show_resolves_local_and_foreign_dependencies() {
 }
 
 #[test]
-fn trailing_periods_are_trimmed_from_cli_id_inputs() {
+fn trailing_periods_and_commas_are_trimmed_from_cli_id_inputs() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let fam = env.init("fam");
@@ -3092,8 +3092,28 @@ fn trailing_periods_are_trimmed_from_cli_id_inputs() {
         id
     );
 
+    // Trailing commas, alone or mixed with periods, trim the same way: on a full id, a
+    // bare suffix, and an id-valued flag.
+    assert_eq!(
+        env.json(&sci, &["show", &format!("{id},")])["task"]["id"],
+        id
+    );
+    assert_eq!(
+        env.json(&sci, &["show", &format!("{id}.,")])["task"]["id"],
+        id
+    );
+    let suffix = id.split_once('-').unwrap().1;
+    assert_eq!(
+        env.json(&sci, &["show", &format!("{suffix},")])["task"]["id"],
+        id
+    );
+    let v = env.json(&sci, &["list", "--parent", &format!("{id},")]);
+    assert_eq!(v["tasks"].as_array().unwrap().len(), 1);
+
     // Other punctuation and whitespace are left for validation to reject.
     assert_eq!(env.fail(&sci, &["show", &format!("{id}. ")]), "invalid_id");
+    assert_eq!(env.fail(&sci, &["show", &format!("{id}, ")]), "invalid_id");
+    assert_eq!(env.fail(&sci, &["show", &format!("{id};")]), "invalid_id");
     assert_eq!(env.fail(&sci, &["show", "bogus,"]), "invalid_id");
 
     // feedback --recur trims as well.

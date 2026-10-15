@@ -446,11 +446,11 @@ contract.
 
 ### Task operations
 
-An id copied from the end of a sentence may carry trailing periods: every positional
+An id copied from a sentence or a list may carry trailing punctuation: every positional
 task id and id-valued flag (`--parent`, `--depends`, `dep --on/--rm`, `feedback
---recur`) strips one or more trailing ASCII periods before validation. Embedded dots,
-other punctuation, and whitespace are still rejected, and records and output stay
-canonical.
+--recur`) strips a trailing run of ASCII periods and commas before validation. Embedded
+or leading punctuation, other punctuation, and whitespace are still rejected, and
+records and output stay canonical.
 
 Inside a project, every one of those inputs also accepts the bare six-hex suffix:
 `tasks show 4f2a9c` is `tasks show sci-4f2a9c` when the cwd (or `-C`) is in `sci`. The
