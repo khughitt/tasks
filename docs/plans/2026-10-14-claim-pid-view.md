@@ -1312,7 +1312,8 @@ It must run these cases. Each prints `case`, `expected`, `observed` and `verdict
    - Record `stat -c %d /proc` in A, then unmount A's `/proc` (`umount /proc` inside A).
    - Start namespace B the same way, record its `/proc` device and whether it equals A's.
    - From B, `TASKS_SESSION=B tasks start T5`. T4's claim must still exist, and the controller must still be alive.
-   - Re-read T4's stored `pid` and `pid_start` after B's write, and the controller's start time inside A. All three must match the values asserted before. A mismatch fails the case. Then stop the controller and A.
+   - Re-read T4's stored `pid` and `pid_start` after B's write. Then remount procfs inside A (`mount -t proc proc /proc`) and read the controller's start time again. All three must match the values asserted before. A mismatch fails the case. Then stop the controller and A.
+   - Do not keep A's original procfs reachable between the unmount and B's mount: no open descriptor into it, no bind mount or second mount of it. Either would keep its superblock, and so its device number, alive, which defeats the reuse condition.
 4. **exported host pid.** In a private-`/proc` child, `TASKS_SESSION=E TASKS_SESSION_PID=<a live host pid, the script's own $$>` with `tasks start T6`. The claim must record no view. A second child write (`TASKS_SESSION=F tasks start T7`) must leave it in place.
 5. **colliding ancestor.** Outer namespace O: `unshare … --mount-proc sh -c 'sleep 300 & …'`, so that the intended owner is pid 2 in O. O launches inner namespace I with `--mount-proc`. In I, arrange an ancestor at pid 2 that exits later (`sh -c 'sh -c "…" ; sleep 1'`, with the inner pid noted from `NSpid`). Run with `TASKS_SESSION=O2 TASKS_SESSION_PID=2` inherited.
    - I's `tasks start T8` records no view.
