@@ -1,13 +1,15 @@
 ---
 id: tasks-44ec1a
 title: Trim trailing commas from CLI task-ID inputs
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-15T17:41:58Z
-updated: 2026-10-15T17:41:58Z
+updated: 2026-10-15T17:42:04Z
+started: 2026-10-15T17:42:04Z
 depends: []
 tags: [cli]
 source: tasks-1e32d6
@@ -24,3 +26,8 @@ Done:
 Where to look: src/model.rs TaskId::parse_input and its unit test (which currently pins `tasks-2578c3,` as rejected), src/shorthand.rs Shorthand::parse, tests/cli.rs trailing_periods_are_trimmed_from_cli_id_inputs (asserts `bogus,` fails; keep that, it is not an id).
 
 Verification: unit cases for comma and mixed runs; CLI cases for a full id, a bare suffix and a flag with a trailing comma; just test-one for these, just test-fast before commit. Update README.md and skills/tasks/SKILL.md's input rule.
+
+## Notes
+
+- 2026-10-15T17:42:04Z (main): started
+  provenance: {"harness_session":"claude-code:44479c9f-7072-4fa9-b91b-fca918212e9f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
