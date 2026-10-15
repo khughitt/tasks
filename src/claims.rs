@@ -643,7 +643,7 @@ impl ClaimStore {
     }
 
     pub fn prune_dead(&mut self) {
-        self.prune_with(|claim| liveness(claim) == Liveness::Live);
+        self.prune_with(|claim| !liveness(claim).is_stale());
     }
 }
 
@@ -702,6 +702,16 @@ pub const TTL_HOURS: i64 = 4;
 pub enum Liveness {
     Live,
     Stale(String),
+    /// Judged through a PID view other than the one that recorded the pid, or where
+    /// either is unknown (claim PID-view design §3). Protected like `Live`: only `Stale`
+    /// permits pruning, takeover without `--force`, or releasing holds (§4).
+    Unverifiable(String),
+}
+
+impl Liveness {
+    pub fn is_stale(&self) -> bool {
+        matches!(self, Liveness::Stale(_))
+    }
 }
 
 /// Every claim in scope, with its liveness verdict, and every park entry, read once per
@@ -775,9 +785,10 @@ impl ClaimSnapshot {
         self.by_id.get(&id.to_string())
     }
 
-    pub fn live(&self, id: &TaskId) -> Option<&Claim> {
+    /// The claim on `id` unless it is stale: `Live` and `Unverifiable` both hold (§4).
+    pub fn held(&self, id: &TaskId) -> Option<&Claim> {
         match self.get(id) {
-            Some((claim, Liveness::Live)) => Some(claim),
+            Some((claim, liveness)) if !liveness.is_stale() => Some(claim),
             _ => None,
         }
     }
@@ -792,7 +803,7 @@ impl ClaimSnapshot {
             .iter()
             .filter_map(|(id, (claim, live))| match live {
                 Liveness::Stale(why) => Some((id, claim, why)),
-                Liveness::Live => None,
+                _ => None,
             })
     }
 }
@@ -909,6 +920,7 @@ pub fn liveness(claim: &Claim) -> Liveness {
         claim,
         time::OffsetDateTime::now_utc(),
         boot_id().as_deref(),
+        crate::pidview::current().as_ref(),
         proc_stat,
     )
 }
@@ -917,6 +929,7 @@ pub fn liveness_with(
     claim: &Claim,
     now: time::OffsetDateTime,
     boot_id: Option<&str>,
+    view: Option<&crate::pidview::PidView>,
     stat: impl Fn(u32) -> ProcStat,
 ) -> Liveness {
     let ttl = || match crate::time::parse(&claim.seen) {
@@ -929,12 +942,26 @@ pub fn liveness_with(
     };
 
     let Some(pid) = claim.pid else { return ttl() };
-    match (boot_id, &claim.boot_id) {
-        (Some(current), Some(recorded)) if current != recorded => {
-            return Liveness::Stale("recorded on an earlier boot".into());
+    // A reboot ends every view, so it needs no view check (§3 rule 1).
+    if let (Some(current), Some(recorded)) = (boot_id, &claim.boot_id)
+        && current != recorded
+    {
+        return Liveness::Stale("recorded on an earlier boot".into());
+    }
+    match (&claim.pid_view, view) {
+        (None, _) => {
+            return Liveness::Unverifiable("PID view not established when recorded".into());
         }
-        (None, _) | (_, None) => return ttl(),
+        (Some(_), None) => {
+            return Liveness::Unverifiable("this command cannot establish its PID view".into());
+        }
+        (Some(recorded), Some(current)) if *recorded != current.to_string() => {
+            return Liveness::Unverifiable("recorded in another PID view".into());
+        }
         _ => {}
+    }
+    if boot_id.is_none() || claim.boot_id.is_none() {
+        return ttl();
     }
     match stat(pid) {
         ProcStat::NotFound => Liveness::Stale(format!("pid {pid} is gone")),
@@ -1081,7 +1108,7 @@ mod tests {
             pid: Some(42),
             pid_start: Some(999),
             boot_id: Some("boot-a".into()),
-            pid_view: None,
+            pid_view: Some(INIT.to_string()),
             host: "h".into(),
             worktree: "/tmp/wt".into(),
             started: "2026-09-05T08:00:00Z".into(),
@@ -1875,6 +1902,7 @@ mod tests {
                 &seen("2026-09-01T00:00:00Z"),
                 at("2026-09-05T00:00:00Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 found(999)
             ),
             Liveness::Live,
@@ -1889,6 +1917,7 @@ mod tests {
                 &seen("2026-09-05T00:00:00Z"),
                 at("2026-09-05T00:00:01Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 |_| ProcStat::NotFound
             ),
             Liveness::Stale(_)
@@ -1902,6 +1931,7 @@ mod tests {
                 &seen("2026-09-05T00:00:00Z"),
                 at("2026-09-05T00:00:01Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 found(12345)
             ),
             Liveness::Stale(_)
@@ -1919,6 +1949,7 @@ mod tests {
                 &no_evidence,
                 at("2026-09-05T01:00:00Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 found(999)
             ),
             Liveness::Live,
@@ -1930,6 +1961,7 @@ mod tests {
                     &no_evidence,
                     at("2026-09-05T05:00:00Z"),
                     Some("boot-a"),
+                    Some(&INIT),
                     found(999)
                 ),
                 Liveness::Stale(_)
@@ -1946,6 +1978,7 @@ mod tests {
                     &seen("2026-09-05T00:00:00Z"),
                     at("2026-09-05T00:00:01Z"),
                     Some("boot-b"),
+                    Some(&INIT),
                     found(999)
                 ),
                 Liveness::Stale(_)
@@ -1961,6 +1994,7 @@ mod tests {
                 &seen("2026-09-05T00:00:00Z"),
                 at("2026-09-05T00:00:01Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 |_| ProcStat::Found {
                     state: 'Z',
                     starttime: 999
@@ -1977,6 +2011,7 @@ mod tests {
                 &seen("2026-09-05T00:00:00Z"),
                 at("2026-09-05T03:59:00Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 |_| ProcStat::Unreadable
             ),
             Liveness::Live,
@@ -1987,6 +2022,7 @@ mod tests {
                 &seen("2026-09-05T00:00:00Z"),
                 at("2026-09-05T04:00:00Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 |_| ProcStat::Unreadable
             ),
             Liveness::Live,
@@ -1997,6 +2033,7 @@ mod tests {
                 &seen("2026-09-05T00:00:00Z"),
                 at("2026-09-05T04:00:01Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 |_| ProcStat::Unreadable
             ),
             Liveness::Stale(_)
@@ -2010,6 +2047,7 @@ mod tests {
                 &seen("2026-09-05T00:00:00Z"),
                 at("2026-09-05T01:00:00Z"),
                 None,
+                Some(&INIT),
                 found(999)
             ),
             Liveness::Live
@@ -2023,6 +2061,7 @@ mod tests {
                 &pidless,
                 at("2026-09-05T05:00:00Z"),
                 Some("boot-a"),
+                Some(&INIT),
                 found(999)
             ),
             Liveness::Stale(_)
@@ -2501,7 +2540,7 @@ mod tests {
                 .park(&TaskId::parse("sci-000001").unwrap())
                 .is_none()
         );
-        assert!(snapshot.live(&parked).is_none());
+        assert!(snapshot.held(&parked).is_none());
     }
 
     #[test]
@@ -2726,5 +2765,161 @@ mod tests {
             found(999),
         );
         assert_eq!(got, Evidence::of(&own));
+    }
+
+    #[test]
+    fn a_claim_from_another_view_is_unverifiable_however_it_would_read() {
+        for stat in [
+            ProcStat::NotFound,
+            ProcStat::Found {
+                state: 'S',
+                starttime: 12345,
+            },
+        ] {
+            assert_eq!(
+                liveness_with(
+                    &seen("2026-09-05T00:00:00Z"),
+                    at("2026-09-05T00:00:01Z"),
+                    Some("boot-a"),
+                    Some(&CHILD),
+                    |_| stat.clone()
+                ),
+                Liveness::Unverifiable("recorded in another PID view".into())
+            );
+        }
+    }
+
+    #[test]
+    fn an_unverifiable_claim_never_ages_into_stale() {
+        assert!(
+            matches!(
+                liveness_with(
+                    &seen("2026-09-01T00:00:00Z"),
+                    at("2026-09-05T00:00:00Z"),
+                    Some("boot-a"),
+                    Some(&CHILD),
+                    |_| ProcStat::Unreadable
+                ),
+                Liveness::Unverifiable(_)
+            ),
+            "a live owner past four hours keeps its claim against a sandboxed caller"
+        );
+    }
+
+    #[test]
+    fn a_legacy_pid_claim_is_unverifiable_even_when_its_pid_is_gone() {
+        let legacy = Claim {
+            pid_view: None,
+            ..seen("2026-09-05T00:00:00Z")
+        };
+        assert_eq!(
+            liveness_with(
+                &legacy,
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                Some(&INIT),
+                |_| ProcStat::NotFound
+            ),
+            Liveness::Unverifiable("PID view not established when recorded".into())
+        );
+    }
+
+    #[test]
+    fn an_unknown_current_view_is_unverifiable() {
+        assert_eq!(
+            liveness_with(
+                &seen("2026-09-05T00:00:00Z"),
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                None,
+                |_| ProcStat::NotFound
+            ),
+            Liveness::Unverifiable("this command cannot establish its PID view".into())
+        );
+    }
+
+    #[test]
+    fn a_malformed_recorded_view_is_unverifiable() {
+        let odd = Claim {
+            pid_view: Some("garbage".into()),
+            ..seen("2026-09-05T00:00:00Z")
+        };
+        assert!(matches!(
+            liveness_with(
+                &odd,
+                at("2026-09-05T00:00:01Z"),
+                Some("boot-a"),
+                Some(&INIT),
+                |_| ProcStat::NotFound
+            ),
+            Liveness::Unverifiable(_)
+        ));
+    }
+
+    #[test]
+    fn a_reboot_is_stale_whatever_the_view() {
+        for view in [Some(&INIT), Some(&CHILD), None] {
+            let legacy = Claim {
+                pid_view: None,
+                ..seen("2026-09-05T00:00:00Z")
+            };
+            assert!(matches!(
+                liveness_with(
+                    &legacy,
+                    at("2026-09-05T00:00:01Z"),
+                    Some("boot-b"),
+                    view,
+                    found(999)
+                ),
+                Liveness::Stale(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn a_pidless_claim_takes_the_ttl_whatever_the_view() {
+        let pidless = Claim {
+            pid: None,
+            pid_view: None,
+            ..seen("2026-09-05T00:00:00Z")
+        };
+        for view in [Some(&INIT), Some(&CHILD), None] {
+            assert!(matches!(
+                liveness_with(
+                    &pidless,
+                    at("2026-09-05T05:00:00Z"),
+                    Some("boot-a"),
+                    view,
+                    found(999)
+                ),
+                Liveness::Stale(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn only_stale_is_stale() {
+        assert!(Liveness::Stale("x".into()).is_stale());
+        assert!(!Liveness::Live.is_stale());
+        assert!(!Liveness::Unverifiable("x".into()).is_stale());
+    }
+
+    #[test]
+    fn prune_keeps_an_unverifiable_claim() {
+        let home = tempfile::tempdir().unwrap();
+        let mut store = ClaimStore::load_from(&home.path().join("sci.toml")).unwrap();
+        let id = TaskId::parse("sci-000001").unwrap();
+        // This boot, so the boot rule cannot make it stale; a view no namespace has.
+        store.insert(
+            &id,
+            Claim {
+                pid_view: Some("0:1".into()),
+                pid: Some(4_194_303),
+                boot_id: boot_id(),
+                ..sample()
+            },
+        );
+        store.prune_dead();
+        assert!(store.get(&id).is_some());
     }
 }

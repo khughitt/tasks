@@ -57,7 +57,7 @@ fn recorded_elsewhere(
     warnings: &mut Vec<String>,
 ) -> Result<(Project, Task, Vec<Task>)> {
     let named = claims
-        .live(id)
+        .held(id)
         .map(|claim| ("claimed", claim.worktree.as_str()))
         .or_else(|| {
             claims

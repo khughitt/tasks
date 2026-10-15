@@ -35,7 +35,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     }
     validate_childless(ctx)?;
     let claims = ClaimSnapshot::load(std::iter::once(ctx.source.project.prefix.as_str()))?;
-    if let Some(claim) = claims.live(id) {
+    if let Some(claim) = claims.held(id) {
         return Err(Error::Claimed(
             id.to_string(),
             format!(

@@ -452,6 +452,10 @@ pub struct ClaimInfo {
     pub started: String,
     pub seen: String,
     pub live: bool,
+    /// Why a held claim could not be judged from here (claim PID-view design §5). `live`
+    /// stays `true` for it, so consumers that read `false` as "free" stay safe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unverified: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub holds: Vec<String>,
 }
@@ -467,7 +471,11 @@ impl ClaimInfo {
             worktree: claim.worktree.clone(),
             started: claim.started.clone(),
             seen: claim.seen.clone(),
-            live: live == &crate::claims::Liveness::Live,
+            live: !live.is_stale(),
+            unverified: match live {
+                crate::claims::Liveness::Unverifiable(why) => Some(why.clone()),
+                _ => None,
+            },
             holds: claim.holds.clone(),
         }
     }
@@ -1285,7 +1293,12 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                     Row::new(vec![
                         row.id.clone(),
                         row.claim.session.clone(),
-                        if row.claim.live { "live" } else { "stale" }.into(),
+                        match (&row.claim.unverified, row.claim.live) {
+                            (Some(_), _) => "unverifiable",
+                            (None, true) => "live",
+                            (None, false) => "stale",
+                        }
+                        .into(),
                         row.claim.worktree.clone(),
                     ])
                 })
@@ -2922,5 +2935,30 @@ mod tests {
         };
         let shown = serde_json::to_value(ClaimInfo::of(&holding, &live)).unwrap();
         assert_eq!(shown["holds"], serde_json::json!(["quiet"]));
+    }
+
+    #[test]
+    fn an_unverifiable_claim_is_held_with_its_reason() {
+        let claim = crate::claims::Claim {
+            owner: "o".into(),
+            session: "s".into(),
+            pid: Some(1),
+            pid_start: None,
+            boot_id: None,
+            pid_view: None,
+            host: "h".into(),
+            worktree: "/w".into(),
+            started: "2026-10-03T00:00:00Z".into(),
+            seen: "2026-10-03T00:00:00Z".into(),
+            holds: Vec::new(),
+            root_session: None,
+        };
+        let why = crate::claims::Liveness::Unverifiable("recorded in another PID view".into());
+        let json = serde_json::to_value(ClaimInfo::of(&claim, &why)).unwrap();
+        assert_eq!(json["live"], true);
+        assert_eq!(json["unverified"], "recorded in another PID view");
+        let live =
+            serde_json::to_value(ClaimInfo::of(&claim, &crate::claims::Liveness::Live)).unwrap();
+        assert!(live.get("unverified").is_none(), "{live}");
     }
 }

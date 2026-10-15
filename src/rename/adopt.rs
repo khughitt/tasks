@@ -1,4 +1,4 @@
-use crate::claims::{ClaimStore, Liveness};
+use crate::claims::ClaimStore;
 use crate::commands::Ctx;
 use crate::error::{Error, Result};
 use crate::model::TaskId;
@@ -152,7 +152,7 @@ pub fn run(
     if matches!(stage, Stage::Fresh(_) | Stage::ResumeRegistry) {
         for (id, claim) in source.iter().chain(target.iter()) {
             let live = crate::claims::liveness(claim);
-            if live == Liveness::Live {
+            if !live.is_stale() {
                 return Err(Error::Claimed(
                     id.clone(),
                     Ctx::describe_claim(claim, &live),

@@ -50,7 +50,7 @@ pub fn sample(
         {
             continue;
         }
-        if let Some(claim) = claims.live(&task.id) {
+        if let Some(claim) = claims.held(&task.id) {
             ctx.warnings
                 .push(super::list::claim_omission(&task.id, claim));
             continue;
