@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-16a48c
 created: 2026-10-15T12:37:58Z
-updated: 2026-10-15T18:13:35Z
+updated: 2026-10-15T18:15:31Z
 started: 2026-10-15T18:04:52Z
 completed: 2026-10-15T18:13:35Z
 depends: []
@@ -42,3 +42,4 @@ Where: src/commands/mod.rs (`load`), src/commands/show.rs (`recorded_elsewhere`,
   provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-15T18:13:35Z (fix/tasks-16a48c): Implemented missing-record checkout guidance for note and flagged/bare edit via shared lookup and recovery helpers. Reviewed and accepted after correcting bare edit; 1489 fast tests and checks passed. User approved local merge and CLI installation.
   provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-15T18:15:31Z (main): Rollout complete after user approval: fast-forward merged to main; merged just test-fast (1489 tests) and just check passed; cargo install --path . succeeded. Installed CLI smoke in isolated disposable project confirmed missing-record remedy, no automatic write, and executable quoted retry. tt-report harvested; no host pointers or retained plan artifacts; task worktree and branch removed.
