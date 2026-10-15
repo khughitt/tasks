@@ -1,6 +1,6 @@
 # Release a claim whose holder is gone
 
-Status: implemented on feat/claim-release (tasks 0.4.0), pending merge
+Status: implemented (tasks 0.4.0)
 Task: tasks-f9fc01 (lane tasks-2fa8c6, Agent identity and lifecycle)
 Builds on: [claim liveness by PID view](2026-10-14-claim-pid-view-design.md) (tasks 0.3.0)
 
