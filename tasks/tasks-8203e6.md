@@ -8,7 +8,7 @@ complexity: high
 process: direct
 owner: docs/project-color-source
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-15T15:52:46Z
+updated: 2026-10-15T15:52:51Z
 started: 2026-10-15T15:51:56Z
 completed: 2026-10-15T15:52:46Z
 depends: [ops-b31634]
@@ -33,3 +33,4 @@ Why: no registered project sets color in tasks/.config.toml, so project colours 
   provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T15:52:46Z (docs/project-color-source): Closed without familiar as a source: the color key in tasks/.config.toml is the only source (ops-b31634), every project sets it (ops-40f2a6), and ids and titles already take it in every table view (comfy-tables §5); no precedence question remains. Corrected the comfy-tables spec's stale colour-source bullets; remaining unpainted surfaces filed as a follow-up idea.
   provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T15:52:51Z (docs/project-color-source): follow-up: tasks-68cb2b (unpainted non-table surfaces)
