@@ -1,10 +1,10 @@
 ---
 id: tasks-f9fc01
 title: Clear a claim whose holder is gone without starting the task
-status: idea
+status: todo
 priority: 2
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T08:05:09Z
+updated: 2026-10-15T08:25:21Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
