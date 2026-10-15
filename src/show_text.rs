@@ -5,6 +5,7 @@
 use crate::claims::Escalation;
 use crate::model::Note;
 use crate::output::{ParkInfo, ShowFields};
+use crate::palette::Rgb;
 use crate::present::{self, Span};
 use crate::style::{Painter, Style};
 use unicode_width::UnicodeWidthChar;
@@ -212,7 +213,7 @@ fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
 }
 
 /// The colour of the project `id` belongs to, when the view knows one.
-fn color(o: &ShowFields, id: &str) -> Option<crate::palette::Rgb> {
+fn color(o: &ShowFields, id: &str) -> Option<Rgb> {
     crate::output::color_of(&o.project_colors, id)
 }
 
@@ -428,13 +429,15 @@ fn hang(line: &str) -> usize {
 
 /// Spec §3.4: `<label>  <id>  <status>  <title>`, columns aligned, titles hanging.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
-    let mut rows: Vec<(&str, &str, Span, &str)> = Vec::new();
+    // The last field is the row's project colour; an unresolved dependency has none.
+    let mut rows: Vec<(&str, &str, Span, &str, Option<Rgb>)> = Vec::new();
     if let Some(parent) = &o.parent {
         rows.push((
             "parent",
             parent.id.as_str(),
             present::status(parent.status),
             parent.title.as_str(),
+            color(o, &parent.id),
         ));
     }
     for dependency in &o.depends_on {
@@ -443,6 +446,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             dependency.id.as_str(),
             present::status_of(dependency.status),
             dependency.title.as_deref().unwrap_or("(unresolved)"),
+            color(o, &dependency.id).filter(|_| dependency.resolved),
         ));
     }
     for child in &o.children {
@@ -451,6 +455,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             child.id.as_str(),
             present::status(child.status),
             child.title.as_str(),
+            color(o, &child.id),
         ));
     }
     if rows.is_empty() {
@@ -466,19 +471,17 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
     let status_width = 7;
     let lead_width = label_width + 2 + id_width + 2 + status_width + 2;
     let mut rendered = present::rule("related", painter, width.unwrap_or(MEASURE));
-    for (label, id, status, title) in rows {
+    for (label, id, status, title, project) in rows {
         let lead = format!(
             "{}  {}  {}  ",
             painter.paint(Style::Chrome, &format!("{label:<label_width$}")),
-            present::row_id(id, color(o, id))
-                .left(id_width)
-                .paint(painter),
+            present::row_id(id, project).left(id_width).paint(painter),
             status.left(status_width).paint(painter),
         );
         rendered.push_str(&block(
             &lead,
             lead_width,
-            &[(title, present::title(title, color(o, id)).style)],
+            &[(title, present::title(title, project).style)],
             lead_width,
             painter,
             width,

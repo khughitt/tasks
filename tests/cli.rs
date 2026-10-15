@@ -7934,6 +7934,8 @@ fn project_colors_paint_show_groups_and_where_without_moving_json() {
         assert_eq!(strip_ansi(&colored), env.pretty(dir, args), "{args:?}");
         let expected: Vec<String> = match (args[0], args.get(1)) {
             ("show", Some(shown)) if *shown == child => vec![
+                // the overview's in-lane value; the parent row's id is padded inside its style
+                format!("\x1b[0m {}", painted(sci_rgb, &lane)),
                 opens(sci_rgb, &lane),
                 painted(sci_rgb, "Lane"),
                 opens(dots_rgb, &dotted),
@@ -7971,6 +7973,94 @@ fn project_colors_paint_show_groups_and_where_without_moving_json() {
         }
         assert_eq!(json, before, "{args:?}");
     }
+}
+
+#[test]
+fn project_colors_leave_unresolved_dependencies_in_chrome() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = |v: serde_json::Value| v["id"].as_str().unwrap().to_string();
+    let gone = id(env.json(&sci, &["add", "Gone"]));
+    let task = id(env.json(&sci, &["add", "Waiting", "--depends", &gone]));
+    std::fs::remove_file(sci.join(format!("tasks/{gone}.md"))).unwrap();
+    write_project_color(&sci, "sci", "#123456");
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["--color=always", "show", &task])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let colored = String::from_utf8(out.stdout).unwrap();
+    assert!(colored.contains(&format!("\x1b[2m{gone}")), "{colored:?}");
+    assert!(colored.contains("  (unresolved)\n"), "{colored:?}");
+}
+
+#[test]
+fn project_colors_warn_instead_of_failing_on_another_projects_bad_config() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let dots = env.init("dots");
+    let id = |v: serde_json::Value| v["id"].as_str().unwrap().to_string();
+    let leaving = id(env.json(&sci, &["add", "Leaving"]));
+    let arrived = id(env.json(&sci, &["move", &leaving, "--to", "dots"]));
+    env.json(&sci, &["group", "set", "pair", "sci", "dots"]);
+    write_project_color(&sci, "sci", "#123456");
+    write_project_color(&dots, "dots", "#abcdef");
+    let bogus = |dir: &std::path::Path, prefix: &str| {
+        std::fs::write(
+            dir.join("tasks/.config.toml"),
+            format!("prefix = \"{prefix}\"\ncolor = \"bogus\"\n"),
+        )
+        .unwrap()
+    };
+    let warned = |v: &serde_json::Value, prefix: &str| {
+        v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains(&format!("project {prefix}")))
+    };
+
+    bogus(&dots, "dots");
+    let shown = env.json(&sci, &["show", &leaving]);
+    assert!(warned(&shown, "dots"), "{shown}");
+    let groups = env.json(&sci, &["groups"]);
+    assert!(warned(&groups, "dots"), "{groups}");
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["--color=always", "show", &leaving])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let colored = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        colored.contains(&format!("\x1b[2m{arrived}")),
+        "{colored:?}"
+    );
+
+    write_project_color(&dots, "dots", "#abcdef");
+    bogus(&sci, "sci");
+    let next = env.json(&dots, &["next"]);
+    assert_eq!(next["next"]["task"]["id"], arrived.as_str(), "{next}");
+    assert!(warned(&next, "sci"), "{next}");
+    let out = env
+        .cmd(&dots)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["--color=always", "next"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let colored = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        colored.contains("\x1b[1;38;2;171;205;239mLeaving"),
+        "{colored:?}"
+    );
+    assert!(
+        colored.contains(&format!("\x1b[2m{leaving}")),
+        "{colored:?}"
+    );
 }
 
 #[test]

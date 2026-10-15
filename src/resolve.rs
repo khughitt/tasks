@@ -501,6 +501,7 @@ pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Tas
 /// The colour a registered project's config sets, as leniently as
 /// `resolve_registered`: an unregistered prefix or a missing root or config is `Ok(None)`.
 pub fn registered_color(registry: &Registry, prefix: &str) -> Result<Option<crate::palette::Rgb>> {
+    let prefix = registry.canonical_prefix(prefix);
     let Some(root) = registry.project_root(prefix) else {
         return Ok(None);
     };
@@ -509,6 +510,21 @@ pub fn registered_color(registry: &Registry, prefix: &str) -> Result<Option<crat
     }
     let project = crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)?;
     Ok(project.color)
+}
+
+/// `registered_color` for a view that only paints with it: a config that cannot be read
+/// becomes a warning naming the project, and the view goes on uncoloured.
+pub fn color_or_warning(
+    registry: &Registry,
+    prefix: &str,
+    warnings: &mut Vec<String>,
+) -> Option<crate::palette::Rgb> {
+    registered_color(registry, prefix).unwrap_or_else(|error| {
+        warnings.push(format!(
+            "project {prefix}: its color is not shown ({error})"
+        ));
+        None
+    })
 }
 
 /// `### Task 1: x` -> `Some("Task 1: x")`; non-headings -> None.

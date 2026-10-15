@@ -5,6 +5,7 @@ use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
 use crate::resolve::{DocKind, DocRead, Located, Resolver, has_heading};
+use std::collections::HashMap;
 use std::path::Path;
 use time::OffsetDateTime;
 
@@ -205,31 +206,29 @@ pub fn describe(
             bytes: file.bytes,
         })
         .collect();
-    let mut project_colors = crate::output::ProjectColors::new();
-    if let Some(color) = project.color {
-        project_colors.insert(project.prefix.clone(), color);
-    }
     // Keyed by the prefix as stored, which is how the view prints the id; looked up by
-    // the live prefix a retired one resolves to.
+    // the live prefix a retired one resolves to, once per prefix.
+    let mut looked_up = HashMap::from([(project.prefix.clone(), project.color)]);
     let named = task
         .depends
         .iter()
         .chain(&task.moved_to)
         .chain(&task.moved_from);
     for id in named {
-        if project_colors.contains_key(&id.prefix) {
-            continue;
-        }
-        let live = registry.canonical_id(id).prefix;
-        let color = if live == project.prefix {
-            project.color
-        } else {
-            crate::resolve::registered_color(registry, &live)?
-        };
-        if let Some(color) = color {
-            project_colors.insert(id.prefix.clone(), color);
+        if !looked_up.contains_key(&id.prefix) {
+            let live = registry.canonical_id(id).prefix;
+            let color = if live == project.prefix {
+                project.color
+            } else {
+                crate::resolve::color_or_warning(registry, &live, warnings)
+            };
+            looked_up.insert(id.prefix.clone(), color);
         }
     }
+    let project_colors: crate::output::ProjectColors = looked_up
+        .into_iter()
+        .filter_map(|(prefix, color)| color.map(|color| (prefix, color)))
+        .collect();
     Ok(ShowFields {
         project_colors,
         spec_path,

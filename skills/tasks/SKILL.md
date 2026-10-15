@@ -246,7 +246,7 @@ Project identity colors are assigned by an optional top-level `color = "#RRGGBB"
 `tasks/.config.toml`, before any table headers. Use exactly six hex digits (either case);
 invalid values fail with a typed config error. Change the value to recolor or remove the
 key to restore existing styling. Init/reinitialization and prefix rename preserve it.
-Pretty output paints a project's name in that RGB wherever it prints one: prefixes in
+Pretty output paints a project's name in that RGB: prefixes in
 `projects`, `groups` and `where`; task ids and titles in table views, and in `show`/`next`
 by the project each related id belongs to. `claims` stays uncolored. Unassigned or unreachable projects keep existing styling;
 other columns keep their roles. Existing `--color`, `TASKS_COLOR`, `NO_COLOR`, and auto

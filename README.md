@@ -817,7 +817,7 @@ color = "#123456"
 The value must be exactly `#RRGGBB` (either hex case); invalid values fail with a config
 error. Change the value to change the color, or remove the key to restore existing styling.
 Init/reinitialization and prefix rename preserve the setting. Pretty output paints a
-project's name in that RGB wherever it prints one: the prefix in `projects`, `groups` and
+project's name in that RGB in these places: the prefix in `projects`, `groups` and
 `where`, and task ids and titles in every table view (`list`, `search`, `ready`, `tree`,
 `prime`, `lanes`, `quiet`, `sample`) and in `show` and `next`, whose related rows, lane
 and move pointers take the colour of the project each id belongs to:
@@ -832,7 +832,9 @@ carries the color, whatever the color controls say, as lowercase `"color": "#rrg
 `projects` rows, on `where`'s `project`, and on `resolve`'s resolved rows, so another tool
 can paint a project without reading its config. The key is omitted when the project sets
 none or is unreachable; `resolve` also omits it, with a warning, when a config cannot be
-read, where `projects` and `where` fail with the config error.
+read, where `projects` and `where` fail with the config error. Pretty `show`, `next` and
+`groups` likewise leave another project's name uncolored, with a warning, when its config
+cannot be read.
 
 With color on, date columns fade by age: today in the terminal theme's cyan, older dates
 toward a dimmed foreground, anything two years or more away the same. Priorities take the
