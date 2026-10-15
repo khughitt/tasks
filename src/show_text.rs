@@ -5,6 +5,7 @@
 use crate::claims::Escalation;
 use crate::model::Note;
 use crate::output::{ParkInfo, ShowFields};
+use crate::palette::Rgb;
 use crate::present::{self, Span};
 use crate::style::{Painter, Style};
 use unicode_width::UnicodeWidthChar;
@@ -185,7 +186,7 @@ fn spans(spans: &[Span]) -> Vec<(&str, Option<Style>)> {
 
 fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
     let mut rendered = present::rule("overview", painter, width.unwrap_or(MEASURE));
-    let title = present::heading(&o.task.title, o.project_color);
+    let title = present::heading(&o.task.title, color(o, &o.task.id.to_string()));
     let id = present::id(&format!("({})", o.task.id));
     rendered.push_str(&block(
         "",
@@ -211,6 +212,11 @@ fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
     rendered
 }
 
+/// The colour of the project `id` belongs to, when the view knows one.
+fn color(o: &ShowFields, id: &str) -> Option<Rgb> {
+    crate::output::color_of(&o.project_colors, id)
+}
+
 /// Spec §3.3: one row per field with a value, in this order. `depends` and `parent` are
 /// listed under `related` instead.
 fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
@@ -220,10 +226,12 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         ("priority", vec![present::priority(t.priority)]),
     ];
     if let Some(to) = &t.moved_to {
-        rows.push(("moved to", vec![present::id(&to.to_string())]));
+        let to = to.to_string();
+        rows.push(("moved to", vec![present::row_id(&to, color(o, &to))]));
     }
     if let Some(from) = &t.moved_from {
-        rows.push(("moved from", vec![present::id(&from.to_string())]));
+        let from = from.to_string();
+        rows.push(("moved from", vec![present::row_id(&from, color(o, &from))]));
     }
     if t.size.is_some() {
         rows.push(("size", vec![present::size(t.size)]));
@@ -235,7 +243,8 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     if t.lane {
         rows.push(("lane", vec![Span::plain("yes")]));
     } else if let Some(lane) = &o.in_lane {
-        rows.push(("in lane", vec![present::id(&lane.to_string())]));
+        let lane = lane.to_string();
+        rows.push(("in lane", vec![present::row_id(&lane, color(o, &lane))]));
     }
     if t.parallel {
         rows.push(("parallel", vec![Span::plain("yes")]));
@@ -420,13 +429,15 @@ fn hang(line: &str) -> usize {
 
 /// Spec §3.4: `<label>  <id>  <status>  <title>`, columns aligned, titles hanging.
 fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<String> {
-    let mut rows: Vec<(&str, &str, Span, &str)> = Vec::new();
+    // The last field is the row's project colour; an unresolved dependency has none.
+    let mut rows: Vec<(&str, &str, Span, &str, Option<Rgb>)> = Vec::new();
     if let Some(parent) = &o.parent {
         rows.push((
             "parent",
             parent.id.as_str(),
             present::status(parent.status),
             parent.title.as_str(),
+            color(o, &parent.id),
         ));
     }
     for dependency in &o.depends_on {
@@ -435,6 +446,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             dependency.id.as_str(),
             present::status_of(dependency.status),
             dependency.title.as_deref().unwrap_or("(unresolved)"),
+            color(o, &dependency.id).filter(|_| dependency.resolved),
         ));
     }
     for child in &o.children {
@@ -443,6 +455,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
             child.id.as_str(),
             present::status(child.status),
             child.title.as_str(),
+            color(o, &child.id),
         ));
     }
     if rows.is_empty() {
@@ -458,17 +471,17 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
     let status_width = 7;
     let lead_width = label_width + 2 + id_width + 2 + status_width + 2;
     let mut rendered = present::rule("related", painter, width.unwrap_or(MEASURE));
-    for (label, id, status, title) in rows {
+    for (label, id, status, title, project) in rows {
         let lead = format!(
             "{}  {}  {}  ",
             painter.paint(Style::Chrome, &format!("{label:<label_width$}")),
-            present::id(id).left(id_width).paint(painter),
+            present::row_id(id, project).left(id_width).paint(painter),
             status.left(status_width).paint(painter),
         );
         rendered.push_str(&block(
             &lead,
             lead_width,
-            &[(title, None)],
+            &[(title, present::title(title, project).style)],
             lead_width,
             painter,
             width,
@@ -654,7 +667,7 @@ mod tests {
     fn fields() -> ShowFields {
         ShowFields {
             task: crate::format::parse_task(BARE, "x").unwrap(),
-            project_color: None,
+            project_colors: Default::default(),
             spec_path: None,
             plan_path: None,
             step_found: None,

@@ -79,7 +79,7 @@ pub fn rm(name: String) -> Result<Output> {
 /// Every group in name order, each member with the reachability test `projects` uses.
 pub fn list(dir: Option<&Path>) -> Result<Output> {
     let registry = Registry::load()?;
-    let warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
+    let mut warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
     let mut groups = Vec::new();
     for (name, members) in &registry.groups {
         let mut rows = Vec::new();
@@ -90,9 +90,15 @@ pub fn list(dir: Option<&Path>) -> Result<Output> {
                     "group {name:?} names {prefix:?}, which is not a registered project"
                 ))
             })?;
+            let reachable = is_reachable(root)?;
             rows.push(GroupMember {
                 prefix: prefix.clone(),
-                reachable: is_reachable(root)?,
+                reachable,
+                color: if reachable {
+                    crate::resolve::color_or_warning(&registry, prefix, &mut warnings)
+                } else {
+                    None
+                },
             });
         }
         groups.push(GroupRow {

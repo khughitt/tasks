@@ -1,15 +1,16 @@
 ---
 id: tasks-68cb2b
 title: "Paint project prefixes outside tables: show's related and lane ids, groups, where"
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: direct
-owner: main
+owner: feat/project-color-surfaces
 created: 2026-10-15T15:52:44Z
-updated: 2026-10-15T16:24:53Z
+updated: 2026-10-15T16:43:26Z
 started: 2026-10-15T16:24:53Z
+completed: 2026-10-15T16:43:26Z
 depends: []
 parent: tasks-1f05a7
 tags: [pretty]
@@ -34,4 +35,13 @@ Where to look: src/show_text.rs (overview_rows, related), src/present.rs, src/ou
 
 - 2026-10-15T16:24:45Z (main): scope: scoped; table precedent (row_id/title replace chrome with project colour) settles the per-surface question; body rewritten with done criteria per surface (show related/in-lane/moved ids, groups, where), claims excluded, JSON unchanged; P2 m mid direct
 - 2026-10-15T16:24:53Z (main): started
+  provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T16:24:55Z (feat/project-color-surfaces): resumed
+  provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T16:35:57Z (feat/project-color-surfaces): review: impl round 1 — verdict: revise; findings: Important 2, Minor 5; reviewer: claude-code
+- 2026-10-15T16:43:15Z (feat/project-color-surfaces): review: impl round 2 — verdict: accept; findings: Minor 3; reviewer: claude-code
+- 2026-10-15T16:43:25Z (feat/project-color-surfaces): minor (deferred): 3 re-review minors → tasks-58d986
+- 2026-10-15T16:43:26Z (feat/project-color-surfaces): done
+  provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T16:43:26Z (feat/project-color-surfaces): show and next paint the lane, move pointers and related rows (id and title) by each id's project, unresolved dependencies stay chrome; groups and where paint prefixes; another project's unreadable config warns instead of failing; JSON unchanged; docs updated; two review rounds, minors deferred to tasks-58d986
   provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

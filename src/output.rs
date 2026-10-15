@@ -207,6 +207,9 @@ pub struct GroupMember {
     pub prefix: String,
     /// The registered root exists and holds a config: the test `projects` applies.
     pub reachable: bool,
+    /// Pretty-only: the colour the member's config sets.
+    #[serde(skip)]
+    pub color: Option<crate::palette::Rgb>,
 }
 
 #[derive(Serialize)]
@@ -256,9 +259,10 @@ pub struct Related {
 #[derive(Serialize)]
 pub struct ShowFields {
     pub task: Task,
-    /// Pretty-only title color, from the record's project.
+    /// Pretty-only colours of every project the view names (the record's own, its
+    /// dependencies' and its move counterpart's), by prefix.
     #[serde(skip)]
-    pub project_color: Option<crate::palette::Rgb>,
+    pub project_colors: ProjectColors,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -316,7 +320,7 @@ pub struct HaltRow {
 /// Each in-scope prefix's configured colour (comfy-tables spec §5).
 pub type ProjectColors = std::collections::HashMap<String, crate::palette::Rgb>;
 
-fn color_of(colors: &ProjectColors, id: &str) -> Option<crate::palette::Rgb> {
+pub fn color_of(colors: &ProjectColors, id: &str) -> Option<crate::palette::Rgb> {
     crate::model::TaskId::parse(id)
         .ok()
         .and_then(|id| colors.get(&id.prefix).copied())
@@ -1160,10 +1164,13 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
         Output::Root(o) => o.root.clone(),
         Output::Where(o) => match &o.project {
             None => "no project".into(),
-            Some(p) => match &p.checkout {
-                Some(checkout) => format!("{} {} (linked to {checkout})", p.prefix, p.root),
-                None => format!("{} {}", p.prefix, p.root),
-            },
+            Some(p) => {
+                let prefix = present::project(&p.prefix, p.color).paint(painter);
+                match &p.checkout {
+                    Some(checkout) => format!("{prefix} {} (linked to {checkout})", p.root),
+                    None => format!("{prefix} {}", p.root),
+                }
+            }
         },
 
         Output::Resolve(o) => o
@@ -1199,10 +1206,11 @@ fn pretty(out: &Output, painter: &Painter, layout: &crate::table::Layout) -> Str
                     .members
                     .iter()
                     .map(|member| {
+                        let prefix = present::project(&member.prefix, member.color).paint(painter);
                         if member.reachable {
-                            member.prefix.clone()
+                            prefix
                         } else {
-                            format!("{} (unreachable)", member.prefix)
+                            format!("{prefix} (unreachable)")
                         }
                     })
                     .collect();
