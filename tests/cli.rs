@@ -7868,10 +7868,20 @@ fn project_colors_paint_prefixes_and_titles_without_changing_json_or_layout() {
             .output()
             .unwrap();
         assert!(json.status.success());
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&json.stdout).unwrap(),
-            before
-        );
+        let mut json = serde_json::from_slice::<serde_json::Value>(&json.stdout).unwrap();
+        if args[0] == "projects" {
+            // the projects rows gain the color, normalized to lowercase; nothing else moves
+            for row in json["projects"].as_array_mut().unwrap() {
+                let color = row.as_object_mut().unwrap().remove("color");
+                let expected = match row["prefix"].as_str().unwrap() {
+                    "sci" => Some(serde_json::json!("#123456")),
+                    "dots" => Some(serde_json::json!("#abcdef")),
+                    _ => None,
+                };
+                assert_eq!(color, expected, "{row}");
+            }
+        }
+        assert_eq!(json, before);
     }
 }
 
@@ -7941,6 +7951,72 @@ fn project_colors_reject_invalid_config_values() {
             assert_eq!(env.fail(&sci, args), "config", "{value}: {args:?}");
         }
     }
+}
+
+#[test]
+fn where_and_resolve_report_the_project_color() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let plain = env.init("plain");
+    let id = id_of(env.json(&sci, &["add", "Science"]));
+    write_project_color(&sci, "sci", "#aBCdEf");
+
+    assert_eq!(env.json(&sci, &["where"])["project"]["color"], "#abcdef");
+    let unset = env.json(&plain, &["where"]);
+    assert!(unset["project"].get("color").is_none(), "{unset}");
+
+    let file = sci.join("tasks").join(format!("{id}.md"));
+    let out = env.json(
+        &plain,
+        &[
+            "resolve",
+            &id,
+            "sci",
+            file.to_str().unwrap(),
+            "plain",
+            plain.to_str().unwrap(),
+        ],
+    );
+    let colors: Vec<_> = out["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            assert_eq!(row["status"], "resolved", "{row}");
+            row.get("color").cloned()
+        })
+        .collect();
+    let abcdef = Some(serde_json::json!("#abcdef"));
+    assert_eq!(
+        colors,
+        [abcdef.clone(), abcdef.clone(), abcdef, None, None],
+        "{out}"
+    );
+    assert_eq!(out["warnings"], serde_json::json!([]));
+}
+
+#[test]
+fn resolve_omits_the_color_it_cannot_read_and_still_resolves() {
+    let mut env = TestEnv::new();
+    let plain = env.init("plain");
+    let gone = env.init("gone");
+    let bad = env.init("bad");
+    write_project_color(&gone, "gone", "#123456");
+    std::fs::remove_file(gone.join("tasks/.config.toml")).unwrap();
+    write_project_color(&bad, "bad", "red");
+
+    let out = env.json(&plain, &["resolve", "gone", "bad"]);
+    for row in out["results"].as_array().unwrap() {
+        assert_eq!(row["status"], "resolved", "{row}");
+        assert!(row.get("color").is_none(), "{row}");
+    }
+    let warnings = out["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{out}");
+    let warning = warnings[0].as_str().unwrap();
+    assert!(
+        warning.starts_with("bad: ") && warning.contains("its color is not reported"),
+        "{warning}"
+    );
 }
 
 #[test]

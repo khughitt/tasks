@@ -250,7 +250,9 @@ key to restore existing styling. Init/reinitialization and prefix rename preserv
 `TASKS_FORMAT=pretty tasks --color=always list --all-projects` paints task titles with the
 same RGB (local `list` too). Unassigned or unreachable projects keep existing styling;
 other columns keep their roles. Existing `--color`, `TASKS_COLOR`, `NO_COLOR`, and auto
-controls apply; JSON and stored IDs are unchanged.
+controls apply; stored IDs are unchanged. JSON carries the color as lowercase
+`color: "#rrggbb"` on `projects` rows, `where`'s `project`, and resolved `resolve` rows
+(omitted when unset or unreadable): read it there, never from config files.
 
 `--source <ref>` records where a task came from (a URL, a message id, a note); tasks never interprets it.
 `tasks list --source <ref>` finds everything filed from one reference, matched exactly.

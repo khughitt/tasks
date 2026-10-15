@@ -1,6 +1,7 @@
 //! Per-host location history and path resolution
 //! (docs/specs/2026-10-06-project-resolution-design.md §2, §4).
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// One registered project that declares a `[checkout]` (linked-checkouts §4.1).
@@ -10,12 +11,14 @@ pub struct Linked {
     pub checkout: PathBuf,
 }
 
-/// Every registered project on this host that declares a checkout, and every registered
-/// project whose config could not be read. A project whose root is gone or holds no config
-/// is in neither: it cannot be opened here, so nothing can be linked to it.
+/// Every registered project on this host that declares a checkout, the color of every one
+/// that sets one, and every registered project whose config could not be read. A project
+/// whose root is gone or holds no config is in none: it cannot be opened here, so nothing
+/// can be linked to it and it has no color to report.
 #[derive(Debug, Default)]
 pub struct CheckoutScan {
     pub linked: Vec<Linked>,
+    pub colors: BTreeMap<String, crate::palette::Rgb>,
     pub failed: Vec<(String, crate::error::Error)>,
 }
 
@@ -44,6 +47,9 @@ pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
         });
         match opened {
             Ok(Some(project)) => {
+                if let Some(color) = project.color {
+                    scan.colors.insert(prefix.clone(), color);
+                }
                 if let Some(checkout) = project.checkout {
                     scan.linked.push(Linked {
                         prefix: prefix.clone(),
@@ -298,6 +304,7 @@ pub enum Answer {
 /// Every registered project's locations on this host (§4.2), built once per call.
 pub struct Index {
     locations: Vec<Location>,
+    colors: BTreeMap<String, crate::palette::Rgb>,
     pub warnings: Vec<String>,
 }
 
@@ -368,12 +375,20 @@ impl Index {
             }
         }
         for (prefix, error) in scan.failed {
-            warnings.push(format!("{prefix}: its checkout is not matched ({error})"));
+            warnings.push(format!(
+                "{prefix}: its checkout is not matched and its color is not reported ({error})"
+            ));
         }
         Index {
             locations,
+            colors: scan.colors,
             warnings,
         }
+    }
+
+    /// The color `prefix`'s config sets, when it was read and sets one.
+    pub fn color(&self, prefix: &str) -> Option<crate::palette::Rgb> {
+        self.colors.get(prefix).copied()
     }
 
     /// The project `path` (already normalized) belongs to (§4.3).

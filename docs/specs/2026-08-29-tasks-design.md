@@ -641,7 +641,10 @@ next        -> { next: ShowFields|null, warnings }   ShowFields = show without w
 root        -> { prefix, root, warnings }
 tags        -> { tags: [{ tag, count, projects: { <prefix>: int } }], warnings }
 projects    -> { projects: [{ prefix, root, reachable: bool, counts: Counts|null,
-                 total: int|null, last_activity: string|null }], warnings }
+                 total: int|null, last_activity: string|null, color?: "#rrggbb" }],
+                 warnings }
+               color is the project's identity color, lowercase; omitted when the
+               project sets none or is unreachable (tasks-b124ab).
                total counts every status, so it exceeds the sum of the open counts;
                last_activity is the newest updated across all tasks, closed included.
                Both are null when unreachable, and last_activity is null for a project

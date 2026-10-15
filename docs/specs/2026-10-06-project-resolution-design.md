@@ -233,6 +233,12 @@ unavailable relative-path base is likewise a per-item invalid outcome.
 
 `root` is always the project's current registered root.
 
+- `color`: on a resolved row, the project's identity color as lowercase `#rrggbb`
+  (tasks-b124ab). It comes from the same pass over registered configs that finds linked
+  checkouts, so a batch reads each config once. It is omitted when the root is
+  unreachable or the config sets none. A reachable config that cannot be read omits it
+  too, with that pass's one warning naming the project; the row stays resolved.
+
 **What resolution checks.** Id resolution is a rule, the same one `canonical_id` already
 applies. It does not check that the task file exists. A consumer that needs the record
 calls `tasks show` with the canonical id.
