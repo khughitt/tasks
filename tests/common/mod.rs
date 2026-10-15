@@ -354,6 +354,9 @@ fn shim_command(program: &Path, dir: &Path, home: &Path) -> std::process::Comman
         .env_remove("CLAUDE_PID")
         .env_remove("CODEX_SESSION_ID")
         .env_remove("CODEX_THREAD_ID")
+        // `write_registry` reads these; an ambient value would rewrite every shim row.
+        .env_remove("SCOPE")
+        .env_remove("ROOT_ID")
         .env_remove("TASKS_THEME")
         // The shim's own invocations never query the terminal of whoever runs the suite,
         // and never inherit a malformed value: TASKS_PALETTE is validated whenever set.
