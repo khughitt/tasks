@@ -529,6 +529,7 @@ impl Ctx {
                 existing.as_ref().filter(|_| mine),
                 crate::pidview::current().as_ref(),
                 crate::claims::boot_id(),
+                time::OffsetDateTime::now_utc(),
                 crate::claims::proc_stat,
             );
             (
@@ -1253,6 +1254,7 @@ pub(crate) fn follow_holder(
         Some(&claim),
         crate::pidview::current().as_ref(),
         crate::claims::boot_id(),
+        time::OffsetDateTime::now_utc(),
         crate::claims::proc_stat,
     );
     let moved = crate::claims::Claim {

@@ -177,9 +177,16 @@ these rules:
 | This write's pid | Evidence written |
 |---|---|
 | established in a known view | all four fields from this write |
-| equal to the recorded pid, not established | the existing evidence, unchanged |
+| equal to the recorded pid, not established | the existing evidence, unchanged, unless it reads `Stale` here* |
 | different from the recorded pid, not established | the new pid, any start read, no view |
-| absent | the existing evidence, unchanged |
+| absent | the existing evidence, unchanged, unless it reads `Stale` here* |
+
+\* Amended after the final implementation review (Important 1). Recorded evidence that
+reads `Stale` from the writer's own view protects nothing. Keeping it would write the
+owner's own claim stale, free for another session to take without `--force`. Such a
+write records this write's evidence instead: for an absent pid, a pid-less TTL claim, as
+before this design. Evidence the writer cannot judge (`Unverifiable`, the sandbox case)
+is still kept.
 
 The third row cannot keep the old evidence. That evidence names a process the owner
 no longer reports, and once it dies its own view would read it `Stale` while the

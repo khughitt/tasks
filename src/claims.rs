@@ -875,14 +875,18 @@ impl Evidence {
 /// recorded only when this write establishes the pid in a known view. Exported pids
 /// establish one only in the initial PID namespace, because no numeric match can prove an
 /// inherited number's namespace (spec round 2). A heartbeat that establishes nothing keeps
-/// the recorded evidence unless it reports a different pid (§2's table).
+/// the recorded evidence unless it reports a different pid (§2's table), or that evidence
+/// already reads stale from this view: keeping a dead pid would write the owner's own claim
+/// stale, free for anyone to take (final review, Important 1).
 pub fn evidence(
     me: &Identity,
     own: Option<&Claim>,
     view: Option<&crate::pidview::PidView>,
     boot_id: Option<String>,
+    now: time::OffsetDateTime,
     stat: impl Fn(u32) -> ProcStat,
 ) -> Evidence {
+    let boot_id_now = boot_id.clone();
     let start = match &me.proof {
         Some(proof) => Some(proof.pid_start),
         None => me.pid.and_then(|pid| match stat(pid) {
@@ -908,7 +912,11 @@ pub fn evidence(
         pid_view: view.filter(|_| established).map(|view| view.to_string()),
     };
     match own {
-        Some(own) if fresh.pid_view.is_none() && (me.pid.is_none() || me.pid == own.pid) => {
+        Some(own)
+            if fresh.pid_view.is_none()
+                && (me.pid.is_none() || me.pid == own.pid)
+                && !liveness_with(own, now, boot_id_now.as_deref(), view, &stat).is_stale() =>
+        {
             Evidence::of(own)
         }
         _ => fresh,
@@ -2599,6 +2607,11 @@ mod tests {
         }
     }
 
+    /// Just after `sample()`'s `seen`, inside the TTL.
+    fn t0() -> time::OffsetDateTime {
+        at("2026-09-05T08:00:01Z")
+    }
+
     fn boot() -> Option<String> {
         Some("boot-a".into())
     }
@@ -2610,6 +2623,7 @@ mod tests {
             None,
             Some(&INIT),
             boot(),
+            t0(),
             found(999),
         );
         assert_eq!(got.pid_view, Some(INIT.to_string()));
@@ -2624,6 +2638,7 @@ mod tests {
             None,
             Some(&CHILD),
             boot(),
+            t0(),
             found(999),
         );
         assert_eq!(got.pid_view, None);
@@ -2637,6 +2652,7 @@ mod tests {
             None,
             Some(&INIT),
             boot(),
+            t0(),
             |_| ProcStat::NotFound,
         );
         assert_eq!((missing.pid_view, missing.pid_start), (None, None));
@@ -2645,6 +2661,7 @@ mod tests {
             None,
             None,
             boot(),
+            t0(),
             found(999),
         );
         assert_eq!(unknown.pid_view, None);
@@ -2657,6 +2674,7 @@ mod tests {
             None,
             Some(&CHILD),
             boot(),
+            t0(),
             found(999),
         );
         assert_eq!(got.pid_view, Some(CHILD.to_string()));
@@ -2669,6 +2687,7 @@ mod tests {
             None,
             Some(&INIT),
             boot(),
+            t0(),
             found(999),
         );
         assert_eq!(got.pid_view, None);
@@ -2684,7 +2703,9 @@ mod tests {
             }),
             ..ident(Some(42), Some(PidSource::Relay))
         };
-        let got = evidence(&me, None, Some(&CHILD), boot(), |_| ProcStat::NotFound);
+        let got = evidence(&me, None, Some(&CHILD), boot(), t0(), |_| {
+            ProcStat::NotFound
+        });
         assert_eq!(got.pid_view, Some(CHILD.to_string()));
         assert_eq!(
             (got.pid_start, got.boot_id.as_deref()),
@@ -2706,6 +2727,7 @@ mod tests {
             Some(&recorded()),
             Some(&INIT),
             boot(),
+            t0(),
             found(1000),
         );
         assert_eq!((got.pid, got.pid_start), (Some(43), Some(1000)));
@@ -2721,6 +2743,7 @@ mod tests {
             Some(&own),
             Some(&CHILD),
             boot(),
+            t0(),
             |_| ProcStat::NotFound,
         );
         assert_eq!(got, Evidence::of(&own));
@@ -2733,6 +2756,7 @@ mod tests {
             Some(&recorded()),
             Some(&CHILD),
             boot(),
+            t0(),
             found(31),
         );
         assert_eq!(
@@ -2749,6 +2773,7 @@ mod tests {
             Some(&own),
             Some(&INIT),
             boot(),
+            t0(),
             found(999),
         );
         assert_eq!(got, Evidence::of(&own));
@@ -2762,6 +2787,7 @@ mod tests {
             Some(&own),
             Some(&INIT),
             boot(),
+            t0(),
             found(999),
         );
         assert_eq!(got, Evidence::of(&own));
@@ -2921,5 +2947,47 @@ mod tests {
         );
         store.prune_dead();
         assert!(store.get(&id).is_some());
+    }
+
+    #[test]
+    fn a_heartbeat_does_not_keep_evidence_that_reads_stale_here() {
+        // Final review, Important 1: keeping a dead pid makes the owner's own new claim
+        // stale, so another session could take it without --force.
+        let own = recorded();
+        let gone = evidence(
+            &ident(None, None),
+            Some(&own),
+            Some(&INIT),
+            boot(),
+            t0(),
+            |_| ProcStat::NotFound,
+        );
+        assert_eq!(
+            (gone.pid, gone.pid_view),
+            (None, None),
+            "a pid-less heartbeat after death"
+        );
+        let rebooted = evidence(
+            &ident(None, None),
+            Some(&own),
+            Some(&INIT),
+            Some("boot-b".into()),
+            t0(),
+            found(999),
+        );
+        assert_eq!(
+            rebooted.pid, None,
+            "evidence from an earlier boot is not kept"
+        );
+        // Evidence this view cannot judge is still kept: the sandbox heartbeat.
+        let elsewhere = evidence(
+            &ident(None, None),
+            Some(&own),
+            Some(&CHILD),
+            boot(),
+            t0(),
+            |_| ProcStat::NotFound,
+        );
+        assert_eq!(elsewhere, Evidence::of(&own));
     }
 }

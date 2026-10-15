@@ -28457,3 +28457,42 @@ fn an_unverifiable_claim_still_occupies_its_worktree() {
     );
     assert!(detail.contains("Wait for that branch to merge"), "{detail}");
 }
+
+#[test]
+fn pid_view_heartbeat_after_the_recorded_pid_died_keeps_the_claim_held() {
+    // Final review, Important 1: a repeated `start` without a pid must not keep evidence
+    // that already reads stale here, or another session takes the claim without --force.
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "owner")
+        .env("TASKS_SESSION_PID", child.id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "owner")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_SESSION", "intruder")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{out:?}");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("\"claimed\""), "{text}");
+}
