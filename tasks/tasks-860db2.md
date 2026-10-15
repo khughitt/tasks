@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-15T01:11:41Z
+updated: 2026-10-15T01:12:51Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -76,3 +76,4 @@ Tests: inject the view the way `liveness_with` injects stat.
 - 2026-10-15T01:11:40Z (fix/claim-pid-view): review: plan round 3 — verdict: accept; findings: none; reviewer: human
 - 2026-10-15T01:11:41Z (fix/claim-pid-view): resumed
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T01:12:51Z (fix/claim-pid-view): baseline: just test-fast passed on fix/claim-pid-view at 53795c3 before Task 1
