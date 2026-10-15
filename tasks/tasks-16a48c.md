@@ -1,15 +1,16 @@
 ---
 id: tasks-16a48c
 title: A write that cannot find a worktree-only task names the checkout its claim or park records
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: fix/tasks-16a48c
 created: 2026-10-15T12:37:58Z
-updated: 2026-10-15T18:13:20Z
+updated: 2026-10-15T18:13:35Z
 started: 2026-10-15T18:04:52Z
+completed: 2026-10-15T18:13:35Z
 depends: []
 parent: tasks-984769
 tags: [feedback, friction, "from:tasks"]
@@ -36,4 +37,8 @@ Where: src/commands/mod.rs (`load`), src/commands/show.rs (`recorded_elsewhere`,
 - 2026-10-15T18:12:19Z (fix/tasks-16a48c): parked (waiting on user, approval): User approves merging fix/tasks-16a48c and installing the CLI (merge updates the installed tasks skill); agent then resumes in .worktrees/tasks-16a48c, closes the task, merges locally and runs cargo install --path . from main.
   provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-15T18:13:20Z (fix/tasks-16a48c): resumed
+  provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-15T18:13:35Z (fix/tasks-16a48c): done
+  provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-15T18:13:35Z (fix/tasks-16a48c): Implemented missing-record checkout guidance for note and flagged/bare edit via shared lookup and recovery helpers. Reviewed and accepted after correcting bare edit; 1489 fast tests and checks passed. User approved local merge and CLI installation.
   provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
