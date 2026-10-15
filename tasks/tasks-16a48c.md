@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: fix/tasks-16a48c
 created: 2026-10-15T12:37:58Z
-updated: 2026-10-15T18:04:52Z
+updated: 2026-10-15T18:05:03Z
 started: 2026-10-15T18:04:52Z
 depends: []
 parent: tasks-984769
@@ -26,4 +26,6 @@ Where: src/commands/mod.rs (`load`), src/commands/show.rs (`recorded_elsewhere`,
 
 - 2026-10-15T16:56:12Z (main): scope: scoped; rewrote as the write-path counterpart of show's §6.1 fallback (error remedy, no routing), todo P2/s/mid/direct under tasks-984769. Premise checked against main 20544c4: note -> open_id_write_ctx -> load -> read_task_with_raw has no claim/park lookup. Absorbs tasks-ae03ed.
 - 2026-10-15T18:04:52Z (main): started
+  provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-15T18:05:03Z (fix/tasks-16a48c): resumed
   provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
