@@ -4,8 +4,8 @@ title: "Plan execution requires task mutations in the main checkout, but documen
 status: idea
 priority: 2
 created: 2026-10-13T17:42:42Z
-updated: 2026-10-15T16:55:44Z
-depends: []
+updated: 2026-10-15T16:55:45Z
+depends: [tasks-82bd08]
 parent: tasks-a73dce
 tags: [feedback, friction, "from:mind6"]
 agent: codex
