@@ -27,9 +27,11 @@ integration, or its step children are filed with no `--plan`/`--step`. Then
   (`overlay/nexc`), and `-C <code worktree>` opens that same overlay project
   (`parked::open_recorded`, linked-checkouts §4.1). Documents resolve under the overlay
   root by design: ops `docs/specs/2026-10-01-linked-checkouts-design.md` §168 says
-  `--spec` and `--plan` resolve there. A spec in the code repository's worktree (nexc
-  notes cite `services/nexml/docs/specs/workflow-feedback-design.md` in a code worktree)
-  is outside every configured root, so `-C` cannot help.
+  `--spec` and `--plan` resolve there. The reported spec
+  (`.worktrees/nex-342/docs/superpowers/specs/2026-10-14-hap-union-render-design.md`,
+  nexc-ad7d4e's `workflow-feedback-design.md` likewise) is a team document in the code
+  repository. It is outside every configured root, so `-C` cannot help. The overlay has
+  no worktrees, so its own working documents are never branch-only.
 - `check` fails `doc_missing` for an open task whose linked file is absent from both the
   checkout and its main checkout (tasks design spec, §check). A link to a branch-only
   document written from main would therefore break main's gate until the branch merges.
@@ -59,17 +61,18 @@ integration, or its step children are filed with no `--plan`/`--step`. Then
    rule for `check` in main (warn rather than `doc_missing` while a sibling holds the
    file), and it reverses part of the 2026-09-29 decision.
 3. **Linked projects: a checkout-relative root.** Let a linked project's config name
-   document roots in the code checkout (resolved in the code worktree the command runs
-   in), or serve them through an external-reference scheme. This only addresses 3eda29.
+   document roots in the code checkout, or serve them through an external-reference
+   scheme. **Rejected by the user, 2026-10-15:** tasks stays silent toward the project.
+   A linked project links only overlay documents, so the team carries no tasks config or
+   links. tasks-3eda29 is proposed for drop as working as designed.
 
 ## Unanswered questions
 
 - Why did mind6's plan execution write step records in the main checkout, and does
   anything prevent writing them in the worktree? *Research task below; mind6's
   guidance and the flows skill can answer.*
-- Should a linked project be able to link a team document that lives in the code
-  repository, or should that document be copied into the overlay? *The user. The
-  linked-checkouts design currently says overlay only.*
+- ~~Should a linked project be able to link a team document that lives in the code
+  repository?~~ *Answered by the user, 2026-10-15: no (alternative 3).*
 - If alternative 2 is chosen, what does main's `check` report for an open task whose
   document is only on a branch? *Design, after the research.*
 
@@ -78,9 +81,9 @@ integration, or its step children are filed with no `--plan`/`--step`. Then
 - Goal: tasks-a73dce, *Link a spec or plan that exists only on its task's branch* (under
   the Record authority lane, tasks-0e432f).
 - Research: tasks-82bd08, *Establish where a branch-only spec or plan can be linked and
-  checked*. tasks-3eda29 and tasks-cefa7d wait on it.
-- A design task is filed only if the research shows alternative 1 cannot serve both
-  cases.
+  checked*, narrowed to in-tree projects. tasks-cefa7d waits on it.
+- A design task is filed only if the research shows alternative 1 cannot serve the
+  in-tree case.
 
 The note-routing reports from the same scope pass need no brief. tasks-16a48c is scoped
 under tasks-984769 (the write error names the checkout its claim or park records), and
