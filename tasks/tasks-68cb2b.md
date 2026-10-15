@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: feat/project-color-surfaces
 created: 2026-10-15T15:52:44Z
-updated: 2026-10-15T16:43:15Z
+updated: 2026-10-15T16:43:25Z
 started: 2026-10-15T16:24:53Z
 depends: []
 parent: tasks-1f05a7
@@ -39,3 +39,4 @@ Where to look: src/show_text.rs (overview_rows, related), src/present.rs, src/ou
   provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T16:35:57Z (feat/project-color-surfaces): review: impl round 1 — verdict: revise; findings: Important 2, Minor 5; reviewer: claude-code
 - 2026-10-15T16:43:15Z (feat/project-color-surfaces): review: impl round 2 — verdict: accept; findings: Minor 3; reviewer: claude-code
+- 2026-10-15T16:43:25Z (feat/project-color-surfaces): minor (deferred): 3 re-review minors → tasks-58d986
