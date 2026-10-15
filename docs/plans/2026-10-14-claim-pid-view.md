@@ -357,6 +357,8 @@ In `identity_from`, set `pid_source` on each level:
 
 In `continuation_identity`, add `pid_source: None`.
 
+The one production `Claim` literal, `ClaimIntent::Acquire(crate::claims::Claim { … })` in `claim_guard` (src/commands/mod.rs:523), needs the new field to compile. Add `pid_view: None,` there for now. Step 11 replaces it with established evidence, so the Step 9 integration test still fails first. `follow_holder`'s literal uses `..claim` and needs nothing until Step 12.
+
 In `Claim`, after `boot_id`:
 
 ```rust
@@ -578,7 +580,7 @@ In `src/commands/mod.rs`, inside `claim_guard`, the `ClaimIntent::Acquire(crate:
             );
 ```
 
-In the literal:
+In the literal, replacing the interim `pid_view: None` from Step 7:
 
 ```rust
                     pid_start: evidence.pid_start,
@@ -1230,14 +1232,15 @@ nothing prunes, takes over without --force, or releases holds on."
 - Create (attachment, not repository code): `pidview-acceptance.sh` and `pidview-acceptance-evidence.json`, attached to tasks-860db2 with `tasks attach`
 
 **Interfaces:**
-- Consumes: the built worktree binary (`target/debug/tasks` after `cargo build`, or the path `just` builds), with Tasks 1 and 2 merged into it.
+- Consumes: the worktree binary `target/debug/tasks`, built by Step 1's `cargo build --bin tasks` from a tree that contains Tasks 1 and 2.
 - Produces: `tasks --version` prints `tasks 0.3.0`; documentation; attached evidence.
 
 - [ ] **Step 1: Bump the version, so the upgrade check can tell the builds apart**
 
-Both the old and the new build would otherwise report `tasks 0.2.0`, and the coordinated-upgrade check in spec §7 would pass falsely. In `Cargo.toml`, `version = "0.2.0"` becomes `version = "0.3.0"`. Run `just check` once; its build updates `Cargo.lock`'s `tasks` entry. Then:
+Both the old and the new build would otherwise report `tasks 0.2.0`, and the coordinated-upgrade check in spec §7 would pass falsely. In `Cargo.toml`, `version = "0.2.0"` becomes `version = "0.3.0"`. `just check` runs Clippy, which type-checks without relinking the executable, so build the binary explicitly:
 
 ```bash
+cargo build --bin tasks
 git diff Cargo.lock
 target/debug/tasks --version
 ```
@@ -1291,7 +1294,7 @@ After the sentence ending "`tasks start --force <id>` takes it over and records 
 
 Write the acceptance script at `$TMPDIR/pidview-acceptance.sh`, outside the repository. Model it on tasks-fe6c59's `pidns-probe.sh`; `tasks show tasks-fe6c59` prints its path. The script must:
 - use a private `HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME` and `RELAY_STATE_DIR` under a `mktemp -d` directory, and delete them on exit (`trap … EXIT INT TERM`);
-- run the worktree binary by explicit path;
+- run the worktree binary by explicit path: `target/debug/tasks` from Step 1's build. Rebuild with `cargo build --bin tasks` first if any source changed since then;
 - use only unprivileged user namespaces: `unshare --user --map-current-user --pid --fork [--mount-proc]`, or `--map-root-user` in place of `--map-current-user` where a case needs root inside its own user namespace (case 3). No `codex sandbox`, no model call and no live desktop.
 
 It must run these cases. Each prints `case`, `expected`, `observed` and `verdict` as one JSON object per line:
@@ -1300,11 +1303,16 @@ It must run these cases. Each prints `case`, `expected`, `observed` and `verdict
 2. **ns-explicit-pid1.** In a private-`/proc` child, `TASKS_SESSION=N TASKS_SESSION_PID=1 tasks start T3`, with the child kept alive by `sleep` in the background. The claim must record no `pid_view`. On the host, `tasks claims` shows it `live: true` with `unverified`, and `TASKS_SESSION=C tasks start T3` fails with `claimed`.
 3. **procfs unmount and reuse.** Plan round 1 found that `--map-current-user` cannot run this case: the session id reads 0 and `umount` needs root. So:
    - Start namespace A with `unshare --user --map-root-user --pid --fork --mount-proc`. Its pid 1 keeps A alive (`sleep 120 &`, then `wait`).
-   - Inside A, run the claim write under `setsid`, so that the Unix session fallback has a session id in A's view (the reviewer observed SID 1): `setsid tasks start T4`, with no `TASKS_SESSION`, `CLAUDE_CODE_SESSION_ID` or Codex variables.
-   - **Assert before continuing** that T4's stored claim has a `pid_view` equal to A's namespace identity (`stat -L -c '%d:%i' /proc/self/ns/pid` inside A). If it does not, the case's verdict is `fail`, not `unavailable`: the setup, not the environment, is wrong.
+   - Inside A, start a **persistent controller** under `setsid`: a shell that becomes the session leader and stays alive through B's write. A `setsid tasks start …` would make the short-lived `tasks` process the session leader, and the claim would track a pid that exits at once (plan round 2). For example, `setsid sh -c 'tasks start T4; echo started > "$SCRATCH/a-started"; exec sleep 120' &`. The controller launches `tasks start T4` as its child, with no `TASKS_SESSION`, `CLAUDE_CODE_SESSION_ID` or Codex variables, so the Unix session fallback records the controller's session id in A's view. The reviewer observed SID 1.
+   - **Assert before continuing:**
+     - T4's stored claim has a `pid_view` equal to A's namespace identity (`stat -L -c '%d:%i' /proc/self/ns/pid` inside A);
+     - its `pid` is the controller's pid in A;
+     - its `pid_start` equals field 22 of `/proc/<pid>/stat` for that pid, read inside A.
+     If any of these does not hold, the case's verdict is `fail`, not `unavailable`: the setup, not the environment, is wrong.
    - Record `stat -c %d /proc` in A, then unmount A's `/proc` (`umount /proc` inside A).
    - Start namespace B the same way, record its `/proc` device and whether it equals A's.
-   - From B, `TASKS_SESSION=B tasks start T5`. T4's claim must still exist while A's pid 1 lives.
+   - From B, `TASKS_SESSION=B tasks start T5`. T4's claim must still exist, and the controller must still be alive.
+   - Re-read T4's stored `pid` and `pid_start` after B's write, and the controller's start time inside A. All three must match the values asserted before. A mismatch fails the case. Then stop the controller and A.
 4. **exported host pid.** In a private-`/proc` child, `TASKS_SESSION=E TASKS_SESSION_PID=<a live host pid, the script's own $$>` with `tasks start T6`. The claim must record no view. A second child write (`TASKS_SESSION=F tasks start T7`) must leave it in place.
 5. **colliding ancestor.** Outer namespace O: `unshare … --mount-proc sh -c 'sleep 300 & …'`, so that the intended owner is pid 2 in O. O launches inner namespace I with `--mount-proc`. In I, arrange an ancestor at pid 2 that exits later (`sh -c 'sh -c "…" ; sleep 1'`, with the inner pid noted from `NSpid`). Run with `TASKS_SESSION=O2 TASKS_SESSION_PID=2` inherited.
    - I's `tasks start T8` records no view.
