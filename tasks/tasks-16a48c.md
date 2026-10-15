@@ -1,13 +1,15 @@
 ---
 id: tasks-16a48c
 title: A write that cannot find a worktree-only task names the checkout its claim or park records
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-15T12:37:58Z
-updated: 2026-10-15T16:56:12Z
+updated: 2026-10-15T18:04:52Z
+started: 2026-10-15T18:04:52Z
 depends: []
 parent: tasks-984769
 tags: [feedback, friction, "from:tasks"]
@@ -23,3 +25,5 @@ Where: src/commands/mod.rs (`load`), src/commands/show.rs (`recorded_elsewhere`,
 ## Notes
 
 - 2026-10-15T16:56:12Z (main): scope: scoped; rewrote as the write-path counterpart of show's §6.1 fallback (error remedy, no routing), todo P2/s/mid/direct under tasks-984769. Premise checked against main 20544c4: note -> open_id_write_ctx -> load -> read_task_with_raw has no claim/park lookup. Absorbs tasks-ae03ed.
+- 2026-10-15T18:04:52Z (main): started
+  provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
