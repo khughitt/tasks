@@ -550,6 +550,7 @@ pub fn next(
     max_complexity: Option<String>,
     without: Vec<String>,
     under: Option<String>,
+    fetch: crate::resolve::Fetch,
 ) -> Result<Output> {
     let cutoff = crate::complexity::cutoff(max_complexity.as_deref())?;
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
@@ -628,6 +629,7 @@ pub fn next(
                 Some(&claims),
                 &mut warnings,
                 now,
+                fetch,
             )?;
             ctx.warnings.extend(warnings);
             Some(fields)

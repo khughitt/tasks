@@ -116,6 +116,7 @@ enum UnavailableCause {
     MissingScheme { scheme: String, config: PathBuf },
     FetchFailed(String),
     BudgetExhausted,
+    FetchDisabled, // --no-fetch: nothing spawned
 }
 
 enum DocRead {
@@ -332,6 +333,11 @@ five-second budget, scoped to that description:
 - Without a step, neither open nor closed external plans are fetched, and no
   historical availability warning is attempted. External specs are display-only
   here as well; `abs` never fetches them.
+- `show --no-fetch` and `next --no-fetch` read with fetching disabled: an
+  external plan reads as `Unavailable(FetchDisabled)` without spawning, and
+  `step_found` is omitted for open and closed tasks alike, with no warning.
+  `doc --no-fetch` fails an external link as `doc_not_found`; local documents
+  still read.
 
 Local-plan behavior remains unchanged, including strict open-step failures and
 the existing missing-historical-path warning without a step. Malformed host

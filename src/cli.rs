@@ -496,6 +496,10 @@ pub enum Command {
     Show {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
+        /// Never run a host's document provider: external links show as stored and
+        /// `step_found` is omitted for an external plan.
+        #[arg(long)]
+        no_fetch: bool,
     },
     /// Print a linked plan or spec body.
     #[command(group(clap::ArgGroup::new("doc_kind").args(["plan", "spec"]).required(true)))]
@@ -506,6 +510,10 @@ pub enum Command {
         plan: bool,
         #[arg(long)]
         spec: bool,
+        /// Never run a host's document provider: an external link fails as
+        /// `doc_not_found`; a local document still prints.
+        #[arg(long)]
+        no_fetch: bool,
     },
     /// List tasks (open by default).
     #[command(
@@ -566,6 +574,10 @@ pub enum Command {
         /// committed to one lane takes its next step.
         #[arg(long, value_name = "REF", add = ArgValueCompleter::new(crate::complete::scoped))]
         under: Option<String>,
+        /// Never run a host's document provider: external links show as stored and
+        /// `step_found` is omitted for an external plan.
+        #[arg(long)]
+        no_fetch: bool,
         #[command(flatten)]
         scope: ScopeArgs,
     },

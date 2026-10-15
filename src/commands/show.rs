@@ -4,12 +4,12 @@ use crate::model::Task;
 use crate::output::{DepInfo, Output, Related, ShowFields, ShowOut};
 use crate::registry::Registry;
 use crate::repo::Project;
-use crate::resolve::{DocKind, DocRead, Located, Resolver, has_heading};
+use crate::resolve::{DocKind, DocRead, Fetch, Located, Resolver, UnavailableCause, has_heading};
 use std::collections::HashMap;
 use std::path::Path;
 use time::OffsetDateTime;
 
-pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
+pub fn run(mut ctx: Ctx, id: String, fetch: Fetch) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
     let (recorded, task, all) = read_record(&mut ctx, &id, &claims)?;
@@ -23,6 +23,7 @@ pub fn run(mut ctx: Ctx, id: String) -> Result<Output> {
         Some(&claims),
         &mut ctx.warnings,
         now,
+        fetch,
     )?;
     Ok(Output::Show(Box::new(ShowOut {
         fields,
@@ -85,7 +86,9 @@ pub(super) fn recorded_elsewhere<'a>(
 /// The `show` view of `task`, which lives in `project`. `all` is a scan containing that
 /// project's tasks (a union is fine: dependencies, parent, and children are looked up
 /// by id, and ids carry their prefix). Unreachable dependencies and a missing parent are
-/// pushed to `warnings`, never errors.
+/// pushed to `warnings`, never errors. Under `Fetch::Disabled` no provider command runs,
+/// and an external plan's `step_found` is omitted: a skipped fetch is not an unavailable plan.
+#[allow(clippy::too_many_arguments)]
 pub fn describe(
     project: &Project,
     registry: &Registry,
@@ -94,8 +97,10 @@ pub fn describe(
     claims: Option<&crate::claims::ClaimSnapshot>,
     warnings: &mut Vec<String>,
     now: OffsetDateTime,
+    fetch: Fetch,
 ) -> Result<ShowFields> {
     let mut resolver = Resolver::new(project, registry);
+    resolver.set_fetch(fetch);
     let mut depends_on = Vec::new();
     for dependency in &task.depends {
         // The scan the caller already holds answers first, so `next` describes the same
@@ -129,6 +134,10 @@ pub fn describe(
             resolver.set_fetch_budget(crate::doc_fetch::OPTIONAL_BUDGET);
             match resolver.read(DocKind::Plan, plan)? {
                 DocRead::Available(doc) => Some(has_heading(&doc.body, step)),
+                DocRead::Unavailable {
+                    cause: UnavailableCause::FetchDisabled,
+                    ..
+                } => None,
                 DocRead::Unavailable { reference, cause } => {
                     warnings.push(format!(
                         "{}plan {reference} is unavailable: {}",

@@ -626,7 +626,9 @@ across parents; list/search compare the stored value exactly and never fetch.
 
 `show` and `next` warn and omit `step_found` for an unavailable open external
 plan; absence means unknown, not a missing heading. No step means no external
-fetch. `check` prioritizes stepped open plans within a shared five-second budget
+fetch. A read that must never run a provider command passes `--no-fetch` to
+`show`, `next` or `doc`: `step_found` is then omitted for any external plan, and
+`doc` fails an external link as `doc_not_found`; local documents still read. `check` prioritizes stepped open plans within a shared five-second budget
 and reports unfinished references once as `doc_unchecked`. Local missing files
 and steps remain errors; malformed host configuration remains fatal. See the
 [README's external document contract](../../README.md#external-documents) for

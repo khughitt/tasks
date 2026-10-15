@@ -388,6 +388,9 @@ path = ["show"]
 verb = "show"
 summary = "Show one task with resolved links and dependencies"
 args = [{ name = "id", value = "ref", required = true }]
+options = [
+  { names = ["--no-fetch"], value = "none" },
+]
 
 [[cli.tasks.commands]]
 path = ["doc"]
@@ -398,6 +401,7 @@ args = [{ name = "id", value = "ref", required = true }]
 options = [
   { names = ["--plan"], value = "none" },
   { names = ["--spec"], value = "none" },
+  { names = ["--no-fetch"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -491,6 +495,7 @@ options = [
   { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
   { names = ["--without"], value = "string", repeatable = true },
   { names = ["--under"], value = "ref" },
+  { names = ["--no-fetch"], value = "none" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },

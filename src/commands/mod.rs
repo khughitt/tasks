@@ -1874,6 +1874,15 @@ fn raw_owner_name(project: &Project) -> Result<String> {
     }
 }
 
+/// The `--no-fetch` switch of the read commands that may consult a document provider.
+fn fetch(no_fetch: bool) -> crate::resolve::Fetch {
+    if no_fetch {
+        crate::resolve::Fetch::Disabled
+    } else {
+        crate::resolve::Fetch::Allowed
+    }
+}
+
 fn dispatch(cli: Cli) -> Result<Output> {
     let dir = cli.dir.as_deref();
     match cli.command {
@@ -1946,11 +1955,17 @@ fn dispatch(cli: Cli) -> Result<Output> {
             lock_and_revalidate(&mut ctx, &routing)?;
             add::run(ctx, title, status, fields)
         }
-        Command::Show { id } => show::run(open_id_ctx(dir, &id)?, id),
-        Command::Doc { id, plan, spec: _ } => doc::run(
+        Command::Show { id, no_fetch } => show::run(open_id_ctx(dir, &id)?, id, fetch(no_fetch)),
+        Command::Doc {
+            id,
+            plan,
+            spec: _,
+            no_fetch,
+        } => doc::run(
             open_id_ctx(dir, &id)?,
             id,
             if plan { DocKind::Plan } else { DocKind::Spec },
+            fetch(no_fetch),
         ),
         Command::List { list: args } => list::list(open_read_ctx(dir, &args.scope)?, args, None),
         Command::Search { query, list: args } => {
@@ -1975,12 +1990,14 @@ fn dispatch(cli: Cli) -> Result<Output> {
             max_complexity,
             without,
             under,
+            no_fetch,
             scope,
         } => list::next(
             open_read_ctx(dir, &scope)?,
             max_complexity,
             without.without,
             under,
+            fetch(no_fetch),
         ),
         Command::Sample {
             limit,

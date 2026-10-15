@@ -15,9 +15,21 @@ pub struct Doc {
 
 #[derive(Debug, Clone)]
 pub enum UnavailableCause {
-    MissingScheme { scheme: String, config: PathBuf },
+    MissingScheme {
+        scheme: String,
+        config: PathBuf,
+    },
     FetchFailed(String),
     BudgetExhausted,
+    /// The caller forbade provider commands (`--no-fetch`); nothing was spawned.
+    FetchDisabled,
+}
+
+/// Whether a read may run a host's `[docs.schemes]` command for an external reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fetch {
+    Allowed,
+    Disabled,
 }
 
 impl UnavailableCause {
@@ -29,6 +41,7 @@ impl UnavailableCause {
             ),
             Self::FetchFailed(detail) => detail.clone(),
             Self::BudgetExhausted => "budget exhausted".into(),
+            Self::FetchDisabled => "fetch disabled by --no-fetch".into(),
         }
     }
 }
@@ -50,9 +63,9 @@ impl DocRead {
                 let detail = format!("{reference}: {}", cause.detail());
                 Err(match cause {
                     UnavailableCause::MissingScheme { .. } => Error::Config(detail),
-                    UnavailableCause::FetchFailed(_) | UnavailableCause::BudgetExhausted => {
-                        Error::DocNotFound(detail)
-                    }
+                    UnavailableCause::FetchFailed(_)
+                    | UnavailableCause::BudgetExhausted
+                    | UnavailableCause::FetchDisabled => Error::DocNotFound(detail),
                 })
             }
         }
@@ -104,6 +117,7 @@ pub struct Resolver<'a> {
     docs: RefCell<HashMap<String, DocRead>>,
     fetch_budget: Option<Duration>,
     fetch_deadline: OnceCell<Instant>,
+    fetch: Fetch,
 }
 
 impl<'a> Resolver<'a> {
@@ -117,6 +131,7 @@ impl<'a> Resolver<'a> {
             docs: RefCell::new(HashMap::new()),
             fetch_budget: None,
             fetch_deadline: OnceCell::new(),
+            fetch: Fetch::Allowed,
         }
     }
 
@@ -263,6 +278,12 @@ impl<'a> Resolver<'a> {
         if let Some(cached) = self.docs.borrow().get(value) {
             return Ok(cached.clone());
         }
+        if self.fetch == Fetch::Disabled {
+            return Ok(DocRead::Unavailable {
+                reference: value.into(),
+                cause: UnavailableCause::FetchDisabled,
+            });
+        }
         let host = self.host_config()?;
         let result = match host.docs_schemes.get(scheme) {
             None => self.missing_scheme(value, scheme)?,
@@ -320,6 +341,10 @@ impl<'a> Resolver<'a> {
             result
         };
         cache.insert(value.into(), result);
+    }
+
+    pub fn set_fetch(&mut self, fetch: Fetch) {
+        self.fetch = fetch;
     }
 
     pub fn set_fetch_budget(&mut self, budget: Duration) {

@@ -1,14 +1,15 @@
 use super::Ctx;
 use crate::error::{Error, Result};
 use crate::output::{DocOut, Output};
-use crate::resolve::{DocKind, Resolver};
+use crate::resolve::{DocKind, Fetch, Resolver};
 
-pub fn run(mut ctx: Ctx, id: String, kind: DocKind) -> Result<Output> {
+pub fn run(mut ctx: Ctx, id: String, kind: DocKind, fetch: Fetch) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let claims = crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
     let (recorded, task, _) = super::show::read_record(&mut ctx, &id, &claims)?;
     let project = recorded.as_ref().unwrap_or(&ctx.project);
-    let resolver = Resolver::new(project, &ctx.registry);
+    let mut resolver = Resolver::new(project, &ctx.registry);
+    resolver.set_fetch(fetch);
     let value = match kind {
         DocKind::Plan => task.plan.as_deref(),
         DocKind::Spec => task.spec.as_deref(),

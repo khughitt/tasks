@@ -846,3 +846,67 @@ fn external_doc_strict_production_deadline() {
             .contains("deadline exceeded")
     );
 }
+
+#[test]
+fn external_doc_no_fetch_reads_without_spawning_the_provider() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let docs = DocFixture::new(&env, "### Task 1: one\n");
+    std::fs::create_dir_all(dir.join("docs/specs")).unwrap();
+    std::fs::write(dir.join("docs/specs/local.md"), "# Local\n").unwrap();
+    let add = |title: &str| {
+        env.json(
+            &dir,
+            &[
+                "add",
+                title,
+                "--plan",
+                "stub:alias",
+                "--step",
+                "Task 1: one",
+                "--spec",
+                "docs/specs/local.md",
+            ],
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let open = add("Open");
+    let closed = add("Closed");
+    env.json(&dir, &["done", &closed]);
+    let before = docs.calls().len();
+    for id in [&open, &closed] {
+        let shown = env.json(&dir, &["show", id, "--no-fetch"]);
+        assert_eq!(shown["plan_path"], "stub:canonical");
+        assert!(shown.get("step_found").is_none(), "{shown}");
+        assert!(shown["warnings"].as_array().unwrap().is_empty(), "{shown}");
+    }
+    let next = env.json(&dir, &["next", "--no-fetch"]);
+    assert_eq!(next["next"]["task"]["id"], open);
+    assert!(next["next"].get("step_found").is_none(), "{next}");
+    let out = env
+        .cmd(&dir)
+        .args(["doc", &open, "--plan", "--no-fetch"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("fetch disabled by --no-fetch"),
+        "{out:?}"
+    );
+    assert_eq!(
+        env.fail(&dir, &["doc", &open, "--plan", "--no-fetch"]),
+        "doc_not_found"
+    );
+    let out = env
+        .cmd(&dir)
+        .args(["doc", &open, "--spec", "--no-fetch"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, b"# Local\n");
+    assert_eq!(docs.calls().len(), before);
+    assert_eq!(env.json(&dir, &["show", &open])["step_found"], true);
+    assert_eq!(docs.calls().len(), before + 1);
+}

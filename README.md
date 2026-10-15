@@ -720,6 +720,13 @@ fetch the external plan, and spec links do not trigger fetches. Displayed
 `spec_path` and `plan_path` are the stored external references; local links
 remain absolute paths.
 
+`show --no-fetch`, `next --no-fetch` and `doc --no-fetch` never run a provider
+command, for a caller that must stay read-only on a host with `[docs.schemes]`.
+`show` and `next` then omit `step_found` for an external plan, open or closed,
+without a warning: a skipped fetch says nothing about availability. `doc` fails
+an external link as `doc_not_found` (`fetch disabled by --no-fetch`). Local
+documents read as usual.
+
 ```sh
 tasks doc <id> --plan       # exactly one of --plan or --spec is required
 tasks doc <id> --spec
