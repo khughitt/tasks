@@ -1,13 +1,15 @@
 ---
 id: tasks-b124ab
 title: "Expose project color in projects, where and resolve JSON"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-15T11:52:10Z
-updated: 2026-10-15T13:38:42Z
+updated: 2026-10-15T13:38:43Z
+started: 2026-10-15T13:38:43Z
 depends: []
 tags: [feedback, gap, "from:hq"]
 agent: claude-code/claude-opus-5-5
@@ -32,3 +34,5 @@ Original report: The project identity color set in tasks/.config.toml is not in 
 ## Notes
 
 - 2026-10-15T13:38:35Z (main): scope: scoped; P2/s/mid/direct; additive color field on projects, where and resolve rows (hex, omitted when unset/unreachable; resolve warns on a malformed config); ProjectRow.color serde(skip) came from tasks-2578c3's pretty-only scope, not a standing contract; consumer hq-760db0
+- 2026-10-15T13:38:43Z (main): started
+  provenance: {"harness_session":"claude-code:1b9e953b-6961-4526-aeb1-7094e2d10ade","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
