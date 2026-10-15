@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T09:10:50Z
+updated: 2026-10-15T09:27:19Z
 started: 2026-10-15T08:25:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -60,4 +60,6 @@ Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f1105
 - 2026-10-15T08:59:10Z (feat/claim-release): spec revision 3: under --adopting, own and live-foreign refusals name the adoption path, not park/done/start --force; tests assert it. User approved the spec with this fix and asked for the implementation plan
 - 2026-10-15T09:10:42Z (feat/claim-release): spec revision 4 (plan stage): stale note carries no reason (pids), prime not lanes, 'rerun the same command'; plan docs/plans/2026-10-15-claim-release.md with 3 steps
 - 2026-10-15T09:10:50Z (feat/claim-release): parked (waiting on user, review): user reviews docs/plans/2026-10-15-claim-release.md in .worktrees/claim-release and picks the execution method; then the agent runs the Setup baseline and starts tasks-fada88 (Task 1)
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T09:27:19Z (feat/claim-release): resumed
   provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
