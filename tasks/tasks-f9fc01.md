@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T08:37:22Z
+updated: 2026-10-15T08:37:23Z
 started: 2026-10-15T08:25:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -51,3 +51,5 @@ Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f1105
   provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T08:35:27Z (feat/claim-release): review: spec round 1 — verdict: revise; findings: must-fix 1, should-fix 1; reviewer: codex/gpt-6.1-sol
 - 2026-10-15T08:37:22Z (feat/claim-release): spec revision 2: release --adopting <old> reaches the old store's claim (gated on adoption's own classify_registry Fresh; both locks sorted) with an end-to-end hint test; occupancy skips every non-live claim of the released session, parks still count
+- 2026-10-15T08:37:23Z (feat/claim-release): parked (waiting on user, review): user reviews spec revision 2 (docs/specs/2026-10-15-claim-release-design.md in .worktrees/claim-release); on approval the agent writes the implementation plan
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
