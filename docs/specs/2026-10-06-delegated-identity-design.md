@@ -6,6 +6,10 @@ also approved; execution resumed at the user's request. Implementation is on
 main, after native/real relay acceptance and final independent review; the tracker
 was rebuilt and reinstalled from main on this host.
 
+Amended 2026-10-15 (tasks-af3aac, draft for review): §4 accepts relay's Codex worker
+rows and selects among rows sharing one process by the thread hint. See
+[Relay worker rows](#relay-worker-rows-2026-10-15-amendment).
+
 ## Outcome and scope
 
 A Codex worker owns its own claims across commands and stamps its own native
@@ -183,8 +187,8 @@ non-Unicode and control-character inputs without leaking either value.
 Keep every current process, host, boot, platform, harness, and cardinality check.
 The one qualifying registry row's `sessionId` must match the actor hint, and its
 `id` remains the acquired claim identity. For a worker `W`, a root row `codex:R`
-therefore refuses. Multiple qualifying rows still refuse; this design does not
-introduce hint-based tie-breaking before the producer's worker contract exists.
+therefore refuses. Multiple qualifying rows refuse, except that a Codex hint
+selects among them (amended 2026-10-15, below).
 No refusal silently falls to native identity or borrows the controller's row.
 
 If a matching Codex actor row is selected, attach the valid native root association
@@ -206,6 +210,87 @@ This intentionally leaves native worker acquisition supported while relay worker
 acquisition remains unavailable against a root-only registry. The remedy must
 report that limitation plainly. Do not disable a user's relay setting to make a
 test or rollout pass. Existing explicit override recovery remains available.
+
+### Relay worker rows (2026-10-15 amendment)
+
+Relay's Codex worker rows spec (relay `docs/specs/2026-10-15-codex-worker-rows.md`,
+relay-6825f7, approved 2026-10-15) is the producer's worker contract that the
+tie-break above waited for. Relay publishes one row per Codex worker `W` under root
+session `R`: key and `id` `codex:W`, `sessionId` `W`, `scope: "worker"`, `root:
+"codex:R"`, and the same process handle as the root row, because controller and
+workers run in one `codex` process. Root rows keep `scope: "session"` and carry no
+`root`. The snapshot schema stays 2. This amendment is tasks' side of that
+contract (relay spec "The tasks change"); it lands and is installed before relay
+publishes any worker row (relay spec, Rollout step 1).
+
+**Snapshot validation.** `snapshot::parse_agent` mirrors relay's validator, as it
+does for every other field, so a row is refused on the same terms on both sides:
+
+- `scope` is `process` for OpenCode, `session` for Claude Code, and for Codex either
+  `session` or `worker`.
+- `root` is required on a `worker` row. Every other row must omit the key entirely:
+  `root: null` is refused, as relay's `Object.hasOwn` check refuses it. On a worker
+  row, `root` is text `codex:<suffix>`, its suffix passes the same non-empty text
+  rule as every other text field, and it differs from the row's `id`.
+- One invalid row still fails the whole snapshot, as today.
+
+`Agent` gains no field. Resolution never reads `root`: the claim's `root_session`
+stays derived from `CODEX_SESSION_ID` (§2). Rejected: reading `root` only to
+compare it with `CODEX_SESSION_ID`. Process proof and the thread hint already
+identify the actor, and a second source would add a refusal that changes no
+ownership. Rejected: ignoring `root` entirely, which relay's spec permits. tasks'
+validator is the producer's mirror, and a looser reader lets a malformed row
+through that relay itself refuses.
+
+**Selection.** In `relay::resolve`, after the process, host, boot, platform and
+harness filters and before the cardinality refusal: when the boundary harness is
+Codex, a hint is present and more than one row qualifies, keep the qualifying row
+whose `sessionId` equals the hint. At most one can: snapshot keys are unique and
+each `id` is `codex:<sessionId>`. The controller (thread `R`) selects the root row,
+and each worker, nested ones included, selects its own row. Selection does not
+depend on `scope`, so two root rows on one process (one `codex` process hosting
+two sessions) are separated the same way. Without a hint, several qualifying rows
+still refuse with the existing "several relay agents match" diagnosis. Claude Code
+and OpenCode are unchanged. Their rows never share a handle, and no hint-based
+selection applies to them.
+
+The hint is the one already validated before the registry is read: the thread when
+present, otherwise the session. A worker given only `CODEX_SESSION_ID` therefore
+selects the root row, which is §1's known session-only limit, now reached through
+relay as well. Proof-only continuation is unchanged. It never reads the registry,
+and it still requires a matching thread.
+
+**Diagnostics.** When qualifying rows exist but none carries the hint, and one of
+them is the root named by a valid `CODEX_SESSION_ID`, the refusal says relay has no
+row for this worker thread. Either the relay writing the registry predates worker
+rows, or its Codex hooks are not installed. The worker cannot claim as its
+controller. This replaces the `relay-f56e30` wording and covers the single-row and
+multi-row cases alike. Every other hint mismatch keeps the generic value-free
+diagnosis. Neither message names a session value.
+
+**Fixture.** tasks vendors relay's shared `registry-workers.json` as
+`tests/fixtures/relay/registry-workers.json`, beside `ancestry.json` and
+`handles.json`. It holds a valid schema-2 snapshot with a root row `R`, worker `W1`,
+nested worker `W2` (whose `root` is `R`, not `W1`) on one Codex handle, and an
+unrelated Claude row. Relay's plan (relay-635fdc Task 1) fixes its bytes, but relay
+commits the file only on its own branch. tasks therefore copies the bytes from that
+plan and records the plan revision in the fixtures README. When relay's commit
+lands, the README is updated to that revision after a byte comparison. A mismatch
+is a contract break to resolve with relay, not to patch over in tasks.
+
+**Documentation.** The relay ancestry spec's Codex hint paragraph, the README's
+relay section and the shipped tasks skill drop "relay worker acquisition refuses a
+root-only row (`relay-f56e30`)". Each states instead that a Codex worker acquires
+through its own relay row, selected by its thread, and that a worker with no row
+is refused rather than given its controller's identity.
+
+**Rollout.** Merge, then `cargo install --path .` on this host. Every other host
+that enables relay identity installs the merged binary before relay's worker
+routing (relay-635fdc) merges. No host enables relay identity today, so the order
+is a constraint on relay's merge, recorded on relay-635fdc, rather than a cutover
+here. Live claim acceptance through real worker rows is relay-635fdc's Task 6,
+which runs against the installed binary. tasks' own tests are fixture and
+synthetic controls and cannot be reported as live support.
 
 ### Interim worker handoff
 
@@ -301,6 +386,13 @@ door, including negative assertions that no claim or record was mutated on refus
    must not prove ownership. Owner proof
    still works with an unavailable registry and matching thread. Missing-thread
    proof refusal on an existing claim has an explicit-identity recovery control.
+   Amendment (2026-10-15): over the vendored `registry-workers.json`, the hint `R`
+   selects `codex:R`, `W1` selects `codex:W1`, and the nested `W2` selects
+   `codex:W2`, each with the shared handle and root `codex:R`. An unregistered
+   thread under root `R` gets the worker-row refusal. No hint gets the
+   several-agents refusal. The validator accepts the fixture and refuses a worker
+   scope on Claude Code or OpenCode, a worker row without `root`, `root` on a
+   session row, and a `root` that is not `codex:<nonempty>` or equals its own `id`.
 5. Foreign-live-claim refusal for closure, park, protected edits, and hold ownership;
    only the worker's own heartbeat refreshes its claim. Test both native identity
    and relay continuation paths, preserving the distinct error policies. Test
