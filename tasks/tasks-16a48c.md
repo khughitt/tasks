@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-16a48c
 created: 2026-10-15T12:37:58Z
-updated: 2026-10-15T18:05:03Z
+updated: 2026-10-15T18:05:38Z
 started: 2026-10-15T18:04:52Z
 depends: []
 parent: tasks-984769
@@ -29,3 +29,4 @@ Where: src/commands/mod.rs (`load`), src/commands/show.rs (`recorded_elsewhere`,
   provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-15T18:05:03Z (fix/tasks-16a48c): resumed
   provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-15T18:05:38Z (fix/tasks-16a48c): Confirmed load returns bare TaskNotFound before checking claims/parks; show already resolves that case. Scope: shared recorded lookup, load refusal using existing occupants and retry quoting, CLI regressions, record-home spec and shipped skill. tasks-a984f1 remains todo, so occupied-checkout rule 1 stays unchanged.
