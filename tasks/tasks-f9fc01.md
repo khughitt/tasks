@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: planned
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T08:25:22Z
+updated: 2026-10-15T08:25:23Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -34,3 +34,7 @@ Decisions for the spec:
 Done when: `tasks release` removes an unverifiable foreign claim and records why, refuses a live one, and leaves the lifecycle untouched. The rename, adopt, retire and move refusals and `ready`'s omission warning for an unverifiable claim name it, and move's park hint is corrected. CLI tests cover each refusal hint and the release/refuse pair (inject the view as the claim-pid-view tests do). Skill and README are updated, and `cargo install --path .` is rerun.
 
 Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f11052 (sid:0 claims held forever: a release target until fixed).
+
+## Notes
+
+- 2026-10-15T08:25:23Z (main): scope: scoped; rewrote body with evidence (main 00cdbd8), lean (new release verb), spec decisions and done criteria; found move's park hint dead-ends on a foreign unverifiable claim; set todo P2 m mid planned
