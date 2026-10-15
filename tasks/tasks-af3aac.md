@@ -1,15 +1,16 @@
 ---
 id: tasks-af3aac
 title: "Accept relay Codex worker rows: worker scope and thread-hint tie-break"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: planned
 owner: feat/codex-worker-rows
 created: 2026-10-15T10:02:07Z
-updated: 2026-10-15T12:34:43Z
+updated: 2026-10-15T12:36:03Z
 started: 2026-10-15T10:35:35Z
+completed: 2026-10-15T12:36:03Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -51,3 +52,7 @@ Done: tests over relay's shared fixture test/fixtures/registry-workers.json (ven
 - 2026-10-15T12:26:15Z (feat/codex-worker-rows): Tasks 1+2 landed (59b179b, 389fbb9); fast 1480/1480, check clean; whole-branch review dispatched (claude-code/fable)
 - 2026-10-15T12:32:17Z (feat/codex-worker-rows): review: impl round 1 — verdict: accept; findings: Minor 6; reviewer: claude-code/claude-fable-5-1
 - 2026-10-15T12:34:43Z (feat/codex-worker-rows): review: impl round 2 — verdict: accept; findings: Minor 1; reviewer: claude-code/claude-fable-5-1
+- 2026-10-15T12:36:03Z (feat/codex-worker-rows): done
+  provenance: {"harness_session":"claude-code:a4b748cf-fdd6-45c6-921f-6493e5d5dc34","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T12:36:03Z (feat/codex-worker-rows): Relay Codex worker rows accepted: snapshot validates scope worker + root (relay fixture vendored from 74ce0d8), resolver selects among shared-process Codex rows by thread hint, worker rows need their own CODEX_THREAD_ID, hint_mismatch replaces relay-f56e30 wording; §4 amendment landed; final review accept (1 re-graded fix)
+  provenance: {"harness_session":"claude-code:a4b748cf-fdd6-45c6-921f-6493e5d5dc34","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
