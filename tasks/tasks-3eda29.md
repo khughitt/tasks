@@ -5,8 +5,8 @@ status: idea
 priority: 2
 reviewed: true
 created: 2026-10-14T20:37:24Z
-updated: 2026-10-15T16:55:47Z
-depends: [tasks-82bd08]
+updated: 2026-10-15T17:21:58Z
+depends: []
 parent: tasks-a73dce
 tags: [feedback, gap, "from:nexc"]
 ---
