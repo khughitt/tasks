@@ -17,6 +17,7 @@ pub mod park;
 pub mod parked;
 pub mod projects;
 pub mod quiet;
+pub mod release;
 pub mod rename;
 mod resolver;
 pub mod retire;
@@ -154,15 +155,23 @@ impl Ctx {
             Liveness::Unverifiable(_) => "unverifiable, forced",
             Liveness::Stale(_) => "stale",
         };
-        let session = match claim
+        format!(
+            "took over {} (owner {}, {how})",
+            Ctx::session_label(claim),
+            claim.owner
+        )
+    }
+
+    /// How a task record names a claim's session: a Unix session's pid never reaches git.
+    pub(crate) fn session_label(claim: &crate::claims::Claim) -> String {
+        match claim
             .session
             .strip_prefix("sid:")
             .and_then(|pid| pid.parse::<u32>().ok())
         {
             Some(_) => "Unix session".to_string(),
             None => format!("session {}", claim.session),
-        };
-        format!("took over {session} (owner {}, {how})", claim.owner)
+        }
     }
 
     pub fn describe_claim(claim: &crate::claims::Claim, live: &Liveness) -> String {
@@ -1116,15 +1125,18 @@ pub(crate) fn guard_write(registry: &Registry, shorthand: &Shorthand, task: &Tas
 
 /// Who is writing, which decides whether a `-C` retry can be offered (spec §3.2).
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Writer {
+pub enum Writer<'a> {
     Command,
     /// A feedback recurrence: `-C` would change the reporting project.
     Feedback,
+    /// `release` of this session's claim: its non-live claims occupy no worktree, since the
+    /// caller asserts the session is gone (claim-release spec §5).
+    Release(&'a str),
 }
 
 /// The record-home §3 check for `task` as loaded (`raw` is the bytes it was read from).
 /// Its warnings are added once, however many times one command checks.
-pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer) -> Result<()> {
+pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer<'_>) -> Result<()> {
     let (newer, warnings) = crate::stale::compare(&ctx.project, &task.id, &task.updated, raw);
     for warning in warnings {
         if !ctx.warnings.contains(&warning) {
@@ -1138,7 +1150,11 @@ pub fn refuse_stale_copy(ctx: &mut Ctx, task: &Task, raw: &str, writer: Writer) 
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
-    let (work, unknown) = match occupants(ctx, &newer.root) {
+    let gone = match writer {
+        Writer::Release(session) => Some(session),
+        Writer::Command | Writer::Feedback => None,
+    };
+    let (work, unknown) = match occupants(ctx, &newer.root, gone) {
         Ok(Occupants { work, unknown }) => (work, unknown),
         Err(error) => (Vec::new(), Some(error)),
     };
@@ -1169,15 +1185,18 @@ struct Occupants {
 
 /// Spec §3.2 rule 1: every task that a session other than the caller holds live in `root`,
 /// or parked there. Claims are compared by `ownership`, parks by their tagged session.
-/// An unresolvable identity makes every park someone else's.
-fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
+/// An unresolvable identity makes every park someone else's. `gone` is the session a
+/// `release` asserts has ended: its claims that do not read `Live` occupy nothing.
+fn occupants(ctx: &mut Ctx, root: &Path, gone: Option<&str>) -> Result<Occupants> {
     let snapshot =
         crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
     let me = crate::claims::resolve_identity(&mut ctx.warnings);
     let mine = me.identity().map(|identity| identity.tagged.clone());
     let mut work = Vec::new();
     for (task, (claim, liveness)) in snapshot.iter() {
+        let released = gone == Some(claim.session.as_str()) && !matches!(liveness, Liveness::Live);
         if !liveness.is_stale()
+            && !released
             && Path::new(&claim.worktree) == root
             && ownership(claim, &me)? == Ownership::Foreign
         {
@@ -2010,6 +2029,7 @@ fn dispatch(cli: Cli) -> Result<Output> {
             message,
             false,
         ),
+        Command::Release { id, why } => release::run(open_id_write_ctx(dir, &id)?, id, why),
         Command::Block { id, message } => status::block(open_id_write_ctx(dir, &id)?, id, message),
         Command::Unblock { id } => status::unblock(open_id_write_ctx(dir, &id)?, id),
         Command::Shelve { id, wake } => status::shelve(open_id_write_ctx(dir, &id)?, id, wake),

@@ -718,6 +718,19 @@ pub enum Command {
         id: String,
         message: Option<String>,
     },
+    /// Release another session's claim that cannot be judged live, and record why.
+    ///
+    /// Refuses a live claim and your own. Status, owner and park are untouched; the next
+    /// `start` needs no --force.
+    #[command(
+        after_help = "Examples:\n  tasks release sci-4f2a9c \"the sandbox exited\"\n  tasks release sci-4f2a9c \"container removed\""
+    )]
+    Release {
+        #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
+        id: String,
+        /// Why the holder is known to be gone; kept verbatim in the task's note.
+        why: String,
+    },
     /// Mark a task blocked.
     Block {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
@@ -931,6 +944,7 @@ impl Command {
             Command::Park { .. } => "park",
             Command::Done { .. } => "done",
             Command::Drop { .. } => "drop",
+            Command::Release { .. } => "release",
             Command::Block { .. } => "block",
             Command::Unblock { .. } => "unblock",
             Command::Shelve { .. } => "shelve",

@@ -619,6 +619,11 @@ summary = "Close a task as dropped"
 args = [{ name = "id", value = "ref", required = true }, { name = "message", value = "string", required = false }]
 
 [[cli.tasks.commands]]
+path = ["release"]
+summary = "Release another session's claim that cannot be judged live, and record why"
+args = [{ name = "id", value = "ref", required = true }, { name = "why", value = "string", required = true }]
+
+[[cli.tasks.commands]]
 path = ["block"]
 summary = "Mark a task blocked"
 args = [{ name = "id", value = "ref", required = true }, { name = "message", value = "string", required = false }]
@@ -740,6 +745,15 @@ options = [
 ]
 
 # ---- walictl
+
+[[cli.walictl.commands]]
+path = ["config"]
+summary = "the configured wallpaper and archive directories"
+
+[[cli.walictl.commands]]
+path = ["config", "show"]
+verb = "show"
+summary = "show the resolved wallpaper and archive directories"
 
 [[cli.walictl.commands]]
 path = ["current"]
@@ -1713,7 +1727,7 @@ options = [
   { names = ["--run"], value = "string", default = "p1" },
   { names = ["--calibration"], value = "string", default = "r1" },
   { names = ["--successor-of"], value = "string" },
-  { names = ["--carry-through"], value = "enum", values = ["harvest", "frame", "calibration", "rubric", "draw", "pins", "inventory", "files", "dossiers", "readings", "adjudication", "series", "rows", "outputs"] },
+  { names = ["--carry-through"], value = "enum", values = ["harvest", "frame", "calibration", "rubric", "draw", "pins", "inventory", "files", "dossiers", "readings", "exchange", "series", "rows", "outputs"] },
 ]
 
 [[cli.survey.commands]]
@@ -1795,10 +1809,10 @@ options = [
 
 [[cli.survey.commands]]
 path = ["assist"]
-summary = "Set parser options for refused tables, as timed technical assistance"
+summary = "Ask both model readers for parser options for refused tables"
 options = [
   { names = ["--run"], value = "string", default = "p1" },
-  { names = ["--human"], value = "string", required = true },
+  { names = ["--cohort"], value = "enum", values = ["calibration", "sample"], default = "sample" },
 ]
 
 [[cli.survey.commands]]
@@ -1807,13 +1821,13 @@ summary = "Make one reader's initial eligibility readings"
 options = [
   { names = ["--run"], value = "string", default = "p1" },
   { names = ["--cohort"], value = "enum", values = ["calibration", "sample"], default = "sample" },
-  { names = ["--reader"], value = "enum", values = ["human", "model"], required = true },
+  { names = ["--reader"], value = "enum", values = ["claude", "gpt", "human"], required = true },
   { names = ["--human"], value = "string" },
 ]
 
 [[cli.survey.commands]]
 path = ["freeze-rubric"]
-summary = "Freeze the calibrated rubric and name the two readers"
+summary = "Freeze the calibrated rubric and name the three readers"
 options = [
   { names = ["--run"], value = "string", default = "p1" },
   { names = ["--human"], value = "string", required = true },
@@ -1827,11 +1841,10 @@ options = [
 ]
 
 [[cli.survey.commands]]
-path = ["adjudicate"]
-summary = "Decide the disagreements between the two readers"
+path = ["exchange"]
+summary = "Run the one exchange round between the two model readers"
 options = [
   { names = ["--run"], value = "string", default = "p1" },
-  { names = ["--human"], value = "string", required = true },
 ]
 
 [[cli.survey.commands]]
@@ -1871,6 +1884,10 @@ options = [
   { names = ["--activity"], value = "enum", values = ["rubric", "audit"], required = true },
 ]
 
+[[cli.survey.commands]]
+path = ["probe"]
+summary = "Send each kind of request to each model reader once, outside any run"
+
 # ---- mindful
 
 [[cli.mindful.commands]]
@@ -1882,6 +1899,7 @@ options = [
   { shared = "as", value = "string" },
   { shared = "via", value = "string" },
   { names = ["--body"], value = "string" },
+  { names = ["--from"], value = "path" },
   { names = ["--body-file"], value = "path" },
   { shared = "tag", role = "set", value = "string", repeatable = true },
   { names = ["--alias"], value = "string" },
@@ -1934,6 +1952,9 @@ options = [
   { shared = "via", value = "string" },
   { names = ["--title"], value = "string" },
   { names = ["--body"], value = "string" },
+  { names = ["--body-file"], value = "path" },
+  { names = ["--from"], value = "path" },
+  { names = ["--etag"], value = "string" },
   { names = ["--interactive", "-i"], value = "none" },
 ]
 
@@ -2103,6 +2124,12 @@ options = [
 path = ["mindmap", "view"]
 summary = "Render a mindmap as terminal sprites and edges"
 args = [{ name = "map-ref", value = "ref", required = true }]
+
+[[cli.mindful.commands]]
+path = ["op"]
+output = "json"
+summary = "Send one raw op through the CLI's transport and print its result"
+args = [{ name = "op", value = "string", required = true }]
 
 [[cli.mindful.commands]]
 path = ["relate"]
@@ -2295,6 +2322,15 @@ options = [
 path = ["undo"]
 summary = "Restore the previous version"
 args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["untag"]
+summary = "Remove a tag from a thought"
+args = [{ name = "ref", value = "ref", required = true }, { name = "name", value = "string", required = true }]
 options = [
   { shared = "as", value = "string" },
   { shared = "via", value = "string" },
@@ -2652,6 +2688,8 @@ options = [
   { names = ["--config-dir"], value = "path" },
   { names = ["--evidence"], value = "path" },
   { names = ["--retire"], value = "enum", values = ["familiar"] },
+  { names = ["--with"], value = "enum", values = ["ask"] },
+  { names = ["--node"], value = "path" },
   { names = ["--artifact"], value = "path" },
   { names = ["--apply"], value = "none" },
 ]
@@ -2663,6 +2701,63 @@ summary = "Undo an applied installation from its artifact"
 options = [
   { names = ["--artifact"], value = "path", required = true },
 ]
+
+[[cli.relay.commands]]
+path = ["serve"]
+output = "none"
+summary = "Run the interaction service: inbox, local socket and optional HTTP surface"
+
+[[cli.relay.commands]]
+path = ["ask"]
+protocol = "harness hook: stdout is the reply; always exits 0"
+summary = "Route one harness question through the inbox"
+args = [{ name = "event", value = "enum", values = ["PreToolUse", "PostToolUse"], required = true }]
+options = [
+  { shared = "harness", role = "select", value = "enum", values = ["claude-code", "codex", "opencode"], required = true, repeatable = false },
+  { names = ["--handback"], value = "none" },
+]
+
+[[cli.relay.commands]]
+path = ["inbox"]
+output = "none"
+summary = "Manage questions and notices in the inbox"
+
+[[cli.relay.commands]]
+path = ["inbox", "list"]
+verb = "list"
+summary = "Questions and notices in the inbox"
+options = [
+  { shared = "since", role = "bound", value = "int", repeatable = false, exception = "Inbox cursor is a durable sequence number" },
+]
+
+[[cli.relay.commands]]
+path = ["inbox", "show"]
+verb = "show"
+summary = "One inbox entry in full"
+args = [{ name = "id", value = "string", required = true }]
+
+[[cli.relay.commands]]
+path = ["inbox", "answer"]
+summary = "Answer a pending question from this desk"
+args = [{ name = "id", value = "string", required = true }, { name = "value", value = "string", required = false, variadic = true }]
+options = [
+  { names = ["--decline"], value = "none" },
+]
+
+[[cli.relay.commands]]
+path = ["inbox", "defer"]
+summary = "Defer a pending question to the desktop"
+args = [{ name = "id", value = "string", required = true }]
+
+[[cli.relay.commands]]
+path = ["inbox", "withdraw"]
+summary = "Withdraw a pending question"
+args = [{ name = "id", value = "string", required = true }]
+
+[[cli.relay.commands]]
+path = ["presence"]
+summary = "Show or set whether questions go to the inbox"
+args = [{ name = "mode", value = "enum", values = ["here", "away"], required = false }]
 
 # Minimal adoption surface; existing ops-projects commands remain outside this inventory.
 [cli.ops-projects]
