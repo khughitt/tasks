@@ -4,7 +4,7 @@ pub mod inventory;
 pub mod rewrite;
 pub mod snapshot;
 
-use crate::claims::{ClaimStore, Liveness};
+use crate::claims::ClaimStore;
 use crate::commands::Ctx;
 use crate::error::{Error, Result};
 use crate::output::RenameOut;
@@ -317,7 +317,7 @@ fn authorize(project: &Project, invocation: &Invocation, warnings: &mut Vec<Stri
     for prefix in [&invocation.source, &invocation.target] {
         for (id, claim) in ClaimStore::load(prefix)?.iter() {
             let live = crate::claims::liveness(claim);
-            if live == Liveness::Live {
+            if !live.is_stale() {
                 return Err(Error::Claimed(
                     id.clone(),
                     Ctx::describe_claim(claim, &live),

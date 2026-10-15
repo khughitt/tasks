@@ -151,6 +151,7 @@ impl Ctx {
     pub fn takeover_summary(claim: &crate::claims::Claim, live: &Liveness) -> String {
         let how = match live {
             Liveness::Live => "live, forced",
+            Liveness::Unverifiable(_) => "unverifiable, forced",
             Liveness::Stale(_) => "stale",
         };
         let session = match claim
@@ -171,6 +172,7 @@ impl Ctx {
         };
         let state = match live {
             Liveness::Live => "live".to_string(),
+            Liveness::Unverifiable(why) => format!("unverifiable: {why}"),
             Liveness::Stale(why) => format!("stale: {why}"),
         };
         let age = (time::OffsetDateTime::now_utc()
@@ -211,7 +213,7 @@ impl Ctx {
         me.require()
             .map_err(|error| crate::claims::name_the_claim(error, Some(&held)))?;
         let live = crate::claims::liveness(&existing);
-        if live == Liveness::Live {
+        if !live.is_stale() {
             return Err(Error::Claimed(
                 id.to_string(),
                 Ctx::describe_claim(&existing, &live),
@@ -231,7 +233,7 @@ impl Ctx {
         let Some(existing) = self.claims_mut()?.get(&task.id).cloned() else {
             return Ok(());
         };
-        if crate::claims::liveness(&existing) != Liveness::Live {
+        if crate::claims::liveness(&existing).is_stale() {
             return Ok(());
         }
         let me = self.resolve_for_guard()?;
@@ -385,7 +387,7 @@ impl Ctx {
         // one of these needs, acquires nothing new: another session's hold, even one taken
         // by override, never refuses it.
         if let Some(existing) = self.claims_mut()?.get(&task.id).cloned()
-            && crate::claims::liveness(&existing) == Liveness::Live
+            && !crate::claims::liveness(&existing).is_stale()
             && holds.iter().all(|need| existing.holds.contains(need))
             && ownership(&existing, &me)? != Ownership::Foreign
         {
@@ -471,21 +473,25 @@ impl Ctx {
         let mut warning = None;
         if let Some(existing) = &existing {
             let live = crate::claims::liveness(existing);
-            match (&live, mine) {
-                (Liveness::Live, false) if !(force && to == Status::Doing) => {
+            match (live.is_stale(), mine) {
+                (false, false) if !(force && to == Status::Doing) => {
                     return Err(Error::Claimed(
                         id.to_string(),
                         Ctx::describe_claim(existing, &live),
                     ));
                 }
-                (Liveness::Live, false) => {
+                (false, false) => {
+                    let what = match live {
+                        Liveness::Unverifiable(_) => "an unverifiable",
+                        _ => "a live",
+                    };
                     warning = Some(format!(
-                        "took over a live claim held by {}",
+                        "took over {what} claim held by {}",
                         Ctx::describe_claim(existing, &live)
                     ));
                     self.takeover = Some(Ctx::takeover_summary(existing, &live));
                 }
-                (Liveness::Stale(_), false) => {
+                (true, false) => {
                     warning = Some(format!(
                         "took over {}",
                         Ctx::describe_claim(existing, &live)
@@ -518,28 +524,28 @@ impl Ctx {
                 (Some(claim), true) => claim.started.clone(),
                 _ => now.clone(),
             };
+            let evidence = crate::claims::evidence(
+                &me,
+                existing.as_ref().filter(|_| mine),
+                crate::pidview::current().as_ref(),
+                crate::claims::boot_id(),
+                time::OffsetDateTime::now_utc(),
+                crate::claims::proc_stat,
+            );
             (
                 id.clone(),
                 ClaimIntent::Acquire(crate::claims::Claim {
                     owner,
-                    pid_start: match &me.proof {
-                        Some(proof) => Some(proof.pid_start),
-                        None => me.pid.and_then(|pid| match crate::claims::proc_stat(pid) {
-                            crate::claims::ProcStat::Found { starttime, .. } => Some(starttime),
-                            _ => None,
-                        }),
-                    },
-                    boot_id: match &me.proof {
-                        Some(proof) => Some(proof.boot_id.clone()),
-                        None => crate::claims::boot_id(),
-                    },
+                    pid_start: evidence.pid_start,
+                    boot_id: evidence.boot_id,
+                    pid_view: evidence.pid_view,
                     host: match &me.proof {
                         Some(proof) => proof.host.clone(),
                         None => crate::claims::hostname(),
                     },
                     session: me.session,
                     root_session,
-                    pid: me.pid,
+                    pid: evidence.pid,
                     worktree,
                     started,
                     seen: now,
@@ -1171,7 +1177,7 @@ fn occupants(ctx: &mut Ctx, root: &Path) -> Result<Occupants> {
     let mine = me.identity().map(|identity| identity.tagged.clone());
     let mut work = Vec::new();
     for (task, (claim, liveness)) in snapshot.iter() {
-        if *liveness == crate::claims::Liveness::Live
+        if !liveness.is_stale()
             && Path::new(&claim.worktree) == root
             && ownership(claim, &me)? == Ownership::Foreign
         {
@@ -1225,9 +1231,15 @@ pub(crate) fn follow_holder(
             &resolved
         }
     };
-    match ownership(&claim, me) {
+    let identity = match ownership(&claim, me) {
         Ok(Ownership::Foreign) => return,
-        Ok(Ownership::ByIdentity | Ownership::ByProof) => {}
+        // Proof-only ownership records the claim's own identity (spec §6.4 of the relay
+        // design), whose pid this write did not supply, so its evidence is kept.
+        Ok(Ownership::ByProof) => crate::claims::continuation_identity(&claim),
+        Ok(Ownership::ByIdentity) => me
+            .identity()
+            .expect("ownership by identity means the identity resolved")
+            .clone(),
         Err(error) => {
             ctx.warnings.push(format!(
                 "{landed}, but whether this session holds the claim on {id} could not be \
@@ -1235,10 +1247,23 @@ pub(crate) fn follow_holder(
             ));
             return;
         }
-    }
+    };
+    // Claim PID-view design §2: a heartbeat applies the evidence rules too.
+    let evidence = crate::claims::evidence(
+        &identity,
+        Some(&claim),
+        crate::pidview::current().as_ref(),
+        crate::claims::boot_id(),
+        time::OffsetDateTime::now_utc(),
+        crate::claims::proc_stat,
+    );
     let moved = crate::claims::Claim {
         worktree: ctx.project.resume_root().display().to_string(),
         seen: crate::time::now(),
+        pid: evidence.pid,
+        pid_start: evidence.pid_start,
+        boot_id: evidence.boot_id,
+        pid_view: evidence.pid_view,
         ..claim
     };
     let saved = ctx.claims_mut().and_then(|store| {

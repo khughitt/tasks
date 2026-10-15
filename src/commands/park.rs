@@ -59,7 +59,7 @@ pub fn run(
                 let live = crate::claims::liveness(existing);
                 let description = Ctx::describe_claim(existing, &live);
                 match live {
-                    Liveness::Live => {
+                    Liveness::Live | Liveness::Unverifiable(_) => {
                         return Err(Error::Claimed(task.id.to_string(), description));
                     }
                     Liveness::Stale(_) => Some(format!("took over {description}")),

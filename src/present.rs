@@ -140,11 +140,16 @@ pub fn today() -> Span {
     Span::styled("now", Style::Date(When::Today))
 }
 
-/// `<owner> [<session>]`, with ` stale` inside the brackets when the claim is not live.
+/// `<owner> [<session>]`, with ` stale` or ` unverifiable` inside the brackets when the
+/// claim is not plainly live.
 pub fn claim(claim: &ClaimInfo) -> Span {
-    let stale = if claim.live { "" } else { " stale" };
+    let state = match (&claim.unverified, claim.live) {
+        (Some(_), _) => " unverifiable",
+        (None, true) => "",
+        (None, false) => " stale",
+    };
     Span::styled(
-        format!("{} [{}{stale}]", claim.owner, claim.session),
+        format!("{} [{}{state}]", claim.owner, claim.session),
         Style::Chrome,
     )
 }

@@ -907,6 +907,42 @@ fn a_checkout_still_using_a_retired_prefix_refuses() {
     );
 }
 
+/// This test process's PID view, read as `src/pidview.rs` reads it: the namespace its
+/// `/proc` numbers pids in, and `None` unless `NSpid` is exactly one positive pid.
+fn test_pid_view() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let nspid = status
+        .lines()
+        .find_map(|line| line.strip_prefix("NSpid:"))?;
+    let mut entries = nspid.split_whitespace();
+    let pid: u32 = entries.next()?.parse().ok()?;
+    if pid == 0 || entries.next().is_some() {
+        return None;
+    }
+    let ns = std::fs::metadata("/proc/self/ns/pid").ok()?;
+    Some(format!("{}:{}", ns.dev(), ns.ino()))
+}
+
+/// The view an exported pid establishes from this test process: its own, only when that
+/// is the initial PID namespace (claim PID-view design §2).
+fn exported_pid_view() -> Option<String> {
+    test_pid_view().filter(|view| view.ends_with(":4026531836"))
+}
+
+fn stored_claim(env: &TestEnv, prefix: &str, id: &str) -> toml::Value {
+    let store: toml::Value =
+        toml::from_str(&std::fs::read_to_string(env.claim_store(prefix)).unwrap()).unwrap();
+    store["claims"][id].clone()
+}
+
+fn pid_view_of(claim: &toml::Value) -> Option<String> {
+    claim
+        .get("pid_view")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
 /// Writes a claim straight into the store.
 fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
     let path = env.claim_store(prefix);
@@ -920,14 +956,34 @@ fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool)
     } else {
         (0, 1, "not-this-boot".to_string())
     };
+    let view = test_pid_view()
+        .map(|view| format!("pid_view = \"{view}\"\n"))
+        .unwrap_or_default();
     let mut text = std::fs::read_to_string(&path).unwrap_or_default();
     text.push_str(&format!(
         "[claims.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\npid = {pid}\n\
          pid_start = {pid_start}\nboot_id = \"{boot}\"\nhost = \"h\"\n\
          worktree = \"/elsewhere\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
-         seen = \"2026-01-01T00:00:00Z\"\n"
+         seen = \"2026-01-01T00:00:00Z\"\n{view}"
     ));
     std::fs::write(&path, text).unwrap();
+}
+
+/// Rewrites one stored claim's `pid_view`, leaving the rest as written.
+fn set_pid_view(env: &TestEnv, prefix: &str, id: &str, view: &str) {
+    let path = env.claim_store(prefix);
+    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    store["claims"][id]
+        .as_table_mut()
+        .unwrap()
+        .insert("pid_view".into(), toml::Value::String(view.into()));
+    std::fs::write(&path, toml::to_string(&store).unwrap()).unwrap();
+}
+
+/// A claim held by this test process but recorded in `view`.
+fn write_claim_in_view(env: &TestEnv, prefix: &str, id: &str, session: &str, view: &str) {
+    write_claim(env, prefix, id, session, true);
+    set_pid_view(env, prefix, id, view);
 }
 
 /// Writes a park entry straight into the store.
@@ -10453,12 +10509,15 @@ fn write_detailed_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, li
     };
     let path = env.claim_store(prefix);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let view = test_pid_view()
+        .map(|view| format!("pid_view = \"{view}\"\n"))
+        .unwrap_or_default();
     let mut text = std::fs::read_to_string(&path).unwrap_or_default();
     text.push_str(&format!(
         "[claims.\"{id}\"]\nowner = \"someone\"\nsession = \"{session}\"\npid = {pid}\n\
          pid_start = {pid_start}\nboot_id = \"{}\"\nhost = \"{LEAK_HOST}\"\n\
          worktree = \"{LEAK_WORKTREE}\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
-         seen = \"2026-01-01T00:00:00Z\"\n",
+         seen = \"2026-01-01T00:00:00Z\"\n{view}",
         boot.trim()
     ));
     std::fs::write(&path, text).unwrap();
@@ -28229,4 +28288,211 @@ fn delegated_worker_handoff_and_takeover() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn pid_view_of_an_exported_pid_is_recorded_only_in_the_initial_namespace() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    let claim = stored_claim(&env, "sci", &id);
+    // The test process is the binary's parent, so the binary shares its view.
+    assert_eq!(pid_view_of(&claim), exported_pid_view(), "{claim}");
+}
+
+#[test]
+fn pid_view_heartbeat_with_a_missing_pid_records_it_without_a_view() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    for pid in [std::process::id().to_string(), "4194303".to_string()] {
+        env.cmd(&sci)
+            .env("TASKS_SESSION", "viewer")
+            .env("TASKS_SESSION_PID", pid)
+            .args(["start", &id])
+            .assert()
+            .success();
+    }
+    let claim = stored_claim(&env, "sci", &id);
+    assert_eq!(claim["pid"].as_integer(), Some(4194303), "{claim}");
+    assert_eq!(pid_view_of(&claim), None, "{claim}");
+    assert!(claim.get("pid_start").is_none(), "{claim}");
+}
+
+#[test]
+fn pid_view_follows_a_new_pid_reported_through_a_note() {
+    // Plan round 1, P1: an ordinary write by the holder is a heartbeat too, and must
+    // apply the evidence rules rather than keep tracking the old process.
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    let before = stored_claim(&env, "sci", &id);
+
+    // Same pid: the recorded evidence stays.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["note", &id, "same process"])
+        .assert()
+        .success();
+    let same = stored_claim(&env, "sci", &id);
+    for field in ["pid", "pid_start", "boot_id", "pid_view"] {
+        assert_eq!(same.get(field), before.get(field), "{field}: {same}");
+    }
+
+    // A different pid this write cannot establish: tracked, with no view.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", "4194303")
+        .args(["note", &id, "new process"])
+        .assert()
+        .success();
+    let moved = stored_claim(&env, "sci", &id);
+    assert_eq!(moved["pid"].as_integer(), Some(4194303), "{moved}");
+    assert_eq!(pid_view_of(&moved), None, "{moved}");
+    assert!(moved.get("pid_start").is_none(), "{moved}");
+}
+
+#[test]
+fn an_unverifiable_claim_is_held_not_pruned_or_taken() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let held = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    let other = id_of(env.json(&sci, &["add", "Other", "-p", "2"]));
+    write_claim_in_view(&env, "sci", &held, "sandboxed", "0:1");
+
+    // An unrelated claim write prunes nothing.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "bystander")
+        .args(["start", &other])
+        .assert()
+        .success();
+    assert!(stored_claim(&env, "sci", &held).get("session").is_some());
+
+    // Another session cannot take it without --force.
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_SESSION", "bystander")
+        .args(["start", &held])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("\"claimed\"")
+            || String::from_utf8_lossy(&out.stderr).contains("claimed")
+    );
+
+    // tasks claims reports it held, with the reason.
+    let claims = env.json(&sci, &["claims"]);
+    let row = claims["claims"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == held)
+        .unwrap()
+        .clone();
+    assert_eq!(row["live"], true, "{row}");
+    assert_eq!(row["unverified"], "recorded in another PID view", "{row}");
+
+    // --force takes it over, and the note says how.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "bystander")
+        .args(["start", "--force", "--reason", "sandbox gone", &held])
+        .assert()
+        .success();
+    let shown = env.json(&sci, &["show", &held]);
+    assert!(
+        shown.to_string().contains("unverifiable, forced"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn pretty_claims_name_an_unverifiable_claim() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    write_claim_in_view(&env, "sci", &id, "sandboxed", "0:1");
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_FORMAT", "pretty")
+        .args(["claims"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("unverifiable"), "{text}");
+    assert!(!text.contains("stale"), "{text}");
+}
+
+#[test]
+fn an_unverifiable_claim_still_occupies_its_worktree() {
+    // Plan round 1: `occupants` must count a held claim, not only a Live one, or the
+    // stale-copy refusal offers a rerun or merge instead of naming the holder.
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let other = id_of(env.json(&side, &["add", "Other work", "-p", "2"]));
+    as_agent(&env, &side, "agent-b")
+        .args(["start", &other])
+        .assert()
+        .success();
+    set_pid_view(&env, "sci", &other, "0:1");
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert!(
+        detail.contains(&other) && detail.contains("agent-b"),
+        "{detail}"
+    );
+    assert!(detail.contains("Wait for that branch to merge"), "{detail}");
+}
+
+#[test]
+fn pid_view_heartbeat_after_the_recorded_pid_died_keeps_the_claim_held() {
+    // Final review, Important 1: a repeated `start` without a pid must not keep evidence
+    // that already reads stale here, or another session takes the claim without --force.
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "owner")
+        .env("TASKS_SESSION_PID", child.id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "owner")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_SESSION", "intruder")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{out:?}");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("\"claimed\""), "{text}");
 }

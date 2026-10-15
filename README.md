@@ -302,10 +302,19 @@ checks have stopped; silence, a timeout and the shared PID do not establish it.
 Relay process matching also requires hooks and task commands to share a PID
 namespace. A sandbox exposing the Codex ancestor as PID 1 cannot match relay's
 published host PID; this refuses acquisition, and no process evidence inside such a
-sandbox can prove the session (tasks-fe6c59). Claim liveness judged across PID views is
-tracked as tasks-860db2.
+sandbox can prove the session (tasks-fe6c59).
 Exact legitimate-owner `TASKS_SESSION` recovery remains available. The live
 acceptance capture used a separately approved host-PID invocation.
+
+A claim records the PID view its pid was established in: the PID namespace that the
+writer's `/proc` numbers pids in. Only a command in that same view judges the pid.
+Elsewhere, and wherever either view is unknown, the claim is `unverifiable`: it is held,
+and nothing prunes it, takes it over without `--force`, or releases its holds. A
+reboot, its owner's `park` or `done`, or `start --force` clears it. An exported pid
+(`TASKS_SESSION_PID`, `CLAUDE_PID`) establishes a view only in the initial PID
+namespace, because an inherited number's namespace cannot be proven. Inside a container
+or sandbox, such claims stay held after their session ends. `TASKS_SESSION_PID` must
+name a process in the namespace of the command that sets it.
 
 **Upgrading.** tasks 0.2.0 reads relay's registry schema 2 and no other; against an older
 registry it refuses and asks you to run `relay reap`. On a host with this switch on, every
@@ -313,6 +322,13 @@ registry it refuses and asks you to run `relay reap`. On a host with this switch
 `tasks --version` for each `tasks` on `PATH` in each harness's environment. An older `tasks`
 refuses fresh claims against the new registry, but it can still let a session nested inside
 another continue the outer session's claims, which no registry format can prevent.
+
+tasks 0.3.0 judges claims by PID view. Its protection holds only when every `tasks`
+that reads or writes a host's claim stores is 0.3.0 or later: each `tasks` on `PATH`
+in each harness's environment, including one a sandbox can execute. An older binary
+judges every pid through its own `/proc`. It can prune a claim that another view holds,
+it drops the recorded view when it saves, and it reports that claim as stale. Check
+`tasks --version` for each.
 
 Enabling relay never rewrites a claim already held: a claim keeps the identity it was
 created with. The level is Linux-only — it needs `/proc` — and it sits *below*
@@ -377,7 +393,7 @@ from a clone):
     tasks quiet                      # what could run tonight, across every project; -n 1 for the top
     tasks list --parked --waiting-on user --all-projects  # everything waiting on you, with its next step
     tasks --pretty --headers list     # label each column of a pretty table
-    tasks claims                     # every claim in every project's store, live or stale; what a Stop hook reads
+    tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads
     tasks shelve <id> "when the dependency lands" # keep open work out of active views
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project

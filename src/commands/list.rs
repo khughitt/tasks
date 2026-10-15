@@ -271,13 +271,13 @@ pub fn ready_tasks(
         .into_iter()
         .partition(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_some());
     paused.retain(|task| {
-        claims.live(&task.id).is_none()
+        claims.held(&task.id).is_none()
             && !claims
                 .park(&task.id)
                 .is_some_and(|park| park.waiting_on == WaitingOn::User)
     });
     deferred.retain(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_none());
-    ready.retain(|task| match claims.live(&task.id) {
+    ready.retain(|task| match claims.held(&task.id) {
         Some(claim) => {
             warnings.push(format!(
                 "{} — {} to take it over",
@@ -299,7 +299,7 @@ pub fn ready_tasks(
         _ => true,
     });
     deferred.retain(|task| {
-        claims.live(&task.id).is_none()
+        claims.held(&task.id).is_none()
             && !claims
                 .park(&task.id)
                 .is_some_and(|park| park.waiting_on == WaitingOn::User)
@@ -646,7 +646,7 @@ fn claimed_elsewhere(
 ) -> Vec<(Task, Vec<Task>)> {
     let mut found = Vec::new();
     for (key, (claim, liveness)) in claims.iter() {
-        if *liveness != crate::claims::Liveness::Live {
+        if liveness.is_stale() {
             continue;
         }
         let id = match TaskId::parse(key) {
@@ -749,7 +749,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
     }
     let mut doing: Vec<Task> = all
         .iter()
-        .filter(|task| task.status == Status::Doing || claims.live(&task.id).is_some())
+        .filter(|task| task.status == Status::Doing || claims.held(&task.id).is_some())
         .cloned()
         .collect();
     let elsewhere = claimed_elsewhere(&mut ctx, &all, &claims);
@@ -825,7 +825,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
         }
     }
     for task in &all {
-        if let Some(claim) = claims.live(&task.id)
+        if let Some(claim) = claims.held(&task.id)
             && matches!(task.status, Status::Todo | Status::Idea)
         {
             ctx.warnings.push(format!(

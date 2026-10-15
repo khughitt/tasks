@@ -2,7 +2,7 @@
 //! project's MutationLock only; the registry is read, never locked, because every command
 //! that changes this prefix's root (`init --force`, `rename`) takes this lock first.
 
-use crate::claims::{ClaimStore, Liveness, MutationLock};
+use crate::claims::{ClaimStore, MutationLock};
 use crate::error::{Error, Result};
 use crate::registry::Registry;
 use crate::repo::{CONFIG_REL, Project, Retirement, validate_retirement};
@@ -73,7 +73,7 @@ fn reject_live_claims(project: &Project) -> Result<()> {
     let store = ClaimStore::load(&project.prefix)?;
     for (id, claim) in store.iter() {
         let live = crate::claims::liveness(claim);
-        if matches!(live, Liveness::Live) {
+        if !live.is_stale() {
             return Err(Error::Claimed(
                 id.clone(),
                 super::Ctx::describe_claim(claim, &live),

@@ -284,7 +284,7 @@ fn classify<'a>(inputs: &Inputs<'a>, task: &Task) -> Class<'a> {
     // fall through to their own cause, keeping the table order.
     let user_parked = park.is_some_and(|park| park.waiting_on == WaitingOn::User);
     let gated = !goal && !user_parked && could_step(task, claims, inputs.now);
-    let cause = if claims.live(&task.id).is_some() {
+    let cause = if claims.held(&task.id).is_some() {
         Some(Cause::Active)
     } else if gated
         && inputs
@@ -364,7 +364,7 @@ fn row(inputs: &Inputs, lane: &Task, picked: &mut BTreeMap<String, TaskId>) -> L
         steps: 0,
         active: live
             .iter()
-            .filter(|task| inputs.claims.live(&task.id).is_some())
+            .filter(|task| inputs.claims.held(&task.id).is_some())
             .map(|task| summary(task))
             .collect(),
         held: Vec::new(),

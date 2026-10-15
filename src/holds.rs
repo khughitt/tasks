@@ -2,7 +2,7 @@
 //! every registered project, hold which exclusive needs. Read without any project's lock;
 //! an acquire that would record a hold reads it under the host-wide holds lock.
 
-use crate::claims::{Claim, ClaimStore, Liveness, MutationLock, ProcStat};
+use crate::claims::{Claim, ClaimStore, MutationLock, ProcStat};
 use crate::error::Result;
 use crate::model::{Task, TaskId};
 use crate::needs::Vocabulary;
@@ -71,6 +71,7 @@ impl HoldSnapshot {
             stores,
             now,
             crate::claims::boot_id().as_deref(),
+            crate::pidview::current().as_ref(),
             crate::claims::proc_stat,
         );
         warnings.extend(more);
@@ -82,6 +83,7 @@ impl HoldSnapshot {
         stores: impl IntoIterator<Item = (String, PathBuf)>,
         now: OffsetDateTime,
         boot_id: Option<&str>,
+        view: Option<&crate::pidview::PidView>,
         stat: impl Fn(u32) -> ProcStat,
     ) -> (HoldSnapshot, Vec<String>) {
         let mut snapshot = HoldSnapshot::default();
@@ -95,10 +97,11 @@ impl HoldSnapshot {
                 }
             };
             for (key, claim) in store.iter() {
-                // Held only while live (§4.4): a dead claim, a park, or a doing status
-                // alone holds nothing; a pidless claim holds for its TTL.
+                // Held unless stale (§4.4; claim PID-view design §4): a dead claim, a park,
+                // or a doing status alone holds nothing; a pidless claim holds for its TTL,
+                // and a claim this command cannot judge keeps holding.
                 if claim.holds.is_empty()
-                    || crate::claims::liveness_with(claim, now, boot_id, &stat) != Liveness::Live
+                    || crate::claims::liveness_with(claim, now, boot_id, view, &stat).is_stale()
                 {
                     continue;
                 }
@@ -241,6 +244,11 @@ mod tests {
         }
     }
 
+    const HERE: crate::pidview::PidView = crate::pidview::PidView {
+        dev: 5,
+        ino: crate::pidview::PROC_PID_INIT_INO,
+    };
+
     fn gone(_: u32) -> ProcStat {
         ProcStat::NotFound
     }
@@ -260,7 +268,11 @@ mod tests {
     /// one, the four-hour TTL's.
     fn entry(id: &str, session: &str, pid: Option<u32>, holds: &[&str]) -> String {
         let pid = pid
-            .map(|pid| format!("pid = {pid}\npid_start = 7\nboot_id = \"boot\"\n"))
+            .map(|pid| {
+                format!(
+                    "pid = {pid}\npid_start = 7\nboot_id = \"boot\"\npid_view = \"5:4026531836\"\n"
+                )
+            })
             .unwrap_or_default();
         let holds = if holds.is_empty() {
             String::new()
@@ -295,7 +307,7 @@ mod tests {
         )];
         let now = at("2026-10-03T11:00:00Z");
         let (live, warnings) =
-            HoldSnapshot::load_from_paths(stores.clone(), now, Some("boot"), alive);
+            HoldSnapshot::load_from_paths(stores.clone(), now, Some("boot"), Some(&HERE), alive);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(
             live.holder("quiet", &id("sci-000002"), &nobody()),
@@ -305,7 +317,7 @@ mod tests {
                 prefix: "sci".into(),
             })
         );
-        let (dead, _) = HoldSnapshot::load_from_paths(stores, now, Some("boot"), gone);
+        let (dead, _) = HoldSnapshot::load_from_paths(stores, now, Some("boot"), Some(&HERE), gone);
         assert!(dead.holder("quiet", &id("sci-000002"), &nobody()).is_none());
     }
 
@@ -321,6 +333,7 @@ mod tests {
             stores.clone(),
             at("2026-10-03T13:59:00Z"),
             Some("boot"),
+            Some(&HERE),
             alive,
         );
         assert!(
@@ -328,8 +341,13 @@ mod tests {
                 .holder("quiet", &id("sci-000002"), &nobody())
                 .is_some()
         );
-        let (past, _) =
-            HoldSnapshot::load_from_paths(stores, at("2026-10-03T15:00:00Z"), Some("boot"), alive);
+        let (past, _) = HoldSnapshot::load_from_paths(
+            stores,
+            at("2026-10-03T15:00:00Z"),
+            Some("boot"),
+            Some(&HERE),
+            alive,
+        );
         assert!(past.holder("quiet", &id("sci-000002"), &nobody()).is_none());
     }
 
@@ -341,8 +359,13 @@ mod tests {
             "sci",
             &entry("sci-000001", "a", Some(42), &[]),
         )];
-        let (snapshot, warnings) =
-            HoldSnapshot::load_from_paths(stores, at("2026-10-03T11:00:00Z"), Some("boot"), alive);
+        let (snapshot, warnings) = HoldSnapshot::load_from_paths(
+            stores,
+            at("2026-10-03T11:00:00Z"),
+            Some("boot"),
+            Some(&HERE),
+            alive,
+        );
         assert!(warnings.is_empty());
         assert!(
             snapshot
@@ -364,8 +387,13 @@ mod tests {
             // A store that was never written is empty, not unknown.
             ("ops".to_string(), dir.path().join("ops.toml")),
         ];
-        let (snapshot, warnings) =
-            HoldSnapshot::load_from_paths(stores, at("2026-10-03T11:00:00Z"), Some("boot"), alive);
+        let (snapshot, warnings) = HoldSnapshot::load_from_paths(
+            stores,
+            at("2026-10-03T11:00:00Z"),
+            Some("boot"),
+            Some(&HERE),
+            alive,
+        );
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
             warnings[0].starts_with("hold state unknown for fam ("),
@@ -386,8 +414,13 @@ mod tests {
             "sci",
             &entry("junk", "a", Some(42), &["quiet"]),
         )];
-        let (snapshot, warnings) =
-            HoldSnapshot::load_from_paths(stores, at("2026-10-03T11:00:00Z"), Some("boot"), alive);
+        let (snapshot, warnings) = HoldSnapshot::load_from_paths(
+            stores,
+            at("2026-10-03T11:00:00Z"),
+            Some("boot"),
+            Some(&HERE),
+            alive,
+        );
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
             warnings[0].starts_with("hold state unknown for sci:"),
@@ -408,8 +441,13 @@ mod tests {
             "sci",
             &entry("sci-000001", "a", Some(42), &["quiet"]),
         )];
-        let (snapshot, _) =
-            HoldSnapshot::load_from_paths(stores, at("2026-10-03T11:00:00Z"), Some("boot"), alive);
+        let (snapshot, _) = HoldSnapshot::load_from_paths(
+            stores,
+            at("2026-10-03T11:00:00Z"),
+            Some("boot"),
+            Some(&HERE),
+            alive,
+        );
         // A claim on the target itself: a takeover, never a hold.
         assert!(
             snapshot
@@ -449,8 +487,13 @@ mod tests {
             "sci",
             &entry("sci-000001", "c1", Some(42), &["quiet"]),
         )];
-        let (snapshot, _) =
-            HoldSnapshot::load_from_paths(stores, at("2026-10-03T11:00:00Z"), Some("boot"), alive);
+        let (snapshot, _) = HoldSnapshot::load_from_paths(
+            stores,
+            at("2026-10-03T11:00:00Z"),
+            Some("boot"),
+            Some(&HERE),
+            alive,
+        );
         // A rule that owns the claim by its process (as relay proof does) makes the hold
         // the caller's own, though the caller's session string is not `c1`.
         let proved = snapshot.mine(|claim| Ok(claim.pid == Some(42))).unwrap();
@@ -502,6 +545,34 @@ mod tests {
         assert_ne!(
             lock,
             crate::claims::MutationLock::path_with("holds", get).unwrap()
+        );
+    }
+
+    #[test]
+    fn an_unverifiable_claim_keeps_its_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let stores = vec![store(
+            dir.path(),
+            "sci",
+            &entry("sci-000001", "a", Some(42), &["quiet"]),
+        )];
+        let elsewhere = crate::pidview::PidView {
+            dev: 5,
+            ino: 4026533720,
+        };
+        // `gone` would make the claim stale in its own view; from another view it holds.
+        let (snapshot, warnings) = HoldSnapshot::load_from_paths(
+            stores,
+            at("2026-10-03T11:00:00Z"),
+            Some("boot"),
+            Some(&elsewhere),
+            gone,
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(
+            snapshot
+                .holder("quiet", &id("sci-000002"), &nobody())
+                .is_some()
         );
     }
 }

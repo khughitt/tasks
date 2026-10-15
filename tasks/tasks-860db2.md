@@ -1,20 +1,23 @@
 ---
 id: tasks-860db2
 title: Judge claim liveness only from the PID view that recorded it
-status: doing
+status: done
 priority: 1
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T19:36:56Z
+updated: 2026-10-15T02:00:14Z
 started: 2026-10-14T19:36:56Z
+completed: 2026-10-15T02:00:14Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
 source: tasks-fe6c59
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-10-14-claim-pid-view-design.md
+plan: docs/plans/2026-10-14-claim-pid-view.md
 ---
 
 Defect found by tasks-fe6c59 (evidence: tasks/files/tasks-fe6c59/pidns-proof-evidence.json, cases prune-*, codex-*, ns-explicit-pid1, host-view-of-ns-pid).
@@ -37,4 +40,56 @@ Tests: inject the view the way `liveness_with` injects stat.
 
 - 2026-10-14T19:35:16Z (main): revised from review of tasks-fe6c59: a cross-view or unknown view is insufficient evidence for takeover, prune or hold release (TTL fallback rejected; a live >4h claim must survive); PID view is the procfs mount's numbering, not /proc/self/ns/pid; inherited-host-/proc and private-/proc cases required
 - 2026-10-14T19:36:56Z (main): started
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T19:37:06Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T19:42:14Z (fix/claim-pid-view): parked (waiting on user, review): user reviews docs/specs/2026-10-14-claim-pid-view-design.md in .worktrees/claim-pid-view; on approval the agent writes the implementation plan
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T20:06:38Z (fix/claim-pid-view): review: spec round 1 — verdict: revise; findings: must-fix 2, should-fix 1; reviewer: human
+- 2026-10-14T20:06:40Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T20:08:09Z (fix/claim-pid-view): spec revision 2: view = procfs's pid namespace (nsfs dev:ino via NSpid==1), unknown otherwise; exported pids establish a view only through the ancestry walk; heartbeats keep established evidence; mixed versions documented unsafe
+- 2026-10-14T20:08:10Z (fix/claim-pid-view): parked (waiting on user, review): user reviews spec revision 2 (docs/specs/2026-10-14-claim-pid-view-design.md in .worktrees/claim-pid-view); on approval the agent writes the implementation plan
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T20:41:11Z (fix/claim-pid-view): review: spec round 2 — verdict: revise; findings: P1 1; reviewer: human
+- 2026-10-14T20:41:12Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T20:42:12Z (fix/claim-pid-view): spec revision 3: exported pids establish a view only when the writer's known view is the initial PID namespace (PROC_PID_INIT_INO), never by numeric/ancestry match; colliding-ancestor acceptance case added
+- 2026-10-14T20:42:13Z (fix/claim-pid-view): parked (waiting on user, review): user reviews spec revision 3 (docs/specs/2026-10-14-claim-pid-view-design.md in .worktrees/claim-pid-view); on approval the agent writes the implementation plan
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T21:48:59Z (fix/claim-pid-view): review: spec round 3 — verdict: accept; findings: none; reviewer: human
+- 2026-10-14T21:49:00Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T22:05:13Z (fix/claim-pid-view): parked (waiting on user, review): user reviews docs/plans/2026-10-14-claim-pid-view.md in .worktrees/claim-pid-view and picks the execution method; then the agent runs the Setup baseline and starts tasks-56d39d (Task 1)
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T23:32:59Z (fix/claim-pid-view): review: plan round 1 — verdict: revise; findings: P1 1, P2 5; reviewer: human
+- 2026-10-14T23:33:00Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T23:37:26Z (fix/claim-pid-view): plan revision 2: evidence in follow_holder with note test; occupants via is_stale with diagnosis test; NSpid entry parsed as positive pid; one filter per test-one, integration tests before the verdict; acceptance case 3 uses --map-root-user + setsid and asserts A's view; version 0.3.0. Execution: inline executing-plans + fresh read-only whole-branch reviewer
+- 2026-10-14T23:37:27Z (fix/claim-pid-view): parked (waiting on user, review): user reviews plan revision 2 (docs/plans/2026-10-14-claim-pid-view.md in .worktrees/claim-pid-view); on approval the agent runs the Setup baseline and starts tasks-56d39d (Task 1) inline
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T00:19:20Z (fix/claim-pid-view): review: plan round 2 — verdict: revise; findings: P2 3; reviewer: human
+- 2026-10-15T00:19:22Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T00:20:05Z (fix/claim-pid-view): plan revision 3: interim pid_view: None in claim_guard at Task 1 Step 7; acceptance case 3 keeps a setsid controller alive through B's write and checks pid/pid_start before and after; Task 3 builds with cargo build --bin tasks before --version and acceptance
+- 2026-10-15T00:20:07Z (fix/claim-pid-view): parked (waiting on user, review): user reviews plan revision 3 (docs/plans/2026-10-14-claim-pid-view.md in .worktrees/claim-pid-view); on approval the agent runs the Setup baseline and starts tasks-56d39d (Task 1) inline
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T01:11:40Z (fix/claim-pid-view): review: plan round 3 — verdict: accept; findings: none; reviewer: human
+- 2026-10-15T01:11:41Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T01:12:51Z (fix/claim-pid-view): baseline: just test-fast passed on fix/claim-pid-view at 53795c3 before Task 1
+- 2026-10-15T01:34:59Z (fix/claim-pid-view): attached: pidview-acceptance.sh (10795 bytes): Disposable acceptance script for the PID-view design: unshare cases, private HOME/config/state, deleted after
+- 2026-10-15T01:35:10Z (fix/claim-pid-view): attached: pidview-acceptance-evidence.json (1730 bytes): Acceptance results: six unshare cases with verdicts, all pass; case 3 observed procfs device reuse (41) with the controller alive
+- 2026-10-15T01:35:12Z (fix/claim-pid-view): acceptance: 6 pass, 0 unavailable (worktree build 0.3.0; case 3 reused procfs dev 41 while A's setsid controller stayed alive, claim kept). First run hit two script bugs, not product bugs: waitfor returned 1 after any wait, and unshare --fork ignores SIGTERM so cleanup hung until SIGKILL; both fixed in the attached script
+- 2026-10-15T01:37:55Z (fix/claim-pid-view): tasks 1-3 done (84d0248, 52bdb70, 5df6221); fast suite 1449/1449; acceptance 6/6; final whole-branch review dispatched to a fresh read-only reviewer
+- 2026-10-15T01:46:00Z (fix/claim-pid-view): review: impl round 1 — verdict: revise; findings: Important 1, Minor 5; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T01:49:15Z (fix/claim-pid-view): corrective round 1: fixed Important 1 in 0990ce4 (heartbeat keeps recorded evidence only when it does not read Stale here; spec §2 amended), suite 1451/1451; minors deferred, follow-ups tasks-f11052 (sid:0) and tasks-ea23de (pretty reason); scoped re-review dispatched
+- 2026-10-15T01:53:19Z (fix/claim-pid-view): review: impl round 2 — verdict: accept; findings: Minor 4; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T01:57:25Z (fix/claim-pid-view): parked (waiting on user, decision): user picks integration for fix/claim-pid-view (.worktrees/claim-pid-view): merge to main locally (changes the live tasks skill via the main checkout link), push+PR, or keep; after a merge, the agent runs tasks done, then the user upgrades every tasks binary on the host together (cargo install --path ., plus any sandbox-reachable copies) per spec §7
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T02:00:12Z (fix/claim-pid-view): resumed
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T02:00:14Z (fix/claim-pid-view): done
+  provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T02:00:14Z (fix/claim-pid-view): Claims record the PID view their pid was established in (exported pids only in the initial namespace); judgements from another or unknown view read Unverifiable, which nothing prunes, takes without --force or releases holds on. tasks 0.3.0; spec amended §2 after review; acceptance 6/6; fast suite 1451/1451; reviews accepted (impl round 2). Follow-ups tasks-f11052, tasks-ea23de
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

@@ -25,6 +25,7 @@ mod needs;
 mod output;
 mod palette;
 mod periodic;
+mod pidview;
 mod present;
 mod provenance;
 mod query;
