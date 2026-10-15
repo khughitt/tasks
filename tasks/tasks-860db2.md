@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-15T01:46:00Z
+updated: 2026-10-15T01:49:15Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -82,3 +82,4 @@ Tests: inject the view the way `liveness_with` injects stat.
 - 2026-10-15T01:35:12Z (fix/claim-pid-view): acceptance: 6 pass, 0 unavailable (worktree build 0.3.0; case 3 reused procfs dev 41 while A's setsid controller stayed alive, claim kept). First run hit two script bugs, not product bugs: waitfor returned 1 after any wait, and unshare --fork ignores SIGTERM so cleanup hung until SIGKILL; both fixed in the attached script
 - 2026-10-15T01:37:55Z (fix/claim-pid-view): tasks 1-3 done (84d0248, 52bdb70, 5df6221); fast suite 1449/1449; acceptance 6/6; final whole-branch review dispatched to a fresh read-only reviewer
 - 2026-10-15T01:46:00Z (fix/claim-pid-view): review: impl round 1 — verdict: revise; findings: Important 1, Minor 5; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T01:49:15Z (fix/claim-pid-view): corrective round 1: fixed Important 1 in 0990ce4 (heartbeat keeps recorded evidence only when it does not read Stale here; spec §2 amended), suite 1451/1451; minors deferred, follow-ups tasks-f11052 (sid:0) and tasks-ea23de (pretty reason); scoped re-review dispatched
