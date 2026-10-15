@@ -122,7 +122,8 @@ no namespace values):
 
     released session <s> (owner <o>, unverifiable: <reason>); reason: <why>
 
-`Stale` reads `stale: <reason>`. A sid claim reads `Unix session`, as in a takeover.
+`Stale` reads `stale` with no reason, as in a takeover note: a stale reason can name a
+host pid (`pid <n> is gone`), and a record keeps none. A sid claim reads `Unix session`, as in a takeover.
 The note is not a lifecycle marker. Release changes no status, so `obs` and other
 marker consumers need nothing new.
 
@@ -141,8 +142,9 @@ guard (`guard_write`, retired, move-pending, stale copy). Only after it lands is
 claim removed and the store saved.
 
 If the store save fails after the note landed, the command fails with the store's error
-and the suffix "the note on `<id>` landed but its claim was not removed; rerun
-`tasks release <id> "<why>"`" (with `--adopting <old>` when it was given). The kind stays the store's (`io`), so `park`'s
+and the suffix "the note on `<id>` landed but its claim was not removed; rerun the same
+`tasks release` command". Naming the command rather than reprinting it avoids
+shell-quoting a free-text reason, and covers `--adopting`. The kind stays the store's (`io`), so `park`'s
 silent-success shape (tasks-c87f7d) is not repeated. A rerun appends a second note. The
 cost is accepted: a release that leaves no record is worse.
 
@@ -177,7 +179,8 @@ keeps its wording; a `Stale` one already passes. The hint is
   park it first;
 - `ready`'s omission warning, after the `start --force` hint.
 
-`next` and `lanes` pass through the same omission code, so they gain the same hint.
+`next` and `prime` pass through the same omission code (`list::ready_tasks`), so they
+gain the same hint. `lanes` has no omission warning.
 `sample` keeps its curator wording, with no takeover or release hint.
 
 ### 7. JSON
@@ -197,7 +200,7 @@ a pid and no `pid_view` reads `Unverifiable` in every view.
   unchanged. A following `start` without `--force` succeeds with no takeover note.
 - Release frees an exclusive hold: another session's `start` of a step needing it then
   passes without `need_held`.
-- Release of a stale foreign claim succeeds and records `stale: …`.
+- Release of a stale foreign claim succeeds and records `stale`, with no pid in the note.
 - Refusals: no claim (`validation`), own claim (`validation`), live foreign claim
   (`claimed`), each with nothing written.
 - Stale copy: with a newer copy in the released claim's worktree, the refusal is the
