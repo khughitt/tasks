@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/codex-worker-rows
 created: 2026-10-15T10:02:07Z
-updated: 2026-10-15T10:50:23Z
+updated: 2026-10-15T10:55:33Z
 started: 2026-10-15T10:35:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -16,6 +16,7 @@ tags: []
 source: relay-6825f7
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-10-06-delegated-identity-design.md
+plan: docs/plans/2026-10-15-codex-worker-rows.md
 ---
 
 Why: relay will publish a registry row per Codex worker (relay docs/specs/2026-10-15-codex-worker-rows.md, approved 2026-10-15): id codex:<W>, sessionId W (the worker's CODEX_THREAD_ID), scope "worker", root codex:<R>, sharing the controller's process handle. Today tasks refuses such a snapshot (scope must be session for Codex) and, on a shared handle, refuses every qualifying row ('several relay agents match'), locking out the controller too.
