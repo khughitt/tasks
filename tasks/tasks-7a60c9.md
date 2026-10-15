@@ -1,13 +1,15 @@
 ---
 id: tasks-7a60c9
 title: "show and doc have no read that never invokes a document provider: show fetches an external plan when a step is set, so a caller that must stay read-only cannot read a task's body, notes or stored links without possibly running the configured fetch command"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-15T15:05:35Z
-updated: 2026-10-15T18:27:27Z
+updated: 2026-10-15T18:35:23Z
+started: 2026-10-15T18:35:23Z
 depends: []
 tags: [feedback, gap, "from:crew"]
 agent: claude-code/claude-opus-5-5
@@ -32,3 +34,5 @@ Source: crew feedback. Original ask: "Wanted: a flag (e.g. --no-fetch) on show a
 
 - 2026-10-15T18:16:19Z (main): scope: scoped; body rewritten with mechanism (Resolver no-fetch mode, UnavailableCause::FetchDisabled), step_found omitted for open and closed tasks, doc fails doc_not_found, sentinel-provider test; next kept out of scope; checked against main 52346fc
 - 2026-10-15T18:27:27Z (main): scope: next --no-fetch added at user request; flag is a parameter of show::describe, test covers next; size and complexity unchanged
+- 2026-10-15T18:35:23Z (main): started
+  provenance: {"harness_session":"claude-code:a68fc905-0583-4b24-916a-7f867f161ee3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
