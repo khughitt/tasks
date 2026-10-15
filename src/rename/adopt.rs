@@ -1,4 +1,4 @@
-use crate::claims::ClaimStore;
+use crate::claims::{ClaimStore, Liveness};
 use crate::commands::Ctx;
 use crate::error::{Error, Result};
 use crate::model::TaskId;
@@ -150,12 +150,34 @@ pub fn run(
     }
 
     if matches!(stage, Stage::Fresh(_) | Stage::ResumeRegistry) {
-        for (id, claim) in source.iter().chain(target.iter()) {
+        // An old-store claim's record is now `<new>-<hex>` here, so its release needs
+        // `--adopting`; a new-store claim's record routes as usual.
+        for (id, claim) in source.iter() {
             let live = crate::claims::liveness(claim);
             if !live.is_stale() {
+                let hint = match live {
+                    Liveness::Unverifiable(_) => {
+                        let renamed = format!("{new}-{}", TaskId::parse(id)?.hex);
+                        crate::commands::release::adopting_hint(&renamed, &claim.session, old)
+                    }
+                    _ => String::new(),
+                };
                 return Err(Error::Claimed(
                     id.clone(),
-                    Ctx::describe_claim(claim, &live),
+                    Ctx::describe_claim(claim, &live) + &hint,
+                ));
+            }
+        }
+        for (id, claim) in target.iter() {
+            let live = crate::claims::liveness(claim);
+            if !live.is_stale() {
+                let hint = match live {
+                    Liveness::Unverifiable(_) => crate::commands::release::hint(id, &claim.session),
+                    _ => String::new(),
+                };
+                return Err(Error::Claimed(
+                    id.clone(),
+                    Ctx::describe_claim(claim, &live) + &hint,
                 ));
             }
         }
@@ -263,6 +285,22 @@ fn classify_registry(
             "registry cannot adopt {old:?} as {new:?}"
         )))
     }
+}
+
+/// Whether adoption would take `old` as this checkout's predecessor: `None` when it would
+/// (the stage in which it checks the old store's claims), else why not. `release
+/// --adopting` asks this, so it never reaches a store adoption would not
+/// (claim-release spec §1).
+pub(crate) fn accepts(registry: &Registry, project: &Project, old: &str) -> Result<Option<String>> {
+    Ok(
+        match classify_registry(registry, project, old, &project.prefix)? {
+            Stage::Fresh(_) => None,
+            Stage::Refuse(reason) => Some(reason),
+            Stage::ResumeRegistry | Stage::ResumeCleanup | Stage::Complete => {
+                Some(format!("this host has already adopted {old:?}"))
+            }
+        },
+    )
 }
 
 fn exists(path: &std::path::Path) -> Result<bool> {

@@ -1,20 +1,23 @@
 ---
 id: tasks-f9fc01
 title: Clear a claim whose holder is gone without starting the task
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T08:25:35Z
+updated: 2026-10-15T10:26:32Z
 started: 2026-10-15T08:25:35Z
+completed: 2026-10-15T10:26:32Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
 source: tasks-860db2
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-10-15-claim-release-design.md
+plan: docs/plans/2026-10-15-claim-release.md
 ---
 
 Why: since tasks 0.3.0 (tasks-860db2, spec docs/specs/2026-10-14-claim-pid-view-design.md §3–§4) a pid claim that no command can judge reads `Unverifiable`: recorded in another PID view, recorded before views existed, or recorded with no established view. Nothing prunes it, takes it over without --force, or releases its exclusive holds. It clears only through its own view, its owner's park or done, a reboot, or `start --force`. While held it hides the task from ready/next and blocks rename, rename --adopt, retire and move. When the holder is known gone (a finished sandbox, a dead container), the only manual path is `start --force` followed by park or drop. That writes a takeover note and a resumed/parked lifecycle the task never had. A person needs a direct, recorded release.
@@ -41,4 +44,39 @@ Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f1105
 
 - 2026-10-15T08:25:23Z (main): scope: scoped; rewrote body with evidence (main 00cdbd8), lean (new release verb), spec decisions and done criteria; found move's park hint dead-ends on a foreign unverifiable claim; set todo P2 m mid planned
 - 2026-10-15T08:25:35Z (main): started
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T08:25:42Z (feat/claim-release): resumed
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T08:28:48Z (feat/claim-release): parked (waiting on user, review): user reviews docs/specs/2026-10-15-claim-release-design.md in .worktrees/claim-release; on approval the agent writes the implementation plan
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T08:35:26Z (feat/claim-release): resumed
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T08:35:27Z (feat/claim-release): review: spec round 1 — verdict: revise; findings: must-fix 1, should-fix 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-15T08:37:22Z (feat/claim-release): spec revision 2: release --adopting <old> reaches the old store's claim (gated on adoption's own classify_registry Fresh; both locks sorted) with an end-to-end hint test; occupancy skips every non-live claim of the released session, parks still count
+- 2026-10-15T08:37:23Z (feat/claim-release): parked (waiting on user, review): user reviews spec revision 2 (docs/specs/2026-10-15-claim-release-design.md in .worktrees/claim-release); on approval the agent writes the implementation plan
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T08:58:52Z (feat/claim-release): resumed
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T08:58:53Z (feat/claim-release): review: spec round 2 — verdict: revise; findings: should-fix 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-15T08:59:10Z (feat/claim-release): spec revision 3: under --adopting, own and live-foreign refusals name the adoption path, not park/done/start --force; tests assert it. User approved the spec with this fix and asked for the implementation plan
+- 2026-10-15T09:10:42Z (feat/claim-release): spec revision 4 (plan stage): stale note carries no reason (pids), prime not lanes, 'rerun the same command'; plan docs/plans/2026-10-15-claim-release.md with 3 steps
+- 2026-10-15T09:10:50Z (feat/claim-release): parked (waiting on user, review): user reviews docs/plans/2026-10-15-claim-release.md in .worktrees/claim-release and picks the execution method; then the agent runs the Setup baseline and starts tasks-fada88 (Task 1)
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T09:27:19Z (feat/claim-release): resumed
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T09:27:20Z (feat/claim-release): review: plan round 1 — verdict: revise; findings: must-fix 2, should-fix 3; reviewer: unverified (pasted by user)
+- 2026-10-15T09:31:28Z (feat/claim-release): plan revision 2 (spec revision 5): is_valid_prefix + own-prefix before locks; eligibility rechecked after both locks with a reloaded registry (lock-blocked /proc/locks test); adoption refusals drop the 'clears when it ends' promise, viewless own claim released by a later session; blank reasons refused; Task 3 test reads decoded warnings. Execution: Native (inline executing-plans + fresh whole-branch reviewer)
+- 2026-10-15T09:32:51Z (feat/claim-release): baseline: just test-fast passed on feat/claim-release at 94901f9 before Task 1
+- 2026-10-15T09:57:21Z (feat/claim-release): tasks 1-3 done (be273cd, a32ddf8, 440cfdf); fast suite 1470/1470; just check clean; ops cli.toml rows 8618bc9 + 30b4448 landed on ops main (user-approved) and adopted; final whole-branch review dispatched to a fresh read-only reviewer (claude-code/opus)
+- 2026-10-15T10:05:49Z (feat/claim-release): review: impl round 1 — verdict: accept; findings: Minor 9; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T10:12:41Z (feat/claim-release): review: impl round 2 — verdict: revise; findings: Important 1, Minor 4; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T10:17:02Z (feat/claim-release): review: impl round 3 — verdict: accept; findings: Minor 1; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T10:17:04Z (feat/claim-release): attached: claim-release-ledger.md (4945 bytes): Execution ledger for docs/plans/2026-10-15-claim-release.md: task completions, rulings, review rounds, deferred minors
+- 2026-10-15T10:18:51Z (feat/claim-release): parked (waiting on user, decision): user picks integration for feat/claim-release (.worktrees/claim-release): merge to main locally (changes the live tasks skill via the main checkout), push+PR, or keep; after a merge the agent runs tasks done on the branch first, merges, runs just test on main, then the user upgrades every tasks binary on the host (cargo install --path .)
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T10:26:28Z (feat/claim-release): resumed
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T10:26:32Z (feat/claim-release): done
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T10:26:32Z (feat/claim-release): tasks release <id> "<why>" [--adopting <old>] lands in 0.4.0: releases a foreign unverifiable or stale claim with one stamped note, lifecycle untouched; rename, adopt, retire, move and ready/next/prime name it; ops cli.toml rows 8618bc9 + 30b4448; full suite 1475/1475; final review accepted after two corrective rounds; minors in tasks-40c6f2
   provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

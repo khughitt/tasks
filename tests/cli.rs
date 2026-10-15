@@ -15834,6 +15834,314 @@ fn set_registry_root(env: &TestEnv, prefix: &str, root: &std::path::Path) {
 }
 
 #[cfg(unix)]
+/// A claim on `old_id` in `old`'s store under the adopt fixture's state directory. With
+/// `view`, it carries this test process's live pid recorded in that view; without, it is
+/// a pid-less claim seen in 2099, which reads live by its TTL.
+fn adopt_old_claim(env: &TestEnv, old_id: &str, session: &str, view: Option<&str>) {
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::create_dir_all(&state).unwrap();
+    let process = match view {
+        Some(view) => {
+            let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+            let rest = stat.rsplit_once(") ").unwrap().1.to_string();
+            let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
+            let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+            format!(
+                "pid = {}\npid_start = {start}\nboot_id = \"{}\"\npid_view = \"{view}\"\n",
+                std::process::id(),
+                boot.trim()
+            )
+        }
+        None => String::new(),
+    };
+    std::fs::write(
+        state.join("old.toml"),
+        format!(
+            "[claims.\"{old_id}\"]\nowner = \"tester\"\nsession = \"{session}\"\nhost = \"host\"\n\
+             worktree = \"/old\"\nstarted = \"2099-01-01T00:00:00Z\"\n\
+             seen = \"2099-01-01T00:00:00Z\"\n{process}"
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn release_adopting_follows_the_adoption_hint_end_to_end() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+
+    let out = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    let detail = err_detail(&out);
+    let hint = format!("tasks release {new_id} \"<why>\" --adopting old");
+    assert!(detail.contains(&hint), "{detail}");
+
+    // Run what the hint prints, with a reason in place of the placeholder.
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "sandbox exited", "--adopting", "old"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let shown = adopt_json(&env, &dir, &["show", &new_id]);
+    assert!(
+        shown.to_string().contains(
+            "released session sandboxed (owner tester, unverifiable: recorded in another PID \
+             view); reason: sandbox exited"
+        ),
+        "{shown}"
+    );
+
+    assert_eq!(
+        adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+        "fresh"
+    );
+}
+
+#[test]
+fn release_adopting_refuses_own_and_live_claims_without_ordinary_remedies() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    let record = std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap();
+    let old_store = env.home.path().join("state/tasks/claims/old.toml");
+
+    for (session, kind, expected) in [
+        (
+            "me",
+            "validation",
+            "is this session's, recorded before the rename",
+        ),
+        (
+            "someone-else",
+            "claimed",
+            "was recorded before the rename. Once session someone-else ends",
+        ),
+    ] {
+        adopt_old_claim(&env, &old_id, session, None);
+        let before = std::fs::read(&old_store).unwrap();
+        let out = adopt_cmd(&env, &dir)
+            .env("TASKS_SESSION", "me")
+            .args(["release", &new_id, "x", "--adopting", "old"])
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), kind, "{session}");
+        let detail = err_detail(&out);
+        assert!(detail.contains(expected), "{detail}");
+        assert!(detail.contains("tasks rename old new --adopt"), "{detail}");
+        assert!(detail.contains("if it reads unverifiable"), "{detail}");
+        assert!(!detail.contains("it clears when"), "{detail}");
+        for remedy in ["tasks park", "tasks done", "start --force"] {
+            assert!(!detail.contains(remedy), "{remedy} in {detail}");
+        }
+        assert_eq!(std::fs::read(&old_store).unwrap(), before);
+        assert_eq!(
+            std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap(),
+            record
+        );
+    }
+}
+
+#[test]
+fn release_adopting_refusals_write_nothing() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+    let record = std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap();
+
+    let claims = env.home.path().join("state/tasks/claims");
+    let locks = |dir: &std::path::Path| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".lock"))
+            .collect();
+        names.sort();
+        names
+    };
+    let before = locks(&claims);
+    for old in ["new", "nope", "../claims/new", "Old", ""] {
+        let out = adopt_cmd(&env, &dir)
+            .env("TASKS_SESSION", "releaser")
+            .args(["release", &new_id, "x", "--adopting", old])
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "validation", "--adopting {old:?}");
+        assert!(
+            err_detail(&out).contains(&format!("--adopting {old}")),
+            "{out:?}"
+        );
+    }
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap(),
+        record
+    );
+    assert_eq!(locks(&claims), before);
+
+    // After adoption completes, the old prefix is no longer adoptable here.
+    std::fs::remove_file(env.home.path().join("state/tasks/claims/old.toml")).unwrap();
+    adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"]);
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "x", "--adopting", "old"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "validation");
+}
+
+#[test]
+fn release_adopting_takes_an_own_viewless_claim_after_its_session_ended() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    // A pid with no boot and no view, as an older binary or an unproven export records it:
+    // it reads unverifiable in every view, even with its process gone.
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(
+        state.join("old.toml"),
+        format!(
+            "[claims.\"{old_id}\"]\nowner = \"tester\"\nsession = \"me\"\nhost = \"host\"\n\
+             worktree = \"/old\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
+             seen = \"2026-01-01T00:00:00Z\"\npid = {pid}\npid_start = 1\n"
+        ),
+    )
+    .unwrap();
+    let claims = adopt_json(&env, &dir, &["claims"]);
+    assert_eq!(
+        claims["claims"][0]["unverified"],
+        "PID view not established when recorded"
+    );
+
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "later")
+        .args([
+            "release",
+            &new_id,
+            "my earlier session ended",
+            "--adopting",
+            "old",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+        "fresh"
+    );
+}
+
+#[test]
+fn release_adopting_rechecks_eligibility_once_both_locks_are_held() {
+    use std::os::unix::fs::MetadataExt;
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+    let other = env.home.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    adopt_json(&env, &other, &["init", "--prefix", "other"]);
+    let old_store = env.home.path().join("state/tasks/claims/old.toml");
+    let store = std::fs::read(&old_store).unwrap();
+    let record = std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap();
+
+    // Hold `old`'s lock, as `init --force` does while it repoints the prefix. "new" sorts
+    // first, so release takes it, passes its first check, and blocks here.
+    let lock_path = env.home.path().join("state/tasks/claims/old.lock");
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    held.lock().unwrap();
+    let ino = std::fs::metadata(&lock_path).unwrap().ino();
+    let child = env
+        .raw(&dir)
+        .env("XDG_CONFIG_HOME", env.home.path().join("config"))
+        .env("XDG_STATE_HOME", env.home.path().join("state"))
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "gone", "--adopting", "old"])
+        .spawn()
+        .unwrap();
+    // /proc/locks lists a blocked flock waiter as a `->` line naming the inode.
+    let blocked = || {
+        std::fs::read_to_string("/proc/locks")
+            .unwrap()
+            .lines()
+            .any(|line| {
+                line.contains("->")
+                    && line
+                        .split_whitespace()
+                        .any(|field| field.ends_with(&format!(":{ino}")))
+            })
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !blocked() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "release never blocked on old.lock"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // Repoint `old` at another project while release waits, then let it through.
+    let registry_path = env.home.path().join("config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry["projects"]["old"] = toml::Value::String(other.display().to_string());
+    std::fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    drop(held);
+
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(err_kind(&out), "validation", "{out:?}");
+    assert!(
+        err_detail(&out).contains("still holds a tasks project"),
+        "{out:?}"
+    );
+    assert_eq!(std::fs::read(&old_store).unwrap(), store);
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap(),
+        record
+    );
+}
+
+#[test]
+fn adopt_hints_plain_release_for_an_unverifiable_claim_in_the_new_store() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::rename(state.join("old.toml"), state.join("new.toml")).unwrap();
+    let text = std::fs::read_to_string(state.join("new.toml")).unwrap();
+    std::fs::write(state.join("new.toml"), text.replace(&old_id, &new_id)).unwrap();
+    let out = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    let detail = err_detail(&out);
+    assert!(
+        detail.contains(&format!("tasks release {new_id} \"<why>\"`")),
+        "{detail}"
+    );
+    assert!(!detail.contains("--adopting"), "{detail}");
+}
+
 #[test]
 fn rename_recovers_through_noncanonical_registry_roots_before_and_after_registry_write() {
     for spelling in ["symlink", "dotdot"] {
@@ -28495,4 +28803,443 @@ fn pid_view_heartbeat_after_the_recorded_pid_died_keeps_the_claim_held() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(text.contains("\"claimed\""), "{text}");
+}
+
+/// The one note `release` wrote on `id`.
+fn release_note(env: &TestEnv, dir: &std::path::Path, id: &str) -> serde_json::Value {
+    let shown = env.json(dir, &["show", id]);
+    let notes: Vec<serde_json::Value> = shown["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|note| note["text"].as_str().unwrap().starts_with("released "))
+        .cloned()
+        .collect();
+    assert_eq!(notes.len(), 1, "{shown}");
+    notes[0].clone()
+}
+
+#[test]
+fn release_removes_an_unverifiable_claim_and_records_why() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    json_as(&env, &sci, "sandboxed", &["start", &id]);
+    set_pid_view(&env, "sci", &id, "0:1");
+    let owner = stored_claim(&env, "sci", &id)["owner"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let before = env.json(&sci, &["show", &id])["task"].clone();
+
+    let out = as_agent(&env, &sci, "releaser")
+        .env(
+            "CLAUDE_CODE_SESSION_ID",
+            "11111111-2222-3333-4444-555555555555",
+        )
+        .args(["release", &id, "sandbox exited"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["id"], id);
+
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
+    let note = release_note(&env, &sci, &id);
+    assert_eq!(
+        note["text"],
+        format!(
+            "released session sandboxed (owner {owner}, unverifiable: recorded in another \
+             PID view); reason: sandbox exited"
+        )
+    );
+    assert_eq!(
+        note["harness_session"],
+        "claude-code:11111111-2222-3333-4444-555555555555"
+    );
+    let after = env.json(&sci, &["show", &id])["task"].clone();
+    for field in ["status", "owner"] {
+        assert_eq!(after[field], before[field], "{field}");
+    }
+
+    // The next start needs no --force and records no takeover.
+    json_as(&env, &sci, "next-agent", &["start", &id]);
+    let shown = env.json(&sci, &["show", &id]).to_string();
+    assert!(!shown.contains("took over"), "{shown}");
+}
+
+#[test]
+fn release_frees_the_claims_exclusive_hold() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    hold_vocab(&sci);
+    let holding = id_of(env.json(&sci, &["add", "Capture", "-p", "2", "--need", "quiet"]));
+    let waiting = id_of(env.json(&sci, &["add", "Rerun", "-p", "2", "--need", "quiet"]));
+    json_as(&env, &sci, "sandboxed", &["start", &holding]);
+    set_pid_view(&env, "sci", &holding, "0:1");
+    let error = error_as(&env, &sci, "agent-b", &["start", &waiting]);
+    assert_eq!(error["error"]["kind"], "need_held", "{error}");
+
+    json_as(
+        &env,
+        &sci,
+        "releaser",
+        &["release", &holding, "sandbox exited"],
+    );
+    json_as(&env, &sci, "agent-b", &["start", &waiting]);
+}
+
+#[test]
+fn release_records_a_stale_claim_without_its_pid() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = child.id().to_string();
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "gone")
+        .env("TASKS_SESSION_PID", &pid)
+        .args(["start", &id])
+        .assert()
+        .success();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let owner = stored_claim(&env, "sci", &id)["owner"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    json_as(&env, &sci, "releaser", &["release", &id, "it died"]);
+    let note = release_note(&env, &sci, &id);
+    let text = note["text"].as_str().unwrap();
+    assert_eq!(
+        text,
+        format!("released session gone (owner {owner}, stale); reason: it died")
+    );
+    assert!(!text.contains(&pid), "{text}");
+}
+
+#[test]
+fn release_refusals_write_nothing() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let free = id_of(env.json(&sci, &["add", "Free", "-p", "2"]));
+    let mine = id_of(env.json(&sci, &["add", "Mine", "-p", "2"]));
+    let live = id_of(env.json(&sci, &["add", "Live", "-p", "2"]));
+    json_as(&env, &sci, "me", &["start", &mine]);
+    json_as(&env, &sci, "other", &["start", &live]);
+    let records: Vec<(String, String)> = [&free, &mine, &live]
+        .iter()
+        .map(|id| (id.to_string(), env.read(&sci, &format!("tasks/{id}.md"))))
+        .collect();
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+
+    let error = error_as(&env, &sci, "me", &["release", &free, "x"]);
+    assert_eq!(error["error"]["kind"], "validation", "{error}");
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("{free} has no claim"))
+    );
+
+    let error = error_as(&env, &sci, "me", &["release", &mine, "x"]);
+    assert_eq!(error["error"]["kind"], "validation", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(detail.contains("is yours"), "{detail}");
+    assert!(detail.contains(&format!("tasks park {mine}")), "{detail}");
+
+    let error = error_as(&env, &sci, "me", &["release", &live, "x"]);
+    assert_eq!(error["error"]["kind"], "claimed", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("only its session releases a live claim"),
+        "{detail}"
+    );
+    assert!(
+        detail.contains(&format!("tasks start --force {live}")),
+        "{detail}"
+    );
+
+    for (id, before) in &records {
+        assert_eq!(&env.read(&sci, &format!("tasks/{id}.md")), before, "{id}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(env.claim_store("sci")).unwrap(),
+        store
+    );
+}
+
+#[test]
+fn release_refuses_a_blank_reason() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    json_as(&env, &sci, "sandboxed", &["start", &id]);
+    set_pid_view(&env, "sci", &id, "0:1");
+    let record = env.read(&sci, &format!("tasks/{id}.md"));
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    for why in ["", "   \t "] {
+        let error = error_as(&env, &sci, "releaser", &["release", &id, why]);
+        assert_eq!(error["error"]["kind"], "validation", "{why:?}: {error}");
+        assert!(
+            error["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("needs a reason"),
+            "{error}"
+        );
+    }
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), record);
+    assert_eq!(
+        std::fs::read_to_string(env.claim_store("sci")).unwrap(),
+        store
+    );
+}
+
+#[test]
+fn release_keeps_a_quoted_reason_verbatim() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    json_as(&env, &sci, "sandboxed", &["start", &id]);
+    set_pid_view(&env, "sci", &id, "0:1");
+    let why = "it said \"done\"; rm -rf `x` $HOME";
+    json_as(&env, &sci, "releaser", &["release", &id, why]);
+    let text = release_note(&env, &sci, &id)["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(text.ends_with(&format!("; reason: {why}")), "{text}");
+}
+
+#[test]
+fn release_without_a_record_leaves_the_claim() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    json_as(&env, &sci, "sandboxed", &["start", &id]);
+    set_pid_view(&env, "sci", &id, "0:1");
+    std::fs::remove_file(sci.join(format!("tasks/{id}.md"))).unwrap();
+    let error = error_as(&env, &sci, "releaser", &["release", &id, "x"]);
+    assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
+    assert!(stored_claim(&env, "sci", &id).get("session").is_some());
+}
+
+#[test]
+fn release_accepts_a_bare_suffix() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    json_as(&env, &sci, "sandboxed", &["start", &id]);
+    set_pid_view(&env, "sci", &id, "0:1");
+    let hex = id.strip_prefix("sci-").unwrap();
+    json_as(&env, &sci, "releaser", &["release", hex, "gone"]);
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
+}
+
+#[test]
+fn release_store_failure_after_the_note_names_the_rerun() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    json_as(&env, &sci, "sandboxed", &["start", &id]);
+    set_pid_view(&env, "sci", &id, "0:1");
+    let claims = env.claim_store("sci").parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&claims, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(claims.join("probe"), "").is_ok() {
+        std::fs::remove_file(claims.join("probe")).unwrap();
+        std::fs::set_permissions(&claims, std::fs::Permissions::from_mode(0o755)).unwrap();
+        eprintln!("skipped: a read-only directory is writable here (running as root)");
+        return;
+    }
+    let error = error_as(&env, &sci, "releaser", &["release", &id, "gone"]);
+    std::fs::set_permissions(&claims, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(error["error"]["kind"], "io", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.ends_with(&format!(
+            "; the note on {id} landed but its claim was not removed; rerun the same \
+             `tasks release` command"
+        )),
+        "{detail}"
+    );
+    assert!(stored_claim(&env, "sci", &id).get("session").is_some());
+    release_note(&env, &sci, &id);
+}
+
+#[test]
+fn release_from_main_skips_the_gone_sessions_claims_in_the_stale_copy_check() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = repo_with_worktree(&mut env);
+    let other = id_of(env.json(&side, &["add", "Other work", "-p", "2"]));
+    as_agent(&env, &side, "gone")
+        .args(["start", &id])
+        .assert()
+        .success();
+    as_agent(&env, &side, "gone")
+        .args(["start", &other])
+        .assert()
+        .success();
+    set_pid_view(&env, "sci", &id, "0:1");
+    set_pid_view(&env, "sci", &other, "0:1");
+    stamp(&main, &id, "2026-09-01T00:00:00Z", "2026-09-05T09:00:00Z");
+    stamp(&side, &id, "2026-09-01T00:00:00Z", "2026-09-07T10:00:00Z");
+
+    // The gone session's two claims occupy nothing for its release: the remedy is the rerun.
+    let release = ["release", id.as_str(), "sandbox exited"];
+    let detail = stale_detail(&env, &main, &release);
+    assert!(
+        !detail.contains("Wait for that branch to merge"),
+        "{detail}"
+    );
+    assert!(detail.contains("tasks -C "), "{detail}");
+
+    // A note from main still names the holder, as before.
+    let detail = stale_detail(&env, &main, &["note", &id, "x"]);
+    assert!(detail.contains("Wait for that branch to merge"), "{detail}");
+
+    // Another session's live claim there still occupies it.
+    let third = id_of(env.json(&side, &["add", "Third", "-p", "2"]));
+    as_agent(&env, &side, "agent-c")
+        .args(["start", &third])
+        .assert()
+        .success();
+    let detail = stale_detail(&env, &main, &release);
+    assert!(detail.contains("Wait for that branch to merge"), "{detail}");
+    assert!(detail.contains("agent-c"), "{detail}");
+
+    // The printed rerun, made where the newer copy is, succeeds.
+    as_agent(&env, &side, "releaser")
+        .args(release)
+        .assert()
+        .success();
+    assert!(env.json(&side, &["show", &id])["claim"].is_null());
+}
+
+#[test]
+fn release_is_named_by_ready_next_retire_and_rename_for_an_unverifiable_claim_only() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let held = id_of(env.json(&sci, &["add", "Held", "-p", "1"]));
+    // A todo record with a claim, as a main checkout sees one while a worktree holds it.
+    write_claim_in_view(&env, "sci", &held, "sandboxed", "0:1");
+    let hint = format!("tasks release {held} \"<why>\"");
+
+    // Decoded strings: serialized JSON would escape the hint's quotation marks.
+    let warnings = |out: &serde_json::Value| -> Vec<String> {
+        out["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|warning| warning.as_str().unwrap().to_string())
+            .collect()
+    };
+    for command in [&["ready"][..], &["next"][..]] {
+        let out = env.json(&sci, command);
+        let list = warnings(&out);
+        assert!(
+            list.iter().any(|w| w.contains(&hint)),
+            "{command:?}: {list:?}"
+        );
+    }
+    for command in [
+        &["retire", "--reason", "over"][..],
+        &["rename", "sci", "lab"][..],
+    ] {
+        let error = error_of(&env, &sci, command);
+        assert_eq!(error["error"]["kind"], "claimed", "{command:?}: {error}");
+        assert!(
+            error["error"]["detail"].as_str().unwrap().contains(&hint),
+            "{command:?}: {error}"
+        );
+    }
+
+    // A live claim keeps the old wording everywhere.
+    let live = id_of(env.json(&sci, &["add", "Live", "-p", "1"]));
+    write_claim(&env, "sci", &live, "agent-b", true);
+    let list = warnings(&env.json(&sci, &["ready"]));
+    assert!(
+        list.iter().any(|w| w.contains(&format!("{live} omitted"))),
+        "{list:?}"
+    );
+    assert!(
+        !list
+            .iter()
+            .any(|w| w.contains(&format!("tasks release {live}"))),
+        "{list:?}"
+    );
+}
+
+#[test]
+fn release_of_a_record_only_in_the_holders_worktree_names_the_rerun_there() {
+    // Final review, Minor 6 re-graded Important: the hints rename, retire and ready print
+    // must not dead-end in a bare task_not_found when the record lives in the gone
+    // holder's worktree. Re-review: "not found" comes first, and the printed command,
+    // pasted into a shell from the main checkout, works for a path with a space.
+    let mut env = TestEnv::new();
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("side wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    let id = id_of(env.json(&side, &["add", "Side only", "-p", "2"]));
+    as_agent(&env, &side, "gone")
+        .args(["start", &id])
+        .assert()
+        .success();
+    set_pid_view(&env, "sci", &id, "0:1");
+
+    let error = error_of(&env, &main, &["release", &id, "sandbox exited"]);
+    assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.starts_with(&format!("task {id} not found; the claim stays. ")),
+        "{detail}"
+    );
+    assert!(stored_claim(&env, "sci", &id).get("session").is_some());
+
+    // The printed command, split as a POSIX shell splits it and run from main, releases.
+    let at = detail.find("`tasks -C ").expect("a rerun") + 1;
+    let line = &detail[at..at + detail[at..].find('`').unwrap()];
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "for word in {}; do printf '%s\\0' \"$word\"; done",
+            line.strip_prefix("tasks ").unwrap()
+        ))
+        .output()
+        .unwrap();
+    let words: Vec<String> = String::from_utf8(out.stdout)
+        .unwrap()
+        .split_terminator('\0')
+        .map(|word| match word {
+            "<why>" => "sandbox exited".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    assert_eq!(words[1], side.to_str().unwrap(), "{words:?}");
+    let out = env
+        .cmd(&main)
+        .env("TASKS_SESSION", "releaser")
+        .args(&words)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{words:?}: {out:?}");
+    assert!(env.json(&side, &["show", &id])["claim"].is_null());
 }

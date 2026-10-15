@@ -74,9 +74,15 @@ fn reject_live_claims(project: &Project) -> Result<()> {
     for (id, claim) in store.iter() {
         let live = crate::claims::liveness(claim);
         if !live.is_stale() {
+            let hint = match live {
+                crate::claims::Liveness::Unverifiable(_) => {
+                    super::release::hint(id, &claim.session)
+                }
+                _ => String::new(),
+            };
             return Err(Error::Claimed(
                 id.clone(),
-                super::Ctx::describe_claim(claim, &live),
+                super::Ctx::describe_claim(claim, &live) + &hint,
             ));
         }
     }

@@ -1507,6 +1507,50 @@ fn the_callers_own_claim_refuses_naming_park() {
     );
 }
 
+fn unverifiable(env: &TestEnv, prefix: &str, id: &str) {
+    let path = env.claim_store(prefix);
+    let mut store: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    store["claims"][id]
+        .as_table_mut()
+        .unwrap()
+        .insert("pid_view".into(), toml::Value::String("0:1".into()));
+    std::fs::write(&path, toml::to_string(&store).unwrap()).unwrap();
+}
+
+#[test]
+fn a_foreign_claim_refuses_move_with_its_sessions_remedy() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let live = id_of(env.json(&dots, &["add", "Live", "-p", "2"]));
+    let gone = id_of(env.json(&dots, &["add", "Gone", "-p", "2"]));
+    for id in [&live, &gone] {
+        env.cmd(&dots)
+            .env("TASKS_SESSION", "other")
+            .env("TASKS_SESSION_PID", std::process::id().to_string())
+            .args(["start", id])
+            .assert()
+            .success();
+    }
+    unverifiable(&env, "dots", &gone);
+
+    let (kind, detail) = fail_detail(&env, &dots, &["move", &live, "--to", "wali"]);
+    assert_eq!(kind, "claimed");
+    assert!(
+        detail.contains("that session must park it first"),
+        "{detail}"
+    );
+    assert!(!detail.contains("tasks park"), "{detail}");
+
+    let (kind, detail) = fail_detail(&env, &dots, &["move", &gone, "--to", "wali"]);
+    assert_eq!(kind, "claimed");
+    assert!(
+        detail.contains(&format!("tasks release {gone} \"<why>\"")),
+        "{detail}"
+    );
+    assert!(!detail.contains("tasks park"), "{detail}");
+}
+
 #[test]
 fn an_earlier_refile_in_the_destination_refuses() {
     // Spec §6 case 4.

@@ -94,7 +94,13 @@ mean those documents were verified.
    task's notes.
    A claim whose pid this command cannot judge (recorded in another PID view, such as
    a sandbox's, or before views were recorded) is held and shows as `unverifiable`.
-   Its own view, its owner, a reboot or `start --force` releases it.
+   Its own view, its owner, a reboot or `start --force` releases it. When you know its
+   holder is gone (a finished sandbox, a removed container), `tasks release <id> "<why>"`
+   removes it with one note and leaves status, owner and park alone; a live claim is
+   refused.
+   Before this host adopts a prefix another host renamed, a claim recorded under the old
+   prefix is released with `tasks release <new id> "<why>" --adopting <old>`, which
+   `tasks rename <old> <new> --adopt` names when it refuses.
    A write refuses with `stale_copy` when another checkout holds a newer copy of the
    record, and the error says what to do: rerun there with the printed `tasks -C <root> …`,
    merge the main checkout's copy into your worktree, or leave the record to the session

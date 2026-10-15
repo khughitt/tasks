@@ -313,7 +313,9 @@ A claim records the PID view its pid was established in: the PID namespace that 
 writer's `/proc` numbers pids in. Only a command in that same view judges the pid.
 Elsewhere, and wherever either view is unknown, the claim is `unverifiable`: it is held,
 and nothing prunes it, takes it over without `--force`, or releases its holds. A
-reboot, its owner's `park` or `done`, or `start --force` clears it. An exported pid
+reboot, its owner's `park` or `done`, or `start --force` clears it, and so does
+`tasks release <id> "<why>"` once you know the holder is gone: it records why in one note
+and leaves the task's lifecycle alone. An exported pid
 (`TASKS_SESSION_PID`, `CLAUDE_PID`) establishes a view only in the initial PID
 namespace, because an inherited number's namespace cannot be proven. Inside a container
 or sandbox, such claims stay held after their session ends. `TASKS_SESSION_PID` must
@@ -397,6 +399,8 @@ from a clone):
     tasks list --parked --waiting-on user --all-projects  # everything waiting on you, with its next step
     tasks --pretty --headers list     # label each column of a pretty table
     tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads
+    tasks release <id> "sandbox exited"  # drop a claim this command cannot judge, holder known gone; records why
+    tasks release new-4f2a9c "gone" --adopting old  # the same for a claim recorded before a rename this host has not adopted
     tasks shelve <id> "when the dependency lands" # keep open work out of active views
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project

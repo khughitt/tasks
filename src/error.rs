@@ -8,6 +8,9 @@ pub enum Error {
     Config(String),
     #[error("task {0} not found")]
     TaskNotFound(String),
+    /// `task_not_found` with what to do next, after the fact rather than inside it.
+    #[error("task {id} not found; {next}")]
+    TaskNotFoundNext { id: String, next: String },
     #[error("cannot resolve {0}")]
     UnresolvableId(String),
     #[error("invalid id {0:?}: {1}")]
@@ -90,6 +93,10 @@ impl Error {
         match self {
             Error::Config(detail) => Error::Config(detail + suffix),
             Error::TaskNotFound(detail) => Error::TaskNotFound(detail + suffix),
+            Error::TaskNotFoundNext { id, next } => Error::TaskNotFoundNext {
+                id,
+                next: next + suffix,
+            },
             Error::UnresolvableId(detail) => Error::UnresolvableId(detail + suffix),
             Error::InvalidId(id, detail) => Error::InvalidId(id, detail + suffix),
             Error::Parse { file, detail } => Error::Parse {
@@ -137,7 +144,7 @@ impl Error {
         match self {
             Error::NoProject(_) => "no_project",
             Error::Config(_) => "config",
-            Error::TaskNotFound(_) => "task_not_found",
+            Error::TaskNotFound(_) | Error::TaskNotFoundNext { .. } => "task_not_found",
             Error::UnresolvableId(_) => "unresolvable_id",
             Error::InvalidId(..) => "invalid_id",
             Error::Parse { .. } => "parse",
