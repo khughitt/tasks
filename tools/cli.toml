@@ -622,6 +622,9 @@ args = [{ name = "id", value = "ref", required = true }, { name = "message", val
 path = ["release"]
 summary = "Release another session's claim that cannot be judged live, and record why"
 args = [{ name = "id", value = "ref", required = true }, { name = "why", value = "string", required = true }]
+options = [
+  { names = ["--adopting"], value = "string" },
+]
 
 [[cli.tasks.commands]]
 path = ["block"]

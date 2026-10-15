@@ -98,6 +98,9 @@ mean those documents were verified.
    holder is gone (a finished sandbox, a removed container), `tasks release <id> "<why>"`
    removes it with one note and leaves status, owner and park alone; a live claim is
    refused.
+   Before this host adopts a prefix another host renamed, a claim recorded under the old
+   prefix is released with `tasks release <new id> "<why>" --adopting <old>`, which
+   `tasks rename <old> <new> --adopt` names when it refuses.
    A write refuses with `stale_copy` when another checkout holds a newer copy of the
    record, and the error says what to do: rerun there with the printed `tasks -C <root> …`,
    merge the main checkout's copy into your worktree, or leave the record to the session

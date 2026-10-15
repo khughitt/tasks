@@ -15834,6 +15834,314 @@ fn set_registry_root(env: &TestEnv, prefix: &str, root: &std::path::Path) {
 }
 
 #[cfg(unix)]
+/// A claim on `old_id` in `old`'s store under the adopt fixture's state directory. With
+/// `view`, it carries this test process's live pid recorded in that view; without, it is
+/// a pid-less claim seen in 2099, which reads live by its TTL.
+fn adopt_old_claim(env: &TestEnv, old_id: &str, session: &str, view: Option<&str>) {
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::create_dir_all(&state).unwrap();
+    let process = match view {
+        Some(view) => {
+            let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+            let rest = stat.rsplit_once(") ").unwrap().1.to_string();
+            let start: u64 = rest.split_whitespace().nth(19).unwrap().parse().unwrap();
+            let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap();
+            format!(
+                "pid = {}\npid_start = {start}\nboot_id = \"{}\"\npid_view = \"{view}\"\n",
+                std::process::id(),
+                boot.trim()
+            )
+        }
+        None => String::new(),
+    };
+    std::fs::write(
+        state.join("old.toml"),
+        format!(
+            "[claims.\"{old_id}\"]\nowner = \"tester\"\nsession = \"{session}\"\nhost = \"host\"\n\
+             worktree = \"/old\"\nstarted = \"2099-01-01T00:00:00Z\"\n\
+             seen = \"2099-01-01T00:00:00Z\"\n{process}"
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn release_adopting_follows_the_adoption_hint_end_to_end() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+
+    let out = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    let detail = err_detail(&out);
+    let hint = format!("tasks release {new_id} \"<why>\" --adopting old");
+    assert!(detail.contains(&hint), "{detail}");
+
+    // Run what the hint prints, with a reason in place of the placeholder.
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "sandbox exited", "--adopting", "old"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let shown = adopt_json(&env, &dir, &["show", &new_id]);
+    assert!(
+        shown.to_string().contains(
+            "released session sandboxed (owner tester, unverifiable: recorded in another PID \
+             view); reason: sandbox exited"
+        ),
+        "{shown}"
+    );
+
+    assert_eq!(
+        adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+        "fresh"
+    );
+}
+
+#[test]
+fn release_adopting_refuses_own_and_live_claims_without_ordinary_remedies() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    let record = std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap();
+    let old_store = env.home.path().join("state/tasks/claims/old.toml");
+
+    for (session, kind, expected) in [
+        (
+            "me",
+            "validation",
+            "is this session's, recorded before the rename",
+        ),
+        (
+            "someone-else",
+            "claimed",
+            "was recorded before the rename. Once session someone-else ends",
+        ),
+    ] {
+        adopt_old_claim(&env, &old_id, session, None);
+        let before = std::fs::read(&old_store).unwrap();
+        let out = adopt_cmd(&env, &dir)
+            .env("TASKS_SESSION", "me")
+            .args(["release", &new_id, "x", "--adopting", "old"])
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), kind, "{session}");
+        let detail = err_detail(&out);
+        assert!(detail.contains(expected), "{detail}");
+        assert!(detail.contains("tasks rename old new --adopt"), "{detail}");
+        assert!(detail.contains("if it reads unverifiable"), "{detail}");
+        assert!(!detail.contains("it clears when"), "{detail}");
+        for remedy in ["tasks park", "tasks done", "start --force"] {
+            assert!(!detail.contains(remedy), "{remedy} in {detail}");
+        }
+        assert_eq!(std::fs::read(&old_store).unwrap(), before);
+        assert_eq!(
+            std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap(),
+            record
+        );
+    }
+}
+
+#[test]
+fn release_adopting_refusals_write_nothing() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+    let record = std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap();
+
+    let claims = env.home.path().join("state/tasks/claims");
+    let locks = |dir: &std::path::Path| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".lock"))
+            .collect();
+        names.sort();
+        names
+    };
+    let before = locks(&claims);
+    for old in ["new", "nope", "../claims/new", "Old", ""] {
+        let out = adopt_cmd(&env, &dir)
+            .env("TASKS_SESSION", "releaser")
+            .args(["release", &new_id, "x", "--adopting", old])
+            .output()
+            .unwrap();
+        assert_eq!(err_kind(&out), "validation", "--adopting {old:?}");
+        assert!(
+            err_detail(&out).contains(&format!("--adopting {old}")),
+            "{out:?}"
+        );
+    }
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap(),
+        record
+    );
+    assert_eq!(locks(&claims), before);
+
+    // After adoption completes, the old prefix is no longer adoptable here.
+    std::fs::remove_file(env.home.path().join("state/tasks/claims/old.toml")).unwrap();
+    adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"]);
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "x", "--adopting", "old"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "validation");
+}
+
+#[test]
+fn release_adopting_takes_an_own_viewless_claim_after_its_session_ended() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    // A pid with no boot and no view, as an older binary or an unproven export records it:
+    // it reads unverifiable in every view, even with its process gone.
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(
+        state.join("old.toml"),
+        format!(
+            "[claims.\"{old_id}\"]\nowner = \"tester\"\nsession = \"me\"\nhost = \"host\"\n\
+             worktree = \"/old\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
+             seen = \"2026-01-01T00:00:00Z\"\npid = {pid}\npid_start = 1\n"
+        ),
+    )
+    .unwrap();
+    let claims = adopt_json(&env, &dir, &["claims"]);
+    assert_eq!(
+        claims["claims"][0]["unverified"],
+        "PID view not established when recorded"
+    );
+
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "later")
+        .args([
+            "release",
+            &new_id,
+            "my earlier session ended",
+            "--adopting",
+            "old",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+        "fresh"
+    );
+}
+
+#[test]
+fn release_adopting_rechecks_eligibility_once_both_locks_are_held() {
+    use std::os::unix::fs::MetadataExt;
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+    let other = env.home.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    adopt_json(&env, &other, &["init", "--prefix", "other"]);
+    let old_store = env.home.path().join("state/tasks/claims/old.toml");
+    let store = std::fs::read(&old_store).unwrap();
+    let record = std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap();
+
+    // Hold `old`'s lock, as `init --force` does while it repoints the prefix. "new" sorts
+    // first, so release takes it, passes its first check, and blocks here.
+    let lock_path = env.home.path().join("state/tasks/claims/old.lock");
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    held.lock().unwrap();
+    let ino = std::fs::metadata(&lock_path).unwrap().ino();
+    let child = env
+        .raw(&dir)
+        .env("XDG_CONFIG_HOME", env.home.path().join("config"))
+        .env("XDG_STATE_HOME", env.home.path().join("state"))
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "gone", "--adopting", "old"])
+        .spawn()
+        .unwrap();
+    // /proc/locks lists a blocked flock waiter as a `->` line naming the inode.
+    let blocked = || {
+        std::fs::read_to_string("/proc/locks")
+            .unwrap()
+            .lines()
+            .any(|line| {
+                line.contains("->")
+                    && line
+                        .split_whitespace()
+                        .any(|field| field.ends_with(&format!(":{ino}")))
+            })
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !blocked() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "release never blocked on old.lock"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // Repoint `old` at another project while release waits, then let it through.
+    let registry_path = env.home.path().join("config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry["projects"]["old"] = toml::Value::String(other.display().to_string());
+    std::fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    drop(held);
+
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(err_kind(&out), "validation", "{out:?}");
+    assert!(
+        err_detail(&out).contains("still holds a tasks project"),
+        "{out:?}"
+    );
+    assert_eq!(std::fs::read(&old_store).unwrap(), store);
+    assert_eq!(
+        std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap(),
+        record
+    );
+}
+
+#[test]
+fn adopt_hints_plain_release_for_an_unverifiable_claim_in_the_new_store() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::rename(state.join("old.toml"), state.join("new.toml")).unwrap();
+    let text = std::fs::read_to_string(state.join("new.toml")).unwrap();
+    std::fs::write(state.join("new.toml"), text.replace(&old_id, &new_id)).unwrap();
+    let out = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
+    let detail = err_detail(&out);
+    assert!(
+        detail.contains(&format!("tasks release {new_id} \"<why>\"`")),
+        "{detail}"
+    );
+    assert!(!detail.contains("--adopting"), "{detail}");
+}
+
 #[test]
 fn rename_recovers_through_noncanonical_registry_roots_before_and_after_registry_write() {
     for spelling in ["symlink", "dotdot"] {

@@ -723,13 +723,17 @@ pub enum Command {
     /// Refuses a live claim and your own. Status, owner and park are untouched; the next
     /// `start` needs no --force.
     #[command(
-        after_help = "Examples:\n  tasks release sci-4f2a9c \"the sandbox exited\"\n  tasks release sci-4f2a9c \"container removed\""
+        after_help = "Examples:\n  tasks release sci-4f2a9c \"the sandbox exited\"\n  tasks release sci-4f2a9c \"container removed\"\n  tasks release new-4f2a9c \"sandbox exited\" --adopting old"
     )]
     Release {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
         /// Why the holder is known to be gone; kept verbatim in the task's note.
         why: String,
+        /// The prefix this checkout is adopting (`tasks rename <old> <new> --adopt`): release
+        /// the claim this host recorded under it before the rename.
+        #[arg(long, value_name = "OLD")]
+        adopting: Option<String>,
     },
     /// Mark a task blocked.
     Block {

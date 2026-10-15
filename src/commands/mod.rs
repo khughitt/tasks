@@ -2029,7 +2029,10 @@ fn dispatch(cli: Cli) -> Result<Output> {
             message,
             false,
         ),
-        Command::Release { id, why } => release::run(open_id_write_ctx(dir, &id)?, id, why),
+        Command::Release { id, why, adopting } => {
+            let (ctx, adopting) = release::open(dir, &id, adopting.as_deref())?;
+            release::run(ctx, adopting, id, why)
+        }
         Command::Block { id, message } => status::block(open_id_write_ctx(dir, &id)?, id, message),
         Command::Unblock { id } => status::unblock(open_id_write_ctx(dir, &id)?, id),
         Command::Shelve { id, wake } => status::shelve(open_id_write_ctx(dir, &id)?, id, wake),

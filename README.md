@@ -400,6 +400,7 @@ from a clone):
     tasks --pretty --headers list     # label each column of a pretty table
     tasks claims                     # every claim in every project's store; live = held (unverified: why it could not be judged here); what a Stop hook reads
     tasks release <id> "sandbox exited"  # drop a claim this command cannot judge, holder known gone; records why
+    tasks release new-4f2a9c "gone" --adopting old  # the same for a claim recorded before a rename this host has not adopted
     tasks shelve <id> "when the dependency lands" # keep open work out of active views
     tasks unshelve <id>             # return shelved work to idea
     tasks next --all-projects        # the same across every registered project
