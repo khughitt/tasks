@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T08:59:10Z
+updated: 2026-10-15T09:10:37Z
 started: 2026-10-15T08:25:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -16,6 +16,7 @@ tags: []
 source: tasks-860db2
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-10-15-claim-release-design.md
+plan: docs/plans/2026-10-15-claim-release.md
 ---
 
 Why: since tasks 0.3.0 (tasks-860db2, spec docs/specs/2026-10-14-claim-pid-view-design.md §3–§4) a pid claim that no command can judge reads `Unverifiable`: recorded in another PID view, recorded before views existed, or recorded with no established view. Nothing prunes it, takes it over without --force, or releases its exclusive holds. It clears only through its own view, its owner's park or done, a reboot, or `start --force`. While held it hides the task from ready/next and blocks rename, rename --adopt, retire and move. When the holder is known gone (a finished sandbox, a dead container), the only manual path is `start --force` followed by park or drop. That writes a takeover note and a resumed/parked lifecycle the task never had. A person needs a direct, recorded release.
