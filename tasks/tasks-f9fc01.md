@@ -6,9 +6,9 @@ priority: 2
 size: m
 complexity: mid
 process: planned
-owner: main
+owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T08:25:35Z
+updated: 2026-10-15T08:25:42Z
 started: 2026-10-15T08:25:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -41,4 +41,6 @@ Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f1105
 
 - 2026-10-15T08:25:23Z (main): scope: scoped; rewrote body with evidence (main 00cdbd8), lean (new release verb), spec decisions and done criteria; found move's park hint dead-ends on a foreign unverifiable claim; set todo P2 m mid planned
 - 2026-10-15T08:25:35Z (main): started
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T08:25:42Z (feat/claim-release): resumed
   provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
