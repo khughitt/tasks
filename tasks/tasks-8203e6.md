@@ -8,7 +8,7 @@ complexity: high
 process: direct
 owner: main
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-15T15:52:16Z
+updated: 2026-10-15T15:52:17Z
 started: 2026-10-15T15:51:56Z
 depends: [ops-b31634]
 parent: tasks-1f05a7
@@ -25,3 +25,4 @@ Why: no registered project sets color in tasks/.config.toml, so project colours 
 - 2026-10-15T14:43:41Z (main): ops-40f2a6: every live project now sets color in its tasks/.config.toml (user accepted the swatch sheet 2026-10-15), so pretty output already paints prefixes; what remains of this task is whether ids/titles get the colour and any precedence question — familiar is no longer the source
 - 2026-10-15T15:51:56Z (main): started
   provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T15:52:17Z (main): re-scoped: ids and titles already take the project colour in every table view (comfy-tables spec §5) and every project sets color (ops-40f2a6); the config key is the sole source, so no precedence question remains; process direct: what is left is closing and correcting the stale comfy-tables spec bullet
