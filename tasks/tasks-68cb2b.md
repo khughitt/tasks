@@ -1,10 +1,10 @@
 ---
 id: tasks-68cb2b
 title: "Paint project prefixes outside tables: show's related and lane ids, groups, where"
-status: idea
+status: todo
 priority: 2
 created: 2026-10-15T15:52:44Z
-updated: 2026-10-15T15:52:44Z
+updated: 2026-10-15T16:24:42Z
 depends: []
 parent: tasks-1f05a7
 tags: [pretty]
