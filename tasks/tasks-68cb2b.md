@@ -1,13 +1,15 @@
 ---
 id: tasks-68cb2b
 title: "Paint project prefixes outside tables: show's related and lane ids, groups, where"
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-15T15:52:44Z
-updated: 2026-10-15T16:24:45Z
+updated: 2026-10-15T16:24:53Z
+started: 2026-10-15T16:24:53Z
 depends: []
 parent: tasks-1f05a7
 tags: [pretty]
@@ -31,3 +33,5 @@ Where to look: src/show_text.rs (overview_rows, related), src/present.rs, src/ou
 ## Notes
 
 - 2026-10-15T16:24:45Z (main): scope: scoped; table precedent (row_id/title replace chrome with project colour) settles the per-surface question; body rewritten with done criteria per surface (show related/in-lane/moved ids, groups, where), claims excluded, JSON unchanged; P2 m mid direct
+- 2026-10-15T16:24:53Z (main): started
+  provenance: {"harness_session":"claude-code:fc40c151-204a-41a6-a0d1-3d155d2ff9b2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
