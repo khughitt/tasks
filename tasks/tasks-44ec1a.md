@@ -1,15 +1,16 @@
 ---
 id: tasks-44ec1a
 title: Trim trailing commas from CLI task-ID inputs
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
 owner: trim-comma
 created: 2026-10-15T17:41:58Z
-updated: 2026-10-15T17:42:10Z
+updated: 2026-10-15T17:44:20Z
 started: 2026-10-15T17:42:04Z
+completed: 2026-10-15T17:44:20Z
 depends: []
 tags: [cli]
 source: tasks-1e32d6
@@ -32,4 +33,8 @@ Verification: unit cases for comma and mixed runs; CLI cases for a full id, a ba
 - 2026-10-15T17:42:04Z (main): started
   provenance: {"harness_session":"claude-code:44479c9f-7072-4fa9-b91b-fca918212e9f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T17:42:10Z (trim-comma): resumed
+  provenance: {"harness_session":"claude-code:44479c9f-7072-4fa9-b91b-fca918212e9f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T17:44:20Z (trim-comma): done
+  provenance: {"harness_session":"claude-code:44479c9f-7072-4fa9-b91b-fca918212e9f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T17:44:20Z (trim-comma): CLI id inputs strip a trailing run of ASCII periods and commas (any mix) via TaskId::trim_input, shared by parse_input and the bare-suffix shorthand path; unit and CLI tests cover full ids, bare suffixes, flags and mixed runs, with whitespace, ';' and embedded commas still invalid_id. README and skills/tasks/SKILL.md updated.
   provenance: {"harness_session":"claude-code:44479c9f-7072-4fa9-b91b-fca918212e9f","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
