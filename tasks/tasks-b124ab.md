@@ -1,13 +1,13 @@
 ---
 id: tasks-b124ab
-title: "The project identity color set in tasks/.config.toml is not in any JSON output (projects, where, resolve), so another tool cannot paint a path in its project's color without parsing config files"
+title: "Expose project color in projects, where and resolve JSON"
 status: todo
 priority: 2
 size: s
 complexity: mid
 process: direct
 created: 2026-10-15T11:52:10Z
-updated: 2026-10-15T13:38:35Z
+updated: 2026-10-15T13:38:42Z
 depends: []
 tags: [feedback, gap, "from:hq"]
 agent: claude-code/claude-opus-5-5
