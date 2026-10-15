@@ -90,9 +90,15 @@ pub fn list(dir: Option<&Path>) -> Result<Output> {
                     "group {name:?} names {prefix:?}, which is not a registered project"
                 ))
             })?;
+            let reachable = is_reachable(root)?;
             rows.push(GroupMember {
                 prefix: prefix.clone(),
-                reachable: is_reachable(root)?,
+                reachable,
+                color: if reachable {
+                    crate::resolve::registered_color(&registry, prefix)?
+                } else {
+                    None
+                },
             });
         }
         groups.push(GroupRow {

@@ -7886,6 +7886,94 @@ fn project_colors_paint_prefixes_and_titles_and_reach_only_projects_json() {
 }
 
 #[test]
+fn project_colors_paint_show_groups_and_where_without_moving_json() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let dots = env.init("dots");
+    let plain = env.init("plain");
+    let id = |v: serde_json::Value| v["id"].as_str().unwrap().to_string();
+    let lane = id(env.json(&sci, &["add", "Lane", "--lane"]));
+    let child = id(env.json(&sci, &["add", "Child", "--parent", &lane]));
+    let dotted = id(env.json(&dots, &["add", "Dotted"]));
+    let bare = id(env.json(&plain, &["add", "Bare"]));
+    env.json(&sci, &["dep", &child, "--on", &dotted, "--on", &bare]);
+    let leaving = id(env.json(&sci, &["add", "Leaving"]));
+    let arrived = id(env.json(&sci, &["move", &leaving, "--to", "dots"]));
+    env.json(&sci, &["group", "set", "trio", "sci", "dots", "plain"]);
+    let commands: Vec<(&std::path::Path, Vec<&str>)> = vec![
+        (&sci, vec!["show", &child]),
+        (&sci, vec!["show", &lane]),
+        (&sci, vec!["show", &leaving]),
+        (&dots, vec!["show", &arrived]),
+        (&sci, vec!["groups"]),
+        (&sci, vec!["where"]),
+        (&plain, vec!["where"]),
+    ];
+    let before: Vec<_> = commands
+        .iter()
+        .map(|(dir, args)| env.json(dir, args))
+        .collect();
+
+    write_project_color(&sci, "sci", "#123456");
+    write_project_color(&dots, "dots", "#abcdef");
+    let sci_rgb = "\x1b[38;2;18;52;86m";
+    let dots_rgb = "\x1b[38;2;171;205;239m";
+    let painted = |rgb: &str, text: &str| format!("{rgb}{text}\x1b[0m");
+    // an id cell in show's related rows pads inside its style, so it is matched open-ended
+    let opens = |rgb: &str, text: &str| format!("{rgb}{text}");
+    for ((dir, args), before) in commands.iter().zip(before) {
+        let out = env
+            .cmd(dir)
+            .env("TASKS_FORMAT", "pretty")
+            .arg("--color=always")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let colored = String::from_utf8(out.stdout).unwrap();
+        assert_eq!(strip_ansi(&colored), env.pretty(dir, args), "{args:?}");
+        let expected: Vec<String> = match (args[0], args.get(1)) {
+            ("show", Some(shown)) if *shown == child => vec![
+                opens(sci_rgb, &lane),
+                painted(sci_rgb, "Lane"),
+                opens(dots_rgb, &dotted),
+                painted(dots_rgb, "Dotted"),
+                opens("\x1b[2m", &bare),
+            ],
+            ("show", Some(shown)) if *shown == lane => {
+                vec![opens(sci_rgb, &child), painted(sci_rgb, "Child")]
+            }
+            ("show", Some(shown)) if *shown == leaving => vec![painted(dots_rgb, &arrived)],
+            ("show", _) => vec![painted(sci_rgb, &leaving)],
+            ("groups", _) => vec![
+                painted(sci_rgb, "sci"),
+                painted(dots_rgb, "dots"),
+                painted("\x1b[2m", "plain"),
+            ],
+            ("where", _) if *dir == sci.as_path() => vec![painted(sci_rgb, "sci")],
+            _ => vec![painted("\x1b[2m", "plain")],
+        };
+        for piece in expected {
+            assert!(
+                colored.contains(&piece),
+                "{args:?} lacks {piece:?}: {colored:?}"
+            );
+        }
+        if args[0] == "show" && args[1] == child {
+            assert!(!colored.contains(&format!("{sci_rgb}Bare")), "{colored:?}");
+            assert!(!colored.contains(&format!("{dots_rgb}Bare")), "{colored:?}");
+        }
+        let mut json = env.json(dir, args);
+        if args[0] == "where" {
+            // where already reports the color; nothing else moves
+            let color = json["project"].as_object_mut().unwrap().remove("color");
+            assert_eq!(color.is_some(), *dir == sci.as_path(), "{json}");
+        }
+        assert_eq!(json, before, "{args:?}");
+    }
+}
+
+#[test]
 fn project_colors_reset_and_resume_on_wrapped_titles() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");

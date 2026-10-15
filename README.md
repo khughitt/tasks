@@ -816,13 +816,16 @@ color = "#123456"
 
 The value must be exactly `#RRGGBB` (either hex case); invalid values fail with a config
 error. Change the value to change the color, or remove the key to restore existing styling.
-Init/reinitialization and prefix rename preserve the setting. These commands use the same
-RGB for the project prefix in `projects` and the task title in `list --all-projects`:
+Init/reinitialization and prefix rename preserve the setting. Pretty output paints a
+project's name in that RGB wherever it prints one: the prefix in `projects`, `groups` and
+`where`, and task ids and titles in every table view (`list`, `search`, `ready`, `tree`,
+`prime`, `lanes`, `quiet`, `sample`) and in `show` and `next`, whose related rows, lane
+and move pointers take the colour of the project each id belongs to:
 
     TASKS_FORMAT=pretty tasks --color=always projects
     TASKS_FORMAT=pretty tasks --color=always list --all-projects
 
-Local `list` uses the project color too. Unassigned or unreachable projects keep their
+`claims` stays uncolored: it opens no checkout. Unassigned or unreachable projects keep their
 existing styling; status, priority, dates, tags, and metadata keep their own roles.
 Project colors obey the color controls above and never appear in stored task IDs. JSON
 carries the color, whatever the color controls say, as lowercase `"color": "#rrggbb"` on

@@ -144,6 +144,9 @@ One row per related task, with a fixed label column:
 The row reads `<label>  <id>  <status>  <title>`. Labels and ids are padded so the columns
 line up, and the title wraps under §3.6, indented to its own column. An unresolved
 dependency shows `?` for its status and `(unresolved)` for its title, as now.
+Each id and title takes the colour of the project the id belongs to, when that project
+has one (tasks-68cb2b, after the tables in the comfy-tables spec §5); an unresolved
+dependency and a project without a colour keep the chrome id and plain title.
 
 ### 3.5 Prose: description, park, and notes
 
@@ -219,7 +222,8 @@ The roles the fields get do not change in the table views (§4.2).
 `heading` is a new `Style` variant painted bold, so a later change can make headings look
 different from emphasis without touching the call sites. The title also takes the project
 color when the project has one: in `show`, `heading` carries the optional `Rgb` and paints
-it bold and colored.
+it bold and colored. The `in lane`, `moved to` and `moved from` ids take their project's
+colour in place of chrome, as related rows do (§3.4).
 
 ## 5. Theme and width wiring
 

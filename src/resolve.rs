@@ -498,6 +498,19 @@ pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Tas
     read_present(&project, id)
 }
 
+/// The colour a registered project's config sets, as leniently as
+/// `resolve_registered`: an unregistered prefix or a missing root or config is `Ok(None)`.
+pub fn registered_color(registry: &Registry, prefix: &str) -> Result<Option<crate::palette::Rgb>> {
+    let Some(root) = registry.project_root(prefix) else {
+        return Ok(None);
+    };
+    if !crate::scope::has_config(root)? {
+        return Ok(None);
+    }
+    let project = crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)?;
+    Ok(project.color)
+}
+
 /// `### Task 1: x` -> `Some("Task 1: x")`; non-headings -> None.
 pub fn heading_text(line: &str) -> Option<&str> {
     let trimmed = line.trim_start_matches('#');

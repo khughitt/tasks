@@ -185,7 +185,7 @@ fn spans(spans: &[Span]) -> Vec<(&str, Option<Style>)> {
 
 fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
     let mut rendered = present::rule("overview", painter, width.unwrap_or(MEASURE));
-    let title = present::heading(&o.task.title, o.project_color);
+    let title = present::heading(&o.task.title, color(o, &o.task.id.to_string()));
     let id = present::id(&format!("({})", o.task.id));
     rendered.push_str(&block(
         "",
@@ -211,6 +211,11 @@ fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
     rendered
 }
 
+/// The colour of the project `id` belongs to, when the view knows one.
+fn color(o: &ShowFields, id: &str) -> Option<crate::palette::Rgb> {
+    crate::output::color_of(&o.project_colors, id)
+}
+
 /// Spec §3.3: one row per field with a value, in this order. `depends` and `parent` are
 /// listed under `related` instead.
 fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
@@ -220,10 +225,12 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         ("priority", vec![present::priority(t.priority)]),
     ];
     if let Some(to) = &t.moved_to {
-        rows.push(("moved to", vec![present::id(&to.to_string())]));
+        let to = to.to_string();
+        rows.push(("moved to", vec![present::row_id(&to, color(o, &to))]));
     }
     if let Some(from) = &t.moved_from {
-        rows.push(("moved from", vec![present::id(&from.to_string())]));
+        let from = from.to_string();
+        rows.push(("moved from", vec![present::row_id(&from, color(o, &from))]));
     }
     if t.size.is_some() {
         rows.push(("size", vec![present::size(t.size)]));
@@ -235,7 +242,8 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     if t.lane {
         rows.push(("lane", vec![Span::plain("yes")]));
     } else if let Some(lane) = &o.in_lane {
-        rows.push(("in lane", vec![present::id(&lane.to_string())]));
+        let lane = lane.to_string();
+        rows.push(("in lane", vec![present::row_id(&lane, color(o, &lane))]));
     }
     if t.parallel {
         rows.push(("parallel", vec![Span::plain("yes")]));
@@ -462,13 +470,15 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
         let lead = format!(
             "{}  {}  {}  ",
             painter.paint(Style::Chrome, &format!("{label:<label_width$}")),
-            present::id(id).left(id_width).paint(painter),
+            present::row_id(id, color(o, id))
+                .left(id_width)
+                .paint(painter),
             status.left(status_width).paint(painter),
         );
         rendered.push_str(&block(
             &lead,
             lead_width,
-            &[(title, None)],
+            &[(title, present::title(title, color(o, id)).style)],
             lead_width,
             painter,
             width,
@@ -654,7 +664,7 @@ mod tests {
     fn fields() -> ShowFields {
         ShowFields {
             task: crate::format::parse_task(BARE, "x").unwrap(),
-            project_color: None,
+            project_colors: Default::default(),
             spec_path: None,
             plan_path: None,
             step_found: None,
