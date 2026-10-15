@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: mid
 process: planned
-owner: main
+owner: feat/codex-worker-rows
 created: 2026-10-15T10:02:07Z
-updated: 2026-10-15T10:35:35Z
+updated: 2026-10-15T10:35:45Z
 started: 2026-10-15T10:35:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -26,4 +26,6 @@ Done: tests over relay's shared fixture test/fixtures/registry-workers.json (ven
 - 2026-10-15T10:02:09Z (main): concerns: relay-6825f7 extension — tasks side of relay's Codex worker-row contract
 - 2026-10-15T10:02:24Z (main): correction: the concerns line above is mistaken (relay-6825f7 is still open; this piece comes from its approved spec, not from closed work falling short) — disregard it
 - 2026-10-15T10:35:35Z (main): started
+  provenance: {"harness_session":"claude-code:956af17d-221f-45e8-b1e0-bac730bba1be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T10:35:45Z (feat/codex-worker-rows): resumed
   provenance: {"harness_session":"claude-code:956af17d-221f-45e8-b1e0-bac730bba1be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
