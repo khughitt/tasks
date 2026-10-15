@@ -1,4 +1,5 @@
 prefix = "tasks"
+color = "#aa8c0e"
 
 [feedback]
 scope = "The tasks CLI and its tasks, curate, and scope skills."
