@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/pidns-refusal
 created: 2026-10-14T19:05:34Z
-updated: 2026-10-15T08:15:48Z
+updated: 2026-10-15T08:15:54Z
 started: 2026-10-15T08:15:48Z
 depends: []
 parent: tasks-2fa8c6
@@ -26,4 +26,6 @@ Change `relay::resolve::no_match` (and the shared SET_EXPLICIT suffix where it a
 - 2026-10-14T19:35:17Z (main): scope reminder from review: recommending TASKS_SESSION without a namespace-local PID corrects the advice only; it does not stop unrelated host claims being pruned from a sandbox. tasks-860db2 owns that.
 - 2026-10-15T08:05:30Z (main): tasks-860db2 landed (0.3.0): a namespace-local TASKS_SESSION_PID is no longer misjudged by the host; it records no view and stays held (Unverifiable) until reboot, release or --force. The advice to set TASKS_SESSION without TASKS_SESSION_PID still stands, now because such a claim never clears on its own. When this lands, also update docs/notes/2026-09-30-delegated-identity-brief.md lines ~153, ~351, ~372, which still describe tasks-860db2 as open
 - 2026-10-15T08:15:48Z (main): started
+  provenance: {"harness_session":"claude-code:00511062-6128-494b-aa3d-a144beb11015","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T08:15:54Z (fix/pidns-refusal): resumed
   provenance: {"harness_session":"claude-code:00511062-6128-494b-aa3d-a144beb11015","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
