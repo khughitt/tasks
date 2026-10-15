@@ -43,6 +43,7 @@ fn row(
             Some(root) => ResolveRow {
                 id: Some(registry.canonical_id(&id).to_string()),
                 alias: (live != id.prefix).then(|| id.prefix.clone()),
+                color: index.color(&live),
                 prefix: Some(live),
                 root: Some(root.display().to_string()),
                 ..row_of(input, "id", "resolved")
@@ -58,6 +59,7 @@ fn row(
         return match registry.project_root(&live) {
             Some(root) => ResolveRow {
                 alias: (live != input).then(|| input.clone()),
+                color: index.color(&live),
                 prefix: Some(live),
                 root: Some(root.display().to_string()),
                 ..row_of(input, "prefix", "resolved")
@@ -117,6 +119,7 @@ fn path_row(
             root: registry
                 .project_root(&m.prefix)
                 .map(|r| r.display().to_string()),
+            color: index.color(&m.prefix),
             prefix: Some(m.prefix),
             via: Some(m.via),
             location: Some(m.location.display().to_string()),

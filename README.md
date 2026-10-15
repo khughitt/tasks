@@ -617,7 +617,8 @@ it stays within that repository; outside git it walks up to find a project. Its 
 outcomes are:
 
 - Project found: `{"project":{"prefix":"<p>","root":"<overlay>","checkout":"<code>","linked":true},"holds_records":false,"warnings":[]}`.
-  An in-tree project has `linked: false` and `checkout: null`.
+  An in-tree project has `linked: false` and `checkout: null`. `color` is present when
+  the project sets one.
 - No project: `{"project":null,"holds_records":false,"warnings":[]}`.
 - Error: exit 1 with `{"error":{"kind":"<kind>","detail":"<detail>"}}` on stderr;
   success JSON is on stdout with exit 0.
@@ -658,6 +659,9 @@ Resolved paths include `via` and `location`. `worktree` is present for a storage
 with a following component, or a git worktree match. `relpath` is relative to
 `worktree` when present, otherwise to `location`; it is empty at that directory itself.
 `root` always names the current registered root, and inapplicable fields are omitted.
+A resolved row carries the project's `color` (`#rrggbb`) when its root is reachable and
+its config sets one; a reachable config that cannot be read adds one warning naming the
+project and leaves its rows resolved without `color`.
 
 Per-item outcomes never fail a batch. Malformed UTF-8 stdin lines become `invalid`
 rows with replacement characters in `input` and decoding details; a stdin read error
@@ -820,7 +824,12 @@ RGB for the project prefix in `projects` and the task title in `list --all-proje
 
 Local `list` uses the project color too. Unassigned or unreachable projects keep their
 existing styling; status, priority, dates, tags, and metadata keep their own roles.
-Project colors obey the color controls above and never appear in JSON or stored task IDs.
+Project colors obey the color controls above and never appear in stored task IDs. JSON
+carries the color, whatever the color controls say, as lowercase `"color": "#rrggbb"` on
+`projects` rows, on `where`'s `project`, and on `resolve`'s resolved rows, so another tool
+can paint a project without reading its config. The key is omitted when the project sets
+none or is unreachable; `resolve` also omits it, with a warning, when a config cannot be
+read, where `projects` and `where` fail with the config error.
 
 With color on, date columns fade by age: today in the terminal theme's cyan, older dates
 toward a dimmed foreground, anything two years or more away the same. Priorities take the

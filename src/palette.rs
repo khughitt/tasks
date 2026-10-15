@@ -16,6 +16,14 @@ pub struct Rgb {
     pub b: u8,
 }
 
+/// JSON carries a color as lowercase `#rrggbb`, whatever case the config used.
+impl serde::Serialize for Rgb {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let Rgb { r, g, b } = self;
+        serializer.serialize_str(&format!("#{r:02x}{g:02x}{b:02x}"))
+    }
+}
+
 impl Rgb {
     /// Exactly `#rrggbb`, either case; anything else is `None`.
     pub fn parse_hex(hex: &str) -> Option<Rgb> {

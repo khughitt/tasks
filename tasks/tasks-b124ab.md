@@ -1,15 +1,16 @@
 ---
 id: tasks-b124ab
 title: "Expose project color in projects, where and resolve JSON"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: feat/project-color-json
 created: 2026-10-15T11:52:10Z
-updated: 2026-10-15T13:38:43Z
+updated: 2026-10-15T13:49:10Z
 started: 2026-10-15T13:38:43Z
+completed: 2026-10-15T13:49:10Z
 depends: []
 tags: [feedback, gap, "from:hq"]
 agent: claude-code/claude-opus-5-5
@@ -35,4 +36,12 @@ Original report: The project identity color set in tasks/.config.toml is not in 
 
 - 2026-10-15T13:38:35Z (main): scope: scoped; P2/s/mid/direct; additive color field on projects, where and resolve rows (hex, omitted when unset/unreachable; resolve warns on a malformed config); ProjectRow.color serde(skip) came from tasks-2578c3's pretty-only scope, not a standing contract; consumer hq-760db0
 - 2026-10-15T13:38:43Z (main): started
+  provenance: {"harness_session":"claude-code:1b9e953b-6961-4526-aeb1-7094e2d10ade","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T13:38:55Z (feat/project-color-json): resumed
+  provenance: {"harness_session":"claude-code:1b9e953b-6961-4526-aeb1-7094e2d10ade","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T13:47:53Z (feat/project-color-json): review: impl round 1 — verdict: accept; findings: minor 6; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T13:49:08Z (feat/project-color-json): minor (deferred): no test pins the color on a resolve path matched via a linked checkout or git worktree, nor on where inside a linked checkout; correct by reading (index keys every location by live prefix), fixtures exist in tests/linked.rs
+- 2026-10-15T13:49:10Z (feat/project-color-json): done
+  provenance: {"harness_session":"claude-code:1b9e953b-6961-4526-aeb1-7094e2d10ade","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T13:49:10Z (feat/project-color-json): projects rows, where's project and resolved resolve rows carry the project color as lowercase #rrggbb (omitted when unset/unreachable; resolve warns on an unreadable config); resolve reuses the checkout scan so each config is read once; README, specs and skill updated; check and test-fast green
   provenance: {"harness_session":"claude-code:1b9e953b-6961-4526-aeb1-7094e2d10ade","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

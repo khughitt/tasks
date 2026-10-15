@@ -126,6 +126,8 @@ pub struct WhereProject {
     pub root: String,
     pub checkout: Option<String>,
     pub linked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<crate::palette::Rgb>,
 }
 
 #[derive(Serialize)]
@@ -148,6 +150,9 @@ pub struct ResolveRow {
     pub alias: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+    /// The resolved project's identity color, when its config sets one and was read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<crate::palette::Rgb>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub via: Option<crate::locations::Via>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,7 +170,8 @@ pub struct ResolveRow {
 #[derive(Serialize)]
 pub struct ProjectRow {
     pub prefix: String,
-    #[serde(skip)]
+    /// The project's identity color. Absent when it sets none or was not read.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<crate::palette::Rgb>,
     pub root: String,
     pub reachable: bool,

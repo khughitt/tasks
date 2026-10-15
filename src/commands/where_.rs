@@ -61,5 +61,6 @@ fn shown(project: Project, linked: bool) -> WhereProject {
             .then(|| project.checkout.map(|c| c.display().to_string()))
             .flatten(),
         linked,
+        color: project.color,
     }
 }
