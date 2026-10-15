@@ -23074,6 +23074,172 @@ fn a_claim_held_by_proof_moves_with_its_holder() {
 }
 
 #[test]
+fn writes_missing_worktree_task_offer_retry_for_own_claim_or_park() {
+    for parked in [false, true] {
+        let mut env = TestEnv::new();
+        let (main, side, _) = repo_with_worktree(&mut env);
+        let id = id_of(env.json(&side, &["add", "Only there"]));
+        as_agent(&env, &side, "agent-a")
+            .args(["start", &id])
+            .assert()
+            .success();
+        if parked {
+            as_agent(&env, &side, "agent-a")
+                .args(["park", &id, "continue here"])
+                .assert()
+                .success();
+        }
+        let path = side.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&path).unwrap();
+        let store = std::fs::read(env.claim_store("sci")).unwrap();
+        let mut retries = Vec::new();
+        for args in [
+            vec!["note", &id, "it's still here"],
+            vec!["edit", &id, "--title", "Changed there"],
+            vec!["edit", &id],
+        ] {
+            let out = as_agent(&env, &main, "agent-a")
+                .env("EDITOR", "touch editor-opened")
+                .args(&args)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(1), "{out:?}");
+            let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+            assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
+            let detail = error["error"]["detail"].as_str().unwrap();
+            assert!(detail.contains("Run it there:"), "{detail}");
+            let retry = retry_words(detail);
+            assert_eq!(retry[0], "-C");
+            assert_eq!(retry[1], side.to_str().unwrap());
+            assert_eq!(retry[2..], args);
+            retries.push(retry);
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+            assert!(!main.join(format!("tasks/{id}.md")).exists());
+            assert!(!main.join("editor-opened").exists());
+        }
+        for retry in retries {
+            as_agent(&env, &main, "agent-a")
+                .env("EDITOR", "true")
+                .args(retry)
+                .assert()
+                .success();
+        }
+        let shown = env.json(&side, &["show", &id]);
+        assert_eq!(shown["task"]["title"], "Changed there");
+        assert!(
+            shown["task"]["notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|note| { note["text"] == "it's still here" })
+        );
+    }
+}
+
+#[test]
+fn writes_missing_worktree_task_do_not_retry_in_occupied_checkout() {
+    for occupied in ["claim", "park", "other task"] {
+        let mut env = TestEnv::new();
+        let (main, side, _) = repo_with_worktree(&mut env);
+        let id = id_of(env.json(&side, &["add", "Only there"]));
+        let owner = if occupied == "other task" {
+            "agent-b"
+        } else {
+            "agent-a"
+        };
+        as_agent(&env, &side, owner)
+            .args(["start", &id])
+            .assert()
+            .success();
+        if occupied != "claim" {
+            as_agent(&env, &side, owner)
+                .args(["park", &id, "continue here"])
+                .assert()
+                .success();
+        }
+        let held = if occupied == "other task" {
+            let other = id_of(env.json(&side, &["add", "Other work"]));
+            as_agent(&env, &side, "agent-a")
+                .args(["start", &other])
+                .assert()
+                .success();
+            other
+        } else {
+            id.clone()
+        };
+        let path = side.join(format!("tasks/{id}.md"));
+        let before = std::fs::read(&path).unwrap();
+        let store = std::fs::read(env.claim_store("sci")).unwrap();
+        for args in [
+            vec!["note", &id, "foreign note"],
+            vec!["edit", &id, "--title", "New"],
+            vec!["edit", &id],
+        ] {
+            let out = as_agent(&env, &main, "agent-b")
+                .args(args)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(1), "{out:?}");
+            let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+            assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
+            let detail = error["error"]["detail"].as_str().unwrap();
+            assert!(detail.contains(side.to_str().unwrap()), "{detail}");
+            assert!(
+                detail.contains(&held) && detail.contains("agent-a"),
+                "{detail}"
+            );
+            assert!(detail.contains("merge"), "{detail}");
+            assert!(!detail.contains("tasks -C"), "{detail}");
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+            assert!(!main.join(format!("tasks/{id}.md")).exists());
+        }
+    }
+}
+
+#[test]
+fn writes_missing_worktree_task_name_unavailable_recorded_checkout() {
+    for removed in [false, true] {
+        let mut env = TestEnv::new();
+        let (main, side, _) = repo_with_worktree(&mut env);
+        let id = id_of(env.json(&side, &["add", "Only there"]));
+        as_agent(&env, &side, "agent-a")
+            .args(["start", &id])
+            .assert()
+            .success();
+        if removed {
+            git(
+                &main,
+                &["worktree", "remove", "--force", side.to_str().unwrap()],
+            );
+        } else {
+            std::fs::remove_file(side.join(format!("tasks/{id}.md"))).unwrap();
+        }
+        let store = std::fs::read(env.claim_store("sci")).unwrap();
+        for args in [
+            vec!["note", &id, "lost note"],
+            vec!["edit", &id, "--title", "New"],
+            vec!["edit", &id],
+        ] {
+            let error = error_of(&env, &main, &args);
+            assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
+            let detail = error["error"]["detail"].as_str().unwrap();
+            assert!(
+                detail.contains(&format!(
+                    "claimed in {}, which is unavailable",
+                    side.display()
+                )),
+                "{detail}"
+            );
+            assert!(!detail.contains("tasks -C"), "{detail}");
+            assert_eq!(std::fs::read(env.claim_store("sci")).unwrap(), store);
+            assert!(!main.join(format!("tasks/{id}.md")).exists());
+        }
+    }
+}
+
+#[test]
 fn show_reads_a_worktree_only_task_from_the_checkout_its_claim_or_park_names() {
     let mut env = TestEnv::new();
     let (main, side, _) = repo_with_worktree(&mut env);

@@ -299,9 +299,7 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
 
 fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
-    let (original, original_raw) = ctx.project.read_task_with_raw(&id)?;
-    super::refuse_stale_copy(&mut ctx, &original, &original_raw, super::Writer::Command)?;
-    super::guard_write(&ctx.registry, &ctx.shorthand, &original)?;
+    let (original, original_raw) = super::load_with_raw(&mut ctx, &id)?;
     let editor = std::env::var("EDITOR")
         .ok()
         .filter(|editor| !editor.is_empty())

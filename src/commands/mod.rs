@@ -1097,15 +1097,49 @@ pub fn create(project: &Project, registry: &Registry, task: &mut Task) -> Result
 }
 
 /// Reads `id` for a write and refuses when another checkout's copy must not be left behind
-/// (record-home spec §3.1). Every write command loads through here, under the mutation lock
+/// (record-home spec §3.1). Every write command loads through this or `load_with_raw`, under the mutation lock
 /// and before it reads any other input, so a refusal consumes nothing and creates nothing.
 pub fn load(ctx: &mut Ctx, id: &str) -> Result<Task> {
-    let (task, raw) =
-        ctx.project
-            .read_task_with_raw(&parse_id(&ctx.registry, &ctx.shorthand, id)?)?;
+    let id = parse_id(&ctx.registry, &ctx.shorthand, id)?;
+    load_with_raw(ctx, &id).map(|(task, _)| task)
+}
+
+/// The editor also needs the original bytes for its unlocked editing window.
+fn load_with_raw(ctx: &mut Ctx, id: &TaskId) -> Result<(Task, String)> {
+    let (task, raw) = match ctx.project.read_task_with_raw(id) {
+        Ok(found) => found,
+        Err(Error::TaskNotFound(_)) => return Err(missing_record(ctx, id)?),
+        Err(error) => return Err(error),
+    };
     refuse_stale_copy(ctx, &task, &raw, Writer::Command)?;
     guard_write(&ctx.registry, &ctx.shorthand, &task)?;
-    Ok(task)
+    Ok((task, raw))
+}
+
+/// A missing local record names its recorded checkout, but never routes a write there.
+fn missing_record(ctx: &mut Ctx, id: &TaskId) -> Result<Error> {
+    let snapshot =
+        crate::claims::ClaimSnapshot::load(std::iter::once(ctx.project.prefix.as_str()))?;
+    let (worktree, _, _, _) = show::recorded_elsewhere(id, &snapshot)?;
+    let root = Path::new(worktree);
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let (work, unknown) = match occupants(ctx, root, None) {
+        Ok(Occupants { work, unknown }) => (work, unknown),
+        Err(error) => (Vec::new(), Some(error)),
+    };
+    let remedy = if work.is_empty() {
+        crate::stale::Remedy::Rerun(&args)
+    } else {
+        crate::stale::Remedy::Occupied(work)
+    };
+    let next = crate::stale::remedy(id, root, remedy, unknown.as_ref());
+    Ok(Error::TaskNotFoundNext {
+        id: id.to_string(),
+        next: format!("exists only in {worktree}; nothing was written. {next}"),
+    })
 }
 
 /// The guard every record write passes before it mutates (task-move spec §3.4).

@@ -244,6 +244,8 @@ When no claim or park names a checkout, or the one named is gone, belongs to ano
 or lacks the record, the result is `task_not_found` as today. When a checkout was named, the
 detail names it and says it was unavailable.
 
+Writes whose local record is missing keep `task_not_found` and use the same lookup to name the recorded checkout (including when unavailable), with §3.2 rule 1's occupied-checkout remedy or otherwise rule 4's retry; they never route the write there automatically.
+
 A record present locally is always read locally (park §5.3), even when another checkout's
 copy is newer. Reading does not risk divergence, and the next write from here will refuse
 under §3.

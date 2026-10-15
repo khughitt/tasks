@@ -38,7 +38,10 @@ pub(super) fn read_record(
     let found = match ctx.project.read_task(id) {
         Ok(task) => (None, task, ctx.project.scan()?),
         Err(Error::TaskNotFound(_)) => {
-            let (project, task, all) = recorded_elsewhere(id, claims, &mut ctx.warnings)?;
+            let (worktree, project, task, all) = recorded_elsewhere(id, claims)?;
+            ctx.warnings.push(format!(
+                "{id} exists only in {worktree}; shown from that checkout"
+            ));
             (Some(project), task, all)
         }
         Err(error) => return Err(error),
@@ -52,11 +55,10 @@ pub(super) fn read_record(
 
 /// Record-home spec §6.1: a record this checkout lacks is read from the checkout named by
 /// its live claim, or else by its park. A record present here is always read here.
-fn recorded_elsewhere(
+pub(super) fn recorded_elsewhere<'a>(
     id: &crate::model::TaskId,
-    claims: &crate::claims::ClaimSnapshot,
-    warnings: &mut Vec<String>,
-) -> Result<(Project, Task, Vec<Task>)> {
+    claims: &'a crate::claims::ClaimSnapshot,
+) -> Result<(&'a str, Project, Task, Vec<Task>)> {
     let named = claims
         .held(id)
         .map(|claim| ("claimed", claim.worktree.as_str()))
@@ -74,12 +76,7 @@ fn recorded_elsewhere(
         ))
     };
     match super::parked::open_recorded(id, Path::new(worktree)) {
-        Ok(Some(found)) => {
-            warnings.push(format!(
-                "{id} exists only in {worktree}; shown from that checkout"
-            ));
-            Ok(found)
-        }
+        Ok(Some((project, task, all))) => Ok((worktree, project, task, all)),
         Ok(None) => Err(unavailable(String::new())),
         Err(error) => Err(unavailable(format!(": {error}"))),
     }

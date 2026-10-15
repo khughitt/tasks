@@ -107,6 +107,7 @@ mean those documents were verified.
    named as working there. There is no override. A write by the claim's holder moves the
    claim to the checkout it lands in, and `show` finds a task that exists only in the
    checkout its claim or park names.
+   A write missing that local record keeps `task_not_found`, names the recorded checkout (or says it is unavailable), and offers a `tasks -C` retry only when no other session's claim or park occupies it; no write is routed automatically.
    `ready` and `next` omit live claims and explain each omission in warnings,
    and `ready` omits tasks parked waiting on the user.
    An open task tagged `halt` in the registered checkout stops new lower-priority starts

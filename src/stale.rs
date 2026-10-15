@@ -128,6 +128,18 @@ pub fn refusal(
             .collect();
         format!(" (also newer in: {})", others.join(", "))
     };
+    let next = self::remedy(id, &newer.root, remedy, unknown);
+    format!("{head}{also}; nothing was written. {next}")
+}
+
+/// Recovery shared by stale copies and records found only in a recorded checkout (§3.2).
+pub fn remedy(
+    id: &TaskId,
+    root: &Path,
+    remedy: Remedy,
+    unknown: Option<&crate::error::Error>,
+) -> String {
+    let display = root.display();
     let next = match remedy {
         Remedy::Occupied(work) => {
             let work: Vec<String> = work
@@ -135,7 +147,7 @@ pub fn refusal(
                 .map(|(task, session)| format!("{task} (session {session})"))
                 .collect();
             format!(
-                "{root} is where another session works: {}. Wait for that branch to merge, \
+                "{display} is where another session works: {}. Wait for that branch to merge, \
                  or merge its copy of tasks/{id}.md into this checkout, then rerun here",
                 work.join(", ")
             )
@@ -144,24 +156,24 @@ pub fn refusal(
             format!("Merge that copy of tasks/{id}.md into this checkout, then rerun here")
         }
         Remedy::Handoff(args) => format!(
-            "Commit tasks/{id}.md in {root} if it has changes, merge it into this branch, then \
+            "Commit tasks/{id}.md in {display} if it has changes, merge it into this branch, then \
              rerun here; the merge may conflict where both copies changed. Or, to write in \
              the main checkout instead: {}{}",
-            rerun_line(&newer.root, args),
+            rerun_line(root, args),
             stdin_hint(args)
         ),
         Remedy::Rerun(args) => format!(
             "Run it there: {}{}",
-            rerun_line(&newer.root, args),
+            rerun_line(root, args),
             stdin_hint(args)
         ),
         Remedy::New => "Rerun with --new to file a separate entry".to_string(),
     };
     let unknown = match unknown {
-        Some(error) => format!(" (whether another session works there is unknown: {error})"),
+        Some(error) => format!("(whether another session works there is unknown: {error}) "),
         None => String::new(),
     };
-    format!("{head}{also}; nothing was written.{unknown} {next}")
+    format!("{unknown}{next}")
 }
 
 /// `-` is how every command here names stdin, which a printed line cannot carry.
