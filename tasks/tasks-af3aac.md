@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/codex-worker-rows
 created: 2026-10-15T10:02:07Z
-updated: 2026-10-15T11:35:35Z
+updated: 2026-10-15T11:36:21Z
 started: 2026-10-15T10:35:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -42,3 +42,4 @@ Done: tests over relay's shared fixture test/fixtures/registry-workers.json (ven
 - 2026-10-15T11:35:33Z (feat/codex-worker-rows): resumed
   provenance: {"harness_session":"claude-code:956af17d-221f-45e8-b1e0-bac730bba1be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T11:35:35Z (feat/codex-worker-rows): review: plan round 1 — verdict: revise; findings: P2 1; reviewer: unverified (pasted by user)
+- 2026-10-15T11:36:21Z (feat/codex-worker-rows): Plan round 1 fix: CODEX_SESSION_ID equal to the worker id (no thread) added to the unit test and CLI control, with a hint-for-thread mutation check in Task 2 Step 7. Keith approved the plan after this fix (2026-10-15); execution method: Native (executing-plans inline, then one fresh whole-branch reviewer).
