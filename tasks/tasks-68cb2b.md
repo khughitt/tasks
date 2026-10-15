@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-15T15:52:44Z
-updated: 2026-10-15T16:24:44Z
+updated: 2026-10-15T16:24:45Z
 depends: []
 parent: tasks-1f05a7
 tags: [pretty]
@@ -27,3 +27,7 @@ Done when, in pretty output with colour on:
 - Docs: show-layout spec §3.4 (docs/specs/2026-10-03-show-layout-design.md) and comfy-tables §5 name the new painting; README's colour section if it lists painted views; skills/tasks/SKILL.md's project-colour paragraph.
 
 Where to look: src/show_text.rs (overview_rows, related), src/present.rs, src/output.rs (Where and Groups render arms near the Projects arm, which already paints), src/commands/group.rs list, src/commands/show.rs describe, src/locations.rs scan_checkouts for how other commands collect colours.
+
+## Notes
+
+- 2026-10-15T16:24:45Z (main): scope: scoped; table precedent (row_id/title replace chrome with project colour) settles the per-surface question; body rewritten with done criteria per surface (show related/in-lane/moved ids, groups, where), claims excluded, JSON unchanged; P2 m mid direct
