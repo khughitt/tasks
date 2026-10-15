@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T10:05:49Z
+updated: 2026-10-15T10:12:41Z
 started: 2026-10-15T08:25:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -68,3 +68,4 @@ Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f1105
 - 2026-10-15T09:32:51Z (feat/claim-release): baseline: just test-fast passed on feat/claim-release at 94901f9 before Task 1
 - 2026-10-15T09:57:21Z (feat/claim-release): tasks 1-3 done (be273cd, a32ddf8, 440cfdf); fast suite 1470/1470; just check clean; ops cli.toml rows 8618bc9 + 30b4448 landed on ops main (user-approved) and adopted; final whole-branch review dispatched to a fresh read-only reviewer (claude-code/opus)
 - 2026-10-15T10:05:49Z (feat/claim-release): review: impl round 1 — verdict: accept; findings: Minor 9; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T10:12:41Z (feat/claim-release): review: impl round 2 — verdict: revise; findings: Important 1, Minor 4; reviewer: claude-code/claude-opus-5-5
