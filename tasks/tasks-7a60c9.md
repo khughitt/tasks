@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-15T15:05:35Z
-updated: 2026-10-15T18:27:26Z
+updated: 2026-10-15T18:27:27Z
 depends: []
 tags: [feedback, gap, "from:crew"]
 agent: claude-code/claude-opus-5-5
@@ -31,3 +31,4 @@ Source: crew feedback. Original ask: "Wanted: a flag (e.g. --no-fetch) on show a
 ## Notes
 
 - 2026-10-15T18:16:19Z (main): scope: scoped; body rewritten with mechanism (Resolver no-fetch mode, UnavailableCause::FetchDisabled), step_found omitted for open and closed tasks, doc fails doc_not_found, sentinel-provider test; next kept out of scope; checked against main 52346fc
+- 2026-10-15T18:27:27Z (main): scope: next --no-fetch added at user request; flag is a parameter of show::describe, test covers next; size and complexity unchanged
