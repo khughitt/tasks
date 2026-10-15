@@ -206,7 +206,10 @@ fn write_note(
         .project
         .read_task_with_raw(id)
         .map_err(|error| match error {
-            Error::TaskNotFound(_) => error.with_suffix(&elsewhere(ctx, id, claim)),
+            Error::TaskNotFound(_) => Error::TaskNotFoundNext {
+                id: id.to_string(),
+                next: elsewhere(ctx, id, claim),
+            },
             other => other,
         })?;
     super::refuse_stale_copy(ctx, &task, &raw, Writer::Release(&claim.session))?;
@@ -239,12 +242,13 @@ fn elsewhere(ctx: &Ctx, id: &TaskId, claim: &Claim) -> String {
     let worktree = Path::new(&claim.worktree);
     if worktree != ctx.project.root && worktree.join(format!("tasks/{id}.md")).is_file() {
         format!(
-            "; the claim stays. Its record is in {0}: rerun this release there with \
-             `tasks -C {0} release {id} \"<why>\"`",
-            claim.worktree
+            "the claim stays. Its record is in {}: rerun this release there with \
+             `tasks -C {} release {id} \"<why>\"`",
+            claim.worktree,
+            crate::stale::quote(&claim.worktree)
         )
     } else {
-        "; the claim stays".to_string()
+        "the claim stays".to_string()
     }
 }
 

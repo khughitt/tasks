@@ -29179,34 +29179,67 @@ fn release_is_named_by_ready_next_retire_and_rename_for_an_unverifiable_claim_on
 fn release_of_a_record_only_in_the_holders_worktree_names_the_rerun_there() {
     // Final review, Minor 6 re-graded Important: the hints rename, retire and ready print
     // must not dead-end in a bare task_not_found when the record lives in the gone
-    // holder's worktree.
+    // holder's worktree. Re-review: "not found" comes first, and the printed command,
+    // pasted into a shell from the main checkout, works for a path with a space.
     let mut env = TestEnv::new();
-    let (main, side, _) = repo_with_worktree(&mut env);
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("side wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
     let id = id_of(env.json(&side, &["add", "Side only", "-p", "2"]));
     as_agent(&env, &side, "gone")
         .args(["start", &id])
         .assert()
         .success();
     set_pid_view(&env, "sci", &id, "0:1");
-    let worktree = stored_claim(&env, "sci", &id)["worktree"]
-        .as_str()
-        .unwrap()
-        .to_string();
 
     let error = error_of(&env, &main, &["release", &id, "sandbox exited"]);
     assert_eq!(error["error"]["kind"], "task_not_found", "{error}");
     let detail = error["error"]["detail"].as_str().unwrap();
-    assert!(detail.contains("the claim stays"), "{detail}");
     assert!(
-        detail.contains(&format!("tasks -C {worktree} release")),
+        detail.starts_with(&format!("task {id} not found; the claim stays. ")),
         "{detail}"
     );
     assert!(stored_claim(&env, "sci", &id).get("session").is_some());
 
-    // The rerun it names releases.
-    as_agent(&env, &side, "releaser")
-        .args(["release", &id, "sandbox exited"])
-        .assert()
-        .success();
+    // The printed command, split as a POSIX shell splits it and run from main, releases.
+    let at = detail.find("`tasks -C ").expect("a rerun") + 1;
+    let line = &detail[at..at + detail[at..].find('`').unwrap()];
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "for word in {}; do printf '%s\\0' \"$word\"; done",
+            line.strip_prefix("tasks ").unwrap()
+        ))
+        .output()
+        .unwrap();
+    let words: Vec<String> = String::from_utf8(out.stdout)
+        .unwrap()
+        .split_terminator('\0')
+        .map(|word| match word {
+            "<why>" => "sandbox exited".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    assert_eq!(words[1], side.to_str().unwrap(), "{words:?}");
+    let out = env
+        .cmd(&main)
+        .env("TASKS_SESSION", "releaser")
+        .args(&words)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{words:?}: {out:?}");
     assert!(env.json(&side, &["show", &id])["claim"].is_null());
 }
