@@ -6,7 +6,7 @@ also approved; execution resumed at the user's request. Implementation is on
 main, after native/real relay acceptance and final independent review; the tracker
 was rebuilt and reinstalled from main on this host.
 
-Amended 2026-10-15 (tasks-af3aac, draft for review): §4 accepts relay's Codex worker
+Amended 2026-10-15 (tasks-af3aac, approved by Keith after spec review round 1): §4 accepts relay's Codex worker
 rows and selects among rows sharing one process by the thread hint. See
 [Relay worker rows](#relay-worker-rows-2026-10-15-amendment).
 
@@ -260,6 +260,22 @@ selects the root row, which is §1's known session-only limit, now reached throu
 relay as well. Proof-only continuation is unchanged. It never reads the registry,
 and it still requires a matching thread.
 
+**A worker row needs its own thread.** Process evidence cannot tell a worker from
+its controller or siblings, because they share the handle. A row with
+`scope: "worker"` is therefore accepted only when a valid, present `CODEX_THREAD_ID`
+equals its `sessionId`. This applies whether it is the sole qualifying row or was
+selected above. A session-only export or absent exports refuse it. The case is
+real: relay creates a worker's row even when its root row is absent (relay spec,
+Row lifecycle), so a single worker row can qualify alone. Without this rule, a
+command with no Codex exports would resolve that worker's id. `ownership()` would
+then grant exact-identity ownership before process proof is consulted, and the
+command could acquire, park or close work as that worker. This is the same thread
+requirement §4 already places on proof-only continuation. The refusal says the only
+qualifying row is a Codex worker row and that only that worker's `CODEX_THREAD_ID`
+selects it, without naming the row's session. It carries the usual
+`TASKS_SESSION` recovery. A sole root row with absent exports is still accepted as
+before; §1's known limit covers that case.
+
 **Diagnostics.** When qualifying rows exist but none carries the hint, and one of
 them is the root named by a valid `CODEX_SESSION_ID`, the refusal says relay has no
 row for this worker thread. Either the relay writing the registry predates worker
@@ -390,7 +406,12 @@ door, including negative assertions that no claim or record was mutated on refus
    selects `codex:R`, `W1` selects `codex:W1`, and the nested `W2` selects
    `codex:W2`, each with the shared handle and root `codex:R`. An unregistered
    thread under root `R` gets the worker-row refusal. No hint gets the
-   several-agents refusal. The validator accepts the fixture and refuses a worker
+   several-agents refusal. A registry holding only a worker row on the caller's
+   process refuses selection when Codex exports are absent and when only
+   `CODEX_SESSION_ID` is present. A CLI control with relay enabled and no Codex
+   exports asserts that `start` of a free task refuses, and that `park` and `done`
+   of a task claimed by that worker refuse. In each case the claim store and the
+   task record are byte-for-byte unchanged. The validator accepts the fixture and refuses a worker
    scope on Claude Code or OpenCode, a worker row without `root`, `root` on a
    session row, and a `root` that is not `codex:<nonempty>` or equals its own `id`.
 5. Foreign-live-claim refusal for closure, park, protected edits, and hold ownership;
