@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/codex-worker-rows
 created: 2026-10-15T10:02:07Z
-updated: 2026-10-15T10:55:33Z
+updated: 2026-10-15T10:55:47Z
 started: 2026-10-15T10:35:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -37,3 +37,5 @@ Done: tests over relay's shared fixture test/fixtures/registry-workers.json (ven
   provenance: {"harness_session":"claude-code:956af17d-221f-45e8-b1e0-bac730bba1be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T10:49:50Z (feat/codex-worker-rows): review: spec round 1 — verdict: revise; findings: P2 1; reviewer: unverified (pasted by user)
 - 2026-10-15T10:50:23Z (feat/codex-worker-rows): Spec round 1 fix: a scope-worker row is accepted only with a matching CODEX_THREAD_ID, sole or tie-broken; CLI control asserts start/park/done refuse without mutation. Keith approved the spec after this fix (2026-10-15).
+- 2026-10-15T10:55:47Z (feat/codex-worker-rows): parked (waiting on user, review): User: review .worktrees/codex-worker-rows/docs/plans/2026-10-15-codex-worker-rows.md and pick an execution method (subagent-driven or native). Agent then records the plan review round and executes Task 1 (tasks-52b9c6) and Task 2 (tasks-2832df) in this worktree.
+  provenance: {"harness_session":"claude-code:956af17d-221f-45e8-b1e0-bac730bba1be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
