@@ -97,6 +97,19 @@ command's view:
 | foreign, `Unverifiable` | released |
 | foreign, `Stale` | released (any write would prune it; releasing it records why) |
 
+The `park`, `done` and `start --force` remedies in those two rows act on the routed id's
+store. Under `--adopting` that is the new prefix's store, so they cannot clear the old
+claim being refused, and following them would change the lifecycle or add a second
+claim while adoption stays blocked. Under `--adopting`, those two rows therefore read:
+
+| Claim in `<old>`'s store | Result |
+|---|---|
+| this session's | `validation`: "the claim on `<old>-<hex>` is this session's, recorded before the rename; it clears when this session ends, and `tasks rename <old> <new> --adopt` then proceeds" |
+| foreign, `Live` | `claimed`, with `describe_claim` and "the claim on `<old>-<hex>` was recorded before the rename; it clears when session `<s>` ends, and `tasks rename <old> <new> --adopt` then proceeds" |
+
+Neither names `park`, `done` or `start --force`. Once the holder ends, a judgement in its
+view reads `Stale`, and adoption passes a stale claim as it does today.
+
 An unresolved identity of this session counts as foreign. Release asserts nothing about
 this session. Releasing a `Live` claim is never offered: the person's knowledge that the
 holder is gone is evidence only where the tool has none.
@@ -198,6 +211,9 @@ a pid and no `pid_view` reads `Unverifiable` in every view.
   and put an unverifiable claim on `<old>-<hex>` in `<old>`'s store. `rename --adopt`
   refuses with the adoption hint. Running the command that hint prints succeeds and
   notes `<new>-<hex>`. Rerunning `rename --adopt` then completes.
+- `--adopting` with an own claim and with a live foreign claim in the old store: each
+  refusal carries the adoption text and names none of `tasks park`, `tasks done` or
+  `start --force`. Nothing is written in either store or the record.
 - `--adopting` refusals: a prefix adoption would not accept (unregistered, already
   adopted, the checkout's own prefix) is `validation` with nothing written.
 - Hints: `rename`, `retire`, `move` and `ready` name `tasks release` for an unverifiable
