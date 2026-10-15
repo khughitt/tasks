@@ -252,7 +252,8 @@ same RGB (local `list` too). Unassigned or unreachable projects keep existing st
 other columns keep their roles. Existing `--color`, `TASKS_COLOR`, `NO_COLOR`, and auto
 controls apply; stored IDs are unchanged. JSON carries the color as lowercase
 `color: "#rrggbb"` on `projects` rows, `where`'s `project`, and resolved `resolve` rows
-(omitted when unset or unreadable): read it there, never from config files.
+(omitted when unset or unreachable, and by `resolve` with a warning when a config cannot
+be read): read it there, never from config files.
 
 `--source <ref>` records where a task came from (a URL, a message id, a note); tasks never interprets it.
 `tasks list --source <ref>` finds everything filed from one reference, matched exactly.

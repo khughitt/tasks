@@ -7788,7 +7788,7 @@ fn write_project_color(dir: &std::path::Path, prefix: &str, color: &str) {
 }
 
 #[test]
-fn project_colors_paint_prefixes_and_titles_without_changing_json_or_layout() {
+fn project_colors_paint_prefixes_and_titles_and_reach_only_projects_json() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let dots = env.init("dots");
@@ -7993,6 +7993,21 @@ fn where_and_resolve_report_the_project_color() {
         "{out}"
     );
     assert_eq!(out["warnings"], serde_json::json!([]));
+}
+
+#[test]
+fn resolve_reports_the_live_projects_color_for_a_retired_prefix() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Science"]));
+    write_project_color(&sci, "sci", "#123456");
+    env.json(&sci, &["rename", "sci", "science"]);
+
+    let out = env.json(&sci, &["resolve", &id, "sci"]);
+    for row in out["results"].as_array().unwrap() {
+        assert_eq!(row["alias"], "sci", "{row}");
+        assert_eq!(row["color"], "#123456", "{row}");
+    }
 }
 
 #[test]

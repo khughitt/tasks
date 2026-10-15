@@ -825,9 +825,11 @@ RGB for the project prefix in `projects` and the task title in `list --all-proje
 Local `list` uses the project color too. Unassigned or unreachable projects keep their
 existing styling; status, priority, dates, tags, and metadata keep their own roles.
 Project colors obey the color controls above and never appear in stored task IDs. JSON
-carries the color as lowercase `"color": "#rrggbb"` on `projects` rows, on `where`'s
-`project`, and on `resolve`'s resolved rows, so another tool can paint a project without
-reading its config; the key is omitted when the project sets none or cannot be read.
+carries the color, whatever the color controls say, as lowercase `"color": "#rrggbb"` on
+`projects` rows, on `where`'s `project`, and on `resolve`'s resolved rows, so another tool
+can paint a project without reading its config. The key is omitted when the project sets
+none or is unreachable; `resolve` also omits it, with a warning, when a config cannot be
+read, where `projects` and `where` fail with the config error.
 
 With color on, date columns fade by age: today in the terminal theme's cyan, older dates
 toward a dimmed foreground, anything two years or more away the same. Priorities take the
