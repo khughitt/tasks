@@ -56,6 +56,28 @@ condition. It is the one thing the record keeps that the tool cannot know. The i
 routes by prefix as `note` does, so a claim in another registered project is released
 from anywhere.
 
+    tasks release <new-id> "<why>" --adopting <old>
+
+The adoption form exists because of one case. Another host renamed the project, the
+renamed checkout has synced here, and this host has not yet run `tasks rename <old>
+<new> --adopt`. The record is now `<new>-<hex>`, but this host's claim for it still
+sits in `<old>`'s store under `<old>-<hex>`. Adoption refuses while that claim is held,
+and ordinary routing cannot connect the two: `<old>`'s registered root now holds a
+project with another prefix, or no project at all. With `--adopting <old>`, the id
+routes as usual to the renamed record in this checkout, and the claim is looked up in
+`<old>`'s store under `<old>-<hex>`. The note lands on the renamed record, the store
+saved is `<old>`'s, and the rest of the command is unchanged.
+
+`--adopting <old>` is accepted only when adoption itself would accept `<old>` for this
+checkout: `rename::adopt::classify_registry(registry, project, old, project.prefix)`
+returns `Fresh`, the stage in which adoption checks the old store's claims. Anything
+else is `validation`, naming that check, with nothing written. The flag names the
+predecessor explicitly. Release never searches the registry for one, because adoption's
+check also matches any registered project whose root has vanished, which could reach an
+unrelated store. The command takes both prefixes' mutation locks in sorted order before
+it loads the record, as `rename --adopt` does, and the record load reuses the lock it
+already holds.
+
 Rejected:
 - **`park --force`.** Park records a next step and a park under the releaser: the same
   false lifecycle this task removes.
@@ -64,7 +86,7 @@ Rejected:
 
 ### 2. What it releases, and what it refuses
 
-Under the claim store's mutation lock, the command judges the task's claim from this
+Under the claim store's mutation lock (both locks under `--adopting`), the command judges the task's claim from this
 command's view:
 
 | Claim | Result |
@@ -107,14 +129,19 @@ claim removed and the store saved.
 
 If the store save fails after the note landed, the command fails with the store's error
 and the suffix "the note on `<id>` landed but its claim was not removed; rerun
-`tasks release <id> "<why>"`". The kind stays the store's (`io`), so `park`'s
+`tasks release <id> "<why>"`" (with `--adopting <old>` when it was given). The kind stays the store's (`io`), so `park`'s
 silent-success shape (tasks-c87f7d) is not repeated. A rerun appends a second note. The
 cost is accepted: a release that leaves no record is worse.
 
 ### 5. The stale-copy check
 
-For `release` alone, `occupants` skips the claim being released. Every other occupant
-still counts. When the gone holder's worktree holds a newer copy, the refusal then gives
+For `release` alone, `occupants` skips every non-`Live` claim of the session being
+released: the target claim and that session's other claims in the same worktree. The
+person asserts that the session is gone, not one claim. Live claims of that session, and
+every other session's claims, still count. Parks still count: a park names work that the
+next session resumes, not a session that must return. Stale-copy protection itself is
+unchanged. Only the remedy differs, because the occupancy diagnostic no longer names the
+gone session. When the gone holder's worktree holds a newer copy, the refusal then gives
 the ordinary remedy: rerun there with `tasks -C <root> release …`, hand off, or merge.
 It no longer says to wait for a session that will never return. A worktree that no
 longer exists has no copy to compare, so the release proceeds.
@@ -123,9 +150,14 @@ longer exists has no copy to compare, so the release proceeds.
 
 Each hint appears only when the blocking claim reads `Unverifiable`. A `Live` claim
 keeps its wording; a `Stale` one already passes. The hint is
-`; if session <s> is gone, run \`tasks release <id> "<why>"\``, appended to:
+`; if session <s> is gone, run \`tasks release <id> "<why>"\``. It is appended to:
 
-- `rename` and `rename --adopt` (`claimed`);
+- `rename` (`claimed`), for a claim in the source prefix's store, whose record lives in
+  this checkout. A claim in the target prefix's store has no record here to note, so it
+  gets no hint;
+- `rename --adopt` (`claimed`). A claim in the new store gets the plain hint. A claim in
+  the old store gets the adoption form with the renamed id:
+  `tasks release <new>-<hex> "<why>" --adopting <old>`;
 - `retire` (`claimed`);
 - `move`'s preflight. Its park hint is corrected at the same time: an own claim keeps
   "park it with `tasks park …` first"; a foreign `Live` claim says its session must
@@ -157,6 +189,17 @@ a pid and no `pid_view` reads `Unverifiable` in every view.
   (`claimed`), each with nothing written.
 - Stale copy: with a newer copy in the released claim's worktree, the refusal is the
   rerun remedy, not "where another session works".
+- Stale copy, two claims: gone session S holds A and B in one worktree whose copies
+  are newer. Releasing A gives the rerun remedy, not "where another session works",
+  and the same holds for B. A live claim of another session in that worktree still
+  yields the occupied remedy.
+- Adoption, end to end. Build a project, simulate another host's rename (the checkout
+  says `<new>` and holds `<new>-<hex>`, while this host's registry still has `<old>`),
+  and put an unverifiable claim on `<old>-<hex>` in `<old>`'s store. `rename --adopt`
+  refuses with the adoption hint. Running the command that hint prints succeeds and
+  notes `<new>-<hex>`. Rerunning `rename --adopt` then completes.
+- `--adopting` refusals: a prefix adoption would not accept (unregistered, already
+  adopted, the checkout's own prefix) is `validation` with nothing written.
 - Hints: `rename`, `retire`, `move` and `ready` name `tasks release` for an unverifiable
   claim and not for a live one. `move`'s hint for a foreign live claim no longer says
   to park it yourself.
