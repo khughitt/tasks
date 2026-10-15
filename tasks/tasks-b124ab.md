@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-15T11:52:10Z
-updated: 2026-10-15T13:38:34Z
+updated: 2026-10-15T13:38:35Z
 depends: []
 tags: [feedback, gap, "from:hq"]
 agent: claude-code/claude-opus-5-5
@@ -28,3 +28,7 @@ Where to look: src/output.rs ProjectRow/WhereProject/ResolveRow, src/commands/pr
 Verification: CLI tests for each of the three commands with a colored project (mixed-case config value comes out lowercase), an uncolored project (key absent), resolve against an unreachable root (key absent, row still resolved) and a malformed color (warning, row still resolved), and a resolve batch over two projects. just test-one for the focused cases, just test-fast before committing; cargo install --path . afterwards.
 
 Original report: The project identity color set in tasks/.config.toml is not in any JSON output (projects, where, resolve), so another tool cannot paint a path in its project's color without parsing config files. Wanted: a session lister painting each row's cwd with its project's color via 'tasks resolve <path>' or 'tasks projects'; neither JSON carries color, and only the pretty --color=always output uses it.
+
+## Notes
+
+- 2026-10-15T13:38:35Z (main): scope: scoped; P2/s/mid/direct; additive color field on projects, where and resolve rows (hex, omitted when unset/unreachable; resolve warns on a malformed config); ProjectRow.color serde(skip) came from tasks-2578c3's pretty-only scope, not a standing contract; consumer hq-760db0
