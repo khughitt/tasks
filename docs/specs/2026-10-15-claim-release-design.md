@@ -1,0 +1,172 @@
+# Release a claim whose holder is gone
+
+Status: draft
+Task: tasks-f9fc01 (lane tasks-2fa8c6, Agent identity and lifecycle)
+Builds on: [claim liveness by PID view](2026-10-14-claim-pid-view-design.md) (tasks 0.3.0)
+
+## Outcome and scope
+
+Since 0.3.0 a pid claim that this command cannot judge reads `Unverifiable`. That covers
+a claim recorded in another PID view, a claim recorded with no established view, and a
+legacy claim. Nothing prunes such a claim, takes it over without `--force`, or releases
+its holds (design §4). While it stands it hides the task from `ready` and `next` and
+blocks `rename`, `rename --adopt`, `retire` and `move`. It clears only through its own
+view, its owner's `park` or `done`, a reboot, or `start --force`.
+
+When a person knows the holder is gone (a finished sandbox, a dead container), the only
+path today is `start --force` followed by `park` or `drop`. That writes a takeover, a
+`resumed` marker and a park the task never had. This design adds one direct, recorded
+release. It also makes every refusal that such a claim causes name that release.
+
+Out of scope: showing the unverifiable reason in pretty output (tasks-ea23de), sid:0
+claims (tasks-f11052), and any automatic reaping. The 0.3.0 rule stands: only `Stale`
+permits automatic action.
+
+## Evidence checked
+
+At main 00cdbd8:
+
+- No verb releases a foreign held claim without a lifecycle. `park` refuses a foreign
+  `Live` or `Unverifiable` claim and has no `--force` (`src/commands/park.rs`). The
+  status transition guard lets `--force` through only toward `doing`
+  (`src/commands/mod.rs`, `Error::Claimed`), so `drop --force` and `done --force` refuse
+  too. `tasks claims` opens no checkout and writes nothing.
+- The refusals name no remedy for an unverifiable claim. `rename` (`src/rename/mod.rs`
+  `authorize`), `rename --adopt` (`src/rename/adopt.rs`) and `retire`
+  (`src/commands/retire.rs` `reject_live_claims`) return `claimed` with
+  `describe_claim` alone. `ready`'s omission warning (`src/commands/list.rs`
+  `claim_omission` + `force_hint`) names only `start --force`.
+- `move`'s preflight (`src/moving/preflight.rs`) says "park it with `tasks park …`
+  first". For a foreign claim, that park refuses: the hint dead-ends.
+- The record-home check counts every non-`Stale` foreign claim as an occupant of its
+  worktree (`occupants`, `src/commands/mod.rs`). Suppose the gone holder's worktree
+  still holds a newer copy of the record. A write from the main checkout is then
+  refused with "wait for that branch to merge". Nobody will ever merge that branch.
+- Holds live on the claim (`src/holds.rs`), so removing the claim frees its exclusive
+  holds. Parks and escalations are separate store entries.
+
+## Design
+
+### 1. The command
+
+    tasks release <id> "<why>"
+
+The reason is positional and required, like `drop`'s message and `shelve`'s wake
+condition. It is the one thing the record keeps that the tool cannot know. The id
+routes by prefix as `note` does, so a claim in another registered project is released
+from anywhere.
+
+Rejected:
+- **`park --force`.** Park records a next step and a park under the releaser: the same
+  false lifecycle this task removes.
+- **`claims --release`.** `claims` reads every store and opens no checkout, but the
+  release must write the record.
+
+### 2. What it releases, and what it refuses
+
+Under the claim store's mutation lock, the command judges the task's claim from this
+command's view:
+
+| Claim | Result |
+|---|---|
+| none | `validation`: "`<id>` has no claim" |
+| this session's (ownership not `Foreign`) | `validation`: "the claim on `<id>` is yours; `tasks park` or `tasks done` releases it" |
+| foreign, `Live` | `claimed`, with `describe_claim` and "only its session releases a live claim; `tasks start --force <id>` takes it over" |
+| foreign, `Unverifiable` | released |
+| foreign, `Stale` | released (any write would prune it; releasing it records why) |
+
+An unresolved identity of this session counts as foreign. Release asserts nothing about
+this session. Releasing a `Live` claim is never offered: the person's knowledge that the
+holder is gone is evidence only where the tool has none.
+
+### 3. What it records and changes
+
+One note on the task, stamped with lifecycle provenance (`harness_session`) like
+`note --stamp`. The text reuses `takeover_summary`'s redaction (no Unix session pid,
+no namespace values):
+
+    released session <s> (owner <o>, unverifiable: <reason>); reason: <why>
+
+`Stale` reads `stale: <reason>`. A sid claim reads `Unix session`, as in a takeover.
+The note is not a lifecycle marker. Release changes no status, so `obs` and other
+marker consumers need nothing new.
+
+The command removes only the claim, and the claim's holds go with it. Status, owner,
+park and escalation are untouched. A `doing` task stays `doing` with no claim, the same
+state a pruned stale claim leaves. The next `start` takes it without `--force` and
+writes an ordinary `resumed`.
+
+### 4. Ordering and failure
+
+The project's mutation lock, which a write takes when it loads the task
+(`Ctx::lock`), is held from the judgement through the store save. No heartbeat or
+takeover can change the claim between the verdict and the removal. Within the lock, the
+order is `park`'s: record first, then store. The record write passes every ordinary
+guard (`guard_write`, retired, move-pending, stale copy). Only after it lands is the
+claim removed and the store saved.
+
+If the store save fails after the note landed, the command fails with the store's error
+and the suffix "the note on `<id>` landed but its claim was not removed; rerun
+`tasks release <id> "<why>"`". The kind stays the store's (`io`), so `park`'s
+silent-success shape (tasks-c87f7d) is not repeated. A rerun appends a second note. The
+cost is accepted: a release that leaves no record is worse.
+
+### 5. The stale-copy check
+
+For `release` alone, `occupants` skips the claim being released. Every other occupant
+still counts. When the gone holder's worktree holds a newer copy, the refusal then gives
+the ordinary remedy: rerun there with `tasks -C <root> release …`, hand off, or merge.
+It no longer says to wait for a session that will never return. A worktree that no
+longer exists has no copy to compare, so the release proceeds.
+
+### 6. Refusals that name it
+
+Each hint appears only when the blocking claim reads `Unverifiable`. A `Live` claim
+keeps its wording; a `Stale` one already passes. The hint is
+`; if session <s> is gone, run \`tasks release <id> "<why>"\``, appended to:
+
+- `rename` and `rename --adopt` (`claimed`);
+- `retire` (`claimed`);
+- `move`'s preflight. Its park hint is corrected at the same time: an own claim keeps
+  "park it with `tasks park …` first"; a foreign `Live` claim says its session must
+  park it first;
+- `ready`'s omission warning, after the `start --force` hint.
+
+`next` and `lanes` pass through the same omission code, so they gain the same hint.
+`sample` keeps its curator wording, with no takeover or release hint.
+
+### 7. JSON
+
+The output is `IdOut` (`{"id", "warnings"}`), as for `note` and `park`. No existing
+shape changes, and errors use existing kinds. The claim store format is unchanged, so
+§7 of the PID-view design (upgrade every binary together) adds nothing new. An older
+binary simply lacks the verb.
+
+## Testing
+
+CLI tests build an unverifiable claim the way the PID-view tests do: a store entry with
+a pid and no `pid_view` reads `Unverifiable` in every view.
+
+- Release of a foreign unverifiable claim: exit 0, the claim is gone from `tasks claims`,
+  one stamped note carries the redacted text and reason, and status, owner and park are
+  unchanged. A following `start` without `--force` succeeds with no takeover note.
+- Release frees an exclusive hold: another session's `start` of a step needing it then
+  passes without `need_held`.
+- Release of a stale foreign claim succeeds and records `stale: …`.
+- Refusals: no claim (`validation`), own claim (`validation`), live foreign claim
+  (`claimed`), each with nothing written.
+- Stale copy: with a newer copy in the released claim's worktree, the refusal is the
+  rerun remedy, not "where another session works".
+- Hints: `rename`, `retire`, `move` and `ready` name `tasks release` for an unverifiable
+  claim and not for a live one. `move`'s hint for a foreign live claim no longer says
+  to park it yourself.
+- Store failure after the note: the error carries the rerun suffix (unit test with an
+  injected store failure, where the existing store tests allow it).
+
+## Documentation
+
+- `skills/tasks/SKILL.md`: the claims paragraph ("Its own view, its owner, a reboot or
+  `start --force` releases it") gains `tasks release <id> "<why>"` for a holder known
+  to be gone.
+- README: the PID-view paragraph and the command list.
+- Version: a new command, so 0.4.0. Rerun `cargo install --path .` after merge.
