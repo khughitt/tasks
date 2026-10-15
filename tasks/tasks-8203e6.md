@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-15T13:33:46Z
+updated: 2026-10-15T14:00:05Z
 depends: [ops-b31634]
 parent: tasks-1f05a7
 tags: [pretty]
@@ -19,3 +19,4 @@ Why: no registered project sets color in tasks/.config.toml, so project colours 
 ## Notes
 
 - 2026-10-15T13:33:46Z (main): consumer goal: ops-30b965 (every project has one colour, used wherever a project is named); the user re-requested this 2026-10-15 and noted the earlier request seemed lost
+- 2026-10-15T14:00:05Z (main): finding (ops-b31634, 2026-10-15): no overlap between project and thought identity needs standardizing — thought colour is corpus- and scheme-relative (placement slots, seed noise, material), familiar's is a shared slot of 12 ramped per tone; project colour is one authored #rrggbb in tasks' color key (tasks/.config.toml), 256-colour stand-in derived; brief: docs/notes/2026-10-04-shared-appearance-brief.md; this task's premise (colour from familiar) no longer holds: familiar slots are shared families (20 pins over 12 slots) and publish no hex; re-scope as precedence/no-op once ops-40f2a6 sets every project's color key
