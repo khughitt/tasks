@@ -1,15 +1,16 @@
 ---
 id: tasks-7a60c9
 title: "show and doc have no read that never invokes a document provider: show fetches an external plan when a step is set, so a caller that must stay read-only cannot read a task's body, notes or stored links without possibly running the configured fetch command"
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: no-fetch
 created: 2026-10-15T15:05:35Z
-updated: 2026-10-15T18:35:31Z
+updated: 2026-10-15T18:41:33Z
 started: 2026-10-15T18:35:23Z
+completed: 2026-10-15T18:41:33Z
 depends: []
 tags: [feedback, gap, "from:crew"]
 agent: claude-code/claude-opus-5-5
@@ -37,4 +38,8 @@ Source: crew feedback. Original ask: "Wanted: a flag (e.g. --no-fetch) on show a
 - 2026-10-15T18:35:23Z (main): started
   provenance: {"harness_session":"claude-code:a68fc905-0583-4b24-916a-7f867f161ee3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T18:35:31Z (no-fetch): resumed
+  provenance: {"harness_session":"claude-code:a68fc905-0583-4b24-916a-7f867f161ee3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T18:41:33Z (no-fetch): done
+  provenance: {"harness_session":"claude-code:a68fc905-0583-4b24-916a-7f867f161ee3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T18:41:33Z (no-fetch): show, next and doc take --no-fetch: no [docs.schemes] command runs; external links show as stored, step_found is omitted for an external plan (open or closed) without a warning, doc fails an external link as doc_not_found (fetch disabled by --no-fetch), local documents read; cli.toml rows landed in ops 32b91c4 and adopted; covered by external_doc_no_fetch_reads_without_spawning_the_provider
   provenance: {"harness_session":"claude-code:a68fc905-0583-4b24-916a-7f867f161ee3","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
