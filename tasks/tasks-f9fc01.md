@@ -3,8 +3,11 @@ id: tasks-f9fc01
 title: Clear a claim whose holder is gone without starting the task
 status: todo
 priority: 2
+size: m
+complexity: mid
+process: planned
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T08:25:21Z
+updated: 2026-10-15T08:25:22Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -12,4 +15,22 @@ source: tasks-860db2
 agent: claude-code/claude-opus-5-5
 ---
 
-Since tasks 0.3.0 a pid claim that no command can judge (recorded in another PID view, before views were recorded, or with a dead pid and no view) is held until reboot, its owner's release, or start --force. While held it hides the task from ready and blocks rename, rename --adopt, retire and move. The only manual path is start --force (taking ownership) and then park or drop, which writes a takeover note and a lifecycle the task never had. A person who knows the holder is gone (a finished sandbox, a dead container) needs a direct, recorded release. Scope: whether this is a new verb (e.g. tasks release <id> --reason) or a flag on an existing one, what it records on the task, and whether the refusals from rename/retire/move and ready's omission warning should name it.
+Why: since tasks 0.3.0 (tasks-860db2, spec docs/specs/2026-10-14-claim-pid-view-design.md §3–§4) a pid claim that no command can judge reads `Unverifiable`: recorded in another PID view, recorded before views existed, or recorded with no established view. Nothing prunes it, takes it over without --force, or releases its exclusive holds. It clears only through its own view, its owner's park or done, a reboot, or `start --force`. While held it hides the task from ready/next and blocks rename, rename --adopt, retire and move. When the holder is known gone (a finished sandbox, a dead container), the only manual path is `start --force` followed by park or drop. That writes a takeover note and a resumed/parked lifecycle the task never had. A person needs a direct, recorded release.
+
+Established while scoping (main at 00cdbd8):
+- No existing verb fits. `park` on a foreign claim refuses `Live` and `Unverifiable` (src/commands/park.rs, takeover block) and has no --force. `drop`/`done` go through the transition guard (src/commands/mod.rs, `Error::Claimed` in the status path), which lets --force through only for `to == Doing`. `tasks claims` is read-only and opens no checkout.
+- Defect in a refusal hint: move's preflight (src/moving/preflight.rs) says "park it with `tasks park {id} ...` first". For a foreign claim that park refuses, so the hint leads nowhere.
+- The refusals: rename (src/rename/mod.rs `authorize`), adopt (src/rename/adopt.rs), retire (src/commands/retire.rs `reject_live_claims`) all emit `Error::Claimed(id, describe_claim)` with no remedy. `ready`'s omission warning (src/commands/list.rs `claim_omission` + `force_hint`) names only `start --force`.
+- Holds live on the claim (src/holds.rs), so removing the claim releases its exclusive holds. Parks are a separate store entry and are untouched.
+
+Lean (for the spec to confirm): a new verb `tasks release <id> --reason "<why>"`. It removes another session's claim only when it reads `Unverifiable` (and `Stale`, harmlessly). It refuses `Live` with `claimed`, pointing to the owner or `start --force`. It leaves status, owner and park alone and appends one note naming the displaced session and owner, the verdict and its reason, and the given reason, in the `takeover_summary` style (no Unix session pid). Rejected: `park --force` (park records a next step and a park under the releaser: the same false lifecycle) and `claims --release` (a write on a command that opens no checkout, while the note needs the record).
+
+Decisions for the spec:
+- Whether the note is a generated lifecycle marker (`released`) with provenance, which obs consumers must learn, or a stamped plain note.
+- Which record the note lands in when the claim's worktree copy is newer or gone (`refuse_stale_copy`, src/commands/mod.rs), and whether the release succeeds while the record write is refused.
+- Whether the record's status stays `doing` (as after a stale prune) or the verb should offer to return it to `todo`.
+- JSON output shape (the contract), and README/skill wording (skills/tasks/SKILL.md mentions the release paths in two places).
+
+Done when: `tasks release` removes an unverifiable foreign claim and records why, refuses a live one, and leaves the lifecycle untouched. The rename, adopt, retire and move refusals and `ready`'s omission warning for an unverifiable claim name it, and move's park hint is corrected. CLI tests cover each refusal hint and the release/refuse pair (inject the view as the claim-pid-view tests do). Skill and README are updated, and `cargo install --path .` is rerun.
+
+Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f11052 (sid:0 claims held forever: a release target until fixed).
