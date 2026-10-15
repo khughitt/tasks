@@ -15,3 +15,13 @@ added to `NULL_SESSION_EXPECTED` there.
 `ps` row parsing, which tasks never performs, so they are not run. Refresh it the same
 way: copy the file from a newer relay revision and update the revision above in the same
 commit. Its `schema` field is the fixture format version and the test fails when it changes.
+
+`registry-workers.json` is relay's shared worker-row snapshot: a Codex root row, a worker
+and a nested worker (whose `root` names the root, not its parent) on one handle, and an
+unrelated Claude Code row. Relay commits it as `test/fixtures/registry-workers.json` in
+relay-635fdc Task 1, after tasks has landed, so it was copied byte for byte from that
+task's step in relay's plan `docs/plans/2026-10-15-codex-worker-rows.md` at revision
+`74ce0d8`. When relay's commit lands, compare the bytes, then replace this source with the
+relay revision of `test/fixtures/registry-workers.json`. A difference is a contract change
+to settle with relay, not a local edit. `src/relay/snapshot.rs` parses it, and
+`src/relay/resolve.rs` resolves each of its Codex threads against it.
