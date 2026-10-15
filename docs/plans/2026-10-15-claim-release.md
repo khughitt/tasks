@@ -1,6 +1,6 @@
 # Claim Release Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task, inline (Native, the execution method chosen at plan round 1), then dispatch one fresh read-only reviewer on the most capable model for the whole branch. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `tasks release <id> "<why>" [--adopting <old>]`, which removes another session's claim that reads `Unverifiable` or `Stale` and records why, without touching the task's lifecycle. Make every refusal such a claim causes name it.
 
@@ -8,21 +8,22 @@
 
 **Tech Stack:** Rust (clap, serde, toml), `assert_cmd` integration tests in `tests/cli.rs` and `tests/move.rs`.
 
-**Spec:** `docs/specs/2026-10-15-claim-release-design.md` (accepted at revision 3, spec round 3; plan-stage corrections in revision 4: `stale` without a reason, `prime` not `lanes`, "rerun the same command"). Read it with this plan. Section numbers below refer to it.
+**Spec:** `docs/specs/2026-10-15-claim-release-design.md` (accepted at revision 3, spec round 3; plan-stage corrections in revision 4: `stale` without a reason, `prime` not `lanes`, "rerun the same command"; revision 5 after plan round 1: prefix validation before locks, eligibility rechecked under both locks, adoption refusals without a promise, blank reasons refused). Read it with this plan. Section numbers below refer to it.
 
 ## Global Constraints
 
 - The verb is `tasks release <id> "<why>"`; the reason is positional and required. The flag is `--adopting <old>` (spec §1).
 - Released only when the claim is foreign and reads `Unverifiable` or `Stale`. No claim and own claim are `validation`; a live foreign claim is `claimed` (spec §2).
 - Plain refusal texts: "`<id>` has no claim"; "the claim on `<id>` is yours; `tasks park <id> "<next step>"` or `tasks done <id>` releases it"; live: `describe_claim` + "; only its session releases a live claim; `tasks start --force <id>` takes it over" (spec §2).
-- Under `--adopting`, the own and live refusals never name `park`, `done` or `start --force`. Own: "the claim on `<old>-<hex>` is this session's, recorded before the rename; it clears when this session ends, and `tasks rename <old> <new> --adopt` then proceeds". Live: `describe_claim` + "; the claim on `<old>-<hex>` was recorded before the rename; it clears when session `<s>` ends, and `tasks rename <old> <new> --adopt` then proceeds" (spec §2).
+- Under `--adopting`, the own and live refusals never name `park`, `done` or `start --force`, and never promise that the holder's end clears the claim. Own: "the claim on `<old>-<hex>` is this session's, recorded before the rename. Once this session ends, `tasks rename <old> <new> --adopt` proceeds if the claim reads stale; if it reads unverifiable, a later session releases it with `tasks release <new>-<hex> "<why>" --adopting <old>`". Live: `describe_claim` + "; the claim on `<old>-<hex>` was recorded before the rename. Once session `<s>` ends, `tasks rename <old> <new> --adopt` proceeds if the claim reads stale; if it reads unverifiable, rerun this release" (spec §2).
+- An empty or whitespace-only reason is `validation` before anything is read or written: "tasks release needs a reason: why the holder is known to be gone" (spec §1).
 - An unresolved identity counts as foreign (spec §2).
 - Note text: `released <session label> (owner <o>, unverifiable: <reason>); reason: <why>`, or `(owner <o>, stale)` for a stale claim. The session label is `takeover_summary`'s: `Unix session` for a `sid:<n>` claim, else `session <s>`. Stamped with lifecycle provenance. Not a lifecycle marker (spec §3).
 - Status, owner, park and escalation are untouched; the claim and its holds go (spec §3).
 - Record first, then store, all under the held mutation lock(s). A store failure after the note is the store's error kind with the suffix `; the note on <id> landed but its claim was not removed; rerun the same \`tasks release\` command` (spec §4).
 - `occupants` skips every non-`Live` claim of the released session, for `release` only. Parks still count (spec §5).
 - Hint text: `; if session <s> is gone, run \`tasks release <id> "<why>"\``. Adoption form: `; if session <s> is gone, run \`tasks release <new>-<hex> "<why>" --adopting <old>\``. Hints appear only for `Unverifiable` (spec §6).
-- `--adopting <old>` is accepted only when `classify_registry(registry, project, old, project.prefix)` returns `Fresh`. Locks are taken in sorted prefix order (spec §1).
+- `--adopting <old>` must pass `crate::model::is_valid_prefix` and differ from the checkout's prefix, both before any lock. It is accepted only when `classify_registry(registry, project, old, project.prefix)` returns `Fresh`. That is checked before locking (to spare a typo a lock file) and again, authoritatively, after both locks are held against a freshly loaded registry. Locks are taken in sorted prefix order (spec §1).
 - Output is `IdOut`; no JSON shape changes; the claim store format is unchanged (spec §7).
 - Version 0.4.0 (spec, Documentation).
 - Tests run through `just test-one <args>` (one filter per run) and `just test-fast`; never `cargo test` directly (AGENTS.md).
@@ -33,7 +34,7 @@
 
 1. **A reason containing quotes or shell metacharacters** (`tasks release <id> 'it said "done"; rm'`). The note keeps it verbatim, and the store-failure suffix does not try to reprint it. Test in Task 1 (`release_keeps_a_quoted_reason_verbatim`).
 2. **Releasing a claim whose task file is missing from this checkout** (the claim exists, the record does not). It must fail with `task_not_found` before the store is touched, so the claim stays. Test in Task 1 (`release_without_a_record_leaves_the_claim`).
-3. **`--adopting` naming this checkout's own prefix.** It must refuse with `validation` before taking any lock, since a second lock on the same prefix in one process would block forever. Test in Task 2 (`release_adopting_refusals_write_nothing`, own-prefix case).
+3. **`--adopting` naming this checkout's own prefix, or a malformed one (`../claims/new`, `Old`, empty).** It must refuse with `validation` before creating or taking any lock: a path-like value can name another prefix's lock file, and a second lock on one prefix in one process blocks forever. Test in Task 2 (`release_adopting_refusals_write_nothing`).
 4. **A stale claim's reason naming a pid** (`pid 4242 is gone`). The note must not contain the pid. Test in Task 1 (`release_records_a_stale_claim_without_its_pid`).
 5. **A bare six-hex suffix** (`tasks release 4f2a9c "<why>"`) inside the project. It resolves like any other id and releases. Test in Task 1 (`release_accepts_a_bare_suffix`).
 
@@ -206,6 +207,24 @@ fn release_refusals_write_nothing() {
 }
 
 #[test]
+fn release_refuses_a_blank_reason() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    json_as(&env, &sci, "sandboxed", &["start", &id]);
+    set_pid_view(&env, "sci", &id, "0:1");
+    let record = env.read(&sci, &format!("tasks/{id}.md"));
+    let store = std::fs::read_to_string(env.claim_store("sci")).unwrap();
+    for why in ["", "   \t "] {
+        let error = error_as(&env, &sci, "releaser", &["release", &id, why]);
+        assert_eq!(error["error"]["kind"], "validation", "{why:?}: {error}");
+        assert!(error["error"]["detail"].as_str().unwrap().contains("needs a reason"), "{error}");
+    }
+    assert_eq!(env.read(&sci, &format!("tasks/{id}.md")), record);
+    assert_eq!(std::fs::read_to_string(env.claim_store("sci")).unwrap(), store);
+}
+
+#[test]
 fn release_keeps_a_quoted_reason_verbatim() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
@@ -312,7 +331,7 @@ fn release_from_main_skips_the_gone_sessions_claims_in_the_stale_copy_check() {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `just test-one --test cli release_`
-Expected: the nine new tests FAIL. Clap rejects `release` as an unrecognized subcommand, so each fails on its first `release` call. The filter also matches two existing tests, `release_follows_the_claim_not_the_local_doing_status` and `done_retries_a_failed_release_after_a_status_edit`, which pass.
+Expected: the ten new tests FAIL. Clap rejects `release` as an unrecognized subcommand, so each fails on its first `release` call. The filter also matches two existing tests, `release_follows_the_claim_not_the_local_doing_status` and `done_retries_a_failed_release_after_a_status_edit`, which pass.
 
 - [ ] **Step 3: Add the subcommand to `src/cli.rs`**
 
@@ -434,6 +453,7 @@ use crate::model::{Task, TaskId};
 use crate::output::Output;
 
 pub fn run(mut ctx: Ctx, id: String, why: String) -> Result<Output> {
+    require_reason(&why)?;
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     let claim = ctx
         .claims_mut()?
@@ -446,6 +466,16 @@ pub fn run(mut ctx: Ctx, id: String, why: String) -> Result<Output> {
     store.remove(&id);
     store.save().map_err(|error| error.with_suffix(&landed(&task.id)))?;
     Ok(super::id_out(ctx, &task))
+}
+
+/// Spec §1: the reason is the one thing the record keeps that the tool cannot know.
+fn require_reason(why: &str) -> Result<()> {
+    if why.trim().is_empty() {
+        return Err(Error::Validation(
+            "tasks release needs a reason: why the holder is known to be gone".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Spec §2: refuse an own or live claim; return the verdict that permits the release.
@@ -522,7 +552,7 @@ In `src/commands/mod.rs`, add `pub mod release;` between `pub mod quiet;` and `p
 - [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `just test-one --test cli release_`
-Expected: PASS, the nine new tests and the two existing ones. Then run `just test-one --test cli an_unverifiable_claim_still_occupies_its_worktree` (unchanged behaviour for `note`). Expected: PASS.
+Expected: PASS, the ten new tests and the two existing ones. Then run `just test-one --test cli an_unverifiable_claim_still_occupies_its_worktree` (unchanged behaviour for `note`). Expected: PASS.
 
 - [ ] **Step 8: Document the verb**
 
@@ -672,7 +702,7 @@ fn release_adopting_refuses_own_and_live_claims_without_ordinary_remedies() {
 
     for (session, kind, expected) in [
         ("me", "validation", "is this session's, recorded before the rename"),
-        ("someone-else", "claimed", "was recorded before the rename; it clears when session someone-else ends"),
+        ("someone-else", "claimed", "was recorded before the rename. Once session someone-else ends"),
     ] {
         adopt_old_claim(&env, &old_id, session, None);
         let before = std::fs::read(&old_store).unwrap();
@@ -685,6 +715,8 @@ fn release_adopting_refuses_own_and_live_claims_without_ordinary_remedies() {
         let detail = err_detail(&out);
         assert!(detail.contains(expected), "{detail}");
         assert!(detail.contains("tasks rename old new --adopt"), "{detail}");
+        assert!(detail.contains("if it reads unverifiable"), "{detail}");
+        assert!(!detail.contains("it clears when"), "{detail}");
         for remedy in ["tasks park", "tasks done", "start --force"] {
             assert!(!detail.contains(remedy), "{remedy} in {detail}");
         }
@@ -701,17 +733,28 @@ fn release_adopting_refusals_write_nothing() {
     adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
     let record = std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap();
 
-    for old in ["new", "nope"] {
+    let claims = env.home.path().join("state/tasks/claims");
+    let locks = |dir: &std::path::Path| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".lock"))
+            .collect();
+        names.sort();
+        names
+    };
+    let before = locks(&claims);
+    for old in ["new", "nope", "../claims/new", "Old", ""] {
         let out = adopt_cmd(&env, &dir)
             .env("TASKS_SESSION", "releaser")
             .args(["release", &new_id, "x", "--adopting", old])
             .output()
             .unwrap();
-        assert_eq!(err_kind(&out), "validation", "--adopting {old}");
+        assert_eq!(err_kind(&out), "validation", "--adopting {old:?}");
         assert!(err_detail(&out).contains(&format!("--adopting {old}")), "{out:?}");
     }
     assert_eq!(std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap(), record);
-    assert!(!env.home.path().join("state/tasks/claims/nope.lock").exists());
+    assert_eq!(locks(&claims), before);
 
     // After adoption completes, the old prefix is no longer adoptable here.
     std::fs::remove_file(env.home.path().join("state/tasks/claims/old.toml")).unwrap();
@@ -722,6 +765,106 @@ fn release_adopting_refusals_write_nothing() {
         .output()
         .unwrap();
     assert_eq!(err_kind(&out), "validation");
+}
+
+#[test]
+fn release_adopting_takes_an_own_viewless_claim_after_its_session_ended() {
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    let pid = child.id();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    // A pid with no boot and no view, as an older binary or an unproven export records it:
+    // it reads unverifiable in every view, even with its process gone.
+    let state = env.home.path().join("state/tasks/claims");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(
+        state.join("old.toml"),
+        format!(
+            "[claims.\"{old_id}\"]\nowner = \"tester\"\nsession = \"me\"\nhost = \"host\"\n\
+             worktree = \"/old\"\nstarted = \"2026-01-01T00:00:00Z\"\n\
+             seen = \"2026-01-01T00:00:00Z\"\npid = {pid}\npid_start = 1\n"
+        ),
+    )
+    .unwrap();
+    let claims = adopt_json(&env, &dir, &["claims"]);
+    assert_eq!(claims["claims"][0]["unverified"], "PID view not established when recorded");
+
+    let out = adopt_cmd(&env, &dir)
+        .env("TASKS_SESSION", "later")
+        .args(["release", &new_id, "my earlier session ended", "--adopting", "old"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        adopt_json(&env, &dir, &["rename", "old", "new", "--adopt"])["recovery"],
+        "fresh"
+    );
+}
+
+#[test]
+fn release_adopting_rechecks_eligibility_once_both_locks_are_held() {
+    use std::os::unix::fs::MetadataExt;
+    let env = TestEnv::new();
+    let (dir, old_id) = adopt_fixture(&env);
+    let new_id = old_id.replacen("old-", "new-", 1);
+    adopt_old_claim(&env, &old_id, "sandboxed", Some("0:1"));
+    let other = env.home.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    adopt_json(&env, &other, &["init", "--prefix", "other"]);
+    let old_store = env.home.path().join("state/tasks/claims/old.toml");
+    let store = std::fs::read(&old_store).unwrap();
+    let record = std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap();
+
+    // Hold `old`'s lock, as `init --force` does while it repoints the prefix. "new" sorts
+    // first, so release takes it, passes its first check, and blocks here.
+    let lock_path = env.home.path().join("state/tasks/claims/old.lock");
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    held.lock().unwrap();
+    let ino = std::fs::metadata(&lock_path).unwrap().ino();
+    let child = env
+        .raw(&dir)
+        .env("XDG_CONFIG_HOME", env.home.path().join("config"))
+        .env("XDG_STATE_HOME", env.home.path().join("state"))
+        .env("TASKS_SESSION", "releaser")
+        .args(["release", &new_id, "gone", "--adopting", "old"])
+        .spawn()
+        .unwrap();
+    // /proc/locks lists a blocked flock waiter as a `->` line naming the inode.
+    let blocked = || {
+        std::fs::read_to_string("/proc/locks").unwrap().lines().any(|line| {
+            line.contains("->")
+                && line
+                    .split_whitespace()
+                    .any(|field| field.ends_with(&format!(":{ino}")))
+        })
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !blocked() {
+        assert!(std::time::Instant::now() < deadline, "release never blocked on old.lock");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // Repoint `old` at another project while release waits, then let it through.
+    let registry_path = env.home.path().join("config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry["projects"]["old"] = toml::Value::String(other.display().to_string());
+    std::fs::write(&registry_path, toml::to_string(&registry).unwrap()).unwrap();
+    drop(held);
+
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(err_kind(&out), "validation", "{out:?}");
+    assert!(err_detail(&out).contains("still holds a tasks project"), "{out:?}");
+    assert_eq!(std::fs::read(&old_store).unwrap(), store);
+    assert_eq!(std::fs::read(dir.join(format!("tasks/{new_id}.md"))).unwrap(), record);
 }
 
 #[test]
@@ -750,7 +893,7 @@ The fixture's `adopt_cmd` sets `XDG_STATE_HOME` to `<home>/state`, which is why 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `just test-one --test cli release_adopting_`
-Expected: FAIL. Clap rejects `--adopting`, and the end-to-end test fails first on the missing hint in adoption's refusal.
+Expected: the five `release_adopting_*` tests FAIL. Clap rejects `--adopting`, and the end-to-end test fails first on the missing hint in adoption's refusal.
 
 - [ ] **Step 3: Add `accepts` and the hints in `src/rename/adopt.rs`**
 
@@ -852,14 +995,23 @@ pub fn open(dir: Option<&Path>, id: &str, adopting: Option<&str>) -> Result<(Ctx
     let Some(old) = adopting else {
         return Ok((super::open_id_write_ctx(dir, id)?, None));
     };
+    // Checked before any lock: `old` names a lock file, so a path-like value could name
+    // another prefix's lock, and a second lock on one prefix would wait on itself.
+    if !crate::model::is_valid_prefix(old) {
+        return Err(Error::Validation(format!(
+            "--adopting {old}: not a valid prefix (2-8 lowercase letters and digits, a letter first)"
+        )));
+    }
     let mut ctx = super::open_id_ctx(dir, id)?;
     let prefix = ctx.project.prefix.clone();
     if old == prefix {
-        // Checked before any lock: a second lock on one prefix would wait on itself.
         return Err(Error::Validation(format!(
             "--adopting {old} names this checkout's own prefix; it takes the prefix being adopted"
         )));
     }
+    // A first check before locking spares a typo a lock file; only the one under both
+    // locks below counts.
+    eligible(&ctx, old)?;
     let early = if old < prefix.as_str() {
         Some(MutationLock::acquire(old)?)
     } else {
@@ -872,16 +1024,14 @@ pub fn open(dir: Option<&Path>, id: &str, adopting: Option<&str>) -> Result<(Ctx
             "--adopting {old}: this checkout's prefix changed from {prefix:?} while locking; retry"
         )));
     }
-    if let Some(reason) = crate::rename::adopt::accepts(&ctx.registry, &ctx.project, old)? {
-        return Err(Error::Validation(format!(
-            "--adopting {old}: {reason}; it is accepted only while `tasks rename {old} {prefix} \
-             --adopt` would adopt it"
-        )));
-    }
     let lock = match early {
         Some(lock) => lock,
         None => MutationLock::acquire(old)?,
     };
+    // Both locks are held: `init --force` and `rename` take a prefix's lock before they
+    // change its root, so a registry read now stays true to the end of the command.
+    ctx.registry = crate::registry::Registry::load()?;
+    eligible(&ctx, old)?;
     let store = ClaimStore::load(old)?;
     Ok((
         ctx,
@@ -893,7 +1043,30 @@ pub fn open(dir: Option<&Path>, id: &str, adopting: Option<&str>) -> Result<(Ctx
     ))
 }
 
+/// Spec §1: `old` is a predecessor adoption would take for this checkout.
+fn eligible(ctx: &Ctx, old: &str) -> Result<()> {
+    match crate::rename::adopt::accepts(&ctx.registry, &ctx.project, old)? {
+        None => Ok(()),
+        Some(reason) => Err(Error::Validation(format!(
+            "--adopting {old}: {reason}; it is accepted only while `tasks rename {old} {} \
+             --adopt` would adopt it",
+            ctx.project.prefix
+        ))),
+    }
+}
+
+/// Spec §1: the reason is the one thing the record keeps that the tool cannot know.
+fn require_reason(why: &str) -> Result<()> {
+    if why.trim().is_empty() {
+        return Err(Error::Validation(
+            "tasks release needs a reason: why the holder is known to be gone".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn run(mut ctx: Ctx, adopting: Option<Adopting>, id: String, why: String) -> Result<Output> {
+    require_reason(&why)?;
     let id = super::parse_id(&ctx.registry, &ctx.shorthand, &id)?;
     match adopting {
         None => {
@@ -916,8 +1089,7 @@ pub fn run(mut ctx: Ctx, adopting: Option<Adopting>, id: String, why: String) ->
                 .get(&key)
                 .cloned()
                 .ok_or_else(|| Error::Validation(format!("{key} has no claim")))?;
-            let new = ctx.project.prefix.clone();
-            let live = judge(&mut ctx, &claim, &key, Some((&adopting.old, &new)))?;
+            let live = judge(&mut ctx, &claim, &key, Some((&adopting.old, &id)))?;
             let task = write_note(&mut ctx, &id, &claim, &live, &why)?;
             adopting.store.remove(&key);
             adopting
@@ -930,25 +1102,29 @@ pub fn run(mut ctx: Ctx, adopting: Option<Adopting>, id: String, why: String) ->
 }
 
 /// Spec §2: refuse an own or live claim; return the verdict that permits the release.
-/// `rename` is `(old, new)` under `--adopting`, whose refusals name adoption, never the
-/// routed id's `park`, `done` or `start --force`, which act on the other store.
+/// `adopting` is `(old, routed id)` under `--adopting`, whose refusals name adoption,
+/// never the routed id's `park`, `done` or `start --force`, which act on the other store,
+/// and never promise that the holder's end clears the claim.
 fn judge(
     ctx: &mut Ctx,
     claim: &Claim,
     key: &TaskId,
-    rename: Option<(&str, &str)>,
+    adopting: Option<(&str, &TaskId)>,
 ) -> Result<Liveness> {
     let me = crate::claims::resolve_identity(&mut ctx.warnings);
     let live = crate::claims::liveness(claim);
     let own = super::ownership(claim, &me)? != Ownership::Foreign;
-    match (own, matches!(live, Liveness::Live), rename) {
+    match (own, matches!(live, Liveness::Live), adopting) {
         (true, _, None) => Err(Error::Validation(format!(
             "the claim on {key} is yours; `tasks park {key} \"<next step>\"` or `tasks done {key}` \
              releases it"
         ))),
-        (true, _, Some((old, new))) => Err(Error::Validation(format!(
-            "the claim on {key} is this session's, recorded before the rename; it clears when \
-             this session ends, and `tasks rename {old} {new} --adopt` then proceeds"
+        (true, _, Some((old, id))) => Err(Error::Validation(format!(
+            "the claim on {key} is this session's, recorded before the rename. Once this session \
+             ends, `tasks rename {old} {} --adopt` proceeds if the claim reads stale; if it \
+             reads unverifiable, a later session releases it with `tasks release {id} \
+             \"<why>\" --adopting {old}`",
+            id.prefix
         ))),
         (false, true, None) => Err(Error::Claimed(
             key.to_string(),
@@ -958,13 +1134,15 @@ fn judge(
                 Ctx::describe_claim(claim, &live)
             ),
         )),
-        (false, true, Some((old, new))) => Err(Error::Claimed(
+        (false, true, Some((old, id))) => Err(Error::Claimed(
             key.to_string(),
             format!(
-                "{}; the claim on {key} was recorded before the rename; it clears when session \
-                 {} ends, and `tasks rename {old} {new} --adopt` then proceeds",
+                "{}; the claim on {key} was recorded before the rename. Once session {} ends, \
+                 `tasks rename {old} {} --adopt` proceeds if the claim reads stale; if it reads \
+                 unverifiable, rerun this release",
                 Ctx::describe_claim(claim, &live),
-                claim.session
+                claim.session,
+                id.prefix
             ),
         )),
         (false, false, _) => Ok(live),
@@ -1040,7 +1218,7 @@ Replace the dispatch arm:
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `just test-one --test cli release_`
-Expected: PASS: Task 1's nine, Task 2's three `release_adopting_*`, and the two existing tests the filter matches.
+Expected: PASS: Task 1's ten, Task 2's five `release_adopting_*`, and the two existing tests the filter matches.
 Run: `just test-one --test cli adopt_`
 Expected: PASS, including `adopt_hints_plain_release_for_an_unverifiable_claim_in_the_new_store` and every existing adoption test.
 
@@ -1100,10 +1278,19 @@ fn release_is_named_by_ready_next_retire_and_rename_for_an_unverifiable_claim_on
     write_claim_in_view(&env, "sci", &held, "sandboxed", "0:1");
     let hint = format!("tasks release {held} \"<why>\"");
 
+    // Decoded strings: serialized JSON would escape the hint's quotation marks.
+    let warnings = |out: &serde_json::Value| -> Vec<String> {
+        out["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|warning| warning.as_str().unwrap().to_string())
+            .collect()
+    };
     for command in [&["ready"][..], &["next"][..]] {
         let out = env.json(&sci, command);
-        let warnings = out["warnings"].to_string();
-        assert!(warnings.contains(&hint), "{command:?}: {warnings}");
+        let list = warnings(&out);
+        assert!(list.iter().any(|w| w.contains(&hint)), "{command:?}: {list:?}");
     }
     for command in [&["retire", "--reason", "over"][..], &["rename", "sci", "lab"][..]] {
         let error = error_of(&env, &sci, command);
@@ -1117,8 +1304,15 @@ fn release_is_named_by_ready_next_retire_and_rename_for_an_unverifiable_claim_on
     // A live claim keeps the old wording everywhere.
     let live = id_of(env.json(&sci, &["add", "Live", "-p", "1"]));
     write_claim(&env, "sci", &live, "agent-b", true);
-    let warnings = env.json(&sci, &["ready"])["warnings"].to_string();
-    assert!(!warnings.contains(&format!("tasks release {live}")), "{warnings}");
+    let list = warnings(&env.json(&sci, &["ready"]));
+    assert!(
+        list.iter().any(|w| w.contains(&format!("{live} omitted"))),
+        "{list:?}"
+    );
+    assert!(
+        !list.iter().any(|w| w.contains(&format!("tasks release {live}"))),
+        "{list:?}"
+    );
 }
 ```
 

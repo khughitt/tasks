@@ -52,7 +52,8 @@ At main 00cdbd8:
     tasks release <id> "<why>"
 
 The reason is positional and required, like `drop`'s message and `shelve`'s wake
-condition. It is the one thing the record keeps that the tool cannot know. The id
+condition. It is the one thing the record keeps that the tool cannot know, so an empty or
+whitespace-only reason is `validation` before anything is read or written. The id
 routes by prefix as `note` does, so a claim in another registered project is released
 from anywhere.
 
@@ -74,9 +75,17 @@ returns `Fresh`, the stage in which adoption checks the old store's claims. Anyt
 else is `validation`, naming that check, with nothing written. The flag names the
 predecessor explicitly. Release never searches the registry for one, because adoption's
 check also matches any registered project whose root has vanished, which could reach an
-unrelated store. The command takes both prefixes' mutation locks in sorted order before
-it loads the record, as `rename --adopt` does, and the record load reuses the lock it
-already holds.
+unrelated store.
+
+`<old>` names a lock and a store file, so it must pass `is_valid_prefix` and differ from
+this checkout's prefix. Both checks come before any lock: a path-like value could name
+another prefix's lock file, and a second lock on one prefix in one process would wait on
+itself. The command then takes both prefixes' mutation locks in sorted order, as
+`rename --adopt` does, and the record load reuses the lock it already holds. Eligibility
+is checked once before locking, which only spares a typo a stray lock file, and again
+after both locks are held, against a freshly loaded registry. Only the second check
+counts: `init --force` and `rename` take a prefix's lock before changing its root, so
+the registry cannot repoint `<old>` between that check and the store write.
 
 Rejected:
 - **`park --force`.** Park records a next step and a park under the releaser: the same
@@ -104,11 +113,13 @@ claim while adoption stays blocked. Under `--adopting`, those two rows therefore
 
 | Claim in `<old>`'s store | Result |
 |---|---|
-| this session's | `validation`: "the claim on `<old>-<hex>` is this session's, recorded before the rename; it clears when this session ends, and `tasks rename <old> <new> --adopt` then proceeds" |
-| foreign, `Live` | `claimed`, with `describe_claim` and "the claim on `<old>-<hex>` was recorded before the rename; it clears when session `<s>` ends, and `tasks rename <old> <new> --adopt` then proceeds" |
+| this session's | `validation`: "the claim on `<old>-<hex>` is this session's, recorded before the rename. Once this session ends, `tasks rename <old> <new> --adopt` proceeds if the claim reads stale; if it reads unverifiable, a later session releases it with `tasks release <new>-<hex> "<why>" --adopting <old>`" |
+| foreign, `Live` | `claimed`, with `describe_claim` and "; the claim on `<old>-<hex>` was recorded before the rename. Once session `<s>` ends, `tasks rename <old> <new> --adopt` proceeds if the claim reads stale; if it reads unverifiable, rerun this release" |
 
-Neither names `park`, `done` or `start --force`. Once the holder ends, a judgement in its
-view reads `Stale`, and adoption passes a stale claim as it does today.
+Neither names `park`, `done` or `start --force`. Neither promises that the holder's end
+clears the claim. One recorded in this view reads `Stale` once its holder ends, and
+adoption passes it. One recorded without a view, or in another, stays `Unverifiable`,
+which is what `release` is for.
 
 An unresolved identity of this session counts as foreign. Release asserts nothing about
 this session. Releasing a `Live` claim is never offered: the person's knowledge that the
@@ -217,6 +228,14 @@ a pid and no `pid_view` reads `Unverifiable` in every view.
 - `--adopting` with an own claim and with a live foreign claim in the old store: each
   refusal carries the adoption text and names none of `tasks park`, `tasks done` or
   `start --force`. Nothing is written in either store or the record.
+- An own old-store claim with a pid and no view, after its session has ended, reads
+  `Unverifiable`. A later session releases it with `--adopting`, and adoption completes.
+- Eligibility after the locks: with `<old>`'s lock held elsewhere, release blocks after
+  its first check. `<old>` is repointed at another project, and the lock released.
+  Release refuses with `validation`, and nothing is written.
+- `--adopting` with a malformed prefix (`../claims/new`, `Old`, empty) is `validation`
+  before any lock file is created.
+- An empty or whitespace-only reason is `validation`; record and store are unchanged.
 - `--adopting` refusals: a prefix adoption would not accept (unregistered, already
   adopted, the checkout's own prefix) is `validation` with nothing written.
 - Hints: `rename`, `retire`, `move` and `ready` name `tasks release` for an unverifiable
