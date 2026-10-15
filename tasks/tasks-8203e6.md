@@ -5,10 +5,10 @@ status: doing
 priority: 2
 size: m
 complexity: high
-process: planned
+process: direct
 owner: main
 created: 2026-10-06T13:01:34Z
-updated: 2026-10-15T15:51:56Z
+updated: 2026-10-15T15:52:16Z
 started: 2026-10-15T15:51:56Z
 depends: [ops-b31634]
 parent: tasks-1f05a7
