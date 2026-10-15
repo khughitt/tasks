@@ -35,13 +35,21 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     }
     validate_childless(ctx)?;
     let claims = ClaimSnapshot::load(std::iter::once(ctx.source.project.prefix.as_str()))?;
-    if let Some(claim) = claims.held(id) {
+    if let Some((claim, live)) = claims.get(id)
+        && !live.is_stale()
+    {
+        let me = crate::claims::resolve_identity(&mut ctx.source.warnings);
+        let remedy = match (commands::ownership(claim, &me)?, live) {
+            (commands::Ownership::Foreign, crate::claims::Liveness::Unverifiable(why)) => format!(
+                "unverifiable: {why}{}",
+                commands::release::hint(&id.to_string(), &claim.session)
+            ),
+            (commands::Ownership::Foreign, _) => "that session must park it first".to_string(),
+            _ => format!("park it with `tasks park {id} \"<next step>\"` first"),
+        };
         return Err(Error::Claimed(
             id.to_string(),
-            format!(
-                "{}; park it with `tasks park {id} \"<next step>\"` first",
-                claim.session
-            ),
+            format!("{}; {remedy}", claim.session),
         ));
     }
     commands::reject_retired(&ctx.registry, &ctx.source.project)?;

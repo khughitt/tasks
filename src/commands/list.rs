@@ -1,5 +1,5 @@
 use super::ReadCtx;
-use crate::claims::WaitingOn;
+use crate::claims::{Liveness, WaitingOn};
 use crate::cli::{FilterArgs, ListArgs};
 use crate::error::Result;
 use crate::filter::{Fields, TaskFilter, TextQuery, check_parent};
@@ -277,16 +277,22 @@ pub fn ready_tasks(
                 .is_some_and(|park| park.waiting_on == WaitingOn::User)
     });
     deferred.retain(|task| crate::hierarchy::paused_lane(all, task, &ctx.registry).is_none());
-    ready.retain(|task| match claims.held(&task.id) {
-        Some(claim) => {
+    ready.retain(|task| match claims.get(&task.id) {
+        Some((claim, live)) if !live.is_stale() => {
+            let release = match live {
+                Liveness::Unverifiable(_) => {
+                    super::release::hint(&task.id.to_string(), &claim.session)
+                }
+                _ => String::new(),
+            };
             warnings.push(format!(
-                "{} — {} to take it over",
+                "{} — {} to take it over{release}",
                 claim_omission(&task.id, claim),
                 force_hint(&task.id.to_string(), snapshots)
             ));
             false
         }
-        None => true,
+        _ => true,
     });
     ready.retain(|task| match claims.park(&task.id) {
         Some(park) if park.waiting_on == WaitingOn::User => {

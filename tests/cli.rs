@@ -29120,3 +29120,57 @@ fn release_from_main_skips_the_gone_sessions_claims_in_the_stale_copy_check() {
         .success();
     assert!(env.json(&side, &["show", &id])["claim"].is_null());
 }
+
+#[test]
+fn release_is_named_by_ready_next_retire_and_rename_for_an_unverifiable_claim_only() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let held = id_of(env.json(&sci, &["add", "Held", "-p", "1"]));
+    // A todo record with a claim, as a main checkout sees one while a worktree holds it.
+    write_claim_in_view(&env, "sci", &held, "sandboxed", "0:1");
+    let hint = format!("tasks release {held} \"<why>\"");
+
+    // Decoded strings: serialized JSON would escape the hint's quotation marks.
+    let warnings = |out: &serde_json::Value| -> Vec<String> {
+        out["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|warning| warning.as_str().unwrap().to_string())
+            .collect()
+    };
+    for command in [&["ready"][..], &["next"][..]] {
+        let out = env.json(&sci, command);
+        let list = warnings(&out);
+        assert!(
+            list.iter().any(|w| w.contains(&hint)),
+            "{command:?}: {list:?}"
+        );
+    }
+    for command in [
+        &["retire", "--reason", "over"][..],
+        &["rename", "sci", "lab"][..],
+    ] {
+        let error = error_of(&env, &sci, command);
+        assert_eq!(error["error"]["kind"], "claimed", "{command:?}: {error}");
+        assert!(
+            error["error"]["detail"].as_str().unwrap().contains(&hint),
+            "{command:?}: {error}"
+        );
+    }
+
+    // A live claim keeps the old wording everywhere.
+    let live = id_of(env.json(&sci, &["add", "Live", "-p", "1"]));
+    write_claim(&env, "sci", &live, "agent-b", true);
+    let list = warnings(&env.json(&sci, &["ready"]));
+    assert!(
+        list.iter().any(|w| w.contains(&format!("{live} omitted"))),
+        "{list:?}"
+    );
+    assert!(
+        !list
+            .iter()
+            .any(|w| w.contains(&format!("tasks release {live}"))),
+        "{list:?}"
+    );
+}

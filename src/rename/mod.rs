@@ -318,9 +318,17 @@ fn authorize(project: &Project, invocation: &Invocation, warnings: &mut Vec<Stri
         for (id, claim) in ClaimStore::load(prefix)?.iter() {
             let live = crate::claims::liveness(claim);
             if !live.is_stale() {
+                // Only the source's records live in this checkout; a claim in the target's
+                // store has no record here to note, so it gets no hint.
+                let hint = match live {
+                    crate::claims::Liveness::Unverifiable(_) if prefix == &invocation.source => {
+                        crate::commands::release::hint(id, &claim.session)
+                    }
+                    _ => String::new(),
+                };
                 return Err(Error::Claimed(
                     id.clone(),
-                    Ctx::describe_claim(claim, &live),
+                    Ctx::describe_claim(claim, &live) + &hint,
                 ));
             }
         }
