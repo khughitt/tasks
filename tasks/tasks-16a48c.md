@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-16a48c
 created: 2026-10-15T12:37:58Z
-updated: 2026-10-15T18:09:39Z
+updated: 2026-10-15T18:11:20Z
 started: 2026-10-15T18:04:52Z
 depends: []
 parent: tasks-984769
@@ -31,3 +31,4 @@ Where: src/commands/mod.rs (`load`), src/commands/show.rs (`recorded_elsewhere`,
   provenance: {"harness_session":"codex:01a140a7-9d0a-7fb3-9bbc-121ffeb29423","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-15T18:05:38Z (fix/tasks-16a48c): Confirmed load returns bare TaskNotFound before checking claims/parks; show already resolves that case. Scope: shared recorded lookup, load refusal using existing occupants and retry quoting, CLI regressions, record-home spec and shipped skill. tasks-a984f1 remains todo, so occupied-checkout rule 1 stays unchanged.
 - 2026-10-15T18:09:39Z (fix/tasks-16a48c): review: impl round 1 — verdict: revise; findings: Important 1; reviewer: codex
+- 2026-10-15T18:11:20Z (fix/tasks-16a48c): Verification: baseline just test-fast passed; three new CLI regressions observed RED then GREEN. Review correction added bare edit across each case, RED then GREEN, no editor launch on refusal. Final just test-fast passed 1489 tests (4 ignored), just check passed. Scope includes note, flagged and bare edit with executable retries and unchanged record/store on refusal.
