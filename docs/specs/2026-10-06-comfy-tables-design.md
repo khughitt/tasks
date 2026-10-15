@@ -125,9 +125,11 @@ full text (`user, review`).
 - **`claims` stays uncoloured.** It reads the claim stores without opening any checkout,
   so a missing checkout changes nothing (`commands/claims.rs`); colours live in checkout
   configuration, and reading them would weaken that contract.
-- No registered project sets `color` yet, so this shows nothing until tasks-8203e6
-  supplies colours from familiar. That task is separate; this design only consumes the
-  colour.
+- The colour is the project's `color` key in `tasks/.config.toml`, its only source.
+  When this was designed no project set one; since 2026-10-15 every registered project
+  does (ops-40f2a6). tasks-8203e6 had proposed taking colours from familiar instead and
+  closed without that: familiar's identity slots are shared between projects and publish
+  no hex (ops-b31634).
 - Status, priority, date recency and the other roles render as today. The spike's
   missing colours came from unpainted title cells and are covered by the first bullet.
 
@@ -183,7 +185,7 @@ release binary (+3.8%), +7 s on a clean release build (tasks-8a14be).
 
 ## 11. Out of scope
 
-- Where project colours come from (tasks-8203e6) and a config file for defaults
-  (tasks-0e366f).
+- Where project colours come from (settled by tasks-8203e6: the `color` key) and a
+  config file for defaults (tasks-0e366f).
 - `show`, `next` and `graph` output, which are not tables.
 - Truncating cells: nothing is cut; narrow terminals fall back as in §3.1.
