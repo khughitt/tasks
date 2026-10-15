@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-15T01:35:10Z
+updated: 2026-10-15T01:35:12Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -79,3 +79,4 @@ Tests: inject the view the way `liveness_with` injects stat.
 - 2026-10-15T01:12:51Z (fix/claim-pid-view): baseline: just test-fast passed on fix/claim-pid-view at 53795c3 before Task 1
 - 2026-10-15T01:34:59Z (fix/claim-pid-view): attached: pidview-acceptance.sh (10795 bytes): Disposable acceptance script for the PID-view design: unshare cases, private HOME/config/state, deleted after
 - 2026-10-15T01:35:10Z (fix/claim-pid-view): attached: pidview-acceptance-evidence.json (1730 bytes): Acceptance results: six unshare cases with verdicts, all pass; case 3 observed procfs device reuse (41) with the controller alive
+- 2026-10-15T01:35:12Z (fix/claim-pid-view): acceptance: 6 pass, 0 unavailable (worktree build 0.3.0; case 3 reused procfs dev 41 while A's setsid controller stayed alive, claim kept). First run hit two script bugs, not product bugs: waitfor returned 1 after any wait, and unshare --fork ignores SIGTERM so cleanup hung until SIGKILL; both fixed in the attached script
