@@ -8,7 +8,8 @@ was rebuilt and reinstalled from main on this host.
 
 Amended 2026-10-15 (tasks-af3aac, approved by Keith after spec review round 1): §4 accepts relay's Codex worker
 rows and selects among rows sharing one process by the thread hint. See
-[Relay worker rows](#relay-worker-rows-2026-10-15-amendment).
+[Relay worker rows](#relay-worker-rows-2026-10-15-amendment). The amendment landed on
+main after a final independent review, and the tracker was reinstalled from main on this host.
 
 ## Outcome and scope
 
