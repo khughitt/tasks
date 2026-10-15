@@ -62,9 +62,10 @@ integration, or its step children are filed with no `--plan`/`--step`. Then
    file), and it reverses part of the 2026-09-29 decision.
 3. **Linked projects: a checkout-relative root.** Let a linked project's config name
    document roots in the code checkout, or serve them through an external-reference
-   scheme. **Rejected by the user, 2026-10-15:** tasks stays silent toward the project.
-   A linked project links only overlay documents, so the team carries no tasks config or
-   links. tasks-3eda29 is proposed for drop as working as designed.
+   scheme. **Accepted in principle by the user, 2026-10-15,** under one invariant: the
+   overlay may depend on the code repository, but nothing of tasks may reach the code
+   repository. Roots are declared only in the overlay's config, read-only, with no link,
+   config or write in the code repository. Design: tasks-6360ac.
 
 ## Unanswered questions
 
@@ -72,7 +73,11 @@ integration, or its step children are filed with no `--plan`/`--step`. Then
   anything prevent writing them in the worktree? *Research task below; mind6's
   guidance and the flows skill can answer.*
 - ~~Should a linked project be able to link a team document that lives in the code
-  repository?~~ *Answered by the user, 2026-10-15: no (alternative 3).*
+  repository?~~ *Answered by the user, 2026-10-15: yes, from the overlay side only
+  (alternative 3).*
+- For alternative 3: which code worktree does a link resolve in, and what does `check`
+  report for a team document that exists only on an unmerged code branch? *tasks-6360ac,
+  taking tasks-82bd08's finding.*
 - If alternative 2 is chosen, what does main's `check` report for an open task whose
   document is only on a branch? *Design, after the research.*
 
@@ -81,10 +86,12 @@ integration, or its step children are filed with no `--plan`/`--step`. Then
 - Goal: tasks-a73dce, *Link a spec or plan that exists only on its task's branch* (under
   the Record authority lane, tasks-0e432f).
 - Research: tasks-82bd08, *Establish where a branch-only spec or plan can be linked and
-  checked*, narrowed to in-tree projects. tasks-cefa7d waits on it.
-- A design task is filed only if the research shows alternative 1 cannot serve the
-  in-tree case.
+  checked*, exercised on an in-tree project. tasks-cefa7d waits on it.
+- Design: tasks-6360ac, *Design overlay-side document roots in a linked project's code
+  checkout* (planned; depends on tasks-82bd08). tasks-3eda29 waits on it.
+- A design task for the in-tree case is filed only if the research shows alternative 1
+  cannot serve it.
 
 The note-routing reports from the same scope pass need no brief. tasks-16a48c is scoped
-under tasks-984769 (the write error names the checkout its claim or park records), and
-tasks-ae03ed duplicates it.
+under tasks-984769 (the write error names the checkout its claim or park records).
+tasks-ae03ed duplicated it and was dropped.
