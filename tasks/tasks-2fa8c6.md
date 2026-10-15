@@ -8,7 +8,7 @@ complexity: high
 process: planned
 lane: true
 created: 2026-09-30T09:58:25Z
-updated: 2026-10-06T16:49:55Z
+updated: 2026-10-15T01:10:35Z
 depends: []
 tags: []
 source: docs/notes/2026-09-30-delegated-identity-brief.md
@@ -24,3 +24,4 @@ Also group tasks-56b450's completion-policy handoff and tasks-27d515's claim-enu
 ## Notes
 
 - 2026-10-06T16:49:55Z (main): organization: adopted as a lane from the user's approved 2026-10-06 backlog organization; existing child records and their review gates remain intact.
+- 2026-10-15T01:10:35Z (main): evidence for the conflicting Codex identity reports (hq-1bd166, codex-cli 0.162.1): in a multi-agent v2 child CODEX_SESSION_ID is the root session's id and CODEX_THREAD_ID the child's own thread id, which names its rollout; in top-level sessions they are equal. Hook payloads carry session_id (root) and, in a child, agent_id (the child's thread). Details: lore docs/notes/2026-10-02-codex-model-identity-brief.md §5.
