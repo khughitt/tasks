@@ -149,10 +149,10 @@ takeover workaround, Stop aggregation or new authority.
 - tasks-f27fe3 and tasks-673b21: dropped with user approval on 2026-10-08 as covered
   by tasks-f8c9cc. Their reports and original capture remain intact.
 - tasks-fe6c59: done; namespace/process-proof findings below. tasks-b9cbe3 is
-  shelved until a verifiable cross-namespace relationship exists. Filed:
-  tasks-860db2 (P1, planned: judge claim liveness only from the PID view that
-  recorded it) and tasks-19b244 (P2, direct: name the namespace cause in relay
-  refusals). No namespace-aware matching is filed.
+  shelved until a verifiable cross-namespace relationship exists. Follow-ups, both
+  done: tasks-860db2 (tasks 0.3.0: claim liveness is judged only from the PID view
+  that recorded it) and tasks-19b244 (relay refusals name the namespace cause). No
+  namespace-aware matching is filed.
 - tasks-56b450: existing controller completion-policy decision; reuse it for aggregation.
   tasks-0005a6 is done (`note --stamp`); it cannot repair identity delivery.
   tasks-481fd6 stays shelved until its documented Claude live-check wake condition.
@@ -348,7 +348,8 @@ view.
   the host view. Sharing /proc alone would not fix the Codex shape.
 - With a non-harness pid 1 and a private /proc, the truncated chain reads as Outside.
   Relay is skipped and the native Codex level claims a pid-less raw thread key.
-  That is a silent fallback, carried into tasks-860db2's design.
+  That is a silent fallback, carried into tasks-860db2's design, which kept it:
+  the pid-less claim depends on no view, and its one harm, the prune, is gone.
 
 **Candidate matches rejected.**
 - Map a namespace pid 1 with ppid 0 to the unique row named by the native thread.
@@ -367,12 +368,13 @@ that `connect` with EPERM, and the oracle would also have to skip the
 `codex-linux-sandbox` helper when choosing the nearest harness.
 
 **Recommendation.** Keep explicit identity for sandboxed callers, with a
-namespace-specific refusal (tasks-19b244). That refusal must not suggest
-`TASKS_SESSION_PID`: a namespace-local pid becomes a claim the host takes over
-without `--force`. Fix liveness and pruning across views first (tasks-860db2). That
-defect is independent of relay and needs no relay change. It affects every claim
-that carries a pid: relay, explicit, `CLAUDE_PID` and `sid:` claims. A host whose
-Codex profile makes the claim store writable from the sandbox is exposed.
+namespace-specific refusal (tasks-19b244, done). That refusal must not suggest
+`TASKS_SESSION_PID`: before tasks-860db2 a namespace-local pid became a claim the
+host took over without `--force`; since it, such a claim records no view and stays
+held until reboot, release or `--force`. Liveness and pruning across views were
+fixed first (tasks-860db2, done in tasks 0.3.0). That defect was independent of
+relay and needed no relay change. It affected every claim that carries a pid:
+relay, explicit, `CLAUDE_PID` and `sid:` claims.
 
 Namespace-aware matching needs no relay-producer change today, because none would
 help. It would need Codex to allow a sandboxed command to reach a host-side oracle,

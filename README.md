@@ -302,9 +302,12 @@ checks have stopped; silence, a timeout and the shared PID do not establish it.
 Relay process matching also requires hooks and task commands to share a PID
 namespace. A sandbox exposing the Codex ancestor as PID 1 cannot match relay's
 published host PID; this refuses acquisition, and no process evidence inside such a
-sandbox can prove the session (tasks-fe6c59).
-Exact legitimate-owner `TASKS_SESSION` recovery remains available. The live
-acceptance capture used a separately approved host-PID invocation.
+sandbox can prove the session (tasks-fe6c59). The refusal names the PID namespace when
+the nearest harness process is pid 1 with no parent, and recommends setting
+`TASKS_SESSION` to the exact session without `TASKS_SESSION_PID` (a pid from inside the
+namespace keeps the claim held after the session ends; see below), or running with the
+host PID view. The live acceptance capture used a separately approved host-PID
+invocation.
 
 A claim records the PID view its pid was established in: the PID namespace that the
 writer's `/proc` numbers pids in. Only a command in that same view judges the pid.
