@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: fix/claim-pid-view
 created: 2026-10-14T19:05:20Z
-updated: 2026-10-14T23:37:27Z
+updated: 2026-10-15T00:19:20Z
 started: 2026-10-14T19:36:56Z
 depends: []
 parent: tasks-2fa8c6
@@ -67,3 +67,4 @@ Tests: inject the view the way `liveness_with` injects stat.
 - 2026-10-14T23:37:26Z (fix/claim-pid-view): plan revision 2: evidence in follow_holder with note test; occupants via is_stale with diagnosis test; NSpid entry parsed as positive pid; one filter per test-one, integration tests before the verdict; acceptance case 3 uses --map-root-user + setsid and asserts A's view; version 0.3.0. Execution: inline executing-plans + fresh read-only whole-branch reviewer
 - 2026-10-14T23:37:27Z (fix/claim-pid-view): parked (waiting on user, review): user reviews plan revision 2 (docs/plans/2026-10-14-claim-pid-view.md in .worktrees/claim-pid-view); on approval the agent runs the Setup baseline and starts tasks-56d39d (Task 1) inline
   provenance: {"harness_session":"claude-code:fb19dd4f-635e-4934-86ce-7f6186000af8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T00:19:20Z (fix/claim-pid-view): review: plan round 2 — verdict: revise; findings: P2 3; reviewer: human
