@@ -17,6 +17,12 @@ pub struct Resolved {
 const SET_EXPLICIT: &str =
     "set TASKS_SESSION and TASKS_SESSION_PID to name this session explicitly";
 
+/// The advice for a caller in a child PID namespace. A pid it can name is namespace-local,
+/// and a claim carrying one stays held after the session ends, so it must not be offered.
+const SET_SESSION_ONLY: &str = "set TASKS_SESSION to this session's exact id, without \
+     TASKS_SESSION_PID (a pid from this namespace keeps the claim held after the session \
+     ends), or run with the host PID view";
+
 fn refuse(detail: String) -> Error {
     Error::Config(format!("relay identity: {detail}; {SET_EXPLICIT}"))
 }
@@ -53,34 +59,49 @@ pub fn same_session(claim_session: &str, harness: &str, session_id: &str) -> boo
 /// diagnosed against each predicate in turn. A row with no handle cannot be tied to this
 /// process, but when the session hint names it, the agent is present and only its handle
 /// is missing, which the operator must be able to tell apart from an absent agent.
+///
+/// A boundary at pid 1 with no parent exists only in a child PID namespace (the initial
+/// pid 1 is init, never a harness): a sandbox helper hides the session process, and no
+/// row can match from here (tasks-fe6c59).
 fn no_match(
     agents: &[crate::relay::snapshot::Agent],
     same_process: &[&crate::relay::snapshot::Agent],
     boundary: &Boundary,
     boot_id: &str,
     hint: Option<&str>,
-) -> String {
+) -> Error {
     let nearest = &boundary.entry;
     let harness = boundary.harness;
+    if nearest.pid == 1 && nearest.ppid == 0 {
+        return Error::Config(format!(
+            "relay identity: the nearest {} ancestor is pid 1 with no parent, so this command \
+             runs in a PID namespace that hides the harness session process (a sandbox helper \
+             is pid 1) and relay cannot match it from here; {SET_SESSION_ONLY}",
+            nearest.comm
+        ));
+    }
     for agent in same_process {
         let process = agent
             .process
             .as_ref()
             .expect("filtered on a present handle");
         if agent.harness != harness {
-            return format!(
+            return refuse(format!(
                 "the agent on pid {} is {:?}, but the nearest harness process ({:?}) is {:?}",
                 nearest.pid, agent.harness, nearest.comm, harness
-            );
+            ));
         }
         if process.platform != "linux" {
-            return format!(
+            return refuse(format!(
                 "agent {} has a {:?} handle, which is not an identity candidate",
                 agent.id, process.platform
-            );
+            ));
         }
         if process.boot_id.as_deref() != Some(boot_id) {
-            return format!("agent {} was recorded on an earlier boot", agent.id);
+            return refuse(format!(
+                "agent {} was recorded on an earlier boot",
+                agent.id
+            ));
         }
     }
     if let Some(hint) = hint
@@ -88,17 +109,17 @@ fn no_match(
             agent.process.is_none() && agent.harness == harness && agent.session_id == hint
         })
     {
-        return format!(
+        return refuse(format!(
             "agent {} is this {} session but relay recorded no process handle for it: relay's \
              hook found no {} session process among its ancestors, or found only a daemon or \
              pty host",
             agent.id, harness, harness
-        );
+        ));
     }
-    format!(
+    refuse(format!(
         "no relay agent matches the nearest {} ancestor, pid {}",
         nearest.comm, nearest.pid
-    )
+    ))
 }
 
 /// `Ok(None)` means the caller is out of scope and the native ladder applies unchanged.
@@ -167,13 +188,13 @@ pub fn resolve(
     let agent = match qualifying.as_slice() {
         [one] => *one,
         [] => {
-            return Err(refuse(no_match(
+            return Err(no_match(
                 &snapshot.agents,
                 &same_process,
                 &boundary,
                 boot_id,
                 hint.as_deref(),
-            )));
+            ));
         }
         many => {
             let ids: Vec<&str> = many.iter().map(|agent| agent.id.as_str()).collect();
@@ -549,6 +570,35 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("no relay agent matches"), "{error}");
+    }
+
+    #[test]
+    fn a_pid_one_boundary_without_a_parent_names_the_pid_namespace() {
+        // A Codex sandbox runs each command in a child PID namespace whose pid 1 is a
+        // codex-named helper; the session relay recorded by its host pid is invisible.
+        // Following the usual advice would record a namespace-local TASKS_SESSION_PID.
+        let session = agent("codex", "s1", "linux", 4242, 800, BOOT);
+        let e = env(&[("CODEX_THREAD_ID", "s1")]);
+        let mut helper = boundary("codex", "codex", 1, 900);
+        helper.entry.ppid = 0;
+        let error = go(Scope::Harness(helper), vec![session.clone()], &e)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("PID namespace"), "{error}");
+        assert!(error.contains("without TASKS_SESSION_PID"), "{error}");
+        assert!(error.contains("host PID view"), "{error}");
+        assert!(!error.contains(SET_EXPLICIT), "{error}");
+
+        // Any other boundary keeps the ordinary refusal and its advice.
+        for (pid, ppid) in [(1, 1), (42, 0), (42, 1)] {
+            let mut other = boundary("codex", "codex", pid, 900);
+            other.entry.ppid = ppid;
+            let error = go(Scope::Harness(other), vec![session.clone()], &e)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("no relay agent matches"), "{error}");
+            assert!(error.ends_with(SET_EXPLICIT), "{error}");
+        }
     }
 
     #[test]
