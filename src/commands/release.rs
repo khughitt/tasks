@@ -202,7 +202,13 @@ fn write_note(
     live: &Liveness,
     why: &str,
 ) -> Result<Task> {
-    let (mut task, raw) = ctx.project.read_task_with_raw(id)?;
+    let (mut task, raw) = ctx
+        .project
+        .read_task_with_raw(id)
+        .map_err(|error| match error {
+            Error::TaskNotFound(_) => error.with_suffix(&elsewhere(ctx, id, claim)),
+            other => other,
+        })?;
     super::refuse_stale_copy(ctx, &task, &raw, Writer::Release(&claim.session))?;
     super::guard_write(&ctx.registry, &ctx.shorthand, &task)?;
     let owner = super::owner_name(&ctx.project)?;
@@ -225,6 +231,21 @@ fn summary(claim: &Claim, live: &Liveness, why: &str) -> String {
         Ctx::session_label(claim),
         claim.owner
     )
+}
+
+/// A record missing here: the claim stays, and when the holder's worktree has the record,
+/// the rerun there is the way forward (a hint elsewhere may have sent the person here).
+fn elsewhere(ctx: &Ctx, id: &TaskId, claim: &Claim) -> String {
+    let worktree = Path::new(&claim.worktree);
+    if worktree != ctx.project.root && worktree.join(format!("tasks/{id}.md")).is_file() {
+        format!(
+            "; the claim stays. Its record is in {0}: rerun this release there with \
+             `tasks -C {0} release {id} \"<why>\"`",
+            claim.worktree
+        )
+    } else {
+        "; the claim stays".to_string()
+    }
 }
 
 fn landed(id: &TaskId) -> String {
