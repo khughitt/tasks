@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: planned
 created: 2026-10-15T10:02:07Z
-updated: 2026-10-15T10:02:09Z
+updated: 2026-10-15T10:02:24Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -22,3 +22,4 @@ Done: tests over relay's shared fixture test/fixtures/registry-workers.json (ven
 ## Notes
 
 - 2026-10-15T10:02:09Z (main): concerns: relay-6825f7 extension — tasks side of relay's Codex worker-row contract
+- 2026-10-15T10:02:24Z (main): correction: the concerns line above is mistaken (relay-6825f7 is still open; this piece comes from its approved spec, not from closed work falling short) — disregard it
