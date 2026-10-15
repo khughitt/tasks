@@ -28343,8 +28343,7 @@ TASKS_SESSION=codex:private-worker "$TASKS_BIN" done {closed} recovered
     );
     let root_error = env.read(env.home.path(), "root.err");
     assert!(
-        root_error.contains("worker registration")
-            && root_error.contains("relay-f56e30")
+        root_error.contains("no row for this Codex worker thread")
             && root_error.contains("TASKS_SESSION"),
         "{root_error}"
     );
@@ -28352,7 +28351,7 @@ TASKS_SESSION=codex:private-worker "$TASKS_BIN" done {closed} recovered
     let unrelated = env.read(env.home.path(), "unrelated.err");
     assert!(unrelated.contains("native actor hint") && unrelated.contains("TASKS_SESSION"));
     assert!(
-        !unrelated.contains("relay-f56e30")
+        !unrelated.contains("worker thread")
             && !unrelated.contains("unrelated-row")
             && !unrelated.contains("private-worker")
     );
@@ -28414,6 +28413,84 @@ TASKS_SESSION=codex:private-worker "$TASKS_BIN" done {closed} recovered
         serde_json::from_str(&env.read(env.home.path(), "released.json")).unwrap();
     assert!(released["claims"].as_array().unwrap().is_empty());
     assert_eq!(env.json(&dir, &["show", &closed])["task"]["status"], "done");
+}
+
+/// Spec round 1 finding: relay creates a worker's row even when its root row is absent, so a
+/// lone worker row can qualify on the shared process. A command without that worker's thread
+/// (a controller or sibling missing its exports) must not resolve as the worker, and its
+/// refusals must leave the claim store and every record byte-identical.
+#[test]
+fn delegated_relay_sole_worker_row_needs_its_thread() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let free = id_of(env.json(&dir, &["add", "Free"]));
+    let held = id_of(env.json(&dir, &["add", "Held by the worker"]));
+    let state = relay_on(&env);
+    let script = format!(
+        r#"set -e
+{}
+SCOPE=worker ROOT_ID=codex:private-root
+export SCOPE ROOT_ID
+write_registry
+CODEX_SESSION_ID=private-root CODEX_THREAD_ID=private-worker "$TASKS_BIN" start {held}
+"$TASKS_BIN" show {held} > "$HOME/held.json"
+refuse() {{
+    cp tasks/{free}.md "$HOME/before-free.md"
+    cp tasks/{held}.md "$HOME/before-held.md"
+    cp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+    if "$TASKS_BIN" "$@" > "$HOME/refuse.out" 2> "$HOME/refuse.err"; then exit 93; fi
+    cmp tasks/{free}.md "$HOME/before-free.md"
+    cmp tasks/{held}.md "$HOME/before-held.md"
+    cmp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
+}}
+for mode in absent session-only matching-session; do
+    unset CODEX_SESSION_ID CODEX_THREAD_ID
+    case "$mode" in
+        absent) : ;;
+        session-only) export CODEX_SESSION_ID=private-root ;;
+        matching-session) export CODEX_SESSION_ID=private-worker ;;
+    esac
+    refuse start {free}
+    cp "$HOME/refuse.err" "$HOME/start-$mode.err"
+    refuse park {held} refused
+    refuse done {held} refused
+done
+"#,
+        shim_env(&state, "codex", "private-worker")
+    );
+    let out = common::harness_shim(&dir, env.home.path(), "codex", &script);
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let held: serde_json::Value =
+        serde_json::from_str(&env.read(env.home.path(), "held.json")).unwrap();
+    assert_eq!(held["claim"]["session"], "codex:private-worker");
+    let absent = env.read(env.home.path(), "start-absent.err");
+    assert!(
+        absent.contains("Codex worker row")
+            && absent.contains("CODEX_THREAD_ID")
+            && absent.contains("TASKS_SESSION"),
+        "{absent}"
+    );
+    let session_only = env.read(env.home.path(), "start-session-only.err");
+    assert!(session_only.contains("native actor hint"), "{session_only}");
+    // The worker's own id as a session export passes the ordinary hint check; only the
+    // worker-thread guard refuses it.
+    let matching_session = env.read(env.home.path(), "start-matching-session.err");
+    assert!(
+        matching_session.contains("Codex worker row")
+            && matching_session.contains("CODEX_THREAD_ID"),
+        "{matching_session}"
+    );
+    for error in [&absent, &session_only, &matching_session] {
+        assert!(
+            !error.contains("private-worker") && !error.contains("private-root"),
+            "{error}"
+        );
+    }
 }
 
 #[test]

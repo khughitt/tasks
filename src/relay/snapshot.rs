@@ -233,15 +233,43 @@ fn parse_agent(key: &str, value: &serde_json::Value) -> Result<Agent> {
         return Err(invalid(&format!("agent {key:?} has an inconsistent id")));
     }
     let scope = text_field(value, "scope")?;
+    // A Codex worker shares its controller's process and names the root session it belongs
+    // to; no other row carries a root, not even a null one (relay spec 2026-10-15, mirrored
+    // from relay's validator).
+    let worker = harness == "codex" && scope == "worker";
     let expected_scope = if harness == "opencode" {
         "process"
     } else {
         "session"
     };
-    if scope != expected_scope {
+    if !worker && scope != expected_scope {
         return Err(invalid(&format!(
             "agent {key:?} has scope {scope:?}, expected {expected_scope:?}"
         )));
+    }
+    match (worker, value.get("root")) {
+        (true, Some(root)) => {
+            let valid = root.as_str().is_some_and(|root| {
+                root != id
+                    && root
+                        .strip_prefix("codex:")
+                        .is_some_and(|suffix| !suffix.trim().is_empty())
+            });
+            if !valid {
+                return Err(invalid(&format!("agent {key:?} has an invalid root")));
+            }
+        }
+        (true, None) => {
+            return Err(invalid(&format!(
+                "agent {key:?} is a worker row without a root"
+            )));
+        }
+        (false, Some(_)) => {
+            return Err(invalid(&format!(
+                "agent {key:?} has a root but is not a worker row"
+            )));
+        }
+        (false, None) => {}
     }
     let cwd = text_field(value, "cwd")?;
     if !Path::new(&cwd).is_absolute() {
@@ -590,6 +618,121 @@ mod tests {
             );
             let error = parse(&text).unwrap_err().to_string();
             assert!(error.contains("schema must be 2"), "{schema}: {error}");
+        }
+    }
+
+    const WORKERS: &str = include_str!("../../tests/fixtures/relay/registry-workers.json");
+
+    #[test]
+    fn relay_worker_rows_fixture_parses() {
+        let snapshot = parse(WORKERS).unwrap();
+        let scopes: Vec<(&str, &str)> = snapshot
+            .agents
+            .iter()
+            .map(|agent| (agent.id.as_str(), agent.scope.as_str()))
+            .collect();
+        assert_eq!(
+            scopes,
+            vec![
+                (
+                    "claude-code:0199f000-0000-7000-8000-0000000000c1",
+                    "session"
+                ),
+                ("codex:0199f000-0000-7000-8000-000000000001", "session"),
+                ("codex:0199f000-0000-7000-8000-000000000002", "worker"),
+                ("codex:0199f000-0000-7000-8000-000000000003", "worker"),
+            ]
+        );
+        let handles: Vec<Handle> = snapshot
+            .agents
+            .iter()
+            .filter(|agent| agent.harness == "codex")
+            .map(|agent| agent.process.clone().unwrap())
+            .collect();
+        assert!(
+            handles.windows(2).all(|pair| pair[0] == pair[1]),
+            "{handles:?}"
+        );
+    }
+
+    /// A valid worker row; tests override one field at a time from here.
+    fn worker_json(overrides: &[(&str, &str)]) -> String {
+        let mut fields: Vec<(&str, &str)> = vec![
+            ("id", "\"codex:w1\""),
+            ("sessionId", "\"w1\""),
+            ("scope", "\"worker\""),
+            ("root", "\"codex:r\""),
+        ];
+        fields.extend_from_slice(overrides);
+        agent_json(&fields)
+    }
+
+    #[test]
+    fn relay_worker_row_is_a_codex_row_with_a_root() {
+        let snapshot = parse(&snapshot_json("codex:w1", &worker_json(&[]))).unwrap();
+        assert_eq!(snapshot.agents[0].scope, "worker");
+
+        let other_harness = |harness: &str| {
+            agent_json(&[
+                ("id", format!("\"{harness}:w1\"").as_str()),
+                ("harness", format!("\"{harness}\"").as_str()),
+                ("sessionId", "\"w1\""),
+                ("scope", "\"worker\""),
+                ("root", "\"codex:r\""),
+            ])
+        };
+        let cases: Vec<(&str, String, &str)> = vec![
+            (
+                "codex:w1",
+                worker_json(&[("root", "\u{0}")]),
+                "without a root",
+            ),
+            (
+                "codex:w1",
+                worker_json(&[("root", "\"codex:w1\"")]),
+                "invalid root",
+            ),
+            (
+                "codex:w1",
+                worker_json(&[("root", "\"claude-code:r\"")]),
+                "invalid root",
+            ),
+            (
+                "codex:w1",
+                worker_json(&[("root", "\"codex:\"")]),
+                "invalid root",
+            ),
+            (
+                "codex:w1",
+                worker_json(&[("root", "\"codex: \"")]),
+                "invalid root",
+            ),
+            ("codex:w1", worker_json(&[("root", "7")]), "invalid root"),
+            ("codex:w1", worker_json(&[("root", "null")]), "invalid root"),
+            (
+                "codex:s1",
+                agent_json(&[("root", "\"codex:r\"")]),
+                "not a worker row",
+            ),
+            (
+                "codex:s1",
+                agent_json(&[("root", "null")]),
+                "not a worker row",
+            ),
+            (
+                "claude-code:w1",
+                other_harness("claude-code"),
+                "expected \"session\"",
+            ),
+            (
+                "opencode:w1",
+                other_harness("opencode"),
+                "expected \"process\"",
+            ),
+        ];
+        for (key, agent, expected) in cases {
+            let error = parse(&snapshot_json(key, &agent)).unwrap_err().to_string();
+            assert!(error.contains(expected), "{key} {agent}: {error}");
         }
     }
 }

@@ -1,0 +1,37 @@
+{
+  "schema": 2,
+  "generation": "3f9c1a52-6b0e-4d7a-9c21-5e8f0b7d4a10",
+  "revision": 7,
+  "agents": {
+    "codex:0199f000-0000-7000-8000-000000000001": {
+      "id": "codex:0199f000-0000-7000-8000-000000000001", "harness": "codex",
+      "sessionId": "0199f000-0000-7000-8000-000000000001", "scope": "session",
+      "process": { "platform": "linux", "host": "host", "bootId": "12345678-1234-4234-8234-123456789abc", "pid": 4242, "start": "123456" },
+      "cwd": "/home/user/project", "repoRoot": "/home/user/project", "remote": null,
+      "projectKey": "/home/user/project", "project": "project", "state": "done", "updatedAt": 1760000000000
+    },
+    "codex:0199f000-0000-7000-8000-000000000002": {
+      "id": "codex:0199f000-0000-7000-8000-000000000002", "harness": "codex",
+      "sessionId": "0199f000-0000-7000-8000-000000000002", "scope": "worker",
+      "root": "codex:0199f000-0000-7000-8000-000000000001",
+      "process": { "platform": "linux", "host": "host", "bootId": "12345678-1234-4234-8234-123456789abc", "pid": 4242, "start": "123456" },
+      "cwd": "/home/user/project", "repoRoot": "/home/user/project", "remote": null,
+      "projectKey": "/home/user/project", "project": "project", "state": "working", "updatedAt": 1760000001000
+    },
+    "codex:0199f000-0000-7000-8000-000000000003": {
+      "id": "codex:0199f000-0000-7000-8000-000000000003", "harness": "codex",
+      "sessionId": "0199f000-0000-7000-8000-000000000003", "scope": "worker",
+      "root": "codex:0199f000-0000-7000-8000-000000000001",
+      "process": { "platform": "linux", "host": "host", "bootId": "12345678-1234-4234-8234-123456789abc", "pid": 4242, "start": "123456" },
+      "cwd": "/home/user/project", "repoRoot": "/home/user/project", "remote": null,
+      "projectKey": "/home/user/project", "project": "project", "state": "done", "updatedAt": 1760000002000
+    },
+    "claude-code:0199f000-0000-7000-8000-0000000000c1": {
+      "id": "claude-code:0199f000-0000-7000-8000-0000000000c1", "harness": "claude-code",
+      "sessionId": "0199f000-0000-7000-8000-0000000000c1", "scope": "session",
+      "process": { "platform": "linux", "host": "host", "bootId": "12345678-1234-4234-8234-123456789abc", "pid": 5151, "start": "654321" },
+      "cwd": "/home/user/other", "repoRoot": null, "remote": null,
+      "projectKey": "/home/user/other", "project": "other", "state": "idle", "updatedAt": 1760000003000
+    }
+  }
+}

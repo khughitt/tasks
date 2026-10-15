@@ -122,6 +122,21 @@ fn no_match(
     ))
 }
 
+/// The actor hint names none of the qualifying rows. When one of them is this caller's own
+/// Codex root, the caller is a worker relay has not registered, and it must not claim as its
+/// controller (delegated identity §4, 2026-10-15 amendment). Neither message names a session.
+fn hint_mismatch(root: Option<&str>, candidates: &[&crate::relay::snapshot::Agent]) -> Error {
+    let detail = if root.is_some_and(|root| candidates.iter().any(|agent| agent.session_id == root))
+    {
+        "relay has no row for this Codex worker thread (the relay writing the registry predates \
+         worker rows, or its Codex hooks are not installed), so the worker cannot claim as its \
+         controller"
+    } else {
+        "the native actor hint does not match any qualifying relay row"
+    };
+    refuse(detail.into())
+}
+
 /// `Ok(None)` means the caller is out of scope and the native ladder applies unchanged.
 /// `load` is invoked only once scope is established as a harness boundary.
 pub fn resolve(
@@ -153,6 +168,17 @@ pub fn resolve(
     // Validate native inputs before reading the registry, so malformed values are
     // diagnosed without becoming a match failure.
     let hint = hint_for(harness, get)?;
+    // Both Codex exports, already validated by `hint_for`. The root is the claim's
+    // association (§2) and names this caller's own root row in a refusal; only the thread
+    // can select a worker row.
+    let (root, thread) = if harness == "codex" {
+        (
+            crate::native::value(get, "CODEX_SESSION_ID").map_err(refuse)?,
+            crate::native::value(get, "CODEX_THREAD_ID").map_err(refuse)?,
+        )
+    } else {
+        (None, None)
+    };
     // The loader's own errors name the cause and the path, but they are registry errors,
     // not identity errors: they must still carry the §5 recovery instruction, because a
     // caller whose registry is missing needs to be told how to name itself.
@@ -196,30 +222,39 @@ pub fn resolve(
                 hint.as_deref(),
             ));
         }
-        many => {
-            let ids: Vec<&str> = many.iter().map(|agent| agent.id.as_str()).collect();
-            return Err(refuse(format!(
-                "several relay agents match pid {}: {}",
-                nearest.pid,
-                ids.join(", ")
-            )));
-        }
+        // Codex workers share their controller's process (relay spec 2026-10-15), so the
+        // actor hint tells their rows apart. Snapshot keys are unique and each id is
+        // `codex:<sessionId>`, so at most one row carries the hint.
+        many => match (harness, hint.as_deref()) {
+            ("codex", Some(hint)) => match many.iter().find(|agent| agent.session_id == hint) {
+                Some(agent) => *agent,
+                None => return Err(hint_mismatch(root.as_deref(), many)),
+            },
+            _ => {
+                let ids: Vec<&str> = many.iter().map(|agent| agent.id.as_str()).collect();
+                return Err(refuse(format!(
+                    "several relay agents match pid {}: {}",
+                    nearest.pid,
+                    ids.join(", ")
+                )));
+            }
+        },
     };
 
-    if let Some(hint) = hint
+    if let Some(hint) = hint.as_deref()
         && hint != agent.session_id
     {
-        let root = if harness == "codex" {
-            crate::native::value(get, "CODEX_SESSION_ID").map_err(refuse)?
-        } else {
-            None
-        };
-        let detail = if harness == "codex" && root.as_deref() == Some(agent.session_id.as_str()) {
-            "only the Codex root is registered in relay; worker registration is unavailable (relay-f56e30), so the worker cannot claim as its controller"
-        } else {
-            "the native actor hint does not match the qualifying relay row"
-        };
-        return Err(refuse(detail.into()));
+        return Err(hint_mismatch(root.as_deref(), &[agent]));
+    }
+    // Process evidence cannot tell a worker from its controller or siblings, which share the
+    // handle: only the worker's own thread selects its row, sole or not. Reaching here with
+    // a worker row means the caller exports no thread.
+    if agent.scope == "worker" && thread.as_deref() != Some(agent.session_id.as_str()) {
+        return Err(refuse(
+            "the qualifying relay row is a Codex worker row, and only that worker's own \
+             CODEX_THREAD_ID selects it; this caller exports none"
+                .into(),
+        ));
     }
 
     let process = agent
@@ -228,13 +263,7 @@ pub fn resolve(
         .expect("filtered on a present handle");
     Ok(Some(Resolved {
         session: agent.id.clone(),
-        root_session: if harness == "codex" {
-            crate::native::value(get, "CODEX_SESSION_ID")
-                .map_err(refuse)?
-                .map(|id| format!("codex:{id}"))
-        } else {
-            None
-        },
+        root_session: root.map(|id| format!("codex:{id}")),
         pid: process.pid,
         pid_start: process.start,
         boot_id: boot_id.to_string(),
@@ -739,5 +768,150 @@ mod tests {
             .to_string();
             assert!(error.contains(&format!("/proc/450/{file}")), "{error}");
         }
+    }
+
+    const WORKERS: &str = include_str!("../../tests/fixtures/relay/registry-workers.json");
+    const FIXTURE_BOOT: &str = "12345678-1234-4234-8234-123456789abc";
+    const R: &str = "0199f000-0000-7000-8000-000000000001";
+    const W1: &str = "0199f000-0000-7000-8000-000000000002";
+    const W2: &str = "0199f000-0000-7000-8000-000000000003";
+
+    /// Resolve against the vendored worker fixture from its shared Codex process.
+    fn workers(e: &impl Fn(&str) -> Option<OsString>) -> Result<Option<Resolved>> {
+        resolve(
+            ancestor("codex", 4242, 123456),
+            || crate::relay::snapshot::parse(WORKERS),
+            "host",
+            Some(FIXTURE_BOOT),
+            e,
+        )
+    }
+
+    fn worker(session: &str) -> Agent {
+        Agent {
+            scope: "worker".into(),
+            ..agent("codex", session, "linux", 42, 900, BOOT)
+        }
+    }
+
+    #[test]
+    fn relay_worker_rows_select_by_thread() {
+        for thread in [R, W1, W2] {
+            let resolved = workers(&env(&[
+                ("CODEX_SESSION_ID", R),
+                ("CODEX_THREAD_ID", thread),
+            ]))
+            .unwrap()
+            .unwrap();
+            assert_eq!(resolved.session, format!("codex:{thread}"));
+            assert_eq!(resolved.root_session, Some(format!("codex:{R}")));
+            assert_eq!((resolved.pid, resolved.pid_start), (4242, 123456));
+        }
+    }
+
+    #[test]
+    fn relay_worker_rows_refuse_an_unregistered_thread_without_values() {
+        let unknown = "0199f000-0000-7000-8000-0000000000ff";
+        let error = workers(&env(&[
+            ("CODEX_SESSION_ID", R),
+            ("CODEX_THREAD_ID", unknown),
+        ]))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("no row for this Codex worker thread")
+                && error.contains("TASKS_SESSION"),
+            "{error}"
+        );
+        assert!(!error.contains("0199f000"), "{error}");
+    }
+
+    #[test]
+    fn relay_worker_rows_without_a_hint_stay_ambiguous() {
+        let error = workers(&env(&[])).unwrap_err().to_string();
+        assert!(
+            error.contains("several relay agents match pid 4242"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn relay_worker_rows_session_only_selects_the_root() {
+        // §1's known limit: without a thread, the root's session names the root row.
+        let resolved = workers(&env(&[("CODEX_SESSION_ID", R)])).unwrap().unwrap();
+        assert_eq!(resolved.session, format!("codex:{R}"));
+    }
+
+    #[test]
+    fn relay_worker_row_alone_needs_its_own_thread() {
+        let rows = || vec![worker("w1")];
+        let absent = go(ancestor("codex", 42, 900), rows(), &env(&[]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            absent.contains("Codex worker row")
+                && absent.contains("CODEX_THREAD_ID")
+                && absent.contains("TASKS_SESSION"),
+            "{absent}"
+        );
+        assert!(!absent.contains("w1"), "{absent}");
+        let session_only = go(
+            ancestor("codex", 42, 900),
+            rows(),
+            &env(&[("CODEX_SESSION_ID", "r")]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(session_only.contains("native actor hint"), "{session_only}");
+        // A session export equal to the worker's id passes the ordinary hint check, so only
+        // the worker-thread guard refuses it: a session export never selects a worker row.
+        let matching_session = go(
+            ancestor("codex", 42, 900),
+            rows(),
+            &env(&[("CODEX_SESSION_ID", "w1")]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            matching_session.contains("Codex worker row")
+                && matching_session.contains("CODEX_THREAD_ID"),
+            "{matching_session}"
+        );
+        assert!(!matching_session.contains("w1"), "{matching_session}");
+        let own = go(
+            ancestor("codex", 42, 900),
+            rows(),
+            &env(&[("CODEX_SESSION_ID", "r"), ("CODEX_THREAD_ID", "w1")]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(own.session, "codex:w1");
+    }
+
+    #[test]
+    fn relay_worker_selection_is_codex_only_and_ignores_scope() {
+        let claude = go(
+            ancestor("claude", 42, 900),
+            vec![
+                agent("claude-code", "c1", "linux", 42, 900, BOOT),
+                agent("claude-code", "c2", "linux", 42, 900, BOOT),
+            ],
+            &env(&[("CLAUDE_CODE_SESSION_ID", "c1")]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(claude.contains("several relay agents match"), "{claude}");
+        // Two root sessions hosted by one codex process are separated the same way.
+        let resolved = go(
+            ancestor("codex", 42, 900),
+            vec![
+                agent("codex", "s1", "linux", 42, 900, BOOT),
+                agent("codex", "s2", "linux", 42, 900, BOOT),
+            ],
+            &env(&[("CODEX_THREAD_ID", "s2")]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved.session, "codex:s2");
     }
 }
