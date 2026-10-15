@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T10:17:02Z
+updated: 2026-10-15T10:17:04Z
 started: 2026-10-15T08:25:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -70,3 +70,4 @@ Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f1105
 - 2026-10-15T10:05:49Z (feat/claim-release): review: impl round 1 — verdict: accept; findings: Minor 9; reviewer: claude-code/claude-opus-5-5
 - 2026-10-15T10:12:41Z (feat/claim-release): review: impl round 2 — verdict: revise; findings: Important 1, Minor 4; reviewer: claude-code/claude-opus-5-5
 - 2026-10-15T10:17:02Z (feat/claim-release): review: impl round 3 — verdict: accept; findings: Minor 1; reviewer: claude-code/claude-opus-5-5
+- 2026-10-15T10:17:04Z (feat/claim-release): attached: claim-release-ledger.md (4945 bytes): Execution ledger for docs/plans/2026-10-15-claim-release.md: task completions, rulings, review rounds, deferred minors
