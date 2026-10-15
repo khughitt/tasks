@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/codex-worker-rows
 created: 2026-10-15T10:02:07Z
-updated: 2026-10-15T11:36:35Z
+updated: 2026-10-15T12:17:29Z
 started: 2026-10-15T10:35:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -46,3 +46,5 @@ Done: tests over relay's shared fixture test/fixtures/registry-workers.json (ven
 - 2026-10-15T11:36:34Z (feat/codex-worker-rows): handoff (fresh session): spec and plan both approved; execute Native. In .worktrees/codex-worker-rows (branch feat/codex-worker-rows): tasks start tasks-af3aac, run baseline just test-fast, then superpowers:executing-plans over docs/plans/2026-10-15-codex-worker-rows.md — Task 1 = tasks-52b9c6, Task 2 = tasks-2832df (depends on Task 1); start/done each step. Task 1 Step 1 vendors the fixture from relay revision 74ce0d8 (2422 bytes, 4 agents). Then one fresh read-only whole-branch reviewer on the most capable model, corrective rounds per global rules, then the plan's Closeout (spec header 'landed', cargo install --path . after merge, note relay-635fdc).
 - 2026-10-15T11:36:35Z (feat/codex-worker-rows): parked (waiting on agent): Agent (fresh session): in .worktrees/codex-worker-rows run tasks start tasks-af3aac, baseline just test-fast, then execute docs/plans/2026-10-15-codex-worker-rows.md Native via executing-plans (tasks-52b9c6 then tasks-2832df), then whole-branch review and Closeout — see the handoff note.
   provenance: {"harness_session":"claude-code:956af17d-221f-45e8-b1e0-bac730bba1be","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T12:17:29Z (feat/codex-worker-rows): resumed
+  provenance: {"harness_session":"claude-code:a4b748cf-fdd6-45c6-921f-6493e5d5dc34","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
