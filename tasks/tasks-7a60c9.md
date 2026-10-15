@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-15T15:05:35Z
-updated: 2026-10-15T18:16:18Z
+updated: 2026-10-15T18:16:19Z
 depends: []
 tags: [feedback, gap, "from:crew"]
 agent: claude-code/claude-opus-5-5
@@ -27,3 +27,7 @@ Check: in `tests/external_docs.rs`, configure a stub provider whose command writ
 Out of scope: `next` also describes through `show::describe` (`src/commands/list.rs:623`) and fetches the same way. Thread the flag through `describe` so `next` can adopt it later, but do not add `next --no-fetch` unless a caller asks. `check` fetches by design.
 
 Source: crew feedback. Original ask: "Wanted: a flag (e.g. --no-fetch) on show and doc. With it, external references come back as stored, step_found is omitted, doc reports an external reference as unavailable, and no provider command is ever spawned. Local documents still read. Use: a read-only sweep that must not run host-configured commands. Expected: a host with [docs.schemes] configured can be read without spawning the command; test with a provider that writes a sentinel file."
+
+## Notes
+
+- 2026-10-15T18:16:19Z (main): scope: scoped; body rewritten with mechanism (Resolver no-fetch mode, UnavailableCause::FetchDisabled), step_found omitted for open and closed tasks, doc fails doc_not_found, sentinel-provider test; next kept out of scope; checked against main 52346fc
