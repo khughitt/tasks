@@ -1,6 +1,8 @@
 # Codex Worker Rows Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task, inline (Native, the execution method chosen at plan round 1), then dispatch one fresh read-only reviewer on the most capable model for the whole branch. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Status:** approved by Keith on 2026-10-15 after plan round 1 (fix: a session export equal to the worker's id is tested against the worker-thread guard).
 
 **Goal:** tasks accepts relay's Codex worker rows (`scope: "worker"`, `root: "codex:<R>"`) and resolves a Codex caller among rows sharing one process by its thread hint. A worker row is selected only by that worker's own `CODEX_THREAD_ID`.
 
@@ -25,7 +27,7 @@
 ## Review Focus
 
 1. **A sole worker row with no Codex exports.** A controller or sibling command must not resolve as that worker. It is refused before any claim or record write (spec round 1 finding). Pinned in Task 2 (unit test and CLI control).
-2. **A sole worker row with only `CODEX_SESSION_ID`.** It is refused with the generic, value-free hint diagnosis, not adopted. Pinned in Task 2.
+2. **A sole worker row with only `CODEX_SESSION_ID`.** The root's id is refused with the generic, value-free hint diagnosis. The worker's own id passes the ordinary hint check and is refused by the worker-thread guard: a session export never selects a worker row (plan round 1 finding). Pinned in Task 2 (unit test, CLI control, and the mutation check in Step 7).
 3. **`root: null` on a root row**, which a careless producer might emit. It is refused as relay refuses it, not read as absent. Pinned in Task 1.
 4. **Two Claude Code rows on one process with a matching hint.** They still refuse as ambiguous, because the tie-break is Codex-only. Pinned in Task 2.
 5. **A worker thread that relay has not registered, under its root.** It gets the worker-row refusal, never the controller's identity, and the error carries no ids. Pinned in Task 2 (fixture test and the updated `delegated_relay_ownership`).
@@ -332,6 +334,17 @@ Append inside `mod tests` in `src/relay/resolve.rs`:
             .unwrap_err()
             .to_string();
         assert!(session_only.contains("native actor hint"), "{session_only}");
+        // A session export equal to the worker's id passes the ordinary hint check, so only
+        // the worker-thread guard refuses it: a session export never selects a worker row.
+        let matching_session = go(ancestor("codex", 42, 900), rows(), &env(&[("CODEX_SESSION_ID", "w1")]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            matching_session.contains("Codex worker row")
+                && matching_session.contains("CODEX_THREAD_ID"),
+            "{matching_session}"
+        );
+        assert!(!matching_session.contains("w1"), "{matching_session}");
         let own = go(
             ancestor("codex", 42, 900),
             rows(),
@@ -578,11 +591,12 @@ refuse() {{
     cmp tasks/{held}.md "$HOME/before-held.md"
     cmp "$HOME/.local/state/tasks/claims/sci.toml" "$HOME/before.toml"
 }}
-for mode in absent session-only; do
+for mode in absent session-only matching-session; do
     unset CODEX_SESSION_ID CODEX_THREAD_ID
     case "$mode" in
         absent) : ;;
         session-only) export CODEX_SESSION_ID=private-root ;;
+        matching-session) export CODEX_SESSION_ID=private-worker ;;
     esac
     refuse start {free}
     cp "$HOME/refuse.err" "$HOME/start-$mode.err"
@@ -611,7 +625,15 @@ done
     );
     let session_only = env.read(env.home.path(), "start-session-only.err");
     assert!(session_only.contains("native actor hint"), "{session_only}");
-    for error in [&absent, &session_only] {
+    // The worker's own id as a session export passes the ordinary hint check; only the
+    // worker-thread guard refuses it.
+    let matching_session = env.read(env.home.path(), "start-matching-session.err");
+    assert!(
+        matching_session.contains("Codex worker row")
+            && matching_session.contains("CODEX_THREAD_ID"),
+        "{matching_session}"
+    );
+    for error in [&absent, &session_only, &matching_session] {
         assert!(
             !error.contains("private-worker") && !error.contains("private-root"),
             "{error}"
@@ -623,7 +645,11 @@ done
 - [ ] **Step 7: Run the CLI tests**
 
 Run: `just test-one --test cli delegated_relay`
-Expected: PASS, with `delegated_relay_ownership` under its new wording and `delegated_relay_sole_worker_row_needs_its_thread`. To confirm the control has teeth, temporarily delete the `agent.scope == "worker"` check from Step 3 and rerun. The control must fail with exit 93 from `refuse start` (in the `absent` mode). Restore the check before continuing.
+Expected: PASS, with `delegated_relay_ownership` under its new wording and `delegated_relay_sole_worker_row_needs_its_thread`. To confirm the control has teeth, make two temporary mutations to the `agent.scope == "worker"` guard from Step 3, one at a time, and run both `just test-one relay_worker_row_alone` and this command after each:
+1. Delete the guard. The CLI control must fail with exit 93 from `refuse start` in the `absent` mode, and the unit test must fail at `absent`.
+2. Restore the guard but compare `hint.as_deref()` instead of `thread.as_deref()`. The CLI control must fail with exit 93 from `refuse start` in the `matching-session` mode, and the unit test must fail at `matching_session`.
+
+Restore the guard exactly as in Step 3 before continuing.
 
 - [ ] **Step 8: Update the docs**
 
