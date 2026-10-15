@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T09:27:20Z
+updated: 2026-10-15T09:31:28Z
 started: 2026-10-15T08:25:35Z
 depends: []
 parent: tasks-2fa8c6
@@ -64,3 +64,4 @@ Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f1105
 - 2026-10-15T09:27:19Z (feat/claim-release): resumed
   provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T09:27:20Z (feat/claim-release): review: plan round 1 — verdict: revise; findings: must-fix 2, should-fix 3; reviewer: unverified (pasted by user)
+- 2026-10-15T09:31:28Z (feat/claim-release): plan revision 2 (spec revision 5): is_valid_prefix + own-prefix before locks; eligibility rechecked after both locks with a reloaded registry (lock-blocked /proc/locks test); adoption refusals drop the 'clears when it ends' promise, viewless own claim released by a later session; blank reasons refused; Task 3 test reads decoded warnings. Execution: Native (inline executing-plans + fresh whole-branch reviewer)
