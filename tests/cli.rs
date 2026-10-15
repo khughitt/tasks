@@ -907,6 +907,42 @@ fn a_checkout_still_using_a_retired_prefix_refuses() {
     );
 }
 
+/// This test process's PID view, read as `src/pidview.rs` reads it: the namespace its
+/// `/proc` numbers pids in, and `None` unless `NSpid` is exactly one positive pid.
+fn test_pid_view() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let nspid = status
+        .lines()
+        .find_map(|line| line.strip_prefix("NSpid:"))?;
+    let mut entries = nspid.split_whitespace();
+    let pid: u32 = entries.next()?.parse().ok()?;
+    if pid == 0 || entries.next().is_some() {
+        return None;
+    }
+    let ns = std::fs::metadata("/proc/self/ns/pid").ok()?;
+    Some(format!("{}:{}", ns.dev(), ns.ino()))
+}
+
+/// The view an exported pid establishes from this test process: its own, only when that
+/// is the initial PID namespace (claim PID-view design §2).
+fn exported_pid_view() -> Option<String> {
+    test_pid_view().filter(|view| view.ends_with(":4026531836"))
+}
+
+fn stored_claim(env: &TestEnv, prefix: &str, id: &str) -> toml::Value {
+    let store: toml::Value =
+        toml::from_str(&std::fs::read_to_string(env.claim_store(prefix)).unwrap()).unwrap();
+    store["claims"][id].clone()
+}
+
+fn pid_view_of(claim: &toml::Value) -> Option<String> {
+    claim
+        .get("pid_view")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
 /// Writes a claim straight into the store.
 fn write_claim(env: &TestEnv, prefix: &str, id: &str, session: &str, live: bool) {
     let path = env.claim_store(prefix);
@@ -28229,4 +28265,79 @@ fn delegated_worker_handoff_and_takeover() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn pid_view_of_an_exported_pid_is_recorded_only_in_the_initial_namespace() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    let claim = stored_claim(&env, "sci", &id);
+    // The test process is the binary's parent, so the binary shares its view.
+    assert_eq!(pid_view_of(&claim), exported_pid_view(), "{claim}");
+}
+
+#[test]
+fn pid_view_heartbeat_with_a_missing_pid_records_it_without_a_view() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    for pid in [std::process::id().to_string(), "4194303".to_string()] {
+        env.cmd(&sci)
+            .env("TASKS_SESSION", "viewer")
+            .env("TASKS_SESSION_PID", pid)
+            .args(["start", &id])
+            .assert()
+            .success();
+    }
+    let claim = stored_claim(&env, "sci", &id);
+    assert_eq!(claim["pid"].as_integer(), Some(4194303), "{claim}");
+    assert_eq!(pid_view_of(&claim), None, "{claim}");
+    assert!(claim.get("pid_start").is_none(), "{claim}");
+}
+
+#[test]
+fn pid_view_follows_a_new_pid_reported_through_a_note() {
+    // Plan round 1, P1: an ordinary write by the holder is a heartbeat too, and must
+    // apply the evidence rules rather than keep tracking the old process.
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["start", &id])
+        .assert()
+        .success();
+    let before = stored_claim(&env, "sci", &id);
+
+    // Same pid: the recorded evidence stays.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", std::process::id().to_string())
+        .args(["note", &id, "same process"])
+        .assert()
+        .success();
+    let same = stored_claim(&env, "sci", &id);
+    for field in ["pid", "pid_start", "boot_id", "pid_view"] {
+        assert_eq!(same.get(field), before.get(field), "{field}: {same}");
+    }
+
+    // A different pid this write cannot establish: tracked, with no view.
+    env.cmd(&sci)
+        .env("TASKS_SESSION", "viewer")
+        .env("TASKS_SESSION_PID", "4194303")
+        .args(["note", &id, "new process"])
+        .assert()
+        .success();
+    let moved = stored_claim(&env, "sci", &id);
+    assert_eq!(moved["pid"].as_integer(), Some(4194303), "{moved}");
+    assert_eq!(pid_view_of(&moved), None, "{moved}");
+    assert!(moved.get("pid_start").is_none(), "{moved}");
 }

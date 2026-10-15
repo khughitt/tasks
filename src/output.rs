@@ -2896,6 +2896,7 @@ mod tests {
             pid: None,
             pid_start: None,
             boot_id: None,
+            pid_view: None,
             host: "h".into(),
             worktree: "/w".into(),
             started: "2026-10-03T00:00:00Z".into(),

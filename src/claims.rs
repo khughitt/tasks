@@ -5,6 +5,16 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PidSource {
+    /// Matched through the caller's own `/proc` ancestry with the start time.
+    Relay,
+    /// `/proc/self/stat`'s session id, translated by the kernel into the procfs's namespace.
+    UnixSession,
+    /// `TASKS_SESSION_PID` or `CLAUDE_PID`: a number whose namespace this process cannot see.
+    Exported,
+}
+
 /// Who holds a claim, and the pid that proves it is still alive. `session` is raw, for
 /// matching against the store; `tagged` is the same session with the scheme of the level
 /// that resolved it, for records that outlive the claim (a park entry, spec §6).
@@ -15,6 +25,10 @@ pub struct Identity {
     pub tagged: String,
     pub proof: Option<Proof>,
     pub root_session: Option<String>,
+    /// How `pid` was obtained, which decides whether a claim write can establish its PID
+    /// view (claim PID-view design §2). `None` when there is no pid, or when the pid is
+    /// carried from a claim rather than supplied by this write.
+    pub pid_source: Option<PidSource>,
 }
 
 /// Process proof adopted from a matched relay handle, written into the claim's existing
@@ -64,12 +78,14 @@ pub fn identity_from(
     };
     let pid_of = |key: &str| var(key).and_then(|value| value.parse().ok());
     if let Some(session) = var("TASKS_SESSION") {
+        let pid = pid_of("TASKS_SESSION_PID");
         return Ok(Identity {
             tagged: session.clone(),
             session,
-            pid: pid_of("TASKS_SESSION_PID"),
+            pid,
             proof: None,
             root_session: None,
+            pid_source: pid.map(|_| PidSource::Exported),
         });
     }
     // Stage 1 of spec §7 is above: an explicit pair short-circuits, so the relay level is
@@ -85,15 +101,18 @@ pub fn identity_from(
                 boot_id: resolved.boot_id,
                 host: resolved.host,
             }),
+            pid_source: Some(PidSource::Relay),
         });
     }
     if let Some(session) = var("CLAUDE_CODE_SESSION_ID") {
+        let pid = pid_of("CLAUDE_PID");
         return Ok(Identity {
             tagged: format!("claude:{session}"),
             session,
-            pid: pid_of("CLAUDE_PID"),
+            pid,
             proof: None,
             root_session: None,
+            pid_source: pid.map(|_| PidSource::Exported),
         });
     }
     let invalid_native = |detail| {
@@ -111,6 +130,7 @@ pub fn identity_from(
             pid: None,
             proof: None,
             root_session,
+            pid_source: None,
         });
     }
     match session_pid {
@@ -120,6 +140,7 @@ pub fn identity_from(
             pid: Some(pid),
             proof: None,
             root_session: None,
+            pid_source: Some(PidSource::UnixSession),
         }),
         None => Err(Error::Config(
             "cannot determine a session identity: set TASKS_SESSION (no \
@@ -150,6 +171,10 @@ pub struct Claim {
     pub pid_start: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boot_id: Option<String>,
+    /// The PID view `pid` was established in, `"<dev>:<ino>"` (claim PID-view design §2).
+    /// Absent when no write could establish it; such a pid is then never judged (§3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid_view: Option<String>,
     pub host: String,
     pub worktree: String,
     pub started: String,
@@ -814,6 +839,71 @@ pub fn boot_id() -> Option<String> {
         .map(|id| id.trim().to_string())
 }
 
+/// The process evidence a claim write records (claim PID-view design §2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evidence {
+    pub pid: Option<u32>,
+    pub pid_start: Option<u64>,
+    pub boot_id: Option<String>,
+    pub pid_view: Option<String>,
+}
+
+impl Evidence {
+    pub fn of(claim: &Claim) -> Evidence {
+        Evidence {
+            pid: claim.pid,
+            pid_start: claim.pid_start,
+            boot_id: claim.boot_id.clone(),
+            pid_view: claim.pid_view.clone(),
+        }
+    }
+}
+
+/// What a claim write records. `own` is the caller's existing claim when this write
+/// continues it (a heartbeat), and `None` for a fresh acquisition or a takeover. A view is
+/// recorded only when this write establishes the pid in a known view. Exported pids
+/// establish one only in the initial PID namespace, because no numeric match can prove an
+/// inherited number's namespace (spec round 2). A heartbeat that establishes nothing keeps
+/// the recorded evidence unless it reports a different pid (§2's table).
+pub fn evidence(
+    me: &Identity,
+    own: Option<&Claim>,
+    view: Option<&crate::pidview::PidView>,
+    boot_id: Option<String>,
+    stat: impl Fn(u32) -> ProcStat,
+) -> Evidence {
+    let start = match &me.proof {
+        Some(proof) => Some(proof.pid_start),
+        None => me.pid.and_then(|pid| match stat(pid) {
+            ProcStat::Found { starttime, .. } => Some(starttime),
+            _ => None,
+        }),
+    };
+    let established = match (me.pid, me.pid_source) {
+        (Some(_), Some(PidSource::Relay)) => true,
+        (Some(pid), Some(PidSource::UnixSession)) => pid != 0 && start.is_some(),
+        (Some(_), Some(PidSource::Exported)) => {
+            view.is_some_and(|view| view.is_initial()) && start.is_some()
+        }
+        _ => false,
+    };
+    let fresh = Evidence {
+        pid: me.pid,
+        pid_start: start,
+        boot_id: match &me.proof {
+            Some(proof) => Some(proof.boot_id.clone()),
+            None => boot_id,
+        },
+        pid_view: view.filter(|_| established).map(|view| view.to_string()),
+    };
+    match own {
+        Some(own) if fresh.pid_view.is_none() && (me.pid.is_none() || me.pid == own.pid) => {
+            Evidence::of(own)
+        }
+        _ => fresh,
+    }
+}
+
 pub fn liveness(claim: &Claim) -> Liveness {
     liveness_with(
         claim,
@@ -917,6 +1007,7 @@ pub fn continuation_identity(claim: &Claim) -> Identity {
             }),
             _ => None,
         },
+        pid_source: None,
     }
 }
 
@@ -990,6 +1081,7 @@ mod tests {
             pid: Some(42),
             pid_start: Some(999),
             boot_id: Some("boot-a".into()),
+            pid_view: None,
             host: "h".into(),
             worktree: "/tmp/wt".into(),
             started: "2026-09-05T08:00:00Z".into(),
@@ -1023,6 +1115,7 @@ mod tests {
             pid,
             pid_start,
             boot_id: Some(PROOF_BOOT.into()),
+            pid_view: None,
             host: "testhost".into(),
             worktree: "/w".into(),
             started: "2026-09-22T00:00:00Z".into(),
@@ -1987,6 +2080,7 @@ mod tests {
             pid: None,
             pid_start: None,
             boot_id: None,
+            pid_view: None,
             host: "h".into(),
             worktree: "/w".into(),
             started: "2026-09-09T20:00:00Z".into(),
@@ -2358,6 +2452,7 @@ mod tests {
                 pid: None,
                 pid_start: None,
                 boot_id: None,
+                pid_view: None,
                 host: "h".into(),
                 worktree: "/w".into(),
                 started: "2026-09-09T22:00:00Z".into(),
@@ -2443,5 +2538,193 @@ mod tests {
                 .holds,
             ["quiet"]
         );
+    }
+
+    const INIT: crate::pidview::PidView = crate::pidview::PidView {
+        dev: 5,
+        ino: crate::pidview::PROC_PID_INIT_INO,
+    };
+    const CHILD: crate::pidview::PidView = crate::pidview::PidView {
+        dev: 5,
+        ino: 4026533720,
+    };
+
+    fn ident(pid: Option<u32>, source: Option<PidSource>) -> Identity {
+        Identity {
+            session: "s1".into(),
+            tagged: "s1".into(),
+            pid,
+            proof: None,
+            root_session: None,
+            pid_source: source,
+        }
+    }
+
+    fn boot() -> Option<String> {
+        Some("boot-a".into())
+    }
+
+    #[test]
+    fn an_exported_pid_found_in_the_initial_namespace_records_the_view() {
+        let got = evidence(
+            &ident(Some(42), Some(PidSource::Exported)),
+            None,
+            Some(&INIT),
+            boot(),
+            found(999),
+        );
+        assert_eq!(got.pid_view, Some(INIT.to_string()));
+        assert_eq!((got.pid, got.pid_start), (Some(42), Some(999)));
+    }
+
+    #[test]
+    fn an_exported_pid_records_no_view_outside_the_initial_namespace() {
+        // Spec round 2: a colliding ancestor is found, and still establishes nothing.
+        let got = evidence(
+            &ident(Some(2), Some(PidSource::Exported)),
+            None,
+            Some(&CHILD),
+            boot(),
+            found(999),
+        );
+        assert_eq!(got.pid_view, None);
+        assert_eq!((got.pid, got.pid_start), (Some(2), Some(999)));
+    }
+
+    #[test]
+    fn an_exported_pid_not_found_or_in_an_unknown_view_records_no_view() {
+        let missing = evidence(
+            &ident(Some(42), Some(PidSource::Exported)),
+            None,
+            Some(&INIT),
+            boot(),
+            |_| ProcStat::NotFound,
+        );
+        assert_eq!((missing.pid_view, missing.pid_start), (None, None));
+        let unknown = evidence(
+            &ident(Some(42), Some(PidSource::Exported)),
+            None,
+            None,
+            boot(),
+            found(999),
+        );
+        assert_eq!(unknown.pid_view, None);
+    }
+
+    #[test]
+    fn a_found_session_id_records_the_view_in_any_known_view() {
+        let got = evidence(
+            &ident(Some(7), Some(PidSource::UnixSession)),
+            None,
+            Some(&CHILD),
+            boot(),
+            found(999),
+        );
+        assert_eq!(got.pid_view, Some(CHILD.to_string()));
+    }
+
+    #[test]
+    fn a_zero_session_id_establishes_nothing() {
+        let got = evidence(
+            &ident(Some(0), Some(PidSource::UnixSession)),
+            None,
+            Some(&INIT),
+            boot(),
+            found(999),
+        );
+        assert_eq!(got.pid_view, None);
+    }
+
+    #[test]
+    fn a_relay_match_records_the_view_from_its_proof() {
+        let me = Identity {
+            proof: Some(Proof {
+                pid_start: 555,
+                boot_id: "boot-r".into(),
+                host: "h".into(),
+            }),
+            ..ident(Some(42), Some(PidSource::Relay))
+        };
+        let got = evidence(&me, None, Some(&CHILD), boot(), |_| ProcStat::NotFound);
+        assert_eq!(got.pid_view, Some(CHILD.to_string()));
+        assert_eq!(
+            (got.pid_start, got.boot_id.as_deref()),
+            (Some(555), Some("boot-r"))
+        );
+    }
+
+    fn recorded() -> Claim {
+        Claim {
+            pid_view: Some(INIT.to_string()),
+            ..sample()
+        }
+    }
+
+    #[test]
+    fn an_established_heartbeat_replaces_the_evidence() {
+        let got = evidence(
+            &ident(Some(43), Some(PidSource::Exported)),
+            Some(&recorded()),
+            Some(&INIT),
+            boot(),
+            found(1000),
+        );
+        assert_eq!((got.pid, got.pid_start), (Some(43), Some(1000)));
+        assert_eq!(got.pid_view, Some(INIT.to_string()));
+    }
+
+    #[test]
+    fn an_unestablished_heartbeat_of_the_same_pid_keeps_the_evidence() {
+        // The sandbox heartbeat: same exported pid, child view, so nothing is established.
+        let own = recorded();
+        let got = evidence(
+            &ident(own.pid, Some(PidSource::Exported)),
+            Some(&own),
+            Some(&CHILD),
+            boot(),
+            |_| ProcStat::NotFound,
+        );
+        assert_eq!(got, Evidence::of(&own));
+    }
+
+    #[test]
+    fn an_unestablished_heartbeat_of_a_new_pid_records_it_without_a_view() {
+        let got = evidence(
+            &ident(Some(77), Some(PidSource::Exported)),
+            Some(&recorded()),
+            Some(&CHILD),
+            boot(),
+            found(31),
+        );
+        assert_eq!(
+            (got.pid, got.pid_start, got.pid_view),
+            (Some(77), Some(31), None)
+        );
+    }
+
+    #[test]
+    fn a_heartbeat_without_a_pid_keeps_the_recorded_evidence() {
+        let own = recorded();
+        let got = evidence(
+            &ident(None, None),
+            Some(&own),
+            Some(&INIT),
+            boot(),
+            found(999),
+        );
+        assert_eq!(got, Evidence::of(&own));
+    }
+
+    #[test]
+    fn a_proof_continuation_keeps_the_claims_evidence() {
+        let own = recorded();
+        let got = evidence(
+            &continuation_identity(&own),
+            Some(&own),
+            Some(&INIT),
+            boot(),
+            found(999),
+        );
+        assert_eq!(got, Evidence::of(&own));
     }
 }

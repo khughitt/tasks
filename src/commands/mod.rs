@@ -518,28 +518,27 @@ impl Ctx {
                 (Some(claim), true) => claim.started.clone(),
                 _ => now.clone(),
             };
+            let evidence = crate::claims::evidence(
+                &me,
+                existing.as_ref().filter(|_| mine),
+                crate::pidview::current().as_ref(),
+                crate::claims::boot_id(),
+                crate::claims::proc_stat,
+            );
             (
                 id.clone(),
                 ClaimIntent::Acquire(crate::claims::Claim {
                     owner,
-                    pid_start: match &me.proof {
-                        Some(proof) => Some(proof.pid_start),
-                        None => me.pid.and_then(|pid| match crate::claims::proc_stat(pid) {
-                            crate::claims::ProcStat::Found { starttime, .. } => Some(starttime),
-                            _ => None,
-                        }),
-                    },
-                    boot_id: match &me.proof {
-                        Some(proof) => Some(proof.boot_id.clone()),
-                        None => crate::claims::boot_id(),
-                    },
+                    pid_start: evidence.pid_start,
+                    boot_id: evidence.boot_id,
+                    pid_view: evidence.pid_view,
                     host: match &me.proof {
                         Some(proof) => proof.host.clone(),
                         None => crate::claims::hostname(),
                     },
                     session: me.session,
                     root_session,
-                    pid: me.pid,
+                    pid: evidence.pid,
                     worktree,
                     started,
                     seen: now,
@@ -1225,9 +1224,15 @@ pub(crate) fn follow_holder(
             &resolved
         }
     };
-    match ownership(&claim, me) {
+    let identity = match ownership(&claim, me) {
         Ok(Ownership::Foreign) => return,
-        Ok(Ownership::ByIdentity | Ownership::ByProof) => {}
+        // Proof-only ownership records the claim's own identity (spec §6.4 of the relay
+        // design), whose pid this write did not supply, so its evidence is kept.
+        Ok(Ownership::ByProof) => crate::claims::continuation_identity(&claim),
+        Ok(Ownership::ByIdentity) => me
+            .identity()
+            .expect("ownership by identity means the identity resolved")
+            .clone(),
         Err(error) => {
             ctx.warnings.push(format!(
                 "{landed}, but whether this session holds the claim on {id} could not be \
@@ -1235,10 +1240,22 @@ pub(crate) fn follow_holder(
             ));
             return;
         }
-    }
+    };
+    // Claim PID-view design §2: a heartbeat applies the evidence rules too.
+    let evidence = crate::claims::evidence(
+        &identity,
+        Some(&claim),
+        crate::pidview::current().as_ref(),
+        crate::claims::boot_id(),
+        crate::claims::proc_stat,
+    );
     let moved = crate::claims::Claim {
         worktree: ctx.project.resume_root().display().to_string(),
         seen: crate::time::now(),
+        pid: evidence.pid,
+        pid_start: evidence.pid_start,
+        boot_id: evidence.boot_id,
+        pid_view: evidence.pid_view,
         ..claim
     };
     let saved = ctx.claims_mut().and_then(|store| {
