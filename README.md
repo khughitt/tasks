@@ -280,10 +280,11 @@ process, so it cannot act on the outer session's claims.
 
 Codex hints validate both native exports and select `CODEX_THREAD_ID` when present,
 otherwise `CODEX_SESSION_ID`. A matching Codex actor row records native root
-association separately. A worker presented only with its registered root row
-refuses acquisition: relay worker registration remains unavailable (`relay-f56e30`).
-It cannot claim as its controller; other mismatches use a value-free diagnosis.
-No registry schema or producer behavior changes here.
+association separately. Relay publishes a row per Codex worker (`scope: "worker"`,
+naming its `root`) on its controller's process. Among the rows on one process, the hint
+selects the caller's own, and a worker row is selected only by that worker's
+`CODEX_THREAD_ID`. A worker relay has not registered is refused rather than given its
+controller's identity; other mismatches use a value-free diagnosis.
 
 Codex proof-only continuation now requires a valid concrete `CODEX_THREAD_ID`
 matching the held claim, plus the existing process, host and boot evidence.

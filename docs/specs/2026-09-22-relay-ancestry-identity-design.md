@@ -193,11 +193,13 @@ worker thread intentionally differ. Validate both native values losslessly; a
 malformed value names its variable but never its value and refuses before loading
 the registry. Select the thread when present, otherwise the session. A qualifying
 root-only row refuses a worker without adopting its controller identity; its
-value-free error names unavailable worker registration (`relay-f56e30`) and
-`TASKS_SESSION` recovery. An unrelated row mismatch stays generic. Existing
-cardinality, process, host, boot, platform and harness checks remain unchanged.
-A selected Codex actor row records valid native `CODEX_SESSION_ID` separately as
-optional `root_session`; no registry schema or producer change is implied.
+value-free error says relay has no row for that worker thread and gives
+`TASKS_SESSION` recovery. An unrelated row mismatch stays generic. Process, host,
+boot, platform and harness checks remain unchanged. Updated 2026-10-15: relay's
+Codex worker rows share their controller's handle, so the hint selects among several
+qualifying Codex rows, and a worker row needs its own `CODEX_THREAD_ID` (delegated
+identity design, "Relay worker rows"). A selected Codex actor row records valid
+native `CODEX_SESSION_ID` separately as optional `root_session`.
 
 ### 4.4 What is adopted
 

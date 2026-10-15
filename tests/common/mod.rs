@@ -370,17 +370,20 @@ fn shim_command(program: &Path, dir: &Path, home: &Path) -> std::process::Comman
 /// `/proc/self/stat` inside a `$(…)` substitution reads the *substituting* process — a
 /// different process with a different start token — and pairing that with `$$` produces a
 /// handle that matches only if two processes happened to start within one clock tick.
+/// `SCOPE` (default `session`) and `ROOT_ID` (adds `root`) let a test write a Codex worker row.
 pub const WRITE_REGISTRY: &str = r#"
 write_registry() {
   start=$(awk '{print $22}' "/proc/$$/stat")
   boot=$(cat /proc/sys/kernel/random/boot_id)
   host=$(cat /proc/sys/kernel/hostname)
+  root_field=""
+  if [ -n "${ROOT_ID:-}" ]; then root_field=",\"root\":\"$ROOT_ID\""; fi
   mkdir -p "$RELAY_STATE_DIR"
   chmod 700 "$RELAY_STATE_DIR"
   cat > "$RELAY_STATE_DIR/agents.json" <<EOF
 {"schema":2,"generation":"11111111-2222-4333-8444-555555555555","revision":1,
  "agents":{"$AGENT_ID":{"id":"$AGENT_ID","harness":"$HARNESS","sessionId":"$SESSION",
-  "scope":"session","cwd":"/w","repoRoot":null,"remote":null,"projectKey":"k",
+  "scope":"${SCOPE:-session}"$root_field,"cwd":"/w","repoRoot":null,"remote":null,"projectKey":"k",
   "project":"p","state":"idle","updatedAt":1,
   "process":{"platform":"linux","host":"$host","bootId":"$boot","pid":$$,"start":"$start"}}}}
 EOF

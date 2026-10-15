@@ -374,7 +374,8 @@ never an immediate parent or ownership authority. Same-owner refresh without roo
 data retains it; conflicting known roots refuse until the owner restores exports
 or releases with `park` before intentional reassociation. Takeovers record the
 new owner's root. Older claim writers can discard it. Relay worker acquisition
-still refuses a root-only row (`relay-f56e30`); Codex proof-only continuation needs
+uses the worker's own row, selected only by its `CODEX_THREAD_ID`, and refuses a
+worker relay has not registered; Codex proof-only continuation needs
 a matching concrete thread even when process ancestry agrees. A legitimate owner
 missing that thread can recover with the exact held `TASKS_SESSION` from `show`;
 never fabricate a thread or use the command PID as a liveness handle.
