@@ -1,15 +1,16 @@
 ---
 id: tasks-f9fc01
 title: Clear a claim whose holder is gone without starting the task
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: planned
 owner: feat/claim-release
 created: 2026-10-15T08:05:09Z
-updated: 2026-10-15T10:26:28Z
+updated: 2026-10-15T10:26:32Z
 started: 2026-10-15T08:25:35Z
+completed: 2026-10-15T10:26:32Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -74,4 +75,8 @@ Related: tasks-ea23de (pretty output shows the unverifiable reason), tasks-f1105
 - 2026-10-15T10:18:51Z (feat/claim-release): parked (waiting on user, decision): user picks integration for feat/claim-release (.worktrees/claim-release): merge to main locally (changes the live tasks skill via the main checkout), push+PR, or keep; after a merge the agent runs tasks done on the branch first, merges, runs just test on main, then the user upgrades every tasks binary on the host (cargo install --path .)
   provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-15T10:26:28Z (feat/claim-release): resumed
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T10:26:32Z (feat/claim-release): done
+  provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-15T10:26:32Z (feat/claim-release): tasks release <id> "<why>" [--adopting <old>] lands in 0.4.0: releases a foreign unverifiable or stale claim with one stamped note, lifecycle untouched; rename, adopt, retire, move and ready/next/prime name it; ops cli.toml rows 8618bc9 + 30b4448; full suite 1475/1475; final review accepted after two corrective rounds; minors in tasks-40c6f2
   provenance: {"harness_session":"claude-code:6724124e-7059-43a8-80ff-e57e2348fafc","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
