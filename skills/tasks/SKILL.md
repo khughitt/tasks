@@ -92,6 +92,9 @@ mean those documents were verified.
    with the session identity and a liveness handle. A task claimed by another live session
    fails with `claimed`; `tasks start --force <id>` takes it over and records that in the
    task's notes.
+   A claim whose pid this command cannot judge (recorded in another PID view, such as
+   a sandbox's, or before views were recorded) is held and shows as `unverifiable`.
+   Its own view, its owner, a reboot or `start --force` releases it.
    A write refuses with `stale_copy` when another checkout holds a newer copy of the
    record, and the error says what to do: rerun there with the printed `tasks -C <root> …`,
    merge the main checkout's copy into your worktree, or leave the record to the session
