@@ -1,15 +1,16 @@
 ---
 id: tasks-98bef8
 title: Name tools/cli.toml and the surface test in AGENTS.md as part of any CLI change
-status: doing
+status: done
 priority: 3
 size: xs
 complexity: low
 process: direct
 owner: crew
 created: 2026-10-15T10:33:27Z
-updated: 2026-10-16T20:53:19Z
+updated: 2026-10-16T21:05:34Z
 started: 2026-10-16T19:27:37Z
+completed: 2026-10-16T21:05:34Z
 depends: []
 tags: [docs]
 agent: claude-code/claude-opus-5-5
@@ -38,3 +39,7 @@ Where: AGENTS.md; src/surface.rs; ops README Consumers section.
 - 2026-10-16T20:05:57Z (crew): crew: attempt 01M534YWG1842PE7A37GZJS36N — verdict not-passed (worker openrouter/anthropic/claude-sonnet-5.5, reviewer openrouter/openai/gpt-6.1-sol); report /home/keith/.local/state/crew/attempts/01M534YWG1842PE7A37GZJS36N/attempt-report.md
 - 2026-10-16T20:05:59Z (crew): parked (waiting on user, review): review crew attempt 01M534YWG1842PE7A37GZJS36N (verdict not-passed): branch crew/tasks-98bef8-7gzjs36n in .worktrees/crew-7gzjs36n; merge and close, or discard
 - 2026-10-16T20:53:19Z (main): review: impl round 1 — verdict: accept; findings: accepted 3, rejected 1; reviewer: human
+- 2026-10-16T21:05:34Z (main): done
+  provenance: {"harness_session":"codex:01a14608-a881-7550-aadb-5b0ad12a4c13","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-16T21:05:34Z (main): Person accepted B (A=yes B=yes C=no D=yes); integrated reviewed B head b6042988adf1cb45d605c2b2b2368ef036f81ba6 via ancestry-preserving source merge 29f4b43bad3a40398cd596965d0a392475d37ff8. Pilot manifest commit b83c8f2 records --merged B with exact full human note, qualified inclusion reasons and audit history unchanged. Recoverable all-four bundles, patches, heads and allowlisted evidence preserved before authorized cleanup. No new model-output review or tuning.
+  provenance: {"harness_session":"codex:01a14608-a881-7550-aadb-5b0ad12a4c13","harness_session_source":"CODEX_THREAD_ID"}
