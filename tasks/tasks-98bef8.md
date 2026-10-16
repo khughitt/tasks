@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: crew
 created: 2026-10-15T10:33:27Z
-updated: 2026-10-16T20:02:06Z
+updated: 2026-10-16T20:02:55Z
 started: 2026-10-16T19:27:37Z
 depends: []
 tags: [docs]
@@ -33,3 +33,4 @@ Where: AGENTS.md; src/surface.rs; ops README Consumers section.
 - 2026-10-16T19:59:08Z (crew): crew: attempt 01M534N689NNDBKFPNBBQKRQC5 started — kind code-xs, worker openrouter/z-ai/glm-5.3-flash, worktree .worktrees/crew-bbqkrqc5
 - 2026-10-16T20:02:04Z (crew): crew: attempt 01M534N689NNDBKFPNBBQKRQC5 — verdict passed (worker openrouter/z-ai/glm-5.3-flash, reviewer openrouter/openai/gpt-6.1-sol); report /home/keith/.local/state/crew/attempts/01M534N689NNDBKFPNBBQKRQC5/attempt-report.md
 - 2026-10-16T20:02:06Z (crew): parked (waiting on user, review): review crew attempt 01M534N689NNDBKFPNBBQKRQC5 (verdict passed): branch crew/tasks-98bef8-bbqkrqc5 in .worktrees/crew-bbqkrqc5; merge and close, or discard
+- 2026-10-16T20:02:55Z (crew): resumed
