@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: crew
 created: 2026-10-15T10:33:27Z
-updated: 2026-10-16T20:05:57Z
+updated: 2026-10-16T20:05:59Z
 started: 2026-10-16T19:27:37Z
 depends: []
 tags: [docs]
@@ -36,3 +36,4 @@ Where: AGENTS.md; src/surface.rs; ops README Consumers section.
 - 2026-10-16T20:02:55Z (crew): resumed
 - 2026-10-16T20:04:29Z (crew): crew: attempt 01M534YWG1842PE7A37GZJS36N started — kind code-xs, worker openrouter/anthropic/claude-sonnet-5.5, worktree .worktrees/crew-7gzjs36n
 - 2026-10-16T20:05:57Z (crew): crew: attempt 01M534YWG1842PE7A37GZJS36N — verdict not-passed (worker openrouter/anthropic/claude-sonnet-5.5, reviewer openrouter/openai/gpt-6.1-sol); report /home/keith/.local/state/crew/attempts/01M534YWG1842PE7A37GZJS36N/attempt-report.md
+- 2026-10-16T20:05:59Z (crew): parked (waiting on user, review): review crew attempt 01M534YWG1842PE7A37GZJS36N (verdict not-passed): branch crew/tasks-98bef8-7gzjs36n in .worktrees/crew-7gzjs36n; merge and close, or discard
