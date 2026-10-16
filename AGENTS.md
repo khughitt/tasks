@@ -81,6 +81,10 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 - `tests/cli.rs` — end-to-end tests against the built binary in temp repos.
 - `tests/attachments.rs` — end-to-end tests for attach, detach, show, check, and rename of task files.
 - `justfile`, `tools/tt`, `.githooks/` — the test front door and its timing wrapper (see Gates).
+- `tools/cli.toml` — the vendored CLI surface from ops (see `tools/README.md`): the shared
+  vocabulary plus a row for every in-scope command and option. `src/surface.rs` builds the
+  live parser surface, and its `parser_surface_equals_table` test asserts it matches the
+  rows here.
 - `skills/tasks/SKILL.md` — the agent skill shipped to other projects; keep it in step with CLI changes.
   `skills/curate/SKILL.md` — the curation pass (`tasks sample`, then bounded edits); same rule.
   `skills/scope/SKILL.md` — the deliberate idea scoping pass; same rule.
@@ -88,6 +92,12 @@ Rebuild and reinstall after CLI changes so the tracker used above is the code un
 
 ## Rules
 
+- Any CLI change (a new subcommand, command, or option) starts on ops: land its rows in
+  ops's `cli.toml` first, then run
+  `python3 "$(tasks --pretty root ops-88a0fa)/bin/vendored" adopt cli.toml` in this
+  checkout and commit the vendored copy together with the parser change. Never edit
+  `tools/cli.toml` in place (ops-check refuses it) and never hand-copy a table into it:
+  `parser_surface_equals_table` fails until the adopted table matches the parser.
 - JSON output is the contract; `--pretty` is for humans. Never change JSON shapes without a task.
 - Fail early with a typed error; no silent fallbacks.
 - Conventional commits; no AI-attribution trailers.
