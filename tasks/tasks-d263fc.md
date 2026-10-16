@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: crew
 created: 2026-10-15T12:41:34Z
-updated: 2026-10-16T18:15:15Z
+updated: 2026-10-16T18:16:47Z
 started: 2026-10-16T18:09:11Z
 depends: []
 tags: [relay]
@@ -25,3 +25,4 @@ hint_mismatch in src/relay/resolve.rs tells a worker with no relay row that the 
 - 2026-10-16T18:14:39Z (crew): crew: attempt 01M52YEMXK3BNP2ZSVV3JQXZ89 — verdict passed (worker openrouter/z-ai/glm-5.3-flash, reviewer openrouter/openai/gpt-6.1-sol); report /home/keith/.local/state/crew/attempts/01M52YEMXK3BNP2ZSVV3JQXZ89/attempt-report.md
 - 2026-10-16T18:14:40Z (crew): parked (waiting on user, review): review crew attempt 01M52YEMXK3BNP2ZSVV3JQXZ89 (verdict passed): branch crew/tasks-d263fc-v3jqxz89 in .worktrees/crew-v3jqxz89; merge and close, or discard
 - 2026-10-16T18:15:15Z (crew): resumed
+- 2026-10-16T18:16:47Z (crew): crew: attempt 01M52YSRFP77SMFC54WWND8QF6 started — kind code-xs, worker openrouter/qwen/qwen3-coder-next, worktree .worktrees/crew-wwnd8qf6
