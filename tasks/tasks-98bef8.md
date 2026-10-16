@@ -1,13 +1,15 @@
 ---
 id: tasks-98bef8
 title: Name tools/cli.toml and the surface test in AGENTS.md as part of any CLI change
-status: todo
+status: doing
 priority: 3
 size: xs
 complexity: low
 process: direct
+owner: crew
 created: 2026-10-15T10:33:27Z
-updated: 2026-10-15T10:33:27Z
+updated: 2026-10-16T19:27:37Z
+started: 2026-10-16T19:27:37Z
 depends: []
 tags: [docs]
 agent: claude-code/claude-opus-5-5
@@ -16,3 +18,7 @@ agent: claude-code/claude-opus-5-5
 Why: a new subcommand or flag must also land as a row in ops cli.toml (vendored here as tools/cli.toml, which ops-check refuses to edit in place), and src/surface.rs's parser_surface_equals_table fails until the adopted table matches. The tasks-f9fc01 plan missed both: AGENTS.md's Layout lists tools/tt but not tools/cli.toml, and nothing says a CLI change starts with the ops row.
 Done: AGENTS.md (Layout and Gates or Rules) says tools/cli.toml is the vendored CLI surface, that the surface test compares it with the parser, and that a CLI change lands its row on ops first and then runs `python3 "$(tasks --pretty root ops-88a0fa)/bin/vendored" adopt cli.toml` (ops README, Consumers). Revisit if ops-a4ab22 introduces a project-first row path.
 Where: AGENTS.md; src/surface.rs; ops README Consumers section.
+
+## Notes
+
+- 2026-10-16T19:27:37Z (crew): started
