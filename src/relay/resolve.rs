@@ -128,9 +128,19 @@ fn no_match(
 fn hint_mismatch(root: Option<&str>, candidates: &[&crate::relay::snapshot::Agent]) -> Error {
     let detail = if root.is_some_and(|root| candidates.iter().any(|agent| agent.session_id == root))
     {
-        "relay has no row for this Codex worker thread (the relay writing the registry predates \
-         worker rows, or its Codex hooks are not installed), so the worker cannot claim as its \
-         controller"
+        if candidates.iter().any(|agent| agent.scope == "worker") {
+            // A worker row among the candidates means this relay does write worker rows
+            // (relay-635fdc), so the registry cannot predate them and its Codex hooks are
+            // present: the missing row is this worker's own, not yet written by its first
+            // hook or already pruned.
+            "relay has no row for this Codex worker thread (relay has not yet seen this \
+             worker's first hook, or pruned its row), so the worker cannot claim as its \
+             controller"
+        } else {
+            "relay has no row for this Codex worker thread (the relay writing the registry \
+             predates worker rows, or its Codex hooks are not installed), so the worker cannot \
+             claim as its controller"
+        }
     } else {
         "the native actor hint does not match any qualifying relay row"
     };
@@ -811,6 +821,9 @@ mod tests {
 
     #[test]
     fn relay_worker_rows_refuse_an_unregistered_thread_without_values() {
+        // The registry already holds sibling worker rows on this handle, so the causes are
+        // that relay has not yet seen this worker's first hook, or pruned its row — never
+        // that it predates worker rows or lacks its hooks.
         let unknown = "0199f000-0000-7000-8000-0000000000ff";
         let error = workers(&env(&[
             ("CODEX_SESSION_ID", R),
@@ -820,10 +833,35 @@ mod tests {
         .to_string();
         assert!(
             error.contains("no row for this Codex worker thread")
+                && error.contains("first hook")
+                && error.contains("pruned")
+                && !error.contains("predates worker rows")
                 && error.contains("TASKS_SESSION"),
             "{error}"
         );
         assert!(!error.contains("0199f000"), "{error}");
+    }
+
+    #[test]
+    fn relay_root_rows_only_refuse_an_unregistered_thread_with_the_predates_cause() {
+        // Root-only control: no candidate row is a worker row, so the registry writes no
+        // worker rows at all and the original causes hold — it predates them, or its Codex
+        // hooks are not installed.
+        let error = go(
+            ancestor("codex", 42, 900),
+            vec![agent("codex", "s1", "linux", 42, 900, BOOT)],
+            &env(&[("CODEX_SESSION_ID", "s1"), ("CODEX_THREAD_ID", "t1")]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("no row for this Codex worker thread")
+                && error.contains("predates worker rows")
+                && !error.contains("first hook")
+                && error.contains("TASKS_SESSION"),
+            "{error}"
+        );
+        assert!(!error.contains("s1") && !error.contains("t1"), "{error}");
     }
 
     #[test]
