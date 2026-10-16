@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: crew
 created: 2026-10-15T10:33:27Z
-updated: 2026-10-16T19:27:37Z
+updated: 2026-10-16T19:29:09Z
 started: 2026-10-16T19:27:37Z
 depends: []
 tags: [docs]
@@ -22,3 +22,4 @@ Where: AGENTS.md; src/surface.rs; ops README Consumers section.
 ## Notes
 
 - 2026-10-16T19:27:37Z (crew): started
+- 2026-10-16T19:29:09Z (crew): crew: attempt 01M532Y91YNDRG7E6STJHEBTFV started — kind code-xs, worker openrouter/qwen/qwen3-coder-next, worktree .worktrees/crew-tjhebtfv
