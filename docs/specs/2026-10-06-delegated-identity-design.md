@@ -280,8 +280,10 @@ before; §1's known limit covers that case.
 **Diagnostics.** When qualifying rows exist but none carries the hint, and one of
 them is the root named by a valid `CODEX_SESSION_ID`, the refusal says relay has no
 row for this worker thread. Either the relay writing the registry predates worker
-rows, or its Codex hooks are not installed. The worker cannot claim as its
-controller. This replaces the `relay-f56e30` wording and covers the single-row and
+rows, or its Codex hooks are not installed. When one of the qualifying rows is a
+worker row, the registry demonstrably writes worker rows and the causes are instead
+that relay has not yet seen this worker's first hook, or pruned its row. The worker
+cannot claim as its controller. This replaces the `relay-f56e30` wording and covers the single-row and
 multi-row cases alike. Every other hint mismatch keeps the generic value-free
 diagnosis. Neither message names a session value.
 
