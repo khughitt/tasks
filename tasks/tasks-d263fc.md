@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: crew
 created: 2026-10-15T12:41:34Z
-updated: 2026-10-16T18:31:56Z
+updated: 2026-10-16T18:31:57Z
 started: 2026-10-16T18:09:11Z
 depends: []
 tags: [relay]
@@ -31,3 +31,4 @@ hint_mismatch in src/relay/resolve.rs tells a worker with no relay row that the 
 - 2026-10-16T18:28:06Z (crew): resumed
 - 2026-10-16T18:29:40Z (crew): crew: attempt 01M52ZH983B7SPJQ6X0MCY5F1M started — kind code-xs, worker openrouter/anthropic/claude-sonnet-5.5, worktree .worktrees/crew-0mcy5f1m
 - 2026-10-16T18:31:56Z (crew): crew: attempt 01M52ZH983B7SPJQ6X0MCY5F1M — verdict passed (worker openrouter/anthropic/claude-sonnet-5.5, reviewer openrouter/openai/gpt-6.1-sol); report /home/keith/.local/state/crew/attempts/01M52ZH983B7SPJQ6X0MCY5F1M/attempt-report.md
+- 2026-10-16T18:31:57Z (crew): parked (waiting on user, review): review crew attempt 01M52ZH983B7SPJQ6X0MCY5F1M (verdict passed): branch crew/tasks-d263fc-0mcy5f1m in .worktrees/crew-0mcy5f1m; merge and close, or discard
