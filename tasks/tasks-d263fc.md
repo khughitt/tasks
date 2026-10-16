@@ -1,15 +1,16 @@
 ---
 id: tasks-d263fc
 title: Fit the unregistered-worker refusal's causes to registries that already hold worker rows
-status: doing
+status: done
 priority: 3
 size: xs
 complexity: low
 process: direct
 owner: crew
 created: 2026-10-15T12:41:34Z
-updated: 2026-10-16T19:14:41Z
+updated: 2026-10-16T19:22:50Z
 started: 2026-10-16T18:09:11Z
+completed: 2026-10-16T19:22:50Z
 depends: []
 tags: [relay]
 source: tasks-af3aac
@@ -37,3 +38,7 @@ hint_mismatch in src/relay/resolve.rs tells a worker with no relay row that the 
 - 2026-10-16T18:38:53Z (crew): crew: attempt 01M52ZSMSS59VH45XP36CT2EJ8 — verdict passed (worker openrouter/deepseek/deepseek-v4-flash-0731, reviewer openrouter/openai/gpt-6.1-sol); report /home/keith/.local/state/crew/attempts/01M52ZSMSS59VH45XP36CT2EJ8/attempt-report.md
 - 2026-10-16T18:38:54Z (crew): parked (waiting on user, review): review crew attempt 01M52ZSMSS59VH45XP36CT2EJ8 (verdict passed): branch crew/tasks-d263fc-36ct2ej8 in .worktrees/crew-36ct2ej8; merge and close, or discard
 - 2026-10-16T19:14:41Z (main): review: impl round 1 — verdict: accept; findings: accepted 3, rejected 1; reviewer: human
+- 2026-10-16T19:22:50Z (main): done
+  provenance: {"harness_session":"codex:01a14608-a881-7550-aadb-5b0ad12a4c13","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-16T19:22:50Z (main): Human accepted A (A=yes B=yes C=yes D=no); integrated reviewed A head 7873eefe41d97bf9312046e0bccd65f7e2ee14ff into main via ancestry-preserving merge 5144a651a5ecc93c541b7b3097d3b0f655495842. Pilot recorded --merged A with unchanged decisions and full human rationale in crew commit 191cb04. No new source review or outcome tuning; remaining attempts are authorized for evidence-preserving discard.
+  provenance: {"harness_session":"codex:01a14608-a881-7550-aadb-5b0ad12a4c13","harness_session_source":"CODEX_THREAD_ID"}
