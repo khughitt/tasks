@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/wait-aware-review
 created: 2026-10-17T09:19:37Z
-updated: 2026-10-17T10:35:58Z
+updated: 2026-10-17T10:50:45Z
 started: 2026-10-17T10:02:52Z
 depends: []
 parent: tasks-5408fe
@@ -16,6 +16,7 @@ tags: []
 source: docs/notes/2026-10-17-scope-queue-stranded-ideas-brief.md
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-10-17-wait-aware-review-design.md
+plan: docs/plans/2026-10-17-wait-aware-review.md
 ---
 
 Question: How should the scope queue tell a reviewed idea that still waits on something recorded from one that nothing will wake, so the stranded ones come back without a waker's note?
