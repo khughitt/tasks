@@ -7,8 +7,8 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-17T11:25:08Z
-updated: 2026-10-17T11:25:08Z
-depends: []
+updated: 2026-10-17T11:25:25Z
+depends: [tasks-c37991]
 parent: tasks-aeeef1
 tags: []
 source: tasks-1a3280
