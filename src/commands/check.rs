@@ -288,7 +288,10 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     format!("depends on shelved {dependency}: unshelve it or drop the dependency"),
                 ));
             }
-            if let Ok(Some(dependency_task)) = record(dependency)
+            // A tombstone's own depends are history and it refuses every write, so only a
+            // live dependent can act on the swap (move spec: Dependency evaluation).
+            if task.status != Status::Moved
+                && let Ok(Some(dependency_task)) = record(dependency)
                 && dependency_task.status == Status::Moved
                 && let Some(to) = dependency_task.moved_to.clone()
             {

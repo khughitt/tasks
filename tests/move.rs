@@ -704,6 +704,35 @@ fn check_warns_moved_dep_with_the_swap() {
 }
 
 #[test]
+fn check_skips_moved_dep_on_a_tombstone_dependent() {
+    let mut env = TestEnv::new();
+    let dots = env.init("dots");
+    env.init("wali");
+    let a = id_of(env.json(&dots, &["add", "A", "-p", "2"]));
+    let b = id_of(env.json(&dots, &["add", "B", "-p", "2", "--depends", &a]));
+    let c = id_of(env.json(&dots, &["add", "C", "-p", "2", "--depends", &a]));
+    let n = id_of(env.json(&dots, &["move", &a, "--to", "wali"]));
+    env.json(&dots, &["move", &b, "--to", "wali"]);
+    // b's tombstone keeps its frozen depends on a's tombstone, which is history (spec:
+    // Dependency evaluation), and refuses the swap; only the live c can act on it.
+    let report = env.check(&dots);
+    let moved: Vec<&serde_json::Value> = report["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "moved_dep")
+        .collect();
+    assert_eq!(moved.len(), 1, "{report}");
+    assert_eq!(moved[0]["id"], c);
+    assert!(
+        moved[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("tasks dep {c} --on {n} --rm {a}"))
+    );
+}
+
+#[test]
 fn half_a_move_is_incomplete_but_an_unreachable_counterpart_only_warns() {
     let mut env = TestEnv::new();
     let dots = env.init("dots");

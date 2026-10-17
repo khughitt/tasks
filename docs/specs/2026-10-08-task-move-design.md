@@ -137,7 +137,9 @@ needs, docs, lanes, depends). Whatever that refuses, `move` refuses.
   `depends` instead of A → C, so C → B → A → C would be left permanently blocked. A move
   never creates a cycle itself: the graph after the move is the graph before it, with
   A renamed to C.
-- **`check`** warns `moved_dep` on every record that depends on a tombstone. The warning
+- **`check`** warns `moved_dep` on every record that depends on a tombstone, except a
+  tombstone itself: its retained depends are history and it refuses every write, so no
+  command could clear the warning (tasks-0d8393). The warning
   names the swap: `tasks dep <id> --on <new> --rm <old>`, where `<new>` is the live
   record at the end of the chain, since `dep --on` refuses a tombstone. When the chain
   cannot be followed to a live record here, the warning names the first hop and no
