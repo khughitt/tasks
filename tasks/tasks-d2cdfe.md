@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-17T12:37:08Z
-updated: 2026-10-17T17:38:28Z
+updated: 2026-10-17T17:45:16Z
 depends: []
 parent: tasks-5408fe
 tags: []
@@ -42,3 +42,4 @@ Tests:
 ## Notes
 
 - 2026-10-17T12:51:56Z (main): also: wait-backfill auto classification and judge proposals should drop named tasks that are the idea's own ancestor (freeze on 2026-10-17 found 27 such names among judge entries and 1 auto entry, mind6-573a5b, overridden to leave); see tasks-9c18e7
+- 2026-10-17T17:45:16Z (main): the awaiting_user re-review item needs a spec decision and moved to tasks-37f8e4; leave it out of this direct task
