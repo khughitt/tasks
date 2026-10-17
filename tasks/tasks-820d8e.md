@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-15T22:29:07Z
-updated: 2026-10-17T02:28:24Z
+updated: 2026-10-17T02:28:34Z
 depends: []
 tags: [feedback, friction, "from:lore"]
 agent: claude-code
@@ -18,3 +18,7 @@ Why: skills/scope/SKILL.md says to use the fixed root "for every evidence read" 
 Done: §1 and §2 say that task commands, this project's records and code, and every document write stay in the fixed root, and that read-only evidence from another registered project (its records via `tasks --project <prefix>`/`tasks root`, its plans, ledgers, or the tool a feedback idea names) may be read from that project's registered checkout, never from a worktree of either project. Nothing is ever written there. The §2 sentence on failed lookups stays. The wording is consistent with §6 ("documents through explicit paths under the fixed root").
 
 Where: skills/scope/SKILL.md §1 (the root paragraph) and §2 (the gather paragraph). Check: reread both sections for one consistent rule. Keep the shipped copy in step (AGENTS.md: skills ship to other projects).
+
+## Notes
+
+- 2026-10-17T02:28:34Z (main): scope: scoped; todo P2 xs/low/direct; body states the rule's purpose (no mixing main/worktree copies of this project's records) and the wording fix allowing read-only evidence from another project's registered checkout; checked against skills/scope/SKILL.md §1–§2 at 721c87a
