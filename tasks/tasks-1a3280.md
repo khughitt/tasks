@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/wait-aware-review
 created: 2026-10-17T09:19:37Z
-updated: 2026-10-17T10:08:03Z
+updated: 2026-10-17T10:08:35Z
 started: 2026-10-17T10:02:52Z
 depends: []
 parent: tasks-5408fe
@@ -34,3 +34,4 @@ Ideas it wakes: on completion, run `tasks note tasks-163055 --no-reviewed "<deci
   provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T10:03:00Z (feat/wait-aware-review): resumed
   provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T10:08:35Z (feat/wait-aware-review): spec drafted (b890fdb): marker = synced awaiting_user bool on reviewed ideas; waits = open dep (moves followed, unreachable counts open) | pending proposal | awaiting_user | future defer (added: else deferred reviewed ideas strand on day one); review_reason unreviewed|woken|stranded|unassessed; stranded drawn before unassessed todos; backfill report+apply, no writer pause
