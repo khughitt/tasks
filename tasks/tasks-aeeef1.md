@@ -7,7 +7,7 @@ size: l
 complexity: high
 process: planned
 created: 2026-10-17T11:25:02Z
-updated: 2026-10-17T12:46:15Z
+updated: 2026-10-17T12:52:17Z
 depends: []
 parent: tasks-5408fe
 tags: []
@@ -28,3 +28,5 @@ Where: spec docs/specs/2026-10-17-wait-aware-review-design.md (accepted after sp
 - 2026-10-17T12:37:55Z (feat/wait-aware-review): parked (waiting on user, approval): User picks integration for feat/wait-aware-review (.worktrees/wait-aware-review, all 7 steps done, final review clean, suite green). Merging is Rollout step 1: pause writers on every host, merge, cargo install --path . on each host, confirm tasks note --help lists --awaiting-user, then resume writers; the agent then runs Rollout steps 2-6 with the user ruling on judge entries
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T12:46:15Z (main): attached: wait-aware-review-ledger.md (11201 bytes): SDD ledger for the wait-aware review plan: pre-flight scan, rulings, per-task and final review outcomes, deferred minors (filed as tasks-d2cdfe)
+- 2026-10-17T12:52:17Z (main): parked (waiting on user, review): User reviews ~/.local/state/tasks/wait-backfill/judge-review.md (67 judge entries J1-J67 with proposals) and replies with only the entries to change; the agent then writes the decisions (judge-proposals.json plus overrides) into the per-project snapshots and, once the user confirms writers are paused and other hosts run the new binary, runs Rollout step 4 apply per project (no live claims), then steps 5-6. Done so far: merged 19974fe, binary installed on titan, freeze run for all 33 projects (139 candidates: 72 auto, 67 judge); auto mind6-573a5b overridden to leave (dep on own ancestor, tasks-9c18e7).
+  provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
