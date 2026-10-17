@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/wait-aware-review
 created: 2026-10-17T09:19:37Z
-updated: 2026-10-17T10:51:12Z
+updated: 2026-10-17T11:17:40Z
 started: 2026-10-17T10:02:52Z
 depends: []
 parent: tasks-5408fe
@@ -50,4 +50,6 @@ Ideas it wakes: on completion, run `tasks note tasks-163055 --no-reviewed "<deci
 - 2026-10-17T10:35:58Z (feat/wait-aware-review): spec round 2 fix landed (86ef756): acceptance 16 split per the review (A in main follows registered copy and waits; B only in W is woken; both in one command); review said no further design blockers, so the spec is taken as accepted and planning starts
 - 2026-10-17T10:51:11Z (feat/wait-aware-review): plan drafted (46ee88a, 15e9250): docs/plans/2026-10-17-wait-aware-review.md, 7 tasks (ops cli rows; stored fields; writers; derived state + per-scan Deps threading; row fields + view acceptance incl divergent checkouts; docs/skills; wait-backfill tool) + rollout; unlinked_step warnings expected until closeout files the step children
 - 2026-10-17T10:51:12Z (feat/wait-aware-review): parked (waiting on user, review): user reviews docs/plans/2026-10-17-wait-aware-review.md in .worktrees/wait-aware-review and picks an execution method; on approval the agent runs the plan's Tracking closeout (file the implementation goal and step children under tasks-5408fe, wake tasks-163055, note tasks-22f407 and tasks-d4e73d, update the brief)
+  provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:17:40Z (feat/wait-aware-review): resumed
   provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
