@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-10-17T11:25:02Z
-updated: 2026-10-17T17:37:47Z
+updated: 2026-10-17T17:38:26Z
 started: 2026-10-17T12:58:26Z
 depends: []
 parent: tasks-5408fe
@@ -44,3 +44,4 @@ Where: spec docs/specs/2026-10-17-wait-aware-review-design.md (accepted after sp
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T17:37:46Z (main): resumed
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T17:38:26Z (main): rollout step 4 (rest): applied/left/changed — material 9/14/0, mind6 39/1/1 (mind6-188345), obs 5/2/0, prism 6/3/0, relay 0/1/0, tasks 12/2/1 (tasks-2b5461: re-briefed at 16:47 with a dep on tasks-57425c, superseding the J61 awaiting_user ruling); step 5: every project clean under tasks/. Totals across 14 projects: 105 applied, 26 left, 5 changed. Installed on titan only; other hosts reading synced records upgrade separately (user).
