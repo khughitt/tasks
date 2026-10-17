@@ -635,7 +635,8 @@ impl Project {
     fn git_toplevel(&self) -> Result<Option<PathBuf>> {
         match self.git(&["rev-parse", "--show-toplevel"]) {
             Ok(output) if output.status.success() => {
-                let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim_end());
+                let line = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
+                let path = crate::link::path_from_git(line);
                 Ok(Some(path.canonicalize().unwrap_or(path)))
             }
             Ok(output) => {

@@ -489,10 +489,11 @@ impl Index {
         if !output.status.success() {
             return None;
         }
-        let text = String::from_utf8(output.stdout).ok()?;
-        let mut lines = text.lines();
-        let top = Path::new(lines.next()?).canonicalize().ok()?;
-        let common = PathBuf::from(lines.next()?);
+        let mut lines = output.stdout.split(|byte| *byte == b'\n');
+        let top = crate::link::path_from_git(lines.next()?)
+            .canonicalize()
+            .ok()?;
+        let common = crate::link::path_from_git(lines.next()?);
         if common.file_name()? != ".git" {
             return None;
         }

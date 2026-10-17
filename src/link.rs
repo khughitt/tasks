@@ -6,6 +6,13 @@ use crate::registry::Registry;
 use crate::repo::Project;
 use std::path::{Path, PathBuf};
 
+/// A path git printed, kept as the bytes git wrote: a path need not be UTF-8, and a lossy
+/// decode names a different, usually missing, path.
+pub fn path_from_git(bytes: &[u8]) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+}
+
 /// git's view of a directory, canonical: the repository's common git directory.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GitTree {
@@ -88,8 +95,11 @@ impl GitTree {
             }
             return Err(Error::Io(failed));
         }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let mut lines = text.lines().map(|line| PathBuf::from(line).canonicalize());
+        let mut lines = output
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| path_from_git(line).canonicalize());
         let mut next = || -> Result<PathBuf> {
             lines
                 .next()
@@ -128,11 +138,12 @@ impl GitTree {
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
-        Ok(String::from_utf8_lossy(&output.stdout)
-            .split('\0')
-            .filter_map(|field| field.strip_prefix("worktree "))
+        Ok(output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter_map(|field| field.strip_prefix(b"worktree "))
             .map(|listed| {
-                let listed = PathBuf::from(listed);
+                let listed = path_from_git(listed);
                 listed.canonicalize().unwrap_or(listed)
             })
             .collect())

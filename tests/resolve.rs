@@ -348,6 +348,35 @@ fn a_path_in_an_outside_worktree_resolves_through_git_with_its_offset() {
 }
 
 #[test]
+fn an_outside_worktree_whose_path_is_not_utf8_resolves_through_git() {
+    use std::os::unix::ffi::OsStrExt;
+    let env = TestEnv::new();
+    let base = tempfile::tempdir().unwrap();
+    let base = base.path().canonicalize().unwrap();
+    let main = base.join("m");
+    std::fs::create_dir_all(&main).unwrap();
+    env.json(&main, &["init", "--prefix", "parent"]);
+    git(&main, &["init", "-q"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "init"]);
+    let top = base.join(std::ffi::OsStr::from_bytes(b"caf\xe9"));
+    let out = std::process::Command::new("git")
+        .args(["worktree", "add", "-q"])
+        .arg(&top)
+        .current_dir(&main)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    std::fs::write(top.join("x"), "").unwrap();
+    // The parser takes UTF-8 arguments only; the path's bytes arrive through the cwd.
+    let r = &resolve(&env, &top, &["./x"])[0];
+    assert_eq!(r["prefix"], "parent", "{r}");
+    assert_eq!(r["via"], "git");
+    assert_eq!(r["worktree"], top.display().to_string());
+    assert_eq!(r["relpath"], "x");
+}
+
+#[test]
 fn a_malformed_locations_table_is_a_config_error() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
