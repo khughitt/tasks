@@ -1462,3 +1462,21 @@ fn every_view_agrees_on_review_state() {
         false
     );
 }
+
+#[test]
+fn rename_keeps_closed_and_reviewed_at_records_readable() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dots");
+    let done = id_of(env.json(&dir, &["add", "D"]));
+    env.json(&dir, &["start", &done]);
+    env.json(&dir, &["done", &done, "landed"]);
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    env.json(&dir, &["rename", "dots", "wali"]);
+    env.json(&dir, &["list"]);
+    for id in [&done, &idea] {
+        let moved = id.replace("dots-", "wali-");
+        assert_eq!(env.json(&dir, &["show", &moved])["task"]["id"], moved);
+    }
+    env.cmd(&dir).arg("check").assert().success();
+}

@@ -184,18 +184,26 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
     Ok(task)
 }
 
+/// Frontmatter keys holding a timestamp (the one scalar containing `:`). Single source for
+/// the parse-time quoting and the rename rewrite's raw write-back, so they cannot drift.
+pub const TIMESTAMP_KEYS: [&str; 7] = [
+    "created",
+    "updated",
+    "started",
+    "completed",
+    "reviewed_at",
+    "closed",
+    "last_done",
+];
+
 /// Timestamps are the one schema scalar containing `:`; quote them for the strict subset
 /// parser. Shared with the rename rewrite, which must round-trip a file it did not write.
 pub fn quote_timestamps(fm: &str) -> String {
     fm.lines()
         .map(|line| {
-            if line.starts_with("created: ")
-                || line.starts_with("updated: ")
-                || line.starts_with("started: ")
-                || line.starts_with("completed: ")
-                || line.starts_with("reviewed_at: ")
-                || line.starts_with("closed: ")
-                || line.starts_with("last_done: ")
+            if TIMESTAMP_KEYS
+                .iter()
+                .any(|k| line.strip_prefix(k).is_some_and(|r| r.starts_with(": ")))
             {
                 let (k, v) = line.split_once(':').expect("prefix matched");
                 format!("{k}: \"{}\"", v.trim_start())
