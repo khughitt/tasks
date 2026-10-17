@@ -326,6 +326,10 @@ decides whether brainstorming runs, ahead of generic Superpowers triggers:
 - `planned`: prepare a written design spec for user review, then an implementation
   plan for user review, before implementation. Reuse existing artifacts after
   verifying their contents and review state; links alone never prove approval.
+  Brainstorming's own sizing step takes the written-design size, and skipping its
+  questions does not waive the spec. When its conversation shows the work is smaller,
+  record the evidence and change the process to `direct` before skipping the design,
+  the mirror of the direct-to-planned rule below.
 - Missing (JSON key omitted): unassessed. Read the full task and relevant code, choose with
   `tasks edit <id> --process direct|planned`, and note the reason before implementation.
   Do not silently default or infer a choice from size, priority, complexity, parents,
