@@ -1,15 +1,16 @@
 ---
 id: tasks-c87f7d
 title: "The park command returns success when park metadata persistence fails, leaving no park entry or released claim; clients must verify the postcondition to avoid falsely reporting completion."
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: fix/park-store-failure
 created: 2026-10-14T16:18:01Z
-updated: 2026-10-17T03:00:17Z
+updated: 2026-10-17T03:05:12Z
 started: 2026-10-17T03:00:05Z
+completed: 2026-10-17T03:05:12Z
 depends: []
 tags: [feedback, gap, "from:crew"]
 agent: codex
@@ -29,4 +30,8 @@ Check: an integration test in tests/cli.rs modelled on `release_store_failure_af
 - 2026-10-17T03:00:05Z (main): started
   provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T03:00:17Z (fix/park-store-failure): resumed
+  provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T03:05:12Z (fix/park-store-failure): done
+  provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T03:05:12Z (fix/park-store-failure): park fails with the store's io error and a 'landed … rerun the same tasks park command' suffix on every store save failure, escalation included; park design §3 and complexity §5.2 amended, skill covers every park; tests in tests/cli.rs
   provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
