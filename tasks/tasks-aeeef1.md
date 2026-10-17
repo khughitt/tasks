@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-10-17T11:25:02Z
-updated: 2026-10-17T12:58:26Z
+updated: 2026-10-17T12:58:44Z
 started: 2026-10-17T12:58:26Z
 depends: []
 parent: tasks-5408fe
@@ -34,3 +34,4 @@ Where: spec docs/specs/2026-10-17-wait-aware-review-design.md (accepted after sp
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T12:58:26Z (main): started
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T12:58:44Z (main): rollout step 3: user ruled on judge-review.md (11 overrides: J6,J7,J10,J32,J42,J45,J63 narrowed dep; J12,J14,J34,J61 awaiting_user); decisions written to all snapshots: 67 judge entries decided
