@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-10-17T11:25:02Z
-updated: 2026-10-17T17:34:33Z
+updated: 2026-10-17T17:37:27Z
 started: 2026-10-17T12:58:26Z
 depends: []
 parent: tasks-5408fe
@@ -39,4 +39,6 @@ Where: spec docs/specs/2026-10-17-wait-aware-review-design.md (accepted after sp
 - 2026-10-17T13:04:20Z (main): parked (waiting on agent): Agent applies the remaining six snapshots once each project shows no live claim in tasks claims: material, mind6, obs, prism, relay, tasks (this goal's own claim is released by this park). From each project's root: python3 -I <tasks root>/tools/wait-backfill --state ~/.local/state/tasks/wait-backfill --root <root> --writers-paused; then git status --porcelain -- tasks/ there (tasks commit if needed), note counts here, append 'rollout complete <date>' to the spec status line, done the goal. Other hosts reading synced records must run the new binary (user).
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T17:34:33Z (main): resumed
+  provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T17:37:27Z (main): parked (waiting on agent): Agent is applying the tasks project snapshot now (claim released for the tool's live-claim check); resume with start and finish the rollout
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
