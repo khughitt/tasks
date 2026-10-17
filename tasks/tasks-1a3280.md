@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/wait-aware-review
 created: 2026-10-17T09:19:37Z
-updated: 2026-10-17T10:25:06Z
+updated: 2026-10-17T10:26:33Z
 started: 2026-10-17T10:02:52Z
 depends: []
 parent: tasks-5408fe
@@ -40,3 +40,4 @@ Ideas it wakes: on completion, run `tasks note tasks-163055 --no-reviewed "<deci
 - 2026-10-17T10:25:05Z (feat/wait-aware-review): resumed
   provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T10:25:06Z (feat/wait-aware-review): review: spec round 1 — verdict: revise; findings: must-fix 3; reviewer: unverified (relayed by user)
+- 2026-10-17T10:26:33Z (feat/wait-aware-review): spec revised for round 1: backfill freezes decisions with updated stamps and applies under the review-state 7.2 writer pause (atomic --if-updated rejected as permanent surface); dependency views bound to their scan, memo keyed by checkout and id, parked rows follow their recorded checkout; equal closed/reviewed_at counts as woken, defer test stays strict; acceptance 14-16
