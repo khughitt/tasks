@@ -5,8 +5,8 @@ status: idea
 priority: 3
 reviewed: true
 created: 2026-10-03T16:36:11Z
-updated: 2026-10-12T18:22:33Z
-depends: []
+updated: 2026-10-17T18:10:38Z
+depends: [tasks-b65dbc]
 parent: tasks-46d207
 tags: []
 source: docs/specs/2026-10-03-lanes-needs-groups-design.md
