@@ -141,10 +141,25 @@ or argues against them at spec review.
    `reviewed_at`. `updated` will not serve, because incidental notes bump it, and the
    scope note's own timestamp would mean reading notes again. Ideas reviewed before
    the field exists cannot be told apart, so the backfill treats them as legacy
-   stranded. Open for the design:
-   - `transition()` (`src/commands/mod.rs`) stamps `completed` only on a move to
-     `done`, so a dependency closed by `drop` carries none. The rule needs another
-     close time for drops, or treats a drop as no new evidence.
+   stranded. Settled with it:
+   - **A dropped dependency is new evidence** (the user, 2026-10-17). A drop ends the
+     wait as done does. A follow-up is dropped because it was covered elsewhere, its
+     premise went away, or it was abandoned, and each changes what the idea should
+     become. If drops did not count, an idea whose only follow-up was dropped would
+     be stranded with no way back. Today `transition()` (`src/commands/mod.rs`)
+     stamps `completed` only on a move to `done`, so a drop carries no close time. The
+     fix stamps one on any move to `done` or `dropped`, either in `completed` or in a
+     separate `closed`, and leaves `done` behaving as it does today.
+   - **A moved dependency is followed, not closed** (the user, 2026-10-17). A `moved`
+     tombstone names its successor (`moved_to`), and `check` reports such edges as
+     `moved_dep` with the command to re-point them. The rule waits on the successor.
+     `Status::is_open` counts `moved` as closed (`src/model.rs`), so a rule built on
+     it would wake every idea waiting across a `tasks move`, such as a retiring
+     project moving its open tasks to a successor. A prefix rename writes no
+     tombstones (`src/commands/rename.rs`); its ids resolve through the alias.
+
+   Still open for the design:
+   - Whether drops stamp `completed` or a new `closed` field.
    - `reviewed_at` is cleared wherever `reviewed` is.
    - A new frontmatter key has the same every-host-first rollout as `reviewed`
      (review-state §7.0).
@@ -158,8 +173,8 @@ or argues against them at spec review.
 
 - tasks-1a3280 — Design wait-aware review state from the brief (P2, m, high, planned),
   under tasks-5408fe. It takes the answers above as inputs, chooses the synced
-  wait-on-user marker, settles the `reviewed_at` tier test (including drops), and
-  specifies the backfill. tasks-163055
+  wait-on-user marker, settles the `reviewed_at` tier test (drops stamp a
+  close time, moves are followed), and specifies the backfill. tasks-163055
   depends on it.
 - tasks-163055 waits on that design. It returns to the queue when the design's
   completion wakes it.
