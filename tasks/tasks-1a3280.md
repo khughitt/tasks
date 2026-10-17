@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/wait-aware-review
 created: 2026-10-17T09:19:37Z
-updated: 2026-10-17T10:35:24Z
+updated: 2026-10-17T10:35:25Z
 started: 2026-10-17T10:02:52Z
 depends: []
 parent: tasks-5408fe
@@ -45,3 +45,4 @@ Ideas it wakes: on completion, run `tasks note tasks-163055 --no-reviewed "<deci
   provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T10:35:24Z (feat/wait-aware-review): resumed
   provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T10:35:25Z (feat/wait-aware-review): review: spec round 2 — verdict: revise; findings: must-fix 1; reviewer: unverified (relayed by user)
