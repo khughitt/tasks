@@ -1154,3 +1154,311 @@ fn show_prints_the_review_date_the_marker_and_closed() {
     env.json(&dir, &["drop", &dropped]);
     assert!(env.pretty(&dir, &["show", &dropped]).contains("closed"));
 }
+
+/// `(needs_review, review_reason)` of one row of `list` JSON, or `None` when not listed.
+fn reason(env: &TestEnv, dir: &Path, args: &[&str], id: &str) -> Option<(bool, Option<String>)> {
+    env.json(dir, args)["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == id)
+        .map(|row| {
+            (
+                row["needs_review"].as_bool().unwrap(),
+                row.get("review_reason")
+                    .map(|r| r.as_str().unwrap().to_string()),
+            )
+        })
+}
+
+fn queued(env: &TestEnv, dir: &Path, id: &str) -> Option<String> {
+    reason(env, dir, &["list", "--needs-review"], id).map(|(_, why)| why.unwrap())
+}
+
+#[test]
+fn an_edge_wakes_its_idea_on_done_and_on_drop() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for close in [["done"].as_slice(), ["drop"].as_slice()] {
+        let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+        let follow_up = id_of(env.json(&dir, &["add", "F"]));
+        env.json(&dir, &["dep", &idea, "--on", &follow_up]);
+        env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+        assert_eq!(queued(&env, &dir, &idea), None);
+        let before = env.read(&dir, &format!("tasks/{idea}.md"));
+        let mut args = close.to_vec();
+        args.push(follow_up.as_str());
+        env.json(&dir, &args);
+        assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("woken"));
+        assert_eq!(
+            env.read(&dir, &format!("tasks/{idea}.md")),
+            before,
+            "no write touched the idea"
+        );
+    }
+}
+
+#[test]
+fn a_moved_dependency_is_followed_to_its_successor() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let other = env.init("wali");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let follow_up = id_of(env.json(&dir, &["add", "F"]));
+    env.json(&dir, &["dep", &idea, "--on", &follow_up]);
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    let moved = id_of(env.json(&dir, &["move", &follow_up, "--to", "wali"]));
+    assert_eq!(
+        queued(&env, &dir, &idea),
+        None,
+        "the successor is still open"
+    );
+    env.json(&other, &["done", &moved]);
+    assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("woken"));
+}
+
+#[test]
+fn an_unreachable_or_shelved_dependency_keeps_the_idea_waiting() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    restamp(&dir, &idea, "depends", "[zzz-abcdef]");
+    // The warning covers listed rows only, so read it from the unfiltered list.
+    let out = env.json(&dir, &["list"]);
+    assert!(
+        out["warnings"]
+            .to_string()
+            .contains("zzz-abcdef is unreachable"),
+        "{out}"
+    );
+    assert_eq!(queued(&env, &dir, &idea), None);
+    // Review Focus 2: a shelf is open.
+    let shelved_wait = id_of(env.json(&dir, &["add", "S", "--status", "idea"]));
+    let follow_up = id_of(env.json(&dir, &["add", "F"]));
+    env.json(&dir, &["dep", &shelved_wait, "--on", &follow_up]);
+    env.json(
+        &dir,
+        &["note", &shelved_wait, "--reviewed", "scope: briefed"],
+    );
+    env.json(&dir, &["shelve", &follow_up, "later"]);
+    assert_eq!(queued(&env, &dir, &shelved_wait), None);
+}
+
+#[test]
+fn stranded_ideas_and_the_review_time_test() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let bare = id_of(env.json(&dir, &["add", "B", "--status", "idea"]));
+    env.json(&dir, &["note", &bare, "--reviewed", "scope: briefed"]);
+    assert_eq!(queued(&env, &dir, &bare).as_deref(), Some("stranded"));
+    // Legacy: reviewed with no stamp, its edge closed since: still stranded.
+    let legacy = id_of(env.json(&dir, &["add", "L", "--status", "idea"]));
+    let done = id_of(env.json(&dir, &["add", "D"]));
+    env.json(&dir, &["dep", &legacy, "--on", &done]);
+    seed_reviewed(&dir, &legacy);
+    env.json(&dir, &["done", &done]);
+    assert_eq!(queued(&env, &dir, &legacy).as_deref(), Some("stranded"));
+    // Closed before the review: stranded; a woken idea re-reviewed: stranded.
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let follow_up = id_of(env.json(&dir, &["add", "F"]));
+    env.json(&dir, &["dep", &idea, "--on", &follow_up]);
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    env.json(&dir, &["done", &follow_up]);
+    restamp(&dir, &follow_up, "closed", "2026-01-02T00:00:00Z");
+    restamp(&dir, &idea, "reviewed_at", "2026-01-01T00:00:00Z");
+    assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("woken"));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &idea,
+            "--reviewed",
+            "scope: briefed; follow-up read",
+        ],
+    );
+    assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("stranded"));
+}
+
+#[test]
+fn proposals_users_and_deferrals_are_waits() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let proposed = id_of(env.json(&dir, &["add", "P", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &proposed,
+            "--reviewed",
+            "scope: drop; landed; proposal: drop it",
+        ],
+    );
+    assert_eq!(queued(&env, &dir, &proposed), None);
+    env.json(&dir, &["note", &proposed, "keep it"]);
+    assert_eq!(queued(&env, &dir, &proposed).as_deref(), Some("stranded"));
+    let asked = id_of(env.json(&dir, &["add", "Q", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &asked,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    assert_eq!(queued(&env, &dir, &asked), None);
+    env.json(&dir, &["note", &asked, "--no-reviewed", "answer"]);
+    assert_eq!(queued(&env, &dir, &asked).as_deref(), Some("unreviewed"));
+    let deferred = id_of(env.json(&dir, &["add", "D", "--status", "idea"]));
+    seed(
+        &dir,
+        &deferred,
+        "reviewed: true\nreviewed_at: 2026-01-01T12:00:00Z\ndefer: 2099-01-01",
+    );
+    assert_eq!(queued(&env, &dir, &deferred), None);
+    restamp(&dir, &deferred, "defer", "2026-01-02");
+    assert_eq!(queued(&env, &dir, &deferred).as_deref(), Some("woken"));
+    restamp(&dir, &deferred, "defer", "2026-01-01");
+    assert_eq!(queued(&env, &dir, &deferred).as_deref(), Some("stranded"));
+}
+
+#[test]
+fn a_dependency_in_another_project_wakes_the_idea_from_either_scope() {
+    // Review Focus 3.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let other = env.init("wali");
+    let follow_up = id_of(env.json(&other, &["add", "F"]));
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(&dir, &["dep", &idea, "--on", &follow_up]);
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    assert_eq!(queued(&env, &dir, &idea), None);
+    env.json(&other, &["done", &follow_up]);
+    assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("woken"));
+    assert_eq!(
+        reason(
+            &env,
+            &dir,
+            &["list", "--all-projects", "--needs-review"],
+            &idea
+        )
+        .and_then(|(_, why)| why)
+        .as_deref(),
+        Some("woken")
+    );
+}
+
+#[test]
+fn every_view_agrees_on_review_state() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let waiting = id_of(env.json(&dir, &["add", "W", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &waiting,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    let stranded = id_of(env.json(&dir, &["add", "S", "--status", "idea"]));
+    env.json(&dir, &["note", &stranded, "--reviewed", "scope: briefed"]);
+    let woken = id_of(env.json(&dir, &["add", "K", "--status", "idea"]));
+    let follow_up = id_of(env.json(&dir, &["add", "F", "--process", "direct"]));
+    env.json(&dir, &["dep", &woken, "--on", &follow_up]);
+    env.json(&dir, &["note", &woken, "--reviewed", "scope: briefed"]);
+    env.json(&dir, &["done", &follow_up]);
+    let fresh = id_of(env.json(&dir, &["add", "N", "--status", "idea"]));
+    let marked = [stranded.clone(), woken.clone(), fresh.clone()];
+    // The one expected state per idea, which every view must report.
+    let expect: [(&String, bool, Option<&str>); 4] = [
+        (&waiting, false, None),
+        (&stranded, true, Some("stranded")),
+        (&woken, true, Some("woken")),
+        (&fresh, true, Some("unreviewed")),
+    ];
+    fn state_of(row: &serde_json::Value) -> (bool, Option<String>) {
+        (
+            row["needs_review"].as_bool().unwrap(),
+            row.get("review_reason")
+                .map(|r| r.as_str().unwrap().to_string()),
+        )
+    }
+    fn walk(nodes: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
+        for node in nodes.as_array().unwrap() {
+            out.push(node.clone());
+            if let Some(children) = node.get("children") {
+                walk(children, out);
+            }
+        }
+    }
+    // JSON rows: needs_review and review_reason agree, the reason is absent exactly when false.
+    let list = env.json(&dir, &["list"]);
+    for row in list["tasks"].as_array().unwrap() {
+        let needs = row["needs_review"].as_bool().unwrap();
+        assert_eq!(needs, row.get("review_reason").is_some(), "{row}");
+        assert!(row["awaiting_user"].is_boolean(), "{row}");
+        let id = row["id"].as_str().unwrap().to_string();
+        assert_eq!(needs, marked.contains(&id), "{row}");
+    }
+    let rows = list["tasks"].as_array().unwrap();
+    for (id, needs, why) in expect {
+        let row = rows.iter().find(|r| r["id"] == id.as_str()).unwrap();
+        assert_eq!(
+            state_of(row),
+            (needs, why.map(str::to_string)),
+            "list row {id}"
+        );
+    }
+    // The filter, the pretty mark and tree return the same set.
+    let mut filtered: Vec<String> = env.json(&dir, &["list", "--needs-review"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    filtered.sort();
+    let mut want = marked.to_vec();
+    want.sort();
+    assert_eq!(filtered, want);
+    for args in [["list"].as_slice(), ["tree"].as_slice()] {
+        let pretty = env.pretty(&dir, args);
+        for (id, needs, _) in expect {
+            let line = pretty
+                .lines()
+                .find(|line| line.contains(id.as_str()))
+                .unwrap_or_else(|| panic!("{id} missing from {args:?}:\n{pretty}"));
+            assert_eq!(
+                line.trim_start().starts_with('*'),
+                needs,
+                "{args:?}: {line}"
+            );
+        }
+    }
+    // tree nodes flatten the summary row: the same fields with the same values.
+    let mut nodes = Vec::new();
+    walk(&env.json(&dir, &["tree"])["nodes"], &mut nodes);
+    for (id, needs, why) in expect {
+        let node = nodes
+            .iter()
+            .find(|n| n["id"] == id.as_str())
+            .unwrap_or_else(|| panic!("{id} not in tree: {nodes:?}"));
+        assert_eq!(
+            state_of(node),
+            (needs, why.map(str::to_string)),
+            "tree node {id}"
+        );
+    }
+    assert_eq!(
+        env.json(&dir, &["show", &waiting])["task"]["awaiting_user"],
+        true
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &fresh])["task"]["awaiting_user"],
+        false
+    );
+}

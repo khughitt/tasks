@@ -405,6 +405,10 @@ pub struct TaskSummary {
     pub lane: bool,
     /// The stored review flag; always present, like `parallel`.
     pub reviewed: bool,
+    /// The stored wait-on-user marker; always present, like `reviewed`.
+    pub awaiting_user: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed_at: Option<String>,
     /// The row needs a look (review-state spec §4). Computed from the scan, never stored.
     pub needs_review: bool,
     /// Why the row needs a look (wait-aware spec §4.2); present exactly when
@@ -421,6 +425,8 @@ pub struct TaskSummary {
     pub started: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -642,6 +648,8 @@ impl TaskSummary {
             parallel: task.parallel,
             lane: task.lane,
             reviewed: task.reviewed,
+            awaiting_user: task.awaiting_user,
+            reviewed_at: task.reviewed_at.clone(),
             needs_review: review_reason.is_some(),
             review_reason,
             needs: task.needs.clone(),
@@ -650,6 +658,7 @@ impl TaskSummary {
             updated: task.updated.clone(),
             started: task.started.clone(),
             completed: task.completed.clone(),
+            closed: task.closed.clone(),
             tags: task.tags.clone(),
             source: task.source.clone(),
             step: task.step.clone(),
@@ -2182,6 +2191,9 @@ mod tests {
             parallel,
             lane: false,
             reviewed: false,
+            awaiting_user: false,
+            reviewed_at: None,
+            closed: None,
             needs_review: false,
             review_reason: None,
         }
