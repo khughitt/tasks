@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-10-17T11:25:02Z
-updated: 2026-10-17T13:04:20Z
+updated: 2026-10-17T17:34:33Z
 started: 2026-10-17T12:58:26Z
 depends: []
 parent: tasks-5408fe
@@ -37,4 +37,6 @@ Where: spec docs/specs/2026-10-17-wait-aware-review-design.md (accepted after sp
 - 2026-10-17T12:58:44Z (main): rollout step 3: user ruled on judge-review.md (11 overrides: J6,J7,J10,J32,J42,J45,J63 narrowed dep; J12,J14,J34,J61 awaiting_user); decisions written to all snapshots: 67 judge entries decided
 - 2026-10-17T13:04:18Z (main): rollout step 4 (partial, user-approved idle projects): applied/left/changed — beliefs 2/1/1 (beliefs-c800ef), fam 1/1/0, forge 2/0/0, hq 3/0/2 (hq-48c5c6, hq-5b8413), ns 3/0/0, ops 22/0/0, tui 0/1/0, wali 4/0/0; step 5: all eight committed, git status clean under tasks/
 - 2026-10-17T13:04:20Z (main): parked (waiting on agent): Agent applies the remaining six snapshots once each project shows no live claim in tasks claims: material, mind6, obs, prism, relay, tasks (this goal's own claim is released by this park). From each project's root: python3 -I <tasks root>/tools/wait-backfill --state ~/.local/state/tasks/wait-backfill --root <root> --writers-paused; then git status --porcelain -- tasks/ there (tasks commit if needed), note counts here, append 'rollout complete <date>' to the spec status line, done the goal. Other hosts reading synced records must run the new binary (user).
+  provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T17:34:33Z (main): resumed
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
