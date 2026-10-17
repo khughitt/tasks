@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/wait-aware-review
 created: 2026-10-17T09:19:37Z
-updated: 2026-10-17T11:17:41Z
+updated: 2026-10-17T11:19:58Z
 started: 2026-10-17T10:02:52Z
 depends: []
 parent: tasks-5408fe
@@ -54,3 +54,4 @@ Ideas it wakes: on completion, run `tasks note tasks-163055 --no-reviewed "<deci
 - 2026-10-17T11:17:40Z (feat/wait-aware-review): resumed
   provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T11:17:41Z (feat/wait-aware-review): review: plan round 1 — verdict: revise; findings: must-fix 4, should-fix 1; reviewer: unverified (relayed by user)
+- 2026-10-17T11:19:58Z (feat/wait-aware-review): plan revised for round 1: freeze keeps a candidate only when show's updated equals the list row's (else reported changed; shim test); references follow moved_to with cycle refusal, failed reads go to an unresolved list and force judge (move + missing-id test); dropped the duplicate Defer::date step; rollout resolves WAIT_BACKFILL from the tasks root and runs it per project with --root; view test asserts needs_review and review_reason on list rows and tree nodes and pretty marks in list and tree
