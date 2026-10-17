@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-17T11:24:25Z
-updated: 2026-10-17T17:49:57Z
+updated: 2026-10-17T17:49:59Z
 depends: []
 tags: [feedback, friction, "from:ops"]
 agent: claude-code/claude-opus-5-5
@@ -22,3 +22,7 @@ Done: both git closures in `tracked_config` and `unborn` run with every `GIT_TRA
 Where: src/link.rs (tracked_config, unborn); tests/linked.rs: the `no HEAD tracks nothing` assertion near line 684 and `a_corrupt_head_ref_is_an_error_not_an_empty_repository`. Verify with `just test-one --test linked <name>` (a regression run of `where` with GIT_TRACE=1 set on the child), then `just test-fast`.
 
 Original report (preserved): Repro: git init a scratch repo, then run a client that asks the resolver about it (here a pre-commit hook) under GIT_TRACE=1: error 'io: git ls-tree HEAD in <repo> failed: <trace line> trace: built-in: git ls-tree -z HEAD -- tasks/.config.toml'. Without GIT_TRACE, or once HEAD exists, it answers. Expected: an unborn HEAD is recognised regardless of git trace output (e.g. check rev-parse --verify HEAD, or run git with GIT_TRACE* unset).
+
+## Notes
+
+- 2026-10-17T17:49:59Z (main): scope: scoped; root cause reproduced: unborn() in src/link.rs:361 requires empty for-each-ref stderr, which GIT_TRACE fills; fix strips GIT_TRACE* from those git calls, regression in tests/linked.rs
