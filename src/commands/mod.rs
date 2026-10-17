@@ -1788,23 +1788,21 @@ pub fn save(ctx: &mut Ctx, task: &mut Task) -> Result<()> {
             if let Some(escalation) = &escalation {
                 store.insert_escalation(&id, escalation.clone());
             }
-            if let Err(error) = store.save() {
-                // For an escalation the store write is the cross-checkout guarantee
-                // (spec §5.2), so its failure is the command's failure; the raised
-                // rating stays, and equal-to-current lets the rerun pass.
-                if let Some(escalation) = escalation {
-                    return Err(Error::Validation(format!(
-                        "the note and rating landed, but the escalation of {id} to {} was not \
-                         recorded ({error}); rerun the same `tasks park` command",
+            // A failed store save is the command's failure, never a warning beside exit 0
+            // (claim-release spec §4): the store's own error, naming what landed and the
+            // rerun. For an escalation the raised rating stays, and equal-to-current lets
+            // the rerun pass (spec §5.2).
+            store.save().map_err(|error| {
+                let landed = match &escalation {
+                    Some(escalation) => format!(
+                        "the note and rating on {id} landed but its escalation to {} was not \
+                         recorded and it was not parked",
                         escalation.level.as_str()
-                    )));
-                }
-                ctx.warnings.push(format!(
-                    "the note landed, but parking on {id} was not updated ({error}); a previous \
-                     park entry, if any, is intact"
-                ));
-            }
-            Ok(())
+                    ),
+                    None => format!("the note on {id} landed but it was not parked"),
+                };
+                error.with_suffix(&format!("; {landed}; rerun the same `tasks park` command"))
+            })
         }
         Some((id, ClaimIntent::ClearEscalation(escalation))) => {
             ctx.project.write_task(&ctx.registry, task)?;

@@ -162,8 +162,9 @@ mean those documents were verified.
    written to the record and to the shared store so no checkout's picker offers it under
    that cutoff again. When no level above the cutoff exists, `--waiting-on user` instead,
    so a person can decompose or reassign it. An environment or credential failure is
-   `--reason environment` and never raises the rating. If the command reports that the
-   escalation was not recorded, rerun it as it was.
+   `--reason environment` and never raises the rating.
+   If any park fails after its note landed (the note is there, but the task was not
+   parked), rerun the same command; the rerun adds a second note.
    When a preflight or benchmark refuses on host load (CPU, GPU, load average, a
    competing application), park with
    `tasks park <id> "<the check to rerun, then what follows>" --reason quiet --waiting-on user --minutes <n>`,

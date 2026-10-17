@@ -67,8 +67,11 @@ is parked there, and losing the store file costs the overlay, never a task.
 - Park is a mutation: it runs under the store's mutation lock, and the file write and the
   store write move together in the order the claims design fixed (validate everything,
   then write the record, then the store). If the store write fails after the note has
-  landed, the result is a warning in the shape `note` uses for a failed heartbeat, saying
-  the note landed but parking was not updated (a previous park entry, if any, is intact).
+  landed, the command fails with the store's error (kind `io`) and the suffix "the note
+  on `<id>` landed but it was not parked; rerun the same `tasks park` command"; a
+  previous park entry, if any, is intact. This replaces the original warning beside exit
+  0, which let a caller report a park that never happened (tasks-c87f7d), and follows the
+  shape claim-release design §4 sets. A rerun appends a second note.
 
 ### 3.1 Store effects
 

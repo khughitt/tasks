@@ -18725,20 +18725,23 @@ fn capability_park_fails_loudly_when_the_store_write_fails_and_the_rerun_succeed
         String::from_utf8_lossy(&capability.stdout)
     );
     let error: serde_json::Value = serde_json::from_slice(&capability.stderr).unwrap();
-    assert_eq!(error["error"]["kind"], "validation");
+    assert_eq!(error["error"]["kind"], "io", "{error}");
     let message = error["error"]["detail"].as_str().unwrap();
     assert!(
-        message.contains("rerun the same `tasks park` command"),
+        message.ends_with(&format!(
+            "; the note and rating on {id} landed but its escalation to high was not recorded \
+             and it was not parked; rerun the same `tasks park` command"
+        )),
         "{message}"
     );
-    assert!(
-        message.contains(&format!("escalation of {id} to high")),
-        "{message}"
+    assert_eq!(
+        ordinary.status.code(),
+        Some(1),
+        "an ordinary park fails too: {}",
+        String::from_utf8_lossy(&ordinary.stdout)
     );
-    assert!(
-        ordinary.status.success(),
-        "an ordinary park keeps the warning contract"
-    );
+    let error: serde_json::Value = serde_json::from_slice(&ordinary.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "io", "{error}");
 
     let v = env.json(&sci, &["show", &id]);
     assert_eq!(v["task"]["complexity"], "high", "the record write landed");
@@ -29602,6 +29605,66 @@ fn release_store_failure_after_the_note_names_the_rerun() {
     );
     assert!(stored_claim(&env, "sci", &id).get("session").is_some());
     release_note(&env, &sci, &id);
+}
+
+/// Make `prefix`'s claim store directory read-only; false when it stays writable (root).
+fn claims_read_only(env: &TestEnv, prefix: &str, read_only: bool) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let claims = env.claim_store(prefix).parent().unwrap().to_path_buf();
+    let mode = if read_only { 0o555 } else { 0o755 };
+    std::fs::set_permissions(&claims, std::fs::Permissions::from_mode(mode)).unwrap();
+    if read_only && std::fs::write(claims.join("probe"), "").is_ok() {
+        std::fs::remove_file(claims.join("probe")).unwrap();
+        claims_read_only(env, prefix, false);
+        eprintln!("skipped: a read-only directory is writable here (running as root)");
+        return false;
+    }
+    true
+}
+
+fn parked_notes(env: &TestEnv, dir: &std::path::Path, id: &str) -> usize {
+    env.json(dir, &["show", id])["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|note| note["text"].as_str().unwrap().starts_with("parked "))
+        .count()
+}
+
+fn stored_park(env: &TestEnv, prefix: &str, id: &str) -> Option<toml::Value> {
+    let store: toml::Value =
+        toml::from_str(&std::fs::read_to_string(env.claim_store(prefix)).unwrap()).unwrap();
+    store.get("parks").and_then(|parks| parks.get(id)).cloned()
+}
+
+#[test]
+fn park_store_failure_after_the_note_names_the_rerun() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let id = id_of(env.json(&sci, &["add", "Held", "-p", "2"]));
+    json_as(&env, &sci, "agent-a", &["start", &id]);
+    if !claims_read_only(&env, "sci", true) {
+        return;
+    }
+    let error = error_as(&env, &sci, "agent-a", &["park", &id, "next step"]);
+    claims_read_only(&env, "sci", false);
+    assert_eq!(error["error"]["kind"], "io", "{error}");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    assert!(
+        detail.ends_with(&format!(
+            "; the note on {id} landed but it was not parked; rerun the same `tasks park` \
+             command"
+        )),
+        "{detail}"
+    );
+    assert_eq!(parked_notes(&env, &sci, &id), 1);
+    assert!(stored_park(&env, "sci", &id).is_none());
+    assert!(stored_claim(&env, "sci", &id).get("session").is_some());
+
+    json_as(&env, &sci, "agent-a", &["park", &id, "next step"]);
+    assert_eq!(parked_notes(&env, &sci, &id), 2);
+    assert!(stored_park(&env, "sci", &id).is_some());
+    assert!(env.json(&sci, &["show", &id])["claim"].is_null());
 }
 
 #[test]

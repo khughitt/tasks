@@ -211,14 +211,16 @@ Pickers compute the effective rating from it (§4.1). `show` and list rows repor
 
 ### 5.2 Write order and recovery
 
-`park` writes the record before it saves the shared store. For every other reason a
-store failure after the record write is a success with a warning, as today: the note is
-the trail, and a missing park entry costs a listing. For `--reason capability` waiting
-on the agent the store write *is* the guarantee, so the command instead fails: exit
-status 1 with a validation-class error,
+`park` writes the record before it saves the shared store, and a store failure after
+the record write fails every park (park design §3). For `--reason capability` waiting
+on the agent the store write is also the escalation's guarantee: exit status 1 with the
+store's error (kind `io`) and the suffix
 
-    the note and rating landed, but the escalation of <id> to <level> was not recorded
-    (<error>); rerun the same `tasks park` command
+    ; the note and rating on <id> landed but its escalation to <level> was not recorded
+    and it was not parked; rerun the same `tasks park` command
+
+(Originally only this case failed, with a validation-class error, while other parks
+warned and exited 0; tasks-c87f7d made every park fail the same way.)
 
 The record then carries the raised rating, and the rerun passes because equal-to-current
 is accepted; it writes the escalation and the park entry. No rollback of the rating is
