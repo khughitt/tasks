@@ -1,6 +1,6 @@
 # Wait-aware review state: reviewed ideas that wait on nothing come back
 
-Status: draft for review (revised after review round 1, 2026-10-17: backfill freeze and writer pause, checkout-scoped dependency views, equal stamps count as woken)
+Status: draft for review (revised after review round 1, 2026-10-17: backfill freeze and writer pause, checkout-scoped dependency views, equal stamps count as woken; round 2, acceptance 16 follows the parked views' existing choice of copy)
 Task: tasks-1a3280 (parent tasks-5408fe, lane tasks-46d207; answers tasks-163055)
 Brief: `docs/notes/2026-10-17-scope-queue-stranded-ideas-brief.md`
 Amends: `docs/specs/2026-10-11-review-state-design.md` §1, §3.3, §4, §5, §6
@@ -441,14 +441,22 @@ commands:
     fixed stamps. A dependency closed one second before `reviewed_at` gives `stranded`.
     A deferral due on the date of `reviewed_at` gives `stranded`, and one due on a
     later date gives `woken`.
-16. **Divergent checkouts:** a reviewed idea is parked in a worktree whose copy of its
-    dependency is `done` with `closed` after `reviewed_at`, while the registered
-    checkout's copy of that dependency is still open.
-    - `list --parked` and `prime`'s parked section, reading the recorded worktree, show
-      the idea `woken`.
-    - `list --needs-review` in the registered checkout leaves it out, because it is
-      still waiting there.
-    - One command that reads both copies gives each row its own checkout's answer.
+16. **Divergent checkouts.** The fixture has a worktree W whose copy of dependency D
+    is `done`, with `closed` after both ideas' `reviewed_at`. The registered checkout's
+    copy of D is still open. Two reviewed ideas depend on D, and both are parked with
+    W recorded:
+    - Idea A exists in the registered checkout too. `list --parked` and `prime`'s
+      parked section prefer the registered copy (`Prefer::Registered`,
+      `src/commands/parked.rs`), so A's row is built from the registered scan and A is
+      waiting: no `*`, and `needs_review: false`.
+    - Idea B exists only in W. Its row comes from W through `resolve_recorded` and is
+      built from W's scan, so B is `woken`.
+    - Both rows appear in one `list --parked` command and in one `prime`, so the same
+      dependency id D resolves open for A and done for B within one command. That is
+      the cache-isolation check.
+    - `list --needs-review` in the registered checkout does not list A.
+    - The parked views' choice of copy is unchanged from today. The review state only
+      follows the copy the row already shows.
 
 ## 9. Out of scope
 
