@@ -1,15 +1,16 @@
 ---
 id: tasks-dd87b6
 title: tasks where fails with io ENOENT on a git repository whose path is not UTF-8
-status: doing
+status: done
 priority: 1
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/where-non-utf8-path
 created: 2026-10-17T11:01:59Z
-updated: 2026-10-17T11:18:04Z
+updated: 2026-10-17T11:25:11Z
 started: 2026-10-17T11:18:04Z
+completed: 2026-10-17T11:25:11Z
 depends: []
 tags: [bug]
 source: ops-e23130
@@ -21,4 +22,11 @@ Repro: mkdir a directory named b'caf\xe9', git init it, run `tasks where <that p
 ## Notes
 
 - 2026-10-17T11:18:04Z (main): started
+  provenance: {"harness_session":"claude-code:1c29b303-8058-4f2c-a42b-119ee67e812a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:18:14Z (fix/where-non-utf8-path): resumed
+  provenance: {"harness_session":"claude-code:1c29b303-8058-4f2c-a42b-119ee67e812a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:25:06Z (fix/where-non-utf8-path): touched four git-path decodes (link GitTree::of and worktrees, locations through_git, repo git_toplevel) via link::path_from_git; tested where (no project, linked worktree) and resolve through git. worktrees() and git_toplevel have no dedicated test: their callers compare against registered roots, which the TOML registry holds as UTF-8 only. test-fast: 18 record_commit unit tests fail from a HOME leak, filed tasks-eeeeda; all integration suites pass
+- 2026-10-17T11:25:11Z (fix/where-non-utf8-path): done
+  provenance: {"harness_session":"claude-code:1c29b303-8058-4f2c-a42b-119ee67e812a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:25:11Z (fix/where-non-utf8-path): where and resolve read git's paths as bytes (link::path_from_git): a repository or worktree whose path is not UTF-8 answers where (no project, or its linked project) and resolves through git instead of io ENOENT / unregistered
   provenance: {"harness_session":"claude-code:1c29b303-8058-4f2c-a42b-119ee67e812a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

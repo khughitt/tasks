@@ -28,7 +28,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 /// A code repository with one commit, at `base/name`.
-fn code_repo(base: &Path, name: &str) -> PathBuf {
+fn code_repo(base: &Path, name: impl AsRef<Path>) -> PathBuf {
     let dir = base.join(name);
     std::fs::create_dir_all(&dir).unwrap();
     git(&dir, &["init", "-q"]);
@@ -580,6 +580,50 @@ fn where_never_crosses_into_an_enclosing_project() {
     let sub = parent.join("sub");
     std::fs::create_dir_all(&sub).unwrap();
     assert_eq!(env.json(&sub, &["where"])["project"]["prefix"], "par");
+}
+
+/// `café` in Latin-1: a directory name that is not UTF-8.
+fn not_utf8() -> &'static std::ffi::OsStr {
+    use std::os::unix::ffi::OsStrExt;
+    std::ffi::OsStr::from_bytes(b"caf\xe9")
+}
+
+#[test]
+fn where_answers_no_project_for_a_repository_whose_path_is_not_utf8() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let repo = code_repo(&l.base, not_utf8());
+    let inside = env.json(&repo, &["where"]);
+    assert!(inside["project"].is_null(), "{inside}");
+    assert_eq!(inside["holds_records"], false);
+    let out = env
+        .cmd(&l.base)
+        .args(["where", "--json"])
+        .arg(&repo)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let by_path: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(by_path["project"].is_null(), "{by_path}");
+}
+
+#[test]
+fn where_finds_the_linked_project_from_a_worktree_whose_path_is_not_utf8() {
+    let env = TestEnv::new();
+    let l = layout(&env);
+    let tree = l.base.join("storage").join(not_utf8());
+    let status = Command::new("git")
+        .args(["worktree", "add", "-q", "-b", "latin"])
+        .arg(&tree)
+        .current_dir(&l.code)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let found = env.json(&tree, &["where"]);
+    assert_eq!(found["project"]["prefix"], "nexc", "{found}");
+    assert_eq!(found["project"]["checkout"], l.code.to_str().unwrap());
 }
 
 #[test]
