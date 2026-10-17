@@ -1,15 +1,16 @@
 ---
 id: tasks-1a3280
 title: Design wait-aware review state from the brief
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 owner: feat/wait-aware-review
 created: 2026-10-17T09:19:37Z
-updated: 2026-10-17T11:24:42Z
+updated: 2026-10-17T11:26:23Z
 started: 2026-10-17T10:02:52Z
+completed: 2026-10-17T11:26:23Z
 depends: []
 parent: tasks-5408fe
 tags: []
@@ -60,3 +61,7 @@ Ideas it wakes: on completion, run `tasks note tasks-163055 --no-reviewed "<deci
 - 2026-10-17T11:24:40Z (feat/wait-aware-review): resumed
   provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T11:24:42Z (feat/wait-aware-review): review: plan round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-17T11:26:23Z (feat/wait-aware-review): done
+  provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:26:23Z (feat/wait-aware-review): spec docs/specs/2026-10-17-wait-aware-review-design.md (accepted, spec round 2) and plan docs/plans/2026-10-17-wait-aware-review.md (accepted, plan round 2, codex/gpt-6.1-sol); brief updated with the decisions; implementation decomposed as tasks-aeeef1 with seven steps under tasks-5408fe; tasks-163055 readmitted, tasks-22f407 and tasks-d4e73d noted
+  provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
