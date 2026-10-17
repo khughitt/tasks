@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: fix/where-non-utf8-path
 created: 2026-10-17T11:01:59Z
-updated: 2026-10-17T11:18:14Z
+updated: 2026-10-17T11:25:06Z
 started: 2026-10-17T11:18:04Z
 depends: []
 tags: [bug]
@@ -24,3 +24,4 @@ Repro: mkdir a directory named b'caf\xe9', git init it, run `tasks where <that p
   provenance: {"harness_session":"claude-code:1c29b303-8058-4f2c-a42b-119ee67e812a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T11:18:14Z (fix/where-non-utf8-path): resumed
   provenance: {"harness_session":"claude-code:1c29b303-8058-4f2c-a42b-119ee67e812a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:25:06Z (fix/where-non-utf8-path): touched four git-path decodes (link GitTree::of and worktrees, locations through_git, repo git_toplevel) via link::path_from_git; tested where (no project, linked worktree) and resolve through git. worktrees() and git_toplevel have no dedicated test: their callers compare against registered roots, which the TOML registry holds as UTF-8 only. test-fast: 18 record_commit unit tests fail from a HOME leak, filed tasks-eeeeda; all integration suites pass
