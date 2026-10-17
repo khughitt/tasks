@@ -5,8 +5,8 @@ status: idea
 priority: 2
 reviewed: true
 created: 2026-09-28T09:46:15Z
-updated: 2026-10-12T18:22:32Z
-depends: []
+updated: 2026-10-17T17:37:41Z
+depends: [tasks-1f6d08]
 parent: tasks-ea2a79
 tags: [feedback, gap, "from:tack"]
 agent: claude-code/claude-opus-5-5
