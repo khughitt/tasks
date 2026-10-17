@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-17T12:57:57Z
-updated: 2026-10-17T17:50:14Z
+updated: 2026-10-17T17:50:15Z
 depends: []
 tags: [feedback, gap, "from:lore"]
 agent: claude-code/claude-opus-5-5
@@ -22,3 +22,7 @@ Done: the skill states the global order: `just setup` when the justfile defines 
 Where: the three paths above. Verify with `grep -n "only the root guide" skills AGENTS.md docs/specs/2026-08-29-tasks-design.md` (no hits) and `just check`.
 
 Original report (preserved): Process and workspace section, 'Then run just setup when defined; otherwise run only the root guide's explicit setup command'. Two instructions now disagree on a checkout with only a package-lock.json, so an agent cannot tell whether to run npm ci; unhydrated worktrees make hooks stop at an npx install prompt or fetch unpinned tools.
+
+## Notes
+
+- 2026-10-17T17:50:15Z (main): scope: scoped; narrow sentence traced to tasks-63742b (2026-09-15) predating the global order; copies at skills/tasks/SKILL.md:348, AGENTS.md:41, docs/specs/2026-08-29-tasks-design.md:963; doc-only alignment
