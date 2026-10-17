@@ -308,6 +308,18 @@ fn apply_runs_decisions_only_on_unchanged_records() {
         report["changed"].to_string().contains(&f.several),
         "{report}"
     );
+    let detail = report["changed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == f.several.as_str())
+        .unwrap()["detail"]
+        .as_str()
+        .unwrap();
+    assert!(
+        detail.contains("review_reason null"),
+        "waiting on an open edge, so not queued: {detail}"
+    );
     assert!(report["left"].to_string().contains(&f.closed), "{report}");
     // The re-reviewed idea wakes when its new dependency closes.
     env.json(&f.dir, &["done", &f.follow_up]);
