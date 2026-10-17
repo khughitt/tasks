@@ -57,7 +57,7 @@
 
 - **Close the design task.** tasks-1a3280 ends when this plan is reviewed. Its closeout runs on the design branch `feat/wait-aware-review`, before that branch merges:
   1. File the implementation goal under tasks-5408fe: `tasks add "Implement wait-aware review state" --parent tasks-5408fe --plan 2026-10-17-wait-aware-review --spec 2026-10-17-wait-aware-review-design -p 2 --size l --complexity high --process planned --source tasks-1a3280`.
-  2. Under that goal, add one child per `### Task N:` heading below, with `--plan 2026-10-17-wait-aware-review --step "Task N: <title>"`, `--process direct`, and the complexity named in each task's heading line.
+  2. Under that goal, add one child per `### Task N:` heading below, with `--plan 2026-10-17-wait-aware-review --step "Task N: <title>"`, `--process direct`, and the complexity on each task's **Complexity:** line.
   3. Run `tasks note tasks-163055 --no-reviewed "<decision and the goal's id>"`.
   4. Note tasks-22f407 and tasks-d4e73d (below).
   5. Update `docs/notes/2026-10-17-scope-queue-stranded-ideas-brief.md` with the decisions.
@@ -70,7 +70,9 @@
 
 ---
 
-### Task 1: The CLI rows in ops (complexity: low)
+### Task 1: The CLI rows in ops
+
+**Complexity:** low
 
 The `parser_surface_equals_table` test fails until the vendored `tools/cli.toml` lists every parser option, and `tools/cli.toml` arrives only from ops main. These rows must land in ops before Task 3 adopts them.
 
@@ -125,7 +127,9 @@ Expected: the merge fast-forwards. If it does not, rebase the branch onto ops ma
 
 ---
 
-### Task 2: The stored fields `awaiting_user`, `reviewed_at`, `closed` (complexity: mid)
+### Task 2: The stored fields `awaiting_user`, `reviewed_at`, `closed`
+
+**Complexity:** mid
 
 **Files:**
 - Modify: `src/model.rs` (the `Task` struct and the `Task { … }` literal near line 149)
@@ -572,7 +576,9 @@ git commit -m "feat(review): store awaiting_user, reviewed_at and closed on the 
 
 ---
 
-### Task 3: Writing the marker and the review stamp (complexity: mid)
+### Task 3: Writing the marker and the review stamp
+
+**Complexity:** mid
 
 **Files:**
 - Modify: `src/review.rs` (`Awaiting`, `apply`, `stamp_edited`)
@@ -897,7 +903,9 @@ git commit -m "feat(review): mark ideas awaiting the user and stamp reviewed_at"
 
 ---
 
-### Task 4: The derived state and per-scan dependency views (complexity: high)
+### Task 4: The derived state and per-scan dependency views
+
+**Complexity:** high
 
 **Files:**
 - Create: `src/proposal.rs`
@@ -1307,7 +1315,9 @@ git commit -m "feat(review): derive review_reason from recorded waits on per-sca
 
 ---
 
-### Task 5: Row fields and view-level acceptance (complexity: mid)
+### Task 5: Row fields and view-level acceptance
+
+**Complexity:** mid
 
 **Files:**
 - Modify: `src/output.rs` (`TaskSummary` fields `awaiting_user`, `reviewed_at`, `closed`)
@@ -1616,7 +1626,9 @@ git commit -m "feat(review): carry the marker and stamps on rows; pin review sta
 
 ---
 
-### Task 6: Skills, README and spec status (complexity: low)
+### Task 6: Skills, README and spec status
+
+**Complexity:** low
 
 **Files:**
 - Modify: `skills/scope/SKILL.md` (§1 selection, §3 verdicts, §5 "Ideas it wakes")
@@ -1713,7 +1725,9 @@ git commit -m "docs(review): wait-aware scope queue in skills, README and specs"
 
 ---
 
-### Task 7: The backfill tool (complexity: mid)
+### Task 7: The backfill tool
+
+**Complexity:** mid
 
 **Files:**
 - Create: `tools/wait-backfill` (Python 3, executable)
