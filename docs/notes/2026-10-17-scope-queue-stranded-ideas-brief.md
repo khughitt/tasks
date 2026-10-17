@@ -195,3 +195,32 @@ or argues against them at spec review.
   depends on it.
 - tasks-163055 waits on that design. It returns to the queue when the design's
   completion wakes it.
+
+## Decisions (2026-10-17)
+
+The design is `docs/specs/2026-10-17-wait-aware-review-design.md` (option 3, accepted
+after spec review round 2), and the plan is `docs/plans/2026-10-17-wait-aware-review.md`
+(accepted after plan review round 2).
+
+- **Wait-on-user marker:** a synced boolean `awaiting_user`, valid only on a reviewed
+  idea. It is set by `note --reviewed --awaiting-user` (the scope `question` verdict) and
+  cleared by `--no-reviewed`, `edit --no-awaiting-user`, and every status transition.
+- **Recorded waits:** an open dependency (moves followed; an unresolvable edge counts as
+  open), a pending proposal (`proposal::pending`, shared with `sample`), `awaiting_user`,
+  or a deferral not yet due. The brief did not list the deferral; without it, every
+  deferred reviewed idea would strand on the first day.
+- **Tiers:** rows carry `review_reason`, one of `unreviewed`, `woken`, `stranded` or
+  `unassessed`.
+  - Woken means a dependency's `closed` is at or after `reviewed_at`. Equal
+    whole-second stamps count as woken.
+  - A deferral that came due after the review's UTC date also counts as woken.
+  - Legacy reviews without `reviewed_at` are stranded.
+  - Scope draws `unreviewed` and `woken` ideas first, then `stranded` ideas, then
+    `unassessed` rows.
+- **Dependency views:** one per scan, so a parked row read from its recorded checkout
+  is judged against that checkout's copies.
+- **Backfill:** `tools/wait-backfill` freezes stranded ideas with their stamps (only
+  when the list and the show agree), follows moved references, and reports unresolved
+  ones. It classifies an idea `auto` (exactly one open task named, everything resolved)
+  or `judge`, and applies decisions only to unchanged records, under a writer pause.
+- **Implementation:** tasks-aeeef1 under tasks-5408fe, seven steps.

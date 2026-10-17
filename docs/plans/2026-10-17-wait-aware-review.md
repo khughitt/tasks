@@ -61,7 +61,7 @@
   3. Run `tasks note tasks-163055 --no-reviewed "<decision and the goal's id>"`.
   4. Note tasks-22f407 and tasks-d4e73d (below).
   5. Update `docs/notes/2026-10-17-scope-queue-stranded-ideas-brief.md` with the decisions.
-- **Run the implementation.** The implementation goal runs this plan in its own worktree. The Rollout below is its last step.
+- **Run the implementation.** The implementation goal (tasks-aeeef1, steps tasks-c37991 → tasks-83ea67 → tasks-f6461c → tasks-e136d5 → tasks-a84c07 → tasks-7c094d and tasks-370a50) runs this plan in `.worktrees/wait-aware-review` on `feat/wait-aware-review`, which already holds the spec and plan. Execution is subagent-driven, steps in order, with read-only reviewers. Run the worktree skill's baseline tests (`just test-fast`) before the first code change. The Rollout below is its last step.
 
 ## Concurrent work
 
