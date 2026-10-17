@@ -14,17 +14,21 @@ idea whose wait has ended to come back on its own.
 
 ## Current behaviour and evidence
 
-Measured 2026-10-17 from `tasks show` on every reviewed idea, classifying each idea by
-its `depends_on` and by the task ids in its latest `scope:` note:
+Measured 2026-10-17 between 09:14Z and 09:19Z from `tasks show` on every reviewed
+idea. Each idea is classified by its `depends_on` and by the task ids in its latest
+`scope:` note. The counts are a snapshot: at 09:25Z an ops pass dropped five of these
+ideas (ops-3dbbe6, ops-7933db, ops-27f2a3, ops-8fdaf6, ops-1a552c), so a re-measure
+will not match.
 
 | | ops | tasks |
 |---|---|---|
 | Reviewed ideas | 59 | 21 |
 | An open dependency edge | 31 | 4 |
-| All edges closed | 2 | 0 |
+| All edges closed before the last review | 1 | 0 |
+| All edges closed after the last review: a missed wake | 1 | 0 |
 | No edge; latest scope note names an open follow-up | 22 | 12 |
-| No edge; the named follow-up has closed | 1 | 1 |
-| No edge; nothing named | 0 | 2 |
+| No edge; the named follow-up has closed: a missed wake | 1 | 0 |
+| No edge; waits on the user or names no task | 0 | 3 |
 | No edge; a pending `proposal:` (drop) | 3 | 2 |
 
 Registry-wide, 139 reviewed ideas carry no edge and 111 carry one.
@@ -34,15 +38,19 @@ Registry-wide, 139 reviewed ideas carry no edge and 111 carry one.
   They predate tasks-a309e0 (done 2026-10-13), which added `tasks dep <idea> --on
   <follow-up>` to scope §5. Each will be stranded when its follow-up closes, unless that
   follow-up's waker remembers the note.
-- **A missed wake.** ops-5bb3e5 waited in prose on ops-36e093, which closed on
-  2026-10-15 without a wake note. tasks-d4e73d's rollout note counted 108 legacy
-  "Ideas it wakes" bodies that use a plain `note`. That note leaves the idea reviewed
-  and only warns (review-state design §3.3, §7.3). A waker that closes with `done`
-  and writes no note gets no warning at all.
-- **Closed edges re-reviewed.** The report's two "follow-ups finished without the wake
-  note" (ops-8fdaf6, ops-1a552c) were re-briefed after their dependencies closed
-  (scope notes 2026-09-29 and 2026-10-05). They are not missed wakes. They wait on
-  nothing recorded, so they are stranded the same way.
+- **Missed wakes, one through a recorded edge.** ops-5bb3e5 waited in prose on
+  ops-36e093, which closed on 2026-10-15 without a wake note. ops-1a552c waited on a
+  recorded dependency: the pass that wrote its 2026-10-05 scope note added
+  `tack-a558e8` (now hq-a558e8) to its `depends` (ops `dc0a36c`, 2026-10-04).
+  hq-a558e8 closed on 2026-10-09 without a wake note. So an edge records the wait but
+  still wakes nothing: tasks-a309e0's fix alone would not have saved this idea.
+  tasks-d4e73d's rollout note counted 108 legacy "Ideas it wakes" bodies that use a
+  plain `note`. That note leaves the idea reviewed and only warns (review-state
+  design §3.3, §7.3). A waker that closes with `done` and writes no note gets no
+  warning at all.
+- **Closed edges re-reviewed.** ops-8fdaf6 was re-briefed (2026-09-29) after its only
+  dependency had closed. It is not a missed wake. It waits on nothing recorded, so it
+  is stranded the same way.
 - **User waits.** tasks-f3910b ("once Q1 is answered") and tasks-2b5461 ("no
   follow-up until [the user's scope call]") wait on a person. Neither is parked, so
   `list --parked --waiting-on user` does not show them. tasks-00bac8 names "a bounded
@@ -60,6 +68,8 @@ status, park or note read.
   queue is read "without reading notes"; §3.3 makes incidental notes keep ideas
   reviewed; §6 keeps pending proposals note-based. `needs_review` is a JSON row field,
   so a change to its meaning is a contract change that needs this task's authority.
+  No reader outside tasks was found: on 2026-10-17 nothing in tasks-tui, hq, obs,
+  familiar, flows, ops, relay or crew references it. That makes the change cheap.
 - Parks live in a host-local store, and records sync between hosts. A rule that reads
   parks can mark an idea differently on different hosts.
 - Dependency status across projects needs registry reads, so `list` would pay a
@@ -79,7 +89,8 @@ status, park or note read.
    when only the person can answer. Otherwise the verdict is `shelved` with a wake
    condition. A one-time judged pass turns prose waits into edges, wakes missed ones
    and parks user waits. This needs no CLI change. A future waker that closes with
-   plain `done` still strands its idea.
+   plain `done` still strands its idea, edge or no edge: ops-1a552c had its edge and
+   was stranded anyway.
 2. **Option 1, plus warnings at the moment.** `done` and `drop` warn when a reviewed
    same-project idea depends on the closing task and now has every edge closed. The
    warning names the `note --no-reviewed` to run. `check` warns on a reviewed idea
@@ -87,34 +98,50 @@ status, park or note read.
    ignored, and the `check` warning repeats on every commit until it is fixed.
 3. **Derived re-entry.** `needs_review` becomes "an idea that is not reviewed, or is
    reviewed but waits on nothing recorded". Waiting means an open dependency, a
-   pending proposal, or a park waiting on the user. When the last edge closes, the
-   idea re-enters the queue with no waker action. A pass must leave a wait (or shelve
-   or scope the idea) for the idea to leave the queue. This needs dependency status
-   and park reads in row building, and it changes what the JSON field means.
+   pending proposal, or a recorded wait on the user (question 1). When the last edge
+   closes, the idea re-enters the queue with no waker action. A pass must leave a
+   wait (or shelve or scope the idea) for the idea to leave the queue. This needs
+   dependency status in row building, and it changes what the JSON field means.
 
-Lean: 3, with option 1's skill rule and backfill as its rollout. It fixes the report's
-complaint in the queue itself, and missed wakes stop depending on wakers'
-wording. Option 2's `done` warning remains a cheap addition if row-time dependency
-reads prove too costly.
+Lean: 3, with option 1's skill rule and backfill as its rollout, once questions 1 and
+2 are settled. It fixes the report's complaint in the queue itself. It is the only
+option that would have saved ops-1a552c, whose wait was already a recorded edge.
+Missed wakes stop depending on what a waker remembers to write. Option 2's `done`
+warning remains a cheap addition if row-time dependency reads prove too costly.
 
-## Unanswered questions
+Question 1 gates option 3. Until a synced wait-on-user marker exists, a `question`
+verdict leaves no recorded wait, so every question idea would come back on every pass.
 
-1. Does a park waiting on the user count as a recorded wait, given that parks are
-   host-local? The alternative is a synced marker on the record. — design, then the
-   user at spec review.
-2. Does the derived rule read pending proposals from notes? That would reverse
-   review-state §1's "without reading notes" for this case. — design, with
-   tasks-22f407's shared helper.
-3. Should a stranded idea rank after never-reviewed ideas in scope's default
-   selection? — the user.
-4. Should the legacy-prose backfill run in every registered project or only on
-   request? The 139 edge-less reviewed ideas registry-wide include proposals and true
-   user waits. — the user.
+## Questions and the user's answers
+
+The user answered these on 2026-10-17, in review of this brief. The design adopts them
+or argues against them at spec review.
+
+1. Does a park waiting on the user count as a recorded wait? **No.** A park is
+   host-local, so the same idea would be queued on one host and not on another. The
+   wait goes on the synced record. A declared need might fit (material declares
+   `owner`: "The owner supplies or judges an image"), but needs exist to claim
+   resources, not to wait, so it may not. Open for the design: which synced marker.
+2. Do pending drop proposals count as a wait? **Yes**, read through tasks-22f407's
+   shared `pending_proposal` helper. Otherwise every pending drop would be re-scoped on
+   every pass until the user rules on it. That justifies one narrow exception to
+   review-state §1's "without reading notes".
+3. Where do stranded ideas sort? **In two tiers.** An idea whose last dependency
+   closed after its review has new evidence, as a woken idea does, and sorts with
+   never-reviewed ideas. A legacy idea that waits on nothing and has nothing new sorts
+   after them. Open for the design: how the rule tells the two apart without a review
+   timestamp.
+4. Does the backfill cover every project? **Yes, run per project from its own
+   checkout**, as scope's fixed root requires, not as one registry-wide pass. A scope
+   note that names exactly one open follow-up can become an edge automatically. Only
+   the ambiguous cases need judgement: proposals, user waits, and notes naming several
+   tasks or none. Of the 139 registry-wide, that is probably a few dozen.
 
 ## Proposed decomposition
 
 - tasks-1a3280 — Design wait-aware review state from the brief (P2, m, high, planned),
-  under tasks-5408fe. It settles the four questions and the backfill. tasks-163055
+  under tasks-5408fe. It takes the answers above as inputs, chooses the synced
+  wait-on-user marker and the tier test, and specifies the backfill. tasks-163055
   depends on it.
 - tasks-163055 waits on that design. It returns to the queue when the design's
   completion wakes it.
