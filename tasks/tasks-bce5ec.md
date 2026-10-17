@@ -1,15 +1,16 @@
 ---
 id: tasks-bce5ec
 title: Rewrite t@t commit authorship in this repository
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: main
 created: 2026-10-16T16:33:12Z
-updated: 2026-10-17T00:56:20Z
+updated: 2026-10-17T00:58:38Z
 started: 2026-10-17T00:55:24Z
+completed: 2026-10-17T00:58:38Z
 depends: [ops-e5b39c]
 tags: []
 source: git-identity-leak-2026-10-07
@@ -24,3 +25,7 @@ Rewrite this repository's t <t@t> commits (from the 2026-10-07 global-config lea
   provenance: {"harness_session":"claude-code:c6863573-34c2-470d-b394-259f7cc75503","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T00:55:25Z (main): Direct history maintenance under ops-e5b39c's pilot procedure (as sci-bd518f). No agent session in tasks on Titan or Europa; one worktree (main) on both hosts. Inventory: 1716 commits, 606 t@t, all on main (origin/main reaches 419, pushed); design/tasks-5e2472, feat/delegated-identity (merged) and spike/comfy-table (unmerged) predate the window (unchanged). No tags, stash, signatures, extra headers, repo-local user.*, or .git-blame-ignore-revs; no other project pins tasks commits; the installed binary is a cargo build, unaffected. Remote khughitt/tasks main 00cdbd8b45039d642719cbf6dff07898737e6c70 (lease). Steps: bundle --all; mirror; filter-repo --mailmap; byte-verify; citation check; guarded update-ref; attach map; test-fast; push main --force-with-lease.
 - 2026-10-17T00:56:20Z (main): attached: 2026-10-16-identity-commit-map.txt (53382 bytes): Authorship rewrite map: 651 changed commit IDs (old new); resolves historical SHA references in task notes, evidence attachments and docs without editing them
+- 2026-10-17T00:58:38Z (main): done
+  provenance: {"harness_session":"claude-code:c6863573-34c2-470d-b394-259f7cc75503","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T00:58:38Z (main): Rewrote 606 t@t commits to Keith Hughitt (1212 identity lines, 651 hashes changed) in one filter-repo pass in a mirror outside Dropbox; verified all 1718 commits byte-for-byte (only mapped parents and identities differ; no message SHAs; every tree preserved). Swapped main in one guarded update-ref transaction; pre-window branches unchanged. Rewritten SHAs cited in tracked files are prose in task notes and two evidence attachments that no code reads; map attached (tasks/files/tasks-bce5ec/2026-10-16-identity-commit-map.txt). just test-fast green. Pushed main with lease 00cdbd8 -> cc1df0a (khughitt/tasks). A fresh remote mirror, Titan and Europa show 0 t@t; Europa fsck clean. Forced only past ops-e5b39c, whose pilot procedure was followed. Artifacts on Titan at WORK_ROOT/tasks/identity-rewrite-20261017T005527Z.
+  provenance: {"harness_session":"claude-code:c6863573-34c2-470d-b394-259f7cc75503","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
