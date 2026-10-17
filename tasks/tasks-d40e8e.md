@@ -5,8 +5,8 @@ status: idea
 priority: 2
 reviewed: true
 created: 2026-09-07T10:25:11Z
-updated: 2026-10-12T18:22:32Z
-depends: []
+updated: 2026-10-17T17:37:42Z
+depends: [tasks-d4e73d]
 parent: tasks-46d207
 tags: [quick-add, cli]
 source: "mindful:thought:ec1726a8595c47f78ddaad57f65eb89e"
