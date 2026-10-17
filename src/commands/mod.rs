@@ -1588,12 +1588,21 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
     } else if task.status == Status::Done && to != Status::Done {
         task.completed = None;
     }
+    // Wait-aware spec §3.3: every close stamps `closed`; a reopen clears it. `move` never
+    // passes through here, so a tombstone carries none.
+    if closing {
+        task.closed = Some(now.clone());
+    } else if matches!(task.status, Status::Done | Status::Dropped) && to.is_open() {
+        task.closed = None;
+    }
     if task.status != to {
         // spec §2.2: a deferral is spent by a status change.
         task.defer = None;
         // Review-state spec §3.2: a status change spends a review; a return to idea
         // arrives unreviewed.
         task.reviewed = false;
+        task.reviewed_at = None;
+        task.awaiting_user = false;
     }
     task.status = to;
     if completing && let Some(every) = task.every {

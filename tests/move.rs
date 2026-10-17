@@ -2947,3 +2947,30 @@ fn correction_i6_foreign_dependency_moved_local_is_ready_and_startable() {
     );
     env.json(&dots, &["start", &local]);
 }
+
+#[test]
+fn move_clears_review_stamps_on_the_tombstone_and_keeps_them_on_the_target() {
+    let mut env = TestEnv::new();
+    let source = env.init("dots");
+    let destination = env.init("wali");
+    let id = id_of(env.json(&source, &["add", "I", "--status", "idea"]));
+    let path = source.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap().replacen(
+        "\npriority: ",
+        "\nreviewed: true\nreviewed_at: 2026-10-17T09:00:00Z\nawaiting_user: true\npriority: ",
+        1,
+    );
+    std::fs::write(&path, text).unwrap();
+    let moved = id_of(env.json(&source, &["move", &id, "--to", "wali"]));
+    let tombstone = env.read(&source, &format!("tasks/{id}.md"));
+    for key in ["reviewed", "reviewed_at", "awaiting_user", "closed"] {
+        assert!(
+            !tombstone.contains(&format!("\n{key}:")),
+            "{key} on tombstone: {tombstone}"
+        );
+    }
+    let target = env.json(&destination, &["show", &moved])["task"].clone();
+    assert_eq!(target["reviewed"], true);
+    assert_eq!(target["reviewed_at"], "2026-10-17T09:00:00Z");
+    assert_eq!(target["awaiting_user"], true);
+}

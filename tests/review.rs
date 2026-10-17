@@ -794,3 +794,149 @@ fn show_names_a_reviewed_idea() {
         "{shown}"
     );
 }
+
+/// Inserts frontmatter lines into a record by hand, before its priority line: states the
+/// writers never produce, or stamps a test needs at a fixed instant.
+fn seed(dir: &Path, id: &str, lines: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let seeded = text.replacen("\npriority: ", &format!("\n{lines}\npriority: "), 1);
+    assert_ne!(seeded, text, "no priority line in {id}");
+    std::fs::write(&path, seeded).unwrap();
+}
+
+fn task(env: &TestEnv, dir: &Path, id: &str) -> serde_json::Value {
+    env.json(dir, &["show", id])["task"].clone()
+}
+
+fn check_kinds(env: &TestEnv, dir: &Path) -> Vec<String> {
+    let out = env.cmd(dir).args(["check"]).output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    report["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["kind"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn done_and_drop_stamp_closed_and_reopening_clears_it() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let done = id_of(env.json(&dir, &["add", "D"]));
+    env.json(&dir, &["done", &done]);
+    let shown = task(&env, &dir, &done);
+    assert!(shown["closed"].is_string(), "{shown}");
+    assert_eq!(shown["closed"], shown["completed"]);
+    let dropped = id_of(env.json(&dir, &["add", "X"]));
+    env.json(&dir, &["drop", &dropped]);
+    let shown = task(&env, &dir, &dropped);
+    assert!(shown["closed"].is_string(), "{shown}");
+    assert!(shown.get("completed").is_none(), "{shown}");
+    env.json(&dir, &["edit", &done, "--status", "todo"]);
+    assert!(task(&env, &dir, &done).get("closed").is_none());
+    assert!(
+        !env.read(&dir, &format!("tasks/{done}.md"))
+            .contains("closed:")
+    );
+    // A recurring completion stamps it, a reopen clears it, the next completion stamps it again.
+    let every = id_of(env.json(&dir, &["add", "R", "--every", "7d"]));
+    env.json(&dir, &["start", &every]);
+    env.json(&dir, &["done", &every]);
+    assert!(task(&env, &dir, &every)["closed"].is_string());
+    env.json(&dir, &["start", &every]);
+    assert!(task(&env, &dir, &every).get("closed").is_none());
+    env.json(&dir, &["done", &every]);
+    assert!(task(&env, &dir, &every)["closed"].is_string());
+}
+
+#[test]
+fn every_status_transition_clears_the_review_stamp_and_marker() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    seed(
+        &dir,
+        &id,
+        "reviewed: true\nreviewed_at: 2026-10-17T09:00:00Z\nawaiting_user: true",
+    );
+    env.json(&dir, &["edit", &id, "--status", "todo"]);
+    let text = env.read(&dir, &format!("tasks/{id}.md"));
+    for key in ["reviewed", "reviewed_at", "awaiting_user"] {
+        assert!(!text.contains(&format!("\n{key}:")), "{key} kept: {text}");
+    }
+}
+
+#[test]
+fn check_reports_review_stamps_and_closed_out_of_place() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let todo = id_of(env.json(&dir, &["add", "T"]));
+    seed(&dir, &todo, "awaiting_user: true");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    seed(&dir, &idea, "reviewed_at: 2026-10-17T09:00:00Z");
+    let open = id_of(env.json(&dir, &["add", "O"]));
+    seed(&dir, &open, "closed: 2026-10-17T09:00:00Z");
+    let kinds = check_kinds(&env, &dir);
+    assert_eq!(
+        kinds.iter().filter(|k| *k == "review_status").count(),
+        2,
+        "{kinds:?}"
+    );
+    assert_eq!(
+        kinds.iter().filter(|k| *k == "closed_status").count(),
+        1,
+        "{kinds:?}"
+    );
+}
+
+#[test]
+fn the_editor_refuses_to_change_closed_or_reviewed_at() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let done = id_of(env.json(&dir, &["add", "D"]));
+    env.json(&dir, &["done", &done]);
+    let file = format!("tasks/{done}.md");
+    let before = env.read(&dir, &file);
+    let script = editor_script(
+        &dir,
+        "sed -i 's/^closed: .*/closed: 2020-01-01T00:00:00Z/' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &script)
+        .args(["edit", &done])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("closed is stamped by closing the task; it cannot be edited")
+    );
+    assert_eq!(env.read(&dir, &file), before);
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    seed(
+        &dir,
+        &idea,
+        "reviewed: true\nreviewed_at: 2026-10-17T09:00:00Z",
+    );
+    let file = format!("tasks/{idea}.md");
+    let before = env.read(&dir, &file);
+    let script = editor_script(
+        &dir,
+        "sed -i 's/^reviewed_at: .*/reviewed_at: 2020-01-01T00:00:00Z/' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &script)
+        .args(["edit", &idea])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("reviewed_at is stamped by reviewing the idea; it cannot be edited")
+    );
+    assert_eq!(env.read(&dir, &file), before);
+}

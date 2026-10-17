@@ -147,6 +147,9 @@ mod tests {
             parallel: false,
             lane: false,
             reviewed: false,
+            awaiting_user: false,
+            reviewed_at: None,
+            closed: None,
             needs: vec![],
             every: None,
             defer: None,
@@ -510,6 +513,14 @@ pub struct Task {
     /// and every status transition clears it.
     /// See docs/specs/2026-10-11-review-state-design.md §3.
     pub reviewed: bool,
+    /// The idea waits on the user's answer. Only on a reviewed idea; cleared with
+    /// `reviewed` and by every status transition.
+    /// See docs/specs/2026-10-17-wait-aware-review-design.md §3.1.
+    pub awaiting_user: bool,
+    /// When the latest review was recorded: set and cleared with `reviewed`. Absent on a
+    /// review recorded before the field existed. Same spec §3.2.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed_at: Option<String>,
     /// Shared resources the work uses, each declared in the project's `[needs]`
     /// vocabulary. Checked against it on write and by `check`, carried as-is on read.
     /// See docs/specs/2026-10-03-lanes-needs-groups-design.md §4.2.
@@ -537,6 +548,11 @@ pub struct Task {
     /// record and does not survive a reopen. Same spec, §3.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<String>,
+    /// When the task last closed (done or dropped): stamped with `completed` on a
+    /// completion and alone on a drop, cleared by reopening, never set by `move`.
+    /// Same spec §3.3.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed: Option<String>,
     /// The completion that anchors the current cycle. Stamped only alongside `every`, and
     /// only by a transition that actually completes the task (spec §4.4).
     #[serde(skip_serializing_if = "Option::is_none")]

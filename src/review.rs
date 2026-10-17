@@ -30,11 +30,29 @@ pub fn not_an_idea(task: &Task) -> Error {
     ))
 }
 
-/// The write-time rule (spec §3.2). Never called from parsing: `parse_task` must accept
-/// a hand-edited record so `check` can report it and an editor save can transition it.
+/// The refusal for `awaiting_user` without `reviewed` (wait-aware spec §3.1).
+pub fn not_reviewed(task: &Task) -> Error {
+    Error::Validation(format!(
+        "{} is not reviewed; only a reviewed idea carries awaiting_user",
+        task.id
+    ))
+}
+
+/// The write-time rule (review-state spec §3.2, wait-aware spec §3.1–3.2). Never called
+/// from parsing: `parse_task` must accept a hand-edited record so `check` can report it
+/// and an editor save can transition it.
 pub fn validate(task: &Task) -> Result<()> {
     if task.reviewed && task.status != Status::Idea {
         return Err(not_an_idea(task));
+    }
+    if task.awaiting_user && !task.reviewed {
+        return Err(not_reviewed(task));
+    }
+    if task.reviewed_at.is_some() && !task.reviewed {
+        return Err(Error::Validation(format!(
+            "{} carries reviewed_at without reviewed",
+            task.id
+        )));
     }
     Ok(())
 }
@@ -85,6 +103,46 @@ pub fn apply(task: &mut Task, review: Review, warnings: &mut Vec<String>) -> Res
 mod tests {
     use super::*;
     use crate::model::Process;
+
+    #[test]
+    fn validate_refuses_marker_or_stamp_without_reviewed() {
+        let parse = |extra: &str| {
+            crate::format::parse_task(
+                &format!(
+                    "---\nid: sci-000001\ntitle: T\nstatus: idea\npriority: 2\n{extra}\
+                     created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
+                     depends: []\ntags: []\n---\n"
+                ),
+                "sci-000001.md",
+            )
+            .unwrap()
+        };
+        let error = validate(&parse("awaiting_user: true\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error
+                .contains("sci-000001 is not reviewed; only a reviewed idea carries awaiting_user"),
+            "{error}"
+        );
+        let error = validate(&parse("reviewed_at: 2026-10-17T09:00:00Z\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("sci-000001 carries reviewed_at without reviewed"),
+            "{error}"
+        );
+        assert!(
+            validate(&parse(
+                "reviewed: true\nawaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z\n"
+            ))
+            .is_ok()
+        );
+        assert!(
+            validate(&parse("reviewed: true\n")).is_ok(),
+            "a legacy review has no stamp"
+        );
+    }
 
     #[test]
     fn needs_review_follows_spec_section_4() {

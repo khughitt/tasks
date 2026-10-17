@@ -46,6 +46,16 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
             "completed is stamped by completing the task; it cannot be edited".into(),
         ));
     }
+    if edited.closed != original.closed {
+        return Err(Error::Validation(
+            "closed is stamped by closing the task; it cannot be edited".into(),
+        ));
+    }
+    if edited.reviewed_at != original.reviewed_at {
+        return Err(Error::Validation(
+            "reviewed_at is stamped by reviewing the idea; it cannot be edited".into(),
+        ));
+    }
     if edited.moved_to != original.moved_to || edited.moved_from != original.moved_from {
         return Err(Error::Validation(
             "moved_to and moved_from are set by `tasks move`; they cannot be edited".into(),

@@ -4771,6 +4771,12 @@ fn check_reports_completed_stamp_on_an_open_record() {
     env.json(&sci, &["done", &id, "landed"]);
     let path = sci.join(format!("tasks/{id}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
+    // A hand edit of the status alone also leaves `closed`; drop it to isolate this finding.
+    let text: String = text
+        .lines()
+        .filter(|line| !line.starts_with("closed: "))
+        .map(|line| format!("{line}\n"))
+        .collect();
     std::fs::write(&path, text.replace("status: done", "status: todo")).unwrap();
     let v = env.check(&sci);
     assert!(v["errors"].as_array().unwrap().is_empty(), "{v}");
