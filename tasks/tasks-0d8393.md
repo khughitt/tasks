@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-17T02:23:40Z
-updated: 2026-10-17T02:57:32Z
+updated: 2026-10-17T02:57:33Z
 depends: []
 tags: [feedback, friction, "from:ops", move]
 agent: claude-code/claude-opus-5-5
@@ -20,3 +20,7 @@ Why: the move design already settles this. docs/specs/2026-10-08-task-move-desig
 Done: check skips moved_dep when the dependent itself has status moved. A live dependent of a tombstone still warns with the swap, as today. Amend the design's `check` bullet ("warns moved_dep on every record that depends on a tombstone") to say "every live record". This also covers tasks-183bfa's M5 ("omit impossible dep repair commands for immutable tombstones"): note that on tasks-183bfa when this lands. Out of scope: retired_prefix on a tombstone's depends. If it proves equally unclearable, file it separately.
 
 Check: a test in tests/move.rs beside check_warns_moved_dep_with_the_swap (~line 680). Move two tasks that depend on each other, then confirm check in the source reports no moved_dep on either tombstone while a third live task depending on a tombstone still gets the swap. Then `just test-fast`.
+
+## Notes
+
+- 2026-10-17T02:57:33Z (main): scope: scoped; todo P2 xs/low/direct; move design already treats a tombstone's depends as history and refuses its writes, so check's moved_dep on a tombstone dependent (check.rs depends loop, at 721c87a) contradicts it; gate on dependent status != moved; supersedes tasks-183bfa M5
