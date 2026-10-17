@@ -20,8 +20,10 @@ pub fn run(ctx: ReadCtx, id: Option<String>, all: bool) -> Result<Output> {
         {
             return Err(Error::TaskNotFound(root.to_string()));
         }
+        let deps = super::list::review_deps(&ctx, &tasks)?;
         nodes.extend(crate::hierarchy::forest(
             &tasks,
+            &deps,
             root.as_ref(),
             all,
             crate::hierarchy::Shelved::UnderShownParent,

@@ -25,7 +25,10 @@ pub fn run(
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     let halts = super::list::halt_snapshots(&mut ctx, &all);
-    let lanes = rows(&mut ctx, &all, &claims, &halts, cutoff, &without, now)?;
+    let deps = super::list::review_deps(&ctx, &all)?;
+    let lanes = rows(
+        &mut ctx, &all, &deps, &claims, &halts, cutoff, &without, now,
+    )?;
     let colors = ctx.project_colors();
     let mut out = Output::Lanes(LanesOut {
         lanes,
@@ -38,10 +41,13 @@ pub fn run(
 /// Every open, unshelved lane in scope as a `LaneRow`. Dependencies are resolved only for
 /// `dependency_readers`, as `ready_tasks` resolves only its candidates' (lanes design §5.1
 /// step 1), so a dependency that only closed, shelved, or paused work names can never
-/// fail the view or `prime`. Holds are read as `ready` reads them (§4.5).
+/// fail the view or `prime`. Holds are read as `ready` reads them (§4.5). `deps` is
+/// `all`'s dependency view (wait-aware spec §4.3).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn rows(
     ctx: &mut ReadCtx,
     all: &[Task],
+    deps: &crate::review::Deps,
     claims: &ClaimSnapshot,
     halts: &HashMap<String, HaltSnapshot>,
     cutoff: Option<Complexity>,
@@ -72,6 +78,7 @@ pub(super) fn rows(
         all,
         claims,
         registry: &ctx.registry,
+        deps,
         dependency: &dependency,
         halts,
         cutoff,

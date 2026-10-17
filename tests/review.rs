@@ -592,7 +592,16 @@ fn mixed_project(env: &mut TestEnv) -> (std::path::PathBuf, Vec<String>, Vec<Str
     let dir = env.init("sci");
     let new_idea = id_of(env.json(&dir, &["add", "New", "--status", "idea"]));
     let briefed = id_of(env.json(&dir, &["add", "Briefed", "--status", "idea"]));
-    env.json(&dir, &["note", &briefed, "--reviewed", "scope: briefed"]);
+    env.json(
+        &dir,
+        &[
+            "note",
+            &briefed,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
     let raw_todo = id_of(env.json(&dir, &["add", "Raw"]));
     let assessed = id_of(env.json(&dir, &["add", "Assessed", "--process", "direct"]));
     let goal = id_of(env.json(&dir, &["add", "Goal"]));
@@ -675,7 +684,13 @@ fn parked_rows_carry_needs_review_and_filter_on_it() {
     let reviewed_idea = id_of(env.json(&dir, &["add", "R", "--status", "idea"]));
     env.json(
         &dir,
-        &["note", &reviewed_idea, "--reviewed", "scope: briefed"],
+        &[
+            "note",
+            &reviewed_idea,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
     );
     write_park(&env, "sci", &unreviewed);
     write_park(&env, "sci", &reviewed_idea);
@@ -765,7 +780,13 @@ fn parked_views_mark_the_same_rows_as_their_json() {
     let reviewed_idea = id_of(env.json(&dir, &["add", "R", "--status", "idea"]));
     env.json(
         &dir,
-        &["note", &reviewed_idea, "--reviewed", "scope: briefed"],
+        &[
+            "note",
+            &reviewed_idea,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
     );
     write_park(&env, "sci", &unreviewed);
     write_park(&env, "sci", &reviewed_idea);

@@ -29,6 +29,12 @@ pub(super) fn resolve_dependency(ctx: &ReadCtx, all: &[Task], id: &TaskId) -> Re
     crate::tombstone::follow(resolve(id)?, resolve)
 }
 
+/// The dependency view for rows of `scan` (wait-aware spec §4.3): one per scan, never
+/// shared, so each row is judged against the copies its own checkout holds.
+pub(super) fn review_deps(ctx: &ReadCtx, scan: &[Task]) -> Result<crate::review::Deps> {
+    crate::review::Deps::of_scan(scan, |id| resolve_dependency(ctx, scan, id))
+}
+
 /// `list`, and `search` when `text` is given: the text predicate narrows the same
 /// selection, pools, order, and output.
 pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result<Output> {
@@ -54,6 +60,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
     filter.resolve_under(&all, &ctx.registry)?;
+    let deps = review_deps(&ctx, &all)?;
     let mut tasks = all.clone();
     tasks.retain(|task| {
         let periodic_ok = !periodic || task.every.is_some();
@@ -69,7 +76,14 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             && plan
                 .as_deref()
                 .is_none_or(|wanted| task.plan.as_deref() == Some(wanted))
-            && filter.matches(&Fields::of_task(task, &all, &claims, &ctx.registry))
+            && filter.matches(&Fields::of_task(
+                task,
+                &all,
+                &deps,
+                &claims,
+                &ctx.registry,
+                now,
+            ))
             && text.as_ref().is_none_or(|text| text.matches(task))
     });
     for task in &tasks {
@@ -97,7 +111,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts: vec![],
         warnings: ctx.warnings,
@@ -211,10 +225,12 @@ fn closing_hint(id: &str, status: Status) -> String {
     }
 }
 
-/// Ready tasks in ready order; pushes a warning per unreachable dependency.
+/// Ready tasks in ready order; pushes a warning per unreachable dependency. `deps` is
+/// `all`'s dependency view (wait-aware spec §4.3).
 pub fn ready_tasks(
     ctx: &mut ReadCtx,
     all: &[Task],
+    deps: &crate::review::Deps,
     claims: &crate::claims::ClaimSnapshot,
     snapshots: &HashMap<String, HaltSnapshot>,
     filter: &TaskFilter,
@@ -226,7 +242,14 @@ pub fn ready_tasks(
         .iter()
         .filter(|task| {
             is_candidate(task, now)
-                && filter.matches(&Fields::of_task(task, all, claims, &ctx.registry))
+                && filter.matches(&Fields::of_task(
+                    task,
+                    all,
+                    deps,
+                    claims,
+                    &ctx.registry,
+                    now,
+                ))
         })
         .collect();
     for task in &selected {
@@ -495,8 +518,9 @@ pub fn ready(
     let now = crate::time::parse(&crate::time::now())?;
     check_parent(&filter, &all, |_| false)?;
     filter.resolve_under(&all, &ctx.registry)?;
+    let deps = review_deps(&ctx, &all)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let mut picked = ready_tasks(&mut ctx, &all, &claims, &snapshots, &filter, now)?;
+    let mut picked = ready_tasks(&mut ctx, &all, &deps, &claims, &snapshots, &filter, now)?;
     let halts = halt_rows(&snapshots, &all);
     let hidden = retain_allowed(&mut picked.tasks, &snapshots);
     warn_hidden(&mut ctx, hidden);
@@ -533,7 +557,7 @@ pub fn ready(
     let mut out = Output::List(ListOut {
         tasks: tasks
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts,
         warnings: ctx.warnings,
@@ -566,10 +590,11 @@ pub fn next(
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
     filter.resolve_under(&all, &ctx.registry)?;
+    let deps = review_deps(&ctx, &all)?;
     let _ = super::parked::rows(&mut ctx, &all, &claims, now)?;
-    let candidates = super::parked::candidates(&mut ctx, &all, &claims, &filter, now)?;
+    let candidates = super::parked::candidates(&mut ctx, &all, &deps, &claims, &filter, now)?;
     let snapshots = halt_snapshots(&mut ctx, &all);
-    let ready = ready_tasks(&mut ctx, &all, &claims, &snapshots, &filter, now)?;
+    let ready = ready_tasks(&mut ctx, &all, &deps, &claims, &snapshots, &filter, now)?;
     // One pool in pick order — parked candidates first, then the ready list — with each
     // task once, so a parked todo that is also ready is hidden and counted once.
     let mut pool = candidates.tasks;
@@ -696,6 +721,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
     let without = Without::from_env(&without, &vocabularies(&ctx.scope))?;
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
+    let deps = review_deps(&ctx, &all)?;
     let upcoming: Vec<OffsetDateTime> = all
         .iter()
         .filter_map(crate::periodic::due)
@@ -742,6 +768,7 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
     let mut ready = ready_tasks(
         &mut ctx,
         &all,
+        &deps,
         &claims,
         &snapshots,
         &TaskFilter::default(),
@@ -762,9 +789,15 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
         .collect();
     let elsewhere = claimed_elsewhere(&mut ctx, &all, &claims);
     doing.extend(elsewhere.iter().map(|(task, _)| task.clone()));
+    // Each row read from another checkout is judged with that checkout's own scan.
+    let elsewhere_deps: Vec<_> = elsewhere
+        .iter()
+        .map(|(_, scan)| review_deps(&ctx, scan))
+        .collect::<Result<_>>()?;
     sort_list(&mut doing);
     let roadmap = crate::hierarchy::forest(
         &all,
+        &deps,
         None,
         false,
         crate::hierarchy::Shelved::Hidden,
@@ -818,7 +851,9 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
     retain_unheld(&mut ctx, &mut ready, now)?;
     ctx.warnings.extend(held);
     // The same builder as `tasks lanes`, under this session's cutoff and `--without`.
-    let lanes = super::lanes::rows(&mut ctx, &all, &claims, &snapshots, cutoff, &without, now)?;
+    let lanes = super::lanes::rows(
+        &mut ctx, &all, &deps, &claims, &snapshots, cutoff, &without, now,
+    )?;
     let wide = matches!(ctx.scope, Scope::All { .. });
     for project in ctx.scope.projects() {
         if let Some(files) = project.uncommitted_task_files()?
@@ -881,24 +916,26 @@ pub fn prime(mut ctx: ReadCtx, closed: bool, without: Vec<String>) -> Result<Out
         closed,
         ready: ready
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         parked,
         lanes,
         doing: doing
             .iter()
             .map(|task| {
-                let scan = elsewhere
+                let (scan, deps) = elsewhere
                     .iter()
-                    .find(|(found, _)| found.id == task.id)
-                    .map_or(all.as_slice(), |(_, scan)| scan.as_slice());
-                TaskSummary::of(task, scan, Some(&claims), &ctx.registry, now)
+                    .position(|(found, _)| found.id == task.id)
+                    .map_or((all.as_slice(), &deps), |at| {
+                        (elsewhere[at].1.as_slice(), &elsewhere_deps[at])
+                    });
+                TaskSummary::of(task, scan, deps, Some(&claims), &ctx.registry, now)
             })
             .collect(),
         roadmap,
         closeout: closeout
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts,
         warnings: ctx.warnings,

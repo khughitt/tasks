@@ -70,6 +70,9 @@ fn sourced_rows(
         .filter(|(_, park)| waiting_on.is_none_or(|who| park.waiting_on == who))
         .collect();
     entries.sort_by(|a, b| b.1.at.cmp(&a.1.at).then_with(|| a.0.cmp(b.0)));
+    // The registered rows' view; a row read from its recorded checkout builds that
+    // checkout's own in `resolve_recorded` (wait-aware spec §4.3).
+    let deps = super::list::review_deps(ctx, all)?;
     let mut rows = Vec::new();
     for (key, park) in entries {
         let id = match TaskId::parse(key) {
@@ -84,7 +87,7 @@ fn sourced_rows(
         };
         let registered = all.iter().find(|task| task.id == id).map(|task| {
             (
-                resolved_row(task, all, claims, &ctx.registry, now),
+                resolved_row(task, all, &deps, claims, &ctx.registry, now),
                 task.clone(),
             )
         });
@@ -112,12 +115,13 @@ fn sourced_rows(
 fn resolved_row(
     task: &Task,
     all: &[Task],
+    deps: &crate::review::Deps,
     claims: &ClaimSnapshot,
     registry: &Registry,
     now: OffsetDateTime,
 ) -> ParkedRow {
     ParkedRow::resolved(
-        TaskSummary::of(task, all, Some(claims), registry, now),
+        TaskSummary::of(task, all, deps, Some(claims), registry, now),
         Phase::of(task),
     )
 }
@@ -130,7 +134,7 @@ fn recorded_or_fallback(
     now: OffsetDateTime,
     fallback: Option<(ParkedRow, Task)>,
 ) -> Option<(ParkedRow, Task)> {
-    match resolve_recorded(id, park, claims, &ctx.registry, now) {
+    match resolve_recorded(ctx, id, park, claims, now) {
         Ok(Some(row)) => {
             ctx.warnings.push(format!(
                 "{id} is parked in {}; resume it from that checkout",
@@ -169,18 +173,21 @@ fn unavailable(
     )
 }
 
+/// The row from the checkout the park recorded, judged with that checkout's own scan and
+/// dependency view (wait-aware spec §4.3).
 fn resolve_recorded(
+    ctx: &ReadCtx,
     id: &TaskId,
     park: &Park,
     claims: &ClaimSnapshot,
-    registry: &Registry,
     now: OffsetDateTime,
 ) -> Result<Option<(ParkedRow, Task)>> {
     let Some((task, scan)) = scan_recorded(id, Path::new(&park.worktree))? else {
         return Ok(None);
     };
+    let deps = super::list::review_deps(ctx, &scan)?;
     let row = ParkedRow::resolved(
-        TaskSummary::of(&task, &scan, Some(claims), registry, now),
+        TaskSummary::of(&task, &scan, &deps, Some(claims), &ctx.registry, now),
         Phase::of(&task),
     );
     Ok(Some((row, task)))
@@ -221,9 +228,11 @@ pub fn scan_recorded(id: &TaskId, worktree: &Path) -> Result<Option<(Task, Vec<T
     Ok(open_recorded(id, worktree)?.map(|(_, task, scan)| (task, scan)))
 }
 
+/// `deps` is `all`'s dependency view (wait-aware spec §4.3).
 pub fn candidates(
     ctx: &mut ReadCtx,
     all: &[Task],
+    deps: &crate::review::Deps,
     claims: &ClaimSnapshot,
     filter: &TaskFilter,
     now: time::OffsetDateTime,
@@ -232,7 +241,14 @@ pub fn candidates(
     let mut deferred = Vec::new();
     let mut paused = Vec::new();
     for task in all {
-        if !filter.matches(&Fields::of_task(task, all, claims, &ctx.registry)) {
+        if !filter.matches(&Fields::of_task(
+            task,
+            all,
+            deps,
+            claims,
+            &ctx.registry,
+            now,
+        )) {
             continue;
         }
         let Some(park) = claims.park(&task.id) else {
