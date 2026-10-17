@@ -5,8 +5,8 @@ status: idea
 priority: 2
 reviewed: true
 created: 2026-09-29T11:33:42Z
-updated: 2026-10-12T18:22:32Z
-depends: []
+updated: 2026-10-17T17:37:38Z
+depends: [tasks-325e79]
 parent: tasks-46d207
 tags: [feedback, friction, "from:mind6"]
 agent: claude-code/claude-fable-5-1
