@@ -6,9 +6,9 @@ priority: 1
 size: s
 complexity: low
 process: direct
-owner: main
+owner: fix/where-non-utf8-path
 created: 2026-10-17T11:01:59Z
-updated: 2026-10-17T11:18:04Z
+updated: 2026-10-17T11:18:14Z
 started: 2026-10-17T11:18:04Z
 depends: []
 tags: [bug]
@@ -21,4 +21,6 @@ Repro: mkdir a directory named b'caf\xe9', git init it, run `tasks where <that p
 ## Notes
 
 - 2026-10-17T11:18:04Z (main): started
+  provenance: {"harness_session":"claude-code:1c29b303-8058-4f2c-a42b-119ee67e812a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:18:14Z (fix/where-non-utf8-path): resumed
   provenance: {"harness_session":"claude-code:1c29b303-8058-4f2c-a42b-119ee67e812a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
