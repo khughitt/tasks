@@ -27,7 +27,7 @@ will not match.
 | All edges closed before the last review | 1 | 0 |
 | All edges closed after the last review: a missed wake | 1 | 0 |
 | No edge; latest scope note names an open follow-up | 22 | 12 |
-| No edge; the named follow-up has closed: a missed wake | 1 | 0 |
+| No edge; the named follow-up woke it with a plain note | 1 | 0 |
 | No edge; waits on the user or names no task | 0 | 3 |
 | No edge; a pending `proposal:` (drop) | 3 | 2 |
 
@@ -38,16 +38,22 @@ Registry-wide, 139 reviewed ideas carry no edge and 111 carry one.
   They predate tasks-a309e0 (done 2026-10-13), which added `tasks dep <idea> --on
   <follow-up>` to scope §5. Each will be stranded when its follow-up closes, unless that
   follow-up's waker remembers the note.
-- **Missed wakes, one through a recorded edge.** ops-5bb3e5 waited in prose on
-  ops-36e093, which closed on 2026-10-15 without a wake note. ops-1a552c waited on a
-  recorded dependency: the pass that wrote its 2026-10-05 scope note added
-  `tack-a558e8` (now hq-a558e8) to its `depends` (ops `dc0a36c`, 2026-10-04).
-  hq-a558e8 closed on 2026-10-09 without a wake note. So an edge records the wait but
-  still wakes nothing: tasks-a309e0's fix alone would not have saved this idea.
-  tasks-d4e73d's rollout note counted 108 legacy "Ideas it wakes" bodies that use a
-  plain `note`. That note leaves the idea reviewed and only warns (review-state
-  design §3.3, §7.3). A waker that closes with `done` and writes no note gets no
-  warning at all.
+- **Missed wakes, failing two ways.**
+  - ops-1a552c waited on a recorded dependency. The pass that wrote its 2026-10-05
+    scope note added `tack-a558e8` (now hq-a558e8) to its `depends` (ops `dc0a36c`,
+    2026-10-04). hq-a558e8 closed on 2026-10-09 and nothing wrote a wake note. So an
+    edge records the wait but still wakes nothing: tasks-a309e0's fix alone would not
+    have saved this idea.
+  - ops-5bb3e5 waited in prose on ops-36e093. On 2026-10-15 ops-36e093 wrote its
+    finding on the idea as a plain `note` instead of `note --no-reviewed`, so the idea
+    stayed reviewed. This is a live case of the plain-note problem: tasks-d4e73d's
+    rollout note counted 108 legacy "Ideas it wakes" bodies that use a plain `note`,
+    which leaves the idea reviewed and only warns (review-state design §3.3, §7.3).
+    The user wrote the missed wake with `--no-reviewed` on 2026-10-17, readmitting it.
+
+  Option 3 covers both: ops-1a552c through its edge, and ops-5bb3e5 once the backfill
+  adds its missing edge. A waker that closes with `done` and writes no note gets no
+  warning at all today.
 - **Closed edges re-reviewed.** ops-8fdaf6 was re-briefed (2026-09-29) after its only
   dependency had closed. It is not a missed wake. It waits on nothing recorded, so it
   is stranded the same way.
@@ -129,8 +135,19 @@ or argues against them at spec review.
 3. Where do stranded ideas sort? **In two tiers.** An idea whose last dependency
    closed after its review has new evidence, as a woken idea does, and sorts with
    never-reviewed ideas. A legacy idea that waits on nothing and has nothing new sorts
-   after them. Open for the design: how the rule tells the two apart without a review
-   timestamp.
+   after them. The user's proposed test: `note --reviewed` and `edit --reviewed` also
+   store a `reviewed_at` timestamp on the record, which syncs with it. An idea counts
+   as freshly woken when one of its dependencies has a `completed` later than its
+   `reviewed_at`. `updated` will not serve, because incidental notes bump it, and the
+   scope note's own timestamp would mean reading notes again. Ideas reviewed before
+   the field exists cannot be told apart, so the backfill treats them as legacy
+   stranded. Open for the design:
+   - `transition()` (`src/commands/mod.rs`) stamps `completed` only on a move to
+     `done`, so a dependency closed by `drop` carries none. The rule needs another
+     close time for drops, or treats a drop as no new evidence.
+   - `reviewed_at` is cleared wherever `reviewed` is.
+   - A new frontmatter key has the same every-host-first rollout as `reviewed`
+     (review-state §7.0).
 4. Does the backfill cover every project? **Yes, run per project from its own
    checkout**, as scope's fixed root requires, not as one registry-wide pass. A scope
    note that names exactly one open follow-up can become an edge automatically. Only
@@ -141,7 +158,8 @@ or argues against them at spec review.
 
 - tasks-1a3280 — Design wait-aware review state from the brief (P2, m, high, planned),
   under tasks-5408fe. It takes the answers above as inputs, chooses the synced
-  wait-on-user marker and the tier test, and specifies the backfill. tasks-163055
+  wait-on-user marker, settles the `reviewed_at` tier test (including drops), and
+  specifies the backfill. tasks-163055
   depends on it.
 - tasks-163055 waits on that design. It returns to the queue when the design's
   completion wakes it.
