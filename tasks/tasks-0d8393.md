@@ -1,13 +1,15 @@
 ---
 id: tasks-0d8393
 title: "check warns moved_dep on a tombstone whose own depends names other tombstones; a tombstone refuses every write, so the warning can never be cleared and its swap command is refused with moved"
-status: todo
+status: doing
 priority: 2
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-17T02:23:40Z
-updated: 2026-10-17T02:57:33Z
+updated: 2026-10-17T08:47:34Z
+started: 2026-10-17T08:47:34Z
 depends: []
 tags: [feedback, friction, "from:ops", move]
 agent: claude-code/claude-opus-5-5
@@ -24,3 +26,5 @@ Check: a test in tests/move.rs beside check_warns_moved_dep_with_the_swap (~line
 ## Notes
 
 - 2026-10-17T02:57:33Z (main): scope: scoped; todo P2 xs/low/direct; move design already treats a tombstone's depends as history and refuses its writes, so check's moved_dep on a tombstone dependent (check.rs depends loop, at 721c87a) contradicts it; gate on dependent status != moved; supersedes tasks-183bfa M5
+- 2026-10-17T08:47:34Z (main): started
+  provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
