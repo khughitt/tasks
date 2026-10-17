@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: main
 created: 2026-10-17T11:25:02Z
-updated: 2026-10-17T17:37:27Z
+updated: 2026-10-17T17:37:47Z
 started: 2026-10-17T12:58:26Z
 depends: []
 parent: tasks-5408fe
@@ -41,4 +41,6 @@ Where: spec docs/specs/2026-10-17-wait-aware-review-design.md (accepted after sp
 - 2026-10-17T17:34:33Z (main): resumed
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T17:37:27Z (main): parked (waiting on agent): Agent is applying the tasks project snapshot now (claim released for the tool's live-claim check); resume with start and finish the rollout
+  provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T17:37:46Z (main): resumed
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
