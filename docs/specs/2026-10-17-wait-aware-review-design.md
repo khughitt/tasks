@@ -1,6 +1,6 @@
 # Wait-aware review state: reviewed ideas that wait on nothing come back
 
-Status: implemented (plan docs/plans/2026-10-17-wait-aware-review.md)
+Status: implemented (plan docs/plans/2026-10-17-wait-aware-review.md); rollout complete 2026-10-17
 Task: tasks-1a3280 (parent tasks-5408fe, lane tasks-46d207; answers tasks-163055)
 Brief: `docs/notes/2026-10-17-scope-queue-stranded-ideas-brief.md`
 Amends: `docs/specs/2026-10-11-review-state-design.md` §1, §3.3, §4, §5, §6
