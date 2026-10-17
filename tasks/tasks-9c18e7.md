@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: planned
 created: 2026-10-17T12:51:55Z
-updated: 2026-10-17T18:04:03Z
+updated: 2026-10-17T18:04:05Z
 depends: []
 tags: []
 source: tasks-aeeef1
@@ -29,3 +29,7 @@ Decide in the spec (planned): whether the write-time refusal covers the direct a
 Done: the reviewed spec's write paths (dep/add/edit `--depends`, editor save, `edit`/`add --parent`, `move`) refuse the deadlocking edge with a typed error that names the path; `check` reports any already on disk; tests in `tests/cli.rs` beside `dep_add_remove_and_local_cycle` (~5532); the tasks skill and README mention the refusal.
 
 Where: `src/commands/dep.rs`, `src/hierarchy.rs` (`validate_parent`, `descendants`), `src/query.rs` `find_cycle`, `src/commands/check.rs`.
+
+## Notes
+
+- 2026-10-17T18:04:05Z (main): scope: scoped; premise confirmed at 8e1ff08 (add_dependencies/ensure_acyclic and validate_parent never combine depends with the parent chain; check has no finding for it; 0 ancestor edges among 1,400 open registry tasks); framed as a closes-before cycle, with reparent coverage; planned for coverage/cost/error/check-severity decisions, m/mid
