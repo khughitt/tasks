@@ -330,7 +330,12 @@ fn rerun_rewrites_nothing_and_reads_no_notes() {
     // A later scope note would change the classification if notes were re-read.
     env.json(
         &f.dir,
-        &["note", &f.closed, "scope: briefed; nothing to wait on"],
+        &[
+            "note",
+            &f.closed,
+            "--reviewed",
+            &format!("scope: briefed; waits on {}", f.follow_up),
+        ],
     );
     let closed_after = env.read(&f.dir, &format!("tasks/{}.md", f.closed));
     let (code, report) = backfill(&env, &f.dir, state.path(), &["--writers-paused"]);

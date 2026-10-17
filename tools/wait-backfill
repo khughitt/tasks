@@ -222,8 +222,11 @@ def apply(tasks, root, path, snapshot, report):
             continue
         task = json.loads(stdout)["task"]
         if task["status"] != "idea" or not task.get("reviewed") or task["updated"] != entry["updated"]:
+            # review_reason is a list-row field (show does not carry it); null when not queued.
+            rows = read_json(tasks, root, "list", "--needs-review")["tasks"]
+            reason = next((r.get("review_reason") for r in rows if r["id"] == entry["id"]), None)
             detail = (f"status {task['status']}, reviewed {str(bool(task.get('reviewed'))).lower()}, "
-                      f"updated {task['updated']} (frozen {entry['updated']})")
+                      f"review_reason {reason or 'null'}, updated {task['updated']} (frozen {entry['updated']})")
             entry.update(done=True, outcome=f"changed: {detail}")
             report["changed"].append({"id": entry["id"], "detail": detail})
             save(path, snapshot)
