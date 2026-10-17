@@ -1,6 +1,6 @@
 # Wait-aware review state: reviewed ideas that wait on nothing come back
 
-Status: draft for review
+Status: draft for review (revised after review round 1, 2026-10-17: backfill freeze and writer pause, checkout-scoped dependency views, equal stamps count as woken)
 Task: tasks-1a3280 (parent tasks-5408fe, lane tasks-46d207; answers tasks-163055)
 Brief: `docs/notes/2026-10-17-scope-queue-stranded-ideas-brief.md`
 Amends: `docs/specs/2026-10-11-review-state-design.md` §1, §3.3, §4, §5, §6
@@ -170,9 +170,19 @@ Open children are not a wait. Waits are recorded as edges.
 
 A reviewed idea that waits on nothing is **woken** when it has `reviewed_at` and either:
 
-- one of its dependencies, resolved as in §4.1, has a `closed` later than `reviewed_at`;
-  or
+- one of its dependencies, resolved as in §4.1, has a `closed` at or after
+  `reviewed_at`; or
 - its `defer` date has come due and is later than the UTC date of `reviewed_at`.
+
+**Equal stamps count as woken.** Stamps have whole-second precision (`time::now`), and
+`time::after` orders writes only within one record. A review and a dependency's close
+in the same second therefore carry equal stamps, and the order cannot be recovered.
+The rule takes the conservative reading: an equal `closed` is new evidence. The cost is
+that a review written in the same second as a close it already saw comes back once as
+`woken` rather than `stranded`, so it is drawn earlier. Wrongly demoting a real wake is
+the worse error, because a stranded idea may wait several passes. The defer test stays
+strict: a deferral comes due at the start of its UTC day, so a review stamped on that
+day was written after the deferral came due and has already seen it.
 
 Every other reviewed idea that waits on nothing is **stranded**. That includes every
 legacy idea without `reviewed_at`, as the user ruled (question 3). Because a legacy
@@ -190,8 +200,17 @@ summary row and the filter cannot disagree. The dependency view is built once pe
 command:
 
 - Only reviewed ideas' edges are resolved. Other rows need no dependency read.
-- Each distinct dependency id is resolved at most once per command. It is read from the
-  scan when present there, otherwise through the existing resolver.
+- A view is bound to one scan, the scan its rows came from. A dependency is read from
+  that scan when present there, otherwise through the existing resolver, exactly as
+  `list::resolve_dependency` reads it today. Within one view each distinct dependency
+  id is resolved at most once. The memo is therefore keyed by the source checkout and
+  the dependency id, never by the id alone.
+- Parked rows keep their current resolution (park design §5.3). A row that
+  `resolve_recorded` (`src/commands/parked.rs`) reads from its recorded checkout uses
+  a view bound to that checkout's scan, and a row read from the registered copy uses
+  the registered scan's view. The same dependency can be done in one checkout's copy
+  and open in another's, and each row's review state follows its own copy, as its
+  children, dependencies and documents already do.
 - `TaskSummary::of`, `Fields::of_task` and `ParkedRow::resolved` take the view rather
   than resolving edges themselves. Their callers (`list`, `ready`, `search`, `sample`,
   `prime`, `tree`, `lanes`, `parked`) build it from the scan they already hold.
@@ -298,31 +317,56 @@ are not displaced, and the backfill (§7.3) shrinks them.
 ### 7.3 Backfill
 
 The backfill runs once per registered project, from that project's own checkout, after
-the binary and skills ship there. It uses only the CLI and runs in two phases:
+the binary and skills ship there. It uses only the CLI and follows review-state §7.2's
+pattern: decisions are frozen against a record stamp, and writes apply only to records
+that have not changed since. A report can go stale before it is applied. For example,
+an idea classified as waiting on the user may be re-reviewed by a scope pass that gives
+it a research edge. Applying the stale `--awaiting-user` would still succeed, since the
+idea is still reviewed, and when the research closed the obsolete marker would keep the
+idea hidden. A stale edge fails the same way. Claims and stale-copy checks cannot catch
+this, because they guard the write, not the assumptions the report made.
 
-1. **Report (read-only).** For each idea with `review_reason: stranded`, read its
-   latest `scope:` note and extract the task ids it names. Resolve each, following
-   moves, and keep those that are open and are not the idea itself. Classify the idea:
-   - **auto edge**: exactly one open id is named. Propose `tasks dep <idea> --on <id>`.
+1. **Report and freeze (read-only toward records).** For each idea with
+   `review_reason: stranded`, read its latest `scope:` note and extract the task ids it
+   names. Resolve each, following moves, and keep those that are open and are not the
+   idea itself. Classify the idea:
+   - **auto edge**: exactly one open id is named. The decision is
+     `tasks dep <idea> --on <id>`.
    - **judge**: several open ids, or none; prose that waits on the user; or a note
      naming only closed tasks (a missed wake, or a closed edge that was re-briefed).
-   The report lists every candidate, its class, the proposed command or the note's
-   text, and the evidence.
-2. **Apply.** The operator reviews the report. The auto-edge commands then run as
-   listed. For each judged idea the operator, or an agent in a scope pass from that
-   checkout, picks one of:
-   - an edge;
-   - `edit --awaiting-user`;
-   - leaving it stranded for the next scope pass, the default for missed wakes and
-     closed edges, since those need a re-review rather than a marker.
+   Write every candidate to a snapshot file outside the project checkouts (the plan
+   names the path, under the operator's state directory). Each entry carries the id,
+   the record's `updated` stamp at the freeze, the class, the evidence, and its
+   decision. The snapshot is written once and never re-derived: a later run that finds
+   it reads it rather than reading notes again.
+2. **Rule.** The operator reviews the snapshot and records a decision on each judged
+   entry, editing only the snapshot, never a record. The decision is one of: an edge
+   (one `dep` command, which may name several `--on`); `edit --awaiting-user`; or
+   `leave`, the default for missed wakes and closed edges, since those need a re-review
+   rather than a marker. An entry with no decision is not applied.
+3. **Apply, inside a writer pause.** Each apply pass, the first and every rerun, runs
+   inside the same writer pause as review-state §7.2. Before the pass, `tasks claims` on
+   each reading host shows no live claim in the project, and the operator explicitly
+   confirms that every other writer of the project's records is paused on every host.
+   For each entry not yet marked done, the pass reads the record:
+   - When it is still an idea, still reviewed, and its `updated` equals the frozen
+     stamp, the pass runs the entry's command (or nothing, for `leave`) and marks the
+     entry done.
+   - Otherwise it writes nothing, reports the entry as changed since the freeze with
+     the record's current status, `reviewed` and `review_reason`, and marks it done. A
+     changed idea has had a later look, and that look decides its wait.
+   - A live-claimed idea is skipped and reported. Its entry stays not done and is
+     retried on the next pass under the same unchanged-record test.
 
-No writer pause is needed, unlike review-state §7.2. Each write is a single CLI
-command that validates against the record as it stands. A second `dep --on` is a no-op
-with a warning. `edit --awaiting-user` is refused if the idea was readmitted or
-promoted in the meantime (§3.1). An edge added to an idea that someone has since
-readmitted records a real wait and hides nothing, because an unreviewed idea is in the
-queue whatever its edges are. Claims and stale copies guard the writes as they guard
-any `dep` or `edit`.
+   An interrupted pass is safe. When a command landed before its entry was marked
+   done, the write bumped `updated`, so the next pass reports the entry as changed
+   and does not repeat it.
+
+   The pause is needed for the reason review-state §7.2 gives: the stamp test and the
+   write are two commands. An atomic expected-stamp option on `dep` and `edit` (an
+   `--if-updated <stamp>`) would remove the pause, but it is permanent CLI surface for
+   a one-time migration. Review-state §7.2 rejected it for the same reason, and this
+   design does too.
 
 A project without `[git] commit` gets one `chore(tasks)` commit of the run's writes. A
 project with `[git] commit = true` commits each write as the CLI does.
@@ -379,9 +423,32 @@ commands:
     `list --parked`.
 13. **JSON:** `review_reason` is absent exactly when `needs_review` is false.
     `awaiting_user` is always present on `Task` and `TaskSummary`.
-14. **Backfill report** (the plan's tool, against a fixture project): one open id named
-    gives an auto edge; two ids, none, or only closed ids give judge. Applying the
-    listed edges and rerunning the report lists nothing for those ideas.
+14. **Backfill** (the plan's tool, against a fixture project):
+    - One open id named gives an auto edge; two ids, none, or only closed ids give
+      judge.
+    - Apply runs the decided commands only on records whose `updated` matches the
+      freeze.
+    - An idea frozen as `--awaiting-user`, then re-reviewed with
+      `note --reviewed` and a new `dep --on` before the apply, is reported as changed.
+      It gets no marker and wakes when the new dependency closes.
+    - An interrupted pass (command landed, entry not marked) reports the entry as
+      changed on the rerun and writes nothing.
+    - A second pass rewrites no record and reads no notes.
+    - An idea skipped for a live claim, and untouched since, is applied on the next
+      pass.
+15. **Equal stamps:** a reviewed idea whose dependency's `closed` equals its
+    `reviewed_at` to the second is `woken`, tested at the `review::state` level with
+    fixed stamps. A dependency closed one second before `reviewed_at` gives `stranded`.
+    A deferral due on the date of `reviewed_at` gives `stranded`, and one due on a
+    later date gives `woken`.
+16. **Divergent checkouts:** a reviewed idea is parked in a worktree whose copy of its
+    dependency is `done` with `closed` after `reviewed_at`, while the registered
+    checkout's copy of that dependency is still open.
+    - `list --parked` and `prime`'s parked section, reading the recorded worktree, show
+      the idea `woken`.
+    - `list --needs-review` in the registered checkout leaves it out, because it is
+      still waiting there.
+    - One command that reads both copies gives each row its own checkout's answer.
 
 ## 9. Out of scope
 
