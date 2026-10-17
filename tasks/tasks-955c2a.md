@@ -5,8 +5,8 @@ status: idea
 priority: 2
 reviewed: true
 created: 2026-10-07T17:45:57Z
-updated: 2026-10-12T18:22:32Z
-depends: []
+updated: 2026-10-17T17:37:36Z
+depends: [tasks-a984f1]
 parent: tasks-984769
 tags: [feedback, friction, "from:flows"]
 agent: claude-code/claude-opus-5-5
