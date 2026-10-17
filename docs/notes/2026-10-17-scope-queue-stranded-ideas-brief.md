@@ -158,8 +158,25 @@ or argues against them at spec review.
      project moving its open tasks to a successor. A prefix rename writes no
      tombstones (`src/commands/rename.rs`); its ids resolve through the alias.
 
+   - **A new `closed` field, not `completed`** (the user's input, 2026-10-17; the
+     choice is the design's). `closed` is stamped on every move to `done` or
+     `dropped`, so a done task carries both fields, and the wake rule reads only
+     `closed`. `completed` keeps meaning done-only. Readers checked on 2026-10-17:
+     - ops `bin/obs-index` computes lead time from `started` to `completed` only
+       inside `status == "done"`, so it is safe either way.
+     - obs copies `completed` into `task_records.completed_ms` (`join.py`).
+       `views/dashboard/tasks.sql` labels it `closed_ms`, and `views/cost.sql` and
+       `dashboard.py::closed_roots` select `status IN ('done','dropped') AND
+       completed_ms >= since`. So obs already reads `completed` as a close time that
+       includes drops, and because drops never carry it, a `since`-filtered view
+       silently omits them (filed as obs-1d6eb4). Stamping `completed` on drops would shift those views
+       unannounced. A separate `closed` lets obs adopt it deliberately.
+
+     The cost is one more frontmatter field with `reviewed_at`'s rollout. Tasks closed
+     before it exists have no `closed`. That is harmless, since ideas reviewed before
+     `reviewed_at` exists count as legacy stranded anyway.
+
    Still open for the design:
-   - Whether drops stamp `completed` or a new `closed` field.
    - `reviewed_at` is cleared wherever `reviewed` is.
    - A new frontmatter key has the same every-host-first rollout as `reviewed`
      (review-state §7.0).
@@ -173,8 +190,8 @@ or argues against them at spec review.
 
 - tasks-1a3280 — Design wait-aware review state from the brief (P2, m, high, planned),
   under tasks-5408fe. It takes the answers above as inputs, chooses the synced
-  wait-on-user marker, settles the `reviewed_at` tier test (drops stamp a
-  close time, moves are followed), and specifies the backfill. tasks-163055
+  wait-on-user marker, settles the `reviewed_at` tier test (a `closed` stamp on
+  done and drop, moves followed), and specifies the backfill. tasks-163055
   depends on it.
 - tasks-163055 waits on that design. It returns to the queue when the design's
   completion wakes it.
