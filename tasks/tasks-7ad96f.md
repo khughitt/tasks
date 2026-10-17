@@ -8,8 +8,8 @@ complexity: high
 process: planned
 reviewed: true
 created: 2026-10-02T10:35:27Z
-updated: 2026-10-12T18:22:32Z
-depends: []
+updated: 2026-10-17T17:37:35Z
+depends: [tasks-10c968]
 parent: tasks-0e7216
 tags: [feedback, friction, "from:sci"]
 agent: claude-code/claude-opus-5-5
