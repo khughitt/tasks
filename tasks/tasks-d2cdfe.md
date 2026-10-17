@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-17T12:37:08Z
-updated: 2026-10-17T12:37:08Z
+updated: 2026-10-17T12:51:56Z
 depends: []
 parent: tasks-aeeef1
 tags: []
@@ -38,3 +38,7 @@ Tests:
 - RED never observed for several Task 2 tests and the corrupt-snapshot backfill test (could assert sci.json still reads {not json).
 - No test for the spec §8 case 6 woken-after-answer variant, prime non-parked woken/stranded rows, a multi-target dep decision, or an interrupted edit --awaiting-user; show-test assertions are loose (contains "yes (", awaiting row not line-anchored).
 - check.rs wording for awaiting_user-without-reviewed differs from review::not_reviewed (plan-mandated texts).
+
+## Notes
+
+- 2026-10-17T12:51:56Z (main): also: wait-backfill auto classification and judge proposals should drop named tasks that are the idea's own ancestor (freeze on 2026-10-17 found 27 such names among judge entries and 1 auto entry, mind6-573a5b, overridden to leave); see tasks-9c18e7
