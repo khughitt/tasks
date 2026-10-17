@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-17T17:45:11Z
-updated: 2026-10-17T18:03:44Z
+updated: 2026-10-17T18:03:46Z
 depends: []
 tags: []
 source: tasks-aeeef1
@@ -34,3 +34,4 @@ Where: `src/review.rs` `apply`, `tests/review.rs`, spec §3.1. Related wording i
 ## Notes
 
 - 2026-10-17T17:45:29Z (main): concerns: tasks-aeeef1 change — whether a re-review should clear awaiting_user, which the shipped rule keeps
+- 2026-10-17T18:03:46Z (main): scope: scoped; premise confirmed at 8e1ff08 (review::apply keeps awaiting_user under Review::Set; registry has 4 awaiting ideas, none mid re-review); decided Review::Set clears the marker unless --awaiting-user rides along, rejecting a skill-side --no-awaiting-user rule; direct, s/low
