@@ -82,3 +82,7 @@ scope it to the chosen alternative, with the reproduction above as its integrati
 That means `show` from main reports the warning with the worktree present, and the scope
 skill's §6 names the skip. tasks-16de1c and tasks-2b2b49 wait on nothing, because they
 are proposed drops.
+
+Resolved 2026-10-17 (scope pass): Q1 taken as the lean, alternatives 2 + 1, and
+tasks-f3910b is scoped to it as a direct task. Q2 and Q3 stay recorded gaps in its body;
+the user may override before it starts.
