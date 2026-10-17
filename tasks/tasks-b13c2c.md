@@ -4,8 +4,8 @@ title: "A provenance source for crew attempts, so their notes carry harness prov
 status: idea
 priority: 2
 created: 2026-10-14T01:44:14Z
-updated: 2026-10-14T01:44:14Z
-depends: []
+updated: 2026-10-17T02:37:20Z
+depends: [tasks-e7f671]
 tags: []
 agent: claude-code/claude-opus-5-5
 ---
