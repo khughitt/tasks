@@ -1,6 +1,6 @@
 # Wait-aware review state: reviewed ideas that wait on nothing come back
 
-Status: draft for review (revised after review round 1, 2026-10-17: backfill freeze and writer pause, checkout-scoped dependency views, equal stamps count as woken; round 2, acceptance 16 follows the parked views' existing choice of copy)
+Status: implemented (plan docs/plans/2026-10-17-wait-aware-review.md)
 Task: tasks-1a3280 (parent tasks-5408fe, lane tasks-46d207; answers tasks-163055)
 Brief: `docs/notes/2026-10-17-scope-queue-stranded-ideas-brief.md`
 Amends: `docs/specs/2026-10-11-review-state-design.md` §1, §3.3, §4, §5, §6

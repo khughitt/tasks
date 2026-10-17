@@ -55,10 +55,13 @@ mean those documents were verified.
    and `--parallel` is a switch. `--need` is all-of, like `--tag`. `--complexity` is a selection over the effective rating,
    not the session cutoff: a session under a cutoff still picks only through `ready` and
    `next`.
-   `--needs-review` keeps rows that still need a look: ideas no scope pass has reviewed
-   (`reviewed` unset) and leaf todo or blocked tasks with no process. Pretty tables mark
-   those rows with a leading `*`; together they are the scope queue, which `/scope` with
-   no ids draws from, ideas first. Status and process tell the two kinds apart.
+   `--needs-review` keeps rows that still need a look, each with a `review_reason`:
+   `unreviewed` ideas, `woken` and `stranded` reviewed ideas (no recorded wait: open
+   dependency, pending proposal, `awaiting_user`, or future deferral), and `unassessed`
+   leaf todo or blocked tasks with no process. Pretty tables mark those rows with a
+   leading `*`; together they are the scope queue, which `/scope` with no ids draws from.
+   `note --reviewed --awaiting-user` records that a reviewed idea waits on the user;
+   `--no-reviewed` readmits it with the answer.
    `tasks search "<phrase>"` is `list` narrowed to tasks whose title or body contains the
    phrase (literal, case-insensitive; notes are not searched) and takes every `list`
    option, so `tasks search "<phrase>" --all-projects` (open work, shelved aside) is the
