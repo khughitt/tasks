@@ -5,8 +5,8 @@ status: idea
 priority: 2
 reviewed: true
 created: 2026-10-17T00:51:23Z
-updated: 2026-10-17T16:47:21Z
-depends: []
+updated: 2026-10-17T16:47:23Z
+depends: [tasks-57425c]
 parent: tasks-037538
 tags: [feedback, idea, "from:material"]
 agent: claude-code/claude-opus-5-5
