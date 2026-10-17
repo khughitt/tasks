@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-15T18:15:26Z
-updated: 2026-10-17T18:10:41Z
+updated: 2026-10-17T18:10:42Z
 depends: []
 tags: [feedback, gap, "from:material"]
 agent: claude-code
@@ -34,3 +34,4 @@ Where: `src/commands/show.rs`, `src/stale.rs`, `skills/scope/SKILL.md` §6, `doc
 ## Notes
 
 - 2026-10-17T02:28:10Z (main): scope: briefed; reproduced in a scratch project: with the promoting worktree present, main's queue and show look clean and only the write refuses stale_copy (its retry points into the branch); with the worktree removed and branch kept, the note writes silently. Lean: show warns on a newer sibling copy + scope §6 skips on it or on stale_copy; tasks-16de1c and tasks-2b2b49 proposed as duplicates; brief: docs/notes/2026-10-16-scope-queue-other-branches-brief.md
+- 2026-10-17T18:10:42Z (main): scope: scoped; stranded briefed idea with no wait; premise unchanged at 8e1ff08 (show never calls stale::compare; scope §6 has no stale_copy rule); took the brief's lean 2+1 (show warns on a newer sibling copy, scope §6 skips on it or on stale_copy), rejecting queue-side filtering; no-worktree branch and retry wording stay recorded gaps; direct, s/mid
