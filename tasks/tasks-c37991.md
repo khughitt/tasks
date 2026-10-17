@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: feat/wait-aware-review
 created: 2026-10-17T11:25:04Z
-updated: 2026-10-17T11:35:21Z
+updated: 2026-10-17T11:38:32Z
 started: 2026-10-17T11:32:47Z
 depends: []
 parent: tasks-aeeef1
@@ -26,3 +26,4 @@ step: "Task 1: The CLI rows in ops"
 - 2026-10-17T11:32:47Z (feat/wait-aware-review): started
   provenance: {"harness_session":"claude-code:f4b45253-a492-455b-872d-fec9d743d492","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T11:35:21Z (feat/wait-aware-review): baseline just test-fast after rebase onto main f177385: 561 passed, 18 failed — all record_commit::tests, the known HOME leak tasks-eeeeda (host git hook under temp HOME); implementers treat exactly those 18 as baseline
+- 2026-10-17T11:38:32Z (feat/wait-aware-review): review: impl round 1 — verdict: accept; findings: none; reviewer: claude-code/claude-sonnet-5-5
