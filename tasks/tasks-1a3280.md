@@ -1,13 +1,15 @@
 ---
 id: tasks-1a3280
 title: Design wait-aware review state from the brief
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-10-17T09:19:37Z
-updated: 2026-10-17T09:59:59Z
+updated: 2026-10-17T10:02:52Z
+started: 2026-10-17T10:02:52Z
 depends: []
 parent: tasks-5408fe
 tags: []
@@ -27,3 +29,5 @@ Ideas it wakes: on completion, run `tasks note tasks-163055 --no-reviewed "<deci
 - 2026-10-17T09:48:10Z (main): brief revised again (2026-10-17): ops-5bb3e5's wake was written as a plain note by ops-36e093 (a live plain-note case), not missing; the user proposed a synced reviewed_at stamped by --reviewed, with 'freshly woken' = a dependency completed after reviewed_at; open: completed is stamped only on done, so drops need their own close time or count as no new evidence
 - 2026-10-17T09:53:56Z (main): user ruling 2026-10-17: a dropped dependency is new evidence (stamp a close time on done or dropped, as completed or a separate closed; done unchanged); a moved dependency is followed to its successor, not treated as closed (Status::is_open counts moved as closed; prefix renames write no tombstones). Recorded in the brief under question 3
 - 2026-10-17T09:59:59Z (main): user input 2026-10-17: drops stamp a new closed field (done and dropped both set it; completed stays done-only; the wake rule reads closed). Checked readers: ops obs-index lead time is done-only (safe); obs views read completed_ms as a close time including drops and already miss dropped tasks (obs-1d6eb4), so a separate closed lets obs adopt it deliberately. Recorded in the brief
+- 2026-10-17T10:02:52Z (main): started
+  provenance: {"harness_session":"claude-code:a8bb9133-4b61-424c-8a52-80795ab6c626","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
