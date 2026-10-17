@@ -1,13 +1,22 @@
 ---
 id: tasks-0d8393
 title: "check warns moved_dep on a tombstone whose own depends names other tombstones; a tombstone refuses every write, so the warning can never be cleared and its swap command is refused with moved"
-status: idea
+status: todo
 priority: 2
+size: xs
+complexity: low
+process: direct
 created: 2026-10-17T02:23:40Z
-updated: 2026-10-17T02:23:40Z
+updated: 2026-10-17T02:57:32Z
 depends: []
-tags: [feedback, friction, "from:ops"]
+tags: [feedback, friction, "from:ops", move]
 agent: claude-code/claude-opus-5-5
 ---
 
-Seen when a chain of mutually dependent tasks is moved together: each source tombstone keeps its frozen depends on the other source ids, and check reports moved_dep on each tombstone, though every counterpart already depends on the live ids. dep on the tombstone refuses (moved) and redirects to a dep on the counterpart that would change nothing. Expected: no moved_dep for a tombstone dependent at all (its depends is history; the counterpart carries the live edges), not only dropping the command as tasks-183bfa M5 proposes. Leaves four permanent warnings in the source project's check on every host.
+Original report (from:ops): seen when a chain of mutually dependent tasks is moved together. Each source tombstone keeps its frozen depends on the other source ids, and check reports moved_dep on each tombstone, though every counterpart already depends on the live ids. dep on the tombstone refuses (moved) and redirects to a dep on the counterpart that would change nothing. Expected: no moved_dep for a tombstone dependent at all (its depends is history; the counterpart carries the live edges), not only dropping the command as tasks-183bfa M5 proposes. Leaves four permanent warnings in the source project's check on every host.
+
+Why: the move design already settles this. docs/specs/2026-10-08-task-move-design.md (Dependency evaluation and Cycle detection) says a tombstone's "only edge is to its moved_to record; its own retained depends are history, not edges", and every write to a tombstone refuses with `moved`. src/commands/check.rs (the depends loop, ~line 291) still runs the moved_dep test for every task, tombstones included, so the warning and its swap command can never be acted on.
+
+Done: check skips moved_dep when the dependent itself has status moved. A live dependent of a tombstone still warns with the swap, as today. Amend the design's `check` bullet ("warns moved_dep on every record that depends on a tombstone") to say "every live record". This also covers tasks-183bfa's M5 ("omit impossible dep repair commands for immutable tombstones"): note that on tasks-183bfa when this lands. Out of scope: retired_prefix on a tombstone's depends. If it proves equally unclearable, file it separately.
+
+Check: a test in tests/move.rs beside check_warns_moved_dep_with_the_swap (~line 680). Move two tasks that depend on each other, then confirm check in the source reports no moved_dep on either tombstone while a third live task depending on a tombstone still gets the swap. Then `just test-fast`.
