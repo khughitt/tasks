@@ -790,7 +790,7 @@ fn show_names_a_reviewed_idea() {
     assert!(
         shown
             .lines()
-            .any(|l| l.starts_with("reviewed") && l.trim_end().ends_with("yes")),
+            .any(|l| l.starts_with("reviewed") && l.contains("yes (")),
         "{shown}"
     );
 }
@@ -803,6 +803,20 @@ fn seed(dir: &Path, id: &str, lines: &str) {
     let seeded = text.replacen("\npriority: ", &format!("\n{lines}\npriority: "), 1);
     assert_ne!(seeded, text, "no priority line in {id}");
     std::fs::write(&path, seeded).unwrap();
+}
+
+/// Rewrites a stored stamp line in place, so a test can age it.
+fn restamp(dir: &Path, id: &str, key: &str, value: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let prefix = format!("\n{key}: ");
+    let start = text
+        .find(&prefix)
+        .unwrap_or_else(|| panic!("no {key} in {id}"))
+        + 1;
+    let end = start + text[start..].find('\n').unwrap();
+    let out = format!("{}{key}: {value}{}", &text[..start], &text[end..]);
+    std::fs::write(&path, out).unwrap();
 }
 
 fn task(env: &TestEnv, dir: &Path, id: &str) -> serde_json::Value {
@@ -939,4 +953,183 @@ fn the_editor_refuses_to_change_closed_or_reviewed_at() {
             .contains("reviewed_at is stamped by reviewing the idea; it cannot be edited")
     );
     assert_eq!(env.read(&dir, &file), before);
+}
+
+#[test]
+fn reviewing_stamps_reviewed_at_and_a_rereview_restamps_it() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(&dir, &["note", &id, "--reviewed", "scope: briefed"]);
+    let first = task(&env, &dir, &id)["reviewed_at"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(first.ends_with('Z'), "{first}");
+    restamp(&dir, &id, "reviewed_at", "2026-01-01T00:00:00Z");
+    env.json(&dir, &["note", &id, "--reviewed", "scope: briefed again"]);
+    assert_ne!(task(&env, &dir, &id)["reviewed_at"], "2026-01-01T00:00:00Z");
+    restamp(&dir, &id, "reviewed_at", "2026-01-01T00:00:00Z");
+    env.json(&dir, &["edit", &id, "--reviewed"]);
+    assert_ne!(task(&env, &dir, &id)["reviewed_at"], "2026-01-01T00:00:00Z");
+}
+
+#[test]
+fn awaiting_user_is_set_with_a_review_and_cleared_by_readmission() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &id,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    let shown = task(&env, &dir, &id);
+    assert_eq!(shown["reviewed"], true);
+    assert_eq!(shown["awaiting_user"], true);
+    // A plain note keeps both and says so.
+    let out = env.json(&dir, &["note", &id, "an aside"]);
+    let warnings = out["warnings"].to_string();
+    assert!(
+        warnings.contains(&format!(
+            "{id} stays reviewed and awaiting the user; add --no-reviewed to readmit it for scope"
+        )),
+        "{warnings}"
+    );
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], true);
+    // edit clears and sets the marker alone, without a warning.
+    let out = env.json(&dir, &["edit", &id, "--no-awaiting-user"]);
+    assert!(
+        !out["warnings"].to_string().contains("stays reviewed"),
+        "{out}"
+    );
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], false);
+    assert_eq!(task(&env, &dir, &id)["reviewed"], true);
+    env.json(&dir, &["edit", &id, "--awaiting-user"]);
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], true);
+    // The answer readmits it: both flags and the stamp go.
+    env.json(&dir, &["note", &id, "--no-reviewed", "answer: yes"]);
+    let shown = task(&env, &dir, &id);
+    assert_eq!(shown["reviewed"], false);
+    assert_eq!(shown["awaiting_user"], false);
+    assert!(shown.get("reviewed_at").is_none(), "{shown}");
+}
+
+#[test]
+fn awaiting_user_is_refused_without_a_review_and_on_a_non_idea() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let file = format!("tasks/{idea}.md");
+    let before = env.read(&dir, &file);
+    let out = env
+        .cmd(&dir)
+        .args(["note", &idea, "--awaiting-user", "q"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&format!(
+        "{idea} is not reviewed; only a reviewed idea carries awaiting_user"
+    )));
+    assert_eq!(env.read(&dir, &file), before);
+    let todo = id_of(env.json(&dir, &["add", "T"]));
+    let file = format!("tasks/{todo}.md");
+    let before = env.read(&dir, &file);
+    let out = env
+        .cmd(&dir)
+        .args(["edit", &todo, "--awaiting-user"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("only an idea carries reviewed"));
+    assert_eq!(env.read(&dir, &file), before);
+    // clap: the marker cannot ride on a readmission.
+    env.usage(
+        &dir,
+        &["note", &idea, "--awaiting-user", "--no-reviewed", "x"],
+    );
+    env.usage(
+        &dir,
+        &["edit", &idea, "--awaiting-user", "--no-awaiting-user"],
+    );
+}
+
+#[test]
+fn the_editor_stamps_reviewed_at_with_reviewed() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let add = editor_script(
+        &dir,
+        "sed -i 's/^priority: /reviewed: true\\npriority: /' \"$1\"",
+    );
+    env.cmd(&dir)
+        .env("EDITOR", &add)
+        .args(["edit", &idea])
+        .assert()
+        .success();
+    assert!(task(&env, &dir, &idea)["reviewed_at"].is_string());
+    // Removing reviewed while the marker stays is refused, file unchanged.
+    env.json(&dir, &["edit", &idea, "--awaiting-user"]);
+    let file = format!("tasks/{idea}.md");
+    let before = env.read(&dir, &file);
+    let drop_reviewed = editor_script(&dir, "sed -i '/^reviewed: /d' \"$1\"");
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &drop_reviewed)
+        .args(["edit", &idea])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("only a reviewed idea carries awaiting_user")
+    );
+    assert_eq!(env.read(&dir, &file), before);
+    // Removing both clears the stamp.
+    env.json(&dir, &["edit", &idea, "--no-awaiting-user"]);
+    env.cmd(&dir)
+        .env("EDITOR", &drop_reviewed)
+        .args(["edit", &idea])
+        .assert()
+        .success();
+    assert!(task(&env, &dir, &idea).get("reviewed_at").is_none());
+}
+
+#[test]
+fn show_prints_the_review_date_the_marker_and_closed() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &idea,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    restamp(&dir, &idea, "reviewed_at", "2026-01-02T03:04:05Z");
+    let shown = env.pretty(&dir, &["show", &idea]);
+    assert!(
+        shown.contains("reviewed") && shown.contains("yes (2026-01-02)"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("awaiting") && shown.contains("user"),
+        "{shown}"
+    );
+    let legacy = id_of(env.json(&dir, &["add", "L", "--status", "idea"]));
+    seed_reviewed(&dir, &legacy);
+    let shown = env.pretty(&dir, &["show", &legacy]);
+    assert!(shown.contains("yes") && !shown.contains("yes ("), "{shown}");
+    let dropped = id_of(env.json(&dir, &["add", "X"]));
+    env.json(&dir, &["drop", &dropped]);
+    assert!(env.pretty(&dir, &["show", &dropped]).contains("closed"));
 }

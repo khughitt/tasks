@@ -2029,12 +2029,14 @@ fn dispatch(cli: Cli) -> Result<Output> {
             stamp,
             reviewed,
             no_reviewed,
+            awaiting_user,
         } => status::note(
             open_id_write_ctx(dir, &id)?,
             id,
             text,
             stamp,
             crate::review::Review::from_flags(reviewed, no_reviewed),
+            crate::review::Awaiting::from_flags(awaiting_user, false),
         ),
         Command::Attach {
             id,

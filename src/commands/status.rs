@@ -197,9 +197,10 @@ pub fn note(
     text: String,
     stamp: bool,
     review: crate::review::Review,
+    awaiting: crate::review::Awaiting,
 ) -> Result<Output> {
     let mut task = load(&mut ctx, &id)?;
-    crate::review::apply(&mut task, review, &mut ctx.warnings)?;
+    crate::review::apply(&mut task, review, awaiting, &mut ctx.warnings)?;
     let owner = owner_name(&ctx.project)?;
     if stamp {
         append_stamped_note(&mut ctx, &mut task, &owner, &text)?;

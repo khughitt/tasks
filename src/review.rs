@@ -76,27 +76,86 @@ impl Review {
     }
 }
 
-/// Applies `review` before anything is written, so a refusal leaves the file untouched.
-/// `Keep` on a reviewed idea warns: the write does not readmit it.
-pub fn apply(task: &mut Task, review: Review, warnings: &mut Vec<String>) -> Result<()> {
+/// What a write does to the `awaiting_user` marker (wait-aware spec §3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Awaiting {
+    Keep,
+    Set,
+    Clear,
+}
+
+impl Awaiting {
+    /// clap's `conflicts_with` keeps both from arriving together.
+    pub fn from_flags(set: bool, clear: bool) -> Awaiting {
+        match (set, clear) {
+            (true, _) => Awaiting::Set,
+            (_, true) => Awaiting::Clear,
+            _ => Awaiting::Keep,
+        }
+    }
+}
+
+/// Applies `review`, then `awaiting`, before anything is written, so a refusal leaves the
+/// file untouched. A write that changes neither (a plain note) on a reviewed idea warns:
+/// it does not readmit the idea.
+pub fn apply(
+    task: &mut Task,
+    review: Review,
+    awaiting: Awaiting,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
     match review {
         Review::Set => {
             if task.status != Status::Idea {
                 return Err(not_an_idea(task));
             }
             task.reviewed = true;
+            task.reviewed_at = Some(crate::time::now());
         }
-        Review::Clear => task.reviewed = false,
-        Review::Keep => {
-            if task.reviewed {
-                warnings.push(format!(
-                    "{} stays reviewed; add --no-reviewed to readmit it for scope",
-                    task.id
-                ));
+        Review::Clear => {
+            task.reviewed = false;
+            task.reviewed_at = None;
+            task.awaiting_user = false;
+        }
+        Review::Keep => {}
+    }
+    match awaiting {
+        Awaiting::Set => {
+            if task.status != Status::Idea {
+                return Err(not_an_idea(task));
             }
+            if !task.reviewed {
+                return Err(not_reviewed(task));
+            }
+            task.awaiting_user = true;
         }
+        Awaiting::Clear => task.awaiting_user = false,
+        Awaiting::Keep => {}
+    }
+    if review == Review::Keep && awaiting == Awaiting::Keep && task.reviewed {
+        warnings.push(if task.awaiting_user {
+            format!(
+                "{} stays reviewed and awaiting the user; add --no-reviewed to readmit it for scope",
+                task.id
+            )
+        } else {
+            format!(
+                "{} stays reviewed; add --no-reviewed to readmit it for scope",
+                task.id
+            )
+        });
     }
     Ok(())
+}
+
+/// The editor's half of wait-aware spec §3.2: `reviewed_at` follows a save's change to
+/// `reviewed`. `check_invariants` has already refused a direct change to the stamp.
+pub fn stamp_edited(original: &Task, edited: &mut Task) {
+    match (original.reviewed, edited.reviewed) {
+        (false, true) => edited.reviewed_at = Some(crate::time::now()),
+        (true, false) => edited.reviewed_at = None,
+        _ => {}
+    }
 }
 
 #[cfg(test)]

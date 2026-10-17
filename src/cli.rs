@@ -317,6 +317,12 @@ pub struct EditArgs {
     /// Readmit this idea for review.
     #[arg(long)]
     pub no_reviewed: bool,
+    /// Mark this reviewed idea as waiting on the user's answer.
+    #[arg(long, conflicts_with_all = ["no_reviewed", "no_awaiting_user"])]
+    pub awaiting_user: bool,
+    /// Clear the wait on the user, leaving the idea reviewed.
+    #[arg(long)]
+    pub no_awaiting_user: bool,
     /// Stop the recurrence, clearing both the cadence and its anchor.
     #[arg(long, conflicts_with = "every")]
     pub no_every: bool,
@@ -623,6 +629,9 @@ pub enum Command {
         /// Readmit the idea for review in the same write: a finding that wakes it.
         #[arg(long)]
         no_reviewed: bool,
+        /// Mark the reviewed idea as waiting on the user's answer, in the same write.
+        #[arg(long, conflicts_with = "no_reviewed")]
+        awaiting_user: bool,
     },
     /// Copy a file into the task's tasks/files/<id>/ and record it in a ledger note.
     #[command(
