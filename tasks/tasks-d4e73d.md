@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-08T10:58:20Z
-updated: 2026-10-13T09:21:39Z
+updated: 2026-10-17T11:26:12Z
 depends: []
 parent: tasks-46d207
 tags: []
@@ -24,3 +24,4 @@ Ideas it wakes: on completion, run tasks note on tasks-d40e8e with the finding b
 ## Notes
 
 - 2026-10-12T19:18:37Z (main): Review-state rollout tasks-b8f3c9 found 108 open legacy Ideas it wakes instructions using plain note, with none explicitly clearing reviewed. The accepted design intentionally leaves their bodies unchanged and warns when a plain note leaves an idea reviewed. Include explicit note --no-reviewed readmission when assessing the completion-follow-up guidance; this evidence does not by itself justify native hooks or a bulk rewrite. Evidence: tasks/files/tasks-b8f3c9/review-state-rollout.json, legacy_wakers.
+- 2026-10-17T11:26:12Z (feat/wait-aware-review): wait-aware review (spec docs/specs/2026-10-17-wait-aware-review-design.md, goal tasks-aeeef1): readmission no longer depends on a waker's note; a closing dependency readmits a reviewed idea through its edge, so a done-time hook need not cover readmission
