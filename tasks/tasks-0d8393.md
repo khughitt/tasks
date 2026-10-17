@@ -1,15 +1,16 @@
 ---
 id: tasks-0d8393
 title: "check warns moved_dep on a tombstone whose own depends names other tombstones; a tombstone refuses every write, so the warning can never be cleared and its swap command is refused with moved"
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
 owner: fix/tombstone-moved-dep
 created: 2026-10-17T02:23:40Z
-updated: 2026-10-17T08:47:35Z
+updated: 2026-10-17T08:50:28Z
 started: 2026-10-17T08:47:34Z
+completed: 2026-10-17T08:50:28Z
 depends: []
 tags: [feedback, friction, "from:ops", move]
 agent: claude-code/claude-opus-5-5
@@ -29,4 +30,8 @@ Check: a test in tests/move.rs beside check_warns_moved_dep_with_the_swap (~line
 - 2026-10-17T08:47:34Z (main): started
   provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T08:47:35Z (fix/tombstone-moved-dep): resumed
+  provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T08:50:28Z (fix/tombstone-moved-dep): done
+  provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T08:50:28Z (fix/tombstone-moved-dep): check skips moved_dep when the dependent is itself a tombstone; live dependents keep the swap warning; move design's check bullet amended; test check_skips_moved_dep_on_a_tombstone_dependent in tests/move.rs; noted on tasks-183bfa (settles M5)
   provenance: {"harness_session":"claude-code:c3a7dc2a-af0a-4a67-b54c-66a822fad9ae","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
