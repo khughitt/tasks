@@ -911,7 +911,6 @@ git commit -m "feat(review): mark ideas awaiting the user and stamp reviewed_at"
 - Create: `src/proposal.rs`
 - Modify: `src/main.rs` (add `mod proposal;` beside `mod review;`)
 - Modify: `src/commands/sample.rs` (use `proposal::pending`; delete `pending_proposal`)
-- Modify: `src/defer.rs` (`Defer::date`)
 - Modify: `src/review.rs` (`ReviewReason`, `DepState`, `Deps`, `state`; delete `needs_review`)
 - Modify: `src/output.rs` (`TaskSummary::of`, the `review_reason` field; `ParkedRow`)
 - Modify: `src/filter.rs` (`Fields::of_task`)
@@ -923,7 +922,7 @@ git commit -m "feat(review): mark ideas awaiting the user and stamp reviewed_at"
 **Interfaces:**
 - Consumes: Task 2's fields; Task 3's `--awaiting-user` (to update fixtures).
 - Produces:
-  - `crate::proposal::pending(task: &Task) -> Option<&str>` and `Defer::date(self) -> time::Date`.
+  - `crate::proposal::pending(task: &Task) -> Option<&str>`. (`Defer::date(self) -> Date` already exists in `src/defer.rs`; reuse it.)
   - `crate::review::ReviewReason` (`Serialize`, lowercase: `Unreviewed | Woken | Stranded | Unassessed`).
   - `crate::review::DepState { Open, Closed { closed: Option<String> } }`.
   - `crate::review::Deps` with:
@@ -955,14 +954,7 @@ pub fn pending(task: &Task) -> Option<&str> {
 }
 ```
 
-Add `mod proposal;` in `src/main.rs`. In `src/commands/sample.rs`, delete `pending_proposal` and call `crate::proposal::pending(task)` where it was called. In `src/defer.rs`, inside `impl Defer`:
-
-```rust
-    /// The calendar date the deferral comes due.
-    pub fn date(self) -> Date {
-        self.0
-    }
-```
+Add `mod proposal;` in `src/main.rs`. In `src/commands/sample.rs`, delete `pending_proposal` and call `crate::proposal::pending(task)` where it was called. `woken` below uses the existing `Defer::date`; do not add one.
 
 Run: `just test-one sample`
 Expected: PASS (no behaviour change).
@@ -1488,6 +1480,27 @@ fn every_view_agrees_on_review_state() {
     env.json(&dir, &["done", &follow_up]);
     let fresh = id_of(env.json(&dir, &["add", "N", "--status", "idea"]));
     let marked = [stranded.clone(), woken.clone(), fresh.clone()];
+    // The one expected state per idea, which every view must report.
+    let expect: [(&String, bool, Option<&str>); 4] = [
+        (&waiting, false, None),
+        (&stranded, true, Some("stranded")),
+        (&woken, true, Some("woken")),
+        (&fresh, true, Some("unreviewed")),
+    ];
+    fn state_of(row: &serde_json::Value) -> (bool, Option<String>) {
+        (
+            row["needs_review"].as_bool().unwrap(),
+            row.get("review_reason").map(|r| r.as_str().unwrap().to_string()),
+        )
+    }
+    fn walk(nodes: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
+        for node in nodes.as_array().unwrap() {
+            out.push(node.clone());
+            if let Some(children) = node.get("children") {
+                walk(children, out);
+            }
+        }
+    }
     // JSON rows: needs_review and review_reason agree, the reason is absent exactly when false.
     let list = env.json(&dir, &["list"]);
     for row in list["tasks"].as_array().unwrap() {
@@ -1497,6 +1510,11 @@ fn every_view_agrees_on_review_state() {
         let id = row["id"].as_str().unwrap().to_string();
         assert_eq!(needs, marked.contains(&id), "{row}");
     }
+    let rows = list["tasks"].as_array().unwrap();
+    for (id, needs, why) in expect {
+        let row = rows.iter().find(|r| r["id"] == id.as_str()).unwrap();
+        assert_eq!(state_of(row), (needs, why.map(str::to_string)), "list row {id}");
+    }
     // The filter, the pretty mark and tree return the same set.
     let mut filtered: Vec<String> = env.json(&dir, &["list", "--needs-review"])["tasks"]
         .as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect();
@@ -1504,17 +1522,25 @@ fn every_view_agrees_on_review_state() {
     let mut want = marked.to_vec();
     want.sort();
     assert_eq!(filtered, want);
-    let pretty = env.pretty(&dir, &["list"]);
-    for line in pretty.lines() {
-        for id in [&waiting, &stranded, &woken, &fresh] {
-            if line.contains(id.as_str()) {
-                assert_eq!(line.trim_start().starts_with('*'), marked.contains(id), "{line}");
-            }
+    for args in [["list"].as_slice(), ["tree"].as_slice()] {
+        let pretty = env.pretty(&dir, args);
+        for (id, needs, _) in expect {
+            let line = pretty
+                .lines()
+                .find(|line| line.contains(id.as_str()))
+                .unwrap_or_else(|| panic!("{id} missing from {args:?}:\n{pretty}"));
+            assert_eq!(line.trim_start().starts_with('*'), needs, "{args:?}: {line}");
         }
     }
-    let tree = env.json(&dir, &["tree"]).to_string();
-    for id in &marked {
-        assert!(tree.contains(id.as_str()), "{tree}");
+    // tree nodes flatten the summary row: the same fields with the same values.
+    let mut nodes = Vec::new();
+    walk(&env.json(&dir, &["tree"])["nodes"], &mut nodes);
+    for (id, needs, why) in expect {
+        let node = nodes
+            .iter()
+            .find(|n| n["id"] == id.as_str())
+            .unwrap_or_else(|| panic!("{id} not in tree: {nodes:?}"));
+        assert_eq!(state_of(node), (needs, why.map(str::to_string)), "tree node {id}");
     }
     assert_eq!(env.json(&dir, &["show", &waiting])["task"]["awaiting_user"], true);
     assert_eq!(env.json(&dir, &["show", &fresh])["task"]["awaiting_user"], false);
@@ -1738,8 +1764,9 @@ git commit -m "docs(review): wait-aware scope queue in skills, README and specs"
 - Produces: `tools/wait-backfill --state <dir> [--root <checkout>] [--tasks <bin>] (--freeze-only | --writers-paused)`, which prints a JSON report and exits 0 when clean, 1 on `failed`/`uncommitted`, and 2 on a usage or snapshot error.
 
 The snapshot is `<state>/<prefix>.json`: `{"prefix", "frozen_at", "entries": [...]}`. Each entry is `{"id", "updated", "class", "named_open", "evidence", "decision", "done", "outcome"}`:
-- `class` is `"auto"` or `"judge"`.
-- `named_open` is a list of ids.
+- `class` is `"auto"` or `"judge"`. It is `"auto"` only when the note names exactly one open task and every named reference resolved.
+- `named_open` is a list of live open ids, each the end of its `moved_to` chain.
+- `unresolved` is a list of strings, one per named reference whose read failed or whose move chain revisits an id.
 - `evidence` is the latest `scope:` note's text, or `null`.
 - `decision` is `null`, `"leave"`, `"awaiting_user"`, or `{"dep": [ids]}`.
 - `done` is a bool, and `outcome` is a string or `null`.
@@ -1816,6 +1843,66 @@ fn freeze_classifies_stranded_ideas_by_their_latest_scope_note() {
         assert!(e["decision"].is_null(), "{e}");
     }
     assert!(entry(&f.waiting).is_none(), "an idea with an open edge is not stranded");
+}
+
+#[test]
+fn freeze_follows_moves_and_reports_unresolved_references() {
+    let mut env = TestEnv::new();
+    let f = fixture(&mut env);
+    env.init("wali");
+    // A follow-up moved to another project is followed to its open successor.
+    let moving = id_of(env.json(&f.dir, &["add", "M"]));
+    let moved_idea = id_of(env.json(&f.dir, &["add", "Moved", "--status", "idea"]));
+    env.json(&f.dir, &["note", &moved_idea, "--reviewed", &format!("scope: briefed; waits on {moving}")]);
+    let successor = id_of(env.json(&f.dir, &["move", &moving, "--to", "wali"]));
+    // A note naming one open task and one that cannot be read is never automatic.
+    let partial = id_of(env.json(&f.dir, &["add", "Partial", "--status", "idea"]));
+    env.json(&f.dir, &["note", &partial, "--reviewed", &format!("scope: briefed; see {} and sci-ffffff", f.follow_up)]);
+    let state = tempfile::tempdir().unwrap();
+    let (code, report) = backfill(&env, &f.dir, state.path(), &["--freeze-only"]);
+    assert_eq!(code, 0, "{report}");
+    let snap = snapshot(state.path());
+    let entry = |id: &str| snap["entries"].as_array().unwrap().iter().find(|e| e["id"] == id).cloned().unwrap();
+    let moved = entry(&moved_idea);
+    assert_eq!(moved["class"], "auto", "{moved}");
+    assert_eq!(moved["decision"], serde_json::json!({"dep": [successor]}));
+    let partial = entry(&partial);
+    assert_eq!(partial["class"], "judge", "{partial}");
+    assert!(partial["decision"].is_null(), "{partial}");
+    assert_eq!(partial["named_open"], serde_json::json!([f.follow_up]));
+    assert!(partial["unresolved"].to_string().contains("sci-ffffff"), "{partial}");
+}
+
+#[test]
+fn freeze_skips_a_record_that_changes_between_list_and_show() {
+    let mut env = TestEnv::new();
+    let f = fixture(&mut env);
+    // A `tasks` shim that, on the freeze's show of `one`, first lets another writer mark it.
+    let real = assert_cmd::cargo::cargo_bin("tasks");
+    let flag = f.dir.join("shim-fired");
+    let shim = f.dir.join("tasks-shim");
+    std::fs::write(
+        &shim,
+        format!(
+            "#!/bin/sh\nif [ \"$3\" = show ] && [ \"$4\" = {one} ] && [ ! -e '{flag}' ]; then\n  touch '{flag}'\n  '{real}' -C \"$2\" edit {one} --awaiting-user >/dev/null || exit 9\nfi\nexec '{real}' \"$@\"\n",
+            one = f.one,
+            flag = flag.display(),
+            real = real.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let (code, report) = backfill_with(&env, &f.dir, state.path(), &shim, &["--freeze-only"]);
+    assert_eq!(code, 0, "{report}");
+    assert!(flag.exists(), "the shim never ran");
+    assert!(report["changed"].to_string().contains(&f.one), "{report}");
+    let snap = snapshot(state.path());
+    assert!(
+        !snap["entries"].as_array().unwrap().iter().any(|e| e["id"] == f.one.as_str()),
+        "{snap}"
+    );
+    assert_eq!(env.json(&f.dir, &["show", &f.one])["task"]["awaiting_user"], true);
 }
 
 #[test]
@@ -1933,8 +2020,10 @@ Expected: FAIL: `tools/wait-backfill` does not exist (the report is `null`).
 """One-time backfill of recorded waits (docs/specs/2026-10-17-wait-aware-review-design.md §7.3).
 
 The first run on a project freezes its candidates: open ideas whose review_reason is
-`stranded`, each with its record's `updated` stamp, the open task ids its latest `scope:`
-note names, and a class. `auto` (exactly one open id named) carries the decision
+`stranded` and whose record did not change between the list and the show, each with its
+`updated` stamp, the open task ids its latest `scope:` note names (moves followed), the
+references it could not resolve, and a class. `auto` (exactly one open id named, every
+reference resolved) carries the decision
 {"dep": [id]}; `judge` carries none until the operator writes one into the snapshot:
 "leave", "awaiting_user", or {"dep": [ids]}. Every apply pass runs only decided entries
 whose record is still a reviewed idea with an unchanged stamp, and reports the rest.
@@ -1953,7 +2042,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 
-ENTRY_KEYS = {"id", "updated", "class", "named_open", "evidence", "decision", "done", "outcome"}
+ENTRY_KEYS = {"id", "updated", "class", "named_open", "unresolved", "evidence", "decision", "done", "outcome"}
 
 
 class Usage(Exception):
@@ -1971,22 +2060,46 @@ def latest_scope_note(task):
     return None
 
 
-def named_open(tasks, root, prefix_pattern, idea_id, text):
-    """Open tasks the note names, resolved through the CLI (which follows moves)."""
-    found = []
+class Unresolved(Exception):
+    pass
+
+
+def follow(tasks, root, named):
+    """The live record a reference means. `show` returns a tombstone as is, so follow its
+    moved_to chain here (spec §4.1), refusing a chain that revisits an id."""
+    seen = []
+    current = named
+    while True:
+        if current in seen:
+            raise Unresolved(f"{named}: move chain revisits {current}")
+        seen.append(current)
+        code, stdout, stderr = run(tasks, root, "show", current)
+        if code != 0:
+            raise Unresolved(f"{named}: show {current}: {error_kind(stderr) or stderr.strip()}")
+        task = json.loads(stdout)["task"]
+        if task["status"] != "moved":
+            return task
+        current = task["moved_to"]
+
+
+def named_refs(tasks, root, prefix_pattern, idea_id, text):
+    """(open ids, unresolved references) the note names. Open ids are the live ends of
+    move chains, deduplicated. Every failed read is reported, never dropped."""
+    found, unresolved = [], []
     for named in dict.fromkeys(re.findall(prefix_pattern, text or "")):
         if named == idea_id:
             continue
-        code, stdout, _ = run(tasks, root, "show", named)
-        if code != 0:
+        try:
+            task = follow(tasks, root, named)
+        except Unresolved as why:
+            unresolved.append(str(why))
             continue
-        task = json.loads(stdout)["task"]
-        if task["status"] not in ("done", "dropped", "moved"):
+        if task["status"] not in ("done", "dropped") and task["id"] not in found and task["id"] != idea_id:
             found.append(task["id"])
-    return found
+    return found, unresolved
 
 
-def freeze(tasks, root, prefix, path):
+def freeze(tasks, root, prefix, path, report):
     ids = r"\b[a-z][a-z0-9-]*-[0-9a-f]{6}\b"
     entries = []
     rows = read_json(tasks, root, "list", "--status", "idea", "--needs-review")["tasks"]
@@ -1994,14 +2107,21 @@ def freeze(tasks, root, prefix, path):
         if row.get("review_reason") != "stranded":
             continue
         task = read_json(tasks, root, "show", row["id"])["task"]
+        # Eligibility came from the list row: freeze only a record that has not changed
+        # since, so no decision is ever attached to a stamp it was not derived from.
+        if task["updated"] != row["updated"]:
+            report["changed"].append({"id": row["id"], "detail":
+                f"changed during the freeze (listed {row['updated']}, shown {task['updated']}); rerun after the next pass"})
+            continue
         evidence = latest_scope_note(task)
-        open_ids = named_open(tasks, root, ids, task["id"], evidence)
-        auto = len(open_ids) == 1
+        open_ids, unresolved = named_refs(tasks, root, ids, task["id"], evidence)
+        auto = len(open_ids) == 1 and not unresolved
         entries.append({
             "id": task["id"],
             "updated": task["updated"],
             "class": "auto" if auto else "judge",
             "named_open": open_ids,
+            "unresolved": unresolved,
             "evidence": evidence,
             "decision": {"dep": open_ids} if auto else None,
             "done": False,
@@ -2050,6 +2170,7 @@ def load(path, prefix):
             and isinstance(entry["updated"], str)
             and entry["class"] in ("auto", "judge")
             and isinstance(entry["named_open"], list)
+            and isinstance(entry["unresolved"], list)
             and valid_decision(entry["decision"])
             and isinstance(entry["done"], bool)
             and (entry["outcome"] is None or isinstance(entry["outcome"], str))
@@ -2136,7 +2257,7 @@ def main():
         if os.path.exists(path):
             snapshot = load(path, prefix)
         else:
-            snapshot = freeze(args.tasks, args.root, prefix, path)
+            snapshot = freeze(args.tasks, args.root, prefix, path, report)
             report["frozen"] = True
         if args.writers_paused:
             held = live_claims(args.tasks, args.root, prefix)
@@ -2188,12 +2309,13 @@ These steps change live state across hosts. Confirm each step that touches a hos
    - No host closes a task with the new binary until every host runs it. Every `done` and `drop` writes `closed` (spec §7.1). The skills are symlinks into the main checkout, so they go live with the merge.
    - Resume writers only after every host is upgraded.
 2. **Freeze, per registered project.**
-   - From each project's own checkout, run `tools/wait-backfill --state ~/.local/state/tasks/wait-backfill --root <project root> --freeze-only`. This only reads, so no pause is needed.
+   - The tool lives only in this repository. Resolve it once from the tasks main checkout: `WAIT_BACKFILL="$(tasks --pretty root tasks-1a3280)/tools/wait-backfill"`.
+   - From each project's own checkout (`cd <project root>`), run `python3 -I "$WAIT_BACKFILL" --state ~/.local/state/tasks/wait-backfill --root <project root> --freeze-only`. This only reads, so no pause is needed. Read `changed` in its report: a record that changed during the freeze is left out, and a later freeze can only happen after the snapshot is removed, so note those ids for the next scope pass.
    - Show the user the snapshot's `judge` entries, with each one's evidence.
 3. **Rule.** The user (or an agent in a scope pass from that checkout, with the user's agreement) writes a decision into each `judge` entry: `"leave"`, `"awaiting_user"`, or `{"dep": [ids]}`. Missed wakes and closed edges default to `"leave"`.
 4. **Apply, per project, under a writer pause.**
    - On each reading host, `tasks claims` shows no live claim in the project, and the operator confirms that every other writer is paused.
-   - Run the tool with `--writers-paused`.
+   - From the project's own checkout, run `python3 -I "$WAIT_BACKFILL" --state ~/.local/state/tasks/wait-backfill --root <project root> --writers-paused`.
    - Read `applied`, `left`, `changed`, `undecided`, `failed` and `uncommitted`, and rerun after fixing any `failed` entry.
 5. **Commits.**
    - For every project the backfill touched, run `git -C <project root> status --porcelain -- tasks/`.
