@@ -5,8 +5,8 @@ status: idea
 priority: 2
 reviewed: true
 created: 2026-09-30T10:40:35Z
-updated: 2026-10-12T18:22:32Z
-depends: []
+updated: 2026-10-17T17:37:32Z
+depends: [tasks-1f6d08]
 parent: tasks-ea2a79
 tags: [feedback, gap, "from:material"]
 agent: codex
