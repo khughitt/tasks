@@ -167,6 +167,8 @@ pub struct Inputs<'a> {
     pub all: &'a [Task],
     pub claims: &'a ClaimSnapshot,
     pub registry: &'a Registry,
+    /// `all`'s dependency view, for the rows' review state (wait-aware spec §4.3).
+    pub deps: &'a crate::review::Deps,
     /// `Some(closed?)` for a reachable dependency, `None` for an unreachable one. Only
     /// the dependencies of `dependency_readers` are ever asked for.
     pub dependency: &'a dyn Fn(&TaskId) -> Option<bool>,
@@ -346,6 +348,7 @@ fn row(inputs: &Inputs, lane: &Task, picked: &mut BTreeMap<String, TaskId>) -> L
         TaskSummary::of(
             task,
             inputs.all,
+            inputs.deps,
             Some(inputs.claims),
             inputs.registry,
             inputs.now,
@@ -471,6 +474,9 @@ mod tests {
             parallel: false,
             lane: false,
             reviewed: false,
+            awaiting_user: false,
+            reviewed_at: None,
+            closed: None,
             needs: vec![],
             every: None,
             defer: None,
@@ -559,6 +565,10 @@ mod tests {
                 .find(|task| task.id == *id)
                 .map(|task| !task.status.is_open())
         };
+        let deps = crate::review::Deps::of_scan(all, |id| {
+            Ok(all.iter().find(|task| task.id == *id).cloned())
+        })
+        .unwrap();
         let halts = HashMap::new();
         let vocabularies = HashMap::from([("xx", &world.vocabulary)]);
         // The fixture's own session is "me": its claims are this caller's holds.
@@ -567,6 +577,7 @@ mod tests {
             all,
             claims: &world.claims,
             registry: &world.registry,
+            deps: &deps,
             dependency: &dependency,
             halts: &halts,
             cutoff,

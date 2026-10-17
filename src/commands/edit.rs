@@ -46,6 +46,16 @@ pub fn check_invariants(original: &Task, edited: &Task) -> Result<()> {
             "completed is stamped by completing the task; it cannot be edited".into(),
         ));
     }
+    if edited.closed != original.closed {
+        return Err(Error::Validation(
+            "closed is stamped by closing the task; it cannot be edited".into(),
+        ));
+    }
+    if edited.reviewed_at != original.reviewed_at {
+        return Err(Error::Validation(
+            "reviewed_at is stamped by reviewing the idea; it cannot be edited".into(),
+        ));
+    }
     if edited.moved_to != original.moved_to || edited.moved_from != original.moved_from {
         return Err(Error::Validation(
             "moved_to and moved_from are set by `tasks move`; they cannot be edited".into(),
@@ -114,6 +124,8 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         || args.no_lane
         || args.reviewed
         || args.no_reviewed
+        || args.awaiting_user
+        || args.no_awaiting_user
         || fields.every.is_some()
         || args.no_every
         || fields.defer.is_some()
@@ -271,10 +283,11 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     }
     // Review-state spec §3.3: after any status change, so `--status idea --reviewed`
     // sets it and `--status todo --reviewed` is refused.
-    if args.reviewed || args.no_reviewed {
+    if args.reviewed || args.no_reviewed || args.awaiting_user || args.no_awaiting_user {
         crate::review::apply(
             &mut task,
             crate::review::Review::from_flags(args.reviewed, args.no_reviewed),
+            crate::review::Awaiting::from_flags(args.awaiting_user, args.no_awaiting_user),
             &mut ctx.warnings,
         )?;
     }
@@ -356,6 +369,7 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
     let edited_raw = std::fs::read_to_string(&tmp).map_err(|error| keep(error.into()))?;
     let mut edited = parse_task(&edited_raw, &tmp_display).map_err(keep)?;
     check_invariants(&original, &edited).map_err(keep)?;
+    crate::review::stamp_edited(&original, &mut edited);
     // `save` overwrites `updated`, so restoring it changes nothing in the record -- but it
     // is also the baseline `save` compares other checkouts against, and a hand-edited stamp
     // must not be able to talk that check out of firing.

@@ -5,6 +5,8 @@
 
 use std::collections::HashSet;
 
+use time::OffsetDateTime;
+
 use crate::claims::ClaimSnapshot;
 use crate::cli::FilterArgs;
 use crate::error::{Error, Result};
@@ -194,8 +196,10 @@ impl<'a> Fields<'a> {
     pub fn of_task(
         task: &'a Task,
         all: &[Task],
+        deps: &crate::review::Deps,
         claims: &ClaimSnapshot,
         registry: &Registry,
+        now: OffsetDateTime,
     ) -> Fields<'a> {
         Fields {
             id: registry.canonical_id(&task.id),
@@ -213,13 +217,13 @@ impl<'a> Fields<'a> {
                 .as_ref()
                 .map(|parent| registry.canonical_id(parent)),
             parallel: task.parallel,
-            needs_review: crate::review::needs_review(
-                task.status,
-                task.reviewed,
-                task.process,
-                task.lane,
+            needs_review: crate::review::state(
+                task,
                 crate::hierarchy::children(all, &task.id, registry).len(),
-            ),
+                deps,
+                now,
+            )
+            .is_some(),
         }
     }
 

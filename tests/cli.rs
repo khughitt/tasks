@@ -4771,6 +4771,12 @@ fn check_reports_completed_stamp_on_an_open_record() {
     env.json(&sci, &["done", &id, "landed"]);
     let path = sci.join(format!("tasks/{id}.md"));
     let text = std::fs::read_to_string(&path).unwrap();
+    // A hand edit of the status alone also leaves `closed`; drop it to isolate this finding.
+    let text: String = text
+        .lines()
+        .filter(|line| !line.starts_with("closed: "))
+        .map(|line| format!("{line}\n"))
+        .collect();
     std::fs::write(&path, text.replace("status: done", "status: todo")).unwrap();
     let v = env.check(&sci);
     assert!(v["errors"].as_array().unwrap().is_empty(), "{v}");
@@ -29837,4 +29843,85 @@ fn release_of_a_record_only_in_the_holders_worktree_names_the_rerun_there() {
         .unwrap();
     assert!(out.status.success(), "{words:?}: {out:?}");
     assert!(env.json(&side, &["show", &id])["claim"].is_null());
+}
+
+/// A park entry for `id` naming `worktree`, written straight into the claim store.
+fn park_in(env: &TestEnv, prefix: &str, id: &str, worktree: &std::path::Path) {
+    let path = env.claim_store(prefix);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    text.push_str(&format!(
+        "[parks.\"{id}\"]\nowner = \"someone\"\nsession = \"s\"\nhost = \"h\"\n\
+         worktree = \"{}\"\nat = \"2026-01-02T00:00:00Z\"\nnext_step = \"next\"\n\
+         waiting_on = \"user\"\ntitle = \"T\"\n",
+        worktree.display()
+    ));
+    std::fs::write(&path, text).unwrap();
+}
+
+/// Sets `reviewed_at` on a record that `note --reviewed` already stamped.
+fn backdate_review(dir: &std::path::Path, id: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let start = text.find("\nreviewed_at: ").unwrap() + "\nreviewed_at: ".len();
+    let end = start + text[start..].find('\n').unwrap();
+    std::fs::write(
+        &path,
+        format!("{}2026-01-01T00:00:00Z{}", &text[..start], &text[end..]),
+    )
+    .unwrap();
+}
+
+#[test]
+fn parked_review_state_follows_the_copy_each_row_shows() {
+    let mut env = TestEnv::new();
+    let (main, side, dependency) = repo_with_worktree(&mut env);
+    // A exists in both checkouts; the registered copy wins.
+    let a = id_of(env.json(&main, &["add", "A", "--status", "idea"]));
+    env.json(&main, &["dep", &a, "--on", &dependency]);
+    env.json(&main, &["note", &a, "--reviewed", "scope: briefed"]);
+    backdate_review(&main, &a);
+    std::fs::copy(
+        main.join(format!("tasks/{a}.md")),
+        side.join(format!("tasks/{a}.md")),
+    )
+    .unwrap();
+    // B exists only in the worktree.
+    let b = id_of(env.json(&side, &["add", "B", "--status", "idea"]));
+    env.json(&side, &["dep", &b, "--on", &dependency]);
+    env.json(&side, &["note", &b, "--reviewed", "scope: briefed"]);
+    backdate_review(&side, &b);
+    // The dependency is done in the worktree's copy only.
+    env.json(&side, &["done", &dependency]);
+    park_in(&env, "sci", &a, &side);
+    park_in(&env, "sci", &b, &side);
+    for args in [["list", "--parked"].as_slice(), ["prime"].as_slice()] {
+        let out = env.json(&main, args).to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let rows = if args[0] == "prime" {
+            &parsed["parked"]
+        } else {
+            &parsed["tasks"]
+        };
+        let row = |id: &str| {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["id"] == id)
+                .cloned()
+                .unwrap_or_else(|| panic!("{id} missing: {out}"))
+        };
+        assert_eq!(
+            row(&a)["needs_review"],
+            false,
+            "A follows main's open copy: {out}"
+        );
+        assert_eq!(
+            row(&b)["review_reason"],
+            "woken",
+            "B follows the worktree's done copy: {out}"
+        );
+    }
+    let queue = env.json(&main, &["list", "--needs-review"]).to_string();
+    assert!(!queue.contains(&a), "{queue}");
 }

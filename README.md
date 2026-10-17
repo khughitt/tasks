@@ -26,10 +26,14 @@ Only `move` sets the pointer fields. Older binaries cannot parse these records:
 update every host reading synced tasks before the first move.
 
 Ideas carry an optional `reviewed` flag (set by `note --reviewed` and `edit --reviewed`,
-cleared by `--no-reviewed` and by every status change), and summary rows carry a derived
-`needs_review`; `--needs-review` filters on it and pretty tables mark it with `*`. Older
-binaries cannot parse records carrying `reviewed`: update every host reading synced
-tasks before the first review write.
+which also stamp `reviewed_at`; cleared by `--no-reviewed` and by every status change),
+and an `awaiting_user` marker for a reviewed idea waiting on the user. Every close to
+done or dropped stamps `closed`. Summary rows carry a derived `needs_review` and its
+`review_reason` (`unreviewed`, `woken`, `stranded`, `unassessed`): a reviewed idea needs
+review again when it waits on nothing recorded. `--needs-review` filters on it and
+pretty tables mark it with `*`. Older binaries cannot parse records carrying `reviewed`,
+`awaiting_user`, `reviewed_at` or `closed`: update every host reading synced tasks
+before any of them runs this version, since every `done` and `drop` writes `closed`.
 
 Design: [`docs/specs/2026-08-29-tasks-design.md`](docs/specs/2026-08-29-tasks-design.md).
 Implementation plan: [`docs/plans/2026-08-29-tasks.md`](docs/plans/2026-08-29-tasks.md).

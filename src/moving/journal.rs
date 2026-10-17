@@ -272,6 +272,8 @@ impl Journal {
         let mut expected_tombstone = source.clone();
         expected_tombstone.status = Status::Moved;
         expected_tombstone.reviewed = false;
+        expected_tombstone.reviewed_at = None;
+        expected_tombstone.awaiting_user = false;
         expected_tombstone.moved_to = Some(target.id.clone());
         expected_tombstone.updated.clone_from(&target.updated);
         for (actual, expected, suffix) in [

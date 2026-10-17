@@ -328,8 +328,10 @@ fn refuse_goal(project: &Project, registry: &Registry, task: &Task, what: &str) 
 /// `Shelved::UnderShownParent` mode. Roots and siblings are in ready order. A task whose parent is
 /// missing from `all` is treated as a root; members of a parent cycle are not shown at all
 /// (`check` reports them as `parent_cycle`).
+#[allow(clippy::too_many_arguments)]
 pub fn forest(
     all: &[Task],
+    deps: &crate::review::Deps,
     root: Option<&TaskId>,
     include_closed: bool,
     shelved: Shelved,
@@ -365,6 +367,7 @@ pub fn forest(
         .filter_map(|task| {
             node(
                 all,
+                deps,
                 task,
                 visibility,
                 claims,
@@ -376,8 +379,10 @@ pub fn forest(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn node(
     all: &[Task],
+    deps: &crate::review::Deps,
     task: &Task,
     visibility: Visibility,
     claims: Option<&crate::claims::ClaimSnapshot>,
@@ -403,10 +408,10 @@ fn node(
     let mut kids = children(all, &task.id, registry);
     kids.sort_by(|a, b| ready_order(a, b));
     Some(TreeNode {
-        summary: TaskSummary::of(task, all, claims, registry, now),
+        summary: TaskSummary::of(task, all, deps, claims, registry, now),
         children: kids
             .into_iter()
-            .filter_map(|child| node(all, child, visibility, claims, registry, visited, now))
+            .filter_map(|child| node(all, deps, child, visibility, claims, registry, visited, now))
             .collect(),
     })
 }
@@ -435,6 +440,9 @@ mod tests {
             parallel: false,
             lane: false,
             reviewed: false,
+            awaiting_user: false,
+            reviewed_at: None,
+            closed: None,
             needs: vec![],
             every: None,
             defer: None,
@@ -569,7 +577,17 @@ mod tests {
         let open_deep = task("xx-000004", Some("xx-000003"), Status::Todo);
         let all = [root, closed_leaf, closed_mid, open_deep];
         let now = crate::time::parse("2026-01-01T00:00:00Z").unwrap();
-        let nodes = forest(&all, None, false, Shelved::Hidden, None, &registry, now);
+        let deps = crate::review::Deps::from_states([]);
+        let nodes = forest(
+            &all,
+            &deps,
+            None,
+            false,
+            Shelved::Hidden,
+            None,
+            &registry,
+            now,
+        );
         assert_eq!(nodes.len(), 1);
         let kids: Vec<&str> = nodes[0]
             .children
@@ -579,14 +597,24 @@ mod tests {
         assert_eq!(kids, ["xx-000003"]);
         assert_eq!(nodes[0].children[0].children[0].summary.id, "xx-000004");
         assert_eq!(
-            forest(&all, None, true, Shelved::Hidden, None, &registry, now)[0]
-                .children
-                .len(),
+            forest(
+                &all,
+                &deps,
+                None,
+                true,
+                Shelved::Hidden,
+                None,
+                &registry,
+                now
+            )[0]
+            .children
+            .len(),
             2
         );
         assert_eq!(
             forest(
                 &all,
+                &deps,
                 Some(&all[2].id),
                 true,
                 Shelved::Hidden,

@@ -189,7 +189,16 @@ fn external_doc_plan_filter_composes_with_needs_review() {
         args.extend(flags);
         let id = env.json(&dir, &args)["id"].as_str().unwrap().to_owned();
         if title == "Target reviewed idea" {
-            env.json(&dir, &["note", &id, "--reviewed", "reviewed"]);
+            env.json(
+                &dir,
+                &[
+                    "note",
+                    &id,
+                    "--reviewed",
+                    "--awaiting-user",
+                    "scope: question",
+                ],
+            );
         }
         env.json(&dir, &["park", &id, "later"]);
         if needs_review {

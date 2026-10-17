@@ -9,6 +9,8 @@ blocked rows as re-scopes, so `*` is the scope queue (§7.1). A goal whose piece
 in other projects holds them as `depends`, is a leaf to §4's rule, and is rated as its
 closeout, usually `process: direct` (§4). The rule in `src/review.rs` is unchanged.
 
+Amended 2026-10-17 (tasks-1a3280): reviewed ideas that wait on nothing recorded return to the queue; see docs/specs/2026-10-17-wait-aware-review-design.md, which supersedes §1's "without reading notes" for the proposal test and §4's idea rule.
+
 ## 1. Goal
 
 `tasks list --pretty` cannot tell a reader which rows still need someone to look at

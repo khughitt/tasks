@@ -592,7 +592,16 @@ fn mixed_project(env: &mut TestEnv) -> (std::path::PathBuf, Vec<String>, Vec<Str
     let dir = env.init("sci");
     let new_idea = id_of(env.json(&dir, &["add", "New", "--status", "idea"]));
     let briefed = id_of(env.json(&dir, &["add", "Briefed", "--status", "idea"]));
-    env.json(&dir, &["note", &briefed, "--reviewed", "scope: briefed"]);
+    env.json(
+        &dir,
+        &[
+            "note",
+            &briefed,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
     let raw_todo = id_of(env.json(&dir, &["add", "Raw"]));
     let assessed = id_of(env.json(&dir, &["add", "Assessed", "--process", "direct"]));
     let goal = id_of(env.json(&dir, &["add", "Goal"]));
@@ -675,7 +684,13 @@ fn parked_rows_carry_needs_review_and_filter_on_it() {
     let reviewed_idea = id_of(env.json(&dir, &["add", "R", "--status", "idea"]));
     env.json(
         &dir,
-        &["note", &reviewed_idea, "--reviewed", "scope: briefed"],
+        &[
+            "note",
+            &reviewed_idea,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
     );
     write_park(&env, "sci", &unreviewed);
     write_park(&env, "sci", &reviewed_idea);
@@ -765,7 +780,13 @@ fn parked_views_mark_the_same_rows_as_their_json() {
     let reviewed_idea = id_of(env.json(&dir, &["add", "R", "--status", "idea"]));
     env.json(
         &dir,
-        &["note", &reviewed_idea, "--reviewed", "scope: briefed"],
+        &[
+            "note",
+            &reviewed_idea,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
     );
     write_park(&env, "sci", &unreviewed);
     write_park(&env, "sci", &reviewed_idea);
@@ -790,7 +811,672 @@ fn show_names_a_reviewed_idea() {
     assert!(
         shown
             .lines()
-            .any(|l| l.starts_with("reviewed") && l.trim_end().ends_with("yes")),
+            .any(|l| l.starts_with("reviewed") && l.contains("yes (")),
         "{shown}"
     );
+}
+
+/// Inserts frontmatter lines into a record by hand, before its priority line: states the
+/// writers never produce, or stamps a test needs at a fixed instant.
+fn seed(dir: &Path, id: &str, lines: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let seeded = text.replacen("\npriority: ", &format!("\n{lines}\npriority: "), 1);
+    assert_ne!(seeded, text, "no priority line in {id}");
+    std::fs::write(&path, seeded).unwrap();
+}
+
+/// Rewrites a stored stamp line in place, so a test can age it.
+fn restamp(dir: &Path, id: &str, key: &str, value: &str) {
+    let path = dir.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let prefix = format!("\n{key}: ");
+    let start = text
+        .find(&prefix)
+        .unwrap_or_else(|| panic!("no {key} in {id}"))
+        + 1;
+    let end = start + text[start..].find('\n').unwrap();
+    let out = format!("{}{key}: {value}{}", &text[..start], &text[end..]);
+    std::fs::write(&path, out).unwrap();
+}
+
+fn task(env: &TestEnv, dir: &Path, id: &str) -> serde_json::Value {
+    env.json(dir, &["show", id])["task"].clone()
+}
+
+fn check_kinds(env: &TestEnv, dir: &Path) -> Vec<String> {
+    let out = env.cmd(dir).args(["check"]).output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    report["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["kind"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn done_and_drop_stamp_closed_and_reopening_clears_it() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let done = id_of(env.json(&dir, &["add", "D"]));
+    env.json(&dir, &["done", &done]);
+    let shown = task(&env, &dir, &done);
+    assert!(shown["closed"].is_string(), "{shown}");
+    assert_eq!(shown["closed"], shown["completed"]);
+    let dropped = id_of(env.json(&dir, &["add", "X"]));
+    env.json(&dir, &["drop", &dropped]);
+    let shown = task(&env, &dir, &dropped);
+    assert!(shown["closed"].is_string(), "{shown}");
+    assert!(shown.get("completed").is_none(), "{shown}");
+    env.json(&dir, &["edit", &done, "--status", "todo"]);
+    assert!(task(&env, &dir, &done).get("closed").is_none());
+    assert!(
+        !env.read(&dir, &format!("tasks/{done}.md"))
+            .contains("closed:")
+    );
+    // A recurring completion stamps it, a reopen clears it, the next completion stamps it again.
+    let every = id_of(env.json(&dir, &["add", "R", "--every", "7d"]));
+    env.json(&dir, &["start", &every]);
+    env.json(&dir, &["done", &every]);
+    assert!(task(&env, &dir, &every)["closed"].is_string());
+    env.json(&dir, &["start", &every]);
+    assert!(task(&env, &dir, &every).get("closed").is_none());
+    env.json(&dir, &["done", &every]);
+    assert!(task(&env, &dir, &every)["closed"].is_string());
+}
+
+#[test]
+fn every_status_transition_clears_the_review_stamp_and_marker() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    seed(
+        &dir,
+        &id,
+        "reviewed: true\nreviewed_at: 2026-10-17T09:00:00Z\nawaiting_user: true",
+    );
+    env.json(&dir, &["edit", &id, "--status", "todo"]);
+    let text = env.read(&dir, &format!("tasks/{id}.md"));
+    for key in ["reviewed", "reviewed_at", "awaiting_user"] {
+        assert!(!text.contains(&format!("\n{key}:")), "{key} kept: {text}");
+    }
+}
+
+#[test]
+fn check_reports_review_stamps_and_closed_out_of_place() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let todo = id_of(env.json(&dir, &["add", "T"]));
+    seed(&dir, &todo, "awaiting_user: true");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    seed(&dir, &idea, "reviewed_at: 2026-10-17T09:00:00Z");
+    let open = id_of(env.json(&dir, &["add", "O"]));
+    seed(&dir, &open, "closed: 2026-10-17T09:00:00Z");
+    let kinds = check_kinds(&env, &dir);
+    assert_eq!(
+        kinds.iter().filter(|k| *k == "review_status").count(),
+        2,
+        "{kinds:?}"
+    );
+    assert_eq!(
+        kinds.iter().filter(|k| *k == "closed_status").count(),
+        1,
+        "{kinds:?}"
+    );
+}
+
+#[test]
+fn the_editor_refuses_to_change_closed_or_reviewed_at() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let done = id_of(env.json(&dir, &["add", "D"]));
+    env.json(&dir, &["done", &done]);
+    let file = format!("tasks/{done}.md");
+    let before = env.read(&dir, &file);
+    let script = editor_script(
+        &dir,
+        "sed -i 's/^closed: .*/closed: 2020-01-01T00:00:00Z/' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &script)
+        .args(["edit", &done])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("closed is stamped by closing the task; it cannot be edited")
+    );
+    assert_eq!(env.read(&dir, &file), before);
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    seed(
+        &dir,
+        &idea,
+        "reviewed: true\nreviewed_at: 2026-10-17T09:00:00Z",
+    );
+    let file = format!("tasks/{idea}.md");
+    let before = env.read(&dir, &file);
+    let script = editor_script(
+        &dir,
+        "sed -i 's/^reviewed_at: .*/reviewed_at: 2020-01-01T00:00:00Z/' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &script)
+        .args(["edit", &idea])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("reviewed_at is stamped by reviewing the idea; it cannot be edited")
+    );
+    assert_eq!(env.read(&dir, &file), before);
+}
+
+#[test]
+fn reviewing_stamps_reviewed_at_and_a_rereview_restamps_it() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(&dir, &["note", &id, "--reviewed", "scope: briefed"]);
+    let first = task(&env, &dir, &id)["reviewed_at"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(first.ends_with('Z'), "{first}");
+    restamp(&dir, &id, "reviewed_at", "2026-01-01T00:00:00Z");
+    env.json(&dir, &["note", &id, "--reviewed", "scope: briefed again"]);
+    assert_ne!(task(&env, &dir, &id)["reviewed_at"], "2026-01-01T00:00:00Z");
+    restamp(&dir, &id, "reviewed_at", "2026-01-01T00:00:00Z");
+    env.json(&dir, &["edit", &id, "--reviewed"]);
+    assert_ne!(task(&env, &dir, &id)["reviewed_at"], "2026-01-01T00:00:00Z");
+}
+
+#[test]
+fn awaiting_user_is_set_with_a_review_and_cleared_by_readmission() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let id = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &id,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    let shown = task(&env, &dir, &id);
+    assert_eq!(shown["reviewed"], true);
+    assert_eq!(shown["awaiting_user"], true);
+    // A plain note keeps both and says so.
+    let out = env.json(&dir, &["note", &id, "an aside"]);
+    let warnings = out["warnings"].to_string();
+    assert!(
+        warnings.contains(&format!(
+            "{id} stays reviewed and awaiting the user; add --no-reviewed to readmit it for scope"
+        )),
+        "{warnings}"
+    );
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], true);
+    // edit clears and sets the marker alone, without a warning.
+    let out = env.json(&dir, &["edit", &id, "--no-awaiting-user"]);
+    assert!(
+        !out["warnings"].to_string().contains("stays reviewed"),
+        "{out}"
+    );
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], false);
+    assert_eq!(task(&env, &dir, &id)["reviewed"], true);
+    env.json(&dir, &["edit", &id, "--awaiting-user"]);
+    assert_eq!(task(&env, &dir, &id)["awaiting_user"], true);
+    // The answer readmits it: both flags and the stamp go.
+    env.json(&dir, &["note", &id, "--no-reviewed", "answer: yes"]);
+    let shown = task(&env, &dir, &id);
+    assert_eq!(shown["reviewed"], false);
+    assert_eq!(shown["awaiting_user"], false);
+    assert!(shown.get("reviewed_at").is_none(), "{shown}");
+}
+
+#[test]
+fn awaiting_user_is_refused_without_a_review_and_on_a_non_idea() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let file = format!("tasks/{idea}.md");
+    let before = env.read(&dir, &file);
+    let out = env
+        .cmd(&dir)
+        .args(["note", &idea, "--awaiting-user", "q"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&format!(
+        "{idea} is not reviewed; only a reviewed idea carries awaiting_user"
+    )));
+    assert_eq!(env.read(&dir, &file), before);
+    let todo = id_of(env.json(&dir, &["add", "T"]));
+    let file = format!("tasks/{todo}.md");
+    let before = env.read(&dir, &file);
+    let out = env
+        .cmd(&dir)
+        .args(["edit", &todo, "--awaiting-user"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("only an idea carries reviewed"));
+    assert_eq!(env.read(&dir, &file), before);
+    // clap: the marker cannot ride on a readmission.
+    env.usage(
+        &dir,
+        &["note", &idea, "--awaiting-user", "--no-reviewed", "x"],
+    );
+    env.usage(
+        &dir,
+        &["edit", &idea, "--awaiting-user", "--no-awaiting-user"],
+    );
+}
+
+#[test]
+fn the_editor_stamps_reviewed_at_with_reviewed() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let add = editor_script(
+        &dir,
+        "sed -i 's/^priority: /reviewed: true\\npriority: /' \"$1\"",
+    );
+    env.cmd(&dir)
+        .env("EDITOR", &add)
+        .args(["edit", &idea])
+        .assert()
+        .success();
+    assert!(task(&env, &dir, &idea)["reviewed_at"].is_string());
+    // Removing reviewed while the marker stays is refused, file unchanged.
+    env.json(&dir, &["edit", &idea, "--awaiting-user"]);
+    let file = format!("tasks/{idea}.md");
+    let before = env.read(&dir, &file);
+    let drop_reviewed = editor_script(&dir, "sed -i '/^reviewed: /d' \"$1\"");
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &drop_reviewed)
+        .args(["edit", &idea])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("only a reviewed idea carries awaiting_user")
+    );
+    assert_eq!(env.read(&dir, &file), before);
+    // Removing both clears the stamp.
+    env.json(&dir, &["edit", &idea, "--no-awaiting-user"]);
+    env.cmd(&dir)
+        .env("EDITOR", &drop_reviewed)
+        .args(["edit", &idea])
+        .assert()
+        .success();
+    assert!(task(&env, &dir, &idea).get("reviewed_at").is_none());
+}
+
+#[test]
+fn show_prints_the_review_date_the_marker_and_closed() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &idea,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    restamp(&dir, &idea, "reviewed_at", "2026-01-02T03:04:05Z");
+    let shown = env.pretty(&dir, &["show", &idea]);
+    assert!(
+        shown.contains("reviewed") && shown.contains("yes (2026-01-02)"),
+        "{shown}"
+    );
+    assert!(
+        shown.contains("awaiting") && shown.contains("user"),
+        "{shown}"
+    );
+    let legacy = id_of(env.json(&dir, &["add", "L", "--status", "idea"]));
+    seed_reviewed(&dir, &legacy);
+    let shown = env.pretty(&dir, &["show", &legacy]);
+    assert!(shown.contains("yes") && !shown.contains("yes ("), "{shown}");
+    let dropped = id_of(env.json(&dir, &["add", "X"]));
+    env.json(&dir, &["drop", &dropped]);
+    assert!(env.pretty(&dir, &["show", &dropped]).contains("closed"));
+}
+
+/// `(needs_review, review_reason)` of one row of `list` JSON, or `None` when not listed.
+fn reason(env: &TestEnv, dir: &Path, args: &[&str], id: &str) -> Option<(bool, Option<String>)> {
+    env.json(dir, args)["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == id)
+        .map(|row| {
+            (
+                row["needs_review"].as_bool().unwrap(),
+                row.get("review_reason")
+                    .map(|r| r.as_str().unwrap().to_string()),
+            )
+        })
+}
+
+fn queued(env: &TestEnv, dir: &Path, id: &str) -> Option<String> {
+    reason(env, dir, &["list", "--needs-review"], id).map(|(_, why)| why.unwrap())
+}
+
+#[test]
+fn an_edge_wakes_its_idea_on_done_and_on_drop() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    for close in [["done"].as_slice(), ["drop"].as_slice()] {
+        let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+        let follow_up = id_of(env.json(&dir, &["add", "F"]));
+        env.json(&dir, &["dep", &idea, "--on", &follow_up]);
+        env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+        assert_eq!(queued(&env, &dir, &idea), None);
+        let before = env.read(&dir, &format!("tasks/{idea}.md"));
+        let mut args = close.to_vec();
+        args.push(follow_up.as_str());
+        env.json(&dir, &args);
+        assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("woken"));
+        assert_eq!(
+            env.read(&dir, &format!("tasks/{idea}.md")),
+            before,
+            "no write touched the idea"
+        );
+    }
+}
+
+#[test]
+fn a_moved_dependency_is_followed_to_its_successor() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let other = env.init("wali");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let follow_up = id_of(env.json(&dir, &["add", "F"]));
+    env.json(&dir, &["dep", &idea, "--on", &follow_up]);
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    let moved = id_of(env.json(&dir, &["move", &follow_up, "--to", "wali"]));
+    assert_eq!(
+        queued(&env, &dir, &idea),
+        None,
+        "the successor is still open"
+    );
+    env.json(&other, &["done", &moved]);
+    assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("woken"));
+}
+
+#[test]
+fn an_unreachable_or_shelved_dependency_keeps_the_idea_waiting() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    restamp(&dir, &idea, "depends", "[zzz-abcdef]");
+    // The warning covers listed rows only, so read it from the unfiltered list.
+    let out = env.json(&dir, &["list"]);
+    assert!(
+        out["warnings"]
+            .to_string()
+            .contains("zzz-abcdef is unreachable"),
+        "{out}"
+    );
+    assert_eq!(queued(&env, &dir, &idea), None);
+    // Review Focus 2: a shelf is open.
+    let shelved_wait = id_of(env.json(&dir, &["add", "S", "--status", "idea"]));
+    let follow_up = id_of(env.json(&dir, &["add", "F"]));
+    env.json(&dir, &["dep", &shelved_wait, "--on", &follow_up]);
+    env.json(
+        &dir,
+        &["note", &shelved_wait, "--reviewed", "scope: briefed"],
+    );
+    env.json(&dir, &["shelve", &follow_up, "later"]);
+    assert_eq!(queued(&env, &dir, &shelved_wait), None);
+}
+
+#[test]
+fn stranded_ideas_and_the_review_time_test() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let bare = id_of(env.json(&dir, &["add", "B", "--status", "idea"]));
+    env.json(&dir, &["note", &bare, "--reviewed", "scope: briefed"]);
+    assert_eq!(queued(&env, &dir, &bare).as_deref(), Some("stranded"));
+    // Legacy: reviewed with no stamp, its edge closed since: still stranded.
+    let legacy = id_of(env.json(&dir, &["add", "L", "--status", "idea"]));
+    let done = id_of(env.json(&dir, &["add", "D"]));
+    env.json(&dir, &["dep", &legacy, "--on", &done]);
+    seed_reviewed(&dir, &legacy);
+    env.json(&dir, &["done", &done]);
+    assert_eq!(queued(&env, &dir, &legacy).as_deref(), Some("stranded"));
+    // Closed before the review: stranded; a woken idea re-reviewed: stranded.
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    let follow_up = id_of(env.json(&dir, &["add", "F"]));
+    env.json(&dir, &["dep", &idea, "--on", &follow_up]);
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    env.json(&dir, &["done", &follow_up]);
+    restamp(&dir, &follow_up, "closed", "2026-01-02T00:00:00Z");
+    restamp(&dir, &idea, "reviewed_at", "2026-01-01T00:00:00Z");
+    assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("woken"));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &idea,
+            "--reviewed",
+            "scope: briefed; follow-up read",
+        ],
+    );
+    assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("stranded"));
+}
+
+#[test]
+fn proposals_users_and_deferrals_are_waits() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let proposed = id_of(env.json(&dir, &["add", "P", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &proposed,
+            "--reviewed",
+            "scope: drop; landed; proposal: drop it",
+        ],
+    );
+    assert_eq!(queued(&env, &dir, &proposed), None);
+    env.json(&dir, &["note", &proposed, "keep it"]);
+    assert_eq!(queued(&env, &dir, &proposed).as_deref(), Some("stranded"));
+    let asked = id_of(env.json(&dir, &["add", "Q", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &asked,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    assert_eq!(queued(&env, &dir, &asked), None);
+    env.json(&dir, &["note", &asked, "--no-reviewed", "answer"]);
+    assert_eq!(queued(&env, &dir, &asked).as_deref(), Some("unreviewed"));
+    let deferred = id_of(env.json(&dir, &["add", "D", "--status", "idea"]));
+    seed(
+        &dir,
+        &deferred,
+        "reviewed: true\nreviewed_at: 2026-01-01T12:00:00Z\ndefer: 2099-01-01",
+    );
+    assert_eq!(queued(&env, &dir, &deferred), None);
+    restamp(&dir, &deferred, "defer", "2026-01-02");
+    assert_eq!(queued(&env, &dir, &deferred).as_deref(), Some("woken"));
+    restamp(&dir, &deferred, "defer", "2026-01-01");
+    assert_eq!(queued(&env, &dir, &deferred).as_deref(), Some("stranded"));
+}
+
+#[test]
+fn a_dependency_in_another_project_wakes_the_idea_from_either_scope() {
+    // Review Focus 3.
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let other = env.init("wali");
+    let follow_up = id_of(env.json(&other, &["add", "F"]));
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(&dir, &["dep", &idea, "--on", &follow_up]);
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    assert_eq!(queued(&env, &dir, &idea), None);
+    env.json(&other, &["done", &follow_up]);
+    assert_eq!(queued(&env, &dir, &idea).as_deref(), Some("woken"));
+    assert_eq!(
+        reason(
+            &env,
+            &dir,
+            &["list", "--all-projects", "--needs-review"],
+            &idea
+        )
+        .and_then(|(_, why)| why)
+        .as_deref(),
+        Some("woken")
+    );
+}
+
+#[test]
+fn every_view_agrees_on_review_state() {
+    let mut env = TestEnv::new();
+    let dir = env.init("sci");
+    let waiting = id_of(env.json(&dir, &["add", "W", "--status", "idea"]));
+    env.json(
+        &dir,
+        &[
+            "note",
+            &waiting,
+            "--reviewed",
+            "--awaiting-user",
+            "scope: question",
+        ],
+    );
+    let stranded = id_of(env.json(&dir, &["add", "S", "--status", "idea"]));
+    env.json(&dir, &["note", &stranded, "--reviewed", "scope: briefed"]);
+    let woken = id_of(env.json(&dir, &["add", "K", "--status", "idea"]));
+    let follow_up = id_of(env.json(&dir, &["add", "F", "--process", "direct"]));
+    env.json(&dir, &["dep", &woken, "--on", &follow_up]);
+    env.json(&dir, &["note", &woken, "--reviewed", "scope: briefed"]);
+    env.json(&dir, &["done", &follow_up]);
+    let fresh = id_of(env.json(&dir, &["add", "N", "--status", "idea"]));
+    let marked = [stranded.clone(), woken.clone(), fresh.clone()];
+    // The one expected state per idea, which every view must report.
+    let expect: [(&String, bool, Option<&str>); 4] = [
+        (&waiting, false, None),
+        (&stranded, true, Some("stranded")),
+        (&woken, true, Some("woken")),
+        (&fresh, true, Some("unreviewed")),
+    ];
+    fn state_of(row: &serde_json::Value) -> (bool, Option<String>) {
+        (
+            row["needs_review"].as_bool().unwrap(),
+            row.get("review_reason")
+                .map(|r| r.as_str().unwrap().to_string()),
+        )
+    }
+    fn walk(nodes: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
+        for node in nodes.as_array().unwrap() {
+            out.push(node.clone());
+            if let Some(children) = node.get("children") {
+                walk(children, out);
+            }
+        }
+    }
+    // JSON rows: needs_review and review_reason agree, the reason is absent exactly when false.
+    let list = env.json(&dir, &["list"]);
+    for row in list["tasks"].as_array().unwrap() {
+        let needs = row["needs_review"].as_bool().unwrap();
+        assert_eq!(needs, row.get("review_reason").is_some(), "{row}");
+        assert!(row["awaiting_user"].is_boolean(), "{row}");
+        let id = row["id"].as_str().unwrap().to_string();
+        assert_eq!(needs, marked.contains(&id), "{row}");
+    }
+    let rows = list["tasks"].as_array().unwrap();
+    for (id, needs, why) in expect {
+        let row = rows.iter().find(|r| r["id"] == id.as_str()).unwrap();
+        assert_eq!(
+            state_of(row),
+            (needs, why.map(str::to_string)),
+            "list row {id}"
+        );
+    }
+    // The filter, the pretty mark and tree return the same set.
+    let mut filtered: Vec<String> = env.json(&dir, &["list", "--needs-review"])["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    filtered.sort();
+    let mut want = marked.to_vec();
+    want.sort();
+    assert_eq!(filtered, want);
+    for args in [["list"].as_slice(), ["tree"].as_slice()] {
+        let pretty = env.pretty(&dir, args);
+        for (id, needs, _) in expect {
+            let line = pretty
+                .lines()
+                .find(|line| line.contains(id.as_str()))
+                .unwrap_or_else(|| panic!("{id} missing from {args:?}:\n{pretty}"));
+            assert_eq!(
+                line.trim_start().starts_with('*'),
+                needs,
+                "{args:?}: {line}"
+            );
+        }
+    }
+    // tree nodes flatten the summary row: the same fields with the same values.
+    let mut nodes = Vec::new();
+    walk(&env.json(&dir, &["tree"])["nodes"], &mut nodes);
+    for (id, needs, why) in expect {
+        let node = nodes
+            .iter()
+            .find(|n| n["id"] == id.as_str())
+            .unwrap_or_else(|| panic!("{id} not in tree: {nodes:?}"));
+        assert_eq!(
+            state_of(node),
+            (needs, why.map(str::to_string)),
+            "tree node {id}"
+        );
+    }
+    assert_eq!(
+        env.json(&dir, &["show", &waiting])["task"]["awaiting_user"],
+        true
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &fresh])["task"]["awaiting_user"],
+        false
+    );
+}
+
+#[test]
+fn rename_keeps_closed_and_reviewed_at_records_readable() {
+    let mut env = TestEnv::new();
+    let dir = env.init("dots");
+    let done = id_of(env.json(&dir, &["add", "D"]));
+    env.json(&dir, &["start", &done]);
+    env.json(&dir, &["done", &done, "landed"]);
+    let idea = id_of(env.json(&dir, &["add", "I", "--status", "idea"]));
+    env.json(&dir, &["note", &idea, "--reviewed", "scope: briefed"]);
+    env.json(&dir, &["rename", "dots", "wali"]);
+    env.json(&dir, &["list"]);
+    for id in [&done, &idea] {
+        let moved = id.replace("dots-", "wali-");
+        assert_eq!(env.json(&dir, &["show", &moved])["task"]["id"], moved);
+    }
+    env.cmd(&dir).arg("check").assert().success();
 }

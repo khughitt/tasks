@@ -19,22 +19,24 @@ Explicit ids are the exact batch. Otherwise discover candidates with:
 
     tasks list --needs-review [--tag <tag>] [--project <prefix>]
 
-It returns the scope queue, the rows pretty tables mark `*`, without reading notes:
-ideas no scope pass has reviewed, and leaf `todo` or `blocked` tasks whose process is
-unassessed. Unreviewed ideas come first: when any is eligible, the batch is drawn from
-ideas alone. Only when none is does the pass draw from the process-less rows, each a
-re-scope (see "Re-scope a scoped task"). A goal whose pieces live in other projects
+It returns the scope queue, the rows pretty tables mark `*`. Each row's `review_reason`
+says why it is there: `unreviewed` (no pass has looked, or a finding readmitted it),
+`woken` (a dependency closed, or a deferral came due, after the last review),
+`stranded` (reviewed, but waiting on nothing recorded and with nothing new), or
+`unassessed` (a leaf `todo` or `blocked` task without process). Draw the batch from
+`unreviewed` and `woken` ideas first; when none is eligible, from `stranded` ideas; only
+then from `unassessed` rows, each a re-scope (see "Re-scope a scoped task"). A goal whose pieces live in other projects
 holds them as `depends`, so it appears among those rows as a leaf; rate it as its
 closeout, usually `--process direct`.
 
-An idea leaves the queue when a pass writes its audit note with `--reviewed`, and
-returns only when a waking finding is noted with `--no-reviewed` or the idea comes back
-to `idea` from another status. Incidental notes (curate, comments) do not readmit it. A
-todo or blocked row leaves when a re-scope sets its process. Existing briefs, goals, or
-research do not by themselves exclude an idea that `--needs-review` returns. An
-explicit id bypasses only this review-state exclusion; it must still be an unclaimed
-idea at revalidation, or an unclaimed `todo` or `blocked` task, which makes it a
-re-scope, and the pass still has the three-document ceiling.
+A reviewed idea stays out of the queue only while it waits on something recorded: an
+open dependency, a pending `proposal:`, the user (`awaiting_user`), or a deferral not yet
+due. It comes back by itself when that wait ends, or at once when it has none.
+Incidental notes (curate, comments) neither readmit it nor change its wait. A todo or
+blocked row leaves when a re-scope sets its process. An explicit id bypasses only this
+review-state exclusion; it must still be an unclaimed idea at revalidation, or an
+unclaimed `todo` or `blocked` task, which makes it a re-scope, and the pass still has the
+three-document ceiling.
 
 Fix one root before member reads, and use `tasks -C <root> ...` for every later task
 command and that root for every evidence read and document write:
@@ -81,8 +83,8 @@ overlaps; batch membership does not make the same unanswered question new work.
 | Verdict | Use when | Required result |
 |---|---|---|
 | `scoped` | Approach and context are established and correctness has a check | Rewrite the body to say why, done, and where to look; set `todo`, priority, size, complexity, and process by the tasks skill rubrics; decompose into children under that idea if needed |
-| `briefed` | Decisions remain that a brief can frame | Keep `idea`; cover it in the handoff and add research or design follow-ups only when needed; make it depend on each follow-up that wakes it (§5) |
-| `question` | Only the user can resolve it and a brief adds no value | Keep status; collect the questions under one `## Open questions` body heading |
+| `briefed` | Decisions remain that a brief can frame | Keep `idea`; cover it in the handoff and add research or design follow-ups only when needed; make it depend on each follow-up that wakes it (§5). A brief that leaves nothing to wait on is not `briefed`: use `question` or `shelved` |
+| `question` | Only the user can resolve it and a brief adds no value | Keep status; collect the questions under one `## Open questions` body heading; write the audit note with `--reviewed --awaiting-user` |
 | `shelved` | Worth keeping, but not worth reviewing now | Run `tasks -C <root> shelve <id> "<wake condition>"` |
 | `drop` | It landed, its premise is gone, or another task covers it | Keep status; propose the drop with the supporting commit or id |
 
@@ -105,6 +107,12 @@ Every successfully processed member receives exactly one audit note. For `briefe
 `question` and `drop` it sets the flag in the same write:
 
     tasks -C <root> note <id> --reviewed "scope: <verdict>; <what changed>[; brief: <path>][; proposal: <text>]"
+
+`question` adds `--awaiting-user` to that command. For a woken or stranded idea, gather
+the closed follow-ups' outcomes as evidence (§2) before choosing; the new audit note
+re-stamps the review, so edges closed earlier stop counting as new. Whoever answers a
+question or declines a proposal records it with `tasks note <id> --no-reviewed
+"<answer>"`, which readmits the idea with the answer.
 
 `scoped` and `shelved` change the status first, which clears the flag; their audit note
 is a plain `tasks note` (`--reviewed` is refused on a non-idea).
@@ -189,8 +197,7 @@ task.
 In the same pass that files or reuses a follow-up, record each wait as an edge: run
 `tasks -C <root> dep <idea> --on <follow-up>` for every idea its `Ideas it wakes` names.
 The edge puts the wait in the record (`show`'s `depends_on`) and keeps the block when
-the idea is later promoted to `todo`. It does not readmit the idea, so the wake note
-stays.
+the idea is later promoted to `todo`. When the follow-up closes, the edge readmits the idea by itself; the wake note still carries the finding to it.
 
 ## 6. Revalidate, write, and record
 

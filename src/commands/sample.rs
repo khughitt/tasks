@@ -13,17 +13,6 @@ use crate::error::Result;
 use crate::model::{Status, Task};
 use crate::output::{DateColumn, ListOut, Output, TaskSummary};
 
-/// The proposal text of a task whose most recent note is a curate or scope note awaiting the
-/// human's decision. Any later note clears it, which is how the human answers.
-fn pending_proposal(task: &Task) -> Option<&str> {
-    let text = task.notes.last()?.text.as_str();
-    let rest = text
-        .strip_prefix("curate:")
-        .or_else(|| text.strip_prefix("scope:"))?;
-    rest.split_once("proposal:")
-        .map(|(_, proposal)| proposal.trim())
-}
-
 pub fn sample(
     mut ctx: ReadCtx,
     limit: usize,
@@ -55,7 +44,7 @@ pub fn sample(
                 .push(super::list::claim_omission(&task.id, claim));
             continue;
         }
-        if let Some(proposal) = pending_proposal(task) {
+        if let Some(proposal) = crate::proposal::pending(task) {
             ctx.warnings
                 .push(format!("{} pending: {proposal}", task.id));
             continue;
@@ -90,11 +79,12 @@ pub fn sample(
     }
     let drawn = &pool[..take];
 
+    let deps = super::list::review_deps(&ctx, &all)?;
     let colors = ctx.project_colors();
     let mut out = Output::List(ListOut {
         tasks: drawn
             .iter()
-            .map(|task| TaskSummary::of(task, &all, Some(&claims), &ctx.registry, now))
+            .map(|task| TaskSummary::of(task, &all, &deps, Some(&claims), &ctx.registry, now))
             .collect(),
         halts: vec![],
         warnings: ctx.warnings,

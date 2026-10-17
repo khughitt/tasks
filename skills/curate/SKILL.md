@@ -102,7 +102,7 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
 `proposal:` segment; it reports the task as `pending` with the proposal text instead.
 Relay those lines in the summary and move on. Any later note clears it: the human records
 the decision with `tasks note <id> "<decision>"` whether they acted on the proposal or
-declined it. A `keep` or `refined` task simply re-enters the pool after the age window;
+declined it; on an idea, a declined proposal is answered with `--no-reviewed` so scope looks again. A `keep` or `refined` task simply re-enters the pool after the age window;
 reviewing it again is the maintenance.
 
 A curate note does not readmit an idea for scope: only `tasks note <id> --no-reviewed`

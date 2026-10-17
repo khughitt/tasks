@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""One-time backfill of recorded waits (docs/specs/2026-10-17-wait-aware-review-design.md §7.3).
+
+The first run on a project freezes its candidates: open ideas whose review_reason is
+`stranded` and whose record did not change between the list and the show, each with its
+`updated` stamp, the open task ids its latest `scope:` note names (moves followed), the
+references it could not resolve, and a class. `auto` (exactly one open id named, every
+reference resolved) carries the decision
+{"dep": [id]}; `judge` carries none until the operator writes one into the snapshot:
+"leave", "awaiting_user", or {"dep": [ids]}. Every apply pass runs only decided entries
+whose record is still a reviewed idea with an unchanged stamp, and reports the rest.
+Notes are read only at the freeze.
+
+Run every apply pass inside a writer pause: no other session may write the project's
+task records on any host (spec §7.3). --writers-paused is the operator's confirmation;
+the tool also refuses while this host's claim store holds a live claim in the project.
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+ENTRY_KEYS = {"id", "updated", "class", "named_open", "unresolved", "evidence", "decision", "done", "outcome"}
+
+
+class Usage(Exception):
+    pass
+
+
+def run(tasks, root, *args):
+    env = dict(os.environ, TASKS_FORMAT="json")
+    out = subprocess.run([tasks, "-C", root, *args], capture_output=True, text=True, env=env)
+    return out.returncode, out.stdout, out.stderr
+
+
+def read_json(tasks, root, *args):
+    code, stdout, stderr = run(tasks, root, *args)
+    if code != 0:
+        raise RuntimeError(f"tasks {' '.join(args)} failed: {stderr.strip()}")
+    return json.loads(stdout)
+
+
+def error_kind(stderr):
+    try:
+        return json.loads(stderr)["error"]["kind"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def save(path, snapshot):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".wait-backfill-")
+    with os.fdopen(fd, "w") as handle:
+        json.dump(snapshot, handle, indent=1)
+        handle.write("\n")
+    os.replace(tmp, path)
+
+
+def live_claims(tasks, root, prefix):
+    claims = read_json(tasks, root, "claims")["claims"]
+    return [c["id"] for c in claims if c.get("prefix") == prefix and c.get("live")]
+
+
+def latest_scope_note(task):
+    for note in reversed(task.get("notes") or []):
+        if note["text"].startswith("scope:"):
+            return note["text"]
+    return None
+
+
+class Unresolved(Exception):
+    pass
+
+
+def follow(tasks, root, named):
+    """The live record a reference means. `show` returns a tombstone as is, so follow its
+    moved_to chain here (spec §4.1), refusing a chain that revisits an id."""
+    seen = []
+    current = named
+    while True:
+        if current in seen:
+            raise Unresolved(f"{named}: move chain revisits {current}")
+        seen.append(current)
+        code, stdout, stderr = run(tasks, root, "show", current)
+        if code != 0:
+            raise Unresolved(f"{named}: show {current}: {error_kind(stderr) or stderr.strip()}")
+        task = json.loads(stdout)["task"]
+        if task["status"] != "moved":
+            return task
+        current = task["moved_to"]
+
+
+def named_refs(tasks, root, prefix_pattern, idea_id, text):
+    """(open ids, unresolved references) the note names. Open ids are the live ends of
+    move chains, deduplicated. Every failed read is reported, never dropped."""
+    found, unresolved = [], []
+    for named in dict.fromkeys(re.findall(prefix_pattern, text or "")):
+        if named == idea_id:
+            continue
+        try:
+            task = follow(tasks, root, named)
+        except Unresolved as why:
+            unresolved.append(str(why))
+            continue
+        if task["status"] not in ("done", "dropped") and task["id"] not in found and task["id"] != idea_id:
+            found.append(task["id"])
+    return found, unresolved
+
+
+def freeze(tasks, root, prefix, path, report):
+    ids = r"\b[a-z][a-z0-9-]*-[0-9a-f]{6}\b"
+    entries = []
+    rows = read_json(tasks, root, "list", "--status", "idea", "--needs-review")["tasks"]
+    for row in rows:
+        if row.get("review_reason") != "stranded":
+            continue
+        task = read_json(tasks, root, "show", row["id"])["task"]
+        # Eligibility came from the list row: freeze only a record that has not changed
+        # since, so no decision is ever attached to a stamp it was not derived from.
+        if task["updated"] != row["updated"]:
+            report["changed"].append({"id": row["id"], "detail":
+                f"changed during the freeze (listed {row['updated']}, shown {task['updated']}); rerun after the next pass"})
+            continue
+        evidence = latest_scope_note(task)
+        open_ids, unresolved = named_refs(tasks, root, ids, task["id"], evidence)
+        auto = len(open_ids) == 1 and not unresolved
+        entries.append({
+            "id": task["id"],
+            "updated": task["updated"],
+            "class": "auto" if auto else "judge",
+            "named_open": open_ids,
+            "unresolved": unresolved,
+            "evidence": evidence,
+            "decision": {"dep": open_ids} if auto else None,
+            "done": False,
+            "outcome": None,
+        })
+    snapshot = {
+        "prefix": prefix,
+        "frozen_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "entries": entries,
+    }
+    save(path, snapshot)
+    return snapshot
+
+
+def valid_decision(decision):
+    if decision in (None, "leave", "awaiting_user"):
+        return True
+    return (
+        isinstance(decision, dict)
+        and set(decision) == {"dep"}
+        and isinstance(decision["dep"], list)
+        and decision["dep"]
+        and all(isinstance(i, str) for i in decision["dep"])
+    )
+
+
+def load(path, prefix):
+    """The whole snapshot, validated before anything is applied (no partial runs)."""
+    def bad(why):
+        return Usage(f"{path} is not a valid wait-backfill snapshot for {prefix}: {why}; inspect it before rerunning")
+    try:
+        with open(path) as handle:
+            snapshot = json.load(handle)
+    except json.JSONDecodeError as error:
+        raise bad(f"invalid JSON ({error})")
+    if not isinstance(snapshot, dict) or snapshot.get("prefix") != prefix:
+        raise bad(f"prefix is {snapshot.get('prefix') if isinstance(snapshot, dict) else None!r}")
+    if not isinstance(snapshot.get("frozen_at"), str) or not isinstance(snapshot.get("entries"), list):
+        raise bad("frozen_at or entries missing")
+    for index, entry in enumerate(snapshot["entries"]):
+        ok = (
+            isinstance(entry, dict)
+            and set(entry) == ENTRY_KEYS
+            and isinstance(entry["id"], str)
+            and re.fullmatch(re.escape(prefix) + r"-[0-9a-f]{6}", entry["id"])
+            and isinstance(entry["updated"], str)
+            and entry["class"] in ("auto", "judge")
+            and isinstance(entry["named_open"], list)
+            and isinstance(entry["unresolved"], list)
+            and valid_decision(entry["decision"])
+            and isinstance(entry["done"], bool)
+            and (entry["outcome"] is None or isinstance(entry["outcome"], str))
+        )
+        if not ok:
+            raise bad(f"entry {index} is {entry!r}")
+    return snapshot
+
+
+def command_for(entry):
+    decision = entry["decision"]
+    if decision == "awaiting_user":
+        return ["edit", entry["id"], "--awaiting-user"]
+    if isinstance(decision, dict):
+        args = ["dep", entry["id"]]
+        for target in decision["dep"]:
+            args += ["--on", target]
+        return args
+    return None  # "leave"
+
+
+def apply(tasks, root, path, snapshot, report):
+    for entry in snapshot["entries"]:
+        if entry["done"]:
+            continue
+        if entry["decision"] is None:
+            report["undecided"].append(entry["id"])
+            continue
+        code, stdout, stderr = run(tasks, root, "show", entry["id"])
+        if code != 0:
+            if error_kind(stderr) == "task_not_found":
+                entry.update(done=True, outcome="changed: record gone")
+                report["changed"].append({"id": entry["id"], "detail": "record gone"})
+            else:
+                entry["outcome"] = f"failed: show: {stderr.strip()}"
+                report["failed"].append({"id": entry["id"], "detail": f"show: {stderr.strip()}"})
+            save(path, snapshot)
+            continue
+        task = json.loads(stdout)["task"]
+        if task["status"] != "idea" or not task.get("reviewed") or task["updated"] != entry["updated"]:
+            # review_reason is a list-row field (show does not carry it); null when not queued.
+            rows = read_json(tasks, root, "list", "--needs-review")["tasks"]
+            reason = next((r.get("review_reason") for r in rows if r["id"] == entry["id"]), None)
+            detail = (f"status {task['status']}, reviewed {str(bool(task.get('reviewed'))).lower()}, "
+                      f"review_reason {reason or 'null'}, updated {task['updated']} (frozen {entry['updated']})")
+            entry.update(done=True, outcome=f"changed: {detail}")
+            report["changed"].append({"id": entry["id"], "detail": detail})
+            save(path, snapshot)
+            continue
+        args = command_for(entry)
+        if args is None:
+            entry.update(done=True, outcome="left")
+            report["left"].append(entry["id"])
+            save(path, snapshot)
+            continue
+        code, stdout, stderr = run(tasks, root, *args)
+        if code == 0:
+            entry.update(done=True, outcome="applied")
+            report["applied"].append({"id": entry["id"], "command": args})
+            for warning in json.loads(stdout).get("warnings", []):
+                if warning.startswith(("commit_failed:", "commit_deferred:")):
+                    entry["outcome"] = f"applied; {warning}"
+                    report["uncommitted"].append({"id": entry["id"], "warning": warning})
+        else:
+            entry["outcome"] = f"failed: {stderr.strip()}"
+            report["failed"].append({"id": entry["id"], "detail": stderr.strip()})
+        save(path, snapshot)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--state", required=True, help="directory holding <prefix>.json snapshots")
+    parser.add_argument("--root", default=".", help="project checkout (default: current directory)")
+    parser.add_argument("--tasks", default="tasks", help="the tasks binary to run")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--freeze-only", action="store_true", help="write the snapshot and stop")
+    mode.add_argument("--writers-paused", action="store_true",
+                      help="confirm every other writer of this project's records is paused on every host")
+    args = parser.parse_args()
+
+    try:
+        prefix = read_json(args.tasks, args.root, "prime")["prefix"]
+        path = os.path.join(args.state, f"{prefix}.json")
+        os.makedirs(args.state, exist_ok=True)
+        report = {"prefix": prefix, "frozen": False, "applied": [], "left": [], "changed": [],
+                  "undecided": [], "failed": [], "uncommitted": [], "remaining": 0}
+        if os.path.exists(path):
+            snapshot = load(path, prefix)
+        else:
+            snapshot = freeze(args.tasks, args.root, prefix, path, report)
+            report["frozen"] = True
+        if args.writers_paused:
+            held = live_claims(args.tasks, args.root, prefix)
+            if held:
+                report["failed"] = [{"id": i, "detail": "live claim; pause its writer first"} for i in held]
+                print(json.dumps(report, indent=1))
+                return 1
+            apply(args.tasks, args.root, path, snapshot, report)
+        report["remaining"] = sum(1 for e in snapshot["entries"] if not e["done"])
+        print(json.dumps(report, indent=1))
+        return 1 if report["failed"] or report["uncommitted"] else 0
+    except Usage as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

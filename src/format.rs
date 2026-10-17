@@ -3,7 +3,7 @@ use crate::frontmatter::{self, Value};
 use crate::model::{Complexity, HarnessProvenance, Note, Process, Size, Status, Task, TaskId};
 
 pub const NOTES_DELIMITER: &str = "## Notes";
-const KEYS: [&str; 30] = [
+const KEYS: [&str; 33] = [
     "id",
     "title",
     "status",
@@ -14,6 +14,8 @@ const KEYS: [&str; 30] = [
     "parallel",
     "lane",
     "reviewed",
+    "awaiting_user",
+    "reviewed_at",
     "needs",
     "every",
     "defer",
@@ -22,6 +24,7 @@ const KEYS: [&str; 30] = [
     "updated",
     "started",
     "completed",
+    "closed",
     "last_done",
     "depends",
     "parent",
@@ -136,6 +139,8 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         parallel: boolean("parallel")?,
         lane: boolean("lane")?,
         reviewed: boolean("reviewed")?,
+        awaiting_user: boolean("awaiting_user")?,
+        reviewed_at: scalar("reviewed_at")?,
         needs: optional_list("needs")?,
         every: scalar("every")?
             .map(|value| crate::periodic::Interval::parse(&value))
@@ -150,6 +155,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         updated,
         started: scalar("started")?,
         completed: scalar("completed")?,
+        closed: scalar("closed")?,
         last_done: scalar("last_done")?,
         depends,
         parent: scalar("parent")?
@@ -178,16 +184,26 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
     Ok(task)
 }
 
+/// Frontmatter keys holding a timestamp (the one scalar containing `:`). Single source for
+/// the parse-time quoting and the rename rewrite's raw write-back, so they cannot drift.
+pub const TIMESTAMP_KEYS: [&str; 7] = [
+    "created",
+    "updated",
+    "started",
+    "completed",
+    "reviewed_at",
+    "closed",
+    "last_done",
+];
+
 /// Timestamps are the one schema scalar containing `:`; quote them for the strict subset
 /// parser. Shared with the rename rewrite, which must round-trip a file it did not write.
 pub fn quote_timestamps(fm: &str) -> String {
     fm.lines()
         .map(|line| {
-            if line.starts_with("created: ")
-                || line.starts_with("updated: ")
-                || line.starts_with("started: ")
-                || line.starts_with("completed: ")
-                || line.starts_with("last_done: ")
+            if TIMESTAMP_KEYS
+                .iter()
+                .any(|k| line.strip_prefix(k).is_some_and(|r| r.starts_with(": ")))
             {
                 let (k, v) = line.split_once(':').expect("prefix matched");
                 format!("{k}: \"{}\"", v.trim_start())
@@ -387,6 +403,12 @@ pub fn validate_task(t: &Task) -> Result<()> {
     if let Some(completed) = &t.completed {
         crate::time::parse(completed)?;
     }
+    if let Some(reviewed_at) = &t.reviewed_at {
+        crate::time::parse(reviewed_at)?;
+    }
+    if let Some(closed) = &t.closed {
+        crate::time::parse(closed)?;
+    }
     match (t.every, &t.last_done) {
         (None, Some(_)) => {
             return Err(Error::Validation(
@@ -486,6 +508,13 @@ pub fn serialize_task(t: &Task) -> String {
     if t.reviewed {
         pairs.push(("reviewed".into(), Value::Raw("true".into())));
     }
+    // Raw for the same reason as `parallel`.
+    if t.awaiting_user {
+        pairs.push(("awaiting_user".into(), Value::Raw("true".into())));
+    }
+    if let Some(reviewed_at) = &t.reviewed_at {
+        pairs.push(("reviewed_at".into(), Value::Raw(reviewed_at.clone())));
+    }
     if !t.needs.is_empty() {
         pairs.push(("needs".into(), Value::List(t.needs.clone())));
     }
@@ -507,6 +536,9 @@ pub fn serialize_task(t: &Task) -> String {
     }
     if let Some(completed) = &t.completed {
         pairs.push((String::from("completed"), Value::Raw(completed.clone())));
+    }
+    if let Some(closed) = &t.closed {
+        pairs.push((String::from("closed"), Value::Raw(closed.clone())));
     }
     if let Some(last_done) = &t.last_done {
         pairs.push((String::from("last_done"), Value::Raw(last_done.clone())));
@@ -841,6 +873,48 @@ mod tests {
         assert!(parse_task(&MINIMAL.replace("status: idea", "status: soon"), "x").is_err());
         assert!(parse_task(&MINIMAL.replace("depends: []", "depends: [nope]"), "x").is_err());
         assert!(parse_task(&MINIMAL.replace("tags: []", "tags: []\nstep: only"), "x").is_err());
+    }
+
+    #[test]
+    fn review_and_close_stamps_round_trip_and_are_omitted_when_unset() {
+        let text = "---\nid: sci-000001\ntitle: T\nstatus: idea\npriority: 2\nreviewed: true\n\
+                    awaiting_user: true\nreviewed_at: 2026-10-17T09:00:00Z\n\
+                    created: 2026-09-09T00:00:00Z\nupdated: 2026-09-09T00:00:00Z\n\
+                    closed: 2026-10-17T10:00:00Z\ndepends: []\ntags: []\n---\n";
+        let task = parse_task(text, "sci-000001.md").unwrap();
+        assert!(task.awaiting_user);
+        assert_eq!(task.reviewed_at.as_deref(), Some("2026-10-17T09:00:00Z"));
+        assert_eq!(task.closed.as_deref(), Some("2026-10-17T10:00:00Z"));
+        let written = serialize_task(&task);
+        assert!(written.contains("\nawaiting_user: true\n"), "{written}");
+        assert!(
+            written.contains("\nreviewed_at: 2026-10-17T09:00:00Z\n"),
+            "{written}"
+        );
+        assert!(
+            written.contains("\nclosed: 2026-10-17T10:00:00Z\n"),
+            "{written}"
+        );
+        assert_eq!(parse_task(&written, "sci-000001.md").unwrap(), task);
+        let mut cleared = task.clone();
+        cleared.awaiting_user = false;
+        cleared.reviewed_at = None;
+        cleared.closed = None;
+        let written = serialize_task(&cleared);
+        for key in ["awaiting_user", "reviewed_at", "closed"] {
+            assert!(
+                !written.contains(key),
+                "{key} written when unset: {written}"
+            );
+        }
+        assert!(parse_task(&text.replace("2026-10-17T09:00:00Z", "soon"), "f").is_err());
+        assert!(
+            parse_task(
+                &text.replace("2026-10-17T10:00:00Z", "2026-13-45T00:00:00Z"),
+                "f"
+            )
+            .is_err()
+        );
     }
 
     #[test]

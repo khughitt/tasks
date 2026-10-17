@@ -27,6 +27,7 @@ mod palette;
 mod periodic;
 mod pidview;
 mod present;
+mod proposal;
 mod provenance;
 mod query;
 mod record_commit;

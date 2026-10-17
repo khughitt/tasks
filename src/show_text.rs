@@ -250,7 +250,14 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         rows.push(("parallel", vec![Span::plain("yes")]));
     }
     if t.reviewed {
-        rows.push(("reviewed", vec![Span::plain("yes")]));
+        let mut value = vec![Span::plain("yes")];
+        if let Some(at) = &t.reviewed_at {
+            value.extend([Span::plain(" ("), present::date(at), Span::plain(")")]);
+        }
+        rows.push(("reviewed", value));
+    }
+    if t.awaiting_user {
+        rows.push(("awaiting", vec![Span::plain("user")]));
     }
     if !t.needs.is_empty() {
         rows.push(("needs", vec![Span::plain(t.needs.join(", "))]));
@@ -271,6 +278,9 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     }
     if let Some(completed) = &t.completed {
         rows.push(("completed", vec![present::date(completed)]));
+    }
+    if let Some(closed) = &t.closed {
+        rows.push(("closed", vec![present::date(closed)]));
     }
     if let Some(periodic) = &o.periodic {
         let mut value = vec![Span::plain(periodic.every.clone())];

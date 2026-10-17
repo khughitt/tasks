@@ -500,6 +500,34 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 ),
             ));
         }
+        // Wait-aware spec §3.4: the writers refuse these, so only a hand edit lands here.
+        if task.awaiting_user && !task.reviewed {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "review_status",
+                "carries awaiting_user without reviewed; only a reviewed idea carries it".into(),
+            ));
+        }
+        if task.reviewed_at.is_some() && !task.reviewed {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "review_status",
+                "carries reviewed_at without reviewed".into(),
+            ));
+        }
+        if task.closed.is_some() && !matches!(task.status, Status::Done | Status::Dropped) {
+            errors.push(finding(
+                Some(task),
+                file.clone(),
+                "closed_status",
+                format!(
+                    "is {} and carries closed; only a done or dropped task carries it",
+                    task.status.as_str()
+                ),
+            ));
+        }
         // A merge or a hand edit can leave a lane inside a lane.
         if task.lane
             && let Some(outer) = crate::hierarchy::enclosing_lane(&tasks, task, &ctx.registry)

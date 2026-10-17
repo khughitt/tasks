@@ -405,8 +405,16 @@ pub struct TaskSummary {
     pub lane: bool,
     /// The stored review flag; always present, like `parallel`.
     pub reviewed: bool,
+    /// The stored wait-on-user marker; always present, like `reviewed`.
+    pub awaiting_user: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed_at: Option<String>,
     /// The row needs a look (review-state spec §4). Computed from the scan, never stored.
     pub needs_review: bool,
+    /// Why the row needs a look (wait-aware spec §4.2); present exactly when
+    /// `needs_review` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_reason: Option<crate::review::ReviewReason>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -417,6 +425,8 @@ pub struct TaskSummary {
     pub started: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -614,15 +624,18 @@ impl DeferredInfo {
 }
 
 impl TaskSummary {
-    /// `all` is the scan the row came from; counts are computed against it.
+    /// `all` is the scan the row came from; counts are computed against it, and `deps` is
+    /// that scan's dependency view (wait-aware spec §4.3).
     pub fn of(
         task: &Task,
         all: &[Task],
+        deps: &crate::review::Deps,
         claims: Option<&crate::claims::ClaimSnapshot>,
         registry: &Registry,
         now: OffsetDateTime,
     ) -> TaskSummary {
         let child_count = crate::hierarchy::children(all, &task.id, registry).len();
+        let review_reason = crate::review::state(task, child_count, deps, now);
         TaskSummary {
             id: task.id.to_string(),
             title: task.title.clone(),
@@ -635,19 +648,17 @@ impl TaskSummary {
             parallel: task.parallel,
             lane: task.lane,
             reviewed: task.reviewed,
-            needs_review: crate::review::needs_review(
-                task.status,
-                task.reviewed,
-                task.process,
-                task.lane,
-                child_count,
-            ),
+            awaiting_user: task.awaiting_user,
+            reviewed_at: task.reviewed_at.clone(),
+            needs_review: review_reason.is_some(),
+            review_reason,
             needs: task.needs.clone(),
             owner: task.owner.clone(),
             created: task.created.clone(),
             updated: task.updated.clone(),
             started: task.started.clone(),
             completed: task.completed.clone(),
+            closed: task.closed.clone(),
             tags: task.tags.clone(),
             source: task.source.clone(),
             step: task.step.clone(),
@@ -698,6 +709,9 @@ pub struct ParkedRow {
     pub reviewed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub needs_review: Option<bool>,
+    /// Omitted on an unresolved row, as `needs_review` is (wait-aware spec §5.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_reason: Option<crate::review::ReviewReason>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -757,6 +771,7 @@ impl ParkedRow {
             lane: summary.lane,
             reviewed: Some(summary.reviewed),
             needs_review: Some(summary.needs_review),
+            review_reason: summary.review_reason,
             needs: summary.needs,
             owner: summary.owner,
             created: Some(summary.created),
@@ -794,6 +809,7 @@ impl ParkedRow {
             lane: false,
             reviewed: None,
             needs_review: None,
+            review_reason: None,
             needs: Vec::new(),
             owner: None,
             created: None,
@@ -2175,7 +2191,11 @@ mod tests {
             parallel,
             lane: false,
             reviewed: false,
+            awaiting_user: false,
+            reviewed_at: None,
+            closed: None,
             needs_review: false,
+            review_reason: None,
         }
     }
 
