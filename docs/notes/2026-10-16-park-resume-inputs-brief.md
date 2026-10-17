@@ -58,7 +58,8 @@ separate want, and it can follow as an extension if it is still wanted after 2.
 ## Unanswered questions
 
 1. Park-scoped (2) or record-wide (3)? Is scratch cleanup at `done`/`drop` wanted now? —
-   the user.
+   the user. Taken as the lean on rerun, 2026-10-17: park-scoped, with scratch cleanup
+   left out. The design task's spec review is where the user can override it.
 2. How is a volatile mount decided: the filesystem type from `statfs`, a fixed path list,
    or both? Is a warning enough, or should `park` refuse? — the design task.
 3. Should an input missing on another host be reported as unknown rather than missing,
@@ -66,6 +67,14 @@ separate want, and it can follow as an extension if it is still wanted after 2.
 
 ## Proposed decomposition
 
-No follow-up is filed until Q1 is answered. With 2 chosen, file one planned task under
-tasks-2b5461, "Design park-scoped resume inputs from the brief", to answer Q2 and Q3 and
-amend the quiet queue design §4. Promote tasks-2b5461 once that task is accepted.
+Rerun 2026-10-17: the first pass filed no follow-up, so the idea had nothing to wait on
+and came back as stranded. Filed now:
+
+- tasks-037538 (goal, todo): declare and check a parked task's resume inputs. tasks-2b5461
+  is its child.
+- tasks-57425c (planned, child of the goal): "Design park-scoped resume inputs from the
+  brief". It answers Q2 and Q3, adds the guidance line, and amends quiet queue §4.
+  tasks-2b5461 depends on it and is woken by its finding note.
+
+Record-wide artifacts and the `done`/`drop` scratch listing (option 3) are not filed. File
+them as an extension of tasks-037538 if they are still wanted once 2 lands.
