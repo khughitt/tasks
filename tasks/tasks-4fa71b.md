@@ -1,15 +1,16 @@
 ---
 id: tasks-4fa71b
 title: Say that a planned task keeps the written design under brainstorming's own sizing
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: planned-sizing
 created: 2026-10-17T11:38:22Z
-updated: 2026-10-17T11:49:17Z
+updated: 2026-10-17T12:27:53Z
 started: 2026-10-17T11:49:17Z
+completed: 2026-10-17T12:27:53Z
 depends: []
 tags: []
 source: lore-5b6cab
@@ -25,4 +26,15 @@ Evidence: lore docs/notes/2026-10-15-superpowers-v7-upgrade-brief.md (reference 
 ## Notes
 
 - 2026-10-17T11:49:17Z (main): started
+  provenance: {"harness_session":"claude-code:0bf9fcb5-39fd-48a3-8c22-b689a52e7a3b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:49:24Z (planned-sizing): resumed
+  provenance: {"harness_session":"claude-code:0bf9fcb5-39fd-48a3-8c22-b689a52e7a3b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T11:51:35Z (planned-sizing): parked (waiting on user, approval): On approval: tasks done on branch planned-sizing (.worktrees/planned-sizing, commit 48fcfac, test-fast 1496 passed), merge into main (live: ~/.claude/skills/tasks), remove the worktree.
+  provenance: {"harness_session":"claude-code:0bf9fcb5-39fd-48a3-8c22-b689a52e7a3b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T12:27:50Z (planned-sizing): resumed
+  provenance: {"harness_session":"claude-code:0bf9fcb5-39fd-48a3-8c22-b689a52e7a3b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T12:27:52Z (planned-sizing): approval: the user approved the merge 2026-10-17
+- 2026-10-17T12:27:53Z (planned-sizing): done
+  provenance: {"harness_session":"claude-code:0bf9fcb5-39fd-48a3-8c22-b689a52e7a3b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T12:27:53Z (planned-sizing): Process and workspace's planned bullet now says brainstorming's own sizing takes the written design, skipping its questions does not waive the spec, and a smaller size needs the process changed to direct first (48fcfac).
   provenance: {"harness_session":"claude-code:0bf9fcb5-39fd-48a3-8c22-b689a52e7a3b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
