@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-17T22:09:56Z
-updated: 2026-10-18T09:43:26Z
+updated: 2026-10-18T09:43:28Z
 depends: []
 tags: [feedback, gap, "from:mind6"]
 agent: claude-code
@@ -24,3 +24,7 @@ Done:
 - Tests in tests/cli.rs: both orders from the report (shelve B, then dep A --on B; dep C --on D, then shelve D) warn. A shelved or closed dependent gives no warning. Existing dep and shelve outputs are otherwise unchanged.
 
 Where to look: src/commands/dep.rs (`add_dependencies`), src/commands/status.rs (`shelve`), src/commands/check.rs (the `shelved_dep` condition and wording).
+
+## Notes
+
+- 2026-10-18T09:43:28Z (main): scope: scoped; todo, s/low/direct, P3 (check still catches it at pre-commit); warn in dep::add_dependencies, which already resolves each target (covers add/edit --depends too), and in shelve over the local scan; cross-project dependents left to check
