@@ -17,9 +17,14 @@ pub enum Origin<'a> {
 /// The config file exists and is a file. `try_exists` so a permission error surfaces
 /// instead of reading as absent; `is_file` so a directory at that path is not mistaken
 /// for a config. Every reachability test in the tool goes through this one function.
+/// A root (or `tasks/` below it) that is a plain file holds no config either.
 pub fn has_config(root: &Path) -> Result<bool> {
     let config = root.join(CONFIG_REL);
-    Ok(config.try_exists()? && config.is_file())
+    match config.try_exists() {
+        Ok(exists) => Ok(exists && config.is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => Ok(false),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Opens the project registered as `prefix`, applying the three checks every

@@ -93,6 +93,9 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))
         .collect();
     let (tasks, parse_errors) = ctx.project.scan_lenient();
+    // A worktree made before the retirement holds no `[retired]` until a merge; the
+    // registered checkout's declaration covers it, as it does for writes.
+    let retired = super::effective_retirement(&ctx.registry, &ctx.project)?.is_some();
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
     for journal in &pending {
@@ -203,7 +206,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         let file = format!("tasks/{}.md", task.id);
         // A retired project holds no open work (ops lifecycle spec §4); one that reappears,
         // say from a sync conflict, is an error to close or a reason to unretire.
-        if ctx.project.retired.is_some() && task.status.is_open() {
+        if retired && task.status.is_open() {
             errors.push(finding(
                 Some(task),
                 file.clone(),

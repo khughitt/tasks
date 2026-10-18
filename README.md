@@ -524,11 +524,14 @@ reused while registered.
 A project that is over declares it in its own `tasks/.config.toml` with `tasks retire
 [--successor <prefix>] --reason "<one line>"`, run in its registered checkout. It refuses
 while any task is open in any checkout, while a claim is live, or while a linked worktree
-cannot be read, and writes a `[retired]` table (`date`, `reason`, optional `successor`).
+cannot be read, and writes a `[retired]` table (`date`, `reason`, optional `successor`,
+stored as the successor's live prefix). It refuses an already retired project too:
+`tasks unretire` first to declare it again.
 From then on every write to the project is refused with `retired_project`, from every
-checkout, a worktree made before the retirement included; its ids keep resolving and
+checkout, a worktree made before the retirement included, whose `tasks check` also
+reports its open work; its ids keep resolving and
 satisfy other projects' dependencies; `--all-projects` and `--group` reads leave it out,
-while `--project` reads and `show` warn; `tasks projects` keeps its row with `retired`;
+as do id completion and the list of feedback owners, while `--project` reads and `show` warn; `tasks projects` keeps its row with `retired`;
 `group set` refuses it as a member; `init --force` and `rename` refuse it. `tasks
 unretire` in the registered checkout removes the table. The project lifecycle runbook in
 ops has the whole procedure.

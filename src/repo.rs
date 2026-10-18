@@ -280,10 +280,14 @@ pub fn validate_retirement(r: &Retirement) -> Result<()> {
     Ok(())
 }
 
-/// `YYYY-MM-DD` naming a real calendar day.
+/// `YYYY-MM-DD` naming a real calendar day from year 1: digits only, so no sign.
 fn is_iso_date(text: &str) -> bool {
     let b = text.as_bytes();
-    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !text.is_ascii() {
+    let digits = b
+        .iter()
+        .enumerate()
+        .all(|(i, byte)| i == 4 || i == 7 || byte.is_ascii_digit());
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !digits || &text[0..4] == "0000" {
         return false;
     }
     let (Ok(y), Ok(m), Ok(d)) = (
@@ -1036,6 +1040,8 @@ mod tests {
             "[retired]\ndate = \"2026-10-04\"\n",
             "[retired]\ndate = \"04/10/2026\"\nreason = \"r\"\n",
             "[retired]\ndate = \"2026-02-30\"\nreason = \"r\"\n",
+            "[retired]\ndate = \"+026-10-04\"\nreason = \"r\"\n",
+            "[retired]\ndate = \"0000-01-01\"\nreason = \"r\"\n",
             "[retired]\ndate = \"2026-10-04\"\nreason = \"two\\nlines\"\n",
             "[retired]\ndate = \"2026-10-04\"\nreason = \"  \"\n",
             "[retired]\ndate = \"2026-10-04\"\nreason = \"r\"\nextra = 1\n",

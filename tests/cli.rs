@@ -27153,6 +27153,7 @@ fn retired_write_a_worktree_made_before_retirement_cannot_write() {
     for args in [
         vec!["add", "N", "-p", "2"],
         vec!["note", &id, "x"],
+        vec!["park", &id, "next"],
         vec!["done", &id, "m"],
     ] {
         assert_eq!(env.fail(&side, &args), "retired_project", "{args:?}");
@@ -29942,4 +29943,171 @@ fn parked_review_state_follows_the_copy_each_row_shows() {
     }
     let queue = env.json(&main, &["list", "--needs-review"]).to_string();
     assert!(!queue.contains(&a), "{queue}");
+}
+
+fn error_detail(out: &std::process::Output) -> String {
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    error["error"]["detail"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn adopt_refuses_a_target_registered_at_a_retired_root_elsewhere() {
+    let env = TestEnv::new();
+    let (dir, _old_id) = adopt_fixture(&env);
+    let other = env.home.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    adopt_json(&env, &other, &["init", "--prefix", "new"]);
+    adopt_json(&env, &other, &["retire", "--reason", "r"]);
+    let registry_path = env.home.path().join("config/tasks/projects.toml");
+    let before = std::fs::read(&registry_path).unwrap();
+    let refused = adopt_cmd(&env, &dir)
+        .args(["rename", "old", "new", "--adopt"])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    let detail = error_detail(&refused);
+    assert!(detail.contains("is registered at"), "{detail}");
+    assert_eq!(std::fs::read(registry_path).unwrap(), before);
+}
+
+#[test]
+fn retire_cmd_refuses_an_already_retired_project_and_keeps_its_declaration() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    env.json(&old, &["retire", "--reason", "first"]);
+    let config = old.join("tasks/.config.toml");
+    let before = std::fs::read(&config).unwrap();
+    let out = env
+        .cmd(&old)
+        .args(["retire", "--reason", "second"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "retired_project");
+    assert!(error_detail(&out).contains("tasks unretire"));
+    assert_eq!(std::fs::read(&config).unwrap(), before);
+}
+
+#[test]
+fn retire_cmd_stores_a_successor_alias_as_its_live_prefix() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    env.init("new");
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    registry["aliases"] = toml::toml! { nu = "new" }.into();
+    std::fs::write(&path, toml::to_string(&registry).unwrap()).unwrap();
+    let out = env.json(&old, &["retire", "--successor", "nu", "--reason", "r"]);
+    assert_eq!(out["retired"]["successor"], "new");
+    assert!(
+        std::fs::read_to_string(old.join("tasks/.config.toml"))
+            .unwrap()
+            .contains("successor = \"new\"")
+    );
+}
+
+#[test]
+fn retired_read_feedback_owners_and_wide_id_completion_leave_it_out() {
+    let (env, _ai, ops, sci) = owners_env();
+    let gone = id_of(env.json(&ops, &["add", "Old"]));
+    env.json(&ops, &["drop", &gone, "m"]);
+    env.json(&ops, &["retire", "--reason", "r"]);
+    assert_eq!(
+        env.complete(&sci, "bash", 3, &["tasks", "feedback", "--project", ""]),
+        ["ai"]
+    );
+    let local = id_of(env.json(&sci, &["add", "Local"]));
+    for scope in [vec!["--all-projects"], vec!["--group", "all"]] {
+        if scope[0] == "--group" {
+            env.json(&sci, &["group", "set", "all", "sci", "ai"]);
+            // A group made before the retirement still names ops.
+            let path = env.home.path().join(".config/tasks/projects.toml");
+            let text = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(
+                &path,
+                text.replace("[\"sci\", \"ai\"]", "[\"sci\", \"ai\", \"ops\"]"),
+            )
+            .unwrap();
+        }
+        let mut words = vec!["tasks", "list"];
+        words.extend(&scope);
+        words.extend(["--parent", ""]);
+        let wide = env.complete(&sci, "bash", words.len() - 1, &words);
+        assert!(wide.contains(&local), "{scope:?}: {wide:?}");
+        assert!(!wide.contains(&gone), "{scope:?}: {wide:?}");
+    }
+    let out = env
+        .cmd(&sci)
+        .args([
+            "feedback",
+            "--project",
+            "sci",
+            "x is slow",
+            "--category",
+            "gap",
+        ])
+        .output()
+        .unwrap();
+    let detail = error_detail(&out);
+    assert!(
+        detail.contains("ai (") && !detail.contains("ops ("),
+        "{detail}"
+    );
+}
+
+#[test]
+fn retired_read_check_in_a_worktree_made_before_retirement_reports_open_work() {
+    let mut env = TestEnv::new();
+    let (main, side, _id) = repo_with_worktree_as(&mut env, "old");
+    declare_retired(&main, None); // only the registered checkout knows
+    let out = env.cmd(&side).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        report["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["kind"] == "open_in_retired"),
+        "{report}"
+    );
+}
+
+#[test]
+fn retire_cmd_names_git_worktree_prune_for_a_worktree_that_is_gone() {
+    let mut env = TestEnv::new();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    std::fs::remove_dir_all(&side).unwrap();
+    let out = env
+        .cmd(&main)
+        .args(["retire", "--reason", "r"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unreadable_checkout");
+    assert!(error_detail(&out).contains("git worktree prune"));
+    git(&main, &["worktree", "prune"]);
+    env.json(&main, &["retire", "--reason", "r"]);
+}
+
+#[test]
+fn init_force_repoints_away_from_a_registered_root_that_is_a_plain_file() {
+    let mut env = TestEnv::new();
+    env.init("aa");
+    let file = env.home.path().join("plainfile");
+    std::fs::write(&file, "").unwrap();
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    registry["projects"]["aa"] = toml::Value::String(file.display().to_string());
+    std::fs::write(&path, toml::to_string(&registry).unwrap()).unwrap();
+    let fresh = env.home.path().join("fresh");
+    std::fs::create_dir(&fresh).unwrap();
+    env.json(&fresh, &["init", "--prefix", "aa", "--force"]);
+    let registry: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        std::path::Path::new(registry["projects"]["aa"].as_str().unwrap())
+            .canonicalize()
+            .unwrap(),
+        fresh.canonicalize().unwrap()
+    );
 }

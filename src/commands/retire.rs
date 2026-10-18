@@ -13,10 +13,18 @@ pub fn retire(here: Project, successor: Option<String>, reason: String) -> Resul
     let _lock = MutationLock::acquire(&here.prefix)?;
     let registry = Registry::load()?;
     let project = authority(&registry, &here)?;
+    if let Some(existing) = &project.retired {
+        return Err(Error::RetiredProject(format!(
+            "{} is already retired (since {}: {}); run `tasks unretire` first to declare it again",
+            project.prefix, existing.date, existing.reason
+        )));
+    }
     let retirement = Retirement {
         // `Date`'s Display is YYYY-MM-DD.
         date: time::OffsetDateTime::now_utc().date().to_string(),
-        successor,
+        // Stored as the live prefix, so a retired alias typed here never outlives a
+        // later `unregister` that drops it.
+        successor: successor.map(|s| registry.canonical_prefix(&s).to_string()),
         reason,
     };
     validate_retirement(&retirement)?;
@@ -98,7 +106,19 @@ fn reject_open_copies(project: &Project) -> Result<()> {
     let mut open = Vec::new();
     for root in project.checkout_roots()? {
         let dir = root.join("tasks");
-        for entry in std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))? {
+        let entries = std::fs::read_dir(&dir).map_err(|e| {
+            // A worktree git still lists whose directory is gone (`prunable`).
+            if e.kind() == std::io::ErrorKind::NotFound && !root.exists() {
+                Error::UnreadableCheckout(format!(
+                    "{}: git lists this worktree but it is gone; run `git worktree prune` in {}, then retry",
+                    root.display(),
+                    project.root.display()
+                ))
+            } else {
+                unreadable(&dir, &e)
+            }
+        })?;
+        for entry in entries {
             let path = entry.map_err(|e| unreadable(&dir, &e))?.path();
             // Records only, as `Project::task_files` reads them: a dot-prefixed stem is a
             // kept edit temp (`.<id>.<hex>.edit.md`), not a task.
