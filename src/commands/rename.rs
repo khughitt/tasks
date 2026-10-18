@@ -95,6 +95,8 @@ pub fn run(
     let mut registry = Registry::load()?;
     let mut requested = invocation(&registry, &old, &new)?;
     if explain {
+        // As the run refuses, so explain never reports a stage it would not reach.
+        reject_renaming_a_retired_project(&registry, &requested.source)?;
         return crate::rename::run(&mut registry, &requested, true).map(Output::Rename);
     }
     for _ in 0..4 {

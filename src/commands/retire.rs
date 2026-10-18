@@ -114,7 +114,7 @@ fn reject_open_copies(project: &Project) -> Result<()> {
         let dir = root.join("tasks");
         let entries = match std::fs::read_dir(&dir) {
             Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !root.exists() => {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(match project.missing_checkout_advice(&root)? {
                     Some(advice) => {
                         Error::UnreadableCheckout(format!("{}: {advice}", root.display()))

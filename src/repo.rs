@@ -729,10 +729,10 @@ impl Project {
             .map(|records| records.into_iter().map(|record| record.root).collect()))
     }
 
-    /// Why `root`, one of `checkout_roots`, is not on disk, phrased as what to do: its
-    /// worktree is gone (locked, so `git worktree prune` skips it until unlocked, or
-    /// prunable), or the worktree is there at a commit without this project. `None` when
-    /// git lists no worktree with that root.
+    /// Why `root`, one of `checkout_roots`, has no `tasks/` on disk, phrased as what to do:
+    /// its worktree is gone (locked, so `git worktree prune` skips it until unlocked, or
+    /// prunable), or the worktree is there at a commit without this project's records.
+    /// `None` when git lists no worktree with that root.
     pub fn missing_checkout_advice(&self, root: &Path) -> Result<Option<String>> {
         let Some(records) = self.worktree_records()? else {
             return Ok(None);
@@ -743,11 +743,13 @@ impl Project {
         let at = self.root.display();
         let worktree = record.worktree.display();
         Ok(Some(if record.worktree.exists() {
+            let records = root.join("tasks");
             format!(
                 "worktree {worktree} has no {} at its commit; remove that worktree or check \
                  out a commit that has the project there, then retry",
-                root.strip_prefix(&record.worktree)
-                    .unwrap_or(root)
+                records
+                    .strip_prefix(&record.worktree)
+                    .unwrap_or(&records)
                     .display()
             )
         } else if record.locked {

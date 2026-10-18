@@ -30082,7 +30082,10 @@ fn retired_read_check_in_a_worktree_made_before_retirement_reports_open_work() {
         .unwrap_or_else(|| panic!("{report}"))
         .clone();
     let detail = finding["detail"].as_str().unwrap();
-    assert!(detail.contains(main.to_str().unwrap()), "{detail}");
+    assert!(
+        detail.contains(main.to_str().unwrap()) && detail.contains("stale"),
+        "{detail}"
+    );
 
     // A registered checkout that cannot be read is a finding, not an abort.
     let config = main.join("tasks/.config.toml");
@@ -30181,7 +30184,10 @@ fn retire_cmd_names_a_worktree_whose_commit_predates_a_nested_project() {
         .unwrap();
     assert_eq!(err_kind(&out), "unreadable_checkout");
     let detail = error_detail(&out);
-    assert!(detail.contains("has no sub at its commit"), "{detail}");
+    assert!(
+        detail.contains("has no sub/tasks at its commit"),
+        "{detail}"
+    );
     assert!(!detail.contains("prune"), "{detail}");
 }
 
@@ -30218,6 +30224,86 @@ fn adopt_explain_refuses_a_retired_checkout_as_the_run_does() {
         &["rename", "old", "new", "--adopt"][..],
     ] {
         let out = adopt_cmd(&env, &dir).args(args).output().unwrap();
+        assert_eq!(err_kind(&out), "retired_project", "{args:?}");
+    }
+}
+
+#[test]
+fn retire_cmd_names_a_worktree_whose_commit_predates_the_records() {
+    let env = TestEnv::new();
+    let repo = env.home.path().canonicalize().unwrap().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("README"), "r").unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "before"]);
+    env.json(&repo, &["init", "--prefix", "old"]);
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "project"]);
+    let wt = repo.join("wt");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "old-side",
+            wt.to_str().unwrap(),
+            "HEAD~1",
+        ],
+    );
+    let out = env
+        .cmd(&repo)
+        .args(["retire", "--reason", "r"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unreadable_checkout");
+    let detail = error_detail(&out);
+    assert!(detail.contains("has no tasks at its commit"), "{detail}");
+}
+
+#[test]
+fn a_registered_root_that_is_missing_or_a_file_is_named_as_such() {
+    let mut env = TestEnv::new();
+    let sci = env.init("sci");
+    let file = env.home.path().join("plainfile");
+    std::fs::write(&file, "").unwrap();
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    let mut registry: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let projects = registry["projects"].as_table_mut().unwrap();
+    projects.insert("fl".into(), file.display().to_string().into());
+    projects.insert(
+        "gone".into(),
+        env.home.path().join("moved").display().to_string().into(),
+    );
+    std::fs::write(&path, toml::to_string(&registry).unwrap()).unwrap();
+    for (prefix, says) in [("fl", "not a directory"), ("gone", "not on this machine")] {
+        let out = env
+            .cmd(&sci)
+            .args(["list", "--project", prefix])
+            .output()
+            .unwrap();
+        let detail = error_detail(&out);
+        assert!(detail.contains(says), "{prefix}: {detail}");
+        assert!(
+            !detail.contains("run `tasks init` there"),
+            "{prefix}: {detail}"
+        );
+    }
+}
+
+#[test]
+fn rename_explain_refuses_a_retired_project_as_the_run_does() {
+    let mut env = TestEnv::new();
+    let old = env.init("old");
+    declare_retired(&old, None);
+    for args in [
+        &["rename", "old", "neu", "--explain"][..],
+        &["rename", "old", "neu"][..],
+    ] {
+        let out = env.cmd(&old).args(args).output().unwrap();
         assert_eq!(err_kind(&out), "retired_project", "{args:?}");
     }
 }

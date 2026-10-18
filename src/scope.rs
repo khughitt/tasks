@@ -44,8 +44,11 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
     if !has_config(root)? {
         let advice = if root.is_dir() {
             "run `tasks init` there"
-        } else {
+        } else if root.exists() {
             "it is not a directory; repoint it with `tasks init --force` in the checkout"
+        } else {
+            "it is not on this machine; restore it, or repoint it with `tasks init --force` \
+             in the checkout"
         };
         return Err(fail(format!(
             "project {live:?} at {} has no {CONFIG_REL}; {advice}",

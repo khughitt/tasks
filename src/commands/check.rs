@@ -114,12 +114,14 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         .project_root(&ctx.project.prefix)
         .unwrap_or(&ctx.project.root)
         .to_path_buf();
-    // Only the registered checkout can unretire, and a worktree's copy cannot be closed.
+    // A retired project takes no writes, so the record cannot be closed as it stands;
+    // a worktree's open copy is a stale branch of work the retirement already closed.
     let way_out = if authority == ctx.project.root {
-        "close it, or run `tasks unretire`".to_string()
+        "run `tasks unretire`, close it, then retire again".to_string()
     } else {
         format!(
-            "close it in {}, or run `tasks unretire` there; this worktree's copy is stale",
+            "this worktree's copy is stale ({} declares the retirement); update or remove \
+             this worktree",
             authority.display()
         )
     };
