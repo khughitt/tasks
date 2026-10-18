@@ -186,8 +186,9 @@ fn spans(spans: &[Span]) -> Vec<(&str, Option<Style>)> {
 
 fn overview(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
     let mut rendered = present::rule("overview", painter, width.unwrap_or(MEASURE));
-    let title = present::heading(&o.task.title, color(o, &o.task.id.to_string()));
-    let id = present::id(&format!("({})", o.task.id));
+    let project = color(o, &o.task.id.to_string());
+    let title = present::heading(&o.task.title, project);
+    let id = present::id(&format!("({})", o.task.id), project);
     rendered.push_str(&block(
         "",
         0,
@@ -227,11 +228,11 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
     ];
     if let Some(to) = &t.moved_to {
         let to = to.to_string();
-        rows.push(("moved to", vec![present::row_id(&to, color(o, &to))]));
+        rows.push(("moved to", vec![present::id(&to, color(o, &to))]));
     }
     if let Some(from) = &t.moved_from {
         let from = from.to_string();
-        rows.push(("moved from", vec![present::row_id(&from, color(o, &from))]));
+        rows.push(("moved from", vec![present::id(&from, color(o, &from))]));
     }
     if t.size.is_some() {
         rows.push(("size", vec![present::size(t.size)]));
@@ -244,7 +245,7 @@ fn overview_rows(o: &ShowFields) -> Vec<(&'static str, Vec<Span>)> {
         rows.push(("lane", vec![Span::plain("yes")]));
     } else if let Some(lane) = &o.in_lane {
         let lane = lane.to_string();
-        rows.push(("in lane", vec![present::row_id(&lane, color(o, &lane))]));
+        rows.push(("in lane", vec![present::id(&lane, color(o, &lane))]));
     }
     if t.parallel {
         rows.push(("parallel", vec![Span::plain("yes")]));
@@ -485,7 +486,7 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
         let lead = format!(
             "{}  {}  {}  ",
             painter.paint(Style::Chrome, &format!("{label:<label_width$}")),
-            present::row_id(id, project).left(id_width).paint(painter),
+            present::id(id, project).left(id_width).paint(painter),
             status.left(status_width).paint(painter),
         );
         rendered.push_str(&block(

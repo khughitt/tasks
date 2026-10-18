@@ -253,8 +253,10 @@ invalid values fail with a typed config error. Change the value to recolor or re
 key to restore existing styling. Init/reinitialization and prefix rename preserve it.
 Pretty output paints a project's name in that RGB: prefixes in
 `projects`, `groups` and `where`; task ids and titles in table views, and in `show`/`next`
-by the project each related id belongs to. `claims` stays uncolored. Unassigned or unreachable projects keep existing styling;
-other columns keep their roles. Existing `--color`, `TASKS_COLOR`, `NO_COLOR`, and auto
+(the overview line included) by the project each id belongs to. Ids take a lighter shade
+of the color than titles (barely lighter for a near-white color). `claims` stays
+uncolored. Unassigned or unreachable projects keep existing styling; other columns keep
+their roles. Existing `--color`, `TASKS_COLOR`, `NO_COLOR`, and auto
 controls apply; stored IDs are unchanged. JSON carries the color as lowercase
 `color: "#rrggbb"` on `projects` rows, `where`'s `project`, and resolved `resolve` rows
 (omitted when unset or unreachable, and by `resolve` with a warning when a config cannot

@@ -45,17 +45,10 @@ impl Span {
     }
 }
 
-/// A task id, wherever it appears.
-pub fn id(id: &str) -> Span {
-    Span::styled(id, Style::Chrome)
-}
-
-/// A task id in a table row: its project's colour when it has one, else chrome.
-pub fn row_id(id: &str, project: Option<Rgb>) -> Span {
-    Span {
-        text: id.into(),
-        style: Some(project.map_or(Style::Chrome, Style::Project)),
-    }
+/// A task id, wherever it appears: the shade of its project's colour when it has one,
+/// else chrome.
+pub fn id(id: &str, project: Option<Rgb>) -> Span {
+    Span::styled(id, project.map_or(Style::Chrome, Style::Id))
 }
 
 /// The review prefix of an id cell: marked, reserved, or absent.
@@ -183,7 +176,10 @@ mod tests {
 
     #[test]
     fn fields_carry_their_roles() {
-        assert_eq!(id("xx-000001").style, Some(Style::Chrome));
+        assert_eq!(id("xx-000001", None).style, Some(Style::Chrome));
+        let rgb = Rgb { r: 1, g: 2, b: 3 };
+        assert_eq!(id("xx-000001", Some(rgb)).style, Some(Style::Id(rgb)));
+        assert_eq!(title("T", Some(rgb)).style, Some(Style::Project(rgb)));
         assert_eq!(owner("me").style, Some(Style::Chrome));
         assert_eq!(
             status(Status::Doing).style,
@@ -220,7 +216,7 @@ mod tests {
 
     #[test]
     fn left_pads_before_painting() {
-        assert_eq!(id("ab").left(4).text, "ab  ");
+        assert_eq!(id("ab", None).left(4).text, "ab  ");
     }
 
     /// Spec §4.1: the views ask this module, so a field cannot look different in two
@@ -237,6 +233,7 @@ mod tests {
                 "Style::Priority(",
                 "Style::Date(",
                 "Style::Project(",
+                "Style::Id(",
             ] {
                 assert!(
                     !code.contains(role),

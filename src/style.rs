@@ -54,6 +54,8 @@ impl ColorMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
     Project(Rgb),
+    /// A task id: its project's colour, lightened so it reads apart from the title beside it.
+    Id(Rgb),
     Status(Status),
     Chrome,
     Emphasis,
@@ -74,6 +76,14 @@ pub enum When {
     Today,
     On(time::Date),
 }
+
+/// How far an id's shade sits from its project colour toward white, in OKLab.
+const ID_TOWARD_WHITE: f64 = 0.3;
+const WHITE: Rgb = Rgb {
+    r: 255,
+    g: 255,
+    b: 255,
+};
 
 /// Days beyond which every date looks the same.
 const HORIZON_DAYS: f64 = 730.0;
@@ -192,6 +202,10 @@ impl Painter {
         );
         let code: String = match style {
             Style::Project(color) => format!("38;2;{};{};{}", color.r, color.g, color.b),
+            Style::Id(color) => {
+                let shade = color.mix(WHITE, ID_TOWARD_WHITE);
+                format!("38;2;{};{};{}", shade.r, shade.g, shade.b)
+            }
             Style::Date(when) => match &self.recency {
                 Some(recency) => {
                     let color = recency.color(when);
@@ -304,6 +318,31 @@ mod tests {
             "\x1b[1;38;2;1;2;3mx\x1b[0m"
         );
         assert_eq!(colored.paint(Style::Status(Status::Todo), "todo"), "todo");
+    }
+
+    #[test]
+    fn the_id_role_paints_its_project_colour_lightened_toward_white() {
+        let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
+        let hex = |value| Rgb::parse_hex(value).unwrap();
+        // each colour mixed 30% of the way to white in OKLab, computed outside tasks
+        for (base, shade) in [("#123456", "#546c87"), ("#abcdef", "#c4dcf4")] {
+            let (base, shade) = (hex(base), hex(shade));
+            assert_eq!(
+                colored.paint(Style::Id(base), "x"),
+                format!("\x1b[38;2;{};{};{}mx\x1b[0m", shade.r, shade.g, shade.b)
+            );
+            assert!(
+                shade.lightness() > base.lightness(),
+                "{base:?} -> {shade:?}"
+            );
+        }
+        // white has nowhere lighter to go
+        assert_eq!(
+            colored.paint(Style::Id(hex("#ffffff")), "x"),
+            "\x1b[38;2;255;255;255mx\x1b[0m"
+        );
+        let plain = Painter::new(ColorMode::Never, Format::Pretty, true);
+        assert_eq!(plain.paint(Style::Id(hex("#123456")), "x"), "x");
     }
 
     use crate::palette::{Palette, Rgb};
