@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: feat/id-shade
 created: 2026-10-18T18:54:35Z
-updated: 2026-10-18T19:00:59Z
+updated: 2026-10-18T19:09:13Z
 started: 2026-10-18T19:00:26Z
 depends: []
 parent: tasks-1f05a7
@@ -36,3 +36,4 @@ Out of scope, judged: ids inside prose (notes, lane guides, next steps, warnings
   provenance: {"harness_session":"claude-code:6c3bce1d-9258-49a0-98a5-0f7c415f7c43","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-18T19:00:59Z (feat/id-shade): resumed
   provenance: {"harness_session":"claude-code:6c3bce1d-9258-49a0-98a5-0f7c415f7c43","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T19:09:13Z (feat/id-shade): a6af253 on feat/id-shade: Style::Id (project colour mixed 0.3 toward white in OKLab), present::id(id, project) replaces row_id; unit test pins hand-derived literal shades (independent Python OKLab) in place of a lightness comparison; impl review dispatched
