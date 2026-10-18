@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use crate::model::TaskId;
 use crate::repo::atomic_write;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -79,6 +80,12 @@ impl Registry {
     }
 
     pub fn load_from(path: &Path) -> Result<Registry> {
+        Self::load_with_home(path, std::env::var_os("HOME"))
+    }
+
+    /// `load_from` with the home directory that expands a leading `~/` passed in, so
+    /// tests never mutate the process-wide `HOME`.
+    fn load_with_home(path: &Path, home: Option<OsString>) -> Result<Registry> {
         // Only an absent registry is empty. `exists()` is false when an ancestor is
         // unreadable too, which would read a permission error as "no projects".
         let text = match std::fs::read_to_string(path) {
@@ -92,7 +99,7 @@ impl Registry {
             .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
         for (prefix, root) in &mut registry.projects {
             if let Some(rest) = root.to_str().and_then(|root| root.strip_prefix("~/")) {
-                let home = std::env::var_os("HOME").ok_or_else(|| {
+                let home = home.as_ref().ok_or_else(|| {
                     Error::Config(format!("project {prefix} uses ~ but HOME is not set"))
                 })?;
                 *root = PathBuf::from(home).join(rest);
@@ -662,10 +669,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("projects.toml");
         std::fs::write(&path, "[projects]\nsci = \"~/d/science\"\n").unwrap();
-        unsafe {
-            std::env::set_var("HOME", home.path());
-        }
-        let r = Registry::load_from(&path).unwrap();
+        let r = Registry::load_with_home(&path, Some(home.path().into())).unwrap();
         assert_eq!(
             r.project_root("sci").unwrap(),
             home.path().join("d/science")
