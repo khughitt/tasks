@@ -76,6 +76,7 @@ pub fn run(
         }
         let project = crate::repo::Project::locate(&super::start_dir(dir)?)?;
         if explain {
+            reject_adopting_a_retired_project(&project)?;
             let mut registry = Registry::load()?;
             return crate::rename::adopt::run(&mut registry, &project, &old, &new, true)
                 .map(Output::Rename);
@@ -87,12 +88,7 @@ pub fn run(
         let _registry_lock = Registry::lock()?;
         let mut registry = Registry::load()?;
         let project = crate::repo::Project::locate(&super::start_dir(dir)?)?;
-        if project.retired.is_some() {
-            return Err(Error::RetiredProject(format!(
-                "{} is retired; a retired project is not renamed",
-                project.prefix
-            )));
-        }
+        reject_adopting_a_retired_project(&project)?;
         return crate::rename::adopt::run(&mut registry, &project, &old, &new, false)
             .map(Output::Rename);
     }
@@ -122,6 +118,18 @@ pub fn run(
     Err(Error::Io(
         "the project's identity kept changing while acquiring rename locks; retry".into(),
     ))
+}
+
+/// `--adopt` and its `--explain` refuse alike, so explain never reports a stage the run
+/// would refuse.
+fn reject_adopting_a_retired_project(project: &crate::repo::Project) -> Result<()> {
+    if project.retired.is_some() {
+        return Err(Error::RetiredProject(format!(
+            "{} is retired; a retired project is not renamed",
+            project.prefix
+        )));
+    }
+    Ok(())
 }
 
 /// A retired project is not renamed (ops lifecycle spec §4). Read without the prefix

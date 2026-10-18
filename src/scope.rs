@@ -42,8 +42,13 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
         return Err(fail(format!("no project registered as {prefix:?}")));
     };
     if !has_config(root)? {
+        let advice = if root.is_dir() {
+            "run `tasks init` there"
+        } else {
+            "it is not a directory; repoint it with `tasks init --force` in the checkout"
+        };
         return Err(fail(format!(
-            "project {live:?} at {} has no {CONFIG_REL}; run `tasks init` there",
+            "project {live:?} at {} has no {CONFIG_REL}; {advice}",
             root.display()
         )));
     }

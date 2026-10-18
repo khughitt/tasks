@@ -38,8 +38,8 @@ pub fn open(dir: Option<&std::path::Path>, target: &str) -> Result<(Ctx, String)
     }
 }
 
-/// Every registered, reachable, unretired project that accepts feedback, with its scope,
-/// read from its config alone: a retired owner refuses the report anyway. Never a task file: a malformed task anywhere must not hide an owner.
+/// Every registered, reachable, unretired project that accepts feedback, with its
+/// scope, read from its config alone: a retired owner refuses the report anyway. Never a task file: a malformed task anywhere must not hide an owner.
 /// A config that cannot be read is listed with its error instead of failing the caller.
 pub fn owners(registry: &Registry) -> Vec<(String, std::result::Result<String, String>)> {
     let mut found = Vec::new();

@@ -24,20 +24,26 @@ pub fn retire(here: Project, successor: Option<String>, reason: String) -> Resul
         date: time::OffsetDateTime::now_utc().date().to_string(),
         // Stored as the live prefix, so a retired alias typed here never outlives a
         // later `unregister` that drops it.
-        successor: successor.map(|s| registry.canonical_prefix(&s).to_string()),
+        successor: successor
+            .as_deref()
+            .map(|s| registry.canonical_prefix(s).to_string()),
         reason,
     };
     validate_retirement(&retirement)?;
-    if let Some(s) = &retirement.successor {
-        let live = registry.canonical_prefix(s);
-        let usable = live != project.prefix
+    if let (Some(typed), Some(live)) = (&successor, &retirement.successor) {
+        let usable = *live != project.prefix
             && registry.project_root(live).is_some()
             && crate::scope::open_registered(&registry, live, Origin::Prefix)?
                 .retired
                 .is_none();
         if !usable {
+            let named = if typed == live {
+                format!("{typed:?}")
+            } else {
+                format!("{typed:?} (now {live:?})")
+            };
             return Err(Error::Config(format!(
-                "successor {s:?} must be a registered, unretired prefix other than {}",
+                "successor {named} must be a registered, unretired prefix other than {}",
                 project.prefix
             )));
         }
@@ -106,18 +112,18 @@ fn reject_open_copies(project: &Project) -> Result<()> {
     let mut open = Vec::new();
     for root in project.checkout_roots()? {
         let dir = root.join("tasks");
-        let entries = std::fs::read_dir(&dir).map_err(|e| {
-            // A worktree git still lists whose directory is gone (`prunable`).
-            if e.kind() == std::io::ErrorKind::NotFound && !root.exists() {
-                Error::UnreadableCheckout(format!(
-                    "{}: git lists this worktree but it is gone; run `git worktree prune` in {}, then retry",
-                    root.display(),
-                    project.root.display()
-                ))
-            } else {
-                unreadable(&dir, &e)
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !root.exists() => {
+                return Err(match project.missing_checkout_advice(&root)? {
+                    Some(advice) => {
+                        Error::UnreadableCheckout(format!("{}: {advice}", root.display()))
+                    }
+                    None => unreadable(&dir, &e),
+                });
             }
-        })?;
+            Err(e) => return Err(unreadable(&dir, &e)),
+        };
         for entry in entries {
             let path = entry.map_err(|e| unreadable(&dir, &e))?.path();
             // Records only, as `Project::task_files` reads them: a dot-prefixed stem is a

@@ -29991,7 +29991,8 @@ fn retire_cmd_refuses_an_already_retired_project_and_keeps_its_declaration() {
 fn retire_cmd_stores_a_successor_alias_as_its_live_prefix() {
     let mut env = TestEnv::new();
     let old = env.init("old");
-    env.init("new");
+    let new = env.init("new");
+    env.init("other");
     let path = env.home.path().join(".config/tasks/projects.toml");
     let mut registry: toml::Value =
         toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -30004,6 +30005,16 @@ fn retire_cmd_stores_a_successor_alias_as_its_live_prefix() {
             .unwrap()
             .contains("successor = \"new\"")
     );
+    // A refusal names the alias as typed and the prefix it now stands for.
+    env.json(&old, &["unretire"]);
+    env.json(&new, &["retire", "--successor", "other", "--reason", "r"]);
+    let refused = env
+        .cmd(&old)
+        .args(["retire", "--successor", "nu", "--reason", "r"])
+        .output()
+        .unwrap();
+    let detail = error_detail(&refused);
+    assert!(detail.contains("\"nu\" (now \"new\")"), "{detail}");
 }
 
 #[test]
@@ -30017,17 +30028,17 @@ fn retired_read_feedback_owners_and_wide_id_completion_leave_it_out() {
         ["ai"]
     );
     let local = id_of(env.json(&sci, &["add", "Local"]));
-    for scope in [vec!["--all-projects"], vec!["--group", "all"]] {
+    for scope in [vec!["--group", "all"], vec!["--all-projects"]] {
         if scope[0] == "--group" {
             env.json(&sci, &["group", "set", "all", "sci", "ai"]);
             // A group made before the retirement still names ops.
             let path = env.home.path().join(".config/tasks/projects.toml");
-            let text = std::fs::read_to_string(&path).unwrap();
-            std::fs::write(
-                &path,
-                text.replace("[\"sci\", \"ai\"]", "[\"sci\", \"ai\", \"ops\"]"),
-            )
-            .unwrap();
+            let mut registry: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            registry["groups"]["all"] = toml::toml! { x = ["ai", "ops", "sci"] }["x"].clone();
+            std::fs::write(&path, toml::to_string(&registry).unwrap()).unwrap();
+            let members = env.json(&sci, &["groups"]).to_string();
+            assert!(members.contains("\"ops\""), "{members}");
         }
         let mut words = vec!["tasks", "list"];
         words.extend(&scope);
@@ -30063,12 +30074,29 @@ fn retired_read_check_in_a_worktree_made_before_retirement_reports_open_work() {
     let out = env.cmd(&side).args(["check"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let finding = report["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["kind"] == "open_in_retired")
+        .unwrap_or_else(|| panic!("{report}"))
+        .clone();
+    let detail = finding["detail"].as_str().unwrap();
+    assert!(detail.contains(main.to_str().unwrap()), "{detail}");
+
+    // A registered checkout that cannot be read is a finding, not an abort.
+    let config = main.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("<<<<<<< HEAD\n{text}")).unwrap();
+    let out = env.cmd(&side).args(["check"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(
         report["errors"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|f| f["kind"] == "open_in_retired"),
+            .any(|f| f["kind"] == "retirement_unknown"),
         "{report}"
     );
 }
@@ -30084,9 +30112,77 @@ fn retire_cmd_names_git_worktree_prune_for_a_worktree_that_is_gone() {
         .output()
         .unwrap();
     assert_eq!(err_kind(&out), "unreadable_checkout");
-    assert!(error_detail(&out).contains("git worktree prune"));
+    let detail = error_detail(&out);
+    assert!(detail.contains("git worktree prune"), "{detail}");
+    assert!(!detail.contains("unlock"), "{detail}");
     git(&main, &["worktree", "prune"]);
     env.json(&main, &["retire", "--reason", "r"]);
+}
+
+#[test]
+fn retire_cmd_names_unlock_for_a_locked_worktree_that_is_gone() {
+    let mut env = TestEnv::new();
+    let (main, side) = closed_repo_with_worktree(&mut env, "old");
+    git(
+        &main,
+        &[
+            "worktree",
+            "lock",
+            "--reason",
+            "kept",
+            side.to_str().unwrap(),
+        ],
+    );
+    std::fs::remove_dir_all(&side).unwrap();
+    let out = env
+        .cmd(&main)
+        .args(["retire", "--reason", "r"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unreadable_checkout");
+    let detail = error_detail(&out);
+    assert!(detail.contains("git worktree unlock"), "{detail}");
+    git(&main, &["worktree", "unlock", side.to_str().unwrap()]);
+    git(&main, &["worktree", "prune"]);
+    env.json(&main, &["retire", "--reason", "r"]);
+}
+
+#[test]
+fn retire_cmd_names_a_worktree_whose_commit_predates_a_nested_project() {
+    let env = TestEnv::new();
+    let repo = env.home.path().canonicalize().unwrap().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("README"), "r").unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "before"]);
+    let sub = repo.join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    env.json(&sub, &["init", "--prefix", "old"]);
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-qm", "project"]);
+    let wt = repo.join("wt");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "old-side",
+            wt.to_str().unwrap(),
+            "HEAD~1",
+        ],
+    );
+    let out = env
+        .cmd(&sub)
+        .args(["retire", "--reason", "r"])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "unreadable_checkout");
+    let detail = error_detail(&out);
+    assert!(detail.contains("has no sub at its commit"), "{detail}");
+    assert!(!detail.contains("prune"), "{detail}");
 }
 
 #[test]
@@ -30110,4 +30206,18 @@ fn init_force_repoints_away_from_a_registered_root_that_is_a_plain_file() {
             .unwrap(),
         fresh.canonicalize().unwrap()
     );
+}
+
+#[test]
+fn adopt_explain_refuses_a_retired_checkout_as_the_run_does() {
+    let env = TestEnv::new();
+    let (dir, _old_id) = adopt_fixture(&env);
+    declare_retired(&dir, None);
+    for args in [
+        &["rename", "old", "new", "--adopt", "--explain"][..],
+        &["rename", "old", "new", "--adopt"][..],
+    ] {
+        let out = adopt_cmd(&env, &dir).args(args).output().unwrap();
+        assert_eq!(err_kind(&out), "retired_project", "{args:?}");
+    }
 }

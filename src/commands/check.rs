@@ -93,10 +93,36 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))
         .collect();
     let (tasks, parse_errors) = ctx.project.scan_lenient();
-    // A worktree made before the retirement holds no `[retired]` until a merge; the
-    // registered checkout's declaration covers it, as it does for writes.
-    let retired = super::effective_retirement(&ctx.registry, &ctx.project)?.is_some();
     let mut errors = Vec::new();
+    // A worktree made before the retirement holds no `[retired]` until a merge; the
+    // registered checkout's declaration covers it, as it does for writes. One that cannot
+    // be read is an error finding, so the rest of the report still runs.
+    let retired = match super::effective_retirement(&ctx.registry, &ctx.project) {
+        Ok(retirement) => retirement.is_some(),
+        Err(error) => {
+            errors.push(finding(
+                None,
+                crate::repo::CONFIG_REL.into(),
+                "retirement_unknown",
+                error.to_string(),
+            ));
+            false
+        }
+    };
+    let authority = ctx
+        .registry
+        .project_root(&ctx.project.prefix)
+        .unwrap_or(&ctx.project.root)
+        .to_path_buf();
+    // Only the registered checkout can unretire, and a worktree's copy cannot be closed.
+    let way_out = if authority == ctx.project.root {
+        "close it, or run `tasks unretire`".to_string()
+    } else {
+        format!(
+            "close it in {}, or run `tasks unretire` there; this worktree's copy is stale",
+            authority.display()
+        )
+    };
     let mut warnings = Vec::new();
     for journal in &pending {
         warnings.push(finding(
@@ -212,7 +238,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 file.clone(),
                 "open_in_retired",
                 format!(
-                    "{} is {} in a retired project; close it, or run `tasks unretire`",
+                    "{} is {} in a retired project; {way_out}",
                     task.id,
                     task.status.as_str()
                 ),
