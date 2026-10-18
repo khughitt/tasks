@@ -173,14 +173,18 @@ not misjudged.
 **Refuted pids record no pid.** Amended by tasks-f11052. A pid that the writer's own
 view shows is not running would be held until reboot under that rule, since no view
 can ever judge it. The write records a pid-less (TTL) claim instead, first write and
-heartbeat alike. A pid is refuted when it is 0, when it is a Unix session id that
-`proc_stat` finds gone or a zombie (the kernel numbered it in this procfs), or when it
+heartbeat alike, and it takes precedence over the table's rows. A pid is refuted when
+it is 0, when it is a Unix session id that `proc_stat` finds gone or a zombie (the
+kernel numbered it in this procfs; under `hidepid` another user's live leader also reads
+gone, which errs toward the TTL), or when it
 is an exported pid gone or a zombie in the initial namespace, which numbers every
 process. An exported pid missing from any other view may be an outer namespace's, so
 its absence refutes nothing, and it keeps the rule above. The Unix fallback also
 refuses session id 0 as an identity: the session leader is outside the namespace, and
 every shell inside shares that id, so it cannot key ownership. `TASKS_SESSION` names
-the session there.
+the session there. A claim already recorded as `sid:0` clears through `tasks release`
+from any session, or its holder sets `TASKS_SESSION=sid:0`; a recorded pid 0 is never
+kept by a heartbeat, so that holder's next write makes it a TTL claim.
 
 **Heartbeats keep established evidence.** The owner's writes refresh `seen`. They
 change the process evidence (`pid`, `pid_start`, `boot_id`, `pid_view`) only under

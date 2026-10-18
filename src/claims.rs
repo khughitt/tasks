@@ -891,8 +891,9 @@ impl Evidence {
 /// claim instead, heartbeat or not: pid 0, a Unix session id this procfs numbers and
 /// finds gone or a zombie, or an exported pid gone or a zombie in the initial namespace,
 /// which numbers every process. Recorded without a view it would read `Unverifiable`
-/// everywhere and be held until reboot (tasks-f11052). An exported pid missing from any
-/// other view may be an outer namespace's, so its absence refutes nothing.
+/// everywhere and be held until reboot, and a zombie recorded with one would read `Stale`
+/// at once (tasks-f11052). An exported pid missing from any other view may be an outer
+/// namespace's, so its absence refutes nothing. A recorded pid 0 is never kept either.
 pub fn evidence(
     me: &Identity,
     own: Option<&Claim>,
@@ -933,7 +934,7 @@ pub fn evidence(
     };
     let established = match (me.pid, me.pid_source) {
         (Some(_), Some(PidSource::Relay)) => true,
-        (Some(pid), Some(PidSource::UnixSession)) => pid != 0 && start.is_some(),
+        (Some(_), Some(PidSource::UnixSession)) => start.is_some(),
         (Some(_), Some(PidSource::Exported)) => {
             view.is_some_and(|view| view.is_initial()) && start.is_some()
         }
@@ -951,6 +952,7 @@ pub fn evidence(
     match own {
         Some(own)
             if fresh.pid_view.is_none()
+                && own.pid != Some(0)
                 && (me.pid.is_none() || me.pid == own.pid)
                 && !liveness_with(own, now, boot_id_now.as_deref(), view, &stat).is_stale() =>
         {
@@ -2703,7 +2705,7 @@ mod tests {
     }
 
     #[test]
-    fn an_exported_pid_not_found_or_in_an_unknown_view_records_no_view() {
+    fn an_exported_pid_not_found_in_the_initial_namespace_or_in_an_unknown_view() {
         let missing = evidence(
             &ident(Some(42), Some(PidSource::Exported)),
             None,
@@ -2816,6 +2818,59 @@ mod tests {
             |_| ProcStat::NotFound,
         );
         assert_eq!((got.pid, got.pid_view), (Some(42), None));
+    }
+
+    #[test]
+    fn an_exported_zombie_in_the_initial_namespace_is_recorded_pidless() {
+        let got = evidence(
+            &ident(Some(42), Some(PidSource::Exported)),
+            None,
+            Some(&INIT),
+            boot(),
+            t0(),
+            |_| ProcStat::Found {
+                state: 'Z',
+                starttime: 999,
+            },
+        );
+        assert_eq!((got.pid, got.pid_start, got.pid_view), (None, None, None));
+    }
+
+    #[test]
+    fn a_refuted_session_id_replaces_evidence_recorded_with_a_view() {
+        let own = Claim {
+            pid: Some(7),
+            pid_view: Some(INIT.to_string()),
+            ..sample()
+        };
+        let got = evidence(
+            &ident(Some(7), Some(PidSource::UnixSession)),
+            Some(&own),
+            Some(&INIT),
+            boot(),
+            t0(),
+            |_| ProcStat::NotFound,
+        );
+        assert_eq!((got.pid, got.pid_view), (None, None));
+    }
+
+    #[test]
+    fn a_pidless_heartbeat_never_keeps_a_recorded_pid_zero() {
+        // A legacy sid:0 holder recovering with TASKS_SESSION=sid:0 and no pid.
+        let own = Claim {
+            pid: Some(0),
+            pid_view: None,
+            ..sample()
+        };
+        let got = evidence(
+            &ident(None, None),
+            Some(&own),
+            Some(&CHILD),
+            boot(),
+            t0(),
+            found(1),
+        );
+        assert_eq!((got.pid, got.pid_view), (None, None));
     }
 
     #[test]

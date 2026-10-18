@@ -327,7 +327,7 @@ namespace, because an inherited number's namespace cannot be proven. Inside a co
 or sandbox, such claims stay held after their session ends. `TASKS_SESSION_PID` must
 name a process in the namespace of the command that sets it. A pid the command's own
 `/proc` shows is not running (pid 0, a gone or zombie session leader, or an exported pid
-gone from the initial namespace) is not recorded: the claim lives by the TTL instead. In
+gone or a zombie in the initial namespace) is not recorded: the claim lives by the TTL instead. In
 a PID namespace whose session leader is outside it, the Unix session id reads 0 for
 every shell, so the fallback refuses it; set `TASKS_SESSION` there.
 

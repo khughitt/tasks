@@ -29184,6 +29184,14 @@ fn pid_view_heartbeat_with_a_missing_pid_drops_it_only_where_the_view_refutes_it
             .success();
     }
     assert_missing_exported_pid(&stored_claim(&env, "sci", &id));
+    // Whatever the evidence, the write refreshed the claim: another session is refused.
+    let out = env
+        .cmd(&sci)
+        .env("TASKS_SESSION", "intruder")
+        .args(["start", &id])
+        .output()
+        .unwrap();
+    assert_eq!(err_kind(&out), "claimed");
 }
 
 #[test]
