@@ -1,13 +1,15 @@
 ---
 id: tasks-b4b9d4
 title: "Retired projects: deferred review minors"
-status: todo
+status: doing
 priority: 3
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-04T16:44:19Z
-updated: 2026-10-06T16:49:57Z
+updated: 2026-10-18T10:10:52Z
+started: 2026-10-18T10:10:52Z
 depends: []
 parent: tasks-a7460c
 tags: []
@@ -20,3 +22,5 @@ From the tasks-132852 final review, deferred: (1) rename --adopt checks only the
 ## Notes
 
 - 2026-10-04T16:44:19Z (main): concerns: tasks-132852 extension — review minors deferred at close
+- 2026-10-18T10:10:52Z (main): started
+  provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
