@@ -1,13 +1,15 @@
 ---
 id: tasks-f11052
 title: "Stop sid:0 claims from being held forever"
-status: todo
+status: doing
 priority: 3
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-15T01:48:41Z
-updated: 2026-10-15T10:33:28Z
+updated: 2026-10-18T09:55:13Z
+started: 2026-10-18T09:55:13Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -21,3 +23,5 @@ From the tasks-860db2 final review (Minor 1). Inside a PID namespace whose sessi
 
 - 2026-10-15T01:53:20Z (fix/claim-pid-view): widen per tasks-860db2 re-review: the same permanent hold applies to any dead pid recorded without a view (heartbeat rows 2-3, a fresh acquisition with a dead exported pid); decide one rule for all of them
 - 2026-10-15T10:33:28Z (main): interim (0.4.0): a held sid:0 claim can now be cleared without a takeover by `tasks release <id> "<why>"` from another session; this task still owns the fix
+- 2026-10-18T09:55:13Z (main): started
+  provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
