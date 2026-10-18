@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-17T20:36:55Z
-updated: 2026-10-18T09:43:57Z
+updated: 2026-10-18T09:43:58Z
 depends: []
 tags: [feedback, idea, "from:beliefs"]
 agent: claude-code
@@ -28,3 +28,7 @@ Done:
 Where to look: src/review.rs (`waits`, `apply`), src/commands/status.rs (`note`), src/commands/edit.rs (the `review::apply` call), src/commands/list.rs (`resolve_dependency`, `review_deps`), skills/scope/SKILL.md §3 and §5.
 
 Related: tasks-3704b5 and tasks-d2cdfe cover what a later plain note does to a pending proposal. This warning calls the same `waits`, so it needs no change if that rule changes.
+
+## Notes
+
+- 2026-10-18T09:43:58Z (main): scope: scoped; todo, s/mid/direct, P2; warning (not refusal) at the write that sets reviewed, reusing review::waits for one task; scope skill to record briefed edges before the --reviewed audit note; distinct from the stranded brief's rejected repeating check warning
