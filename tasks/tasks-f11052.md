@@ -4,11 +4,11 @@ title: "Stop sid:0 claims from being held forever"
 status: doing
 priority: 3
 size: s
-complexity: low
+complexity: mid
 process: direct
 owner: main
 created: 2026-10-15T01:48:41Z
-updated: 2026-10-18T09:57:13Z
+updated: 2026-10-18T09:57:15Z
 started: 2026-10-18T09:55:13Z
 depends: []
 parent: tasks-2fa8c6
