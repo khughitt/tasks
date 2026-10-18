@@ -102,6 +102,13 @@ pub struct Project {
     pub worktree: Option<PathBuf>,
 }
 
+/// One `git worktree list` record, with this project's root inside it.
+struct WorktreeRecord {
+    root: PathBuf,
+    worktree: PathBuf,
+    locked: bool,
+}
+
 /// One other checkout's copy of a record, as `sibling_task_copies` found it.
 #[derive(Debug)]
 pub enum SiblingCopy {
@@ -280,10 +287,14 @@ pub fn validate_retirement(r: &Retirement) -> Result<()> {
     Ok(())
 }
 
-/// `YYYY-MM-DD` naming a real calendar day.
+/// `YYYY-MM-DD` naming a real calendar day from year 1: digits only, so no sign.
 fn is_iso_date(text: &str) -> bool {
     let b = text.as_bytes();
-    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !text.is_ascii() {
+    let digits = b
+        .iter()
+        .enumerate()
+        .all(|(i, byte)| i == 4 || i == 7 || byte.is_ascii_digit());
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' || !digits || &text[0..4] == "0000" {
         return false;
     }
     let (Ok(y), Ok(m), Ok(d)) = (
@@ -713,6 +724,48 @@ impl Project {
     /// main worktree comes first; this checkout is included. `None` in the two cases
     /// `git_toplevel` documents.
     fn worktree_roots(&self) -> Result<Option<Vec<PathBuf>>> {
+        Ok(self
+            .worktree_records()?
+            .map(|records| records.into_iter().map(|record| record.root).collect()))
+    }
+
+    /// Why `root`, one of `checkout_roots`, has no `tasks/` on disk, phrased as what to do:
+    /// its worktree is gone (locked, so `git worktree prune` skips it until unlocked, or
+    /// prunable), or the worktree is there at a commit without this project's records.
+    /// `None` when git lists no worktree with that root.
+    pub fn missing_checkout_advice(&self, root: &Path) -> Result<Option<String>> {
+        let Some(records) = self.worktree_records()? else {
+            return Ok(None);
+        };
+        let Some(record) = records.into_iter().find(|record| record.root == root) else {
+            return Ok(None);
+        };
+        let at = self.root.display();
+        let worktree = record.worktree.display();
+        Ok(Some(if record.worktree.exists() {
+            let records = root.join("tasks");
+            format!(
+                "worktree {worktree} has no {} at its commit; remove that worktree or check \
+                 out a commit that has the project there, then retry",
+                records
+                    .strip_prefix(&record.worktree)
+                    .unwrap_or(&records)
+                    .display()
+            )
+        } else if record.locked {
+            format!(
+                "git lists worktree {worktree} but it is gone, and it is locked; run \
+                 `git worktree unlock {worktree}` and `git worktree prune` in {at}, then retry"
+            )
+        } else {
+            format!(
+                "git lists worktree {worktree} but it is gone; run `git worktree prune` in \
+                 {at}, then retry"
+            )
+        }))
+    }
+
+    fn worktree_records(&self) -> Result<Option<Vec<WorktreeRecord>>> {
         let Some(toplevel) = self.git_toplevel()? else {
             return Ok(None);
         };
@@ -734,27 +787,35 @@ impl Project {
             )));
         }
         // porcelain with -z: NUL-terminated fields, paths verbatim (no quoting of spaces or
-        // non-ASCII). Every record opens with a `worktree <path>` field; the rest describe
-        // the checkout's head and are not ours to read.
+        // non-ASCII). Every record opens with a `worktree <path>` field; of the rest, only
+        // `locked` (bare or with a reason) is ours to read.
         let stdout = String::from_utf8_lossy(&listed.stdout);
-        let roots = stdout
-            .split('\0')
-            .filter_map(|field| field.strip_prefix("worktree "))
-            .map(|listed| {
+        let mut records: Vec<WorktreeRecord> = Vec::new();
+        for field in stdout.split('\0') {
+            if let Some(listed) = field.strip_prefix("worktree ") {
                 let listed = PathBuf::from(listed);
                 // A worktree git still lists but that is no longer on disk canonicalizes
                 // to nothing; leave the path as given and let a read below it find nothing.
                 let worktree = listed.canonicalize().unwrap_or(listed);
                 // `join` on an empty offset would leave a trailing separator on the path
                 // that goes into every warning.
-                if offset.as_os_str().is_empty() {
-                    worktree
+                let root = if offset.as_os_str().is_empty() {
+                    worktree.clone()
                 } else {
                     worktree.join(offset)
-                }
-            })
-            .collect();
-        Ok(Some(roots))
+                };
+                records.push(WorktreeRecord {
+                    root,
+                    worktree,
+                    locked: false,
+                });
+            } else if (field == "locked" || field.starts_with("locked "))
+                && let Some(record) = records.last_mut()
+            {
+                record.locked = true;
+            }
+        }
+        Ok(Some(records))
     }
 
     /// This project's root in the repository's main worktree, when this checkout is a
@@ -1036,6 +1097,8 @@ mod tests {
             "[retired]\ndate = \"2026-10-04\"\n",
             "[retired]\ndate = \"04/10/2026\"\nreason = \"r\"\n",
             "[retired]\ndate = \"2026-02-30\"\nreason = \"r\"\n",
+            "[retired]\ndate = \"+026-10-04\"\nreason = \"r\"\n",
+            "[retired]\ndate = \"0000-01-01\"\nreason = \"r\"\n",
             "[retired]\ndate = \"2026-10-04\"\nreason = \"two\\nlines\"\n",
             "[retired]\ndate = \"2026-10-04\"\nreason = \"  \"\n",
             "[retired]\ndate = \"2026-10-04\"\nreason = \"r\"\nextra = 1\n",

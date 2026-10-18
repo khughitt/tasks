@@ -26,6 +26,10 @@ pub fn set(name: String, prefixes: Vec<String>) -> Result<Output> {
 /// A group lists active projects: a retired member is refused. An unreachable member is
 /// kept as before, since a host that does not hold it cannot read its declaration; a
 /// reachable one whose config does not parse is an error, never "not retired".
+/// Read without the members' project locks, deliberately: `retire` never reads groups, so
+/// a retirement racing this write leaves exactly what running the two one after the
+/// other would, a group listing a member retired after it was made, which wide reads
+/// already skip.
 fn reject_retired_members(registry: &Registry, members: &[String]) -> Result<()> {
     for member in members {
         let Some(root) = registry.project_root(member) else {

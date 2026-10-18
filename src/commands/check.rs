@@ -94,6 +94,37 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         .collect();
     let (tasks, parse_errors) = ctx.project.scan_lenient();
     let mut errors = Vec::new();
+    // A worktree made before the retirement holds no `[retired]` until a merge; the
+    // registered checkout's declaration covers it, as it does for writes. One that cannot
+    // be read is an error finding, so the rest of the report still runs.
+    let retired = match super::effective_retirement(&ctx.registry, &ctx.project) {
+        Ok(retirement) => retirement.is_some(),
+        Err(error) => {
+            errors.push(finding(
+                None,
+                crate::repo::CONFIG_REL.into(),
+                "retirement_unknown",
+                error.to_string(),
+            ));
+            false
+        }
+    };
+    let authority = ctx
+        .registry
+        .project_root(&ctx.project.prefix)
+        .unwrap_or(&ctx.project.root)
+        .to_path_buf();
+    // A retired project takes no writes, so the record cannot be closed as it stands;
+    // a worktree's open copy is a stale branch of work the retirement already closed.
+    let way_out = if authority == ctx.project.root {
+        "run `tasks unretire`, close it, then retire again".to_string()
+    } else {
+        format!(
+            "this worktree's copy is stale ({} declares the retirement); update or remove \
+             this worktree",
+            authority.display()
+        )
+    };
     let mut warnings = Vec::new();
     for journal in &pending {
         warnings.push(finding(
@@ -203,13 +234,13 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         let file = format!("tasks/{}.md", task.id);
         // A retired project holds no open work (ops lifecycle spec §4); one that reappears,
         // say from a sync conflict, is an error to close or a reason to unretire.
-        if ctx.project.retired.is_some() && task.status.is_open() {
+        if retired && task.status.is_open() {
             errors.push(finding(
                 Some(task),
                 file.clone(),
                 "open_in_retired",
                 format!(
-                    "{} is {} in a retired project; close it, or run `tasks unretire`",
+                    "{} is {} in a retired project; {way_out}",
                     task.id,
                     task.status.as_str()
                 ),

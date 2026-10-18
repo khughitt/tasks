@@ -565,8 +565,12 @@ pub fn scoped(current: &OsStr) -> Vec<CompletionCandidate> {
             Some(name) => registry.groups.get(name).cloned().unwrap_or_default(),
             None => registry.projects.keys().cloned().collect(),
         };
+        // Wide reads leave a retired project out (ops lifecycle spec §4), so its ids
+        // are not offered either.
         for prefix in &members {
-            if let Some(project) = open_prefix(&registry, prefix) {
+            if let Some(project) = open_prefix(&registry, prefix)
+                && project.retired.is_none()
+            {
                 tasks.extend(project.scan_lenient().0);
             }
         }

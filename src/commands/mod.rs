@@ -760,26 +760,7 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
 /// config names another prefix, is an error here, never "not retired": the write it would
 /// have guarded does not happen.
 pub fn reject_retired(registry: &Registry, project: &Project) -> Result<()> {
-    let registered = match registry.project_root(&project.prefix) {
-        Some(root) if root != project.root.as_path() => Some(
-            crate::scope::open_registered(registry, &project.prefix, Origin::Prefix).map_err(
-                |error| {
-                    Error::Config(format!(
-                        "cannot tell whether {} is retired: its registered checkout {} did not \
-                         open ({error}); fix that checkout, then retry",
-                        project.prefix,
-                        root.display()
-                    ))
-                },
-            )?,
-        ),
-        _ => None,
-    };
-    let declared = project
-        .retired
-        .as_ref()
-        .or(registered.as_ref().and_then(|p| p.retired.as_ref()));
-    let Some(retirement) = declared else {
+    let Some(retirement) = effective_retirement(registry, project)? else {
         return Ok(());
     };
     let authority = registry
@@ -796,6 +777,33 @@ pub fn reject_retired(registry: &Registry, project: &Project) -> Result<()> {
         retirement.date,
         authority.display()
     )))
+}
+
+/// The retirement `project` is under: its own `[retired]`, else its registered
+/// checkout's when it is another checkout (a worktree made before the retirement).
+pub fn effective_retirement(
+    registry: &Registry,
+    project: &Project,
+) -> Result<Option<crate::repo::Retirement>> {
+    let registered = match registry.project_root(&project.prefix) {
+        Some(root) if root != project.root.as_path() => Some(
+            crate::scope::open_registered(registry, &project.prefix, Origin::Prefix).map_err(
+                |error| {
+                    Error::Config(format!(
+                        "cannot tell whether {} is retired: its registered checkout {} did not \
+                         open ({error}); fix that checkout, then retry",
+                        project.prefix,
+                        root.display()
+                    ))
+                },
+            )?,
+        ),
+        _ => None,
+    };
+    Ok(project
+        .retired
+        .clone()
+        .or(registered.and_then(|p| p.retired)))
 }
 
 /// Recorded names and root remain stable through the config/registry transition.

@@ -13,23 +13,37 @@ pub fn retire(here: Project, successor: Option<String>, reason: String) -> Resul
     let _lock = MutationLock::acquire(&here.prefix)?;
     let registry = Registry::load()?;
     let project = authority(&registry, &here)?;
+    if let Some(existing) = &project.retired {
+        return Err(Error::RetiredProject(format!(
+            "{} is already retired (since {}: {}); run `tasks unretire` first to declare it again",
+            project.prefix, existing.date, existing.reason
+        )));
+    }
     let retirement = Retirement {
         // `Date`'s Display is YYYY-MM-DD.
         date: time::OffsetDateTime::now_utc().date().to_string(),
-        successor,
+        // Stored as the live prefix, so a retired alias typed here never outlives a
+        // later `unregister` that drops it.
+        successor: successor
+            .as_deref()
+            .map(|s| registry.canonical_prefix(s).to_string()),
         reason,
     };
     validate_retirement(&retirement)?;
-    if let Some(s) = &retirement.successor {
-        let live = registry.canonical_prefix(s);
-        let usable = live != project.prefix
+    if let (Some(typed), Some(live)) = (&successor, &retirement.successor) {
+        let usable = *live != project.prefix
             && registry.project_root(live).is_some()
             && crate::scope::open_registered(&registry, live, Origin::Prefix)?
                 .retired
                 .is_none();
         if !usable {
+            let named = if typed == live {
+                format!("{typed:?}")
+            } else {
+                format!("{typed:?} (now {live:?})")
+            };
             return Err(Error::Config(format!(
-                "successor {s:?} must be a registered, unretired prefix other than {}",
+                "successor {named} must be a registered, unretired prefix other than {}",
                 project.prefix
             )));
         }
@@ -98,7 +112,19 @@ fn reject_open_copies(project: &Project) -> Result<()> {
     let mut open = Vec::new();
     for root in project.checkout_roots()? {
         let dir = root.join("tasks");
-        for entry in std::fs::read_dir(&dir).map_err(|e| unreadable(&dir, &e))? {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(match project.missing_checkout_advice(&root)? {
+                    Some(advice) => {
+                        Error::UnreadableCheckout(format!("{}: {advice}", root.display()))
+                    }
+                    None => unreadable(&dir, &e),
+                });
+            }
+            Err(e) => return Err(unreadable(&dir, &e)),
+        };
+        for entry in entries {
             let path = entry.map_err(|e| unreadable(&dir, &e))?.path();
             // Records only, as `Project::task_files` reads them: a dot-prefixed stem is a
             // kept edit temp (`.<id>.<hex>.edit.md`), not a task.
