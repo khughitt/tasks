@@ -1,13 +1,15 @@
 ---
 id: tasks-3d619b
 title: "Paint task ids in a lighter shade of their project colour, show's overview id included"
-status: todo
+status: doing
 priority: 3
 size: s
 complexity: low
 process: direct
+owner: main
 created: 2026-10-18T18:54:35Z
-updated: 2026-10-18T18:54:43Z
+updated: 2026-10-18T19:00:26Z
+started: 2026-10-18T19:00:26Z
 depends: []
 parent: tasks-1f05a7
 tags: [pretty]
@@ -30,3 +32,5 @@ Out of scope, judged: ids inside prose (notes, lane guides, next steps, warnings
 ## Notes
 
 - 2026-10-18T18:54:43Z (main): process: direct — scoping settled the id role, the shade method, the surfaces and the checks; the mix fraction is a bounded choice made against real project colours
+- 2026-10-18T19:00:26Z (main): started
+  provenance: {"harness_session":"claude-code:6c3bce1d-9258-49a0-98a5-0f7c415f7c43","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
