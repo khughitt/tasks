@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-18T18:54:35Z
-updated: 2026-10-18T18:54:35Z
+updated: 2026-10-18T18:54:43Z
 depends: []
 parent: tasks-1f05a7
 tags: [pretty]
@@ -26,3 +26,7 @@ Done when:
 - README colour section, skills/tasks/SKILL.md colour paragraph, and docs/specs/2026-10-06-comfy-tables-design.md ('Ids and titles take the project colour') describe the id shade.
 
 Out of scope, judged: ids inside prose (notes, lane guides, next steps, warnings), source (opaque, never interpreted), claims (uncoloured by design), graph output, and light-background terminals, where mixing toward white lowers contrast; adapting the mix to the palette's foreground would be a separate task.
+
+## Notes
+
+- 2026-10-18T18:54:43Z (main): process: direct — scoping settled the id role, the shade method, the surfaces and the checks; the mix fraction is a bounded choice made against real project colours
