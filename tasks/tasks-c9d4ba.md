@@ -1,0 +1,13 @@
+---
+id: tasks-c9d4ba
+title: "Renumbering a plan's step headings needs one edit per step child, and each edit's auto-commit fails the pre-commit tasks check until the last one lands"
+status: idea
+priority: 2
+created: 2026-10-18T22:14:12Z
+updated: 2026-10-18T22:14:12Z
+depends: []
+tags: [feedback, friction, "from:crew"]
+agent: claude-code/claude-opus-5-5
+---
+
+tasks edit <id> --step '<new heading>' under [git] commit = true, after renaming several '### Task N:' headings at once: every write but the last reports commit_failed (step_missing for the not-yet-renamed siblings) and leaves its record uncommitted; expected a batch step rename, or a way to defer the per-write commit until the set is consistent
