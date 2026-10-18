@@ -325,16 +325,22 @@ mod tests {
         let colored = Painter::new(ColorMode::Always, Format::Pretty, false);
         let hex = |value| Rgb::parse_hex(value).unwrap();
         // each colour mixed 30% of the way to white in OKLab, computed outside tasks
-        for (base, shade) in [
-            ("#123456", "84;108;135"),
-            ("#abcdef", "196;220;244"),
-            ("#ffffff", "255;255;255"),
-        ] {
+        for (base, shade) in [("#123456", "#546c87"), ("#abcdef", "#c4dcf4")] {
+            let (base, shade) = (hex(base), hex(shade));
             assert_eq!(
-                colored.paint(Style::Id(hex(base)), "x"),
-                format!("\x1b[38;2;{shade}mx\x1b[0m")
+                colored.paint(Style::Id(base), "x"),
+                format!("\x1b[38;2;{};{};{}mx\x1b[0m", shade.r, shade.g, shade.b)
+            );
+            assert!(
+                shade.lightness() > base.lightness(),
+                "{base:?} -> {shade:?}"
             );
         }
+        // white has nowhere lighter to go
+        assert_eq!(
+            colored.paint(Style::Id(hex("#ffffff")), "x"),
+            "\x1b[38;2;255;255;255mx\x1b[0m"
+        );
         let plain = Painter::new(ColorMode::Never, Format::Pretty, true);
         assert_eq!(plain.paint(Style::Id(hex("#123456")), "x"), "x");
     }

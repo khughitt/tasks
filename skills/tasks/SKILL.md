@@ -254,7 +254,7 @@ key to restore existing styling. Init/reinitialization and prefix rename preserv
 Pretty output paints a project's name in that RGB: prefixes in
 `projects`, `groups` and `where`; task ids and titles in table views, and in `show`/`next`
 (the overview line included) by the project each id belongs to. Ids take a lighter shade
-of the color, so an id reads apart from the title beside it. `claims` stays uncolored. Unassigned or unreachable projects keep existing styling;
+of the color than titles (barely lighter for a near-white color). `claims` stays uncolored. Unassigned or unreachable projects keep existing styling;
 other columns keep their roles. Existing `--color`, `TASKS_COLOR`, `NO_COLOR`, and auto
 controls apply; stored IDs are unchanged. JSON carries the color as lowercase
 `color: "#rrggbb"` on `projects` rows, `where`'s `project`, and resolved `resolve` rows

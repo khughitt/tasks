@@ -841,7 +841,7 @@ project's name in that RGB in these places: the prefix in `projects`, `groups` a
 `prime`, `lanes`, `quiet`, `sample`) and in `show` and `next`, whose overview line, related
 rows, lane and move pointers take the colour of the project each id belongs to. An id
 paints a lighter shade of the colour (mixed 30% of the way to white in OKLab), so it reads
-apart from the title beside it:
+apart from the title beside it; the nearer a colour is to white, the less the two differ:
 
     TASKS_FORMAT=pretty tasks --color=always projects
     TASKS_FORMAT=pretty tasks --color=always list --all-projects

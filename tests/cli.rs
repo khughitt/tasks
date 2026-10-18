@@ -7999,7 +7999,10 @@ fn project_colors_paint_show_groups_and_where_without_moving_json() {
                 overview(dots_heading, "Leaving", DOTS_ID, &arrived),
                 painted(SCI_ID, &leaving),
             ],
-            ("show", _) => vec![overview("\x1b[1m", "Bare", "\x1b[2m", &bare)],
+            ("show", Some(shown)) if *shown == bare => {
+                vec![overview("\x1b[1m", "Bare", "\x1b[2m", &bare)]
+            }
+            ("show", _) => unreachable!("every show case has its expectations: {args:?}"),
             ("groups", _) => vec![
                 painted(sci_rgb, "sci"),
                 painted(dots_rgb, "dots"),
@@ -28165,7 +28168,7 @@ fn search_parked_matches_the_copy_the_row_shows() {
 fn search_rows_carry_the_project_color() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
-    env.json(&sci, &["add", "Colored match", "-p", "2"]);
+    let id = id_of(env.json(&sci, &["add", "Colored match", "-p", "2"]));
     write_project_color(&sci, "sci", "#123456");
     let out = env
         .cmd(&sci)
@@ -28182,6 +28185,7 @@ fn search_rows_carry_the_project_color() {
     assert!(out.status.success());
     let colored = String::from_utf8(out.stdout).unwrap();
     assert!(colored.contains("\x1b[38;2;18;52;86m"), "{colored:?}");
+    assert!(colored.contains(&format!("{SCI_ID}{id}")), "{colored:?}");
     assert!(strip_ansi(&colored).contains("Colored match"));
 }
 
@@ -28382,10 +28386,7 @@ fn claims_is_a_table_and_never_coloured() {
         .output()
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(
-        text.contains(&id) && !text.contains("38;2;18;52;86"),
-        "{text}"
-    );
+    assert!(text.contains(&id) && !text.contains("38;2;"), "{text}");
 }
 
 #[test]

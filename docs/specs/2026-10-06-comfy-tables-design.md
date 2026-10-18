@@ -125,9 +125,10 @@ full text (`user, review`).
   are already `TaskSummary` values, so they need no new field) and the parked rows.
   `ParkedRow` gains the one new serde-skipped `project_color` field.
 - **Outside tables** (tasks-68cb2b): `show` and `next` paint related rows, the lane and
-  move pointers by each id's project, and (tasks-3d619b) the overview's own id; `groups` and `where` paint prefixes as `projects`
-  does. The colours stay out of JSON. Another project's unreadable config leaves its name
-  uncoloured with a warning, as in `resolve`, never a failed command.
+  move pointers by each id's project, and (tasks-3d619b) the overview's own id; `groups`
+  and `where` paint prefixes as `projects` does. The colours stay out of JSON. Another
+  project's unreadable config leaves its name uncoloured with a warning, as in `resolve`,
+  never a failed command.
 - **`claims` stays uncoloured.** It reads the claim stores without opening any checkout,
   so a missing checkout changes nothing (`commands/claims.rs`); colours live in checkout
   configuration, and reading them would weaken that contract.

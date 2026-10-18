@@ -145,8 +145,9 @@ The row reads `<label>  <id>  <status>  <title>`. Labels and ids are padded so t
 line up, and the title wraps under §3.6, indented to its own column. An unresolved
 dependency shows `?` for its status and `(unresolved)` for its title, as now.
 Each id and title takes the colour of the project the id belongs to, when that project
-has one (tasks-68cb2b, after the tables in the comfy-tables spec §5); an unresolved
-dependency and a project without a colour keep the chrome id and plain title.
+has one (tasks-68cb2b, after the tables in the comfy-tables spec §5), the id in its
+lighter shade (tasks-3d619b); an unresolved dependency and a project without a colour keep
+the chrome id and plain title.
 
 ### 3.5 Prose: description, park, and notes
 
@@ -209,7 +210,8 @@ The roles the fields get do not change in the table views (§4.2).
 
 | span | role |
 |---|---|
-| ids, owner (the field and a note's), claim, tags, agent/model/source, section rules after the name, provenance, session lines, note time | chrome (dim), as today |
+| ids whose project has no colour, owner (the field and a note's), claim, tags, agent/model/source, section rules after the name, provenance, session lines, note time | chrome (dim), as today |
+| ids whose project has a colour | **id**: the colour's lighter shade (tasks-3d619b; comfy-tables spec §5) |
 | status | status hue, as today |
 | priority | the priority scale, as in `list` (§5) |
 | dates | the recency scale, as in `list` (§5) |
@@ -223,7 +225,8 @@ The roles the fields get do not change in the table views (§4.2).
 different from emphasis without touching the call sites. The title also takes the project
 color when the project has one: in `show`, `heading` carries the optional `Rgb` and paints
 it bold and colored. The `in lane`, `moved to` and `moved from` ids take their project's
-colour in place of chrome, as related rows do (§3.4).
+colour in place of chrome, as related rows do (§3.4); since tasks-3d619b every id,
+the overview's own included, paints the lighter shade of that colour.
 
 ## 5. Theme and width wiring
 
