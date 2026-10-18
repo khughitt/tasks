@@ -22,8 +22,8 @@ tt := "python3 tools/tt"
 # in $TMPDIR (some host process leaves an empty one) cannot fail the fixtures' temp
 # projects; tests that set their own ceiling still override it.
 test_env := "ceiling=$(realpath -e -- \"${TMPDIR:-/tmp}\") && GIT_CEILING_DIRECTORIES=$ceiling"
-fast_cmd := test_env + " cargo test"
-test_cmd := test_env + " cargo test -- --include-ignored"
+fast_cmd := test_env + " cargo test --no-fail-fast"
+test_cmd := test_env + " cargo test --no-fail-fast -- --include-ignored"
 check_cmd := "python3 tools/ops-check && cargo fmt --check && cargo clippy --all-targets -- -D warnings && tasks check"
 
 # README and design documents stay on the full check; only guide/task records skip Rust checks.
