@@ -1,15 +1,17 @@
 ---
 id: tasks-f11052
 title: "Stop sid:0 claims from being held forever"
-status: doing
+status: done
 priority: 3
 size: s
 complexity: mid
 process: direct
 owner: fix/refuted-claim-pids
 created: 2026-10-15T01:48:41Z
-updated: 2026-10-18T10:07:18Z
+updated: 2026-10-18T10:09:16Z
 started: 2026-10-18T09:55:13Z
+completed: 2026-10-18T10:09:16Z
+closed: 2026-10-18T10:09:16Z
 depends: []
 parent: tasks-2fa8c6
 tags: []
@@ -29,3 +31,7 @@ From the tasks-860db2 final review (Minor 1). Inside a PID namespace whose sessi
 - 2026-10-18T09:57:17Z (fix/refuted-claim-pids): resumed
   provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-18T10:07:18Z (fix/refuted-claim-pids): review: impl round 1 — verdict: accept; findings: Critical 0, Important 0, Minor 7; reviewer: claude-code
+- 2026-10-18T10:09:16Z (fix/refuted-claim-pids): done
+  provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T10:09:16Z (fix/refuted-claim-pids): A pid the writer's own /proc refutes (pid 0, a gone or zombie Unix session leader, an exported pid gone or a zombie in the initial namespace) is recorded pid-less, so the claim lives by the TTL instead of reading unverifiable until reboot; a recorded pid 0 is never kept by a heartbeat; sid:0 is refused as an identity (set TASKS_SESSION). Amends PID-view spec §2 only; README updated. Verified live under unshare -r -p -f --mount-proc (old binary: sid:0 pid 0 unverifiable; new: refusal, then a pid-less claim with TASKS_SESSION_PID=0). Review accepted (0 Critical/Important); minors folded in except none outstanding.
+  provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
