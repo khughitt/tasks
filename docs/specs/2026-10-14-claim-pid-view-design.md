@@ -170,6 +170,18 @@ known:
 A claim with a pid and no view reads `Unverifiable` everywhere (§3). It is protected,
 not misjudged.
 
+**Refuted pids record no pid.** Amended by tasks-f11052. A pid that the writer's own
+view shows is not running would be held until reboot under that rule, since no view
+can ever judge it. The write records a pid-less (TTL) claim instead, first write and
+heartbeat alike. A pid is refuted when it is 0, when it is a Unix session id that
+`proc_stat` finds gone or a zombie (the kernel numbered it in this procfs), or when it
+is an exported pid gone or a zombie in the initial namespace, which numbers every
+process. An exported pid missing from any other view may be an outer namespace's, so
+its absence refutes nothing, and it keeps the rule above. The Unix fallback also
+refuses session id 0 as an identity: the session leader is outside the namespace, and
+every shell inside shares that id, so it cannot key ownership. `TASKS_SESSION` names
+the session there.
+
 **Heartbeats keep established evidence.** The owner's writes refresh `seen`. They
 change the process evidence (`pid`, `pid_start`, `boot_id`, `pid_view`) only under
 these rules:

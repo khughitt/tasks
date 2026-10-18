@@ -29155,8 +29155,23 @@ fn pid_view_of_an_exported_pid_is_recorded_only_in_the_initial_namespace() {
     assert_eq!(pid_view_of(&claim), exported_pid_view(), "{claim}");
 }
 
+/// The evidence a write records for the exported pid 4194303, which no process holds:
+/// the initial namespace numbers every pid, so there it is refuted and the claim goes
+/// pid-less (tasks-f11052); anywhere else it may be an outer namespace's, so it is kept
+/// with no view.
+fn assert_missing_exported_pid(claim: &toml::Value) {
+    let kept = exported_pid_view().is_none().then_some(4194303);
+    assert_eq!(
+        claim.get("pid").and_then(|v| v.as_integer()),
+        kept,
+        "{claim}"
+    );
+    assert_eq!(pid_view_of(claim), None, "{claim}");
+    assert!(claim.get("pid_start").is_none(), "{claim}");
+}
+
 #[test]
-fn pid_view_heartbeat_with_a_missing_pid_records_it_without_a_view() {
+fn pid_view_heartbeat_with_a_missing_pid_drops_it_only_where_the_view_refutes_it() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "T", "-p", "2"]));
@@ -29168,10 +29183,7 @@ fn pid_view_heartbeat_with_a_missing_pid_records_it_without_a_view() {
             .assert()
             .success();
     }
-    let claim = stored_claim(&env, "sci", &id);
-    assert_eq!(claim["pid"].as_integer(), Some(4194303), "{claim}");
-    assert_eq!(pid_view_of(&claim), None, "{claim}");
-    assert!(claim.get("pid_start").is_none(), "{claim}");
+    assert_missing_exported_pid(&stored_claim(&env, "sci", &id));
 }
 
 #[test]
@@ -29201,17 +29213,15 @@ fn pid_view_follows_a_new_pid_reported_through_a_note() {
         assert_eq!(same.get(field), before.get(field), "{field}: {same}");
     }
 
-    // A different pid this write cannot establish: tracked, with no view.
+    // A different pid this write cannot establish: tracked with no view, or dropped
+    // where this view refutes it; never the old process's evidence.
     env.cmd(&sci)
         .env("TASKS_SESSION", "viewer")
         .env("TASKS_SESSION_PID", "4194303")
         .args(["note", &id, "new process"])
         .assert()
         .success();
-    let moved = stored_claim(&env, "sci", &id);
-    assert_eq!(moved["pid"].as_integer(), Some(4194303), "{moved}");
-    assert_eq!(pid_view_of(&moved), None, "{moved}");
-    assert!(moved.get("pid_start").is_none(), "{moved}");
+    assert_missing_exported_pid(&stored_claim(&env, "sci", &id));
 }
 
 #[test]

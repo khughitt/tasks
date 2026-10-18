@@ -325,7 +325,11 @@ and leaves the task's lifecycle alone. An exported pid
 (`TASKS_SESSION_PID`, `CLAUDE_PID`) establishes a view only in the initial PID
 namespace, because an inherited number's namespace cannot be proven. Inside a container
 or sandbox, such claims stay held after their session ends. `TASKS_SESSION_PID` must
-name a process in the namespace of the command that sets it.
+name a process in the namespace of the command that sets it. A pid the command's own
+`/proc` shows is not running (pid 0, a gone or zombie session leader, or an exported pid
+gone from the initial namespace) is not recorded: the claim lives by the TTL instead. In
+a PID namespace whose session leader is outside it, the Unix session id reads 0 for
+every shell, so the fallback refuses it; set `TASKS_SESSION` there.
 
 **Upgrading.** tasks 0.2.0 reads relay's registry schema 2 and no other; against an older
 registry it refuses and asks you to run `relay reap`. On a host with this switch on, every

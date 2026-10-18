@@ -134,6 +134,14 @@ pub fn identity_from(
         });
     }
     match session_pid {
+        // The session leader lives outside this PID namespace, so every shell in the
+        // namespace reads 0: it would key them all as one owner.
+        Some(0) => Err(Error::Config(
+            "cannot determine a session identity: set TASKS_SESSION (this command's Unix \
+             session leader is outside this PID namespace, so its session id is 0, shared by \
+             every shell here)"
+                .into(),
+        )),
         Some(pid) => Ok(Identity {
             session: format!("sid:{pid}"),
             tagged: format!("sid:{pid}"),
@@ -878,6 +886,13 @@ impl Evidence {
 /// the recorded evidence unless it reports a different pid (§2's table), or that evidence
 /// already reads stale from this view: keeping a dead pid would write the owner's own claim
 /// stale, free for anyone to take (final review, Important 1).
+///
+/// A pid this view refutes is no liveness handle, and the write records a pid-less (TTL)
+/// claim instead, heartbeat or not: pid 0, a Unix session id this procfs numbers and
+/// finds gone or a zombie, or an exported pid gone or a zombie in the initial namespace,
+/// which numbers every process. Recorded without a view it would read `Unverifiable`
+/// everywhere and be held until reboot (tasks-f11052). An exported pid missing from any
+/// other view may be an outer namespace's, so its absence refutes nothing.
 pub fn evidence(
     me: &Identity,
     own: Option<&Claim>,
@@ -887,12 +902,34 @@ pub fn evidence(
     stat: impl Fn(u32) -> ProcStat,
 ) -> Evidence {
     let boot_id_now = boot_id.clone();
+    let read = match &me.proof {
+        Some(_) => None,
+        None => me.pid.map(&stat),
+    };
+    let gone = matches!(
+        read,
+        Some(ProcStat::NotFound | ProcStat::Found { state: 'Z', .. })
+    );
+    let refuted = match (me.pid, me.pid_source) {
+        (Some(0), _) => true,
+        (Some(_), Some(PidSource::UnixSession)) => gone,
+        (Some(_), Some(PidSource::Exported)) => view.is_some_and(|view| view.is_initial()) && gone,
+        _ => false,
+    };
+    if refuted {
+        return Evidence {
+            pid: None,
+            pid_start: None,
+            boot_id,
+            pid_view: None,
+        };
+    }
     let start = match &me.proof {
         Some(proof) => Some(proof.pid_start),
-        None => me.pid.and_then(|pid| match stat(pid) {
-            ProcStat::Found { starttime, .. } => Some(starttime),
+        None => match read {
+            Some(ProcStat::Found { starttime, .. }) => Some(starttime),
             _ => None,
-        }),
+        },
     };
     let established = match (me.pid, me.pid_source) {
         (Some(_), Some(PidSource::Relay)) => true,
@@ -1694,6 +1731,26 @@ mod tests {
         let id = identity_from(env_of(&[]), Some(11), relay_off(), &mut Vec::new()).unwrap();
         assert_eq!(id.session, "sid:11");
         assert_eq!(id.pid, Some(11));
+    }
+
+    #[test]
+    fn a_zero_session_id_is_refused_rather_than_shared_by_every_shell_in_the_namespace() {
+        let error = identity_from(env_of(&[]), Some(0), relay_off(), &mut Vec::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("TASKS_SESSION"), "{error}");
+        assert!(error.contains("outside this PID namespace"), "{error}");
+        let explicit = identity_from(
+            env_of(&[("TASKS_SESSION", "s")]),
+            Some(0),
+            relay_off(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            explicit.session, "s",
+            "an explicit identity never reads sid:0"
+        );
     }
 
     #[test]
@@ -2655,7 +2712,11 @@ mod tests {
             t0(),
             |_| ProcStat::NotFound,
         );
-        assert_eq!((missing.pid_view, missing.pid_start), (None, None));
+        assert_eq!(
+            (missing.pid, missing.pid_start, missing.pid_view),
+            (None, None, None),
+            "the initial namespace numbers every pid, so a missing one is refuted"
+        );
         let unknown = evidence(
             &ident(Some(42), Some(PidSource::Exported)),
             None,
@@ -2681,16 +2742,112 @@ mod tests {
     }
 
     #[test]
-    fn a_zero_session_id_establishes_nothing() {
+    fn a_zero_pid_is_recorded_pidless_from_any_source() {
+        for source in [PidSource::UnixSession, PidSource::Exported] {
+            let got = evidence(
+                &ident(Some(0), Some(source)),
+                None,
+                Some(&CHILD),
+                boot(),
+                t0(),
+                found(999),
+            );
+            assert_eq!(
+                (got.pid, got.pid_start, got.pid_view),
+                (None, None, None),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_gone_or_zombie_session_id_is_recorded_pidless() {
+        let zombie = |_| ProcStat::Found {
+            state: 'Z',
+            starttime: 999,
+        };
+        for view in [Some(&CHILD), None] {
+            let gone = evidence(
+                &ident(Some(7), Some(PidSource::UnixSession)),
+                None,
+                view,
+                boot(),
+                t0(),
+                |_| ProcStat::NotFound,
+            );
+            assert_eq!((gone.pid, gone.pid_view), (None, None));
+            let dead = evidence(
+                &ident(Some(7), Some(PidSource::UnixSession)),
+                None,
+                view,
+                boot(),
+                t0(),
+                zombie,
+            );
+            assert_eq!(
+                (dead.pid, dead.pid_start, dead.pid_view),
+                (None, None, None)
+            );
+        }
+    }
+
+    #[test]
+    fn an_unreadable_session_id_keeps_its_pid_without_a_view() {
         let got = evidence(
-            &ident(Some(0), Some(PidSource::UnixSession)),
+            &ident(Some(7), Some(PidSource::UnixSession)),
             None,
+            Some(&CHILD),
+            boot(),
+            t0(),
+            |_| ProcStat::Unreadable,
+        );
+        assert_eq!((got.pid, got.pid_view), (Some(7), None));
+    }
+
+    #[test]
+    fn an_exported_pid_missing_outside_the_initial_namespace_keeps_its_pid() {
+        // The number may belong to an outer namespace: absence here refutes nothing.
+        let got = evidence(
+            &ident(Some(42), Some(PidSource::Exported)),
+            None,
+            Some(&CHILD),
+            boot(),
+            t0(),
+            |_| ProcStat::NotFound,
+        );
+        assert_eq!((got.pid, got.pid_view), (Some(42), None));
+    }
+
+    #[test]
+    fn a_heartbeat_with_a_refuted_pid_drops_the_unverifiable_evidence_it_would_keep() {
+        // The owner's earlier write recorded pid 42 with no view: Unverifiable everywhere.
+        let own = Claim {
+            pid: Some(42),
+            pid_view: None,
+            ..sample()
+        };
+        let got = evidence(
+            &ident(Some(42), Some(PidSource::Exported)),
+            Some(&own),
             Some(&INIT),
+            boot(),
+            t0(),
+            |_| ProcStat::NotFound,
+        );
+        assert_eq!((got.pid, got.pid_start, got.pid_view), (None, None, None));
+        let zero = evidence(
+            &ident(Some(0), Some(PidSource::UnixSession)),
+            Some(&Claim {
+                pid: Some(0),
+                pid_view: None,
+                ..sample()
+            }),
+            Some(&CHILD),
             boot(),
             t0(),
             found(999),
         );
-        assert_eq!(got.pid_view, None);
+        assert_eq!(zero.pid, None);
     }
 
     #[test]
