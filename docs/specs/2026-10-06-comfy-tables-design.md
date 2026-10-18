@@ -116,7 +116,7 @@ full text (`user, review`).
   where the project has one. This closes tasks-9b5b0a. Rows without a project colour
   keep today's roles. Since tasks-3d619b an id paints a lighter shade of the colour (the
   `Style::Id` role: the colour mixed 30% of the way to white in OKLab), so it reads apart
-  from the title beside it.
+  from the title beside it; the nearer a colour is to white, the less the two differ.
 - **One place fills the colour.** Today `TaskSummary::of` leaves `project_color` unset
   and only `list` and `search` fill it afterwards (`commands/list.rs`). A `ReadCtx`
   helper resolves a prefix's colour from the projects in scope, and every command that

@@ -8009,7 +8009,8 @@ fn project_colors_paint_show_groups_and_where_without_moving_json() {
                 painted("\x1b[2m", "plain"),
             ],
             ("where", _) if *dir == sci.as_path() => vec![painted(sci_rgb, "sci")],
-            _ => vec![painted("\x1b[2m", "plain")],
+            ("where", _) if *dir == plain.as_path() => vec![painted("\x1b[2m", "plain")],
+            _ => unreachable!("every case has its expectations: {args:?}"),
         };
         for piece in expected {
             assert!(
