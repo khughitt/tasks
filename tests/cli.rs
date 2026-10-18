@@ -7805,6 +7805,11 @@ fn strip_ansi(text: &str) -> String {
     plain
 }
 
+// Ids paint a lighter shade of their project colour: #123456 and #abcdef mixed 30% of the
+// way to white in OKLab, computed outside tasks.
+const SCI_ID: &str = "\x1b[38;2;84;108;135m";
+const DOTS_ID: &str = "\x1b[38;2;196;220;244m";
+
 fn write_project_color(dir: &std::path::Path, prefix: &str, color: &str) {
     std::fs::write(
         dir.join("tasks/.config.toml"),
@@ -7820,9 +7825,9 @@ fn project_colors_paint_prefixes_and_titles_and_reach_only_projects_json() {
     let dots = env.init("dots");
     let plain = env.init("plain");
     let gone = env.init("gone");
-    env.json(&sci, &["add", "Science", "--tag", "research"]);
-    env.json(&dots, &["add", "Dotfiles", "--status", "idea"]);
-    env.json(&plain, &["add", "Unassigned"]);
+    let science = id_of(env.json(&sci, &["add", "Science", "--tag", "research"]));
+    let dotfiles = id_of(env.json(&dots, &["add", "Dotfiles", "--status", "idea"]));
+    let unassigned = id_of(env.json(&plain, &["add", "Unassigned"]));
     write_project_color(&gone, "gone", "#abcdef");
     std::fs::remove_file(gone.join("tasks/.config.toml")).unwrap();
     let commands = [&["projects"][..], &["list", "--all-projects"][..]];
@@ -7865,6 +7870,12 @@ fn project_colors_paint_prefixes_and_titles_and_reach_only_projects_json() {
             assert!(colored.contains(" \x1b[2m[research]\x1b[0m"), "{colored:?}");
             assert!(colored.contains("\x1b[34midea\x1b[0m"), "{colored:?}");
             assert!(colored.contains("  Unassigned\n"), "{colored:?}");
+            for (paint, id) in [(SCI_ID, &science), (DOTS_ID, &dotfiles)] {
+                let painted = format!("{paint}{id}\x1b[0m");
+                assert!(colored.contains(&painted), "{painted:?} in {colored:?}");
+            }
+            let chrome = format!("\x1b[2m{unassigned}\x1b[0m");
+            assert!(colored.contains(&chrome), "{colored:?}");
         }
         for mode in ["never", "auto"] {
             let out = env
@@ -7931,6 +7942,7 @@ fn project_colors_paint_show_groups_and_where_without_moving_json() {
         (&sci, vec!["show", &lane]),
         (&sci, vec!["show", &leaving]),
         (&dots, vec!["show", &arrived]),
+        (&plain, vec!["show", &bare]),
         (&sci, vec!["groups"]),
         (&sci, vec!["where"]),
         (&plain, vec!["where"]),
@@ -7958,21 +7970,36 @@ fn project_colors_paint_show_groups_and_where_without_moving_json() {
         assert!(out.status.success());
         let colored = String::from_utf8(out.stdout).unwrap();
         assert_eq!(strip_ansi(&colored), env.pretty(dir, args), "{args:?}");
+        // the overview line: the bold title in its project colour, then the id in its shade
+        let overview = |heading: &str, title: &str, shade: &str, id: &str| {
+            format!(
+                "{} {}",
+                painted(heading, title),
+                painted(shade, &format!("({id})"))
+            )
+        };
+        let sci_heading = "\x1b[1;38;2;18;52;86m";
+        let dots_heading = "\x1b[1;38;2;171;205;239m";
         let expected: Vec<String> = match (args[0], args.get(1)) {
             ("show", Some(shown)) if *shown == child => vec![
+                overview(sci_heading, "Child", SCI_ID, &child),
                 // the overview's in-lane value; the parent row's id is padded inside its style
-                format!("\x1b[0m {}", painted(sci_rgb, &lane)),
-                opens(sci_rgb, &lane),
+                format!("\x1b[0m {}", painted(SCI_ID, &lane)),
+                opens(SCI_ID, &lane),
                 painted(sci_rgb, "Lane"),
-                opens(dots_rgb, &dotted),
+                opens(DOTS_ID, &dotted),
                 painted(dots_rgb, "Dotted"),
                 opens("\x1b[2m", &bare),
             ],
             ("show", Some(shown)) if *shown == lane => {
-                vec![opens(sci_rgb, &child), painted(sci_rgb, "Child")]
+                vec![opens(SCI_ID, &child), painted(sci_rgb, "Child")]
             }
-            ("show", Some(shown)) if *shown == leaving => vec![painted(dots_rgb, &arrived)],
-            ("show", _) => vec![painted(sci_rgb, &leaving)],
+            ("show", Some(shown)) if *shown == leaving => vec![painted(DOTS_ID, &arrived)],
+            ("show", Some(shown)) if *shown == arrived => vec![
+                overview(dots_heading, "Leaving", DOTS_ID, &arrived),
+                painted(SCI_ID, &leaving),
+            ],
+            ("show", _) => vec![overview("\x1b[1m", "Bare", "\x1b[2m", &bare)],
             ("groups", _) => vec![
                 painted(sci_rgb, "sci"),
                 painted(dots_rgb, "dots"),
@@ -28163,10 +28190,10 @@ fn ready_tree_and_prime_rows_carry_the_project_color() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let goal = id_of(env.json(&sci, &["add", "Goal title", "--lane", "-b", "why"]));
-    env.json(
+    let child = id_of(env.json(
         &sci,
         &["add", "Child title", "--parent", &goal, "--size", "s"],
-    );
+    ));
     write_project_color(&sci, "sci", "#123456");
     let paint = "\x1b[38;2;18;52;86m";
     // lanes paints its titles from Task 5, which pins it there.
@@ -28179,11 +28206,15 @@ fn ready_tree_and_prime_rows_carry_the_project_color() {
             text.contains(&format!("{paint}Child title")),
             "{args:?}: {text}"
         );
+        assert!(
+            text.contains(&format!("{SCI_ID}{child}")),
+            "{args:?}: {text}"
+        );
     }
 }
 
 #[test]
-fn list_ids_take_the_project_color() {
+fn list_ids_take_the_project_id_shade() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "A task"]));
@@ -28194,7 +28225,7 @@ fn list_ids_take_the_project_color() {
         .output()
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains(&format!("\x1b[38;2;18;52;86m{id}")), "{text}");
+    assert!(text.contains(&format!("{SCI_ID}{id}")), "{text}");
 }
 
 #[test]
@@ -28215,7 +28246,7 @@ fn prime_sections_share_every_fixed_width_when_piped() {
 }
 
 #[test]
-fn parked_rows_paint_ids_and_titles_with_the_project_color() {
+fn parked_rows_paint_ids_in_the_id_shade_and_titles_in_the_project_color() {
     let mut env = TestEnv::new();
     let sci = env.init("sci");
     let id = id_of(env.json(&sci, &["add", "Parked title"]));
@@ -28237,10 +28268,7 @@ fn parked_rows_paint_ids_and_titles_with_the_project_color() {
         full.extend(args.iter().copied());
         let out = env.cmd(&sci).args(&full).output().unwrap();
         let text = String::from_utf8(out.stdout).unwrap();
-        assert!(
-            text.contains(&format!("\x1b[38;2;18;52;86m{id}")),
-            "{args:?}: {text}"
-        );
+        assert!(text.contains(&format!("{SCI_ID}{id}")), "{args:?}: {text}");
         assert!(
             text.contains("\x1b[38;2;18;52;86mParked"),
             "{args:?}: {text}"
@@ -28283,11 +28311,11 @@ fn lanes_render_as_a_table_and_paint_lane_pick_and_active_rows() {
         .unwrap();
     let colored = String::from_utf8(out.stdout).unwrap();
     for span in [
-        format!("{paint}{lane}"),
+        format!("{SCI_ID}{lane}"),
         format!("{paint}Lane title"),
-        format!("{paint}{pick}"),
+        format!("{SCI_ID}{pick}"),
         format!("{paint}Pick step"),
-        format!("{paint}{running}"),
+        format!("{SCI_ID}{running}"),
         format!("{paint}Running step"),
     ] {
         assert!(colored.contains(&span), "{span:?} in:\n{colored}");

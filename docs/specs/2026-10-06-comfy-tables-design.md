@@ -114,7 +114,9 @@ full text (`user, review`).
 
 - **Ids and titles take the project colour** in every table that renders task rows,
   where the project has one. This closes tasks-9b5b0a. Rows without a project colour
-  keep today's roles.
+  keep today's roles. Since tasks-3d619b an id paints a lighter shade of the colour (the
+  `Style::Id` role: the colour mixed 30% of the way to white in OKLab), so it reads apart
+  from the title beside it.
 - **One place fills the colour.** Today `TaskSummary::of` leaves `project_color` unset
   and only `list` and `search` fill it afterwards (`commands/list.rs`). A `ReadCtx`
   helper resolves a prefix's colour from the projects in scope, and every command that
@@ -123,7 +125,7 @@ full text (`user, review`).
   are already `TaskSummary` values, so they need no new field) and the parked rows.
   `ParkedRow` gains the one new serde-skipped `project_color` field.
 - **Outside tables** (tasks-68cb2b): `show` and `next` paint related rows, the lane and
-  move pointers by each id's project; `groups` and `where` paint prefixes as `projects`
+  move pointers by each id's project, and (tasks-3d619b) the overview's own id; `groups` and `where` paint prefixes as `projects`
   does. The colours stay out of JSON. Another project's unreadable config leaves its name
   uncoloured with a warning, as in `resolve`, never a failed command.
 - **`claims` stays uncoloured.** It reads the claim stores without opening any checkout,

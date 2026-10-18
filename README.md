@@ -838,8 +838,10 @@ error. Change the value to change the color, or remove the key to restore existi
 Init/reinitialization and prefix rename preserve the setting. Pretty output paints a
 project's name in that RGB in these places: the prefix in `projects`, `groups` and
 `where`, and task ids and titles in every table view (`list`, `search`, `ready`, `tree`,
-`prime`, `lanes`, `quiet`, `sample`) and in `show` and `next`, whose related rows, lane
-and move pointers take the colour of the project each id belongs to:
+`prime`, `lanes`, `quiet`, `sample`) and in `show` and `next`, whose overview line, related
+rows, lane and move pointers take the colour of the project each id belongs to. An id
+paints a lighter shade of the colour (mixed 30% of the way to white in OKLab), so it reads
+apart from the title beside it:
 
     TASKS_FORMAT=pretty tasks --color=always projects
     TASKS_FORMAT=pretty tasks --color=always list --all-projects

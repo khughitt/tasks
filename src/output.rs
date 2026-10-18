@@ -1567,7 +1567,7 @@ fn lane_table(
     let task = |row: &TaskSummary| {
         format!(
             "{} {}",
-            present::row_id(&row.id, row.project_color).paint(painter),
+            present::id(&row.id, row.project_color).paint(painter),
             present::title(&row.title, row.project_color).paint(painter)
         )
     };
@@ -1601,7 +1601,7 @@ fn lane_table(
                 format!(
                     "{}{}",
                     if pad { "  " } else { "" },
-                    present::row_id(&row.lane.id, row.lane.project_color).paint(painter)
+                    present::id(&row.lane.id, row.lane.project_color).paint(painter)
                 ),
                 present::priority(row.lane.priority).paint(painter),
                 present::title(&row.lane.title, row.lane.project_color).paint(painter),
@@ -1857,7 +1857,7 @@ pub fn task_row(
             "{}{}{}",
             present::review_mark(row.needs_review, marks.review).paint(painter),
             "  ".repeat(indent),
-            present::row_id(&row.id, row.project_color).paint(painter)
+            present::id(&row.id, row.project_color).paint(painter)
         ),
         present::priority(row.priority).paint(painter),
         present::size(row.size).paint(painter),
@@ -2001,7 +2001,7 @@ pub fn parked_row(row: &ParkedRow, painter: &Painter, review: bool) -> crate::ta
         format!(
             "{}{}",
             present::review_mark(row.needs_review == Some(true), review).paint(painter),
-            present::row_id(&row.id, row.project_color).paint(painter)
+            present::id(&row.id, row.project_color).paint(painter)
         ),
         present::status_of(row.status).paint(painter),
         row.phase
@@ -2046,7 +2046,7 @@ pub fn quiet_table(rows: &[ParkedRow], painter: &Painter, layout: &crate::table:
         .filter_map(|row| row.park.as_ref().map(|park| (row, park)))
         .map(|(row, park)| {
             let mut built = Row::new(vec![
-                present::row_id(&row.id, row.project_color).paint(painter),
+                present::id(&row.id, row.project_color).paint(painter),
                 match row.priority {
                     Some(priority) => present::priority(priority).paint(painter),
                     None => "P-".into(),
