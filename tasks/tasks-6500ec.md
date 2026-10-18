@@ -1,15 +1,17 @@
 ---
 id: tasks-6500ec
 title: "test-fast stops at the first failing test binary, hiding every integration suite behind a unit failure"
-status: doing
+status: done
 priority: 1
 size: xs
 complexity: low
 process: direct
 owner: fix/test-hermeticity
 created: 2026-10-17T17:45:13Z
-updated: 2026-10-18T09:49:04Z
+updated: 2026-10-18T09:50:52Z
 started: 2026-10-18T09:49:04Z
+completed: 2026-10-18T09:50:52Z
+closed: 2026-10-18T09:50:52Z
 depends: []
 tags: [testing]
 source: tasks-aeeef1
@@ -21,4 +23,8 @@ fast_cmd runs cargo test without --no-fail-fast, so one failing unit test (today
 ## Notes
 
 - 2026-10-18T09:49:04Z (fix/test-hermeticity): started
+  provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T09:50:52Z (fix/test-hermeticity): done
+  provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T09:50:52Z (fix/test-hermeticity): fast_cmd and test_cmd (and push_fast_cmd through fast_cmd) pass --no-fail-fast. Verified with a temporary failing unit test: before, test-fast stopped after the unit binary; after, all 12 binaries reported and the recipe still exited 101. Clean test-fast and just check pass.
   provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
