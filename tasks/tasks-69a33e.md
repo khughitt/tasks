@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-18T02:37:48Z
-updated: 2026-10-18T09:43:05Z
+updated: 2026-10-18T09:43:13Z
 depends: []
 tags: [feedback, gap, "from:beliefs"]
 agent: codex
@@ -27,3 +27,7 @@ Done:
 Where to look: src/format.rs (`validate_line`, `validate_note_text`, `normalize_note_text`), src/commands/mod.rs (`append_note`), src/commands/status.rs (`done`, `note`), src/commands/attach.rs; skills/tasks/SKILL.md.
 
 Out of scope: the global closeout rule that asks for the verify output in the done message belongs to lore. It was filed there as lore-e24159.
+
+## Notes
+
+- 2026-10-18T09:43:13Z (main): scope: scoped; todo, s/low/direct, P2; retitled to the attach route: tasks attach - already keeps multi-line output before and after done (scratch check 2026-10-18), so the work is the refusal hint and a skill line; multi-line notes rejected; instruction side filed as lore-e24159
