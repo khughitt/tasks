@@ -6,9 +6,9 @@ priority: 1
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: fix/test-hermeticity
 created: 2026-10-17T11:24:09Z
-updated: 2026-10-18T09:45:12Z
+updated: 2026-10-18T09:45:23Z
 started: 2026-10-18T09:45:12Z
 depends: []
 tags: [testing]
@@ -21,4 +21,6 @@ src/registry.rs expands_leading_tilde_on_load does std::env::set_var("HOME", <te
 ## Notes
 
 - 2026-10-18T09:45:12Z (main): started
+  provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T09:45:23Z (fix/test-hermeticity): resumed
   provenance: {"harness_session":"claude-code:db33ae25-27fd-4537-883b-1b3aa17ecfdf","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
