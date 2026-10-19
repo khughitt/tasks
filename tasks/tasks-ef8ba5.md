@@ -1,12 +1,14 @@
 ---
 id: tasks-ef8ba5
 title: Skills (the activation commit)
-status: todo
+status: doing
 priority: 2
 complexity: low
 process: direct
+owner: task-references
 created: 2026-10-19T13:19:38Z
-updated: 2026-10-19T13:19:38Z
+updated: 2026-10-19T14:48:23Z
+started: 2026-10-19T14:48:23Z
 depends: [tasks-4eea09]
 parent: tasks-6eeecd
 tags: []
@@ -15,3 +17,8 @@ agent: codex
 plan: docs/plans/2026-10-19-task-references.md
 step: "Task 9: Skills (the activation commit)"
 ---
+
+## Notes
+
+- 2026-10-19T14:48:23Z (task-references): started
+  provenance: {"harness_session":"codex:01a154a2-1f9a-7fe3-bfa3-f67b76310881","harness_session_source":"CODEX_THREAD_ID"}
