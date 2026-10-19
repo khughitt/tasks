@@ -1,6 +1,68 @@
 use crate::error::{Error, Result};
 use crate::model::{Ref, Relation, Task};
+use crate::repo::Project;
+use crate::resolve::{LocatedEntry, Resolver};
 use crate::{format, frontmatter};
+use std::path::PathBuf;
+
+pub enum Location<'a> {
+    Path(&'a str),
+    Attachment(&'a str),
+    External,
+}
+
+pub enum Presence {
+    Here(PathBuf),
+    Main { root: PathBuf, path: PathBuf },
+    Absent(PathBuf),
+    Special(PathBuf),
+    Unsafe { path: PathBuf, detail: String },
+}
+
+pub fn present(
+    resolver: &Resolver,
+    project: &Project,
+    task: &Task,
+    entry: &Ref,
+) -> Result<Presence> {
+    use crate::attachments::{self, EntryState, Ledger};
+
+    match location(&entry.reference)? {
+        Location::Path(rel) => Ok(match resolver.locate_entry(rel)? {
+            LocatedEntry::Here(path) => Presence::Here(path),
+            LocatedEntry::Main { root, path } => Presence::Main { root, path },
+            LocatedEntry::Missing => Presence::Absent(project.root.join(rel)),
+            LocatedEntry::Special(path) => Presence::Special(path),
+        }),
+        Location::Attachment(name) => {
+            let path = attachments::task_dir(project, &task.id).join(name);
+            match attachments::check_storage(project, &task.id) {
+                Ok(false) => return Ok(Presence::Absent(path)),
+                Ok(true) => {}
+                Err(Error::AttachmentUnsafe(detail)) => {
+                    return Ok(Presence::Unsafe { path, detail });
+                }
+                Err(error) => return Err(error),
+            }
+            if attachments::ledger(task).get(name) != Some(&Ledger::Attached) {
+                return Ok(Presence::Absent(path));
+            }
+            Ok(match attachments::entry_state(&path)? {
+                EntryState::Absent => Presence::Absent(path),
+                EntryState::File(_) => Presence::Here(path),
+                EntryState::Unsafe(detail) => {
+                    let kind = std::fs::symlink_metadata(&path)?.file_type();
+                    if !kind.is_file() && !kind.is_dir() && !kind.is_symlink() {
+                        Presence::Special(path)
+                    } else {
+                        Presence::Unsafe { path, detail }
+                    }
+                }
+            })
+        }
+        Location::External => unreachable!("external references have no local presence"),
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Citation<'a> {
@@ -199,17 +261,22 @@ pub fn validate_entry(entry: &Ref) -> Result<()> {
 }
 
 pub fn validate_reference(reference: &str) -> Result<()> {
+    location(reference).map(|_| ())
+}
+
+pub fn location(reference: &str) -> Result<Location<'_>> {
     if reference.starts_with('@') {
         return Err(Error::Validation(
             "cross-project references are not supported yet".into(),
         ));
     }
     if let Some(name) = reference.strip_prefix("files:") {
-        return crate::attachments::validate_name(name)
-            .map_err(|error| Error::Validation(error.to_string()));
+        crate::attachments::validate_name(name)
+            .map_err(|error| Error::Validation(error.to_string()))?;
+        return Ok(Location::Attachment(name));
     }
     if format::external_doc(reference)?.is_some() {
-        return Ok(());
+        return Ok(Location::External);
     }
     format::validate_line("reference", reference)?;
     if reference.ends_with('/') {
@@ -223,7 +290,7 @@ pub fn validate_reference(reference: &str) -> Result<()> {
             "reference {reference:?} must be a normalized repo-relative path"
         )));
     }
-    Ok(())
+    Ok(Location::Path(reference))
 }
 
 #[cfg(test)]

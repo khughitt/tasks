@@ -31,6 +31,8 @@ pub enum Error {
     Ambiguous(String),
     #[error("{0}")]
     DocNotFound(String),
+    #[error("{0}")]
+    SpecialFile(String),
     #[error("{0} changed on disk; {1}")]
     ConcurrentModification(String, String),
     #[error("{0} is claimed by {1}")]
@@ -110,6 +112,7 @@ impl Error {
             Error::Cycle(detail) => Error::Cycle(detail + suffix),
             Error::Ambiguous(detail) => Error::Ambiguous(detail + suffix),
             Error::DocNotFound(detail) => Error::DocNotFound(detail + suffix),
+            Error::SpecialFile(detail) => Error::SpecialFile(detail + suffix),
             Error::ConcurrentModification(id, path) => {
                 Error::ConcurrentModification(id, path + suffix)
             }
@@ -155,6 +158,7 @@ impl Error {
             Error::Cycle(_) => "cycle",
             Error::Ambiguous(_) => "ambiguous",
             Error::DocNotFound(_) => "doc_not_found",
+            Error::SpecialFile(_) => "special_file",
             Error::ConcurrentModification(..) => "concurrent_modification",
             Error::Claimed(..) => "claimed",
             Error::StaleCopy(_) => "stale_copy",
