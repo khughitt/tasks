@@ -6,9 +6,9 @@ priority: 2
 size: m
 complexity: high
 process: planned
-owner: main
+owner: task-references
 created: 2026-10-19T11:01:01Z
-updated: 2026-10-19T11:03:39Z
+updated: 2026-10-19T11:04:06Z
 started: 2026-10-19T11:03:39Z
 depends: []
 tags: []
@@ -38,4 +38,6 @@ Done: a reviewed design spec and an implementation plan for the first increment.
 
 - 2026-10-19T11:01:06Z (main): proposal reviewed before filing by codex/gpt-6-astra (relayed by the user): adopted inventory vs required reading, separated dimensions, [ref:] citations, locate vs read, expected vs produced outputs, revision pinning; storage left open for the spec
 - 2026-10-19T11:03:39Z (main): started
+  provenance: {"harness_session":"claude-code:c665bb98-6b0b-4918-9280-20b2b8db99f7","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-19T11:04:06Z (task-references): resumed
   provenance: {"harness_session":"claude-code:c665bb98-6b0b-4918-9280-20b2b8db99f7","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
