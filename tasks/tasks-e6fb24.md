@@ -1,14 +1,16 @@
 ---
 id: tasks-e6fb24
 title: "Locating entries, and `check` for their targets"
-status: doing
+status: done
 priority: 2
 complexity: mid
 process: direct
 owner: task-references
 created: 2026-10-19T13:19:29Z
-updated: 2026-10-19T14:06:38Z
+updated: 2026-10-19T14:06:39Z
 started: 2026-10-19T13:53:08Z
+completed: 2026-10-19T14:06:39Z
+closed: 2026-10-19T14:06:39Z
 depends: [tasks-317677]
 parent: tasks-6eeecd
 tags: []
@@ -28,3 +30,7 @@ step: "Task 4: Locating entries, and `check` for their targets"
 - 2026-10-19T14:06:36Z (task-references): resumed
   provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-19T14:06:38Z (task-references): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-19T14:06:39Z (task-references): done
+  provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T14:06:39Z (task-references): Entry resolution, attachment presence and target checks implemented (7e8f4f0); FIFO read guards reviewed; 1575 tests and check passed
+  provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
