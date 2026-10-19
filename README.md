@@ -5,7 +5,7 @@ humans supervising them. One markdown file per task, checked into the project; a
 Rust binary as the only writer. JSON output by default.
 
 JSON task records omit unset optional fields and empty task collections (`tags`,
-`depends`, `notes`, `depends_on`, `children`). Missing means unset or empty; consumers
+`depends`, `notes`, `refs`, `depends_on`, `children`). Missing means unset or empty; consumers
 must not require those keys. Values such as `false`, `0`, and `body: ""` remain.
 Response containers such as `tasks: []` and `warnings: []` remain, as does `next: null`
 when nothing is eligible. See
@@ -681,6 +681,77 @@ adds an invalid diagnostic and stops reading, preserving earlier rows. Unavailab
 relative-path bases also produce invalid rows. Only registry problems fail command
 execution with the usual error envelope on stderr and exit 1.
 
+## Task references
+
+Alongside the governing `--spec` and `--plan` links, `add --ref` and `edit --ref`
+accept repeatable reference entries. The binary stores them in a managed
+`## References` section between the body and `## Notes`; do not put that heading
+in `--body`. Each stored line uses this grammar (omit the leading `- ` in `--ref`):
+
+```text
+- <handle> (<relation>[, required][, kind=<kind>]): <reference>[ — <description>]
+```
+
+Handles match `[a-z][a-z0-9-]{0,31}` and are unique within the task. Relations are
+`context` (consult when needed), `input` (used by the work), or `output` (produced
+or revised by the work). `required` marks an entry for reading before work;
+`kind` is a descriptive label matching `[a-z][a-z0-9-]*`. Attributes stay in the
+order shown. Descriptions follow a space, em dash, and space.
+
+A reference is a normalized repo-relative file or directory path (no trailing
+slash), an attachment `files:<name>`, or an external `<scheme>:<remainder>`.
+Cross-project `@` references are not supported. References containing whitespace,
+`"`, or `\` must be double-quoted, with `\"` and `\\` as the only escapes.
+Decoded references must also be unique within a task. New or changed context
+and input targets must exist locally or be attached; outputs may be pending.
+External entries are validated for shape without fetching.
+
+```sh
+tasks add "Revise the runbook" \
+  --ref 'brief (input, required, kind=brief): docs/notes/brief.md — admission rules' \
+  --ref 'runbook (output, required, kind=runbook): "docs/runbooks/trigger sweep.md"' \
+  --body 'Follow [ref:brief] §7 and revise [ref:runbook].'
+tasks edit <id> --ref 'brief (input, required): docs/notes/revised-brief.md'
+tasks edit <id> --rm-ref brief --body 'Revise [ref:runbook].'
+tasks edit <id> --no-refs --body 'References no longer needed.'
+```
+
+`edit --ref` replaces an existing handle in place or appends a new one.
+`--rm-ref` is repeatable; `--no-refs` clears all entries and conflicts with
+`--ref` and `--rm-ref`. A body citation is `[ref:<handle>]`; unknown or malformed
+handles are refused when saving body or entry changes, and reported by `check`
+for open tasks. Citation syntax inside CommonMark code spans or fenced or
+indented code blocks is literal. Notes are not audited. Remove citations when
+removing their entries, replacing the body in the same call if needed.
+
+```sh
+tasks doc <id> brief            # exact UTF-8 text, without an envelope
+tasks list --ref docs/notes/brief.md
+tasks search "runbook" --ref docs/notes/brief.md
+```
+
+`doc` accepts exactly one handle, `--spec`, or `--plan`. Directories and binary
+files fail as `ref_not_text`; pending outputs fail as `doc_not_found`. External
+entries use the host's document provider and respect `--no-fetch`.
+`list --ref` and `search --ref` match the stored reference byte for byte,
+without fetching or alias resolution.
+
+`show` includes an optional `inventory`: spec, plan, explicit entries in order,
+source, then unreferenced attached files in name order. Rows report origin,
+location, status and any entry metadata. Entries matching a spec or plan merge
+into its row when both resolve to the same target; an attachment entry replaces
+its standalone attachment row. Required rows form the reading list in inventory
+order: spec and plan are always required, then entries marked `required`.
+Missing outputs show as `pending`; external entries are not fetched for inventory.
+Full task objects expose `refs` only when nonempty; summary rows omit it.
+
+Every fresh transition to `done`, including `edit --status done` and the editor,
+requires local output paths and output attachments to exist (`ref_output_missing`).
+Produce them or explicitly remove their entries; `--force` does not bypass this
+gate. Special files are refused. External outputs and `drop` are not checked.
+Each reopened or recurring completion is checked; repeating `done` on an already
+completed task still releases its claim even if an output has since disappeared.
+
 ## External documents
 
 `--spec` and `--plan` also accept `<scheme>:<remainder>`, for example
@@ -739,7 +810,7 @@ an external link as `doc_not_found` (`fetch disabled by --no-fetch`). Local
 documents read as usual.
 
 ```sh
-tasks doc <id> --plan       # exactly one of --plan or --spec is required
+tasks doc <id> --plan       # exactly one of --plan, --spec, or a reference handle
 tasks doc <id> --spec
 tasks list --plan mindful:thought:abc --status done
 tasks search "phrase" --plan mindful:thought:abc
