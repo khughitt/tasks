@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-19T01:24:43Z
+updated: 2026-10-19T01:44:37Z
 depends: []
 tags: []
 source: "user:2026-10-19 ops publication"
@@ -24,3 +24,7 @@ Alternatives to settle in a spec:
 Questions: what replaces flow's 'the record lands with the code' rule (flow skill, Where the record lives) and tasks' stale_copy model when records no longer branch with code; the open linked-project gaps (tasks-6360ac overlay doc roots, ops-ba81cf guide roots, ops-c3a7e0, obs-29a062, obs-ba704d); obs's reads of review and concerns notes; flow-trial-1 runs to 2027-01-10 and a move changes its measured environment; the migration of existing records and their history; whether specs follow the records.
 
 Done: a reviewed spec choosing one alternative, with the migration order and the follow-up pieces filed per affected project (tasks, flows, obs, ops, lore).
+
+## Notes
+
+- 2026-10-19T01:44:37Z (main): Scope widened by the user 2026-10-19: every working document leaves public repositories, not only task records: plans, briefs, handoffs, and specs by default. A spec worth keeping as reference is committed consciously, possibly in a minimal form. Everything moved stays findable through a CLI (list, search, and possibly create and edit docs, e.g. 'tasks doc search' or an ops/lore command). Applies to ops and its sibling projects; the verifiably family keeps its own conventions unless it opts in.
