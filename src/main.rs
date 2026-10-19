@@ -31,6 +31,7 @@ mod proposal;
 mod provenance;
 mod query;
 mod record_commit;
+mod refs;
 mod registry;
 mod relay;
 mod rename;

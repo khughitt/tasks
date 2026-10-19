@@ -498,6 +498,7 @@ mod tests {
             moved_to: None,
             moved_from: None,
             body: String::new(),
+            refs: vec![],
             notes: vec![],
         }
     }

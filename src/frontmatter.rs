@@ -98,7 +98,7 @@ fn parse_scalar(tok: &str) -> std::result::Result<String, String> {
 }
 
 /// Parses a leading `"..."`; returns the unescaped string and the remainder after the closing quote.
-fn take_quoted(s: &str) -> std::result::Result<(String, &str), String> {
+pub(crate) fn take_quoted(s: &str) -> std::result::Result<(String, &str), String> {
     let mut out = String::new();
     let mut chars = s[1..].char_indices();
     while let Some((i, c)) = chars.next() {
@@ -115,7 +115,7 @@ fn take_quoted(s: &str) -> std::result::Result<(String, &str), String> {
     Err("unterminated quoted string".into())
 }
 
-fn quote(s: &str) -> String {
+pub(crate) fn quote(s: &str) -> String {
     let mut q = String::with_capacity(s.len() + 2);
     q.push('"');
     for c in s.chars() {
