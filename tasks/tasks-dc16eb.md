@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-19T01:44:37Z
+updated: 2026-10-19T11:40:55Z
 depends: []
 tags: []
 source: "user:2026-10-19 ops publication"
@@ -28,3 +28,4 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
 ## Notes
 
 - 2026-10-19T01:44:37Z (main): Scope widened by the user 2026-10-19: every working document leaves public repositories, not only task records: plans, briefs, handoffs, and specs by default. A spec worth keeping as reference is committed consciously, possibly in a minimal form. Everything moved stays findable through a CLI (list, search, and possibly create and edit docs, e.g. 'tasks doc search' or an ops/lore command). Applies to ops and its sibling projects; the verifiably family keeps its own conventions unless it opts in.
+- 2026-10-19T11:40:55Z (main): From the boundary survey review (ops-630a87, revision 2, 2026-10-19), this design also settles: (1) one home for working docs, the records store or mindful; if the records store, rule on doc_fetch.rs and [docs.schemes] explicitly, reconcile ops-721511 and hq-5a3e12, and re-inventory stored external references (none on 2026-10-19) before removing code; (2) flows' fingerprint covers all retained repository content, reference: true permits presence only; (3) catalogue freshness as current/behind/unknown, since stale.rs cannot see another host's sync; (4) ops keeps its prefix as the records-only hub (rename reserves old prefixes), the public kit gets a fresh prefix; (5) the moves respect flow-trial-1 through readout 2027-02-16.
