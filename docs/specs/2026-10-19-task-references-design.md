@@ -146,9 +146,12 @@ frontmatter key is today.
   - A normalized repo-relative path under the rule `validate_doc_shape` applies: no
     empty, `.` or `..` segments.
   - Any file type is allowed, not only `.md`.
-  - The path may name a file or a directory. A directory is spelled without a trailing
-    slash (`results/run-12`), and a trailing slash is refused with that spelling as the
-    hint. Whether the path is a file or a directory is observed, not declared.
+  - The path may name a regular file or a directory, after following symlinks. A
+    directory is spelled without a trailing slash (`results/run-12`), and a trailing
+    slash is refused with that spelling as the hint. Whether the path is a file or a
+    directory is observed, not declared. Any other object at the path (a FIFO, socket or
+    device) is refused as `ref_special_file`, wherever the path is resolved (writes,
+    `check`, `doc`, the completion gate, `show`), so nothing ever opens one.
   - Spaces are allowed, written in the quoted form. The first segment contains no colon.
 - **Attachment.** `files:<name>`, where `<name>` passes `attachments::validate_name`.
   - A `context` or `input` attachment must be held as attached by the ledger when
@@ -215,8 +218,10 @@ The inventory is computed by `show`, never stored. Its rows come in this order:
 2. the `plan`, when one is linked;
 3. every explicit entry, in entry order, except one merged into row 1 or 2 (§5.2);
 4. the `source`, when one is set;
-5. every attachment the ledger holds as attached that no explicit entry names, in
-   ledger order.
+5. every attachment the ledger holds as attached that no explicit entry names, in name
+   order (the ledger keeps each name's latest entry). A row whose file is gone has status
+   `missing`. A file in storage that the ledger does not hold is not a row; the existing
+   attachment audit warnings still report it.
 
 Each row records where it came from (`origin`: `spec`, `plan`, `ref`, `source` or
 `attachment`) and whether it is required.
@@ -543,3 +548,7 @@ These are my calls, settled without the user and open to change in review:
   - entry references unique within a task (§3.2, §8);
   - merging only when the resolved targets agree, with rules for missing and external
     targets and for spec and plan sharing a document (§5.2).
+- Plan review round 1:
+  - special filesystem objects refused as `ref_special_file` (§3.3);
+  - attachment rows built from the ledger, in name order, with `missing` for a recorded
+    attachment whose file is gone (§5.1).
