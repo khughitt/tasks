@@ -149,9 +149,17 @@ frontmatter key is today.
   - The path may name a regular file or a directory, after following symlinks. A
     directory is spelled without a trailing slash (`results/run-12`), and a trailing
     slash is refused with that spelling as the hint. Whether the path is a file or a
-    directory is observed, not declared. Any other object at the path (a FIFO, socket or
-    device) is refused as `ref_special_file`, wherever the path is resolved (writes,
-    `check`, `doc`, the completion gate, `show`), so nothing ever opens one.
+    directory is observed, not declared.
+  - Any other object at the path (a FIFO, socket or device) is a *special file*, and
+    tasks never opens one:
+    - writes of `context` and `input` entries refuse it as `special_file`, and so does
+      `doc`;
+    - the completion gate refuses a special output the same way (§6.3);
+    - `check` reports it for every relation (§8);
+    - `show` stays readable and reports it as status `special` with a warning (§7.3).
+
+    The same guard covers a linked spec or plan path, which tasks reads to check step
+    headings.
   - Spaces are allowed, written in the quoted form. The first segment contains no colon.
 - **Attachment.** `files:<name>`, where `<name>` passes `attachments::validate_name`.
   - A `context` or `input` attachment must be held as attached by the ledger when
@@ -187,7 +195,8 @@ The body cites a reference as `[ref:<handle>]`:
 Recognition:
 
 - A citation is `[ref:` followed by text up to the next `]`.
-- Text inside an inline code span or a fenced code block is never a citation. That is
+- Text that CommonMark parses as code (an inline code span, or a fenced or indented
+  code block) is never a citation. That is
   also the escape: to write a citation literally, as this spec does, put it in
   backticks or a fence.
 - Only the body is read. Notes are append-only history, so a note's citation text is
@@ -383,6 +392,7 @@ reading list is the rows with `required: true`, so it gets no field of its own.
 | `pending` | An absent local path or attachment on an output row. |
 | `available` | An external document `show` fetched and read. |
 | `unavailable` | An external document `show` tried to fetch and could not; `cause` carries `UnavailableCause::detail()`. |
+| `special` | Something exists at the path but is not a regular file or directory (§3.3). It is never opened, and `show` adds a warning naming the path. This holds for every row type and relation. |
 | `unchecked` | Not looked at: every external entry, an external spec, an external plan without a step, the source, and anything external under `--no-fetch`. |
 
 Governing documents keep `show`'s current fetch behaviour, with nothing new fetched:
@@ -413,9 +423,12 @@ its spec and plan links are (check's "Spec §7" rule).
 | `ref_citation_dangling` | error | The body cites a handle with no entry (§4). |
 | `ref_citation_malformed` | error | The body has a `[ref:…]` citation that is not a valid handle (§4). |
 | `ref_duplicate` | error | Two entries hold the same decoded reference (§3.2). |
+| `special_file` | error | A special file (§3.3) sits at an entry's path (any relation, outputs included) or at the linked spec or plan path. |
 
-- Outputs are not checked while the task is open, whether or not they exist yet. The
-  completion gate covers them (§6.3).
+- Outputs are not checked for existence while the task is open, whether or not they
+  exist yet; the completion gate covers them (§6.3). The one exception is
+  `special_file`, which is reported for outputs too, because a special file is never a
+  valid output.
 - `check` does not fetch external references. Unlike a linked external spec, which
   `check` fetches, references can be many and are often plain URLs (my call).
 - A malformed section is a parse error, as a malformed note line is.
@@ -552,3 +565,7 @@ These are my calls, settled without the user and open to change in review:
   - special filesystem objects refused as `ref_special_file` (§3.3);
   - attachment rows built from the ledger, in name order, with `missing` for a recorded
     attachment whose file is gone (§5.1).
+- Plan review round 2:
+  - special files: show status `special`, the `special_file` kind, the check exception
+    for outputs, and the same guard on spec and plan paths (§3.3, §7.3, §8);
+  - citations exclude everything CommonMark parses as code (§4).
