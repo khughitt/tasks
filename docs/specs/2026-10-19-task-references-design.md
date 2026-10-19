@@ -562,7 +562,7 @@ These are my calls, settled without the user and open to change in review:
   - merging only when the resolved targets agree, with rules for missing and external
     targets and for spec and plan sharing a document (§5.2).
 - Plan review round 1:
-  - special filesystem objects refused as `ref_special_file` (§3.3);
+  - special filesystem objects refused (§3.3; the kind is `special_file` since round 2);
   - attachment rows built from the ledger, in name order, with `missing` for a recorded
     attachment whose file is gone (§5.1).
 - Plan review round 2:

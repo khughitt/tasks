@@ -6,7 +6,8 @@
 
 **Architecture:**
 - **Pure record layer.** `src/refs.rs` holds the `Ref` entry: its grammar (parse and render), its reference forms, the audit of duplicates and citations, and the presence and target checks. `src/format.rs` stores the entries as a managed body section between the body and `## Notes`.
-- **Resolver.** `src/resolve.rs` gains `locate_entry` (regular files or directories, worktree first; special files refused) and `read_external`.
+- **Resolver.** `src/resolve.rs` gains `locate_entry` (regular files or directories, worktree first; special files refused), a special-file guard on every local document read, and `read_external`.
+- **Citations.** The citation scanner uses `pulldown-cmark` to find what CommonMark parses as code, rather than a hand-written Markdown approximation.
 - **Show.** `src/inventory.rs` builds `show`'s inventory rows from the governing links, the entries, the source and the attachment ledger, with the merge and status rules.
 - **Gates.** Each lives where its command already decides: `transition()` (completion), `detach`, move preflight, and `check`.
 
@@ -34,23 +35,29 @@
   - `files:<name>` (an attachment);
   - `<scheme>:<rest>` (external, per `format::external_doc`).
   - A leading `@` is refused with exactly `cross-project references are not supported yet`. `files` is a reserved scheme.
-  - Any other filesystem object (FIFO, socket, device) is `ref_special_file`, and nothing ever opens one.
+  - Any other filesystem object (FIFO, socket, device) is a special file, and nothing ever opens one (spec §3.3):
+    - writes of `context` and `input` entries, `doc`, and the completion gate refuse it as `special_file`;
+    - `check` reports it for every relation and for spec and plan paths;
+    - `show` reports status `special` with a warning.
+    - `Resolver::read` refuses a special file at a local spec or plan path before opening it.
 - **Section** (spec §3.1): heading exactly `## References`, after the body and before `## Notes`, written only when the task has entries. `validate_body` refuses the heading.
 - **Section parse errors:** a second heading, the heading after `## Notes`, a malformed line, a duplicate handle.
 - **Citation** (spec §4): `[ref:` up to the next `]` on the same line, in the body only.
-  - Never inside a fenced code block, or inside an inline code span. Code spans follow CommonMark and may cross line breaks within a paragraph.
+  - Never inside anything CommonMark parses as code: an inline code span, or a fenced or indented code block.
+  - The code ranges come from `pulldown_cmark::Parser::new(body).into_offset_iter()`, using `pulldown-cmark = { version = "0.13", default-features = false }`, which is in the local cargo cache.
   - A malformed handle is `ref_citation_malformed`; an unknown one is `ref_citation_dangling`.
 - **Duplicate references** (spec §3.2): equal decoded references are `ref_duplicate`, naming both handles.
 - **Audit placement.** `parse_task` calls `validate_task`, so the duplicate-reference and citation audit never runs there: a read must never fail on prose. It runs in `check` (open tasks) and on `add` and `edit` writes that change the body or the entries.
-- **Error kinds** (JSON `error.kind`): `ref_not_found`, `ref_output_missing`, `ref_cites_attachment`, `ref_not_text`, `ref_special_file`, `ref_duplicate`, `ref_citation_dangling`, `ref_citation_malformed`.
+- **Error kinds** (JSON `error.kind`): `ref_not_found`, `ref_output_missing`, `ref_cites_attachment`, `ref_not_text`, `special_file`, `ref_duplicate`, `ref_citation_dangling`, `ref_citation_malformed`.
 - **Check finding kinds** (spec §8):
-  - `ref_missing` (error), `ref_in_main_checkout` (warning), `ref_special_file` (error);
+  - `ref_missing` (error), `ref_in_main_checkout` (warning);
+  - `special_file` (error): any relation, outputs included, and the spec and plan paths;
   - `ref_citation_dangling`, `ref_citation_malformed` and `ref_duplicate` (errors);
   - open tasks only.
 - **Inventory row** (spec §7.2):
   - `origin`: `spec`, `plan`, `ref`, `source`, `attachment`;
   - `location`: `path`, `attachment`, `external`, `opaque`;
-  - `status`: `present`, `missing`, `pending`, `available`, `unavailable`, `unchecked`.
+  - `status`: `present`, `missing`, `pending`, `special`, `available`, `unavailable`, `unchecked`.
   - Attachment rows come from the ledger, in name order (spec §5.1).
 - **JSON omission** (spec §7): empty lists and absent options are omitted, never `[]` or `null`. `task.refs` is on full task objects only.
 - **CLI surface** (spec §6):
@@ -328,6 +335,7 @@ git commit -m "feat(refs): reference entries stored in a managed body section"
 **Complexity:** mid
 
 **Files:**
+- Modify: `Cargo.toml`, `Cargo.lock` (`pulldown-cmark = { version = "0.13", default-features = false }`)
 - Modify: `src/refs.rs` (citations, `Problem`, `audit`)
 - Modify: `src/config.rs` (the `files` scheme reservation)
 - Modify: `src/commands/check.rs` (audit findings)
@@ -356,6 +364,16 @@ fn citations_skip_code_spans_and_fences() {
 }
 
 #[test]
+fn a_code_span_does_not_cross_a_block_boundary() {
+    // The heading's backtick is literal: a heading is its own block (reviewer's case).
+    assert_eq!(citations("# Example `\nUse `[ref:sample]` literally."), vec![]);
+    // A list item boundary ends the paragraph too.
+    assert_eq!(citations("- one `\n- two `[ref:sample]` x"), vec![]);
+    // An indented code block is code.
+    assert_eq!(citations("Text.\n\n    [ref:indented]\n\nAfter [ref:real]."), vec![Citation::Handle("real")]);
+}
+
+#[test]
 fn a_code_span_does_not_cross_a_blank_line() {
     let body = "Open `tick\n\nThen [ref:real] and `close`.";
     assert_eq!(citations(body), vec![Citation::Handle("real")]);
@@ -380,10 +398,8 @@ Expected: FAIL (`citations`, `audit` undefined).
 - [ ] **Step 3: Implement `citations` and `audit`**
 
 **Citations.**
-1. **Fences.** Split the body into fenced and unfenced regions. A line whose trimmed start is three or more backticks or tildes opens a fence, which closes on a line of the same character at least as long. Fenced text is skipped.
-2. **Paragraphs.** Split the unfenced text into paragraphs at blank lines.
-3. **Code spans.** Within a paragraph, line breaks included, a run of n backticks opens a code span that closes at the next run of exactly n. Text inside a closed span is skipped, and an unclosed run is literal (CommonMark).
-4. **Citations.** Outside spans, `[ref:` begins a citation that ends at the next `]` on the same line. The citation is `Handle` when its text matches the handle grammar, and `Malformed` otherwise, including an unterminated one, whose text runs to the end of the line.
+1. **Code ranges.** Collect the byte ranges of every `Event::Code` and of every code block (the range of `Event::Start(Tag::CodeBlock(_))`, which spans the whole block, fenced or indented) from `pulldown_cmark::Parser::new(body).into_offset_iter()`.
+2. **Citations.** Find each `[ref:` in the body whose start offset lies in no code range. It ends at the next `]` on the same line. It is `Handle` when its text matches the handle grammar, and `Malformed` otherwise, including an unterminated one, whose text runs to the end of the line.
 
 **Audit.** Duplicates come first, as pairs in entry order, with detail `<first> and <second> both reference <reference>`. Then citations in body order: an unknown handle with detail `[ref:<h>] names no reference`, and a malformed one with detail `[ref:<text>] is not a reference handle`.
 
@@ -416,15 +432,19 @@ fn check_reports_reference_audit_findings_on_open_tasks_only() {
     assert_eq!(code, 0, "{v}");
 }
 
-#[test]
-fn a_files_scheme_in_host_config_is_a_config_error() {
-    // write `[docs.schemes]\nfiles = "cat"\n` to env.home/.config/tasks/config.toml;
-    // `tasks show <id>` fails with kind "config", message containing
-    // "files is reserved for task attachments".
-}
 ```
 
-Adjust the `replacen` anchor to the record shape `add` writes if it differs (`env.read` the record first). Write the second test in full.
+Adjust the `replacen` anchor to the record shape `add` writes if it differs (`env.read` the record first).
+
+In `src/config.rs` unit tests (the host configuration loads lazily, so an integration command would not necessarily read it):
+
+```rust
+#[test]
+fn the_files_scheme_is_reserved() {
+    let error = HostConfig::parse("[docs.schemes]\nfiles = 'cat'\n", "c.toml").unwrap_err().to_string();
+    assert!(error.contains("files is reserved for task attachments"), "{error}");
+}
+```
 
 - [ ] **Step 6: Implement the check findings and the scheme reservation**
 
@@ -459,9 +479,9 @@ git commit -m "feat(refs): check audits duplicate references and citations"
 
 **Files:**
 - Modify: `src/refs.rs` (`Location`, `location`, `present`; `validate_reference` now calls `location`)
-- Modify: `src/resolve.rs` (`LocatedEntry`, `locate_entry`)
-- Modify: `src/error.rs` (`Error::RefSpecialFile(String)` → `ref_special_file`)
-- Modify: `src/commands/check.rs` (the open-task block beside `doc_missing`)
+- Modify: `src/resolve.rs` (`LocatedEntry`, `locate_entry`, `refuse_special`, the guard in `read`)
+- Modify: `src/error.rs` (`Error::SpecialFile(String)` → `special_file`)
+- Modify: `src/commands/check.rs` (the open-task block beside `doc_missing`, and the spec and plan loop)
 - Test: unit tests in `src/resolve.rs`; integration in `tests/refs.rs`
 
 **Interfaces:**
@@ -475,8 +495,10 @@ git commit -m "feat(refs): check audits duplicate references and citations"
   - `pub enum LocatedEntry { Here(PathBuf), Main { root: PathBuf, path: PathBuf }, Missing }`. It records no file-or-directory kind, because no caller would read it (Clippy's `dead_code`); `doc` tests `is_dir()` on the located path.
   - `Resolver::locate_entry(&self, rel: &str) -> Result<LocatedEntry>`.
     - Look at `project.root.join(rel)` with `fs::metadata`, which follows symlinks. Only `NotFound` means nothing exists; other errors propagate.
-    - A regular file or a directory is found. Any other type is `Err(Error::RefSpecialFile("<path> is not a regular file or directory"))`.
+    - A regular file or a directory is found. Any other type is `Err(Error::SpecialFile("<path> is not a regular file or directory"))`.
     - Only when nothing exists here is the main checkout consulted, by the same rule.
+  - `pub(crate) fn refuse_special(path: &Path) -> Result<()>`: `fs::metadata` (following symlinks). `NotFound`, a regular file and a directory are `Ok`; anything else is the `SpecialFile` error. `locate_entry` uses it.
+  - **The guard in `Resolver::read`.** Before `read_to_string` on a local document, call `refuse_special` on the path it is about to open. This covers `doc --plan`, `doc --spec`, `step_exists`, `edit --step` and `check`'s plan reads, none of which may hang on a FIFO.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -498,7 +520,7 @@ fn locate_entry_refuses_a_fifo_and_a_symlink_to_one() {
     // std::process::Command::new("mkfifo").arg(root.join("pipe")); symlink root/to-pipe -> pipe
     for rel in ["pipe", "to-pipe"] {
         let error = resolver.locate_entry(rel).unwrap_err();
-        assert_eq!(error.kind(), "ref_special_file");
+        assert_eq!(error.kind(), "special_file");
     }
 }
 ```
@@ -514,7 +536,7 @@ fn check_reports_missing_main_checkout_and_special_targets_on_open_tasks() {
     // entry o (output): docs/later.md, absent → no finding.
     // entry f (context): files:gone.png never attached → error ref_missing.
     // attach shot.png, entry s (input): files:shot.png, then delete the stored bytes → ref_missing.
-    // mkfifo docs/pipe, entry p (context): docs/pipe → error ref_special_file
+    // mkfifo docs/pipe, entry p (context): docs/pipe → error special_file
     //   (run check with .timeout(Duration::from_secs(10))).
     // close the task → none of these findings.
 }
@@ -522,19 +544,34 @@ fn check_reports_missing_main_checkout_and_special_targets_on_open_tasks() {
 
 Write it in full.
 
+In `tests/refs.rs`:
+
+```rust
+#[test]
+fn a_fifo_at_a_linked_plan_path_is_refused_not_opened() {
+    // add T with plan docs/plans/x.md, step "Task 1: A" (file with that heading);
+    // replace docs/plans/x.md with a FIFO (remove, then mkfifo).
+    // With .timeout(Duration::from_secs(10)) on each command:
+    // `doc <id> --plan` → kind special_file;
+    // `check` → error finding special_file naming the plan path (no doc_missing for it).
+}
+```
+
 - [ ] **Step 2: Run to verify failure**
 
 Run: `just test-one resolve::` and `just test-one --test refs check_reports_missing`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `location`, `present`, `locate_entry`, `RefSpecialFile` and the check findings**
+- [ ] **Step 3: Implement `location`, `present`, `locate_entry`, `SpecialFile` and the check findings**
 
 In `check`, inside `if task.status.is_open()`, for each `context` or `input` entry that is not external:
 - `Main`: warning `ref_in_main_checkout`, detail `reference <h> <rel> is not in this checkout; read from the main checkout at <root>`;
 - absent: error `ref_missing`, detail `reference <h> <reference> does not exist`;
-- `Err(RefSpecialFile)`: error `ref_special_file` with its message.
+- `Err(SpecialFile)`: error `special_file` with its message.
 
-For an `output` entry, only `RefSpecialFile` is reported.
+For an `output` entry, only `SpecialFile` is reported (spec §8's exception).
+
+In the spec and plan loop, a `Located::Missing` link whose path holds a special file, here or (when nothing is here) in main, is the error `special_file` instead of `doc_missing`.
 
 - [ ] **Step 4: Run the tests and the lint gate**
 
@@ -574,7 +611,7 @@ git commit -m "feat(refs): locate entries worktree first; check reports missing 
 - Consumes: `refs::parse_entry`, `audit`, `location` and `present`; `Resolver::locate_entry` (Tasks 2-4).
 - Produces:
   - `pub fn refuse_problems(task: &Task) -> Result<()>`: the first `audit` problem as `Error::Reference { kind: problem.kind, detail: problem.detail }`. `Error::kind()` returns `kind`.
-  - `pub fn require_targets(resolver: &Resolver, project: &Project, task: &Task, original: Option<&Task>) -> Result<()>`. Every non-external `context` or `input` entry whose `(reference, relation)` pair is not in `original` must give `present(..)? == Some(_)`, or the call fails with `Error::RefNotFound("<id>: reference <handle> <reference> does not exist")`. A `RefSpecialFile` error propagates. A `Main` location calls `note_main_entry`.
+  - `pub fn require_targets(resolver: &Resolver, project: &Project, task: &Task, original: Option<&Task>) -> Result<()>`. Every non-external `context` or `input` entry whose `(reference, relation)` pair is not in `original` must give `present(..)? == Some(_)`, or the call fails with `Error::RefNotFound("<id>: reference <handle> <reference> does not exist")`. A `SpecialFile` error propagates. A `Main` location calls `note_main_entry`.
   - `Resolver::note_main_entry(&self, handle: &str, rel: &str, root: &Path)`: queues `reference <handle> <rel> is not in this checkout; read from the main checkout at <root>` for `take_warnings`.
   - `Resolver::read_external(&self, value: &str) -> Result<DocRead>`: the external branch of `read`, moved out unchanged, which `read` now calls.
   - `doc::run(ctx, id, target: DocTarget, fetch)`, with `pub enum DocTarget { Plan, Spec, Ref(String) }` replacing the `DocKind` argument.
@@ -658,8 +695,8 @@ fn doc_reads_an_entry_by_handle() {
 #[test]
 fn a_fifo_is_refused_without_being_opened() {
     // mkfifo docs/pipe. With .timeout(Duration::from_secs(10)) on each command:
-    // `add T --ref "p (context): docs/pipe"` → ref_special_file;
-    // hand-write entry p (context): docs/pipe into a record, then `doc <id> p` → ref_special_file.
+    // `add T --ref "p (context): docs/pipe"` → special_file;
+    // hand-write entry p (context): docs/pipe into a record, then `doc <id> p` → special_file.
 }
 ```
 
@@ -800,6 +837,16 @@ fn external_plan_rows_report_the_fetch_outcome() {
 }
 
 #[test]
+fn show_stays_readable_with_special_files_and_reports_them() {
+    // With .timeout(Duration::from_secs(10)) on show:
+    // (a) plan docs/plans/x.md with step, replaced by a FIFO, plus entry p (context): docs/plans/x.md
+    //     → show succeeds; the plan row (merged, handle "p") has status "special", no step_found
+    //     in the row or at top level; a warning names the path.
+    // (b) entry o (output): docs/out-pipe where docs/out-pipe is a FIFO → its row has status "special"
+    //     and a warning names it.
+}
+
+#[test]
 fn pretty_show_has_a_references_section() {
     let out = env.pretty(&dir, &["show", &id]);
     assert!(out.contains("── references"));
@@ -816,28 +863,32 @@ Write the elided bodies in full.
 Run: `just test-one --test refs`
 Expected: the new tests FAIL (no `inventory` key; the missing-plan test fails with an `io` error).
 
-- [ ] **Step 3: Keep `show` alive when a stepped local plan is missing**
+- [ ] **Step 3: Keep `show` readable when a stepped local plan is missing or not a regular file**
 
-In `describe`, the final `(Some(plan), Some(step))` arm checks for absence before `step_exists`. When the plan is local, `resolver.locate(plan)?` is `Missing`, and nothing exists at the path here or in main (the same `try_exists` test the closed-task arm uses), then `step_found` is `None`. Any other read error still propagates. `check` already reports `doc_missing` for it.
+In `describe`, the final `(Some(plan), Some(step))` arm calls `step_exists` only when `resolver.locate(plan)?` is `Here` or `Main`, which are regular files. When it is `Missing`:
+- If something exists at the path `read` would open (`project.root.join(plan)`), or at the main checkout's copy when nothing is here, push the warning `plan <path> is not a regular file; its step is not checked`.
+- Either way, `step_found` is `None`.
+
+Never call `read` on that path. Any other error still propagates. `check` reports these cases (`doc_missing`, or `special_file` from Task 4).
 
 - [ ] **Step 4: Implement `inventory::build`**
 
 Rows come in spec §5.1 order.
 
 - **Governing rows.**
-  - A local spec or plan: `locate` gives `present` (with path) or `missing`, and `path` is `resolver.abs(..)`.
+  - A local spec or plan: `locate` gives `present` (with path). Otherwise the status is `special` when `refuse_special` fails on the path here (or in main when nothing is here), with a warning carrying its message, and `missing` otherwise. `path` is `resolver.abs(..)`.
   - An external spec is `unchecked`.
   - An external plan with a step: when `fetch` is allowed, `resolver.read(DocKind::Plan, ..)`, which is cached since `describe` already read it, maps `Available` to `available` and `Unavailable` to `unavailable` with `cause = cause.detail()`. Under `FetchDisabled` it is `unchecked`.
   - An external plan without a step is `unchecked`.
   - The plan row carries `step` and the `step_found` passed in.
 - **Merge** (spec §5.2). An entry merges into the spec row (the plan row only when the spec does not match) when its reference equals the link and the targets agree:
-  - for a local path, `locate` and `locate_entry` yield the same path, or both are missing;
+  - for a local path, `locate` and `locate_entry` yield the same path, both are missing, or both are special at the same path (the merged row is `special`);
   - for an external reference, the strings are equal.
   
   A merged row takes the entry's handle, relation, kind and description, and keeps `required: true`. When the targets disagree, the entry keeps its own row, and a warning goes to `warnings`: `reference <h> <reference> resolves to <entry path|missing>, but the <spec|plan> link resolves to <path|missing>`.
 - **Entry rows.**
   - A local path or attachment: `refs::present` gives `present`, otherwise `pending` for an output and `missing` for anything else. `path` is the located path, or the would-be path (`project.root.join(rel)`, or `attachments::task_dir(..).join(name)`) when absent.
-  - A `RefSpecialFile` error becomes status `missing` plus a warning carrying its message, so `show` never fails or opens it.
+  - A `SpecialFile` error becomes status `special` (any relation) plus a warning carrying its message, so `show` never fails or opens it.
   - An external entry is `unchecked`, with no path.
 - **Source row.** `location: opaque`, `status: unchecked`.
 - **Attachment rows.** Iterate `attachments::ledger(task)` (a `BTreeMap`, so name order) for names whose latest entry is `Attached` and that no entry names. Each row has origin `attachment`, reference `files:<name>` and path `task_dir(..).join(name)`. Its status is `present` when `entry_state` is `File`, and `missing` otherwise. The existing `audit_task` warnings stay as they are.
@@ -881,7 +932,7 @@ git commit -m "feat(show): one inventory of spec, plan, references, source and a
 - Test: `tests/refs.rs`
 
 **Interfaces:**
-- Produces: `pub fn require_outputs(resolver: &Resolver, project: &Project, task: &Task) -> Result<()>`. Every `output` entry that is a local path or attachment and for which `present` is `None` is listed in `Error::RefOutputMissing("<id> declares outputs that do not exist: <h> (<reference>), …; produce them, or remove each with `tasks edit <id> --rm-ref <handle>`")`. A special file propagates `RefSpecialFile`.
+- Produces: `pub fn require_outputs(resolver: &Resolver, project: &Project, task: &Task) -> Result<()>`. Every `output` entry that is a local path or attachment and for which `present` is `None` is listed in `Error::RefOutputMissing("<id> declares outputs that do not exist: <h> (<reference>), …; produce them, or remove each with `tasks edit <id> --rm-ref <handle>`")`. A special file propagates `SpecialFile`.
 
 - [ ] **Step 1: Write the failing integration tests**
 
@@ -898,7 +949,7 @@ fn completion_refuses_missing_outputs_on_every_path() {
     env.json(&dir, &["edit", &id, "--status", "done", "--rm-ref", "o"]);
     // a produced output passes: second task, write docs/out.md, done succeeds.
     // a files: output passes after `tasks attach <id> <file> --name after.png`.
-    // a FIFO output (mkfifo, .timeout 10s) → ref_special_file.
+    // a FIFO output (mkfifo, .timeout 10s) → special_file.
     // drop never checks outputs.
 }
 
