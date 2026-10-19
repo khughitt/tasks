@@ -1,6 +1,6 @@
 # Task references: one explicit, ordered list of what a task cites
 
-Status: draft, revised after spec review round 1; awaiting the user's review
+Status: approved by the user 2026-10-19, with spec review round 2's fixes applied; implementation plan next
 Task: tasks-3a445e
 Coordinates with: tasks-dc16eb (document roots), tasks-a73dce, tasks-82bd08 and
 tasks-6360ac (branch-only and linked-checkout resolution)
@@ -102,6 +102,12 @@ after `## Notes`, and on a malformed entry line.
 ```
 
 - **handle**: `[a-z][a-z0-9-]{0,31}`, unique within the task.
+- **Unique references.** The decoded reference (after unquoting) is also unique among a
+  task's entries: one document or artifact has one entry, so one inventory row carries
+  one set of metadata. A write that would hold two entries with equal references is
+  refused as `ref_duplicate`, naming both handles. That covers `add`, `edit --ref` and
+  saves from the flagless editor. `check` reports `ref_duplicate` for a pair that
+  arrives by hand edit.
 - **relation**: `context` (consult when needed), `input` (the work uses it) or `output`
   (the work produces or revises it).
 - **required**: puts the entry on the reading list (§5.3). It is allowed on every
@@ -217,13 +223,35 @@ Each row records where it came from (`origin`: `spec`, `plan`, `ref`, `source` o
 
 ### 5.2 Merging, so nothing appears twice
 
-- **Entry equal to the spec or plan.** An explicit entry whose reference equals the
-  linked spec or plan, byte for byte, merges into that row. The row keeps the
-  governing origin and position and takes the entry's handle, relation, kind and
-  description. It stays required. Citations of the handle keep working. This lets a
-  task declare `sweep-spec (output, kind=spec): docs/specs/…` before writing the spec,
-  then link it with `edit --spec` without the inventory listing it twice (my call;
-  refusing the overlap would block that flow).
+- **Entry equal to the spec or plan.** An explicit entry is a merge candidate when its
+  decoded reference equals the linked spec or plan, byte for byte. It merges into that
+  row only when both resolve to the same target. The merged row keeps the governing
+  origin and position and takes the entry's handle, relation, kind and description. It
+  stays required. Citations of the handle keep working. This lets a task declare
+  `sweep-spec (output, kind=spec): docs/specs/…` before writing the spec, then link it
+  with `edit --spec` without the inventory listing it twice (my call; refusing the
+  overlap would block that flow).
+
+  The governing row resolves through the file-only `locate`, and the entry through
+  `locate_entry` (§9). The two agree when:
+
+  - **local, both found**: they resolve to the same absolute path;
+  - **local, both missing**: neither finds anything. The merged row takes the governing
+    row's status (`missing`), because an unresolvable governing link is the error
+    `check` already reports;
+  - **external**: equal external strings always agree. The merged row takes the
+    governing row's status (§7.3).
+
+  Otherwise they disagree. Examples: a directory at the path in the worktree and a file
+  at that path in the main checkout; or the entry finding a directory while the
+  governing `locate` finds nothing. Then the entry keeps its own row at its entry
+  position, with origin `ref` and its own `path` and `status`. `show` adds a warning
+  naming the handle and both resolved targets (or `missing`), so the difference is
+  visible rather than hidden in one row. `doc <id> --spec` and `doc <id> <handle>` then
+  read what their rows say.
+- **Spec and plan linking the same document.** Nothing forbids this today, and both
+  governing rows stay. A matching entry merges into the spec row only, under the rule
+  above. The plan row keeps its own fields.
 - **Entry naming an attachment.** An explicit entry naming `files:<name>` replaces that
   attachment's row from step 5. One row, with origin `ref`.
 - **Source.** The source is never merged. It is provenance and stays opaque.
@@ -379,6 +407,7 @@ its spec and plan links are (check's "Spec §7" rule).
 | `ref_in_main_checkout` | warning | Found only in the main checkout, matching `doc_in_main_checkout`. |
 | `ref_citation_dangling` | error | The body cites a handle with no entry (§4). |
 | `ref_citation_malformed` | error | The body has a `[ref:…]` citation that is not a valid handle (§4). |
+| `ref_duplicate` | error | Two entries hold the same decoded reference (§3.2). |
 
 - Outputs are not checked while the task is open, whether or not they exist yet. The
   completion gate covers them (§6.3).
@@ -480,7 +509,8 @@ These are my calls, settled without the user and open to change in review:
    quoting for references that need it (§3.2, §6.1).
 3. `required` allowed on every relation, including outputs that already exist (§3.2).
 4. Spec and plan lead the inventory and are always required (§5).
-5. An entry equal to the spec or plan merges into the governing row, not refused
+5. An entry equal to the spec or plan merges into the governing row, not refused, when
+   both resolve to the same target. Otherwise it keeps its own row, with a warning
    (§5.2).
 6. The reading list is a filter of the inventory, with no field of its own (§5.3, §7.2).
 7. Citations validated in the body only, not in notes; code spans and fences escape
@@ -492,6 +522,7 @@ These are my calls, settled without the user and open to change in review:
 11. `list --ref` included in this increment (§6.2).
 12. Cross-project references, pinned revisions and entry locators deferred, with room
     kept for them (§11).
+13. Entry references unique within a task (§3.2).
 
 ## Revision history
 
@@ -508,3 +539,7 @@ These are my calls, settled without the user and open to change in review:
   - citation escaping via code spans (§4);
   - the JSON omission convention (§7);
   - the git-history claim corrected (§11).
+- Round 2 (codex/gpt-6-astra, revise; P2 2):
+  - entry references unique within a task (§3.2, §8);
+  - merging only when the resolved targets agree, with rules for missing and external
+    targets and for spec and plan sharing a document (§5.2).
