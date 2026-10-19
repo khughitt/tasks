@@ -232,6 +232,16 @@ pub fn run(ctx: Ctx) -> Result<Output> {
 
     for task in &tasks {
         let file = format!("tasks/{}.md", task.id);
+        if task.status.is_open() {
+            for problem in crate::refs::audit(task) {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    problem.kind,
+                    problem.detail,
+                ));
+            }
+        }
         // A retired project holds no open work (ops lifecycle spec §4); one that reappears,
         // say from a sync conflict, is an error to close or a reason to unretire.
         if retired && task.status.is_open() {

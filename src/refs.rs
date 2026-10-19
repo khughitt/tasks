@@ -1,6 +1,85 @@
 use crate::error::{Error, Result};
-use crate::model::{Ref, Relation};
+use crate::model::{Ref, Relation, Task};
 use crate::{format, frontmatter};
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Citation<'a> {
+    Handle(&'a str),
+    Malformed(&'a str),
+}
+
+pub fn citations(body: &str) -> Vec<Citation<'_>> {
+    use pulldown_cmark::{Event, Parser, Tag};
+
+    let code_ranges: Vec<_> = Parser::new(body)
+        .into_offset_iter()
+        .filter_map(|(event, range)| match event {
+            Event::Code(_) | Event::Start(Tag::CodeBlock(_)) => Some(range),
+            _ => None,
+        })
+        .collect();
+    body.match_indices("[ref:")
+        .filter(|(start, _)| !code_ranges.iter().any(|range| range.contains(start)))
+        .map(|(start, _)| {
+            let rest = &body[start + "[ref:".len()..];
+            let line = &rest[..rest.find(['\n', '\r']).unwrap_or(rest.len())];
+            match line.find(']') {
+                Some(end) => {
+                    let handle = &line[..end];
+                    if handle.len() <= 32 && format::valid_doc_scheme(handle) {
+                        Citation::Handle(handle)
+                    } else {
+                        Citation::Malformed(handle)
+                    }
+                }
+                None => Citation::Malformed(line),
+            }
+        })
+        .collect()
+}
+
+pub const DUPLICATE: &str = "ref_duplicate";
+pub const CITATION_DANGLING: &str = "ref_citation_dangling";
+pub const CITATION_MALFORMED: &str = "ref_citation_malformed";
+
+pub struct Problem {
+    pub kind: &'static str,
+    pub detail: String,
+}
+
+pub fn audit(task: &Task) -> Vec<Problem> {
+    let mut problems = Vec::new();
+    for (index, first) in task.refs.iter().enumerate() {
+        for second in &task.refs[index + 1..] {
+            if first.reference == second.reference {
+                problems.push(Problem {
+                    kind: DUPLICATE,
+                    detail: format!(
+                        "{} and {} both reference {}",
+                        first.handle, second.handle, first.reference
+                    ),
+                });
+            }
+        }
+    }
+    for citation in citations(&task.body) {
+        match citation {
+            Citation::Handle(handle) => {
+                if !task.refs.iter().any(|entry| entry.handle == handle) {
+                    problems.push(Problem {
+                        kind: CITATION_DANGLING,
+                        detail: format!("[ref:{handle}] names no reference"),
+                    });
+                }
+            }
+            Citation::Malformed(text) => problems.push(Problem {
+                kind: CITATION_MALFORMED,
+                detail: format!("[ref:{text}] is not a reference handle"),
+            }),
+        }
+    }
+    problems
+}
 
 pub fn parse_entry(text: &str) -> Result<Ref> {
     let (handle, rest) = text
@@ -151,6 +230,60 @@ pub fn validate_reference(reference: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::model::Relation;
+
+    #[test]
+    fn citations_skip_code_spans_and_fences() {
+        let body = "Use [ref:brief] here.\nQuote `[ref:shown]` or ``[ref:also]``.\nLiteral `example\n[ref:sample]` here.\n```\n[ref:fenced]\n```\n~~~md\n[ref:tilde]\n~~~\nAnd [ref:Bad Handle] and [ref:open";
+        assert_eq!(
+            citations(body),
+            vec![
+                Citation::Handle("brief"),
+                Citation::Malformed("Bad Handle"),
+                Citation::Malformed("open"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_code_span_does_not_cross_a_block_boundary() {
+        // The heading's backtick is literal: a heading is its own block (reviewer's case).
+        assert_eq!(
+            citations("# Example `\nUse `[ref:sample]` literally."),
+            vec![]
+        );
+        // A list item boundary ends the paragraph too.
+        assert_eq!(citations("- one `\n- two `[ref:sample]` x"), vec![]);
+        // An indented code block is code.
+        assert_eq!(
+            citations("Text.\n\n    [ref:indented]\n\nAfter [ref:real]."),
+            vec![Citation::Handle("real")]
+        );
+    }
+
+    #[test]
+    fn a_code_span_does_not_cross_a_blank_line() {
+        let body = "Open `tick\n\nThen [ref:real] and `close`.";
+        assert_eq!(citations(body), vec![Citation::Handle("real")]);
+    }
+
+    #[test]
+    fn audit_names_duplicates_and_unresolved_citations() {
+        let text = "---\nid: sci-4f2a9c\ntitle: T\nstatus: todo\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n\nSee [ref:a] and [ref:gone] and [ref:X].\n\n## References\n\n- a (context): docs/x.md\n- b (input): docs/x.md\n";
+        let task = crate::format::parse_task(text, "t.md").unwrap();
+        let problems = audit(&task);
+        let kinds: Vec<_> = problems.iter().map(|p| p.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![DUPLICATE, CITATION_DANGLING, CITATION_MALFORMED]
+        );
+        assert!(
+            problems[0]
+                .detail
+                .contains("a and b both reference docs/x.md"),
+            "{}",
+            problems[0].detail
+        );
+    }
 
     #[test]
     fn an_entry_round_trips_every_field() {

@@ -393,3 +393,98 @@ EOF
   chmod 600 "$RELAY_STATE_DIR/agents.json"
 }
 "#;
+
+pub fn write_doc(dir: &std::path::Path, rel: &str, text: &str) {
+    let p = dir.join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, text).unwrap();
+}
+
+pub fn id_of(value: serde_json::Value) -> String {
+    value["id"].as_str().unwrap().to_string()
+}
+
+/// Run git in `dir` under a fixed identity, asserting success.
+pub fn git(dir: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+}
+
+/// Runs `check` in `dir` and returns its exit code and parsed findings (`null` when clean).
+pub fn check_findings(env: &TestEnv, dir: &std::path::Path) -> (i32, serde_json::Value) {
+    let out = env.cmd(dir).args(["check"]).output().unwrap();
+    let findings = if out.stdout.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    (out.status.code().unwrap(), findings)
+}
+
+pub fn findings_of<'a>(
+    v: &'a serde_json::Value,
+    key: &str,
+    kind: &str,
+) -> Vec<&'a serde_json::Value> {
+    v[key]
+        .as_array()
+        .map(|all| all.iter().filter(|f| f["kind"] == kind).collect())
+        .unwrap_or_default()
+}
+
+/// A project whose specs and plans are kept out of git, one task linked to a spec, a
+/// plan, and its `Task 1: A` step, and a linked worktree at `<main>/wt` that git therefore
+/// gave no docs: `(main, side, id)`.
+pub fn worktree_with_excluded_docs(
+    env: &mut TestEnv,
+) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let main = env.init("sci");
+    git(&main, &["init", "-q", "-b", "main"]);
+    // Kept out of git, as a project whose profile does not commit its specs does.
+    std::fs::write(main.join(".git/info/exclude"), "docs/\n").unwrap();
+    write_doc(&main, "docs/specs/x-design.md", "# X\n");
+    write_doc(
+        &main,
+        "docs/plans/x.md",
+        "# X plan\n\n### Task 1: A\n\n### Task 2: B\n",
+    );
+    let id = id_of(env.json(
+        &main,
+        &[
+            "add",
+            "T",
+            "-p",
+            "2",
+            "--spec",
+            "x",
+            "--plan",
+            "x",
+            "--step",
+            "Task 1: A",
+        ],
+    ));
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "seed"]);
+    let side = main.join("wt");
+    git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    assert!(!side.join("docs").exists(), "git carried the excluded docs");
+    (main, side, id)
+}

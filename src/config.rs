@@ -64,6 +64,11 @@ impl HostConfig {
         let file: FileShape =
             toml::from_str(text).map_err(|error| Error::Config(format!("{path}: {error}")))?;
         for (scheme, command) in &file.docs.schemes {
+            if scheme == "files" {
+                return Err(Error::Config(format!(
+                    "{path}: [docs.schemes] key files is reserved for task attachments"
+                )));
+            }
             if !crate::format::valid_doc_scheme(scheme) {
                 return Err(Error::Config(format!(
                     "{path}: [docs.schemes] key {scheme:?} must match [a-z][a-z0-9-]*"
@@ -104,6 +109,17 @@ mod tests {
         ] {
             assert!(HostConfig::parse(text, "c.toml").is_err(), "{text:?}");
         }
+    }
+
+    #[test]
+    fn the_files_scheme_is_reserved() {
+        let error = HostConfig::parse("[docs.schemes]\nfiles = 'cat'\n", "c.toml")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("files is reserved for task attachments"),
+            "{error}"
+        );
     }
 
     #[test]
