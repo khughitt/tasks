@@ -97,6 +97,25 @@ pub enum Located {
     Missing,
 }
 
+pub enum LocatedEntry {
+    Here(PathBuf),
+    Main { root: PathBuf, path: PathBuf },
+    Special(PathBuf),
+    Missing,
+}
+
+pub(crate) fn refuse_special(path: &Path) -> Result<()> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() || meta.is_dir() => Ok(()),
+        Ok(_) => Err(Error::SpecialFile(format!(
+            "{} is not a regular file or directory",
+            path.display()
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 impl Located {
     pub fn into_path(self) -> Option<PathBuf> {
         match self {
@@ -179,6 +198,39 @@ impl<'a> Resolver<'a> {
         })
     }
 
+    pub fn locate_entry(&self, rel: &str) -> Result<LocatedEntry> {
+        let here = self.project.root.join(rel);
+        match std::fs::metadata(&here) {
+            Ok(meta) => {
+                return Ok(if meta.is_file() || meta.is_dir() {
+                    LocatedEntry::Here(here)
+                } else {
+                    LocatedEntry::Special(here)
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        if let Some(root) = self.main_root()? {
+            let path = root.join(rel);
+            match std::fs::metadata(&path) {
+                Ok(meta) => {
+                    return Ok(if meta.is_file() || meta.is_dir() {
+                        LocatedEntry::Main {
+                            root: root.clone(),
+                            path,
+                        }
+                    } else {
+                        LocatedEntry::Special(path)
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(LocatedEntry::Missing)
+    }
+
     /// The file `rel` is read from, noting a main-checkout copy for [`Self::take_warnings`].
     fn find(&self, kind: DocKind, rel: &str) -> Result<Option<PathBuf>> {
         Ok(match self.locate(rel)? {
@@ -195,6 +247,17 @@ impl<'a> Resolver<'a> {
         let line = format!(
             "{} {rel} is not in this checkout; read from the main checkout at {}",
             kind.name(),
+            root.display()
+        );
+        let mut from_main = self.from_main.borrow_mut();
+        if !from_main.contains(&line) {
+            from_main.push(line);
+        }
+    }
+
+    pub fn note_main_entry(&self, handle: &str, rel: &str, root: &Path) {
+        let line = format!(
+            "reference {handle} {rel} is not in this checkout; read from the main checkout at {}",
             root.display()
         );
         let mut from_main = self.from_main.borrow_mut();
@@ -266,15 +329,26 @@ impl<'a> Resolver<'a> {
     }
 
     pub fn read(&self, kind: DocKind, value: &str) -> Result<DocRead> {
-        let Some((scheme, rest)) = crate::format::external_doc(value)? else {
-            let path = self
-                .find(kind, value)?
-                .unwrap_or_else(|| self.project.root.join(value));
+        if crate::format::external_doc(value)?.is_none() {
+            let path = match self.find(kind, value)? {
+                Some(path) => path,
+                None => match self.locate_entry(value)? {
+                    LocatedEntry::Special(path) => path,
+                    _ => self.project.root.join(value),
+                },
+            };
+            refuse_special(&path)?;
             return Ok(DocRead::Available(Doc {
                 reference: value.into(),
                 body: std::fs::read_to_string(path)?,
             }));
-        };
+        }
+        self.read_external(value)
+    }
+
+    pub fn read_external(&self, value: &str) -> Result<DocRead> {
+        let (scheme, rest) = crate::format::external_doc(value)?
+            .ok_or_else(|| Error::Validation(format!("{value} is not an external reference")))?;
         if let Some(cached) = self.docs.borrow().get(value) {
             return Ok(cached.clone());
         }
@@ -586,6 +660,96 @@ pub fn step_headings(text: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn locate_entry_finds_files_and_directories_here_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = Project::init(temp.path(), "xx", None).unwrap();
+        let registry = Registry::default();
+        let resolver = Resolver::new(&project, &registry);
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.md"), "a").unwrap();
+        std::fs::create_dir_all(root.join("results/run-12")).unwrap();
+        std::os::unix::fs::symlink("docs/a.md", root.join("link")).unwrap();
+        assert!(
+            matches!(resolver.locate_entry("docs/a.md").unwrap(), LocatedEntry::Here(p) if p == root.join("docs/a.md") && p.is_file())
+        );
+        assert!(
+            matches!(resolver.locate_entry("results/run-12").unwrap(), LocatedEntry::Here(p) if p == root.join("results/run-12") && p.is_dir())
+        );
+        assert!(
+            matches!(resolver.locate_entry("link").unwrap(), LocatedEntry::Here(p) if p == root.join("link"))
+        );
+        assert!(matches!(
+            resolver.locate_entry("nope").unwrap(),
+            LocatedEntry::Missing
+        ));
+        assert!(matches!(
+            resolver.locate("results/run-12").unwrap(),
+            Located::Missing
+        ));
+    }
+
+    #[test]
+    fn locate_entry_reports_a_fifo_and_a_symlink_to_one_as_special() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = Project::init(temp.path(), "xx", None).unwrap();
+        let registry = Registry::default();
+        let resolver = Resolver::new(&project, &registry);
+        let root = temp.path();
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(root.join("pipe"))
+                .status()
+                .unwrap()
+                .success()
+        );
+        std::os::unix::fs::symlink("pipe", root.join("to-pipe")).unwrap();
+        for rel in ["pipe", "to-pipe"] {
+            assert!(
+                matches!(resolver.locate_entry(rel).unwrap(), LocatedEntry::Special(p) if p == root.join(rel))
+            );
+        }
+    }
+
+    #[test]
+    fn locate_entry_uses_main_only_when_absent_here_and_propagates_errors() {
+        let here = tempfile::tempdir().unwrap();
+        let main = tempfile::tempdir().unwrap();
+        let project = Project::init(here.path(), "xx", None).unwrap();
+        let registry = Registry::default();
+        let resolver = Resolver::new(&project, &registry);
+        resolver.main.set(Some(main.path().to_path_buf())).unwrap();
+        std::fs::create_dir(main.path().join("target")).unwrap();
+        assert!(
+            matches!(resolver.locate_entry("target").unwrap(), LocatedEntry::Main { root, path } if root == main.path() && path == main.path().join("target"))
+        );
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(here.path().join("target"))
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            matches!(resolver.locate_entry("target").unwrap(), LocatedEntry::Special(p) if p == here.path().join("target"))
+        );
+        std::fs::remove_file(here.path().join("target")).unwrap();
+        std::fs::remove_dir(main.path().join("target")).unwrap();
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(main.path().join("target"))
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            matches!(resolver.locate_entry("target").unwrap(), LocatedEntry::Special(p) if p == main.path().join("target"))
+        );
+        std::os::unix::fs::symlink("loop", here.path().join("loop")).unwrap();
+        assert!(matches!(resolver.locate_entry("loop"), Err(Error::Io(_))));
+    }
 
     fn prefetch_fixture() -> (tempfile::TempDir, Project, Registry, String) {
         let temp = tempfile::tempdir().unwrap();

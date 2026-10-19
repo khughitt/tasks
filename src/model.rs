@@ -171,6 +171,7 @@ mod tests {
             moved_to: None,
             moved_from: None,
             body: String::new(),
+            refs: vec![],
             notes: vec![],
         }
     }
@@ -485,6 +486,47 @@ pub struct Note {
     pub provenance: Option<HarnessProvenance>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Relation {
+    Context,
+    Input,
+    Output,
+}
+
+impl Relation {
+    pub fn parse(s: &str) -> Result<Relation> {
+        match s {
+            "context" => Ok(Self::Context),
+            "input" => Ok(Self::Input),
+            "output" => Ok(Self::Output),
+            _ => Err(Error::Validation(format!(
+                "unknown reference relation {s:?}"
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Context => "context",
+            Self::Input => "input",
+            Self::Output => "output",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Ref {
+    pub handle: String,
+    pub relation: Relation,
+    pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub reference: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Task {
     pub id: TaskId,
@@ -592,6 +634,8 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moved_from: Option<TaskId>,
     pub body: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<Ref>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<Note>,
 }

@@ -31,6 +31,18 @@ pub enum Error {
     Ambiguous(String),
     #[error("{0}")]
     DocNotFound(String),
+    #[error("{0}")]
+    SpecialFile(String),
+    #[error("{detail}")]
+    Reference { kind: &'static str, detail: String },
+    #[error("{0}")]
+    RefNotFound(String),
+    #[error("{0}")]
+    RefOutputMissing(String),
+    #[error("{0}")]
+    RefCitesAttachment(String),
+    #[error("{0}")]
+    RefNotText(String),
     #[error("{0} changed on disk; {1}")]
     ConcurrentModification(String, String),
     #[error("{0} is claimed by {1}")]
@@ -110,6 +122,15 @@ impl Error {
             Error::Cycle(detail) => Error::Cycle(detail + suffix),
             Error::Ambiguous(detail) => Error::Ambiguous(detail + suffix),
             Error::DocNotFound(detail) => Error::DocNotFound(detail + suffix),
+            Error::SpecialFile(detail) => Error::SpecialFile(detail + suffix),
+            Error::Reference { kind, detail } => Error::Reference {
+                kind,
+                detail: detail + suffix,
+            },
+            Error::RefNotFound(detail) => Error::RefNotFound(detail + suffix),
+            Error::RefOutputMissing(detail) => Error::RefOutputMissing(detail + suffix),
+            Error::RefCitesAttachment(detail) => Error::RefCitesAttachment(detail + suffix),
+            Error::RefNotText(detail) => Error::RefNotText(detail + suffix),
             Error::ConcurrentModification(id, path) => {
                 Error::ConcurrentModification(id, path + suffix)
             }
@@ -155,6 +176,12 @@ impl Error {
             Error::Cycle(_) => "cycle",
             Error::Ambiguous(_) => "ambiguous",
             Error::DocNotFound(_) => "doc_not_found",
+            Error::SpecialFile(_) => "special_file",
+            Error::Reference { kind, .. } => kind,
+            Error::RefNotFound(_) => "ref_not_found",
+            Error::RefOutputMissing(_) => "ref_output_missing",
+            Error::RefCitesAttachment(_) => "ref_cites_attachment",
+            Error::RefNotText(_) => "ref_not_text",
             Error::ConcurrentModification(..) => "concurrent_modification",
             Error::Claimed(..) => "claimed",
             Error::StaleCopy(_) => "stale_copy",

@@ -1,7 +1,8 @@
 use crate::error::{Error, Result};
 use crate::frontmatter::{self, Value};
-use crate::model::{Complexity, HarnessProvenance, Note, Process, Size, Status, Task, TaskId};
+use crate::model::{Complexity, HarnessProvenance, Note, Process, Ref, Size, Status, Task, TaskId};
 
+pub const REFS_DELIMITER: &str = "## References";
 pub const NOTES_DELIMITER: &str = "## Notes";
 const KEYS: [&str; 33] = [
     "id",
@@ -118,7 +119,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
         .map(|d| TaskId::parse(d))
         .collect::<Result<Vec<_>>>()
         .map_err(|e| perr(file, e.to_string()))?;
-    let (body, notes) = split_body_notes(after, file)?;
+    let (body, refs, notes) = split_body(after, file)?;
     let task = Task {
         id: TaskId::parse(&required("id")?).map_err(|e| perr(file, e.to_string()))?,
         title: required("title")?,
@@ -178,6 +179,7 @@ pub fn parse_task(text: &str, file: &str) -> Result<Task> {
             .transpose()
             .map_err(|e| perr(file, e.to_string()))?,
         body,
+        refs,
         notes,
     };
     validate_task(&task).map_err(|e| perr(file, e.to_string()))?;
@@ -215,11 +217,23 @@ pub fn quote_timestamps(fm: &str) -> String {
         .join("\n")
 }
 
-fn split_body_notes(after: &str, file: &str) -> Result<(String, Vec<Note>)> {
+fn split_body(after: &str, file: &str) -> Result<(String, Vec<Ref>, Vec<Note>)> {
     let mut body = Vec::new();
+    let mut refs = Vec::new();
+    let mut in_refs = false;
     let mut notes: Vec<Note> = Vec::new();
     let mut in_notes = false;
     for line in after.lines() {
+        if line == REFS_DELIMITER {
+            if in_notes {
+                return Err(perr(file, "## References after ## Notes"));
+            }
+            if in_refs {
+                return Err(perr(file, "second ## References heading"));
+            }
+            in_refs = true;
+            continue;
+        }
         if line == NOTES_DELIMITER {
             if in_notes {
                 return Err(perr(file, "second ## Notes heading"));
@@ -227,7 +241,17 @@ fn split_body_notes(after: &str, file: &str) -> Result<(String, Vec<Note>)> {
             in_notes = true;
             continue;
         }
-        if !in_notes {
+        if !in_notes && in_refs {
+            if !line.trim().is_empty() {
+                let text = line
+                    .strip_prefix("- ")
+                    .ok_or_else(|| perr(file, format!("malformed reference line {line:?}")))?;
+                refs.push(
+                    crate::refs::parse_entry(text)
+                        .map_err(|error| perr(file, error.to_string()))?,
+                );
+            }
+        } else if !in_notes {
             body.push(line);
         } else if let Some(json) = line.strip_prefix("  provenance: ") {
             let note = notes
@@ -256,7 +280,7 @@ fn split_body_notes(after: &str, file: &str) -> Result<(String, Vec<Note>)> {
         .unwrap_or(&body)
         .trim_end()
         .to_string();
-    Ok((body, notes))
+    Ok((body, refs, notes))
 }
 
 fn parse_note_line(line: &str) -> Option<Note> {
@@ -276,10 +300,13 @@ fn parse_note_line(line: &str) -> Option<Note> {
 }
 
 pub fn validate_body(body: &str) -> Result<()> {
-    if body.lines().any(|l| l == NOTES_DELIMITER) {
-        Err(Error::Validation(
-            "body contains reserved ## Notes delimiter".into(),
-        ))
+    if let Some(delimiter) = body
+        .lines()
+        .find(|line| matches!(*line, NOTES_DELIMITER | REFS_DELIMITER))
+    {
+        Err(Error::Validation(format!(
+            "body contains reserved {delimiter} delimiter"
+        )))
     } else {
         Ok(())
     }
@@ -341,16 +368,18 @@ pub fn external_doc(value: &str) -> Result<Option<(&str, &str)>> {
     Ok(Some((scheme, rest)))
 }
 
+pub fn normalized_rel(rel: &str) -> bool {
+    rel.split('/')
+        .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
 /// Local document links are normalized `.md` paths; external links have an opaque remainder.
 pub fn validate_doc_shape(kind: &str, rel: &str) -> Result<()> {
     validate_line(kind, rel)?;
     if external_doc(rel)?.is_some() {
         return Ok(());
     }
-    let normalized = rel
-        .split('/')
-        .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
-    if !normalized || !rel.ends_with(".md") {
+    if !normalized_rel(rel) || !rel.ends_with(".md") {
         return Err(Error::Validation(format!(
             "{kind} {rel:?} must be a normalized repo-relative .md path"
         )));
@@ -465,6 +494,16 @@ pub fn validate_task(t: &Task) -> Result<()> {
         return Err(Error::Validation("task cannot depend on itself".into()));
     }
     validate_body(&t.body)?;
+    let mut handles = std::collections::HashSet::new();
+    for entry in &t.refs {
+        crate::refs::validate_entry(entry)?;
+        if !handles.insert(&entry.handle) {
+            return Err(Error::Validation(format!(
+                "duplicate reference handle {}",
+                entry.handle
+            )));
+        }
+    }
     for n in &t.notes {
         crate::time::parse(&n.at)?;
         validate_owner(&n.by)?;
@@ -584,6 +623,16 @@ pub fn serialize_task(t: &Task) -> String {
         out.push_str(body);
         out.push('\n');
     }
+    if !t.refs.is_empty() {
+        out.push('\n');
+        out.push_str(REFS_DELIMITER);
+        out.push_str("\n\n");
+        for entry in &t.refs {
+            out.push_str("- ");
+            out.push_str(&crate::refs::render_entry(entry));
+            out.push('\n');
+        }
+    }
     if !t.notes.is_empty() {
         out.push('\n');
         out.push_str(NOTES_DELIMITER);
@@ -607,6 +656,100 @@ pub fn serialize_task(t: &Task) -> String {
 mod tests {
     use super::*;
     use crate::model::*;
+    const WITH_REFS: &str = "---\nid: sci-4f2a9c\ntitle: T\nstatus: todo\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n\nSee [ref:brief].\n\n## References\n\n- brief (input, required): docs/notes/b.md — the brief\n- out (output): \"docs/a b.md\"\n\n## Notes\n\n- 2026-08-29T15:10:44Z (keith): started\n";
+
+    #[test]
+    fn the_references_section_round_trips_between_body_and_notes() {
+        let task = parse_task(WITH_REFS, "t.md").unwrap();
+        assert_eq!(task.body, "See [ref:brief].");
+        assert_eq!(task.refs.len(), 2);
+        assert_eq!(task.refs[1].reference, "docs/a b.md");
+        assert_eq!(task.notes.len(), 1);
+        assert_eq!(serialize_task(&task), WITH_REFS);
+    }
+
+    #[test]
+    fn references_serialize_decoded_values_and_omit_absent_fields() {
+        let mut task = parse_task(WITH_REFS, "t.md").unwrap();
+        let json = serde_json::to_value(&task).unwrap();
+        assert_eq!(
+            json["refs"],
+            serde_json::json!([
+                {"handle": "brief", "relation": "input", "required": true,
+                 "reference": "docs/notes/b.md", "description": "the brief"},
+                {"handle": "out", "relation": "output", "required": false,
+                 "reference": "docs/a b.md"}
+            ])
+        );
+        task.refs.clear();
+        assert!(serde_json::to_value(&task).unwrap().get("refs").is_none());
+    }
+
+    #[test]
+    fn references_need_neither_a_body_nor_notes_and_do_not_audit_duplicate_targets() {
+        let text = format!(
+            "{MINIMAL}\n## References\n\n- first (context): missing.md\n- second (input): missing.md\n"
+        );
+        let task = parse_task(&text, "t.md").unwrap();
+        assert!(task.body.is_empty());
+        assert!(task.notes.is_empty());
+        assert_eq!(serialize_task(&task), text);
+        assert_eq!(
+            serialize_task(&parse_task(&format!("{MINIMAL}\n## References\n"), "t.md").unwrap()),
+            MINIMAL
+        );
+    }
+
+    #[test]
+    fn no_section_is_written_without_entries() {
+        let task = parse_task(FULL, "t.md").unwrap();
+        assert_eq!(serialize_task(&task), FULL);
+        assert!(!serialize_task(&task).contains(REFS_DELIMITER));
+    }
+
+    #[test]
+    fn a_misplaced_or_repeated_section_is_a_parse_error() {
+        let notes_at = WITH_REFS.find("## Notes").unwrap();
+        let cases = [
+            (
+                WITH_REFS.replacen("## Notes", "## References\n\n## Notes", 1),
+                "second ## References heading",
+            ),
+            (
+                format!("{}\n## References\n", WITH_REFS),
+                "## References after ## Notes",
+            ),
+            (
+                format!(
+                    "{}not an entry\n\n{}",
+                    &WITH_REFS[..notes_at],
+                    &WITH_REFS[notes_at..]
+                ),
+                "malformed reference line",
+            ),
+            (
+                WITH_REFS.replacen("- out (output)", "- brief (output)", 1),
+                "duplicate reference handle brief",
+            ),
+        ];
+        for (text, needle) in cases {
+            let error = parse_task(&text, "t.md").unwrap_err().to_string();
+            assert!(error.contains(needle), "{needle}: {error}");
+        }
+    }
+
+    #[test]
+    fn the_body_refuses_the_references_heading() {
+        let error = validate_body("x\n## References\n").unwrap_err().to_string();
+        assert!(error.contains("## References"), "{error}");
+    }
+
+    #[test]
+    fn citation_text_in_the_body_never_fails_a_read() {
+        let text = WITH_REFS.replacen("See [ref:brief].", "See [ref:gone] and [ref:Bad].", 1);
+        assert!(parse_task(&text, "t.md").is_ok());
+    }
+
     const MINIMAL: &str = "---\nid: sci-000001\ntitle: Tiny\nstatus: idea\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n";
     const FULL: &str = "---\nid: sci-4f2a9c\ntitle: Bank the holdings ledger\nstatus: todo\npriority: 2\nsize: m\nowner: keith\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: [sci-91be03, fam-0c3d7e]\ntags: [world-index, cut-12]\nspec: docs/specs/2026-08-24-holdings-design.md\nplan: docs/plans/2026-08-24-holdings.md\nstep: \"Task 3: emit the ledger row\"\n---\n\nFree-form body.\n\nSecond paragraph.\n\n## Notes\n\n- 2026-08-29T15:10:44Z (keith): started; the spec's §4 assumption no longer holds.\n- 2026-08-29T16:41:02Z (slice-12): split the emitter into sci-a7d1e2.\n";
     #[test]

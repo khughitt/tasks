@@ -981,6 +981,29 @@ pub fn apply_fields(
         validate_body(body)?;
         task.body = body.clone();
     }
+    let mut handles = std::collections::HashSet::new();
+    for text in &fields.refs {
+        let entry = crate::refs::parse_entry(text)?;
+        if !handles.insert(entry.handle.clone()) {
+            return Err(Error::Validation(format!(
+                "--ref names {} twice",
+                entry.handle
+            )));
+        }
+        if let Some(existing) = task
+            .refs
+            .iter_mut()
+            .find(|existing| existing.handle == entry.handle)
+        {
+            *existing = entry;
+        } else {
+            task.refs.push(entry);
+        }
+    }
+    crate::refs::require_targets(&resolver, &ctx.project, task, original)?;
+    if original.is_none_or(|old| old.body != task.body || old.refs != task.refs) {
+        crate::refs::refuse_problems(task)?;
+    }
     if let Some(priority) = fields.priority {
         if priority > 4 {
             return Err(Error::Validation("priority must be 0-4".into()));
@@ -1562,7 +1585,15 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             "only `tasks move` sets status moved".into(),
         ));
     }
-    if to == Status::Done && task.status != Status::Done && !force {
+    let completing = to == Status::Done && task.status != Status::Done;
+    if completing {
+        crate::refs::require_outputs(
+            &Resolver::new(&ctx.project, &ctx.registry),
+            &ctx.project,
+            task,
+        )?;
+    }
+    if completing && !force {
         let open = open_deps(ctx, task)?;
         if !open.is_empty() {
             return Err(Error::OpenDependencies(
@@ -1582,7 +1613,6 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             return Err(Error::OpenDescendants(task.id.to_string(), open.join(", ")));
         }
     }
-    let completing = to == Status::Done && task.status != Status::Done;
     let first_start = task.started.is_none();
     // One instant for everything this transition stamps, so a recurring completion's
     // `completed` and `last_done` agree to the second (spec §3).
@@ -1975,11 +2005,16 @@ fn dispatch(cli: Cli) -> Result<Output> {
             id,
             plan,
             spec: _,
+            handle,
             no_fetch,
         } => doc::run(
             open_id_ctx(dir, &id)?,
             id,
-            if plan { DocKind::Plan } else { DocKind::Spec },
+            match handle {
+                Some(handle) => doc::DocTarget::Ref(handle),
+                None if plan => doc::DocTarget::Plan,
+                None => doc::DocTarget::Spec,
+            },
             fetch(no_fetch),
         ),
         Command::List { list: args } => list::list(open_read_ctx(dir, &args.scope)?, args, None),

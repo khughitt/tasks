@@ -1,10 +1,11 @@
 use super::Ctx;
 use crate::error::{Error, Result};
-use crate::model::{Status, Task, TaskId};
+use crate::model::{Relation, Status, Task, TaskId};
 use crate::output::{CheckOut, Finding, Output};
 use crate::query::find_cycle;
+use crate::refs::{Location, Presence};
 use crate::resolve::{
-    DocKind, DocRead, Located, Resolver, UnavailableCause, has_heading, step_headings,
+    DocKind, DocRead, Located, LocatedEntry, Resolver, UnavailableCause, has_heading, step_headings,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -232,6 +233,16 @@ pub fn run(ctx: Ctx) -> Result<Output> {
 
     for task in &tasks {
         let file = format!("tasks/{}.md", task.id);
+        if task.status.is_open() {
+            for problem in crate::refs::audit(task) {
+                errors.push(finding(
+                    Some(task),
+                    file.clone(),
+                    problem.kind,
+                    problem.detail,
+                ));
+            }
+        }
         // A retired project holds no open work (ops lifecycle spec §4); one that reappears,
         // say from a sync conflict, is an error to close or a reason to unretire.
         if retired && task.status.is_open() {
@@ -593,6 +604,36 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         // Spec §7: link drift is held against open work only. A closed record's links are
         // history, and a later plan revision that merges its heading away is not an error.
         if task.status.is_open() {
+            for entry in &task.refs {
+                if matches!(crate::refs::location(&entry.reference)?, Location::External) {
+                    continue;
+                }
+                let presence = crate::refs::present(&resolver, &ctx.project, task, entry)?;
+                if entry.relation == Relation::Output && !matches!(&presence, Presence::Special(_))
+                {
+                    continue;
+                }
+                let handle = &entry.handle;
+                match presence {
+                    Presence::Here(_path) => {}
+                    Presence::Main { root, path } => warnings.push(finding(
+                        Some(task), file.clone(), "ref_in_main_checkout",
+                        format!("reference {handle} {} is not in this checkout; read from {} in the main checkout at {}", entry.reference, path.display(), root.display()),
+                    )),
+                    Presence::Absent(path) => errors.push(finding(
+                        Some(task), file.clone(), "ref_missing",
+                        format!("reference {handle} {} does not exist (looked for {})", entry.reference, path.display()),
+                    )),
+                    Presence::Special(path) => errors.push(finding(
+                        Some(task), file.clone(), "special_file",
+                        format!("reference {handle}: {} is not a regular file or directory", path.display()),
+                    )),
+                    Presence::Unsafe { path, detail } => errors.push(finding(
+                        Some(task), file.clone(), "ref_missing",
+                        format!("reference {handle}: {} is not a usable attachment ({detail})", path.display()),
+                    )),
+                }
+            }
             for (kind, path) in [(DocKind::Spec, &task.spec), (DocKind::Plan, &task.plan)] {
                 let Some(path) = path else { continue };
                 if crate::format::external_doc(path)?.is_some() {
@@ -620,12 +661,24 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                             root.display()
                         ),
                     )),
-                    Located::Missing => errors.push(finding(
-                        Some(task),
-                        file.clone(),
-                        "doc_missing",
-                        format!("{} {path} does not exist", kind.name()),
-                    )),
+                    Located::Missing => match resolver.locate_entry(path)? {
+                        LocatedEntry::Special(path) => errors.push(finding(
+                            Some(task),
+                            file.clone(),
+                            "special_file",
+                            format!(
+                                "{} {} is not a regular file or directory",
+                                kind.name(),
+                                path.display()
+                            ),
+                        )),
+                        _ => errors.push(finding(
+                            Some(task),
+                            file.clone(),
+                            "doc_missing",
+                            format!("{} {path} does not exist", kind.name()),
+                        )),
+                    },
                 }
             }
             if let (Some(plan), Some(step)) = (&task.plan, &task.step)

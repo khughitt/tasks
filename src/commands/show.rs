@@ -169,7 +169,27 @@ pub fn describe(
             warnings.push(format!("historical plan {plan} is unavailable"));
             step.as_ref().map(|_| false)
         }
-        (Some(plan), Some(step)) => Some(resolver.step_exists(plan, step)?),
+        (Some(plan), Some(step)) => match resolver.locate(plan)? {
+            Located::Here(_) | Located::Main { .. } => Some(resolver.step_exists(plan, step)?),
+            Located::Missing => {
+                let here = project.root.join(plan);
+                let existing = if here.try_exists()? {
+                    Some(here)
+                } else {
+                    match project.main_checkout_root()? {
+                        Some(main) if main.join(plan).try_exists()? => Some(main.join(plan)),
+                        _ => None,
+                    }
+                };
+                if let Some(path) = existing {
+                    warnings.push(format!(
+                        "plan {} is not a regular file; its step is not checked",
+                        path.display()
+                    ));
+                }
+                None
+            }
+        },
         _ => None,
     };
     let related = |task: &Task| Related {
@@ -203,6 +223,8 @@ pub fn describe(
         Some(path) => Some(resolver.abs(DocKind::Plan, path)?),
         None => None,
     };
+    let inventory =
+        crate::inventory::build(&resolver, project, &task, step_found, fetch, warnings)?;
     warnings.extend(resolver.take_warnings());
     let files = attached
         .into_iter()
@@ -256,6 +278,7 @@ pub fn describe(
         periodic: crate::output::PeriodicInfo::of(&task, now),
         deferred: crate::output::DeferredInfo::of(&task, now),
         files,
+        inventory,
         task,
     })
 }

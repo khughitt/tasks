@@ -255,6 +255,120 @@ pub struct Related {
     pub status: Status,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Origin {
+    Spec,
+    Plan,
+    Ref,
+    Source,
+    Attachment,
+}
+
+impl Origin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Spec => "spec",
+            Self::Plan => "plan",
+            Self::Ref => "ref",
+            Self::Source => "source",
+            Self::Attachment => "attachment",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowLocation {
+    Path,
+    Attachment,
+    External,
+    Opaque,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowStatus {
+    Present,
+    Missing,
+    Pending,
+    Special,
+    Available,
+    Unavailable,
+    Unchecked,
+}
+
+impl RowStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Present => "present",
+            Self::Missing => "missing",
+            Self::Pending => "pending",
+            Self::Special => "special",
+            Self::Available => "available",
+            Self::Unavailable => "unavailable",
+            Self::Unchecked => "unchecked",
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct InventoryRow {
+    pub origin: Origin,
+    pub required: bool,
+    pub reference: String,
+    pub location: RowLocation,
+    pub status: RowStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relation: Option<crate::model::Relation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_found: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
+}
+
+impl InventoryRow {
+    pub fn new(origin: Origin, reference: String, location: RowLocation) -> Self {
+        Self {
+            origin,
+            required: false,
+            reference,
+            location,
+            status: RowStatus::Unchecked,
+            handle: None,
+            relation: None,
+            kind: None,
+            description: None,
+            path: None,
+            step: None,
+            step_found: None,
+            cause: None,
+        }
+    }
+
+    pub fn label(&self) -> &str {
+        self.handle.as_deref().unwrap_or_else(|| {
+            if self.origin == Origin::Attachment {
+                self.reference
+                    .strip_prefix("files:")
+                    .expect("attachment reference")
+            } else {
+                self.origin.as_str()
+            }
+        })
+    }
+}
+
 /// Everything `show` says about one task, without the warnings, so `next` can embed it.
 #[derive(Serialize)]
 pub struct ShowFields {
@@ -290,6 +404,8 @@ pub struct ShowFields {
     pub deferred: Option<DeferredInfo>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<FileInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub inventory: Vec<InventoryRow>,
 }
 
 #[derive(Serialize)]

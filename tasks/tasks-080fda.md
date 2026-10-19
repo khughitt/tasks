@@ -1,0 +1,35 @@
+---
+id: tasks-080fda
+title: "The gates: completion, detach, move"
+status: done
+priority: 2
+complexity: mid
+process: direct
+owner: task-references
+created: 2026-10-19T13:19:35Z
+updated: 2026-10-19T14:41:41Z
+started: 2026-10-19T14:33:38Z
+completed: 2026-10-19T14:41:41Z
+closed: 2026-10-19T14:41:41Z
+depends: [tasks-2e51a8]
+parent: tasks-6eeecd
+tags: []
+source: "tasks-3a445e:step-7"
+agent: codex
+plan: docs/plans/2026-10-19-task-references.md
+step: "Task 7: The gates: completion, detach, move"
+---
+
+## Notes
+
+- 2026-10-19T14:33:38Z (task-references): started
+  provenance: {"harness_session":"codex:01a15494-3dbf-7a92-ab25-c43a9a86c9ec","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T14:38:23Z (task-references): parked (waiting on agent): Controller reviews commit d81cfd6 and Task 7 report in .worktrees/task-references, then closes the step
+  provenance: {"harness_session":"codex:01a15494-3dbf-7a92-ab25-c43a9a86c9ec","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T14:41:38Z (task-references): resumed
+  provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T14:41:40Z (task-references): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-19T14:41:41Z (task-references): done
+  provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T14:41:41Z (task-references): Output completion gate, referenced-attachment protection and atomic move input validation implemented and reviewed (d81cfd6); 1605 tests and check passed
+  provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}

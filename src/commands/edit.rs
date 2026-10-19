@@ -112,6 +112,9 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
     let has_flags = args.title.is_some()
         || args.status.is_some()
         || fields.body.is_some()
+        || !fields.refs.is_empty()
+        || !args.rm_refs.is_empty()
+        || args.no_refs
         || fields.priority.is_some()
         || fields.size.is_some()
         || fields.complexity.is_some()
@@ -246,6 +249,19 @@ pub fn run(mut ctx: Ctx, id: String, mut args: EditArgs) -> Result<Output> {
         if task.needs.len() == before {
             return Err(Error::Validation(format!(
                 "{} does not need {need:?}",
+                task.id
+            )));
+        }
+    }
+    if args.no_refs {
+        task.refs.clear();
+    }
+    for handle in &args.rm_refs {
+        let before = task.refs.len();
+        task.refs.retain(|entry| entry.handle != *handle);
+        if task.refs.len() == before {
+            return Err(Error::Validation(format!(
+                "{} has no reference {handle}",
                 task.id
             )));
         }
@@ -454,6 +470,12 @@ fn editor(mut ctx: Ctx, id: String) -> Result<Output> {
         .cloned()
         .collect();
     crate::needs::require_declared(&ctx.project.needs, &added).map_err(keep)?;
+    crate::refs::require_targets(&resolver, &ctx.project, &edited, Some(&original))
+        .map_err(keep)?;
+    if edited.body != original.body || edited.refs != original.refs {
+        crate::refs::refuse_problems(&edited).map_err(keep)?;
+    }
+    ctx.warnings.extend(resolver.take_warnings());
     edited.status = original.status;
     if status == original.status {
         ctx.refuse_foreign_live_claim(&original.id).map_err(keep)?;

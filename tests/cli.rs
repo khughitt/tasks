@@ -1,5 +1,8 @@
 mod common;
-use common::TestEnv;
+use common::{
+    TestEnv, check_findings, editor_script, findings_of, git, id_of, worktree_with_excluded_docs,
+    write_doc,
+};
 
 #[test]
 fn lifecycle_provenance_survives_claim_and_park_release() {
@@ -856,16 +859,6 @@ fn tasks_format_env_must_be_valid() {
             "{args:?}: {text}"
         );
     }
-}
-
-fn write_doc(dir: &std::path::Path, rel: &str, text: &str) {
-    let p = dir.join(rel);
-    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    std::fs::write(p, text).unwrap();
-}
-
-fn id_of(value: serde_json::Value) -> String {
-    value["id"].as_str().unwrap().to_string()
 }
 
 /// Register `alias` as a retired prefix of `target` by writing the registry directly.
@@ -4393,15 +4386,6 @@ fn lane_field_round_trips_through_add_edit_and_every_row() {
     assert!(line.contains("≡ "), "lane rows carry the mark: {text}");
 }
 
-/// An EDITOR value that has sh read the script rather than exec it: executing a file this
-/// process just wrote races sibling test threads, whose forks can still hold the write
-/// descriptor, into ETXTBSY.
-fn editor_script(dir: &std::path::Path, body: &str) -> String {
-    let p = dir.join("editor.sh");
-    std::fs::write(&p, format!("{body}\n")).unwrap();
-    format!("sh '{}'", p.display())
-}
-
 /// Writes `last_done: <stamp>` into a task record, inserting the line if it is absent and
 /// replacing it if it is not. Fixture-only: it reaches states the CLI produces later, or
 /// (in Task 3) does not produce at all.
@@ -5801,7 +5785,7 @@ fn show_closed_records_keeps_missing_historical_plan_links() {
 }
 
 #[test]
-fn show_missing_historical_plan_keeps_open_and_read_failures() {
+fn show_missing_plans_stay_readable_and_keep_read_failures() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let plan = "docs/plans/history.md";
@@ -5819,15 +5803,26 @@ fn show_missing_historical_plan_keeps_open_and_read_failures() {
     env.json(&dir, &["done", &closed]);
     std::fs::remove_file(dir.join(plan)).unwrap();
     for id in [&open, &shelved] {
-        assert_eq!(env.fail(&dir, &["show", id]), "io");
+        let shown = env.json(&dir, &["show", id]);
+        assert!(shown.get("step_found").is_none(), "{shown}");
+        assert_eq!(shown["inventory"][0]["status"], "missing");
     }
-    assert_eq!(env.fail(&dir, &["next"]), "io");
+    let next = env.json(&dir, &["next"]);
+    assert!(next["next"].get("step_found").is_none(), "{next}");
+    assert_eq!(next["next"]["inventory"][0]["status"], "missing");
 
     std::fs::write(dir.join(plan), [0xff]).unwrap();
     assert_eq!(env.fail(&dir, &["show", &closed]), "io");
     std::fs::remove_file(dir.join(plan)).unwrap();
     std::fs::create_dir(dir.join(plan)).unwrap();
-    assert_eq!(env.fail(&dir, &["show", &closed]), "io");
+    let shown = env.json(&dir, &["show", &closed]);
+    assert!(shown.get("step_found").is_none(), "{shown}");
+    assert_eq!(shown["inventory"][0]["status"], "missing");
+    assert!(
+        shown["warnings"]
+            .to_string()
+            .contains("is not a regular file")
+    );
 }
 
 #[test]
@@ -11828,19 +11823,6 @@ fn the_reported_sequence_start_then_create_the_worktree() {
         }),
         "and the divergence is called out: {v}"
     );
-}
-/// Run git in `dir` under a fixed identity, asserting success.
-fn git(dir: &std::path::Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "t")
-        .env("GIT_AUTHOR_EMAIL", "t@e")
-        .env("GIT_COMMITTER_NAME", "t")
-        .env("GIT_COMMITTER_EMAIL", "t@e")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}: {output:?}");
 }
 
 /// A project that is its own git repository, with one task committed, plus a second
@@ -22351,73 +22333,6 @@ fn theme_default_sends_no_osc_query_on_a_terminal() {
     assert!(terminal.contains("theme colors off"), "{terminal:?}");
 }
 
-/// Runs `check` in `dir` and returns its exit code and parsed findings (`null` when clean).
-fn check_findings(env: &TestEnv, dir: &std::path::Path) -> (i32, serde_json::Value) {
-    let out = env.cmd(dir).args(["check"]).output().unwrap();
-    let findings = if out.stdout.is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::from_slice(&out.stdout).unwrap()
-    };
-    (out.status.code().unwrap(), findings)
-}
-
-fn findings_of<'a>(v: &'a serde_json::Value, key: &str, kind: &str) -> Vec<&'a serde_json::Value> {
-    v[key]
-        .as_array()
-        .map(|all| all.iter().filter(|f| f["kind"] == kind).collect())
-        .unwrap_or_default()
-}
-
-/// A project whose specs and plans are kept out of git, one task linked to a spec, a
-/// plan, and its `Task 1: A` step, and a linked worktree at `<main>/wt` that git therefore
-/// gave no docs: `(main, side, id)`.
-fn worktree_with_excluded_docs(
-    env: &mut TestEnv,
-) -> (std::path::PathBuf, std::path::PathBuf, String) {
-    let main = env.init("sci");
-    git(&main, &["init", "-q", "-b", "main"]);
-    // Kept out of git, as a project whose profile does not commit its specs does.
-    std::fs::write(main.join(".git/info/exclude"), "docs/\n").unwrap();
-    write_doc(&main, "docs/specs/x-design.md", "# X\n");
-    write_doc(
-        &main,
-        "docs/plans/x.md",
-        "# X plan\n\n### Task 1: A\n\n### Task 2: B\n",
-    );
-    let id = id_of(env.json(
-        &main,
-        &[
-            "add",
-            "T",
-            "-p",
-            "2",
-            "--spec",
-            "x",
-            "--plan",
-            "x",
-            "--step",
-            "Task 1: A",
-        ],
-    ));
-    git(&main, &["add", "-A"]);
-    git(&main, &["commit", "-qm", "seed"]);
-    let side = main.join("wt");
-    git(
-        &main,
-        &[
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "side",
-            side.to_str().unwrap(),
-        ],
-    );
-    assert!(!side.join("docs").exists(), "git carried the excluded docs");
-    (main, side, id)
-}
-
 #[test]
 fn doc_reads_local_and_main_only_documents_with_stderr_warnings() {
     let mut env = TestEnv::new();
@@ -22653,7 +22568,16 @@ fn show_historical_plan_keeps_main_checkout_metadata_failures() {
 
     std::fs::remove_file(plans.join("x.md")).unwrap();
     std::fs::create_dir(plans.join("x.md")).unwrap();
-    assert_eq!(env.fail(&side, &["show", &id]), "io");
+    let shown = env.json(&side, &["show", &id]);
+    assert!(shown.get("step_found").is_none(), "{shown}");
+    assert_eq!(shown["inventory"][1]["status"], "missing");
+    assert!(
+        shown["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(plans.join("x.md").to_str().unwrap()) && w.contains("is not a regular file")
+        }),
+        "{shown}"
+    );
 }
 
 #[test]

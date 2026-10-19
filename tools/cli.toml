@@ -375,6 +375,7 @@ options = [
   { shared = "tag", role = "set", value = "string", repeatable = true },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
+  { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
   { names = ["--step"], value = "string" },
@@ -394,10 +395,10 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["doc"]
-summary = "Print a linked plan or spec body"
+summary = "Print a linked plan or spec body, or a referenced document"
 protocol = "raw UTF-8 document body on stdout"
 exception = "document export is raw even under JSON/pretty flags; noun command names its exported artifact"
-args = [{ name = "id", value = "ref", required = true }]
+args = [{ name = "id", value = "ref", required = true }, { name = "handle", value = "string", required = false }]
 options = [
   { names = ["--plan"], value = "none" },
   { names = ["--spec"], value = "none" },
@@ -419,6 +420,7 @@ options = [
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--plan"], value = "string" },
+  { names = ["--ref"], value = "string" },
   { names = ["--parent"], value = "ref" },
   { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
@@ -449,6 +451,7 @@ options = [
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--plan"], value = "string" },
+  { names = ["--ref"], value = "string" },
   { names = ["--parent"], value = "ref" },
   { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
@@ -543,6 +546,8 @@ options = [
   { names = ["--no-tags"], value = "none" },
   { names = ["--rm-need"], value = "string", repeatable = true },
   { names = ["--no-needs"], value = "none" },
+  { names = ["--rm-ref"], value = "string", repeatable = true },
+  { names = ["--no-refs"], value = "none" },
   { names = ["--no-depends"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
@@ -558,6 +563,7 @@ options = [
   { shared = "tag", role = "set", value = "string", repeatable = true },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
+  { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
   { names = ["--step"], value = "string" },
@@ -928,6 +934,7 @@ path = ["index"]
 summary = "index local harness transcripts"
 options = [
   { names = ["--full"], value = "none" },
+  { names = ["--replay"], value = "path", repeatable = true },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
   { shared = "project", role = "select", value = "string", repeatable = false },
 ]
@@ -2606,19 +2613,9 @@ protocol = "harness settings document: stdout is the JSON settings file in any m
 summary = "Print Claude Code integration settings"
 
 [[cli.familiar.commands]]
-path = ["setup", "codex"]
-protocol = "harness settings document: stdout is the JSON settings file in any mode"
-summary = "Print Codex integration settings"
-
-[[cli.familiar.commands]]
-path = ["hook"]
-protocol = "harness hook: reads the harness payload on stdin"
-summary = "Record an agent lifecycle event"
-args = [{ name = "event", value = "string", required = true }]
-options = [
-  { names = ["--agent"], value = "string" },
-  { names = ["--trace"], value = "path" },
-]
+path = ["setup", "relay"]
+protocol = "relay subscribers fragment: stdout is the JSON subscribers list in any mode"
+summary = "Print familiar's relay observer entries"
 
 [[cli.familiar.commands]]
 path = ["statusline"]
@@ -2629,8 +2626,13 @@ options = [
 ]
 
 [[cli.familiar.commands]]
+path = ["observe"]
+protocol = "relay observer: reads one observer envelope on stdin"
+summary = "Project relay's registry into presentation state"
+
+[[cli.familiar.commands]]
 path = ["reap"]
-summary = "Remove sessions whose agent has exited"
+summary = "Prune relay's registry and reconcile presentation"
 
 # ---- forge
 
@@ -2778,6 +2780,13 @@ args = [{ name = "id", value = "string", required = true }]
 path = ["presence"]
 summary = "Show or set whether questions go to the inbox"
 args = [{ name = "mode", value = "enum", values = ["here", "away"], required = false }]
+
+[[cli.relay.commands]]
+path = ["model"]
+summary = "The model a Codex tool call's turn runs, read from its rollout"
+options = [
+  { shared = "harness", role = "select", value = "enum", values = ["codex"], required = true, repeatable = false },
+]
 
 # Minimal adoption surface; existing ops-projects commands remain outside this inventory.
 [cli.ops-projects]
