@@ -7,7 +7,7 @@ complexity: high
 process: direct
 owner: task-references
 created: 2026-10-19T13:19:34Z
-updated: 2026-10-19T14:21:05Z
+updated: 2026-10-19T14:28:11Z
 started: 2026-10-19T14:21:05Z
 depends: [tasks-309bc8]
 parent: tasks-6eeecd
@@ -22,3 +22,4 @@ step: "Task 6: The inventory in `show`"
 
 - 2026-10-19T14:21:05Z (task-references): started
   provenance: {"harness_session":"codex:01a15489-4622-7d30-aacd-b5af6fd14d88","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T14:28:11Z (task-references): Task 6 scope clarification: the fast suite exposed three older show assertions expecting io for missing or directory-valued plans; updated cli/move expectations to the reviewed readable-show contract. Main-checkout permission errors and invalid UTF-8 still propagate and their covering assertions pass. Reference inventory suite 29/29; fast suite 1599 passed, 4 ignored; just check and release install passed.
