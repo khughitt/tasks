@@ -1,15 +1,17 @@
 ---
 id: tasks-3a445e
 title: "Design task references: one explicit, ordered list of the documents and artifacts a task cites"
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 owner: task-references
 created: 2026-10-19T11:01:01Z
-updated: 2026-10-19T13:19:19Z
+updated: 2026-10-19T13:19:40Z
 started: 2026-10-19T11:03:39Z
+completed: 2026-10-19T13:19:40Z
+closed: 2026-10-19T13:19:40Z
 depends: []
 tags: []
 source: "user:2026-10-19 task references discussion"
@@ -85,3 +87,7 @@ Done: a reviewed design spec and an implementation plan for the first increment.
 - 2026-10-19T13:16:18Z (task-references): resumed
   provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-19T13:19:19Z (task-references): review: plan round 5 — verdict: accept; findings: none; reviewer: human
+- 2026-10-19T13:19:40Z (task-references): done
+  provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T13:19:40Z (task-references): Spec and plan reviewed and approved; implementation tracked by tasks-6eeecd and its nine steps
+  provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
