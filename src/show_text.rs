@@ -131,6 +131,9 @@ pub fn render(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String
     if let Some(related) = related(o, painter, width) {
         sections.push(related);
     }
+    if !o.inventory.is_empty() {
+        sections.push(references(o, painter, width));
+    }
     if !o.files.is_empty() {
         sections.push(files(o, painter, width));
     }
@@ -501,6 +504,61 @@ fn related(o: &ShowFields, painter: &Painter, width: Option<usize>) -> Option<St
     Some(rendered)
 }
 
+fn references(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
+    let mut rendered = present::rule("references", painter, width.unwrap_or(MEASURE));
+    let required: Vec<&str> = o
+        .inventory
+        .iter()
+        .filter(|row| row.required)
+        .map(|row| row.label())
+        .collect();
+    if !required.is_empty() {
+        rendered.push_str(&block(
+            "",
+            0,
+            &[(&format!("read first: {}", required.join(", ")), None)],
+            0,
+            painter,
+            width,
+        ));
+    }
+    for row in &o.inventory {
+        let mut facets = vec![
+            row.relation
+                .map(|relation| relation.as_str())
+                .unwrap_or(row.origin.as_str())
+                .to_string(),
+        ];
+        if row.required {
+            facets.push("required".into());
+        }
+        if let Some(kind) = &row.kind {
+            facets.push(format!("kind={kind}"));
+        }
+        let reference = if row
+            .reference
+            .chars()
+            .any(|c| c.is_whitespace() || c == '"' || c == '\\')
+        {
+            crate::frontmatter::quote(&row.reference)
+        } else {
+            row.reference.clone()
+        };
+        let mut text = format!("{} ({}): {reference}", row.label(), facets.join(", "));
+        if row.status != crate::output::RowStatus::Present {
+            text.push_str(&format!(" [{}]", row.status.as_str()));
+        }
+        if let Some(step) = &row.step {
+            text.push_str(&format!(" (step: {step})"));
+        }
+        if let Some(description) = &row.description {
+            text.push_str(&format!(" — {description}"));
+        }
+        rendered.push_str(&block("- ", 2, &[(&text, None)], 2, painter, width));
+    }
+    rendered
+}
+
 fn files(o: &ShowFields, painter: &Painter, width: Option<usize>) -> String {
     let mut rendered = present::rule("files", painter, width.unwrap_or(MEASURE));
     for file in &o.files {
@@ -692,6 +750,7 @@ mod tests {
             periodic: None,
             deferred: None,
             files: vec![],
+            inventory: vec![],
         }
     }
 

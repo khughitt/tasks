@@ -940,3 +940,493 @@ fn unsafe_attachment_storage_is_refused_by_writes_and_doc() {
     );
     assert_eq!(env.fail(&dir, &["doc", &id, "shot"]), "attachment_unsafe");
 }
+
+fn inventory_fixture(env: &mut TestEnv) -> (std::path::PathBuf, String) {
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/specs/x-design.md", "# X");
+    write_doc(&dir, "docs/plans/x.md", "### Task 1: A");
+    write_doc(&dir, "docs/notes/b.md", "brief");
+    for name in ["cited.png", "shot.png"] {
+        write_doc(&dir, &format!("scratch/{name}"), "png");
+    }
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Inventory",
+            "--spec",
+            "x",
+            "--plan",
+            "x",
+            "--step",
+            "Task 1: A",
+            "--source",
+            "user:2026-10-19 chat",
+            "--ref",
+            "brief (input, required, kind=brief): docs/notes/b.md — the brief",
+            "--ref",
+            "ctx (context): https://e.org/x",
+            "--ref",
+            "out (output, required): docs/out.md",
+        ],
+    ));
+    for name in ["cited.png", "shot.png"] {
+        env.json(&dir, &["attach", &id, &format!("scratch/{name}")]);
+    }
+    env.json(
+        &dir,
+        &["edit", &id, "--ref", "c (context): files:cited.png"],
+    );
+    (dir, id)
+}
+
+fn bounded_show(env: &TestEnv, dir: &std::path::Path, id: &str) -> serde_json::Value {
+    let out = env
+        .cmd(dir)
+        .args(["show", id])
+        .timeout(Duration::from_secs(10))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(out.stderr.is_empty(), "{out:?}");
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+fn fifo(path: &std::path::Path) {
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+#[test]
+fn the_inventory_lists_everything_in_order_with_origins() {
+    let mut env = TestEnv::new();
+    let (dir, id) = inventory_fixture(&mut env);
+    let v = env.json(&dir, &["show", &id]);
+    let rows = v["inventory"].as_array().unwrap();
+    let summary: Vec<(&str, &str, bool)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r["origin"].as_str().unwrap(),
+                r["status"].as_str().unwrap(),
+                r["required"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("spec", "present", true),
+            ("plan", "present", true),
+            ("ref", "present", true),
+            ("ref", "unchecked", false),
+            ("ref", "pending", true),
+            ("ref", "present", false),
+            ("source", "unchecked", false),
+            ("attachment", "present", false)
+        ]
+    );
+    assert_eq!(rows[1]["step"], "Task 1: A");
+    assert_eq!(rows[1]["step_found"], true);
+    assert_eq!(rows[6]["location"], "opaque");
+    assert_eq!(rows[5]["location"], "attachment");
+    assert_eq!(rows[7]["reference"], "files:shot.png");
+    for key in [
+        "handle",
+        "relation",
+        "kind",
+        "description",
+        "step",
+        "step_found",
+        "cause",
+    ] {
+        assert!(rows[0].get(key).is_none(), "{key}: {v}");
+    }
+    assert!(
+        rows[2]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("docs/notes/b.md")
+    );
+    assert!(rows[3].get("path").is_none());
+    let bare = id_of(env.json(&dir, &["add", "Bare"]));
+    assert!(env.json(&dir, &["show", &bare]).get("inventory").is_none());
+}
+
+#[test]
+fn attachment_rows_come_from_the_ledger() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(&dir, &["add", "A"]));
+    for name in ["b.png", "a.png", "detached.png"] {
+        write_doc(&dir, &format!("scratch/{name}"), "png");
+        env.json(&dir, &["attach", &id, &format!("scratch/{name}")]);
+    }
+    env.json(&dir, &["detach", &id, "detached.png", "not needed"]);
+    std::fs::remove_file(dir.join(format!("tasks/files/{id}/b.png"))).unwrap();
+    write_doc(&dir, &format!("tasks/files/{id}/stray.png"), "stray");
+    let v = env.json(&dir, &["show", &id]);
+    let rows = v["inventory"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{v}");
+    assert_eq!(rows[0]["reference"], "files:a.png");
+    assert_eq!(rows[0]["status"], "present");
+    assert_eq!(rows[1]["reference"], "files:b.png");
+    assert_eq!(rows[1]["status"], "missing");
+    let warnings = v["warnings"].to_string();
+    assert!(
+        warnings.contains("[attachment_missing]") && warnings.contains("b.png"),
+        "{v}"
+    );
+    assert!(warnings.contains("stray.png"), "{v}");
+}
+
+#[test]
+fn a_missing_stepped_plan_on_an_open_task_is_a_missing_row() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/plans/x.md", "### Task 1: A");
+    let id = id_of(env.json(&dir, &["add", "A", "--plan", "x", "--step", "Task 1: A"]));
+    std::fs::remove_file(dir.join("docs/plans/x.md")).unwrap();
+    let v = env.json(&dir, &["show", &id]);
+    assert_eq!(v["inventory"][0]["status"], "missing");
+    assert!(v.get("step_found").is_none());
+    assert!(v["inventory"][0].get("step_found").is_none());
+    std::fs::create_dir(dir.join("docs/plans/x.md")).unwrap();
+    let v = env.json(&dir, &["show", &id]);
+    assert_eq!(v["inventory"][0]["status"], "missing");
+    assert!(v.get("step_found").is_none());
+    assert!(
+        v["warnings"]
+            .to_string()
+            .contains("is not a regular file; its step is not checked")
+    );
+}
+
+#[test]
+fn an_entry_equal_to_the_spec_merges_once_targets_agree() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "A",
+            "--ref",
+            "s (output, kind=spec): docs/specs/y-design.md",
+            "--body",
+            "[ref:s]",
+        ],
+    ));
+    let v = env.json(&dir, &["show", &id]);
+    assert_eq!(v["inventory"][0]["status"], "pending");
+    write_doc(&dir, "docs/specs/y-design.md", "# Y");
+    env.json(&dir, &["edit", &id, "--spec", "docs/specs/y-design.md"]);
+    let v = env.json(&dir, &["show", &id]);
+    assert_eq!(v["inventory"].as_array().unwrap().len(), 1);
+    let row = &v["inventory"][0];
+    assert_eq!(row["origin"], "spec");
+    assert_eq!(row["handle"], "s");
+    assert_eq!(row["relation"], "output");
+    assert_eq!(row["kind"], "spec");
+    assert_eq!(row["required"], true);
+    env.json(&dir, &["edit", &id, "--body", "[ref:s] again"]);
+    std::fs::remove_file(dir.join("docs/specs/y-design.md")).unwrap();
+    let v = env.json(&dir, &["show", &id]);
+    assert_eq!(v["inventory"].as_array().unwrap().len(), 1);
+    assert_eq!(v["inventory"][0]["status"], "missing");
+}
+
+#[test]
+fn merge_keeps_separate_rows_when_targets_differ() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = worktree_with_excluded_docs(&mut env);
+    std::fs::create_dir_all(side.join("docs/specs/x-design.md")).unwrap();
+    set_refs(&env, &side, &id, "- d (context): docs/specs/x-design.md");
+    let v = env.json(&side, &["show", &id]);
+    assert_eq!(v["inventory"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        v["inventory"][0]["path"],
+        main.join("docs/specs/x-design.md").to_str().unwrap()
+    );
+    assert_eq!(
+        v["inventory"][2]["path"],
+        side.join("docs/specs/x-design.md").to_str().unwrap()
+    );
+    assert_eq!(v["inventory"][2]["status"], "present");
+    assert!(
+        v["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains("reference d")
+                && w.contains(main.join("docs/specs/x-design.md").to_str().unwrap())
+                && w.contains(side.join("docs/specs/x-design.md").to_str().unwrap())
+        }),
+        "{v}"
+    );
+    std::fs::remove_file(main.join("docs/specs/x-design.md")).unwrap();
+    let v = env.json(&side, &["show", &id]);
+    assert_eq!(v["inventory"].as_array().unwrap().len(), 3);
+    assert_eq!(v["inventory"][0]["status"], "missing");
+    assert_eq!(v["inventory"][2]["status"], "present");
+}
+
+#[test]
+fn external_plan_rows_report_the_fetch_outcome() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let fixture = common::docs::DocFixture::new(&env, "### Task 1: A");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "A",
+            "--spec",
+            "stub:s",
+            "--plan",
+            "stub:p",
+            "--step",
+            "Task 1: A",
+            "--ref",
+            "e (input): stub:entry",
+        ],
+    ));
+    let count = fixture.calls().len();
+    let v = env.json(&dir, &["show", &id]);
+    assert_eq!(v["inventory"][0]["status"], "unchecked");
+    assert_eq!(v["inventory"][1]["status"], "available");
+    assert_eq!(v["inventory"][1]["step_found"], true);
+    assert_eq!(v["inventory"][2]["status"], "unchecked");
+    assert_eq!(&fixture.calls()[count..], ["p"]);
+    let v = env.json(&dir, &["show", &id, "--no-fetch"]);
+    assert_eq!(v["inventory"][1]["status"], "unchecked");
+    assert!(v["inventory"][1].get("step_found").is_none());
+    fixture.disconnect();
+    let v = env.json(&dir, &["show", &id]);
+    assert_eq!(v["inventory"][1]["status"], "unavailable");
+    assert!(v["inventory"][1]["cause"].as_str().is_some());
+    assert!(v["inventory"][0].get("cause").is_none());
+}
+
+#[test]
+fn show_stays_readable_with_special_files_and_reports_them() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/plans/x.md", "### Task 1: A");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "A",
+            "--plan",
+            "x",
+            "--step",
+            "Task 1: A",
+            "--ref",
+            "p (context): docs/plans/x.md",
+            "--ref",
+            "o (output): docs/out-pipe",
+        ],
+    ));
+    std::fs::remove_file(dir.join("docs/plans/x.md")).unwrap();
+    fifo(&dir.join("docs/plans/x.md"));
+    fifo(&dir.join("docs/out-pipe"));
+    let v = bounded_show(&env, &dir, &id);
+    assert_eq!(v["inventory"].as_array().unwrap().len(), 2);
+    assert_eq!(v["inventory"][0]["handle"], "p");
+    for (i, rel) in [(0, "docs/plans/x.md"), (1, "docs/out-pipe")] {
+        assert_eq!(v["inventory"][i]["status"], "special");
+        assert_eq!(v["inventory"][i]["path"], dir.join(rel).to_str().unwrap());
+        assert!(
+            v["warnings"]
+                .to_string()
+                .contains(dir.join(rel).to_str().unwrap()),
+            "{v}"
+        );
+    }
+    assert!(v.get("step_found").is_none());
+    assert!(v["inventory"][0].get("step_found").is_none());
+}
+
+#[test]
+fn special_and_symlinked_attachments_stay_readable() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(&dir, &["add", "A"]));
+    for name in ["a.png", "b.png", "c.png"] {
+        write_doc(&dir, &format!("scratch/{name}"), "png");
+        env.json(&dir, &["attach", &id, &format!("scratch/{name}")]);
+    }
+    env.json(&dir, &["edit", &id, "--ref", "s (input): files:a.png"]);
+    for name in ["a.png", "b.png", "c.png"] {
+        let path = dir.join(format!("tasks/files/{id}/{name}"));
+        std::fs::remove_file(&path).unwrap();
+        if name == "c.png" {
+            std::os::unix::fs::symlink(dir.join("scratch/c.png"), &path).unwrap();
+        } else {
+            fifo(&path);
+        }
+    }
+    let v = bounded_show(&env, &dir, &id);
+    let rows = v["inventory"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0]["handle"], "s");
+    assert_eq!(rows[1]["origin"], "attachment");
+    for (i, name) in [(0, "a.png"), (1, "b.png"), (2, "c.png")] {
+        assert_eq!(
+            rows[i]["status"],
+            if i == 2 { "missing" } else { "special" }
+        );
+        assert_eq!(
+            rows[i]["path"],
+            dir.join(format!("tasks/files/{id}/{name}"))
+                .to_str()
+                .unwrap()
+        );
+    }
+    let warnings = v["warnings"].as_array().unwrap();
+    for code in ["attachment_invalid", "attachment_missing"] {
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.as_str().unwrap().contains(&format!("[{code}]"))
+                    && w.as_str().unwrap().contains("c.png")),
+            "{v}"
+        );
+    }
+    assert!(
+        !v["warnings"].to_string().contains("[attachment_unsafe]"),
+        "{v}"
+    );
+}
+
+#[test]
+fn main_only_special_governing_rows_keep_the_actual_path_and_merge() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = worktree_with_excluded_docs(&mut env);
+    let path = main.join("docs/specs/x-design.md");
+    std::fs::remove_file(&path).unwrap();
+    fifo(&path);
+    let v = bounded_show(&env, &side, &id);
+    assert_eq!(v["inventory"][0]["status"], "special");
+    assert_eq!(v["inventory"][0]["path"], path.to_str().unwrap());
+    set_refs(&env, &side, &id, "- d (context): docs/specs/x-design.md");
+    let v = bounded_show(&env, &side, &id);
+    assert_eq!(v["inventory"].as_array().unwrap().len(), 2);
+    assert_eq!(v["inventory"][0]["handle"], "d");
+    assert_eq!(v["inventory"][0]["status"], "special");
+    assert_eq!(v["inventory"][0]["path"], path.to_str().unwrap());
+}
+
+#[test]
+fn pretty_show_has_a_references_section() {
+    let mut env = TestEnv::new();
+    let (dir, id) = inventory_fixture(&mut env);
+    let out = env.pretty(&dir, &["show", &id]);
+    assert!(out.contains("── references"), "{out}");
+    assert!(out.contains("read first: spec, plan, brief, out"), "{out}");
+    assert!(
+        out.contains("- brief (input, required, kind=brief): docs/notes/b.md — the brief"),
+        "{out}"
+    );
+    assert!(
+        out.contains("- out (output, required): docs/out.md [pending]"),
+        "{out}"
+    );
+    assert!(
+        out.contains("- shot.png (attachment): files:shot.png"),
+        "{out}"
+    );
+    assert!(
+        out.contains("- plan (plan, required): docs/plans/x.md (step: Task 1: A)"),
+        "{out}"
+    );
+}
+
+#[test]
+fn equal_external_links_merge_into_spec_and_an_unstepped_plan_is_not_fetched() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let fixture = common::docs::DocFixture::new(&env, "# Shared");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "A",
+            "--spec",
+            "stub:p",
+            "--plan",
+            "stub:p",
+            "--ref",
+            "shared (context): stub:p",
+        ],
+    ));
+    let count = fixture.calls().len();
+    let v = env.json(&dir, &["show", &id]);
+    let rows = v["inventory"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["origin"], "spec");
+    assert_eq!(rows[0]["handle"], "shared");
+    assert_eq!(rows[0]["status"], "unchecked");
+    assert_eq!(rows[0]["required"], true);
+    assert_eq!(rows[1]["origin"], "plan");
+    assert_eq!(rows[1]["status"], "unchecked");
+    for key in ["handle", "step", "step_found", "path", "cause"] {
+        assert!(rows[1].get(key).is_none(), "{key}: {v}");
+    }
+    assert_eq!(fixture.calls().len(), count);
+}
+
+#[test]
+fn pretty_inventory_quotes_references_and_preserves_required_labels() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "A",
+            "--source",
+            "user:chat",
+            "--ref",
+            r#"draft (output, required): "docs/a \"quoted\" \\ draft.md" — draft"#,
+        ],
+    ));
+    let out = env.pretty(&dir, &["show", &id]);
+    assert!(out.contains("read first: draft"), "{out}");
+    assert!(
+        out.contains(
+            r#"- draft (output, required): "docs/a \"quoted\" \\ draft.md" [pending] — draft"#
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("- source (source): user:chat [unchecked]"),
+        "{out}"
+    );
+}
+
+#[test]
+fn missing_attachment_outputs_are_pending_but_missing_inputs_are_missing() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(&dir, &["add", "A"]));
+    set_refs(
+        &env,
+        &dir,
+        &id,
+        "- i (input): docs/gone.md\n- o (output): files:future.png",
+    );
+    let v = env.json(&dir, &["show", &id]);
+    assert_eq!(v["inventory"][0]["status"], "missing");
+    assert_eq!(v["inventory"][1]["status"], "pending");
+    assert_eq!(
+        v["inventory"][1]["path"],
+        dir.join(format!("tasks/files/{id}/future.png"))
+            .to_str()
+            .unwrap()
+    );
+}

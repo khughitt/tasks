@@ -15,6 +15,7 @@ mod frontmatter;
 mod halt;
 mod hierarchy;
 mod holds;
+mod inventory;
 mod lanes;
 mod link;
 mod locations;

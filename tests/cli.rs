@@ -5785,7 +5785,7 @@ fn show_closed_records_keeps_missing_historical_plan_links() {
 }
 
 #[test]
-fn show_missing_historical_plan_keeps_open_and_read_failures() {
+fn show_missing_plans_stay_readable_and_keep_read_failures() {
     let mut env = TestEnv::new();
     let dir = env.init("sci");
     let plan = "docs/plans/history.md";
@@ -5803,15 +5803,26 @@ fn show_missing_historical_plan_keeps_open_and_read_failures() {
     env.json(&dir, &["done", &closed]);
     std::fs::remove_file(dir.join(plan)).unwrap();
     for id in [&open, &shelved] {
-        assert_eq!(env.fail(&dir, &["show", id]), "io");
+        let shown = env.json(&dir, &["show", id]);
+        assert!(shown.get("step_found").is_none(), "{shown}");
+        assert_eq!(shown["inventory"][0]["status"], "missing");
     }
-    assert_eq!(env.fail(&dir, &["next"]), "io");
+    let next = env.json(&dir, &["next"]);
+    assert!(next["next"].get("step_found").is_none(), "{next}");
+    assert_eq!(next["next"]["inventory"][0]["status"], "missing");
 
     std::fs::write(dir.join(plan), [0xff]).unwrap();
     assert_eq!(env.fail(&dir, &["show", &closed]), "io");
     std::fs::remove_file(dir.join(plan)).unwrap();
     std::fs::create_dir(dir.join(plan)).unwrap();
-    assert_eq!(env.fail(&dir, &["show", &closed]), "io");
+    let shown = env.json(&dir, &["show", &closed]);
+    assert!(shown.get("step_found").is_none(), "{shown}");
+    assert_eq!(shown["inventory"][0]["status"], "missing");
+    assert!(
+        shown["warnings"]
+            .to_string()
+            .contains("is not a regular file")
+    );
 }
 
 #[test]
@@ -22557,7 +22568,16 @@ fn show_historical_plan_keeps_main_checkout_metadata_failures() {
 
     std::fs::remove_file(plans.join("x.md")).unwrap();
     std::fs::create_dir(plans.join("x.md")).unwrap();
-    assert_eq!(env.fail(&side, &["show", &id]), "io");
+    let shown = env.json(&side, &["show", &id]);
+    assert!(shown.get("step_found").is_none(), "{shown}");
+    assert_eq!(shown["inventory"][1]["status"], "missing");
+    assert!(
+        shown["warnings"].as_array().unwrap().iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains(plans.join("x.md").to_str().unwrap()) && w.contains("is not a regular file")
+        }),
+        "{shown}"
+    );
 }
 
 #[test]

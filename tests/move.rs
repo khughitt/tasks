@@ -99,7 +99,10 @@ fn show_moved_record_keeps_missing_historical_plan_and_move_pointers() {
         id
     );
     std::fs::remove_file(destination.join(plan)).unwrap();
-    assert_eq!(env.fail(&destination, &["show", &moved]), "io");
+    let shown = env.json(&destination, &["show", &moved]);
+    assert_eq!(shown["task"]["moved_from"], id);
+    assert!(shown.get("step_found").is_none(), "{shown}");
+    assert_eq!(shown["inventory"][0]["status"], "missing");
 }
 
 #[test]
