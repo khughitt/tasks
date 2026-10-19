@@ -13,6 +13,8 @@
 
 **Tech Stack:** Rust (clap, serde, assert_cmd integration tests).
 
+**Status:** approved by the user 2026-10-19 after plan review round 4. Execution is subagent-driven, from a fresh session.
+
 **Spec:** `docs/specs/2026-10-19-task-references-design.md` (approved 2026-10-19 after review round 2; amended by this plan's review round 1). Read it with this plan; section numbers below refer to it.
 
 ## Global Constraints
@@ -572,7 +574,7 @@ In `check`, inside `if task.status.is_open()`, map `present` for each non-extern
 - `Main { root, path }`: warning `ref_in_main_checkout`, detail `reference <h> <rel> is not in this checkout; read from <path> in the main checkout at <root>`;
 - `Absent(path)`: error `ref_missing`, detail `reference <h> <reference> does not exist (looked for <path>)`;
 - `Special(path)`: error `special_file`, detail `reference <h>: <path> is not a regular file or directory`;
-- `Unsafe { path, detail }`: error `ref_missing`, detail `reference <h>: <path> is not a usable attachment (<detail>)`, alongside the audit's existing `attachment_unsafe`.
+- `Unsafe { path, detail }`: error `ref_missing`, detail `reference <h>: <path> is not a usable attachment (<detail>)`, alongside the attachment audit's existing findings (`attachment_invalid` for the stored entry, and `attachment_missing` when the ledger records the name; `attachment_unsafe` only when the storage directory itself is unsafe).
 
 These details read every field `present` returns, so Task 4 passes Clippy's `dead_code` with no later caller.
 
@@ -857,8 +859,11 @@ fn show_stays_readable_with_special_files_and_reports_them() {
     // With .timeout(Duration::from_secs(10)) on show:
     // (c) attach a.png and b.png, then replace both stored files with FIFOs; entry s (input): files:a.png.
     //     → show succeeds; the ref row for s and the attachment row for b.png both have status
-    //     "special", with paths under tasks/files/<id>/; a symlinked attachment c.png instead
-    //     gives status "missing" plus the existing attachment_unsafe warning line.
+    //     "special", with paths under tasks/files/<id>/. A symlinked attachment c.png (attached,
+    //     then its stored file replaced by a symlink) instead gives status "missing", and show's
+    //     warnings carry the existing audit lines for it: "[attachment_invalid]" for
+    //     tasks/files/<id>/c.png and "[attachment_missing]" for the recorded name, and no
+    //     "[attachment_unsafe]" line (the storage directory is safe).
     // (d) worktree_with_excluded_docs: replace main's docs/specs/x-design.md with a FIFO; in side,
     //     the spec row has status "special" and a path under main (not side); add entry
     //     d (context): docs/specs/x-design.md → one merged row, handle "d", status "special",
@@ -919,7 +924,7 @@ Rows come in spec §5.1 order.
     - `Here` or `Main` is `present`, with that path;
     - `Absent(path)` is `pending` for an output and `missing` otherwise, with that would-be path;
     - `Special(path)` is `special` for any relation, with that path and a warning;
-    - `Unsafe { path, .. }` is `missing`, with that path, and the attachment audit's existing `attachment_unsafe` warning explains it.
+    - `Unsafe { path, .. }` is `missing`, with that path, and the attachment audit's existing findings (`attachment_invalid` for the stored entry, and `attachment_missing` when the ledger records the name; `attachment_unsafe` only when the storage directory itself is unsafe) explain it.
   - Nothing here opens a target or propagates a special-file or unsafe-attachment error, so `show` never fails on one.
   - An external entry is `unchecked`, with no path.
 - **Source row.** `location: opaque`, `status: unchecked`.
@@ -1015,6 +1020,17 @@ fn move_preflight_checks_input_paths_at_the_destination() {
     // two projects; task with a (input): docs/a.md existing only in the source → move refused,
     // message contains "--rm-ref"; an output or external entry does not block the move.
 }
+
+#[test]
+fn move_preflight_refuses_a_destination_fifo_and_changes_nothing() {
+    // two projects; docs/a.md is a file in the source and a FIFO (mkfifo) in the destination;
+    // task with a (input): docs/a.md. With .timeout(Duration::from_secs(10)):
+    // `move <id> --to <dest>` → kind special_file, message names the destination path and "--rm-ref".
+    // Both projects unchanged: the source record's bytes equal a copy read before the move,
+    // the destination tasks/ holds no new record, `git status --porcelain` in both checkouts
+    // matches its value from before the move, and no move journal is pending (`tasks check`
+    // in the source reports no move_pending finding).
+}
 ```
 
 Write the elided bodies in full.
@@ -1028,7 +1044,12 @@ Expected: the new tests FAIL.
 
 - **Completion.** In `transition`, compute `completing` (`to == Done && task.status != Done`) before the dependency checks. When `completing`, call `refs::require_outputs(&Resolver::new(&ctx.project, &ctx.registry), &ctx.project, task)?` before any stamp, whatever `force` is.
 - **Detach.** In `detach`, after name validation, refuse with `RefCitesAttachment("<id> reference <h> names <name>; remove it first with `tasks edit <id> --rm-ref <h>`")` when an entry's reference is `files:<name>`.
-- **Move.** In `validate_destination_docs`, for each `context` or `input` entry with a local path, call `locate_entry` on the destination resolver. `Missing` is `Validation("<source>: reference <h> <reference> does not exist in <prefix>; run `tasks edit <source> --rm-ref <h>` or create it there")`.
+- **Move.** In `validate_destination_docs`, for each `context` or `input` entry with a local path, call `locate_entry` on the destination resolver and map every case:
+  - `Here` or `Main` passes;
+  - `Missing` is `Validation("<source>: reference <h> <reference> does not exist in <prefix>; run `tasks edit <source> --rm-ref <h>` or create it there")`;
+  - `Special(path)` is `refuse_special(&path)`'s `SpecialFile` error, prefixed `<source>: reference <h>: ` and naming the same `--rm-ref` remedy.
+
+  Preflight runs before any write, so a refusal leaves both projects unchanged.
 
 - [ ] **Step 4: Run the tests and the lint gate**
 
