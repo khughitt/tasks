@@ -1,12 +1,14 @@
 ---
 id: tasks-49483b
 title: The CLI rows in ops
-status: todo
+status: doing
 priority: 2
 complexity: low
 process: direct
+owner: task-references
 created: 2026-10-19T13:19:22Z
-updated: 2026-10-19T13:19:22Z
+updated: 2026-10-19T13:21:16Z
+started: 2026-10-19T13:21:16Z
 depends: []
 parent: tasks-6eeecd
 tags: []
@@ -15,3 +17,8 @@ agent: codex
 plan: docs/plans/2026-10-19-task-references.md
 step: "Task 1: The CLI rows in ops"
 ---
+
+## Notes
+
+- 2026-10-19T13:21:16Z (task-references): started
+  provenance: {"harness_session":"codex:01a15452-7f78-7920-bb9d-6c57b1ba26c7","harness_session_source":"CODEX_THREAD_ID"}
