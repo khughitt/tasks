@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-19T11:01:01Z
-updated: 2026-10-19T11:01:01Z
+updated: 2026-10-19T11:01:06Z
 depends: []
 tags: []
 source: "user:2026-10-19 task references discussion"
@@ -31,3 +31,7 @@ First increment: explicit references, an ordered required-reading list, one JSON
 Coordinate with tasks-dc16eb's decision on document roots without waiting for its relocation rollout; branch-only and linked-checkout resolution remain open in tasks-a73dce, tasks-82bd08 and tasks-6360ac.
 
 Done: a reviewed design spec and an implementation plan for the first increment.
+
+## Notes
+
+- 2026-10-19T11:01:06Z (main): proposal reviewed before filing by codex/gpt-6-astra (relayed by the user): adopted inventory vs required reading, separated dimensions, [ref:] citations, locate vs read, expected vs produced outputs, revision pinning; storage left open for the spec
