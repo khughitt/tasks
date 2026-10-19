@@ -8,7 +8,7 @@ complexity: low
 process: direct
 defer: 2026-10-31
 created: 2026-10-17T17:45:14Z
-updated: 2026-10-17T17:45:30Z
+updated: 2026-10-19T18:53:32Z
 depends: []
 tags: []
 source: tasks-aeeef1
@@ -20,3 +20,4 @@ The wait-aware rollout ran on titan only (2026-10-17); every other host that rea
 ## Notes
 
 - 2026-10-17T17:45:30Z (main): concerns: tasks-aeeef1 extension — retire the one-time backfill tool and state after every host upgrades
+- 2026-10-19T18:53:32Z (main): Gate met 2026-10-19: europa reinstalled from main 061f43a (includes the wait-aware binary) during the tasks-f0c643 rollout; titan already current. Retirement of tools/wait-backfill can proceed.
