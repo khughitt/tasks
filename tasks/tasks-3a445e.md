@@ -8,13 +8,14 @@ complexity: high
 process: planned
 owner: task-references
 created: 2026-10-19T11:01:01Z
-updated: 2026-10-19T11:43:26Z
+updated: 2026-10-19T11:52:36Z
 started: 2026-10-19T11:03:39Z
 depends: []
 tags: []
 source: "user:2026-10-19 task references discussion"
 agent: claude-code
 spec: docs/specs/2026-10-19-task-references-design.md
+plan: docs/plans/2026-10-19-task-references.md
 ---
 
 Why: a task's documents are scattered across spec, plan, source, attachments and prose. Prose citations dominate: about 2,800 docs/plans, 1,700 docs/specs and 1,700 docs/notes mentions across project records, with 156 hand-written 'Where:' sections (count 2026-10-19). None can be queried, checked, or rewritten when a document moves, and an agent picking up a task has no single answer to 'what must I read first'. Example: crew-5aa683's Where: section.
