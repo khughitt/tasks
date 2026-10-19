@@ -159,7 +159,13 @@ For unresolved cluster decisions, write or update one roughly one-page brief at
 
 Use `docs/specs/` with `Status: draft` only when the handoff already presents one
 reviewable design; attach that document through `--spec`. Write at most three briefs or
-draft specs in one pass. A brief is not attached as a spec.
+draft specs in one pass. A brief is not attached as a spec. Add a brief the pass
+writes as a reference on each task it scopes, including follow-ups that use it:
+
+    tasks -C <root> edit <id> --ref 'brief (input, required, kind=brief): docs/notes/YYYY-MM-DD-<topic>-brief.md — context and questions for this work'
+
+Reuse the existing handle on reruns; mark `required` only when the brief must be read
+first. In a body the pass rewrites, cite `[ref:brief]` and say why it matters.
 
 Reuse a parent shared by all members. Otherwise create one priority-2 `todo` goal whose
 source is the brief path, and parent only previously unparented members beneath it.

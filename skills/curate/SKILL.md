@@ -74,6 +74,10 @@ Grep, `git log`, and every other piece of evidence gathering run in that same ro
    - `--spec`, `--plan <topic> --step "<heading>"`, `--parent`: fix when the linked
      thing exists and the link is missing or wrong. A missing dependency is added with
      `--depends`; a wrong one is replaced with `tasks dep <id> --on <right> --rm <wrong>`.
+   - `--ref` with `--body`: promote an existing prose path to a reference entry and
+     rewrite the prose to cite its handle as `[ref:<handle>]`, preserving why the
+     document matters. This is a bounded `refined` edit; use the entry syntax and
+     relations in the tasks skill, reusing an existing handle when present.
    - `--size`: set or correct.
    - `--complexity`: set or correct against the rubric in the tasks skill (low: approach
      established, context identified, clear check; mid: bounded choices remain, scope

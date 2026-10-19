@@ -11,7 +11,7 @@ nothing when it has nothing to report).
 Task objects omit unset optional fields and empty collections; treat missing optional
 keys as unset and missing task arrays as empty. `false`, `0`, and empty strings remain.
 Response containers (`tasks`, `warnings`, etc.) remain present; `next: null` still means
-nothing is eligible. `tasks doc <id> --plan|--spec` is the exception: exact UTF-8
+nothing is eligible. `tasks doc <id> --plan|--spec|<handle>` is the exception: exact UTF-8
 body bytes on stdout in every format, with warnings on stderr and no JSON wrapper.
 Summary and parked rows expose `step` only when set. `check` distinguishes
 `doc_unreachable` (an unavailable reference) from `doc_unchecked` (one summary of
@@ -88,7 +88,9 @@ mean those documents were verified.
    or `--group <name>` narrows it. It is the person's bedtime
    view, not a picker: resume an entry by opening a session in the checkout it names
    and running `tasks start <id>` there.
-3. Read the task's `process` and follow **Process and workspace** below before
+3. Run `tasks show <id>` and read the inventory's `required` rows in order before
+   starting; use **Task references** below to retrieve them. Read the task's `process`
+   and follow **Process and workspace** below before
    implementation; state the chosen path and workspace. `tasks start <id>` before
    changing code records you as owner.
    `start` also records a claim outside git, visible from every worktree of the project,
@@ -225,7 +227,7 @@ mean those documents were verified.
 8. When a goal appears under `closeout`, confirm it is met and `tasks done <id> "<verdict>"`,
    or add the children still missing.
 
-Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--lane/--no-lane/--tag/--depends/--no-depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--agent/--no-agent/--every/--no-every/--defer/--no-defer/--need/--rm-need/--no-needs`
+Never edit `tasks/*.md` directly. `tasks edit <id> --title/--body/-p/--size/--complexity/--no-complexity/--process/--no-process/--lane/--no-lane/--tag/--depends/--no-depends/--spec/--no-spec/--plan/--no-plan/--step/--no-step/--parent/--no-parent/--source/--no-source/--ref/--rm-ref/--no-refs/--agent/--no-agent/--every/--no-every/--defer/--no-defer/--need/--rm-need/--no-needs`
 updates fields; `tasks edit <id>` with no flags opens `$EDITOR` and validates the result.
 Notes stay append-only there: the one note change it accepts is removing trailing spaces
 and tabs, which every new note already has stripped.
@@ -481,7 +483,7 @@ Outside every project it is `invalid_id`; use the full id there and for other pr
   `prime` and `list --parked` for cleanup. `check` warns when open work depends on it.
   `edit --status shelved` refuses; only `shelve` writes the shelf. `tasks unshelve <id>`
   returns it to `idea`.
-- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"]`.
+- A scoped task: `tasks add "<title>" -p <0-4> --size <xs|s|m|l|xl> --complexity <low|mid|high> --process <direct|planned> --tag <group> [--need <name>]... [--defer <date|Nd|Nw>] [--source <ref>] [--agent <harness>/<model>] [--spec <name>] [--plan <name> --step "<heading>"] [--ref '<entry>']...`.
   `complexity` is the reasoning and judgment the task demands given its current spec,
   plan, and context — `low`: the approach is established, the relevant context is
   identified, and correctness has a clear check; `mid`: bounded investigation or
@@ -622,6 +624,58 @@ in its registered checkout. Every write to it is refused afterwards with `retire
 from every checkout; its ids keep resolving, `--all-projects` and `--group` reads leave it
 out, and `--project` reads warn. `tasks unretire` there undoes it. The project lifecycle
 runbook in ops has the whole procedure.
+
+## Task references
+
+When filing or scoping, put documents the work cites in repeatable `--ref` entries
+on `tasks add` or `tasks edit`. Cite their handles in the body as `[ref:<handle>]`,
+saying why each matters; the handle keeps prose valid when the document moves.
+When quoting citation syntax rather than citing a document, put it in backticks.
+
+An entry has this form (no leading `- ` in the flag argument):
+
+    <handle> (<relation>[, required][, kind=<kind>]): <reference>[ — <description>]
+
+Handles use lowercase letters, digits and hyphens, start with a letter, and are at
+most 32 characters. Relations are `context` (background), `input` (consumed by the
+work), or `output` (produced by it). Mark `required` only what must be read first,
+and place those entries in reading order. Declare the outputs the task will produce;
+an output need not exist when filed. `required` is a reading obligation, not what
+makes an output subject to the completion gate.
+
+For example, add these flags to the task-filing command and cite `[ref:brief]` in
+the body when explaining which question the report must answer:
+
+    --ref 'brief (input, required, kind=brief): docs/notes/topic-brief.md — question and constraints'
+    --ref 'report (output, kind=report): docs/notes/topic-report.md — findings and recommendation'
+
+References accept normalized repo-relative file or directory paths (no trailing
+slash), `files:<name>` for an attachment, or an external `<scheme>:<rest>`.
+Quote the reference inside the entry when it contains whitespace, a double quote
+or a backslash; inside those double quotes only `\"` and `\\` are escapes.
+Cross-project `@` references are not supported. Local `context` and `input` targets
+must exist when added or changed.
+
+Kind is a descriptive free label; it changes no behavior. Suggested vocabulary:
+`brief`, `spec`, `plan`, `report` (findings, probes, spikes, diagnoses, audits, runs),
+`review`, `ledger`, `handoff`, `retro`, `runbook`, `guide`, `decision`, and artifacts
+`dataset`, `image`, `log`, `trace`, `transcript`.
+
+On pickup, `tasks show <id>` presents the document inventory, including required
+rows in reading order. `tasks doc <id> <handle>` reads a text reference; directories
+and binary files refuse as `ref_not_text` and name the path to inspect instead.
+External reads use the configured document provider; `--no-fetch` prevents fetching.
+Before moving a document, run `tasks list --ref <stored reference>` to find its tasks
+by exact reference, then update each entry with `tasks edit <id> --ref '<entry>'`.
+An existing handle is replaced in place; a new handle is appended. `search` searches
+the body, not the entries.
+
+A fresh completion refuses with `ref_output_missing` if any local or attachment
+output is absent, whether or not it is `required`; `--force` does not bypass it.
+Produce the output or explicitly withdraw it with `tasks edit <id> --rm-ref <handle>`.
+If the body cites that handle, replace the body in the same edit to remove or rewrite
+its citations. `--no-refs` clears all entries with the same citation safeguard.
+External outputs are not checked.
 
 ## Document links and reads
 
