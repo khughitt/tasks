@@ -1,12 +1,14 @@
 ---
 id: tasks-e6fb24
 title: "Locating entries, and `check` for their targets"
-status: todo
+status: doing
 priority: 2
 complexity: mid
 process: direct
+owner: task-references
 created: 2026-10-19T13:19:29Z
-updated: 2026-10-19T13:19:29Z
+updated: 2026-10-19T13:53:08Z
+started: 2026-10-19T13:53:08Z
 depends: [tasks-317677]
 parent: tasks-6eeecd
 tags: []
@@ -15,3 +17,8 @@ agent: codex
 plan: docs/plans/2026-10-19-task-references.md
 step: "Task 4: Locating entries, and `check` for their targets"
 ---
+
+## Notes
+
+- 2026-10-19T13:53:08Z (task-references): started
+  provenance: {"harness_session":"codex:01a1546f-8c1e-7b23-8fa5-d4f1b307a492","harness_session_source":"CODEX_THREAD_ID"}
