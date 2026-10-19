@@ -1,6 +1,6 @@
 # Task references: one explicit, ordered list of what a task cites
 
-Status: implemented (plan docs/plans/2026-10-19-task-references.md); skills activate after the host rollout
+Status: implemented (plan docs/plans/2026-10-19-task-references.md); skills active since the 2026-10-19 host rollout
 Task: tasks-3a445e
 Coordinates with: tasks-dc16eb (document roots), tasks-a73dce, tasks-82bd08 and
 tasks-6360ac (branch-only and linked-checkout resolution)
