@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: task-references
 created: 2026-10-19T14:44:28Z
-updated: 2026-10-19T15:00:36Z
+updated: 2026-10-19T15:00:37Z
 started: 2026-10-19T15:00:36Z
 depends: [tasks-ef8ba5]
 parent: tasks-6eeecd
@@ -23,3 +23,4 @@ Execute the approved plan’s Rollout section after whole-branch review: integra
 
 - 2026-10-19T15:00:36Z (task-references): started
   provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T15:00:37Z (task-references): Whole-branch review accepts code-only integration through 74b8e85; skills d11d9da remain withheld pending confirmation that every host runs the new binary and the live activation gate
