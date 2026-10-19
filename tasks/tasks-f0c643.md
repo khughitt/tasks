@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: task-references
 created: 2026-10-19T14:44:28Z
-updated: 2026-10-19T18:42:28Z
+updated: 2026-10-19T18:44:30Z
 started: 2026-10-19T15:00:36Z
 depends: [tasks-ef8ba5]
 parent: tasks-6eeecd
@@ -29,3 +29,4 @@ Execute the approved plan’s Rollout section after whole-branch review: integra
   provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-19T18:42:28Z (task-references): resumed
   provenance: {"harness_session":"claude-code:2aac073c-533b-47e2-b385-7732b25e24c2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-19T18:44:30Z (task-references): Hosts: titan installed at 5472812 earlier; europa reinstalled 2026-10-19 from main 061f43a (shared Dropbox tree, content verified equal to HEAD via temp index; europa's own .git/index is stale since 2026-10-17); tasks show on both exposes inventory. Citation sweep rerun: only done tasks-3a445e matches.
