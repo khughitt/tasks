@@ -64,6 +64,51 @@ pub fn present(
     }
 }
 
+pub fn refuse_problems(task: &Task) -> Result<()> {
+    if let Some(problem) = audit(task).into_iter().next() {
+        return Err(Error::Reference {
+            kind: problem.kind,
+            detail: problem.detail,
+        });
+    }
+    Ok(())
+}
+
+pub fn require_targets(
+    resolver: &Resolver,
+    project: &Project,
+    task: &Task,
+    original: Option<&Task>,
+) -> Result<()> {
+    for entry in &task.refs {
+        if entry.relation == Relation::Output
+            || matches!(location(&entry.reference)?, Location::External)
+            || original.is_some_and(|old| {
+                old.refs.iter().any(|before| {
+                    before.reference == entry.reference && before.relation == entry.relation
+                })
+            })
+        {
+            continue;
+        }
+        match present(resolver, project, task, entry)? {
+            Presence::Here(_) => {}
+            Presence::Main { root, .. } => {
+                resolver.note_main_entry(&entry.handle, &entry.reference, &root)
+            }
+            Presence::Absent(_) => {
+                return Err(Error::RefNotFound(format!(
+                    "{}: reference {} {} does not exist",
+                    task.id, entry.handle, entry.reference
+                )));
+            }
+            Presence::Special(path) => crate::resolve::refuse_special(&path)?,
+            Presence::Unsafe { detail, .. } => return Err(Error::AttachmentUnsafe(detail)),
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Citation<'a> {
     Handle(&'a str),

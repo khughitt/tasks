@@ -417,3 +417,526 @@ fn check_preserves_attachment_ledger_and_storage_safety() {
         "{v}"
     );
 }
+
+#[test]
+fn add_and_edit_write_entries_that_show_returns() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/notes/b.md", "brief");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "T",
+            "--body",
+            "See [ref:brief].",
+            "--ref",
+            "brief (input, required, kind=brief): docs/notes/b.md — the brief",
+            "--ref",
+            r#"rb (output): "docs/run books/a \"v2\" \\ — x.md""#,
+        ],
+    ));
+    let shown = env.json(&dir, &["show", &id]);
+    let refs = &shown["task"]["refs"];
+    assert_eq!(
+        refs[0],
+        serde_json::json!({"handle":"brief","relation":"input","required":true,"kind":"brief","reference":"docs/notes/b.md","description":"the brief"})
+    );
+    assert_eq!(
+        refs[1],
+        serde_json::json!({"handle":"rb","relation":"output","required":false,"reference":"docs/run books/a \"v2\" \\ — x.md"})
+    );
+    assert!(env.read(&dir, &format!("tasks/{id}.md")).contains(
+        "## References\n\n- brief (input, required, kind=brief): docs/notes/b.md — the brief\n"
+    ));
+    let marker = env.home.path().join("editor-ran");
+    let stub = common::write_editor_stub(&env, &marker);
+    for args in [
+        vec![
+            "edit",
+            &id,
+            "--ref",
+            "brief (context): docs/notes/b.md",
+            "--ref",
+            "c (context): https://example.org/x",
+        ],
+        vec!["edit", &id, "--rm-ref", "rb"],
+        vec!["edit", &id, "--no-refs", "--body", "Nothing cited."],
+    ] {
+        env.cmd(&dir)
+            .env("EDITOR", &stub)
+            .args(&args)
+            .timeout(Duration::from_secs(10))
+            .assert()
+            .success();
+        assert!(!marker.exists());
+        if args.contains(&"--ref") {
+            let refs = env.json(&dir, &["show", &id])["task"]["refs"].clone();
+            let handles: Vec<_> = refs
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["handle"].as_str().unwrap())
+                .collect();
+            assert_eq!(handles, ["brief", "rb", "c"]);
+            assert_eq!(refs[0]["relation"], "context");
+        }
+    }
+    assert!(env.json(&dir, &["show", &id])["task"].get("refs").is_none());
+    // Clearing alone must also use the non-editor path.
+    env.cmd(&dir)
+        .env("EDITOR", stub)
+        .args(["edit", &id, "--no-refs"])
+        .timeout(Duration::from_secs(10))
+        .assert()
+        .success();
+    assert!(!marker.exists());
+}
+
+#[test]
+fn writes_refuse_broken_entries_and_citations() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/b.md", "b");
+    assert_eq!(
+        env.fail(&dir, &["add", "T", "--ref", "a (input): docs/none.md"]),
+        "ref_not_found"
+    );
+    assert_eq!(
+        env.fail(&dir, &["add", "T", "--body", "[ref:gone]"]),
+        "ref_citation_dangling"
+    );
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "add",
+                "T",
+                "--ref",
+                "a (context): docs/b.md",
+                "--ref",
+                "b (input): docs/b.md"
+            ]
+        ),
+        "ref_duplicate"
+    );
+    assert_eq!(
+        env.fail(
+            &dir,
+            &[
+                "add",
+                "T",
+                "--ref",
+                "a (context): docs/b.md",
+                "--ref",
+                "a (input): docs/b.md"
+            ]
+        ),
+        "validation"
+    );
+    env.json(
+        &dir,
+        &[
+            "add",
+            "T",
+            "--ref",
+            "o (output): docs/later.md",
+            "--ref",
+            "s (output): files:after.png",
+        ],
+    );
+    env.json(
+        &dir,
+        &[
+            "add",
+            "T",
+            "--body",
+            "Write `[ref:x]` to cite.\nLiteral `example\n[ref:sample]` here.\n```\n[ref:y]\n```",
+        ],
+    );
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "T",
+            "--body",
+            "See [ref:a].",
+            "--ref",
+            "a (context): docs/b.md",
+        ],
+    ));
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--rm-ref", "a"]),
+        "ref_citation_dangling"
+    );
+    env.json(
+        &dir,
+        &["edit", &id, "--rm-ref", "a", "--body", "Nothing cited."],
+    );
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--rm-ref", "a"]),
+        "validation"
+    );
+    for flag in ["--ref", "--rm-ref"] {
+        let value = if flag == "--ref" {
+            "a (output): docs/a.md"
+        } else {
+            "a"
+        };
+        let error = env.usage(&dir, &["edit", &id, "--no-refs", flag, value]);
+        assert!(
+            error.contains("--no-refs") && error.contains(flag),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn an_attachment_input_needs_its_bytes_not_just_its_ledger_entry() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    write_doc(&dir, "shot.png", "png");
+    env.json(&dir, &["attach", &id, "shot.png"]);
+    std::fs::remove_file(dir.join(format!("tasks/files/{id}/shot.png"))).unwrap();
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--ref", "s (input): files:shot.png"]),
+        "ref_not_found"
+    );
+}
+
+#[test]
+fn an_unrelated_edit_ignores_an_input_that_has_since_vanished() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/b.md", "b");
+    let id = id_of(env.json(&dir, &["add", "T", "--ref", "a (input): docs/b.md"]));
+    std::fs::remove_file(dir.join("docs/b.md")).unwrap();
+    env.json(&dir, &["edit", &id, "-p", "1"]);
+    env.json(
+        &dir,
+        &[
+            "edit",
+            &id,
+            "--ref",
+            "a (input, required): docs/b.md — still valid",
+        ],
+    );
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--ref", "a (context): docs/b.md"]),
+        "ref_not_found"
+    );
+    assert_eq!(
+        env.fail(&dir, &["edit", &id, "--ref", "a (input): docs/c.md"]),
+        "ref_not_found"
+    );
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["priority"], 1);
+}
+
+#[test]
+fn editor_saves_validate_added_entries() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/b.md", "b");
+    for notes in [false, true] {
+        let id = id_of(env.json(&dir, &["add", "T"]));
+        if notes {
+            env.json(&dir, &["note", &id, "A note"]);
+        }
+        for (entry, expected) in [
+            ("x (input): docs/none.md", Some("ref_not_found")),
+            ("x (input): docs/b.md", None),
+        ] {
+            let section = format!("## References\\n\\n- {entry}\\n\\n");
+            let body = if notes {
+                format!("sed -i '/^## Notes/i {section}' \"$1\"")
+            } else {
+                format!("printf '\\n{section}' >> \"$1\"")
+            };
+            let editor = common::editor_script(env.home.path(), &body);
+            let out = env
+                .cmd(&dir)
+                .env("EDITOR", editor)
+                .args(["edit", &id])
+                .timeout(Duration::from_secs(10))
+                .output()
+                .unwrap();
+            if let Some(kind) = expected {
+                assert_eq!(out.status.code(), Some(1), "{out:?}");
+                let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+                assert_eq!(error["error"]["kind"], kind);
+                let detail = error["error"]["detail"].as_str().unwrap();
+                let kept = detail
+                    .split(" (edit kept at ")
+                    .nth(1)
+                    .unwrap()
+                    .strip_suffix(')')
+                    .unwrap();
+                assert!(std::fs::read_to_string(kept).unwrap().contains(entry));
+                assert!(
+                    !env.read(&dir, &format!("tasks/{id}.md"))
+                        .contains("## References")
+                );
+            } else {
+                assert!(out.status.success(), "{out:?}");
+                assert_eq!(
+                    env.json(&dir, &["show", &id])["task"]["refs"][0]["handle"],
+                    "x"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn list_and_search_filter_by_reference_byte_for_byte() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/b.md", "b");
+    write_doc(&dir, "docs/c.md", "c");
+    let id = id_of(env.json(&dir, &["add", "T one", "--ref", "b (context): docs/b.md"]));
+    let other = id_of(env.json(&dir, &["add", "T two", "--ref", "c (context): docs/c.md"]));
+    for parked in [false, true] {
+        if parked {
+            for task in [&id, &other] {
+                env.json(&dir, &["start", task]);
+                env.json(&dir, &["park", task, "resume"]);
+            }
+        }
+        for command in [vec!["list"], vec!["search", "T"]] {
+            for (reference, count) in [("docs/b.md", 1), ("docs/b", 0)] {
+                let mut args = command.clone();
+                args.extend(["--ref", reference]);
+                if parked {
+                    args.push("--parked");
+                }
+                let result = env.json(&dir, &args);
+                let rows = result["tasks"].as_array().unwrap();
+                assert_eq!(rows.len(), count, "{result}");
+                if count == 1 {
+                    assert_eq!(rows[0]["id"], id);
+                }
+            }
+        }
+    }
+    std::fs::remove_file(dir.join(format!("tasks/{id}.md"))).unwrap();
+    assert_eq!(
+        env.json(&dir, &["list", "--parked"])["tasks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(
+        env.json(&dir, &["list", "--parked", "--ref", "docs/b.md"])["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn doc_reads_an_entry_by_handle() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/b.md", "body\n");
+    write_doc(&dir, "docs/folder/child", "child");
+    std::fs::write(dir.join("docs/binary"), [0xff, 0xfe]).unwrap();
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "T",
+            "--ref",
+            "text (context): docs/b.md",
+            "--ref",
+            "folder (input): docs/folder",
+            "--ref",
+            "bytes (input): docs/binary",
+            "--ref",
+            "later (output): docs/later.md",
+            "--ref",
+            "external (context): stub:x",
+        ],
+    ));
+    for (handle, kind) in [
+        ("folder", "ref_not_text"),
+        ("bytes", "ref_not_text"),
+        ("later", "doc_not_found"),
+        ("unknown", "doc_not_found"),
+    ] {
+        assert_eq!(env.fail(&dir, &["doc", &id, handle]), kind);
+    }
+    env.cmd(&dir)
+        .args(["doc", &id, "text"])
+        .assert()
+        .success()
+        .stdout("body\n");
+    env.json(&dir, &["attach", &id, "docs/b.md"]);
+    env.json(
+        &dir,
+        &["edit", &id, "--ref", "attachment (input): files:b.md"],
+    );
+    env.cmd(&dir)
+        .args(["doc", &id, "attachment"])
+        .assert()
+        .success()
+        .stdout("body\n");
+    let fixture = common::docs::DocFixture::new(&env, "external body\n");
+    env.cmd(&dir)
+        .args(["doc", &id, "external"])
+        .assert()
+        .success()
+        .stdout("external body\n");
+    assert_eq!(
+        env.fail(&dir, &["doc", &id, "external", "--no-fetch"]),
+        "doc_not_found"
+    );
+    assert_eq!(fixture.calls(), ["x"]);
+    for flag in ["--plan", "--spec"] {
+        env.usage(&dir, &["doc", &id, "text", flag]);
+    }
+}
+
+#[test]
+fn a_fifo_is_refused_without_being_opened() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    std::fs::create_dir_all(dir.join("docs")).unwrap();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(dir.join("docs/pipe"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    set_refs(&env, &dir, &id, "- p (context): docs/pipe");
+    for args in [
+        vec!["add", "T", "--ref", "p (context): docs/pipe"],
+        vec!["doc", &id, "p"],
+    ] {
+        let out = env
+            .cmd(&dir)
+            .args(&args)
+            .timeout(Duration::from_secs(10))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "special_file");
+    }
+}
+
+#[test]
+fn entry_targets_use_main_checkout_but_prefer_local_directories() {
+    let mut env = TestEnv::new();
+    let (main, side, id) = worktree_with_excluded_docs(&mut env);
+    let result = env.json(
+        &side,
+        &[
+            "edit",
+            &id,
+            "--ref",
+            "brief (input): docs/specs/x-design.md",
+        ],
+    );
+    let warning = format!(
+        "reference brief docs/specs/x-design.md is not in this checkout; read from the main checkout at {}",
+        main.display()
+    );
+    assert!(
+        result["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == &warning)
+    );
+    let out = env.cmd(&side).args(["doc", &id, "brief"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(out.stdout, b"# X\n");
+    assert!(String::from_utf8(out.stderr).unwrap().contains(&warning));
+    std::fs::create_dir_all(side.join("docs/specs/x-design.md")).unwrap();
+    assert_eq!(env.fail(&side, &["doc", &id, "brief"]), "ref_not_text");
+}
+
+#[test]
+fn editor_body_audit_keeps_the_edit_and_unrelated_changes_ignore_existing_prose() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(&dir, &["add", "T", "--body", "Original body."]));
+    let editor = common::editor_script(
+        env.home.path(),
+        "sed -i 's/Original body./See [ref:missing]./' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", editor)
+        .args(["edit", &id])
+        .timeout(Duration::from_secs(10))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "ref_citation_dangling");
+    let detail = error["error"]["detail"].as_str().unwrap();
+    let kept = detail
+        .split(" (edit kept at ")
+        .nth(1)
+        .unwrap()
+        .strip_suffix(')')
+        .unwrap();
+    assert!(
+        std::fs::read_to_string(kept)
+            .unwrap()
+            .contains("See [ref:missing].")
+    );
+    assert_eq!(
+        env.json(&dir, &["show", &id])["task"]["body"],
+        "Original body."
+    );
+    let record = dir.join(format!("tasks/{id}.md"));
+    std::fs::write(
+        &record,
+        env.read(&dir, &format!("tasks/{id}.md"))
+            .replace("Original body.", "See [ref:missing]."),
+    )
+    .unwrap();
+    env.json(&dir, &["edit", &id, "-p", "1"]);
+    let editor = common::editor_script(
+        env.home.path(),
+        "sed -i 's/^priority: 1$/priority: 2/' \"$1\"",
+    );
+    env.cmd(&dir)
+        .env("EDITOR", editor)
+        .args(["edit", &id])
+        .timeout(Duration::from_secs(10))
+        .assert()
+        .success();
+    assert_eq!(env.json(&dir, &["show", &id])["task"]["priority"], 2);
+}
+
+#[test]
+fn unsafe_attachment_storage_is_refused_by_writes_and_doc() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(&dir, &["add", "T"]));
+    write_doc(&dir, "shot.png", "png");
+    env.json(&dir, &["attach", &id, "shot.png"]);
+    env.json(
+        &dir,
+        &["edit", &id, "--ref", "shot (output): files:shot.png"],
+    );
+    let storage = dir.join(format!("tasks/files/{id}"));
+    let moved = dir.join("moved-storage");
+    std::fs::rename(&storage, &moved).unwrap();
+    std::os::unix::fs::symlink(&moved, &storage).unwrap();
+    assert_eq!(
+        env.fail(
+            &dir,
+            &["edit", &id, "--ref", "shot (input): files:shot.png"]
+        ),
+        "attachment_unsafe"
+    );
+    assert_eq!(env.fail(&dir, &["doc", &id, "shot"]), "attachment_unsafe");
+}

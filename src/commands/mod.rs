@@ -981,6 +981,29 @@ pub fn apply_fields(
         validate_body(body)?;
         task.body = body.clone();
     }
+    let mut handles = std::collections::HashSet::new();
+    for text in &fields.refs {
+        let entry = crate::refs::parse_entry(text)?;
+        if !handles.insert(entry.handle.clone()) {
+            return Err(Error::Validation(format!(
+                "--ref names {} twice",
+                entry.handle
+            )));
+        }
+        if let Some(existing) = task
+            .refs
+            .iter_mut()
+            .find(|existing| existing.handle == entry.handle)
+        {
+            *existing = entry;
+        } else {
+            task.refs.push(entry);
+        }
+    }
+    crate::refs::require_targets(&resolver, &ctx.project, task, original)?;
+    if original.is_none_or(|old| old.body != task.body || old.refs != task.refs) {
+        crate::refs::refuse_problems(task)?;
+    }
     if let Some(priority) = fields.priority {
         if priority > 4 {
             return Err(Error::Validation("priority must be 0-4".into()));
@@ -1975,11 +1998,16 @@ fn dispatch(cli: Cli) -> Result<Output> {
             id,
             plan,
             spec: _,
+            handle,
             no_fetch,
         } => doc::run(
             open_id_ctx(dir, &id)?,
             id,
-            if plan { DocKind::Plan } else { DocKind::Spec },
+            match handle {
+                Some(handle) => doc::DocTarget::Ref(handle),
+                None if plan => doc::DocTarget::Plan,
+                None => doc::DocTarget::Spec,
+            },
             fetch(no_fetch),
         ),
         Command::List { list: args } => list::list(open_read_ctx(dir, &args.scope)?, args, None),

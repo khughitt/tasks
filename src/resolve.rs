@@ -255,6 +255,17 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    pub fn note_main_entry(&self, handle: &str, rel: &str, root: &Path) {
+        let line = format!(
+            "reference {handle} {rel} is not in this checkout; read from the main checkout at {}",
+            root.display()
+        );
+        let mut from_main = self.from_main.borrow_mut();
+        if !from_main.contains(&line) {
+            from_main.push(line);
+        }
+    }
+
     /// The warnings for documents read from the main checkout so far, once each.
     pub fn take_warnings(&self) -> Vec<String> {
         self.from_main.take()
@@ -318,7 +329,7 @@ impl<'a> Resolver<'a> {
     }
 
     pub fn read(&self, kind: DocKind, value: &str) -> Result<DocRead> {
-        let Some((scheme, rest)) = crate::format::external_doc(value)? else {
+        if crate::format::external_doc(value)?.is_none() {
             let path = match self.find(kind, value)? {
                 Some(path) => path,
                 None => match self.locate_entry(value)? {
@@ -331,7 +342,13 @@ impl<'a> Resolver<'a> {
                 reference: value.into(),
                 body: std::fs::read_to_string(path)?,
             }));
-        };
+        }
+        self.read_external(value)
+    }
+
+    pub fn read_external(&self, value: &str) -> Result<DocRead> {
+        let (scheme, rest) = crate::format::external_doc(value)?
+            .ok_or_else(|| Error::Validation(format!("{value} is not an external reference")))?;
         if let Some(cached) = self.docs.borrow().get(value) {
             return Ok(cached.clone());
         }

@@ -40,6 +40,7 @@ pub(super) fn review_deps(ctx: &ReadCtx, scan: &[Task]) -> Result<crate::review:
 pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result<Output> {
     let ListArgs {
         plan,
+        reference,
         statuses,
         filter,
         sort,
@@ -54,7 +55,7 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
     let mut filter = TaskFilter::parse(&filter, &statuses, &ctx.registry, &ctx.shorthand)?;
     if parked {
         let waiting_on = waiting_on.as_deref().map(WaitingOn::parse).transpose()?;
-        return list_parked(ctx, filter, waiting_on, text.as_ref(), plan);
+        return list_parked(ctx, filter, waiting_on, text.as_ref(), plan, reference);
     }
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -76,6 +77,9 @@ pub fn list(mut ctx: ReadCtx, args: ListArgs, text: Option<TextQuery>) -> Result
             && plan
                 .as_deref()
                 .is_none_or(|wanted| task.plan.as_deref() == Some(wanted))
+            && reference
+                .as_deref()
+                .is_none_or(|r| task.refs.iter().any(|e| e.reference == r))
             && filter.matches(&Fields::of_task(
                 task,
                 &all,
@@ -131,6 +135,7 @@ fn list_parked(
     waiting_on: Option<WaitingOn>,
     text: Option<&TextQuery>,
     plan: Option<String>,
+    reference: Option<String>,
 ) -> Result<Output> {
     let (all, claims) = ctx.scan_with_claims()?;
     let now = crate::time::parse(&crate::time::now())?;
@@ -149,6 +154,12 @@ fn list_parked(
             plan.as_deref().is_none_or(|wanted| {
                 task.as_ref()
                     .is_some_and(|task| task.plan.as_deref() == Some(wanted))
+            })
+        })
+        .filter(|(_, task)| {
+            reference.as_deref().is_none_or(|r| {
+                task.as_ref()
+                    .is_some_and(|task| task.refs.iter().any(|e| e.reference == r))
             })
         })
         .filter(|(_, task)| match (text, task) {

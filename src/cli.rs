@@ -67,6 +67,9 @@ pub struct ScopeArgs {
 /// the parked/periodic/deferred modes, and scope.
 #[derive(Args, Debug)]
 pub struct ListArgs {
+    /// Only tasks with an entry whose stored reference exactly matches this value.
+    #[arg(long = "ref")]
+    pub reference: Option<String>,
     /// Only tasks whose stored plan exactly matches this value; never fetched or resolved.
     #[arg(long)]
     pub plan: Option<String>,
@@ -200,6 +203,9 @@ pub struct WithoutArgs {
 
 #[derive(Args, Debug, Default, Clone)]
 pub struct FieldArgs {
+    /// Add or replace a reference entry (repeatable).
+    #[arg(long = "ref", value_name = "ENTRY")]
+    pub refs: Vec<String>,
     #[arg(short = 'b', long)]
     pub body: Option<String>,
     /// Urgency, 0 (most urgent) to 4.
@@ -283,6 +289,12 @@ pub struct FieldArgs {
 /// The flags `edit` adds to the shared field flags.
 #[derive(Args, Debug)]
 pub struct EditArgs {
+    /// Remove a reference by handle (repeatable).
+    #[arg(long = "rm-ref", value_name = "HANDLE")]
+    pub rm_refs: Vec<String>,
+    /// Clear every reference entry.
+    #[arg(long, conflicts_with_all = ["refs", "rm_refs"])]
+    pub no_refs: bool,
     #[arg(long)]
     pub title: Option<String>,
     /// Move to a status: idea, todo, doing, blocked, done, or dropped. Shelved is
@@ -507,11 +519,13 @@ pub enum Command {
         #[arg(long)]
         no_fetch: bool,
     },
-    /// Print a linked plan or spec body.
-    #[command(group(clap::ArgGroup::new("doc_kind").args(["plan", "spec"]).required(true)))]
+    /// Print a linked plan or spec body, or a referenced document.
+    #[command(group(clap::ArgGroup::new("doc_kind").args(["plan", "spec", "handle"]).required(true)))]
     Doc {
         #[arg(add = ArgValueCompleter::new(crate::complete::id_directed))]
         id: String,
+        /// The reference handle to read.
+        handle: Option<String>,
         #[arg(long)]
         plan: bool,
         #[arg(long)]

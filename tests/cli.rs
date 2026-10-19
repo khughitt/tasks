@@ -1,6 +1,7 @@
 mod common;
 use common::{
-    TestEnv, check_findings, findings_of, git, id_of, worktree_with_excluded_docs, write_doc,
+    TestEnv, check_findings, editor_script, findings_of, git, id_of, worktree_with_excluded_docs,
+    write_doc,
 };
 
 #[test]
@@ -4383,15 +4384,6 @@ fn lane_field_round_trips_through_add_edit_and_every_row() {
     let text = env.pretty(&sci, &["list"]);
     let line = text.lines().find(|line| line.contains(&lane)).unwrap();
     assert!(line.contains("≡ "), "lane rows carry the mark: {text}");
-}
-
-/// An EDITOR value that has sh read the script rather than exec it: executing a file this
-/// process just wrote races sibling test threads, whose forks can still hold the write
-/// descriptor, into ETXTBSY.
-fn editor_script(dir: &std::path::Path, body: &str) -> String {
-    let p = dir.join("editor.sh");
-    std::fs::write(&p, format!("{body}\n")).unwrap();
-    format!("sh '{}'", p.display())
 }
 
 /// Writes `last_done: <stamp>` into a task record, inserting the line if it is absent and

@@ -488,3 +488,17 @@ pub fn worktree_with_excluded_docs(
     assert!(!side.join("docs").exists(), "git carried the excluded docs");
     (main, side, id)
 }
+
+/// Read the script through sh, avoiding ETXTBSY from concurrent test forks.
+pub fn editor_script(dir: &Path, body: &str) -> String {
+    let path = dir.join("editor.sh");
+    std::fs::write(&path, format!("{body}\n")).unwrap();
+    format!("sh '{}'", path.display())
+}
+
+pub fn write_editor_stub(env: &TestEnv, marker: &Path) -> String {
+    editor_script(
+        env.home.path(),
+        &format!("touch '{}'\nexit 1", marker.display()),
+    )
+}
