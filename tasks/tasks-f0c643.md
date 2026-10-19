@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: task-references
 created: 2026-10-19T14:44:28Z
-updated: 2026-10-19T15:06:36Z
+updated: 2026-10-19T18:42:28Z
 started: 2026-10-19T15:00:36Z
 depends: [tasks-ef8ba5]
 parent: tasks-6eeecd
@@ -27,3 +27,5 @@ Execute the approved plan’s Rollout section after whole-branch review: integra
 - 2026-10-19T15:06:34Z (task-references): Code-only merge 5472812 and main install verified; 1605 fast tests and check pass. Installed show exposes inventory. All-project citation sweep has zero open matches. Followups flows-aa2328, ops-eba300, lore-8bf796 filed with rollout dependency. Pending user confirmation of other-host upgrades and live skill activation.
 - 2026-10-19T15:06:36Z (task-references): parked (waiting on user, approval): User confirms every host runs the new tasks binary and approves live skill activation; agent then merges the remaining task-references branch into main, runs just install-skills to confirm links, verifies and closes rollout and goal tasks-6eeecd. Code is merged and reinstalled at 5472812; no check or child remains running. Preserve .worktrees/task-references and its plan ledger until activation.
   provenance: {"harness_session":"codex:01a1544c-1f64-7051-86dc-2dc1a562befb","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T18:42:28Z (task-references): resumed
+  provenance: {"harness_session":"claude-code:2aac073c-533b-47e2-b385-7732b25e24c2","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
