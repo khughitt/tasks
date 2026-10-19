@@ -467,7 +467,7 @@ Run: `just check`
 Expected: PASS.
 
 ```bash
-git add src tests
+git add Cargo.toml Cargo.lock src tests
 git commit -m "feat(refs): check audits duplicate references and citations"
 ```
 
@@ -487,17 +487,22 @@ git commit -m "feat(refs): check audits duplicate references and citations"
 **Interfaces:**
 - Produces, in `src/refs.rs`:
   - `pub enum Location<'a> { Path(&'a str), Attachment(&'a str), External }` and `pub fn location(reference: &str) -> Result<Location<'_>>`, with the same rules and messages as Task 2's `validate_reference`, which becomes `location(reference).map(|_| ())`.
-  - `pub fn present(resolver: &Resolver, project: &Project, task: &Task, entry: &Ref) -> Result<Option<PathBuf>>`: the located path, or `None` when absent.
-    - A local path goes through `locate_entry`; `Main` returns the main path.
-    - An attachment counts only when `attachments::ledger(task)` holds the name as `Attached` **and** `attachments::entry_state` of its storage path is `File`. `Unsafe` maps to `Error::AttachmentUnsafe`.
+  - `pub enum Presence { Here(PathBuf), Main { root: PathBuf, path: PathBuf }, Absent(PathBuf), Special(PathBuf), Unsafe { path: PathBuf, detail: String } }`. Every variant carries the path actually examined. `Absent` carries the path that would hold the target: the worktree path, or the attachment's storage path.
+  - `pub fn present(resolver: &Resolver, project: &Project, task: &Task, entry: &Ref) -> Result<Presence>`. Callers map each variant explicitly (the table in Step 3, and the callers in Tasks 5-7).
+    - A local path maps `locate_entry` one to one (`Here`, `Main`, `Special`, and `Missing` → `Absent(project.root.join(rel))`).
+    - An attachment keeps the existing safety rules: `attachments::check_storage` first, and `entry_state` (which never follows a symlink) on the storage path.
+      - Unsafe storage gives `Unsafe` with its detail. Catch `Error::AttachmentUnsafe` from `check_storage` for this; nothing beneath it is examined.
+      - A name the ledger does not hold as `Attached`, or `EntryState::Absent`, gives `Absent(path)`.
+      - `File` gives `Here(path)`.
+      - `Unsafe` whose object is a special file (the `symlink_metadata` file type is neither file, directory nor symlink) gives `Special(path)`. Any other `Unsafe` (a symlink or a directory) gives `Unsafe { path, detail }`.
     - External entries: never called (callers branch on `location` first).
 - Produces, in `src/resolve.rs`:
-  - `pub enum LocatedEntry { Here(PathBuf), Main { root: PathBuf, path: PathBuf }, Missing }`. It records no file-or-directory kind, because no caller would read it (Clippy's `dead_code`); `doc` tests `is_dir()` on the located path.
+  - `pub enum LocatedEntry { Here(PathBuf), Main { root: PathBuf, path: PathBuf }, Special(PathBuf), Missing }`. It records no file-or-directory kind, because no caller would read it (Clippy's `dead_code`); `doc` tests `is_dir()` on the located path. `Special` keeps the path where the special file actually is, here or in main.
   - `Resolver::locate_entry(&self, rel: &str) -> Result<LocatedEntry>`.
     - Look at `project.root.join(rel)` with `fs::metadata`, which follows symlinks. Only `NotFound` means nothing exists; other errors propagate.
-    - A regular file or a directory is found. Any other type is `Err(Error::SpecialFile("<path> is not a regular file or directory"))`.
+    - A regular file or a directory is found. Any other type is `Special(path)` with that path. It is not an error, so each caller decides, and the path is never opened.
     - Only when nothing exists here is the main checkout consulted, by the same rule.
-  - `pub(crate) fn refuse_special(path: &Path) -> Result<()>`: `fs::metadata` (following symlinks). `NotFound`, a regular file and a directory are `Ok`; anything else is the `SpecialFile` error. `locate_entry` uses it.
+  - `pub(crate) fn refuse_special(path: &Path) -> Result<()>`: `fs::metadata` (following symlinks). `NotFound`, a regular file and a directory are `Ok`; anything else is `Error::SpecialFile("<path> is not a regular file or directory")`. Used by the guard in `read`, and by callers that turn `Special(path)` into a refusal.
   - **The guard in `Resolver::read`.** Before `read_to_string` on a local document, call `refuse_special` on the path it is about to open. This covers `doc --plan`, `doc --spec`, `step_exists`, `edit --step` and `check`'s plan reads, none of which may hang on a FIFO.
 
 - [ ] **Step 1: Write the failing tests**
@@ -516,11 +521,10 @@ fn locate_entry_finds_files_and_directories_here_first() {
 }
 
 #[test]
-fn locate_entry_refuses_a_fifo_and_a_symlink_to_one() {
+fn locate_entry_reports_a_fifo_and_a_symlink_to_one_as_special() {
     // std::process::Command::new("mkfifo").arg(root.join("pipe")); symlink root/to-pipe -> pipe
     for rel in ["pipe", "to-pipe"] {
-        let error = resolver.locate_entry(rel).unwrap_err();
-        assert_eq!(error.kind(), "special_file");
+        assert!(matches!(resolver.locate_entry(rel).unwrap(), LocatedEntry::Special(p) if p == root.join(rel)));
     }
 }
 ```
@@ -564,14 +568,17 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement `location`, `present`, `locate_entry`, `SpecialFile` and the check findings**
 
-In `check`, inside `if task.status.is_open()`, for each `context` or `input` entry that is not external:
-- `Main`: warning `ref_in_main_checkout`, detail `reference <h> <rel> is not in this checkout; read from the main checkout at <root>`;
-- absent: error `ref_missing`, detail `reference <h> <reference> does not exist`;
-- `Err(SpecialFile)`: error `special_file` with its message.
+In `check`, inside `if task.status.is_open()`, map `present` for each non-external entry. For `context` and `input` entries:
+- `Main { root, path }`: warning `ref_in_main_checkout`, detail `reference <h> <rel> is not in this checkout; read from <path> in the main checkout at <root>`;
+- `Absent(path)`: error `ref_missing`, detail `reference <h> <reference> does not exist (looked for <path>)`;
+- `Special(path)`: error `special_file`, detail `reference <h>: <path> is not a regular file or directory`;
+- `Unsafe { path, detail }`: error `ref_missing`, detail `reference <h>: <path> is not a usable attachment (<detail>)`, alongside the audit's existing `attachment_unsafe`.
 
-For an `output` entry, only `SpecialFile` is reported (spec §8's exception).
+These details read every field `present` returns, so Task 4 passes Clippy's `dead_code` with no later caller.
 
-In the spec and plan loop, a `Located::Missing` link whose path holds a special file, here or (when nothing is here) in main, is the error `special_file` instead of `doc_missing`.
+For an `output` entry, only `Special` is reported (spec §8's exception).
+
+In the spec and plan loop, a `Located::Missing` link for which `locate_entry` gives `Special(path)` is the error `special_file` naming that path (here or main), instead of `doc_missing`.
 
 - [ ] **Step 4: Run the tests and the lint gate**
 
@@ -611,7 +618,12 @@ git commit -m "feat(refs): locate entries worktree first; check reports missing 
 - Consumes: `refs::parse_entry`, `audit`, `location` and `present`; `Resolver::locate_entry` (Tasks 2-4).
 - Produces:
   - `pub fn refuse_problems(task: &Task) -> Result<()>`: the first `audit` problem as `Error::Reference { kind: problem.kind, detail: problem.detail }`. `Error::kind()` returns `kind`.
-  - `pub fn require_targets(resolver: &Resolver, project: &Project, task: &Task, original: Option<&Task>) -> Result<()>`. Every non-external `context` or `input` entry whose `(reference, relation)` pair is not in `original` must give `present(..)? == Some(_)`, or the call fails with `Error::RefNotFound("<id>: reference <handle> <reference> does not exist")`. A `SpecialFile` error propagates. A `Main` location calls `note_main_entry`.
+  - `pub fn require_targets(resolver: &Resolver, project: &Project, task: &Task, original: Option<&Task>) -> Result<()>`. It checks every non-external `context` or `input` entry whose `(reference, relation)` pair is not in `original`, mapping `present` as follows:
+    - `Here`: ok;
+    - `Main`: ok, with `note_main_entry`;
+    - `Absent`: `Error::RefNotFound("<id>: reference <handle> <reference> does not exist")`;
+    - `Special(path)`: `refuse_special(&path)`'s `SpecialFile` error;
+    - `Unsafe { detail, .. }`: `Error::AttachmentUnsafe(detail)`, the existing kind.
   - `Resolver::note_main_entry(&self, handle: &str, rel: &str, root: &Path)`: queues `reference <handle> <rel> is not in this checkout; read from the main checkout at <root>` for `take_warnings`.
   - `Resolver::read_external(&self, value: &str) -> Result<DocRead>`: the external branch of `read`, moved out unchanged, which `read` now calls.
   - `doc::run(ctx, id, target: DocTarget, fetch)`, with `pub enum DocTarget { Plan, Spec, Ref(String) }` replacing the `DocKind` argument.
@@ -730,7 +742,11 @@ Expected: PASS.
 - **`list --ref`.** At both `plan` filter sites, add `reference.as_deref().is_none_or(|r| task.refs.iter().any(|e| e.reference == r))`. On the parked-row site, an unresolved park has no record and does not match.
 - **`doc`.** Find the entry by handle, else `DocNotFound("<id> has no reference <h>")`.
   - An external reference goes through `read_external(..)?.required()`.
-  - Otherwise `refs::present` gives the path (a special file errors there, before any open); `None` is `DocNotFound("<id> reference <h> <reference> does not exist yet")`.
+  - Otherwise map `refs::present`:
+    - `Here` or `Main` gives the path to read;
+    - `Absent` is `DocNotFound("<id> reference <h> <reference> does not exist yet")`;
+    - `Special(path)` is the `SpecialFile` error, without opening it;
+    - `Unsafe` is `AttachmentUnsafe`.
   - A directory is `RefNotText("<path> is a directory")`.
   - The bytes must be UTF-8, else `RefNotText("<path> is not UTF-8 text")`.
   - Print as `doc` prints today.
@@ -839,6 +855,14 @@ fn external_plan_rows_report_the_fetch_outcome() {
 #[test]
 fn show_stays_readable_with_special_files_and_reports_them() {
     // With .timeout(Duration::from_secs(10)) on show:
+    // (c) attach a.png and b.png, then replace both stored files with FIFOs; entry s (input): files:a.png.
+    //     → show succeeds; the ref row for s and the attachment row for b.png both have status
+    //     "special", with paths under tasks/files/<id>/; a symlinked attachment c.png instead
+    //     gives status "missing" plus the existing attachment_unsafe warning line.
+    // (d) worktree_with_excluded_docs: replace main's docs/specs/x-design.md with a FIFO; in side,
+    //     the spec row has status "special" and a path under main (not side); add entry
+    //     d (context): docs/specs/x-design.md → one merged row, handle "d", status "special",
+    //     path under main.
     // (a) plan docs/plans/x.md with step, replaced by a FIFO, plus entry p (context): docs/plans/x.md
     //     → show succeeds; the plan row (merged, handle "p") has status "special", no step_found
     //     in the row or at top level; a warning names the path.
@@ -876,22 +900,36 @@ Never call `read` on that path. Any other error still propagates. `check` report
 Rows come in spec §5.1 order.
 
 - **Governing rows.**
-  - A local spec or plan: `locate` gives `present` (with path). Otherwise the status is `special` when `refuse_special` fails on the path here (or in main when nothing is here), with a warning carrying its message, and `missing` otherwise. `path` is `resolver.abs(..)`.
+  - A local spec or plan: `locate` `Here` or `Main` gives `present`, with that path. When `locate` is `Missing`, `locate_entry` decides:
+    - `Special(path)` gives `special`, with that actual path (here or main) and a warning;
+    - anything else gives `missing`, with `path = resolver.abs(..)`.
+    
+    The row keeps the path it examined, and the merge compares that path, never `abs()`'s fallback.
   - An external spec is `unchecked`.
   - An external plan with a step: when `fetch` is allowed, `resolver.read(DocKind::Plan, ..)`, which is cached since `describe` already read it, maps `Available` to `available` and `Unavailable` to `unavailable` with `cause = cause.detail()`. Under `FetchDisabled` it is `unchecked`.
   - An external plan without a step is `unchecked`.
   - The plan row carries `step` and the `step_found` passed in.
 - **Merge** (spec §5.2). An entry merges into the spec row (the plan row only when the spec does not match) when its reference equals the link and the targets agree:
-  - for a local path, `locate` and `locate_entry` yield the same path, both are missing, or both are special at the same path (the merged row is `special`);
+  - for a local path, both are found at the same path, both are special at the same actual path (the merged row is `special`, with that path), or both are missing;
   - for an external reference, the strings are equal.
   
   A merged row takes the entry's handle, relation, kind and description, and keeps `required: true`. When the targets disagree, the entry keeps its own row, and a warning goes to `warnings`: `reference <h> <reference> resolves to <entry path|missing>, but the <spec|plan> link resolves to <path|missing>`.
 - **Entry rows.**
-  - A local path or attachment: `refs::present` gives `present`, otherwise `pending` for an output and `missing` for anything else. `path` is the located path, or the would-be path (`project.root.join(rel)`, or `attachments::task_dir(..).join(name)`) when absent.
-  - A `SpecialFile` error becomes status `special` (any relation) plus a warning carrying its message, so `show` never fails or opens it.
+  - A local path or attachment maps `refs::present`:
+    - `Here` or `Main` is `present`, with that path;
+    - `Absent(path)` is `pending` for an output and `missing` otherwise, with that would-be path;
+    - `Special(path)` is `special` for any relation, with that path and a warning;
+    - `Unsafe { path, .. }` is `missing`, with that path, and the attachment audit's existing `attachment_unsafe` warning explains it.
+  - Nothing here opens a target or propagates a special-file or unsafe-attachment error, so `show` never fails on one.
   - An external entry is `unchecked`, with no path.
 - **Source row.** `location: opaque`, `status: unchecked`.
-- **Attachment rows.** Iterate `attachments::ledger(task)` (a `BTreeMap`, so name order) for names whose latest entry is `Attached` and that no entry names. Each row has origin `attachment`, reference `files:<name>` and path `task_dir(..).join(name)`. Its status is `present` when `entry_state` is `File`, and `missing` otherwise. The existing `audit_task` warnings stay as they are.
+- **Attachment rows.** Iterate `attachments::ledger(task)` (a `BTreeMap`, so name order) for names whose latest entry is `Attached` and that no entry names. Each row has origin `attachment` and reference `files:<name>`, and its status and path come from the same attachment branch of `refs::present` as an entry's:
+  - `Here` is `present`;
+  - `Absent` is `missing`;
+  - `Special` is `special`, with a warning;
+  - `Unsafe` is `missing`.
+
+  The existing `audit_task` warnings stay as they are.
 
 Wire it into `describe` and every `ShowFields` literal.
 
@@ -932,7 +970,11 @@ git commit -m "feat(show): one inventory of spec, plan, references, source and a
 - Test: `tests/refs.rs`
 
 **Interfaces:**
-- Produces: `pub fn require_outputs(resolver: &Resolver, project: &Project, task: &Task) -> Result<()>`. Every `output` entry that is a local path or attachment and for which `present` is `None` is listed in `Error::RefOutputMissing("<id> declares outputs that do not exist: <h> (<reference>), …; produce them, or remove each with `tasks edit <id> --rm-ref <handle>`")`. A special file propagates `SpecialFile`.
+- Produces: `pub fn require_outputs(resolver: &Resolver, project: &Project, task: &Task) -> Result<()>`. For each `output` entry that is a local path or attachment, it maps `present`:
+  - `Here` or `Main` passes;
+  - `Absent` entries are collected into `Error::RefOutputMissing("<id> declares outputs that do not exist: <h> (<reference>), …; produce them, or remove each with `tasks edit <id> --rm-ref <handle>`")`;
+  - `Special(path)` is the `SpecialFile` error;
+  - `Unsafe` is `AttachmentUnsafe`.
 
 - [ ] **Step 1: Write the failing integration tests**
 
