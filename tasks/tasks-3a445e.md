@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: task-references
 created: 2026-10-19T11:01:01Z
-updated: 2026-10-19T13:19:40Z
+updated: 2026-10-19T13:45:11Z
 started: 2026-10-19T11:03:39Z
 completed: 2026-10-19T13:19:40Z
 closed: 2026-10-19T13:19:40Z
@@ -26,7 +26,7 @@ Settled in discussion (2026-10-19, with a codex review):
 - Entries are TaskReference: handle, ref, relationship (context | input | output), optional kind, optional locator (section), description. Kind is descriptive only; no type dictionary or filename inference until something behaves differently by kind. Location (repo path, attachment, URL, external scheme, task id) is its own dimension, not a kind.
 - spec and plan keep their fields and workflow roles (phase, step checks, list --plan, doc); source stays opaque provenance (its duplicate key is source plus title). A referenced spec is not the task's governing spec.
 - Inventory is not required reading: an explicit required-review marker, separate from relationship, selects the reading list; entry order is reading order. Sources and attachments appear in the inventory, not automatically in the reading list. JSON exposes the same effective list as pretty output.
-- Prose cites with a reserved form ([ref:<handle>], optionally with a section); the reference stores the location and the sentence says why it matters. check errors on a citation without an entry. No routine warning for raw paths in prose; promotion suggestions belong to curate or an explicit audit.
+- Prose cites with a reserved form (`[ref:<handle>]`, optionally with a section); the reference stores the location and the sentence says why it matters. check errors on a citation without an entry. No routine warning for raw paths in prose; promotion suggestions belong to curate or an explicit audit.
 - Attachments are referenced, not copied. Locating and reading are separate: the resolver reads UTF-8 bodies (Resolver::read), so binary artifacts resolve to a location, and reading text is a separate capability.
 - Code locations are out of scope; they get their own design (path plus symbol, drift).
 
