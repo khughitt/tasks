@@ -5,17 +5,21 @@
 **Goal:** Give every task an explicit, ordered list of the documents and artifacts it cites (`## References` entries cited in prose as `[ref:<handle>]`), report one inventory of everything a task points at in `show`, and enforce it in `check`, `done`, `detach` and `move`.
 
 **Architecture:**
-- **Pure record layer.** `src/refs.rs` holds the `Ref` entry: its grammar (parse and render), its reference forms, and the audit of duplicates and citations. `src/format.rs` stores the entries as a managed body section between the body and `## Notes`.
-- **Resolver.** `src/resolve.rs` gains `locate_entry` (files or directories, worktree first) and `read_external`.
-- **Show.** `src/inventory.rs` builds `show`'s inventory rows from the governing links, the entries, the source and the attachments, with the merge and status rules.
+- **Pure record layer.** `src/refs.rs` holds the `Ref` entry: its grammar (parse and render), its reference forms, the audit of duplicates and citations, and the presence and target checks. `src/format.rs` stores the entries as a managed body section between the body and `## Notes`.
+- **Resolver.** `src/resolve.rs` gains `locate_entry` (regular files or directories, worktree first; special files refused) and `read_external`.
+- **Show.** `src/inventory.rs` builds `show`'s inventory rows from the governing links, the entries, the source and the attachment ledger, with the merge and status rules.
 - **Gates.** Each lives where its command already decides: `transition()` (completion), `detach`, move preflight, and `check`.
 
 **Tech Stack:** Rust (clap, serde, assert_cmd integration tests).
 
-**Spec:** `docs/specs/2026-10-19-task-references-design.md` (approved 2026-10-19 after review round 2). Read it with this plan; section numbers below refer to it.
+**Spec:** `docs/specs/2026-10-19-task-references-design.md` (approved 2026-10-19 after review round 2; amended by this plan's review round 1). Read it with this plan; section numbers below refer to it.
 
 ## Global Constraints
 
+- **Every commit passes the pre-commit hook.** `just check` runs `cargo clippy --all-targets -- -D warnings`, and this is a binary crate, so an unused function, variant or field fails it.
+  - A helper lands in the same task as its first production caller.
+  - Never add `#[allow(dead_code)]` or another lint allowance to get past this.
+  - Each task's commit step runs `just check` first.
 - **Entry line** (spec §3.2): `- <handle> (<relation>[, required][, kind=<kind>]): <reference>[ — <description>]`. The separator is space, U+2014 em dash, space.
 - **Field rules** (spec §3.2):
   - handle: `[a-z][a-z0-9-]{0,31}`;
@@ -26,25 +30,28 @@
   - *bare*: no whitespace, no `"`, no `\`;
   - *quoted* otherwise: `"…"` with `\"` and `\\` as the only escapes, reusing `frontmatter::take_quoted` and `quote`. The writer quotes exactly when bare is not allowed.
 - **Reference forms** (spec §3.3):
-  - local normalized repo-relative path, any file type, file or directory, no trailing slash; the hint names the spelling without it;
+  - local normalized repo-relative path: a regular file or a directory after following symlinks, with no trailing slash; the hint names the spelling without it;
   - `files:<name>` (an attachment);
   - `<scheme>:<rest>` (external, per `format::external_doc`).
   - A leading `@` is refused with exactly `cross-project references are not supported yet`. `files` is a reserved scheme.
+  - Any other filesystem object (FIFO, socket, device) is `ref_special_file`, and nothing ever opens one.
 - **Section** (spec §3.1): heading exactly `## References`, after the body and before `## Notes`, written only when the task has entries. `validate_body` refuses the heading.
 - **Section parse errors:** a second heading, the heading after `## Notes`, a malformed line, a duplicate handle.
-- **Citation** (spec §4): `[ref:` up to the next `]`, in the body only.
-  - Never inside an inline code span or a fenced code block. Code spans are matched within one line (my call for this plan).
+- **Citation** (spec §4): `[ref:` up to the next `]` on the same line, in the body only.
+  - Never inside a fenced code block, or inside an inline code span. Code spans follow CommonMark and may cross line breaks within a paragraph.
   - A malformed handle is `ref_citation_malformed`; an unknown one is `ref_citation_dangling`.
 - **Duplicate references** (spec §3.2): equal decoded references are `ref_duplicate`, naming both handles.
-- **Error kinds** (JSON `error.kind`): `ref_not_found`, `ref_output_missing`, `ref_cites_attachment`, `ref_not_text`, `ref_duplicate`, `ref_citation_dangling`, `ref_citation_malformed`.
+- **Audit placement.** `parse_task` calls `validate_task`, so the duplicate-reference and citation audit never runs there: a read must never fail on prose. It runs in `check` (open tasks) and on `add` and `edit` writes that change the body or the entries.
+- **Error kinds** (JSON `error.kind`): `ref_not_found`, `ref_output_missing`, `ref_cites_attachment`, `ref_not_text`, `ref_special_file`, `ref_duplicate`, `ref_citation_dangling`, `ref_citation_malformed`.
 - **Check finding kinds** (spec §8):
-  - `ref_missing` (error), `ref_in_main_checkout` (warning);
+  - `ref_missing` (error), `ref_in_main_checkout` (warning), `ref_special_file` (error);
   - `ref_citation_dangling`, `ref_citation_malformed` and `ref_duplicate` (errors);
   - open tasks only.
 - **Inventory row** (spec §7.2):
   - `origin`: `spec`, `plan`, `ref`, `source`, `attachment`;
   - `location`: `path`, `attachment`, `external`, `opaque`;
   - `status`: `present`, `missing`, `pending`, `available`, `unavailable`, `unchecked`.
+  - Attachment rows come from the ledger, in name order (spec §5.1).
 - **JSON omission** (spec §7): empty lists and absent options are omitted, never `[]` or `null`. `task.refs` is on full task objects only.
 - **CLI surface** (spec §6):
   - `add --ref` and `edit --ref` (repeatable);
@@ -53,11 +60,13 @@
   - `doc <id> [<handle>]`.
   
   The rows land in ops's `cli.toml` first, and this repo adopts them with `vendored adopt` in the parser commit (AGENTS.md Rules). Never edit `tools/cli.toml` by hand.
+- **Skills activate on merge.** `~/.claude/skills/{tasks,scope,curate}` are symlinks into this repository's main checkout. Skill changes (Task 9) merge only after every host runs the new binary (see Rollout).
 - **Tests:** run them only through `just test-one <args>` and `just test-fast`, never `cargo test` directly (AGENTS.md). After CLI changes, `cargo install --path .` before using `tasks` on this repo's own records.
+- **Bounded tests.** A test that touches a FIFO sets `assert_cmd`'s `.timeout(Duration::from_secs(10))`. A test of a flag path that must not open the editor sets `EDITOR` to a script that writes a marker file and exits 1.
 
 ## Review Focus
 
-1. A body that shows citation syntax inside backticks or a fenced block, as an agent quoting the form would, must save. Test in Task 3 (unit) and Task 5 (integration).
+1. A body that shows citation syntax inside backticks (including a code span broken across lines) or a fenced block, as an agent quoting the form would, must save. Test in Task 3 (unit) and Task 5 (integration).
 2. A reference with spaces, a `"`, a `\` and a literal ` — ` round-trips byte for byte from `--ref` to the file to JSON. Test in Task 2 (unit) and Task 5 (integration).
 3. Editing an unrelated field on a task whose existing `input` reference has since disappeared must not be refused: only new or changed entries are checked for targets. Test in Task 5.
 4. A task declares a spec as an `output` entry, writes it, then links it with `edit --spec`. The inventory shows one row (origin `spec`, the entry's handle), and `[ref:<handle>]` still resolves. Test in Task 6.
@@ -69,7 +78,7 @@
   1. File the implementation goal: `tasks add "Implement task references" --plan 2026-10-19-task-references --spec 2026-10-19-task-references-design -p 2 --size l --complexity high --process planned --source tasks-3a445e`.
   2. Under that goal, add one child per `### Task N:` heading below, with `--parent <goal>`, `--plan 2026-10-19-task-references --step "Task N: <title>"`, `--process direct`, the complexity on each task's **Complexity:** line, and `--depends` on the previous step.
   3. `tasks done tasks-3a445e "<spec and plan reviewed; goal id>"`.
-- **Run the implementation** in `.worktrees/task-references` on `task-references`, which already holds the spec and plan. Run the worktree skill's baseline tests (`just test-fast`) before the first code change.
+- **Run the implementation** in `.worktrees/task-references` on `task-references`, which already holds the spec and plan. Run the worktree skill's baseline tests (`just test-fast`) before the first code change. The Rollout below is the goal's last step.
 
 ## Concurrent work
 
@@ -142,6 +151,7 @@ Expected: the merge fast-forwards. If it does not, rebase onto ops main, rerun S
 - Create: `src/refs.rs` (declared in `src/main.rs` beside `mod resolve;`)
 - Modify: `src/model.rs` (`Relation`, `Ref`, `Task::refs`, the `Task { … }` literal)
 - Modify: `src/format.rs` (`REFS_DELIMITER`, `split_body_notes` → `split_body`, `parse_task`, `serialize_task`, `validate_body`, `validate_task`, a `normalized_rel` helper extracted from `validate_doc_shape`)
+- Modify: `src/frontmatter.rs` (`take_quoted` and `quote` become `pub(crate)`)
 - Modify: every other `Task { … }` literal. `grep -rln "notes: vec!\[\]" src` lists them: `src/halt.rs`, `src/complexity.rs`, `src/hierarchy.rs`, `src/repo.rs`, `src/defer.rs`, `src/lanes.rs`, `src/periodic.rs`, `src/query.rs`, `src/similarity.rs`, `src/commands/add.rs`.
 - Test: unit tests in `src/refs.rs` and `src/format.rs`
 
@@ -153,8 +163,8 @@ Expected: the merge fast-forwards. If it does not, rebase onto ops main, rerun S
 - Produces, in `src/refs.rs`:
   - `pub fn parse_entry(text: &str) -> Result<Ref>`: the entry without its leading `- `, with `Error::Validation` on any grammar or form error.
   - `pub fn render_entry(entry: &Ref) -> String`: without the leading `- `.
-  - `pub fn validate_entry(entry: &Ref) -> Result<()>`: field and form rules on a constructed `Ref`.
-  - `pub enum Location<'a> { Path(&'a str), Attachment(&'a str), External }` and `pub fn location(reference: &str) -> Result<Location<'_>>`.
+  - `pub fn validate_entry(entry: &Ref) -> Result<()>`: field rules plus `validate_reference`.
+  - `pub fn validate_reference(reference: &str) -> Result<()>`: the form rules of Global Constraints, without filesystem access. Task 4 reimplements it over `location`.
 - Produces, in `src/format.rs`: `pub const REFS_DELIMITER: &str = "## References";` and `pub fn normalized_rel(rel: &str) -> bool`. The latter is the segment rule `validate_doc_shape` applies today; `validate_doc_shape` calls it.
 
 - [ ] **Step 1: Write the failing grammar tests in `src/refs.rs`**
@@ -172,7 +182,7 @@ fn an_entry_round_trips_every_field() {
     assert_eq!(entry.description.as_deref(), Some("admission rules, §7"));
     assert_eq!(render_entry(&entry), text);
     let bare = parse_entry("r1 (context): files:after.png").unwrap();
-    assert_eq!((bare.required, bare.kind, bare.description), (false, None, None));
+    assert_eq!((bare.required, bare.kind.clone(), bare.description.clone()), (false, None, None));
     assert_eq!(render_entry(&bare), "r1 (context): files:after.png");
 }
 
@@ -206,15 +216,6 @@ fn malformed_entries_are_refused_with_the_reason() {
         assert!(error.contains(needle), "{text}: {error}");
     }
 }
-
-#[test]
-fn location_tells_the_forms_apart() {
-    assert!(matches!(location("docs/notes/b.md").unwrap(), Location::Path("docs/notes/b.md")));
-    assert!(matches!(location("results/run-12").unwrap(), Location::Path(_)));
-    assert!(matches!(location("files:after.png").unwrap(), Location::Attachment("after.png")));
-    assert!(matches!(location("https://example.org/a b").unwrap(), Location::External));
-    assert!(location("@ops/x.md").is_err());
-}
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -222,19 +223,19 @@ fn location_tells_the_forms_apart() {
 Run: `just test-one refs::`
 Expected: FAIL (compile errors: `parse_entry`, `Ref`, `Relation` undefined).
 
-- [ ] **Step 3: Implement `Relation`, `Ref`, `parse_entry`, `render_entry`, `validate_entry` and `location`**
+- [ ] **Step 3: Implement `Relation`, `Ref`, `parse_entry`, `render_entry`, `validate_entry` and `validate_reference`**
 
 Parsing:
 1. Split the handle off at the first ` (`, then the attributes at the first `): `.
-2. The reference is quoted when it starts with `"`; read it with `frontmatter::take_quoted`, which needs making `pub(crate)`. Otherwise it runs to the first whitespace.
+2. The reference is quoted when it starts with `"`; read it with `frontmatter::take_quoted`. Otherwise it runs to the first whitespace.
 3. What remains must be empty or ` — ` followed by a non-empty description.
 
-`render_entry` quotes with `frontmatter::quote` (also `pub(crate)`) exactly when the reference contains whitespace, `"` or `\`, or starts with `"`.
+`render_entry` quotes with `frontmatter::quote` exactly when the reference contains whitespace, `"` or `\`, or starts with `"`.
 
-`location`, in this order:
+`validate_reference`, in this order:
 1. A leading `@` is the refusal from Global Constraints.
-2. `files:` gives `Attachment` after `attachments::validate_name`.
-3. `format::external_doc` returning `Some` gives `External`.
+2. `files:<name>` needs `attachments::validate_name(name)`.
+3. `format::external_doc` returning `Some` is accepted.
 4. Otherwise the reference must pass `format::normalized_rel`, and a trailing `/` is refused with `use <path without the slash>`.
 
 - [ ] **Step 4: Run them to verify they pass**
@@ -245,31 +246,38 @@ Expected: PASS.
 - [ ] **Step 5: Write the failing storage tests in `src/format.rs`**
 
 ```rust
+const WITH_REFS: &str = "---\nid: sci-4f2a9c\ntitle: T\nstatus: todo\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n\nSee [ref:brief].\n\n## References\n\n- brief (input, required): docs/notes/b.md — the brief\n- out (output): \"docs/a b.md\"\n\n## Notes\n\n- 2026-08-29T15:10:44Z (keith): started\n";
+
 #[test]
 fn the_references_section_round_trips_between_body_and_notes() {
-    let text = "---\nid: sci-4f2a9c\ntitle: T\nstatus: todo\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n\nSee [ref:brief].\n\n## References\n\n- brief (input, required): docs/notes/b.md — the brief\n- out (output): \"docs/a b.md\"\n\n## Notes\n\n- 2026-08-29T15:10:44Z (keith): started\n";
-    let task = parse_task(text, "t.md").unwrap();
+    let task = parse_task(WITH_REFS, "t.md").unwrap();
     assert_eq!(task.body, "See [ref:brief].");
     assert_eq!(task.refs.len(), 2);
     assert_eq!(task.refs[1].reference, "docs/a b.md");
     assert_eq!(task.notes.len(), 1);
-    assert_eq!(serialize_task(&task), text);
+    assert_eq!(serialize_task(&task), WITH_REFS);
 }
 
 #[test]
 fn no_section_is_written_without_entries() {
-    // An existing fixture without refs serializes byte-identically (reuse FULL).
-    assert_eq!(serialize_task(&parse_task(FULL, "t.md").unwrap()), FULL);
-    assert!(!serialize_task(&parse_task(FULL, "t.md").unwrap()).contains(REFS_DELIMITER));
+    let task = parse_task(FULL, "t.md").unwrap();
+    assert_eq!(serialize_task(&task), FULL);
+    assert!(!serialize_task(&task).contains(REFS_DELIMITER));
 }
 
 #[test]
 fn a_misplaced_or_repeated_section_is_a_parse_error() {
-    // Build each from the round-trip text above.
-    // (a) a second `## References` → error containing "second ## References heading";
-    // (b) `## References` after `## Notes` → error containing "## References after ## Notes";
-    // (c) a line `not an entry` inside the section → error containing "malformed reference line";
-    // (d) two entries with handle `brief` → error containing "duplicate reference handle brief".
+    let notes_at = WITH_REFS.find("## Notes").unwrap();
+    let cases = [
+        (WITH_REFS.replacen("## Notes", "## References\n\n## Notes", 1), "second ## References heading"),
+        (format!("{}\n## References\n", WITH_REFS), "## References after ## Notes"),
+        (format!("{}not an entry\n\n{}", &WITH_REFS[..notes_at], &WITH_REFS[notes_at..]), "malformed reference line"),
+        (WITH_REFS.replacen("- out (output)", "- brief (output)", 1), "duplicate reference handle brief"),
+    ];
+    for (text, needle) in cases {
+        let error = parse_task(&text, "t.md").unwrap_err().to_string();
+        assert!(error.contains(needle), "{needle}: {error}");
+    }
 }
 
 #[test]
@@ -277,9 +285,13 @@ fn the_body_refuses_the_references_heading() {
     let error = validate_body("x\n## References\n").unwrap_err().to_string();
     assert!(error.contains("## References"), "{error}");
 }
-```
 
-Write test (c) and the others in full, in the style of `rejects_duplicates_and_bad_lines`.
+#[test]
+fn citation_text_in_the_body_never_fails_a_read() {
+    let text = WITH_REFS.replacen("See [ref:brief].", "See [ref:gone] and [ref:Bad].", 1);
+    assert!(parse_task(&text, "t.md").is_ok());
+}
+```
 
 - [ ] **Step 6: Run them to verify they fail**
 
@@ -293,53 +305,50 @@ Expected: the new tests FAIL. Existing tests still pass once `refs: vec![]` is a
   - blank lines are skipped;
   - each `- ` line goes through `refs::parse_entry`, with errors wrapped by `perr`;
   - anything else is `malformed reference line {line:?}`.
-- **Validation.** `validate_task` adds `refs::validate_entry` for each entry and the duplicate-handle error. It does **not** run the citation or duplicate-reference audit (Task 3): `parse_task` calls `validate_task`, and a read must never fail on prose.
+- **Validation.** `validate_task` adds `refs::validate_entry` for each entry and the duplicate-handle error, and nothing else (Audit placement).
 - **Serializing.** `serialize_task` writes `\n## References\n\n` and one `- <render_entry>` line per entry, after the body and before the notes, only when `refs` is non-empty.
 - **Body.** `validate_body` refuses `## References` as it refuses `## Notes`.
 
-- [ ] **Step 8: Run the fast suite**
+- [ ] **Step 8: Run the fast suite and the lint gate**
 
-Run: `just test-fast`
-Expected: PASS.
+Run: `just test-fast`, then `just check`.
+Expected: both PASS.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/refs.rs src/model.rs src/format.rs src/main.rs src/frontmatter.rs $(git diff --name-only)
+git add src
 git commit -m "feat(refs): reference entries stored in a managed body section"
 ```
 
 ---
 
-### Task 3: The audit: duplicate references and citations
+### Task 3: The audit in `check`
 
 **Complexity:** mid
 
 **Files:**
 - Modify: `src/refs.rs` (citations, `Problem`, `audit`)
-- Modify: `src/error.rs` (`Error::Reference`)
 - Modify: `src/config.rs` (the `files` scheme reservation)
 - Modify: `src/commands/check.rs` (audit findings)
-- Move: `worktree_with_excluded_docs`, `check_findings`, `findings_of` and `write_doc` from `tests/cli.rs` to `tests/common/mod.rs` as `pub fn`s, unchanged. Later tasks use them from `tests/refs.rs`.
+- Move: `worktree_with_excluded_docs`, `check_findings`, `findings_of` and `write_doc` from `tests/cli.rs` to `tests/common/mod.rs` as `pub fn`s, unchanged.
 - Create: `tests/refs.rs`
 - Record: tasks-3a445e's body (Step 7)
 
 **Interfaces:**
 - Produces, in `src/refs.rs`:
-  - `pub enum Citation<'a> { Handle(&'a str), Malformed(&'a str) }` and `pub fn citations(body: &str) -> Vec<Citation<'_>>`.
+  - `pub enum Citation<'a> { Handle(&'a str), Malformed(&'a str) }`, deriving `Debug, PartialEq, Eq`, and `pub fn citations(body: &str) -> Vec<Citation<'_>>`.
   - `pub struct Problem { pub kind: &'static str, pub detail: String }`, with the constants `DUPLICATE = "ref_duplicate"`, `CITATION_DANGLING = "ref_citation_dangling"` and `CITATION_MALFORMED = "ref_citation_malformed"`.
   - `pub fn audit(task: &Task) -> Vec<Problem>`.
-  - `pub fn refuse_problems(task: &Task) -> Result<()>`: the first problem as `Error::Reference`.
-- Produces, in `src/error.rs`: `Error::Reference { kind: &'static str, detail: String }`, whose `kind()` returns `kind`.
+- Consumed later: Task 5 adds `refuse_problems` and `Error::Reference` alongside their first callers (the writers).
 
 - [ ] **Step 1: Write the failing unit tests in `src/refs.rs`**
 
 ```rust
 #[test]
 fn citations_skip_code_spans_and_fences() {
-    let body = "Use [ref:brief] here.\nQuote `[ref:shown]` or ``[ref:also]``.\n```\n[ref:fenced]\n```\n~~~md\n[ref:tilde]\n~~~\nAnd [ref:Bad Handle] and [ref:open";
-    let found = citations(body);
-    assert_eq!(found, vec![
+    let body = "Use [ref:brief] here.\nQuote `[ref:shown]` or ``[ref:also]``.\nLiteral `example\n[ref:sample]` here.\n```\n[ref:fenced]\n```\n~~~md\n[ref:tilde]\n~~~\nAnd [ref:Bad Handle] and [ref:open";
+    assert_eq!(citations(body), vec![
         Citation::Handle("brief"),
         Citation::Malformed("Bad Handle"),
         Citation::Malformed("open"),
@@ -347,28 +356,34 @@ fn citations_skip_code_spans_and_fences() {
 }
 
 #[test]
+fn a_code_span_does_not_cross_a_blank_line() {
+    let body = "Open `tick\n\nThen [ref:real] and `close`.";
+    assert_eq!(citations(body), vec![Citation::Handle("real")]);
+}
+
+#[test]
 fn audit_names_duplicates_and_unresolved_citations() {
-    // task with body "See [ref:a] and [ref:gone] and [ref:X]" and entries
-    // a (context): docs/x.md, b (input): docs/x.md
-    let kinds: Vec<_> = audit(&task).iter().map(|p| p.kind).collect();
+    let text = "---\nid: sci-4f2a9c\ntitle: T\nstatus: todo\npriority: 2\ncreated: 2026-08-29T14:02:11Z\nupdated: 2026-08-29T14:02:11Z\ndepends: []\ntags: []\n---\n\nSee [ref:a] and [ref:gone] and [ref:X].\n\n## References\n\n- a (context): docs/x.md\n- b (input): docs/x.md\n";
+    let task = crate::format::parse_task(text, "t.md").unwrap();
+    let problems = audit(&task);
+    let kinds: Vec<_> = problems.iter().map(|p| p.kind).collect();
     assert_eq!(kinds, vec![DUPLICATE, CITATION_DANGLING, CITATION_MALFORMED]);
-    assert!(audit(&task)[0].detail.contains("a") && audit(&task)[0].detail.contains("b"));
+    assert!(problems[0].detail.contains("a and b both reference docs/x.md"), "{}", problems[0].detail);
 }
 ```
-
-Build `task` with `crate::format::parse_task` from a record text in the shape of Task 2's round-trip fixture.
 
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `just test-one refs::`
 Expected: FAIL (`citations`, `audit` undefined).
 
-- [ ] **Step 3: Implement `citations`, `audit` and `refuse_problems`**
+- [ ] **Step 3: Implement `citations` and `audit`**
 
-**Citations.** Scan line by line:
-- A line whose trimmed start is three or more backticks or tildes opens a fence. The fence closes on a line of the same character, at least as long.
-- Within a line outside a fence, a run of n backticks opens an inline span that closes at the next run of exactly n. Text inside a closed span is skipped, and an unclosed run is literal.
-- Outside spans, `[ref:` begins a citation that ends at the next `]` on the line. The citation is `Handle` when its text matches the handle grammar, and `Malformed` otherwise, including an unterminated one, whose text runs to the end of the line.
+**Citations.**
+1. **Fences.** Split the body into fenced and unfenced regions. A line whose trimmed start is three or more backticks or tildes opens a fence, which closes on a line of the same character at least as long. Fenced text is skipped.
+2. **Paragraphs.** Split the unfenced text into paragraphs at blank lines.
+3. **Code spans.** Within a paragraph, line breaks included, a run of n backticks opens a code span that closes at the next run of exactly n. Text inside a closed span is skipped, and an unclosed run is literal (CommonMark).
+4. **Citations.** Outside spans, `[ref:` begins a citation that ends at the next `]` on the same line. The citation is `Handle` when its text matches the handle grammar, and `Malformed` otherwise, including an unterminated one, whose text runs to the end of the line.
 
 **Audit.** Duplicates come first, as pairs in entry order, with detail `<first> and <second> both reference <reference>`. Then citations in body order: an unknown handle with detail `[ref:<h>] names no reference`, and a malformed one with detail `[ref:<text>] is not a reference handle`.
 
@@ -379,30 +394,37 @@ Expected: PASS.
 
 - [ ] **Step 5: Write the failing integration tests in `tests/refs.rs`**
 
-Records are hand-written here; the CLI writers arrive in Task 5.
-
 ```rust
 #[test]
 fn check_reports_reference_audit_findings_on_open_tasks_only() {
-    // init "rf"; add task A; append to tasks/<A>.md (via env.read + fs::write):
-    // body "See [ref:gone] and [ref:Bad]" and a References section with
-    // a (context): docs/x.md and b (input): docs/x.md; create docs/x.md.
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "docs/x.md", "x");
+    let id = id_of(env.json(&dir, &["add", "A"]));
+    // Hand-write the body and section: the CLI writers arrive in Task 5.
+    let rel = format!("tasks/{id}.md");
+    let text = env.read(&dir, &rel).replacen("---\n\n", "---\n\nSee [ref:gone] and [ref:Bad].\n\n## References\n\n- a (context): docs/x.md\n- b (input): docs/x.md\n\n", 1);
+    std::fs::write(dir.join(&rel), text).unwrap();
     let (code, v) = check_findings(&env, &dir);
     assert_eq!(code, 1, "{v}");
     for kind in ["ref_duplicate", "ref_citation_dangling", "ref_citation_malformed"] {
         assert_eq!(findings_of(&v, "errors", kind).len(), 1, "{kind}: {v}");
     }
-    // Close A (`tasks start A`, then `tasks done A "x"`); a closed record is history:
+    env.json(&dir, &["start", &id]);
+    env.json(&dir, &["done", &id, "x"]);
     let (code, v) = check_findings(&env, &dir);
     assert_eq!(code, 0, "{v}");
 }
 
 #[test]
 fn a_files_scheme_in_host_config_is_a_config_error() {
-    // write [docs.schemes] files = "cat" to the host config; any command → error kind "config"
-    // whose message contains "files is reserved for task attachments".
+    // write `[docs.schemes]\nfiles = "cat"\n` to env.home/.config/tasks/config.toml;
+    // `tasks show <id>` fails with kind "config", message containing
+    // "files is reserved for task attachments".
 }
 ```
+
+Adjust the `replacen` anchor to the record shape `add` writes if it differs (`env.read` the record first). Write the second test in full.
 
 - [ ] **Step 6: Implement the check findings and the scheme reservation**
 
@@ -419,35 +441,42 @@ tasks-3a445e's body contains an unescaped `[ref:<handle>]` (and `[ref:` text). R
 Run: `cargo run -q -- check`
 Expected: no `ref_citation_*` finding.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Lint gate and commit**
+
+Run: `just check`
+Expected: PASS.
 
 ```bash
-git add -A src tests
-git commit -m "feat(refs): audit duplicate references and citations; check reports them"
+git add src tests
+git commit -m "feat(refs): check audits duplicate references and citations"
 ```
 
 ---
 
-### Task 4: Locating entries
+### Task 4: Locating entries, and `check` for their targets
 
 **Complexity:** mid
 
 **Files:**
-- Modify: `src/resolve.rs` (`EntryKind`, `LocatedEntry`, `locate_entry`, `read_external`, `note_main_entry`)
-- Modify: `src/refs.rs` (`require_targets`, `present`)
+- Modify: `src/refs.rs` (`Location`, `location`, `present`; `validate_reference` now calls `location`)
+- Modify: `src/resolve.rs` (`LocatedEntry`, `locate_entry`)
+- Modify: `src/error.rs` (`Error::RefSpecialFile(String)` → `ref_special_file`)
+- Modify: `src/commands/check.rs` (the open-task block beside `doc_missing`)
 - Test: unit tests in `src/resolve.rs`; integration in `tests/refs.rs`
 
 **Interfaces:**
-- Produces, in `src/resolve.rs`:
-  - `pub enum EntryKind { File, Dir }`.
-  - `pub enum LocatedEntry { Here(PathBuf, EntryKind), Main { root: PathBuf, path: PathBuf, kind: EntryKind }, Missing }`.
-  - `Resolver::locate_entry(&self, rel: &str) -> Result<LocatedEntry>`. Anything that exists at `project.root.join(rel)` (following symlinks; a directory counts as `Dir`, everything else as `File`) is `Here`. Only when nothing exists there is the main checkout consulted, by the same rule.
-  - `Resolver::read_external(&self, value: &str) -> Result<DocRead>`: the external branch of `read`, moved out unchanged, which `read` now calls.
-  - `Resolver::note_main_entry(&self, handle: &str, rel: &str, root: &Path)`: queues the warning `reference <handle> <rel> is not in this checkout; read from the main checkout at <root>` for `take_warnings`.
 - Produces, in `src/refs.rs`:
-  - `pub fn require_targets(resolver: &Resolver, project: &Project, task: &Task, original: Option<&Task>) -> Result<()>`. Every `context` or `input` entry whose `(reference, relation)` pair is not in `original` must resolve, or the call fails with `Error::RefNotFound("<id>: reference <handle> <reference> does not exist")`. A local path resolves through `locate_entry` (with `note_main_entry` for `Main`). An attachment resolves when `attachments::ledger(task)` holds it as `Attached`. External references are skipped.
-  - `pub fn present(resolver: &Resolver, project: &Project, task: &Task, entry: &Ref) -> Result<Option<PathBuf>>`: the located path, or `None` when absent. An attachment is present when attached and `attachments::entry_state` is `File`. Never called for externals.
-- Produces, in `src/error.rs`: `Error::RefNotFound(String)` → `ref_not_found`.
+  - `pub enum Location<'a> { Path(&'a str), Attachment(&'a str), External }` and `pub fn location(reference: &str) -> Result<Location<'_>>`, with the same rules and messages as Task 2's `validate_reference`, which becomes `location(reference).map(|_| ())`.
+  - `pub fn present(resolver: &Resolver, project: &Project, task: &Task, entry: &Ref) -> Result<Option<PathBuf>>`: the located path, or `None` when absent.
+    - A local path goes through `locate_entry`; `Main` returns the main path.
+    - An attachment counts only when `attachments::ledger(task)` holds the name as `Attached` **and** `attachments::entry_state` of its storage path is `File`. `Unsafe` maps to `Error::AttachmentUnsafe`.
+    - External entries: never called (callers branch on `location` first).
+- Produces, in `src/resolve.rs`:
+  - `pub enum LocatedEntry { Here(PathBuf), Main { root: PathBuf, path: PathBuf }, Missing }`. It records no file-or-directory kind, because no caller would read it (Clippy's `dead_code`); `doc` tests `is_dir()` on the located path.
+  - `Resolver::locate_entry(&self, rel: &str) -> Result<LocatedEntry>`.
+    - Look at `project.root.join(rel)` with `fs::metadata`, which follows symlinks. Only `NotFound` means nothing exists; other errors propagate.
+    - A regular file or a directory is found. Any other type is `Err(Error::RefSpecialFile("<path> is not a regular file or directory"))`.
+    - Only when nothing exists here is the main checkout consulted, by the same rule.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -456,34 +485,67 @@ In `src/resolve.rs` unit tests, using a temp project root:
 ```rust
 #[test]
 fn locate_entry_finds_files_and_directories_here_first() {
-    // root/docs/a.md (file), root/results/run-12/ (dir)
-    assert!(matches!(resolver.locate_entry("docs/a.md").unwrap(), LocatedEntry::Here(_, EntryKind::File)));
-    assert!(matches!(resolver.locate_entry("results/run-12").unwrap(), LocatedEntry::Here(_, EntryKind::Dir)));
+    // root/docs/a.md (file), root/results/run-12/ (dir), root/link -> docs/a.md (symlink)
+    assert!(matches!(resolver.locate_entry("docs/a.md").unwrap(), LocatedEntry::Here(p) if p.is_file()));
+    assert!(matches!(resolver.locate_entry("results/run-12").unwrap(), LocatedEntry::Here(p) if p.is_dir()));
+    assert!(matches!(resolver.locate_entry("link").unwrap(), LocatedEntry::Here(_)));
     assert!(matches!(resolver.locate_entry("nope").unwrap(), LocatedEntry::Missing));
-    // `locate` stays file-only:
-    assert!(matches!(resolver.locate("results/run-12").unwrap(), Located::Missing));
+    assert!(matches!(resolver.locate("results/run-12").unwrap(), Located::Missing)); // locate stays file-only
+}
+
+#[test]
+fn locate_entry_refuses_a_fifo_and_a_symlink_to_one() {
+    // std::process::Command::new("mkfifo").arg(root.join("pipe")); symlink root/to-pipe -> pipe
+    for rel in ["pipe", "to-pipe"] {
+        let error = resolver.locate_entry(rel).unwrap_err();
+        assert_eq!(error.kind(), "ref_special_file");
+    }
 }
 ```
 
-The worktree-precedence case (a directory in the worktree, a file at the same path in main) is tested through `show` in Task 6 (`merge_keeps_separate_rows_when_targets_differ`).
+In `tests/refs.rs`, using the helpers moved in Task 3, hand-writing the section as Task 3 did:
+
+```rust
+#[test]
+fn check_reports_missing_main_checkout_and_special_targets_on_open_tasks() {
+    // worktree_with_excluded_docs: entry i (input): docs/specs/x-design.md exists only in main
+    //   → from side: warning ref_in_main_checkout whose detail names main.
+    // remove it from main → error ref_missing naming "i".
+    // entry o (output): docs/later.md, absent → no finding.
+    // entry f (context): files:gone.png never attached → error ref_missing.
+    // attach shot.png, entry s (input): files:shot.png, then delete the stored bytes → ref_missing.
+    // mkfifo docs/pipe, entry p (context): docs/pipe → error ref_special_file
+    //   (run check with .timeout(Duration::from_secs(10))).
+    // close the task → none of these findings.
+}
+```
+
+Write it in full.
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `just test-one resolve::`
-Expected: FAIL (`locate_entry` undefined).
+Run: `just test-one resolve::` and `just test-one --test refs check_reports_missing`
+Expected: FAIL.
 
-- [ ] **Step 3: Implement `locate_entry`, `read_external`, `note_main_entry`, `require_targets`, `present` and `RefNotFound`**
+- [ ] **Step 3: Implement `location`, `present`, `locate_entry`, `RefSpecialFile` and the check findings**
 
-- [ ] **Step 4: Run to verify they pass**
+In `check`, inside `if task.status.is_open()`, for each `context` or `input` entry that is not external:
+- `Main`: warning `ref_in_main_checkout`, detail `reference <h> <rel> is not in this checkout; read from the main checkout at <root>`;
+- absent: error `ref_missing`, detail `reference <h> <reference> does not exist`;
+- `Err(RefSpecialFile)`: error `ref_special_file` with its message.
 
-Run: `just test-one resolve::` and then `just test-fast`.
-Expected: PASS.
+For an `output` entry, only `RefSpecialFile` is reported.
+
+- [ ] **Step 4: Run the tests and the lint gate**
+
+Run: `just test-one resolve::`, `just test-one --test refs`, `just test-fast`, then `just check`.
+Expected: all PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/resolve.rs src/refs.rs src/error.rs
-git commit -m "feat(resolve): locate reference entries, files or directories, worktree first"
+git add src tests
+git commit -m "feat(refs): locate entries worktree first; check reports missing and special targets"
 ```
 
 ---
@@ -499,17 +561,23 @@ git commit -m "feat(resolve): locate reference entries, files or directories, wo
   - `EditArgs.rm_refs` and `EditArgs.no_refs`;
   - `ListArgs.reference`: `--ref`;
   - `Command::Doc`: an optional positional `handle`, with the `doc_kind` group over `plan`, `spec` and `handle`, still required and single. The doc comment matches the new summary row.
+- Modify: `src/refs.rs` (`refuse_problems`, `require_targets`)
+- Modify: `src/resolve.rs` (`read_external` split out of `read`; `note_main_entry`)
+- Modify: `src/error.rs` (`Error::Reference { kind, detail }`, `Error::RefNotFound(String)` → `ref_not_found`, `Error::RefNotText(String)` → `ref_not_text`)
 - Modify: `src/commands/mod.rs` (`apply_fields`)
 - Modify: `src/commands/edit.rs` (`has_flags`, the clear-and-remove block, `editor`)
-- Modify: `src/commands/list.rs` (both `plan` filter sites gain the `--ref` filter)
-- Modify: `src/commands/doc.rs`
-- Modify: `src/main.rs` (dispatch of `Doc`)
-- Modify: `src/error.rs` (`Error::RefNotText(String)` → `ref_not_text`)
+- Modify: `src/commands/list.rs` (both `plan` filter sites)
+- Modify: `src/commands/doc.rs`, `src/main.rs` (dispatch of `Doc`)
 - Test: `tests/refs.rs`
 
 **Interfaces:**
-- Consumes: `refs::parse_entry`, `refs::refuse_problems` and `refs::require_targets` (Tasks 2-4); `Resolver::locate_entry` and `read_external` (Task 4).
-- Produces: `doc::run(ctx, id, target: DocTarget, fetch)`, with `pub enum DocTarget { Plan, Spec, Ref(String) }` replacing the `DocKind` argument.
+- Consumes: `refs::parse_entry`, `audit`, `location` and `present`; `Resolver::locate_entry` (Tasks 2-4).
+- Produces:
+  - `pub fn refuse_problems(task: &Task) -> Result<()>`: the first `audit` problem as `Error::Reference { kind: problem.kind, detail: problem.detail }`. `Error::kind()` returns `kind`.
+  - `pub fn require_targets(resolver: &Resolver, project: &Project, task: &Task, original: Option<&Task>) -> Result<()>`. Every non-external `context` or `input` entry whose `(reference, relation)` pair is not in `original` must give `present(..)? == Some(_)`, or the call fails with `Error::RefNotFound("<id>: reference <handle> <reference> does not exist")`. A `RefSpecialFile` error propagates. A `Main` location calls `note_main_entry`.
+  - `Resolver::note_main_entry(&self, handle: &str, rel: &str, root: &Path)`: queues `reference <handle> <rel> is not in this checkout; read from the main checkout at <root>` for `take_warnings`.
+  - `Resolver::read_external(&self, value: &str) -> Result<DocRead>`: the external branch of `read`, moved out unchanged, which `read` now calls.
+  - `doc::run(ctx, id, target: DocTarget, fetch)`, with `pub enum DocTarget { Plan, Spec, Ref(String) }` replacing the `DocKind` argument.
 
 - [ ] **Step 1: Write the failing integration tests in `tests/refs.rs`**
 
@@ -519,17 +587,23 @@ fn add_and_edit_write_entries_that_show_returns() {
     // init "rf"; write docs/notes/b.md and "docs/run books/a.md"
     let id = id_of(env.json(&dir, &["add", "T", "--body", "See [ref:brief].",
         "--ref", "brief (input, required, kind=brief): docs/notes/b.md — the brief",
-        "--ref", r#"rb (output): "docs/run books/a.md""#]));
+        "--ref", r#"rb (output): "docs/run books/a \"v2\" \\ — x.md""#]));
     let refs = &env.json(&dir, &["show", &id])["task"]["refs"];
     assert_eq!(refs[0], serde_json::json!({"handle":"brief","relation":"input","required":true,"kind":"brief","reference":"docs/notes/b.md","description":"the brief"}));
-    assert_eq!(refs[1], serde_json::json!({"handle":"rb","relation":"output","required":false,"reference":"docs/run books/a.md"}));
+    assert_eq!(refs[1], serde_json::json!({"handle":"rb","relation":"output","required":false,"reference":"docs/run books/a \"v2\" \\ — x.md"}));
     assert!(env.read(&dir, &format!("tasks/{id}.md")).contains("## References\n\n- brief (input, required, kind=brief): docs/notes/b.md — the brief\n"));
-    // replace in place keeps position; a new handle appends
-    env.json(&dir, &["edit", &id, "--ref", "brief (context): docs/notes/b.md", "--ref", "c (context): https://example.org/x"]);
+    // `edit --ref` alone never opens the editor (EDITOR stub writes a marker and exits 1)
+    let marker = env.home.path().join("editor-ran");
+    let stub = write_editor_stub(&env, &marker); // `#!/bin/sh\ntouch <marker>\nexit 1`
+    let out = env.cmd(&dir).env("EDITOR", &stub)
+        .args(["edit", &id, "--ref", "brief (context): docs/notes/b.md", "--ref", "c (context): https://example.org/x"])
+        .timeout(std::time::Duration::from_secs(10)).output().unwrap();
+    assert!(out.status.success() && !marker.exists());
     let refs = env.json(&dir, &["show", &id])["task"]["refs"].clone();
     let handles: Vec<_> = refs.as_array().unwrap().iter().map(|r| r["handle"].as_str().unwrap().to_string()).collect();
     assert_eq!(handles, ["brief", "rb", "c"]);
     assert_eq!(refs[0]["relation"], "context");
+    // --rm-ref and --no-refs alone never open the editor either (same stub, same assertions)
 }
 
 #[test]
@@ -538,26 +612,33 @@ fn writes_refuse_broken_entries_and_citations() {
     assert_eq!(env.fail(&dir, &["add", "T", "--body", "[ref:gone]"]), "ref_citation_dangling");
     assert_eq!(env.fail(&dir, &["add", "T", "--ref", "a (context): docs/b.md", "--ref", "b (input): docs/b.md"]), "ref_duplicate");
     assert_eq!(env.fail(&dir, &["add", "T", "--ref", "a (context): docs/b.md", "--ref", "a (input): docs/b.md"]), "validation");
-    // an output need not exist; a files: output need not be attached
+    // outputs need not exist; a files: output need not be attached
     env.json(&dir, &["add", "T", "--ref", "o (output): docs/later.md", "--ref", "s (output): files:after.png"]);
-    // code spans and fences are not citations (Review Focus 1)
-    env.json(&dir, &["add", "T", "--body", "Write `[ref:x]` to cite.\n```\n[ref:y]\n```"]);
+    // code spans (one line and across lines) and fences are not citations (Review Focus 1)
+    env.json(&dir, &["add", "T", "--body", "Write `[ref:x]` to cite.\nLiteral `example\n[ref:sample]` here.\n```\n[ref:y]\n```"]);
     // --rm-ref of a cited handle is refused unless the same call replaces the body
     let id = id_of(env.json(&dir, &["add", "T", "--body", "See [ref:a].", "--ref", "a (context): docs/b.md"]));
     assert_eq!(env.fail(&dir, &["edit", &id, "--rm-ref", "a"]), "ref_citation_dangling");
     env.json(&dir, &["edit", &id, "--rm-ref", "a", "--body", "Nothing cited."]);
-    assert_eq!(env.fail(&dir, &["edit", &id, "--rm-ref", "a"]), "validation"); // not present
+    assert_eq!(env.fail(&dir, &["edit", &id, "--rm-ref", "a"]), "validation");
+}
+
+#[test]
+fn an_attachment_input_needs_its_bytes_not_just_its_ledger_entry() {
+    // attach shot.png to T; delete tasks/files/<id>/shot.png;
+    assert_eq!(env.fail(&dir, &["edit", &id, "--ref", "s (input): files:shot.png"]), "ref_not_found");
 }
 
 #[test]
 fn an_unrelated_edit_ignores_an_input_that_has_since_vanished() {
-    // add with a (input): docs/b.md; delete docs/b.md; edit -p 1 succeeds (Review Focus 3)
+    // add with a (input): docs/b.md; delete docs/b.md; `edit <id> -p 1` succeeds (Review Focus 3)
 }
 
 #[test]
 fn editor_saves_validate_added_entries() {
-    // EDITOR script appends "- x (input): docs/none.md" under a new ## References
-    // section → exit 1 with kind ref_not_found, edit kept; appending a valid entry lands.
+    // EDITOR script appends "## References\n\n- x (input): docs/none.md\n" before ## Notes
+    // (or at the end when no notes) → exit 1, kind ref_not_found, edit kept;
+    // appending "- x (input): docs/b.md" instead lands.
 }
 
 #[test]
@@ -568,14 +649,21 @@ fn list_and_search_filter_by_reference_byte_for_byte() {
 
 #[test]
 fn doc_reads_an_entry_by_handle() {
-    // text file → body printed raw; directory → ref_not_text; binary file (bytes [0xff,0xfe]) →
-    // ref_not_text; pending output → doc_not_found; unknown handle → doc_not_found;
-    // attachment entry (after `tasks attach`) → its text; external via DocFixture "stub:x"
-    // → fixture body; with --no-fetch → doc_not_found.
+    // text file → body printed raw; directory → ref_not_text; bytes [0xff,0xfe] → ref_not_text;
+    // pending output → doc_not_found; unknown handle → doc_not_found;
+    // attachment entry (after `tasks attach`) → its text;
+    // external "stub:x" via DocFixture → fixture body; with --no-fetch → doc_not_found.
+}
+
+#[test]
+fn a_fifo_is_refused_without_being_opened() {
+    // mkfifo docs/pipe. With .timeout(Duration::from_secs(10)) on each command:
+    // `add T --ref "p (context): docs/pipe"` → ref_special_file;
+    // hand-write entry p (context): docs/pipe into a record, then `doc <id> p` → ref_special_file.
 }
 ```
 
-Write the elided bodies in full, with the assertions named in each comment.
+Write the elided bodies in full, with the assertions named in each comment. Put `write_editor_stub` in `tests/common/mod.rs` if no equivalent exists there (`grep -n EDITOR tests/common/mod.rs tests/cli.rs`).
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -591,12 +679,13 @@ Expected: PASS.
 
 - [ ] **Step 4: Implement the writers**
 
+- **`has_flags`** (`edit::run`) gains all three: `!fields.refs.is_empty()`, `args.no_refs` and `!args.rm_refs.is_empty()`.
+- **`edit::run`.** Following the tag pattern, `--no-refs` clears and then `--rm-ref` removes (`<id> has no reference <h>` when absent) before `apply_fields`.
 - **`apply_fields`**, after the body is set:
   1. Parse each `fields.refs` with `refs::parse_entry`; a handle repeated within the call is `Validation("--ref names <h> twice")`.
   2. Replace an existing handle in place, or append.
   3. Call `refs::require_targets(&resolver, &ctx.project, task, original)`, then move `resolver.take_warnings()` into `ctx.warnings`.
   4. When `original` is `None`, or the body or entries differ from `original`, call `refs::refuse_problems(task)`.
-- **`edit::run`.** Following the tag pattern, `--no-refs` clears and then `--rm-ref` removes (`<id> has no reference <h>` when absent) before `apply_fields`. Add both to `has_flags`.
 - **`editor`.** After the needs check, call `require_targets(&resolver, &ctx.project, &edited, Some(&original))`. Then call `refuse_problems(&edited)` when the body or entries changed. Both errors go through `.map_err(keep)`.
 
 - [ ] **Step 5: Implement `list --ref` and `doc <handle>`**
@@ -604,15 +693,15 @@ Expected: PASS.
 - **`list --ref`.** At both `plan` filter sites, add `reference.as_deref().is_none_or(|r| task.refs.iter().any(|e| e.reference == r))`. On the parked-row site, an unresolved park has no record and does not match.
 - **`doc`.** Find the entry by handle, else `DocNotFound("<id> has no reference <h>")`.
   - An external reference goes through `read_external(..)?.required()`.
-  - Otherwise `refs::present` gives the path; `None` is `DocNotFound("<id> reference <h> <reference> does not exist yet")`.
+  - Otherwise `refs::present` gives the path (a special file errors there, before any open); `None` is `DocNotFound("<id> reference <h> <reference> does not exist yet")`.
   - A directory is `RefNotText("<path> is a directory")`.
   - The bytes must be UTF-8, else `RefNotText("<path> is not UTF-8 text")`.
   - Print as `doc` prints today.
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 6: Run the tests and the lint gate**
 
-Run: `just test-one --test refs` and then `just test-fast`.
-Expected: PASS.
+Run: `just test-one --test refs`, `just test-fast`, then `just check`.
+Expected: all PASS.
 
 - [ ] **Step 7: Commit, then reinstall**
 
@@ -631,17 +720,16 @@ cargo install --path .
 **Files:**
 - Create: `src/inventory.rs` (declared in `src/main.rs`)
 - Modify: `src/output.rs` (`InventoryRow`, `Origin`, `RowLocation`, `RowStatus`, `ShowFields.inventory`)
-- Modify: `src/commands/show.rs` (`describe`: build the inventory after `step_found` and `files`)
+- Modify: `src/commands/show.rs` (`describe`: the `step_found` fix in Step 3, then the inventory after `step_found` and `files`)
 - Modify: `src/show_text.rs` (a `references` section between `related` and `files`)
 - Modify: every `ShowFields { … }` literal (`grep -rn "ShowFields {" src`)
-- Modify: the spec (Step 7)
 - Test: `tests/refs.rs`
 
 **Interfaces:**
-- Consumes: `Resolver::locate`, `locate_entry`, `read` and `abs`; `refs::present`; `attachments::audit_task`'s attached list (which `describe` already computes).
+- Consumes: `Resolver::locate`, `locate_entry`, `read` and `abs`; `refs::location` and `refs::present`; `attachments::ledger`, `task_dir` and `entry_state`.
 - Produces, in `src/output.rs`:
   - `pub struct InventoryRow { origin: Origin, required: bool, reference: String, location: RowLocation, status: RowStatus, handle: Option<String>, relation: Option<Relation>, kind: Option<String>, description: Option<String>, path: Option<String>, step: Option<String>, step_found: Option<bool>, cause: Option<String> }`. Every `Option` is skipped when `None`, and the enums serialize lowercase.
-- Produces, in `src/inventory.rs`: `pub fn build(resolver: &Resolver, project: &Project, task: &Task, attached: &[crate::attachments::Attachment], step_found: Option<bool>, fetch: Fetch, warnings: &mut Vec<String>) -> Result<Vec<InventoryRow>>`.
+- Produces, in `src/inventory.rs`: `pub fn build(resolver: &Resolver, project: &Project, task: &Task, step_found: Option<bool>, fetch: Fetch, warnings: &mut Vec<String>) -> Result<Vec<InventoryRow>>`.
 
 - [ ] **Step 1: Write the failing integration tests in `tests/refs.rs`**
 
@@ -650,8 +738,8 @@ cargo install --path .
 fn the_inventory_lists_everything_in_order_with_origins() {
     // spec docs/specs/x-design.md, plan docs/plans/x.md with step "Task 1: A",
     // entries: brief (input, required): docs/notes/b.md; ctx (context): https://e.org/x;
-    // out (output, required): docs/out.md (absent); source "user:2026-10-19 chat";
-    // attachments: shot.png (unreferenced) and cited.png referenced as c (context): files:cited.png
+    // out (output, required): docs/out.md (absent); c (context): files:cited.png;
+    // source "user:2026-10-19 chat"; attachments: cited.png and shot.png (both attached)
     let rows = env.json(&dir, &["show", &id])["inventory"].as_array().unwrap().clone();
     let summary: Vec<(String, String, bool)> = rows.iter().map(|r| (
         r["origin"].as_str().unwrap().into(), r["status"].as_str().unwrap().into(), r["required"].as_bool().unwrap())).collect();
@@ -673,6 +761,20 @@ fn the_inventory_lists_everything_in_order_with_origins() {
 }
 
 #[test]
+fn attachment_rows_come_from_the_ledger() {
+    // attach a.png and b.png; delete b.png's stored bytes; drop an unrecorded file
+    // stray.png into tasks/files/<id>/.
+    // inventory attachment rows: a.png present, b.png missing; no row for stray.png;
+    // show's warnings still carry the existing audit lines for b.png and stray.png.
+}
+
+#[test]
+fn a_missing_stepped_plan_on_an_open_task_is_a_missing_row() {
+    // open task with plan docs/plans/x.md and step "Task 1: A"; delete the plan file.
+    // show succeeds; plan row status "missing", no step_found key in the row or at top level.
+}
+
+#[test]
 fn an_entry_equal_to_the_spec_merges_once_targets_agree() {
     // Review Focus 4: add with s (output, kind=spec): docs/specs/y-design.md and body "[ref:s]";
     // inventory: one ref row, status pending. Write the file; edit --spec docs/specs/y-design.md.
@@ -683,10 +785,10 @@ fn an_entry_equal_to_the_spec_merges_once_targets_agree() {
 #[test]
 fn merge_keeps_separate_rows_when_targets_differ() {
     // worktree_with_excluded_docs: spec docs/specs/x-design.md exists only in main.
-    // In side, create a directory at docs/specs/x-design.md; add entry
-    // d (context): docs/specs/x-design.md by hand-editing the record (Task 5's writer
-    // would also accept it). show in side: a spec row (path under main) and a separate
-    // ref row (path under side, status present), plus a warning containing "d" and both paths.
+    // In side, create a directory at docs/specs/x-design.md and hand-write entry
+    // d (context): docs/specs/x-design.md. show in side: a spec row (path under main) and a
+    // separate ref row (path under side, status present), plus a warning containing "d"
+    // and both paths.
 }
 
 #[test]
@@ -711,10 +813,14 @@ Write the elided bodies in full.
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `just test-one --test refs inventory` (and the other names)
-Expected: FAIL (no `inventory` key).
+Run: `just test-one --test refs`
+Expected: the new tests FAIL (no `inventory` key; the missing-plan test fails with an `io` error).
 
-- [ ] **Step 3: Implement `inventory::build`**
+- [ ] **Step 3: Keep `show` alive when a stepped local plan is missing**
+
+In `describe`, the final `(Some(plan), Some(step))` arm checks for absence before `step_exists`. When the plan is local, `resolver.locate(plan)?` is `Missing`, and nothing exists at the path here or in main (the same `try_exists` test the closed-task arm uses), then `step_found` is `None`. Any other read error still propagates. `check` already reports `doc_missing` for it.
+
+- [ ] **Step 4: Implement `inventory::build`**
 
 Rows come in spec §5.1 order.
 
@@ -731,13 +837,14 @@ Rows come in spec §5.1 order.
   A merged row takes the entry's handle, relation, kind and description, and keeps `required: true`. When the targets disagree, the entry keeps its own row, and a warning goes to `warnings`: `reference <h> <reference> resolves to <entry path|missing>, but the <spec|plan> link resolves to <path|missing>`.
 - **Entry rows.**
   - A local path or attachment: `refs::present` gives `present`, otherwise `pending` for an output and `missing` for anything else. `path` is the located path, or the would-be path (`project.root.join(rel)`, or `attachments::task_dir(..).join(name)`) when absent.
+  - A `RefSpecialFile` error becomes status `missing` plus a warning carrying its message, so `show` never fails or opens it.
   - An external entry is `unchecked`, with no path.
 - **Source row.** `location: opaque`, `status: unchecked`.
-- **Attachment rows.** Attached files that no entry names, in the order `audit_task` returns them (name order), with origin `attachment`, reference `files:<name>`, status `present` and path.
+- **Attachment rows.** Iterate `attachments::ledger(task)` (a `BTreeMap`, so name order) for names whose latest entry is `Attached` and that no entry names. Each row has origin `attachment`, reference `files:<name>` and path `task_dir(..).join(name)`. Its status is `present` when `entry_state` is `File`, and `missing` otherwise. The existing `audit_task` warnings stay as they are.
 
 Wire it into `describe` and every `ShowFields` literal.
 
-- [ ] **Step 4: Implement the pretty section**
+- [ ] **Step 5: Implement the pretty section**
 
 The `references` rule, then `read first: <labels>` when any row is required, then one line per row:
 - `- <label> (<facets>): <reference>[ [<status>]][ — <description>]`.
@@ -747,25 +854,21 @@ The `references` rule, then `read first: <labels>` when any row is required, the
 - The plan row appends ` (step: <step>)` before the description.
 - References are rendered with `refs::render_entry`'s quoting rule.
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 6: Run the tests and the lint gate**
 
-Run: `just test-one --test refs` and then `just test-fast`.
-Expected: PASS.
+Run: `just test-one --test refs`, `just test-fast`, then `just check`.
+Expected: all PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src tests
 git commit -m "feat(show): one inventory of spec, plan, references, source and attachments"
 ```
 
-- [ ] **Step 7: Amend the spec's attachment order**
-
-In spec §5.1 item 5, replace "in ledger order" with "in name order, as `files` lists them". Add a Revision history line, "Plan: attachment rows in name order (the ledger is a map)", and commit with `docs(spec): attachment rows in name order`.
-
 ---
 
-### Task 7: The gates: completion, detach, move, check
+### Task 7: The gates: completion, detach, move
 
 **Complexity:** mid
 
@@ -774,12 +877,11 @@ In spec §5.1 item 5, replace "in ledger order" with "in name order, as `files` 
 - Modify: `src/commands/mod.rs` (`transition`)
 - Modify: `src/commands/attach.rs` (`detach`)
 - Modify: `src/moving/preflight.rs` (`validate_destination_docs`)
-- Modify: `src/commands/check.rs` (the open-task block beside `doc_missing`)
 - Modify: `src/error.rs` (`RefOutputMissing` → `ref_output_missing`, `RefCitesAttachment` → `ref_cites_attachment`)
 - Test: `tests/refs.rs`
 
 **Interfaces:**
-- Produces: `pub fn require_outputs(resolver: &Resolver, project: &Project, task: &Task) -> Result<()>`. Every `output` entry that is a local path or attachment and for which `present` is `None` is listed in `Error::RefOutputMissing("<id> declares outputs that do not exist: <h> (<reference>), …; produce them, or remove each with `tasks edit <id> --rm-ref <handle>`")`.
+- Produces: `pub fn require_outputs(resolver: &Resolver, project: &Project, task: &Task) -> Result<()>`. Every `output` entry that is a local path or attachment and for which `present` is `None` is listed in `Error::RefOutputMissing("<id> declares outputs that do not exist: <h> (<reference>), …; produce them, or remove each with `tasks edit <id> --rm-ref <handle>`")`. A special file propagates `RefSpecialFile`.
 
 - [ ] **Step 1: Write the failing integration tests**
 
@@ -790,21 +892,23 @@ fn completion_refuses_missing_outputs_on_every_path() {
     assert_eq!(env.fail(&dir, &["done", &id, "x"]), "ref_output_missing");
     assert_eq!(env.fail(&dir, &["edit", &id, "--status", "done"]), "ref_output_missing");
     assert_eq!(env.fail(&dir, &["edit", &id, "--status", "done", "--force"]), "ref_output_missing");
-    // flagless editor that changes status: done → exit 1, kind ref_output_missing, edit kept
-    // same call removes it → lands:
+    // the flagless editor changing `status: doing` to `status: done` → exit 1,
+    // kind ref_output_missing, edit kept.
+    // the same call removing it lands:
     env.json(&dir, &["edit", &id, "--status", "done", "--rm-ref", "o"]);
-    // a produced output passes: second task, write docs/out.md, done succeeds
-    // a files: output passes after `tasks attach <id> <file> --name after.png`
-    // drop never checks outputs
+    // a produced output passes: second task, write docs/out.md, done succeeds.
+    // a files: output passes after `tasks attach <id> <file> --name after.png`.
+    // a FIFO output (mkfifo, .timeout 10s) → ref_special_file.
+    // drop never checks outputs.
 }
 
 #[test]
 fn an_already_done_recurring_task_releases_its_claim_with_an_output_gone() {
-    // Review Focus 5: --every 7d task with o (output): docs/out.md; write the file; start; done;
-    // start (next occurrence) and done again → completes; then start, remove docs/out.md,
-    // simulate the already-done cleanup path the way `transition`'s recurring branch is
-    // exercised in tests/cli.rs (done twice from the same checkout) → the second done is not
-    // refused with ref_output_missing.
+    // Review Focus 5. Copy the setup of the tests/cli.rs test that reaches
+    // "was already completed; releasing its claim" (grep for that text): an --every task
+    // whose occurrence is done while its claim remains. Give it o (output): docs/out.md,
+    // write the file, complete the occurrence, then delete docs/out.md. The second
+    // `tasks done` succeeds with that warning, and its error is never ref_output_missing.
 }
 
 #[test]
@@ -818,16 +922,9 @@ fn move_preflight_checks_input_paths_at_the_destination() {
     // two projects; task with a (input): docs/a.md existing only in the source → move refused,
     // message contains "--rm-ref"; an output or external entry does not block the move.
 }
-
-#[test]
-fn check_reports_missing_and_main_checkout_entries_on_open_tasks() {
-    // worktree_with_excluded_docs: an entry (input) to a doc only in main → warning
-    // ref_in_main_checkout naming main; delete it there → error ref_missing; an absent
-    // output entry → no finding; close the task → no finding.
-}
 ```
 
-Write the elided bodies in full. For the recurring case, copy the setup of the existing `tests/cli.rs` test that exercises `already completed; releasing its claim` (`grep -n "was already completed" tests/cli.rs`).
+Write the elided bodies in full.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -836,38 +933,64 @@ Expected: the new tests FAIL.
 
 - [ ] **Step 3: Implement the gates**
 
-- **Completion.** In `transition`, compute `completing` before the dependency checks. When `completing`, call `refs::require_outputs(&Resolver::new(&ctx.project, &ctx.registry), &ctx.project, task)?` before any stamp, whatever `force` is.
+- **Completion.** In `transition`, compute `completing` (`to == Done && task.status != Done`) before the dependency checks. When `completing`, call `refs::require_outputs(&Resolver::new(&ctx.project, &ctx.registry), &ctx.project, task)?` before any stamp, whatever `force` is.
 - **Detach.** In `detach`, after name validation, refuse with `RefCitesAttachment("<id> reference <h> names <name>; remove it first with `tasks edit <id> --rm-ref <h>`")` when an entry's reference is `files:<name>`.
 - **Move.** In `validate_destination_docs`, for each `context` or `input` entry with a local path, call `locate_entry` on the destination resolver. `Missing` is `Validation("<source>: reference <h> <reference> does not exist in <prefix>; run `tasks edit <source> --rm-ref <h>` or create it there")`.
-- **Check.** In `check`, inside `if task.status.is_open()`:
-  - `context` and `input` entries: `Main` gives warning `ref_in_main_checkout` ("reference <h> <rel> is not in this checkout; read from the main checkout at <root>"), and `Missing` gives error `ref_missing` ("reference <h> <reference> does not exist").
-  - An attachment entry not attached, or whose file is gone, is `ref_missing`.
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 4: Run the tests and the lint gate**
 
-Run: `just test-one --test refs` and then `just test-fast`.
-Expected: PASS.
+Run: `just test-one --test refs`, `just test-fast`, then `just check`.
+Expected: all PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src tests
-git commit -m "feat(refs): completion, detach, move and check honour references"
+git commit -m "feat(refs): completion, detach and move honour references"
 ```
 
 ---
 
-### Task 8: Skills, README and spec status
+### Task 8: README and spec status
 
 **Complexity:** low
 
 **Files:**
-- Modify: `skills/tasks/SKILL.md`, `skills/scope/SKILL.md`, `skills/curate/SKILL.md`, `README.md`, `docs/specs/2026-10-19-task-references-design.md` (Status line)
+- Modify: `README.md`, `docs/specs/2026-10-19-task-references-design.md` (Status line)
 
-- [ ] **Step 1: Update the skills and README**
+- [ ] **Step 1: Update the README**
+
+Document the reference options next to `--spec` and `--plan`: the entry grammar, `[ref:<handle>]` citations, `doc <id> <handle>`, `list --ref`, the inventory in `show`, and the completion gate.
+
+- [ ] **Step 2: Mark the spec implemented**
+
+`Status: implemented (plan docs/plans/2026-10-19-task-references.md); skills activate after the host rollout`.
+
+- [ ] **Step 3: Gate and commit**
+
+Run: `just check`
+Expected: PASS.
+
+```bash
+git add README.md docs/specs/2026-10-19-task-references-design.md
+git commit -m "docs: task references in the README; spec implemented"
+```
+
+---
+
+### Task 9: Skills (the activation commit)
+
+**Complexity:** low
+
+This is the branch's last commit and merges separately (Rollout steps 3-4). The installed skills are symlinks into main, so merging this commit is what tells agents to write references.
+
+**Files:**
+- Modify: `skills/tasks/SKILL.md`, `skills/scope/SKILL.md`, `skills/curate/SKILL.md`
+
+- [ ] **Step 1: Update the skills**
 
 - **`skills/tasks/SKILL.md`** (spec §10):
-  - filing with `--ref` and citing with `[ref:<handle>]`, saying why each matters;
+  - filing with `--ref` and citing with `[ref:<handle>]` (written in backticks when quoting the syntax), saying why each matters;
   - `required` in reading order;
   - declaring outputs;
   - reading the inventory's required rows from `tasks show` on pickup;
@@ -877,28 +1000,23 @@ git commit -m "feat(refs): completion, detach, move and check honour references"
   - the completion gate and its `--rm-ref` remedy.
 - **`skills/scope/SKILL.md`**: a brief the pass writes becomes a reference on the tasks it scopes.
 - **`skills/curate/SKILL.md`**: promoting a prose path to an entry, with the prose rewritten to cite it, is a bounded edit.
-- **`README.md`**: the reference options next to `--spec` and `--plan`, with the entry grammar.
 
-- [ ] **Step 2: Mark the spec implemented**
-
-`Status: implemented (plan docs/plans/2026-10-19-task-references.md)`.
-
-- [ ] **Step 3: Gate and commit**
+- [ ] **Step 2: Gate and commit**
 
 Run: `just check`
 Expected: PASS.
 
 ```bash
-git add skills README.md docs/specs/2026-10-19-task-references-design.md
-git commit -m "docs: task references in the skills and README"
+git add skills
+git commit -m "docs(skills): file, cite and read task references"
 ```
 
 ---
 
 ## Rollout (after the branch is reviewed; operator steps, not implementer tasks)
 
-1. **Merge** `task-references` into main locally (personal profile), then run `cargo install --path .` from main.
-2. **Upgrade the other hosts.** Install the binary on every other host that runs `tasks` before any record gains a `## References` section. Older binaries read the section as body text, but an older `edit --body` would drop it (spec §12).
+1. **Merge the code without the skills.** Merge `task-references` into main up to Task 8's commit: `git merge --no-ff <Task 8 sha>` on main (personal profile, local merge). Then run `cargo install --path .` from main.
+2. **Upgrade every other host** that runs `tasks` from that main commit before any record gains a `## References` section. Older binaries read the section as body text, but an older `edit --body` would drop it (spec §12). Confirm on each host with a `tasks show` of a task carrying a reference whose JSON has `inventory`.
 3. **Sweep for stray citation text.** Run `grep -ln '\[ref:' "$root"/tasks/*.md` for each registered project root (`tasks projects`). Rewrite any open record whose citation-form text is not in backticks, then run `tasks check` there.
-4. **Install the skills** with `just install-skills`.
+4. **Activate the skills.** Merge the rest of `task-references` (Task 9's commit) into main. The symlinked skills change at that moment. Run `just install-skills` only to confirm the links, since they already point into main.
 5. **File follow-ups**, each with `concerns: tasks-3a445e extension — <one line>`, for the skills other projects own: flow (flows), quick-add (ops), lore's instruction corpus (lore).
