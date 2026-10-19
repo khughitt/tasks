@@ -169,7 +169,7 @@ fn check_reports_missing_main_checkout_and_special_targets_on_open_tasks() {
         .assert()
         .success();
     env.cmd(&side)
-        .args(["done", &id, "x"])
+        .args(["drop", &id, "x"])
         .timeout(Duration::from_secs(10))
         .assert()
         .success();
@@ -939,6 +939,7 @@ fn unsafe_attachment_storage_is_refused_by_writes_and_doc() {
         "attachment_unsafe"
     );
     assert_eq!(env.fail(&dir, &["doc", &id, "shot"]), "attachment_unsafe");
+    assert_eq!(env.fail(&dir, &["done", &id, "x"]), "attachment_unsafe");
 }
 
 fn inventory_fixture(env: &mut TestEnv) -> (std::path::PathBuf, String) {
@@ -1429,4 +1430,412 @@ fn missing_attachment_outputs_are_pending_but_missing_inputs_are_missing() {
             .to_str()
             .unwrap()
     );
+}
+
+#[test]
+fn completion_refuses_missing_outputs_on_every_path() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "T",
+            "--ref",
+            "o (output): docs/out.md",
+            "--ref",
+            "p (output): docs/other.md",
+        ],
+    ));
+    env.json(&dir, &["start", &id]);
+    let record = format!("tasks/{id}.md");
+    let before = env.read(&dir, &record);
+    let marker = env.home.path().join("editor-opened");
+    let stub = common::write_editor_stub(&env, &marker);
+    for args in [
+        vec!["done", &id, "x"],
+        vec!["done", &id, "x", "--force"],
+        vec!["edit", &id, "--status", "done"],
+        vec!["edit", &id, "--status", "done", "--force"],
+    ] {
+        let out = env
+            .cmd(&dir)
+            .env("EDITOR", &stub)
+            .args(&args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "ref_output_missing", "{error}");
+        let detail = error["error"]["detail"].as_str().unwrap();
+        for needle in [
+            "o (docs/out.md)",
+            "p (docs/other.md)",
+            &format!("tasks edit {id} --rm-ref"),
+        ] {
+            assert!(detail.contains(needle), "{detail}");
+        }
+        assert_eq!(env.read(&dir, &record), before);
+        assert!(!marker.exists());
+    }
+    let editor = common::editor_script(
+        env.home.path(),
+        "sed -i 's/^status: doing$/status: done/' \"$1\"",
+    );
+    let out = env
+        .cmd(&dir)
+        .env("EDITOR", &editor)
+        .args(["edit", &id])
+        .timeout(Duration::from_secs(10))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "ref_output_missing", "{error}");
+    let kept = error["error"]["detail"]
+        .as_str()
+        .unwrap()
+        .split(" (edit kept at ")
+        .nth(1)
+        .unwrap()
+        .strip_suffix(')')
+        .unwrap();
+    assert!(
+        std::fs::read_to_string(kept)
+            .unwrap()
+            .contains("status: done")
+    );
+    assert_eq!(env.read(&dir, &record), before);
+    env.json(
+        &dir,
+        &[
+            "edit", &id, "--status", "done", "--rm-ref", "o", "--rm-ref", "p",
+        ],
+    );
+    let shown = env.json(&dir, &["show", &id]);
+    assert_eq!(shown["task"]["status"], "done");
+    assert!(shown["task"].get("refs").is_none());
+
+    let editor_id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Editor removal",
+            "--ref",
+            "o (output): docs/absent.md",
+        ],
+    ));
+    env.json(&dir, &["start", &editor_id]);
+    let editor = common::editor_script(
+        env.home.path(),
+        "sed -i -e 's/^status: doing$/status: done/' -e '/^- o (output):/d' \"$1\"",
+    );
+    env.cmd(&dir)
+        .env("EDITOR", editor)
+        .args(["edit", &editor_id])
+        .timeout(Duration::from_secs(10))
+        .assert()
+        .success();
+    let shown = env.json(&dir, &["show", &editor_id]);
+    assert_eq!(shown["task"]["status"], "done");
+    assert!(shown["task"].get("refs").is_none());
+
+    let produced = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Produced",
+            "--ref",
+            "o (output): docs/out.md",
+            "--ref",
+            "e (output): https://example.com/out",
+        ],
+    ));
+    write_doc(&dir, "docs/out.md", "output");
+    env.json(&dir, &["done", &produced, "produced"]);
+    assert_eq!(
+        env.json(&dir, &["show", &produced])["task"]["status"],
+        "done"
+    );
+
+    let attached = id_of(env.json(
+        &dir,
+        &["add", "Attached", "--ref", "o (output): files:after.png"],
+    ));
+    assert_eq!(
+        env.fail(&dir, &["done", &attached, "missing"]),
+        "ref_output_missing"
+    );
+    write_doc(&dir, "shot.png", "png");
+    env.json(
+        &dir,
+        &["attach", &attached, "shot.png", "--name", "after.png"],
+    );
+    env.json(&dir, &["done", &attached, "attached"]);
+    assert_eq!(
+        env.json(&dir, &["show", &attached])["task"]["status"],
+        "done"
+    );
+
+    let pipe = id_of(env.json(&dir, &["add", "Pipe", "--ref", "o (output): docs/pipe"]));
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(dir.join("docs/pipe"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let out = env
+        .cmd(&dir)
+        .args(["done", &pipe, "x"])
+        .timeout(Duration::from_secs(10))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "special_file", "{error}");
+    env.cmd(&dir)
+        .args(["drop", &pipe, "not producing it"])
+        .timeout(Duration::from_secs(10))
+        .assert()
+        .success();
+    let missing = id_of(env.json(
+        &dir,
+        &["add", "Drop missing", "--ref", "o (output): docs/absent.md"],
+    ));
+    env.json(&dir, &["drop", &missing, "not producing it"]);
+}
+
+#[test]
+fn an_already_done_recurring_task_releases_its_claim_with_an_output_gone() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    let id = id_of(env.json(
+        &dir,
+        &[
+            "add",
+            "Sweep",
+            "--every",
+            "30d",
+            "--ref",
+            "o (output): docs/out.md",
+        ],
+    ));
+    write_doc(&dir, "docs/out.md", "output");
+    env.cmd(&dir)
+        .env("CODEX_SESSION_ID", "native-a")
+        .args(["start", &id])
+        .assert()
+        .success();
+    let claim = std::fs::read(env.claim_store("rf")).unwrap();
+    env.cmd(&dir)
+        .env("CODEX_SESSION_ID", "native-a")
+        .args(["done", &id, "produced"])
+        .assert()
+        .success();
+    // Recreate interrupted claim cleanup after the occurrence was actually completed.
+    std::fs::write(env.claim_store("rf"), claim).unwrap();
+    let before = env.json(&dir, &["show", &id])["task"].clone();
+    std::fs::remove_file(dir.join("docs/out.md")).unwrap();
+    let out = env
+        .cmd(&dir)
+        .env("CODEX_SESSION_ID", "native-a")
+        .args(["done", &id, "cleanup"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        value["warnings"]
+            .to_string()
+            .contains("was already completed; releasing its claim"),
+        "{value}"
+    );
+    assert!(
+        !std::fs::read_to_string(env.claim_store("rf"))
+            .unwrap()
+            .contains(&id)
+    );
+    let after = env.json(&dir, &["show", &id])["task"].clone();
+    for field in ["last_done", "completed", "closed", "notes"] {
+        assert_eq!(before[field], after[field], "{field}");
+    }
+}
+
+#[test]
+fn detach_refuses_an_attachment_an_entry_names() {
+    let mut env = TestEnv::new();
+    let dir = env.init("rf");
+    write_doc(&dir, "shot.png", "png");
+    for relation in ["context", "input", "output"] {
+        let id = id_of(env.json(&dir, &["add", "T"]));
+        env.json(&dir, &["attach", &id, "shot.png"]);
+        env.json(
+            &dir,
+            &[
+                "edit",
+                &id,
+                "--ref",
+                &format!("s ({relation}): files:shot.png"),
+            ],
+        );
+        let record = format!("tasks/{id}.md");
+        let before = env.read(&dir, &record);
+        let out = env
+            .cmd(&dir)
+            .args(["detach", &id, "shot.png", "stale"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "ref_cites_attachment", "{error}");
+        assert!(
+            error["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("tasks edit {id} --rm-ref s")),
+            "{error}"
+        );
+        assert_eq!(env.read(&dir, &record), before);
+        assert_eq!(
+            std::fs::read(dir.join(format!("tasks/files/{id}/shot.png"))).unwrap(),
+            b"png"
+        );
+        env.json(&dir, &["edit", &id, "--rm-ref", "s"]);
+        env.json(&dir, &["detach", &id, "shot.png", "stale"]);
+        assert!(!dir.join(format!("tasks/files/{id}/shot.png")).exists());
+    }
+}
+
+#[test]
+fn move_preflight_checks_input_paths_at_the_destination() {
+    let mut env = TestEnv::new();
+    let source = env.init("rf");
+    let destination = env.init("dest");
+    write_doc(&source, "docs/a.md", "source input");
+    for relation in ["context", "input"] {
+        let id = id_of(env.json(
+            &source,
+            &["add", "T", "--ref", &format!("a ({relation}): docs/a.md")],
+        ));
+        let before = env.read(&source, &format!("tasks/{id}.md"));
+        let out = env
+            .cmd(&source)
+            .args(["move", &id, "--to", "dest"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["error"]["kind"], "validation", "{error}");
+        for needle in [
+            "reference a docs/a.md",
+            "does not exist in dest",
+            &format!("tasks edit {id} --rm-ref a"),
+        ] {
+            assert!(
+                error["error"]["detail"].as_str().unwrap().contains(needle),
+                "{error}"
+            );
+        }
+        assert_eq!(env.read(&source, &format!("tasks/{id}.md")), before);
+        write_doc(&destination, "docs/a.md", "destination input");
+        env.json(&source, &["move", &id, "--to", "dest"]);
+        std::fs::remove_file(destination.join("docs/a.md")).unwrap();
+    }
+    let id = id_of(env.json(
+        &source,
+        &[
+            "add",
+            "Outputs and external",
+            "--ref",
+            "o (output): docs/absent.md",
+            "--ref",
+            "e (input): https://example.com/in",
+        ],
+    ));
+    env.json(&source, &["move", &id, "--to", "dest"]);
+}
+
+#[test]
+fn move_preflight_refuses_a_destination_fifo_and_changes_nothing() {
+    let mut env = TestEnv::new();
+    let source = env.init("rf");
+    let destination = env.init("dest");
+    for dir in [&source, &destination] {
+        common::git(dir, &["init", "-q", "-b", "main"]);
+    }
+    write_doc(&source, "docs/a.md", "source input");
+    std::fs::create_dir_all(destination.join("docs")).unwrap();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(destination.join("docs/a.md"))
+            .status()
+            .unwrap()
+            .success()
+    );
+    let id = id_of(env.json(&source, &["add", "T", "--ref", "a (input): docs/a.md"]));
+    let record = format!("tasks/{id}.md");
+    let before = std::fs::read(source.join(&record)).unwrap();
+    let destination_before = std::fs::read_dir(destination.join("tasks"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<std::collections::BTreeSet<_>>();
+    let status = |dir: &std::path::Path| {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["status", "--porcelain"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        out.stdout
+    };
+    let source_status = status(&source);
+    let destination_status = status(&destination);
+    let out = env
+        .cmd(&source)
+        .args(["move", &id, "--to", "dest"])
+        .timeout(Duration::from_secs(10))
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["kind"], "special_file", "{error}");
+    for needle in [
+        destination.join("docs/a.md").to_str().unwrap(),
+        &format!("{id}: reference a:"),
+        &format!("tasks edit {id} --rm-ref a"),
+    ] {
+        assert!(
+            error["error"]["detail"].as_str().unwrap().contains(needle),
+            "{error}"
+        );
+    }
+    assert_eq!(std::fs::read(source.join(&record)).unwrap(), before);
+    assert_eq!(
+        std::fs::read_dir(destination.join("tasks"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<std::collections::BTreeSet<_>>(),
+        destination_before
+    );
+    assert_eq!(status(&source), source_status);
+    assert_eq!(status(&destination), destination_status);
+    let (code, check) = bounded_check(&env, &source);
+    assert_eq!(code, 0, "{check}");
+    assert!(
+        findings_of(&check, "errors", "move_pending").is_empty(),
+        "{check}"
+    );
+}
+
+#[test]
+fn completion_accepts_an_output_in_the_main_checkout() {
+    let mut env = TestEnv::new();
+    let (_main, side, id) = worktree_with_excluded_docs(&mut env);
+    env.json(
+        &side,
+        &["edit", &id, "--ref", "o (output): docs/specs/x-design.md"],
+    );
+    env.json(&side, &["done", &id, "produced in main"]);
+    assert_eq!(env.json(&side, &["show", &id])["task"]["status"], "done");
 }

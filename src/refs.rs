@@ -109,6 +109,34 @@ pub fn require_targets(
     Ok(())
 }
 
+pub fn require_outputs(resolver: &Resolver, project: &Project, task: &Task) -> Result<()> {
+    let mut missing = Vec::new();
+    for entry in &task.refs {
+        if entry.relation != Relation::Output
+            || matches!(location(&entry.reference)?, Location::External)
+        {
+            continue;
+        }
+        match present(resolver, project, task, entry)? {
+            Presence::Here(_) | Presence::Main { .. } => {}
+            Presence::Absent(_) => {
+                missing.push(format!("{} ({})", entry.handle, entry.reference));
+            }
+            Presence::Special(path) => crate::resolve::refuse_special(&path)?,
+            Presence::Unsafe { detail, .. } => return Err(Error::AttachmentUnsafe(detail)),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(Error::RefOutputMissing(format!(
+            "{} declares outputs that do not exist: {}; produce them, or remove each with `tasks edit {} --rm-ref <handle>`",
+            task.id,
+            missing.join(", "),
+            task.id
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Citation<'a> {
     Handle(&'a str),

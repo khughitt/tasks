@@ -6,11 +6,11 @@ use crate::commands::{self, append_note, append_stamped_note};
 use crate::error::{Error, Result};
 use crate::format::{serialize_task, validate_task};
 use crate::hierarchy;
-use crate::model::{Status, Task, TaskId};
+use crate::model::{Relation, Status, Task, TaskId};
 use crate::registry::Registry;
 use crate::rename::inventory::digest;
 use crate::repo::Project;
-use crate::resolve::{DocKind, Resolver};
+use crate::resolve::{DocKind, LocatedEntry, Resolver};
 
 pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     let (source, source_text) = ctx.source.project.read_task_with_raw(&ctx.source_id)?;
@@ -183,6 +183,32 @@ fn validate_destination_docs(
             "{source}: heading {step:?} not found in {plan} in {}; run `tasks edit {source} --no-plan` or add the heading there",
             project.prefix
         )));
+    }
+    for entry in &task.refs {
+        if entry.relation == Relation::Output {
+            continue;
+        }
+        let crate::refs::Location::Path(path) = crate::refs::location(&entry.reference)? else {
+            continue;
+        };
+        match resolver.locate_entry(path)? {
+            LocatedEntry::Here(_) | LocatedEntry::Main { .. } => {}
+            LocatedEntry::Missing => {
+                return Err(Error::Validation(format!(
+                    "{source}: reference {} {} does not exist in {}; run `tasks edit {source} --rm-ref {}` or create it there",
+                    entry.handle, entry.reference, project.prefix, entry.handle
+                )));
+            }
+            LocatedEntry::Special(path) => {
+                crate::resolve::refuse_special(&path).map_err(|error| match error {
+                    Error::SpecialFile(detail) => Error::SpecialFile(format!(
+                        "{source}: reference {}: {detail}; run `tasks edit {source} --rm-ref {}` or create it there",
+                        entry.handle, entry.handle
+                    )),
+                    error => error,
+                })?;
+            }
+        }
     }
     Ok(())
 }

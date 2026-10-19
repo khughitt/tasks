@@ -38,6 +38,10 @@ pub enum Error {
     #[error("{0}")]
     RefNotFound(String),
     #[error("{0}")]
+    RefOutputMissing(String),
+    #[error("{0}")]
+    RefCitesAttachment(String),
+    #[error("{0}")]
     RefNotText(String),
     #[error("{0} changed on disk; {1}")]
     ConcurrentModification(String, String),
@@ -124,6 +128,8 @@ impl Error {
                 detail: detail + suffix,
             },
             Error::RefNotFound(detail) => Error::RefNotFound(detail + suffix),
+            Error::RefOutputMissing(detail) => Error::RefOutputMissing(detail + suffix),
+            Error::RefCitesAttachment(detail) => Error::RefCitesAttachment(detail + suffix),
             Error::RefNotText(detail) => Error::RefNotText(detail + suffix),
             Error::ConcurrentModification(id, path) => {
                 Error::ConcurrentModification(id, path + suffix)
@@ -173,6 +179,8 @@ impl Error {
             Error::SpecialFile(_) => "special_file",
             Error::Reference { kind, .. } => kind,
             Error::RefNotFound(_) => "ref_not_found",
+            Error::RefOutputMissing(_) => "ref_output_missing",
+            Error::RefCitesAttachment(_) => "ref_cites_attachment",
             Error::RefNotText(_) => "ref_not_text",
             Error::ConcurrentModification(..) => "concurrent_modification",
             Error::Claimed(..) => "claimed",

@@ -1585,7 +1585,15 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             "only `tasks move` sets status moved".into(),
         ));
     }
-    if to == Status::Done && task.status != Status::Done && !force {
+    let completing = to == Status::Done && task.status != Status::Done;
+    if completing {
+        crate::refs::require_outputs(
+            &Resolver::new(&ctx.project, &ctx.registry),
+            &ctx.project,
+            task,
+        )?;
+    }
+    if completing && !force {
         let open = open_deps(ctx, task)?;
         if !open.is_empty() {
             return Err(Error::OpenDependencies(
@@ -1605,7 +1613,6 @@ pub fn transition(ctx: &mut Ctx, task: &mut Task, to: Status, force: bool) -> Re
             return Err(Error::OpenDescendants(task.id.to_string(), open.join(", ")));
         }
     }
-    let completing = to == Status::Done && task.status != Status::Done;
     let first_start = task.started.is_none();
     // One instant for everything this transition stamps, so a recurring completion's
     // `completed` and `last_done` agree to the second (spec §3).

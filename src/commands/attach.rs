@@ -177,6 +177,16 @@ pub fn detach(mut ctx: Ctx, id: String, name: String, why: String) -> Result<Out
     let mut task = load(&mut ctx, &id)?;
     let owner = owner_name(&ctx.project)?;
     attachments::validate_name(&name)?;
+    if let Some(entry) = task
+        .refs
+        .iter()
+        .find(|entry| entry.reference == format!("files:{name}"))
+    {
+        return Err(Error::RefCitesAttachment(format!(
+            "{} reference {} names {name}; remove it first with `tasks edit {} --rm-ref {}`",
+            task.id, entry.handle, task.id, entry.handle
+        )));
+    }
     if why.trim().is_empty() {
         return Err(Error::Validation("detach needs a reason".into()));
     }
