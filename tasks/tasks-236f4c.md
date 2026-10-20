@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-20T11:42:26Z
-updated: 2026-10-20T14:27:23Z
+updated: 2026-10-20T14:27:25Z
 depends: []
 tags: [feedback, friction, "from:lore"]
 agent: claude-code
@@ -24,3 +24,7 @@ Original report (preserved): commit_failed from a refusing hook tells the agent 
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-20-feedback-ask-preservation-brief.md — evidence, distinct asks, alternatives and ownership boundaries
+
+## Notes
+
+- 2026-10-20T14:27:25Z (main): scope: scoped; 88c242e and f62e840 establish that the recovery routes exist under Process and workspace. Narrowed to a named heading and precise warning/doc references; P2/xs/low/direct with existing warning tests and content checks. tasks-dd1225 remains the separate project-root fix; brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md
