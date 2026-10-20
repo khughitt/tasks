@@ -4,8 +4,9 @@ title: "tasks prime's default JSON runs to ~250 KB on a project with ~230 open t
 status: idea
 priority: 2
 created: 2026-10-19T11:09:12Z
-updated: 2026-10-20T02:02:19Z
+updated: 2026-10-20T02:03:26Z
 depends: []
+parent: tasks-96c00c
 tags: [feedback, friction, "from:mind6", "from:tasks"]
 ---
 
