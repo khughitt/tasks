@@ -4,7 +4,7 @@ title: "Feedback entries record no session provenance, so a scope pass must reco
 status: idea
 priority: 2
 created: 2026-10-20T11:06:59Z
-updated: 2026-10-20T11:41:08Z
+updated: 2026-10-20T12:21:27Z
 depends: []
 tags: [feedback, idea, "from:lore"]
 agent: claude-code
@@ -24,3 +24,5 @@ A pilot recovered the user's original request behind a title-only report only by
   provenance: {"harness_session":"claude-code:737a5757-83af-4e31-9fdd-4ce70dd9e6f1","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-20T11:41:08Z (main): Audit result bearing on this idea (full table attached to tasks-fa3525): in a blind audit of 71 coverage drops, the filed report already stated every ask in 68, and 10 of the 11 lost asks were in the report text. For drop decisions, session context would mostly have served as a check, not as missing information; the larger fix is the per-ask drop check filed as tasks-fa3525. Retrieval worked as follows: 62 origins anchored by title text and time; 9 only through the CLI's created output, because the filing command's title differed from the stored one (wrapping or escaping); 6 Codex subagent origins have an encrypted dispatch brief, so the parent thread had to be read; 1 had no recoverable origin. A stamp at filing would remove all three workarounds.
   provenance: {"harness_session":"claude-code:737a5757-83af-4e31-9fdd-4ce70dd9e6f1","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-20T12:21:27Z (main): Case from the coverage-drop audit follow-up (tasks-fa3525), 2026-10-20: lore-c21298's scope pass recorded "No originating transcript is linked, so the reported recovery is not independently verified" and dropped it as covered; the origin session showed the incident was real and the ask was lost. A session stamp on the report would have let that pass verify it. ops-fec58a's user words were likewise recoverable only by searching the session stores.
+  provenance: {"harness_session":"claude-code:40cb347f-4334-45a0-bd26-2650ae480230","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
