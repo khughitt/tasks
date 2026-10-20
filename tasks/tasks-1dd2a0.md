@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-01T23:14:04Z
-updated: 2026-10-08T09:50:37Z
+updated: 2026-10-20T12:02:27Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, friction, "from:material"]
@@ -33,3 +33,5 @@ Lane recommendation to evaluate: retain explicit feedback opt-in and make the re
 
 - 2026-10-06T16:52:04Z (main): organization: assigned to guidance/adoption; evaluate explaining the existing add fallback before broadening feedback routing and opt-in semantics.
 - 2026-10-08T09:50:36Z (main): scope: scoped; P2/s/low/direct; retain feedback opt-in and explain an explicit untagged tasks add fallback; current tag exemptions apply only to accepting projects, so do not imitate feedback tags
+- 2026-10-20T12:02:27Z (main): From the coverage-drop audit (tasks-fa3525): this task's scope (2026-10-08: keep opt-in, "Automatically accepting feedback everywhere would change the routing contract unnecessarily"; "Do not add feedback/category/from tags to this fallback") predates the user's own renewed ask. On 2026-10-12T23:40:59Z (claude-code:b7c6aaa3-e7cb-415b-9603-da5784af28fb) the user wrote: "> lit doesn't accept tasks feedback.. Let's file a friction report with ops; it seems like it may make more sense to accept `feedback` for any project registered with `ops`?" The report filed from it, ops-fec58a, also asked that the fallback keep the feedback tag, category and from: provenance ("so the report never reaches the owner's triage queue"). Its drop (2026-10-13) said "raise it there if opt-out is wanted", but nothing reached this task. Still live: src/commands/feedback.rs:84-105 (require_acceptance) refuses every project without [feedback]. The user's ruling between an opt-out default and this task's opt-in with an untagged fallback is pending; the audit follow-up raised it with the user.
+  provenance: {"harness_session":"claude-code:40cb347f-4334-45a0-bd26-2650ae480230","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
