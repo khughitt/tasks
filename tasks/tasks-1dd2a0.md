@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-01T23:14:04Z
-updated: 2026-10-20T12:20:11Z
+updated: 2026-10-20T12:20:12Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, friction, "from:material"]
@@ -41,3 +41,4 @@ Lane recommendation to evaluate: retain explicit feedback opt-in and make the re
   provenance: {"harness_session":"claude-code:40cb347f-4334-45a0-bd26-2650ae480230","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-20T12:20:10Z (main): ruling (user, 2026-10-20, in the session stamped here): "ops-fec58a: yes - accept every registered project by default." This replaces the 2026-10-08 scope that kept feedback opt-in.
   provenance: {"harness_session":"claude-code:40cb347f-4334-45a0-bd26-2650ae480230","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-20T12:20:12Z (main): scope: rescoped; premise "retain feedback opt-in" replaced by the user's 2026-10-20 ruling (accept every registered project by default); checked against tasks main (src/commands/feedback.rs:41-105, check.rs:262-270, complete.rs:679-688, repo.rs:84-86) and ops bin/ops-projects:251-262 and the 2026-09-26 design; Done now default acceptance with the three tags, [feedback] scope kept as a routing declaration, no opt-out key; the design amendment and generated header split to ops-92168d (depends on this); size, complexity and process unchanged (s/low/direct), priority unchanged.
