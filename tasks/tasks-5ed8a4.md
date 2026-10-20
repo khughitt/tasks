@@ -4,14 +4,19 @@ title: "Widen the priority scale: most tasks sit at the P2 default, leaving litt
 status: idea
 priority: 2
 created: 2026-10-18T22:39:46Z
-updated: 2026-10-19T10:16:09Z
+updated: 2026-10-20T09:11:40Z
 depends: []
+parent: tasks-298107
 tags: [quick-add]
 source: "mindful:thought:0082fda09c0ec41dcf9f2ae116727ea5"
 agent: claude-code/claude-opus-5-5
 ---
 
 Task priorities cluster at the default P2, so they convey little about relative importance. Consider a wider or remapped scale (for example P1..P5) and how existing records would migrate. Raised alongside the same question for the importance of Mindful thoughts.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-20-task-priority-concentration-brief.md — priority evidence and the existing importance research to reuse
 
 ## Notes
 
