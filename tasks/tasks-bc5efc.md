@@ -4,8 +4,9 @@ title: `tasks list --all-projects --status todo --status doing --status blocked`
 status: idea
 priority: 2
 created: 2026-10-19T18:17:10Z
-updated: 2026-10-20T02:02:22Z
+updated: 2026-10-20T02:03:32Z
 depends: []
+parent: tasks-96c00c
 tags: [feedback, idea, "from:dots"]
 agent: claude-code
 ---
