@@ -3,8 +3,10 @@ id: tasks-bc5efc
 title: `tasks list --all-projects --status todo --status doing --status blocked` takes ~3.1 s on ~30 projects and dominates a dashboard's 30 s refresh; a cheaper all-projects open-status listing (or per-project caching) would help read-only consumers
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-20T02:03:35Z
 created: 2026-10-19T18:17:10Z
-updated: 2026-10-20T02:03:33Z
+updated: 2026-10-20T02:03:35Z
 depends: [tasks-e4ccb6]
 parent: tasks-96c00c
 tags: [feedback, idea, "from:dots"]
@@ -16,3 +18,7 @@ Scope handoff: [ref:brief] records the current code, unresolved contract or meas
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-19-cli-consumer-reads-brief.md — current evidence, constraints and next questions
+
+## Notes
+
+- 2026-10-20T02:03:35Z (main): scope: briefed; full-record scan before filtering confirmed; reported 3.1 s remains unverified and needs bottleneck measurement; waits on tasks-e4ccb6; evidence: 89c58a7 and tasks 0.4.0; brief: docs/notes/2026-10-19-cli-consumer-reads-brief.md
