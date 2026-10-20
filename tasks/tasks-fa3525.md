@@ -4,7 +4,7 @@ title: "A scope pass's drop-as-covered verdict tests topical overlap, not each d
 status: idea
 priority: 2
 created: 2026-10-20T11:40:51Z
-updated: 2026-10-20T12:42:58Z
+updated: 2026-10-20T12:43:01Z
 depends: []
 tags: [feedback, friction, "from:lore"]
 agent: claude-code
@@ -23,3 +23,4 @@ Audit method and per-report table are attached. Proposal for the scope skill's d
 - 2026-10-20T12:25:03Z (main): idea from the lost-ask follow-up: make the carry mechanical rather than an instruction, e.g. `tasks drop <id> "<why>" --carry <covering-id> "<ask>"`, which writes a note on the covering task naming the dropped id in the same command. Then an approved drop cannot leave its carry as advice in the drop note, which is what happened in 3 of the 4 losses that held up. Scoping chooses between the scope skill's drop step and a CLI option; a new CLI option starts in ops's cli.toml.
 - 2026-10-20T12:25:05Z (main): idea from the lost-ask follow-up: once this proposal lands, re-run the blind coverage-drop audit on the drops made after it to measure the change, against this baseline: 71 judged, 11 lost and 9 declined-but-called-covered, of which only 4 of the 10 lost verdicts checked held up. Two method fixes from the follow-up: snapshot covering tasks later than five minutes after the drop (ns-80a711 was edited 7.5 min after), and check tasks filed after the drop before calling an ask lost (lore-4e50e7 held flows-79e5a0's). obs could own it as an outcome measure.
 - 2026-10-20T12:42:58Z (main): attached: audit-labels.csv (6006 bytes): Per-report labels for all 72 coverage drops: judge verdict, category, and the 2026-10-20 follow-up's correction for the lost asks
+- 2026-10-20T12:43:01Z (main): attached: audit-method.tar.gz (6501 bytes): Audit method: inventory, origin-locating and packet-building scripts plus the judge prompt, for re-running the audit after this change
