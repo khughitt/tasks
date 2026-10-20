@@ -4,8 +4,8 @@ title: "tasks feedback's duplicate check misses paraphrased duplicates and ignor
 status: idea
 priority: 2
 created: 2026-10-20T12:44:29Z
-updated: 2026-10-20T14:27:13Z
-depends: []
+updated: 2026-10-20T14:27:15Z
+depends: [tasks-a9744c]
 parent: tasks-9b1c2b
 tags: [feedback, gap, "from:lore"]
 agent: claude-code
