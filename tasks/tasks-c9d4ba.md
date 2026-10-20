@@ -4,10 +4,15 @@ title: "Renumbering a plan's step headings needs one edit per step child, and ea
 status: idea
 priority: 2
 created: 2026-10-18T22:14:12Z
-updated: 2026-10-18T22:14:12Z
+updated: 2026-10-20T09:10:43Z
 depends: []
+parent: tasks-e959ec
 tags: [feedback, friction, "from:crew"]
 agent: claude-code/claude-opus-5-5
 ---
 
 tasks edit <id> --step '<new heading>' under [git] commit = true, after renaming several '### Task N:' headings at once: every write but the last reports commit_failed (step_missing for the not-yet-renamed siblings) and leaves its record uncommitted; expected a batch step rename, or a way to defer the per-write commit until the set is consistent
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-20-plan-step-renumbering-brief.md — evidence and alternatives for consistent plan-step renumbering
