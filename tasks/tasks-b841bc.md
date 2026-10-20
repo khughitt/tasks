@@ -6,8 +6,8 @@ priority: 3
 complexity: high
 process: planned
 created: 2026-10-19T15:11:58Z
-updated: 2026-10-20T01:41:06Z
-depends: []
+updated: 2026-10-20T01:41:08Z
+depends: [tasks-d09e87]
 parent: tasks-7102c1
 tags: []
 source: "tasks-3a445e:followup-cross-project-refs"
