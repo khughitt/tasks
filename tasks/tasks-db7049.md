@@ -4,8 +4,8 @@ title: "tasks --version cannot tell a host's binary from main's: it stays 0.4.0 
 status: idea
 priority: 2
 created: 2026-10-19T18:53:30Z
-updated: 2026-10-20T01:58:12Z
-depends: []
+updated: 2026-10-20T01:58:14Z
+depends: [tasks-e3fdce]
 parent: tasks-83e0e1
 tags: []
 source: tasks-f0c643
