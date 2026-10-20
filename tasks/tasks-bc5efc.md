@@ -4,8 +4,14 @@ title: `tasks list --all-projects --status todo --status doing --status blocked`
 status: idea
 priority: 2
 created: 2026-10-19T18:17:10Z
-updated: 2026-10-19T18:17:10Z
+updated: 2026-10-20T02:02:22Z
 depends: []
 tags: [feedback, idea, "from:dots"]
 agent: claude-code
 ---
+
+Scope handoff: [ref:brief] records the current code, unresolved contract or measurement question, and the follow-up that must answer it before implementation is scoped.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-19-cli-consumer-reads-brief.md — current evidence, constraints and next questions
