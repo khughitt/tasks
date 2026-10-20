@@ -6,8 +6,8 @@ priority: 3
 complexity: high
 process: planned
 created: 2026-10-19T15:12:01Z
-updated: 2026-10-20T01:41:12Z
-depends: []
+updated: 2026-10-20T01:41:14Z
+depends: [tasks-c8ad5b]
 parent: tasks-7102c1
 tags: []
 source: "tasks-3a445e:followup-pinned-refs"
