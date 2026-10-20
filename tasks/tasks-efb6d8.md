@@ -4,8 +4,8 @@ title: "add refuses a body citing `[ref:x]` for an attachment, which can only be
 status: idea
 priority: 2
 created: 2026-10-19T21:32:49Z
-updated: 2026-10-20T01:41:17Z
-depends: []
+updated: 2026-10-20T01:41:19Z
+depends: [tasks-4216a2]
 parent: tasks-7102c1
 tags: [feedback, gap, "from:ops"]
 agent: claude-code/claude-opus-5-5
