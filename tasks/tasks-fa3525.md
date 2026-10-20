@@ -4,8 +4,8 @@ title: "A scope pass's drop-as-covered verdict tests topical overlap, not each d
 status: idea
 priority: 2
 created: 2026-10-20T11:40:51Z
-updated: 2026-10-20T14:27:08Z
-depends: []
+updated: 2026-10-20T14:27:10Z
+depends: [tasks-441019]
 parent: tasks-9b1c2b
 tags: [feedback, friction, "from:lore"]
 agent: claude-code
