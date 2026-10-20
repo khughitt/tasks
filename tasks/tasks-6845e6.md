@@ -3,8 +3,10 @@ id: tasks-6845e6
 title: tasks projects reports each project's name and purpose from its identity.toml
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-20T02:03:25Z
 created: 2026-10-17T21:04:56Z
-updated: 2026-10-20T02:03:23Z
+updated: 2026-10-20T02:03:25Z
 depends: [tasks-48216e]
 parent: tasks-96c00c
 tags: []
@@ -23,3 +25,7 @@ Scope handoff: [ref:brief] records the current code, unresolved contract or meas
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-19-cli-consumer-reads-brief.md — current evidence, constraints and next questions
+
+## Notes
+
+- 2026-10-20T02:03:25Z (main): scope: briefed; preserved the user decision and source; schema, linked-root authority and invalid-file behavior need verification; waits on tasks-48216e; evidence: 89c58a7 and tasks 0.4.0; brief: docs/notes/2026-10-19-cli-consumer-reads-brief.md
