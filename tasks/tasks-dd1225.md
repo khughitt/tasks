@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-10T17:51:21Z
-updated: 2026-10-10T17:51:21Z
+updated: 2026-10-20T14:41:13Z
 depends: []
 tags: [cli]
 source: "tasks-6939f6:final-review:M1"
@@ -15,3 +15,7 @@ agent: codex
 ---
 
 Deferred final-review Minor M1 from tasks-6939f6: automatic commit grouping correctly runs at the Git working-tree top level, but its warning tells a nested or linked project to run tasks commit there, which can select no project or the wrong one. Keep one commit per working tree; render explicit recovery commands against each affected project root while preserving the actual worktree route. Cover a nested project and a shared-repository write.
+
+## Notes
+
+- 2026-10-20T14:41:13Z (main): coordination: tasks-236f4c rewrites the destination wording of the same commit_failed string (src/record_commit.rs::failed) to name a new tasks-skill heading; whichever lands second rebases onto the other's string. Neither absorbs the other.
