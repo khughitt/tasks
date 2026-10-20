@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: direct
 created: 2026-10-20T14:26:02Z
-updated: 2026-10-20T14:40:47Z
+updated: 2026-10-20T14:41:17Z
 depends: []
 parent: tasks-9b1c2b
 tags: []
@@ -28,3 +28,7 @@ Ideas it wakes: On completion, run `tasks note tasks-fb861e --no-reviewed "<find
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-20-feedback-ask-preservation-brief.md — evidence, distinct asks, alternatives and ownership boundaries
+
+## Notes
+
+- 2026-10-20T14:41:17Z (main): scope: rescoped (review of the brief, 2026-10-20); retitled to name the outcome; added the tasks skill's documented tasks search check as a compared baseline and the global one-command feedback rule as a constraint to note.
