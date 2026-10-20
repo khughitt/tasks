@@ -3,8 +3,10 @@ id: tasks-fa3525
 title: "A scope pass's drop-as-covered verdict tests topical overlap, not each distinct ask: a blind audit of 71 coverage drops found 11 lost an ask that no task carries, 10 of which the filed report itself stated, and 9 more called a deliberate decline 'covered'"
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-20T14:27:11Z
 created: 2026-10-20T11:40:51Z
-updated: 2026-10-20T14:27:10Z
+updated: 2026-10-20T14:27:11Z
 depends: [tasks-441019]
 parent: tasks-9b1c2b
 tags: [feedback, friction, "from:lore"]
@@ -31,3 +33,4 @@ Audit method and per-report table are attached. Proposal for the scope skill's d
 - 2026-10-20T12:43:01Z (main): attached: audit-method.tar.gz (6501 bytes): Audit method: inventory, origin-locating and packet-building scripts plus the judge prompt, for re-running the audit after this change
 - 2026-10-20T12:44:30Z (main): Follow-up corrections (labels attached as audit-labels.csv; method as audit-method.tar.gz): 8 of 71 coverage drops lost an ask at drop time (11%); 3 of the audit's 11 lost verdicts were wrong, one because the covering task gained the ask 13 minutes after the drop, outside the packet's five-minute snapshot window. For the planned re-run: judge each ask both at the drop and now, widen the snapshot to the whole scope pass, and give the judge later tasks that cite the report's id (one lost ask resurfaced as a re-report 8 days later). User asks: both lost asks from user-involved reports were the user's own words (2 of 6 such reports, against 6 of 65 agent-observed ones), so the proposal's rule could go further: a report relaying the user's ask is never dropped as covered without the user's ruling (awaiting-user), and a decline of it reaches the user as a question.
   provenance: {"harness_session":"claude-code:737a5757-83af-4e31-9fdd-4ce70dd9e6f1","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-20T14:27:11Z (main): scope: briefed; checked 88c242e and attached audit/corrections: scope lacks per-ask commitment checks and verified carry. Latest baseline is 8/71 lost at drop time, distinct from four unresolved losses later carried; timing discrepancy remains explicit. Retain skill-versus-CLI carry, user-relayed ruling, declined/pending distinctions and post-change audit in tasks-441019; historical follow-up already belongs to ops-f4950c; brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md
