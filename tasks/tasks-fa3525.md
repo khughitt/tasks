@@ -4,7 +4,7 @@ title: "A scope pass's drop-as-covered verdict tests topical overlap, not each d
 status: idea
 priority: 2
 created: 2026-10-20T11:40:51Z
-updated: 2026-10-20T12:43:01Z
+updated: 2026-10-20T12:44:30Z
 depends: []
 tags: [feedback, friction, "from:lore"]
 agent: claude-code
@@ -24,3 +24,5 @@ Audit method and per-report table are attached. Proposal for the scope skill's d
 - 2026-10-20T12:25:05Z (main): idea from the lost-ask follow-up: once this proposal lands, re-run the blind coverage-drop audit on the drops made after it to measure the change, against this baseline: 71 judged, 11 lost and 9 declined-but-called-covered, of which only 4 of the 10 lost verdicts checked held up. Two method fixes from the follow-up: snapshot covering tasks later than five minutes after the drop (ns-80a711 was edited 7.5 min after), and check tasks filed after the drop before calling an ask lost (lore-4e50e7 held flows-79e5a0's). obs could own it as an outcome measure.
 - 2026-10-20T12:42:58Z (main): attached: audit-labels.csv (6006 bytes): Per-report labels for all 72 coverage drops: judge verdict, category, and the 2026-10-20 follow-up's correction for the lost asks
 - 2026-10-20T12:43:01Z (main): attached: audit-method.tar.gz (6501 bytes): Audit method: inventory, origin-locating and packet-building scripts plus the judge prompt, for re-running the audit after this change
+- 2026-10-20T12:44:30Z (main): Follow-up corrections (labels attached as audit-labels.csv; method as audit-method.tar.gz): 8 of 71 coverage drops lost an ask at drop time (11%); 3 of the audit's 11 lost verdicts were wrong, one because the covering task gained the ask 13 minutes after the drop, outside the packet's five-minute snapshot window. For the planned re-run: judge each ask both at the drop and now, widen the snapshot to the whole scope pass, and give the judge later tasks that cite the report's id (one lost ask resurfaced as a re-report 8 days later). User asks: both lost asks from user-involved reports were the user's own words (2 of 6 such reports, against 6 of 65 agent-observed ones), so the proposal's rule could go further: a report relaying the user's ask is never dropped as covered without the user's ruling (awaiting-user), and a decline of it reaches the user as a question.
+  provenance: {"harness_session":"claude-code:737a5757-83af-4e31-9fdd-4ce70dd9e6f1","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
