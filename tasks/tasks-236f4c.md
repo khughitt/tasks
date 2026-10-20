@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-20T11:42:26Z
-updated: 2026-10-20T14:41:00Z
+updated: 2026-10-20T14:41:19Z
 depends: []
 parent: tasks-6ed79b
 tags: [feedback, friction, "from:lore"]
@@ -29,3 +29,4 @@ Original report (preserved): commit_failed from a refusing hook tells the agent 
 ## Notes
 
 - 2026-10-20T14:27:25Z (main): scope: scoped; 88c242e and f62e840 establish that the recovery routes exist under Process and workspace. Narrowed to a named heading and precise warning/doc references; P2/xs/low/direct with existing warning tests and content checks. tasks-dd1225 remains the separate project-root fix; brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md
+- 2026-10-20T14:41:19Z (main): scope: rescoped (review of the brief, 2026-10-20); brief ref demoted from required input to context, since the body holds all of it; tasks-dd1225 boundary stated in the body and noted there; parented under the guidance lane tasks-6ed79b beside tasks-9a9ef3's skill trim.
