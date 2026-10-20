@@ -4,8 +4,8 @@ title: "Feedback entries record no session provenance, so a scope pass must reco
 status: idea
 priority: 2
 created: 2026-10-20T11:06:59Z
-updated: 2026-10-20T14:27:18Z
-depends: []
+updated: 2026-10-20T14:27:20Z
+depends: [tasks-441019]
 parent: tasks-9b1c2b
 tags: [feedback, idea, "from:lore"]
 agent: claude-code
