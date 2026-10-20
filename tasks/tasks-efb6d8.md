@@ -3,8 +3,10 @@ id: tasks-efb6d8
 title: "add refuses a body citing `[ref:x]` for an attachment, which can only be attached once the task exists: filing a task around an attached file takes add without the citation, attach, then edit --ref"
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-20T01:41:21Z
 created: 2026-10-19T21:32:49Z
-updated: 2026-10-20T01:41:19Z
+updated: 2026-10-20T01:41:21Z
 depends: [tasks-4216a2]
 parent: tasks-7102c1
 tags: [feedback, gap, "from:ops"]
@@ -18,3 +20,7 @@ Scope handoff: [ref:brief] records the verified implementation limits, alternati
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-19-reference-extensions-brief.md — evidence, alternatives, and the follow-up that wakes this idea
+
+## Notes
+
+- 2026-10-20T01:41:21Z (main): scope: briefed; verified reference limits in d242e98, 7e8f4f0, 3d35e51 and current attachment validation; preserved source and body; waits on tasks-4216a2; brief: docs/notes/2026-10-19-reference-extensions-brief.md
