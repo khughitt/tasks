@@ -6,8 +6,9 @@ priority: 3
 complexity: high
 process: planned
 created: 2026-10-19T15:11:58Z
-updated: 2026-10-19T15:11:59Z
+updated: 2026-10-20T01:41:06Z
 depends: []
+parent: tasks-7102c1
 tags: []
 source: "tasks-3a445e:followup-cross-project-refs"
 agent: codex
@@ -18,6 +19,12 @@ Why: task references currently reject a leading @, so a task cannot hold a struc
 Scope to settle: project-qualified syntax and canonical identity, registry aliases and prefix renames, project/document-root selection, linked checkouts and worktree/main precedence, unavailable-project diagnostics, and how writing, doc, inventory, check and list filtering share the same resolution contract. Coordinate with tasks-dc16eb (document roots), tasks-a73dce (branch-only document resolution), and tasks-91c622 (cross-project scoping); do not duplicate those tasks or assume their migrations must finish before design.
 
 Done when scoped and, if pursued, a reviewed design defines cross-project reference behavior and compatibility/rollout. Do not copy shared briefs between projects or introduce an implementation before that design.
+
+Scope handoff: [ref:brief] records the verified implementation limits, alternatives, and related work. Wait for tasks-d09e87 to return its design or investigation finding, then re-scope this idea; no implementation approach is approved by this pass.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-19-reference-extensions-brief.md — evidence, alternatives, and the follow-up that wakes this idea
 
 ## Notes
 
