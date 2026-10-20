@@ -4,8 +4,9 @@ title: tasks projects reports each project's name and purpose from its identity.
 status: idea
 priority: 2
 created: 2026-10-17T21:04:56Z
-updated: 2026-10-20T02:02:17Z
+updated: 2026-10-20T02:03:21Z
 depends: []
+parent: tasks-96c00c
 tags: []
 source: "tui:docs/notes/2026-09-15-project-identity-brief.md"
 agent: claude-code/claude-opus-5-5
