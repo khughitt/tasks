@@ -6,8 +6,8 @@ priority: 2
 reviewed: true
 reviewed_at: 2026-10-20T14:27:21Z
 created: 2026-10-20T11:06:59Z
-updated: 2026-10-20T14:27:21Z
-depends: [tasks-441019]
+updated: 2026-10-20T14:40:35Z
+depends: [tasks-a58a90]
 parent: tasks-9b1c2b
 tags: [feedback, idea, "from:lore"]
 agent: claude-code
