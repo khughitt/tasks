@@ -5,8 +5,10 @@ status: idea
 priority: 3
 complexity: high
 process: planned
+reviewed: true
+reviewed_at: 2026-10-20T01:41:15Z
 created: 2026-10-19T15:12:01Z
-updated: 2026-10-20T01:41:14Z
+updated: 2026-10-20T01:41:15Z
 depends: [tasks-c8ad5b]
 parent: tasks-7102c1
 tags: []
@@ -29,3 +31,4 @@ Scope handoff: [ref:brief] records the verified implementation limits, alternati
 ## Notes
 
 - 2026-10-19T15:12:02Z (main): concerns: tasks-3a445e extension — retain the exact report or review version that supported a task decision
+- 2026-10-20T01:41:15Z (main): scope: briefed; verified reference limits in d242e98, 7e8f4f0, 3d35e51 and current attachment validation; preserved source and body; waits on tasks-c8ad5b; brief: docs/notes/2026-10-19-reference-extensions-brief.md
