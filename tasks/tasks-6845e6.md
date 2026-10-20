@@ -4,7 +4,7 @@ title: tasks projects reports each project's name and purpose from its identity.
 status: idea
 priority: 2
 created: 2026-10-17T21:04:56Z
-updated: 2026-10-17T21:04:56Z
+updated: 2026-10-20T02:02:17Z
 depends: []
 tags: []
 source: "tui:docs/notes/2026-09-15-project-identity-brief.md"
@@ -16,3 +16,9 @@ Why: tasks-tui's Projects view shows each checkout's directory basename as the p
 Shape: two optional fields on `ProjectRow` (src/output.rs), filled in src/commands/projects.rs beside `color`, omitted when the root has no `identity.toml` or the project is unreachable, like `color` and `checkout`.
 
 Left for scoping here: a malformed or unreadable `identity.toml` (error vs a `warnings` entry); whether `aliases` travel too (the TUI's lean: filter-only, if at all); whether the pretty table shows the name.
+
+Scope handoff: [ref:brief] records the current code, unresolved contract or measurement question, and the follow-up that must answer it before implementation is scoped.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-19-cli-consumer-reads-brief.md — current evidence, constraints and next questions
