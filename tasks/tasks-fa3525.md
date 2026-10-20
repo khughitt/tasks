@@ -4,7 +4,7 @@ title: "A scope pass's drop-as-covered verdict tests topical overlap, not each d
 status: idea
 priority: 2
 created: 2026-10-20T11:40:51Z
-updated: 2026-10-20T12:25:03Z
+updated: 2026-10-20T12:25:05Z
 depends: []
 tags: [feedback, friction, "from:lore"]
 agent: claude-code
@@ -21,3 +21,4 @@ Audit method and per-report table are attached. Proposal for the scope skill's d
 - 2026-10-20T12:03:36Z (main): correction to the previous note: ns-80a711 was edited 7.5 min after ops-11a4a6's drop (drop 02:14:17Z, edit 02:21:50Z on 2026-10-17), 13 min after the drop proposal; still outside the five-minute snapshot window.
 - 2026-10-20T12:21:25Z (main): pattern from the lost-ask follow-up, for the proposal: in 3 of the 4 losses that held up, the drop note itself named what to carry, but nobody wrote it onto the covering task: ops-fec58a ("raise it there if opt-out is wanted"), hq-872750 ("carry the errored-turn case ... into relay-6825f7 as a design input"), lore-c21298 ("its cleanup walkthrough should confirm the owning task identifies each retained ledger"). So the drop step itself should write each carried ask onto the covering task when the drop executes, not leave it as advice in the drop note; the user's approval of a drop ("ops-fec58a drop approved.") does not move the ask. Separately, nothing on a report marks that it relays the user's own words: telling took the origin session (ops-fec58a), so a scope pass cannot hold such a drop for the user's ruling. tasks-516ab4's stamp would make the words findable; a filing-time marker would make them visible. The remaining 14 partial verdicts are ops-f4950c.
 - 2026-10-20T12:25:03Z (main): idea from the lost-ask follow-up: make the carry mechanical rather than an instruction, e.g. `tasks drop <id> "<why>" --carry <covering-id> "<ask>"`, which writes a note on the covering task naming the dropped id in the same command. Then an approved drop cannot leave its carry as advice in the drop note, which is what happened in 3 of the 4 losses that held up. Scoping chooses between the scope skill's drop step and a CLI option; a new CLI option starts in ops's cli.toml.
+- 2026-10-20T12:25:05Z (main): idea from the lost-ask follow-up: once this proposal lands, re-run the blind coverage-drop audit on the drops made after it to measure the change, against this baseline: 71 judged, 11 lost and 9 declined-but-called-covered, of which only 4 of the 10 lost verdicts checked held up. Two method fixes from the follow-up: snapshot covering tasks later than five minutes after the drop (ns-80a711 was edited 7.5 min after), and check tasks filed after the drop before calling an ask lost (lore-4e50e7 held flows-79e5a0's). obs could own it as an outcome measure.
