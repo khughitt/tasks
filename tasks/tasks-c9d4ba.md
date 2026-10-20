@@ -4,8 +4,8 @@ title: "Renumbering a plan's step headings needs one edit per step child, and ea
 status: idea
 priority: 2
 created: 2026-10-18T22:14:12Z
-updated: 2026-10-20T09:10:43Z
-depends: []
+updated: 2026-10-20T09:10:45Z
+depends: [tasks-110ba6]
 parent: tasks-e959ec
 tags: [feedback, friction, "from:crew"]
 agent: claude-code/claude-opus-5-5
