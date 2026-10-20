@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-02T14:29:35Z
-updated: 2026-10-14T13:29:49Z
+updated: 2026-10-20T14:41:14Z
 depends: []
 parent: tasks-ffdbaa
 tags: []
@@ -26,3 +26,4 @@ Ideas it wakes: Record the approved finding on tasks-c591da and tasks-4e8cef and
 - 2026-10-12T19:18:37Z (main): Review-state rollout tasks-b8f3c9 is now complete on both reading hosts; this supersedes the earlier activation-pending note. Use list --status idea --needs-review for eligibility, note --reviewed for scope decisions, and note --no-reviewed for findings that readmit an idea. Evidence: tasks/files/tasks-b8f3c9/review-state-rollout.json. No separate cross-project review-state task is needed.
 - 2026-10-13T09:55:52Z (main): Design input from scope pass 2026-10-13: the user ruled that a scope pass may move a misfiled record into its owning project without approval (tasks-19d4fe adds a refile verdict via tasks move); the cross-project contract should allow that one write outside the fixed root.
 - 2026-10-14T13:29:49Z (main): Eligibility update 2026-10-14: scope's default selection now reads tasks list --needs-review (unreviewed ideas first, then process-less todo/blocked rows as re-scopes), superseding the --status idea --needs-review rule in the 2026-10-11/12 notes; see skills/scope/SKILL.md §1 and the review-state spec's 2026-10-14 amendment (tasks-3333bc).
+- 2026-10-20T14:41:14Z (main): Design input from the 2026-10-20 review of the feedback ask-preservation brief: a verified carry, which writes a dropped report's ask onto its covering task before the drop, is a second write a scope pass may need outside its fixed root (ops-fec58a's carry went to tasks-1dd2a0; hq-872750's covering tasks are in relay). tasks-441019 decides whether the carry exists and takes its cross-project contract from this design.
