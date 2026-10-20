@@ -4,7 +4,7 @@ title: "Feedback entries record no session provenance, so a scope pass must reco
 status: idea
 priority: 2
 created: 2026-10-20T11:06:59Z
-updated: 2026-10-20T11:13:03Z
+updated: 2026-10-20T11:15:32Z
 depends: []
 tags: [feedback, idea, "from:lore"]
 agent: claude-code
@@ -18,3 +18,5 @@ A pilot recovered the user's original request behind a title-only report only by
   provenance: {"harness_session":"claude-code:737a5757-83af-4e31-9fdd-4ce70dd9e6f1","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-20T11:13:03Z (main): Follow-up suggestion from the conversation stamped here (not an implementation decision): retain both a short tool-level account and source provenance. Stamp every new report and recurrence separately. Distinguish the reporting session from an older origin session; add a turn or tool-call anchor when available, otherwise record the timestamp and label a recovered match as inferred. Scope should read the relevant request, action, tool result and later correction, not only the nearest human turn. Acceptance should demonstrate retrieval from a live transcript and its archived copy, an explicit unavailable result, and retrieval or an explicit limitation on another host. Archive preservation alone does not establish reader reachability.
   provenance: {"harness_session":"codex:01a158ff-0fbd-7203-aca5-281026150307","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-20T11:15:32Z (main): Acceptance detail, verified in this session: (1) session-episodes reads only the default Claude projects store and the Codex sessions store (each env-overridable), not a second harness home, Codex archived sessions or the backup archive, so reachability needs work beyond stamping. (2) --stamp records only the session id, and neither harness exposes a turn or tool-call id to a running command, so the occurrence is found by matching the filing call's time and text and must be labelled inferred. (3) A blind pilot on a real report must run against the records as they stood at filing (their creating commits) in a disposable project. Later scope notes, corrections and the discussing session already hold the answer, so a fresh agent restricted to the reporting session must recover each distinct ask and say which existing task covers it.
+  provenance: {"harness_session":"claude-code:737a5757-83af-4e31-9fdd-4ce70dd9e6f1","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
