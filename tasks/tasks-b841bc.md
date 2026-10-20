@@ -5,8 +5,10 @@ status: idea
 priority: 3
 complexity: high
 process: planned
+reviewed: true
+reviewed_at: 2026-10-20T01:41:10Z
 created: 2026-10-19T15:11:58Z
-updated: 2026-10-20T01:41:08Z
+updated: 2026-10-20T01:41:10Z
 depends: [tasks-d09e87]
 parent: tasks-7102c1
 tags: []
@@ -29,3 +31,4 @@ Scope handoff: [ref:brief] records the verified implementation limits, alternati
 ## Notes
 
 - 2026-10-19T15:11:59Z (main): concerns: tasks-3a445e extension — support structured references to documents held by another project
+- 2026-10-20T01:41:10Z (main): scope: briefed; verified reference limits in d242e98, 7e8f4f0, 3d35e51 and current attachment validation; preserved source and body; waits on tasks-d09e87; brief: docs/notes/2026-10-19-reference-extensions-brief.md
