@@ -6,7 +6,7 @@ priority: 2
 reviewed: true
 reviewed_at: 2026-10-20T14:27:21Z
 created: 2026-10-20T11:06:59Z
-updated: 2026-10-20T14:40:35Z
+updated: 2026-10-20T14:41:20Z
 depends: [tasks-a58a90]
 parent: tasks-9b1c2b
 tags: [feedback, idea, "from:lore"]
@@ -34,3 +34,4 @@ A pilot recovered the user's original request behind a title-only report only by
 - 2026-10-20T12:21:27Z (main): Case from the coverage-drop audit follow-up (tasks-fa3525), 2026-10-20: lore-c21298's scope pass recorded "No originating transcript is linked, so the reported recovery is not independently verified" and dropped it as covered; the origin session showed the incident was real and the ask was lost. A session stamp on the report would have let that pass verify it. ops-fec58a's user words were likewise recoverable only by searching the session stores.
   provenance: {"harness_session":"claude-code:40cb347f-4334-45a0-bd26-2650ae480230","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-20T14:27:21Z (main): scope: briefed; checked 88c242e: feedback creation and recurrence are unstamped, while native append_stamped_note exists. tasks-441019 retains occurrence/origin distinctions, short summaries, user-relayed marker, inferred anchors, live/archive/parent/other-host retrieval and blind pilot. Reuse hq-c411df, lore-c01bc8 and obs-c5c599 ownership; no duplicate reader or trace task; brief: docs/notes/2026-10-20-feedback-ask-preservation-brief.md
+- 2026-10-20T14:41:20Z (main): wait moved 2026-10-20: tasks-441019 was split; this idea now waits on tasks-a58a90 (occurrence provenance design), which carries every requirement the 14:27 scope note listed for it.
