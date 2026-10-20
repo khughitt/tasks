@@ -4,10 +4,15 @@ title: "tasks feedback's duplicate check misses paraphrased duplicates and ignor
 status: idea
 priority: 2
 created: 2026-10-20T12:44:29Z
-updated: 2026-10-20T12:44:29Z
+updated: 2026-10-20T14:27:13Z
 depends: []
+parent: tasks-9b1c2b
 tags: [feedback, gap, "from:lore"]
 agent: claude-code
 ---
 
 In the coverage-drop audit (attached to tasks-fa3525), 47 drop links pointed to an earlier open-or-recent feedback task in the same project whose title paraphrased the new one (token similarity found no match), and 11 drops had only an ordinary covering task that predated the report, which the check never considers. Proposal: on filing, print the few most similar open tasks in the owner project, feedback or not, by a looser or semantic match, without blocking; the filer then recurs or adds its distinct ask as a note on the right one, or files new. Coverage drops were 72 of 117 drop proposals, and 8 of 71 audited coverage drops lost an ask.
+
+## References
+
+- brief (input, required, kind=brief): docs/notes/2026-10-20-feedback-ask-preservation-brief.md — evidence, distinct asks, alternatives and ownership boundaries
