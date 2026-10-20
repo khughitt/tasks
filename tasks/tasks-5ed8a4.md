@@ -4,8 +4,8 @@ title: "Widen the priority scale: most tasks sit at the P2 default, leaving litt
 status: idea
 priority: 2
 created: 2026-10-18T22:39:46Z
-updated: 2026-10-20T09:11:40Z
-depends: []
+updated: 2026-10-20T09:11:41Z
+depends: [mind6-8a54c8]
 parent: tasks-298107
 tags: [quick-add]
 source: "mindful:thought:0082fda09c0ec41dcf9f2ae116727ea5"
