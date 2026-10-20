@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-18T10:27:11Z
-updated: 2026-10-20T09:09:32Z
+updated: 2026-10-20T09:09:33Z
 depends: []
 parent: tasks-5408fe
 tags: [feedback, idea, "from:forge"]
@@ -20,3 +20,7 @@ Done: Update skills/scope/SKILL.md to assess the existing goals touched by a pas
 Where to look: skills/scope/SKILL.md sections 4 and 7; skills/tasks/SKILL.md lane guidance; docs/specs/2026-10-03-lanes-needs-groups-design.md. Code and guidance checked at 7a7c85c; scope's lane paragraph is limited to new-goal creation. This belongs under the existing review-pass follow-through goal tasks-5408fe, inside the work discovery lane.
 
 Original report: scope skill: lane guidance only fires when a pass creates a new goal; a pass that reuses an existing top-level goal or re-scopes its children never assesses whether that goal should be a lane. Suggest: report lane candidates in the summary (flag, don't set), since lane choice is scheduling the user owns, like priority on a re-scope
+
+## Notes
+
+- 2026-10-20T09:09:33Z (main): scope: scoped; established the new-goal-only lane guidance at 7a7c85c; P2/xs/low/direct documentation change reports candidates for reused goals without setting lanes, changing priorities, or nesting lanes; parented under tasks-5408fe; original report preserved in body
