@@ -4,7 +4,7 @@ title: "Feedback entries record no session provenance, so a scope pass must reco
 status: idea
 priority: 2
 created: 2026-10-20T11:06:59Z
-updated: 2026-10-20T11:07:16Z
+updated: 2026-10-20T11:13:03Z
 depends: []
 tags: [feedback, idea, "from:lore"]
 agent: claude-code
@@ -16,3 +16,5 @@ A pilot recovered the user's original request behind a title-only report only by
 
 - 2026-10-20T11:07:16Z (main): context: the user proposed this in the session stamped on this note (2026-10-20). The user asked either for capture when a report is filed (exact user input and a summary of the surrounding context) or for retroactive extraction from session logs, noting the risk that logs do not persist; and separately for a trace system across the task, harness, evidence and flow tools to locate where friction originates.
   provenance: {"harness_session":"claude-code:737a5757-83af-4e31-9fdd-4ce70dd9e6f1","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-20T11:13:03Z (main): Follow-up suggestion from the conversation stamped here (not an implementation decision): retain both a short tool-level account and source provenance. Stamp every new report and recurrence separately. Distinguish the reporting session from an older origin session; add a turn or tool-call anchor when available, otherwise record the timestamp and label a recovered match as inferred. Scope should read the relevant request, action, tool result and later correction, not only the nearest human turn. Acceptance should demonstrate retrieval from a live transcript and its archived copy, an explicit unavailable result, and retrieval or an explicit limitation on another host. Archive preservation alone does not establish reader reachability.
+  provenance: {"harness_session":"codex:01a158ff-0fbd-7203-aca5-281026150307","harness_session_source":"CODEX_THREAD_ID"}
