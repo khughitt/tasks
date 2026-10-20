@@ -4,8 +4,8 @@ title: An older tasks binary reading records written by a newer one reports a ma
 status: idea
 priority: 2
 created: 2026-10-19T09:19:07Z
-updated: 2026-10-20T01:57:59Z
-depends: []
+updated: 2026-10-20T01:58:01Z
+depends: [tasks-e3fdce]
 parent: tasks-83e0e1
 tags: [feedback, friction, "from:hq"]
 agent: claude-code/claude-opus-5-5
