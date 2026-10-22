@@ -7,7 +7,7 @@ size: s
 complexity: mid
 process: planned
 created: 2026-10-22T20:35:03Z
-updated: 2026-10-22T20:35:03Z
+updated: 2026-10-22T20:36:47Z
 depends: [ops-e4d678]
 tags: []
 source: ops-e4d678
@@ -25,3 +25,7 @@ Done: reviewed candidate policy/skill text with acceptance assertions supplied t
 ## References
 
 - design (input, required, kind=spec): ops:docs/specs/2026-10-22-interactive-walkthrough-design.md — accepted frozen ops e21ea75
+
+## Notes
+
+- 2026-10-22T20:36:47Z (main): attached: walkthrough-design-e21ea75.md (33256 bytes): Accepted design frozen at ops e21ea75; sha256 df835af8428626da6284972352edeffa749429e1c209fc183e62a3801f30c70a
