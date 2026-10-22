@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: records-detached
 created: 2026-10-22T20:54:24Z
-updated: 2026-10-22T21:43:50Z
+updated: 2026-10-22T21:51:12Z
 started: 2026-10-22T21:07:05Z
 depends: []
 tags: []
@@ -33,4 +33,6 @@ Implement the tasks CLI part of the approved design (tasks:docs/specs/2026-10-22
 - 2026-10-22T21:38:45Z (records-detached): review: plan round 1 — verdict: revise; findings: P1 2, P2 6; reviewer: codex/gpt-6-astra
 - 2026-10-22T21:43:48Z (records-detached): plan round 1 fixes (revision 2, 2d70542): rename keeps identity (root) and current records directory apart in Invocation, Inventory (records_from/records_to), Snapshot (RecordsDir, records_old/new) and classify; fixtures build git env with env_clear and assert the fixture repo before writes, TestEnv drops GIT_* except GIT_CEILING_DIRECTORIES; effective_retirement, reject_retired, check and retire::authority compare config_dir with records; init --records on an existing config sets [git] commit = true and carries validate_checkout's overlap checks; projects rows always carry records, checkout/kind when the config was read (decision 3 revised); Task 2 spec test commits the spec before edit; just test after Task 9 and on the branch head; D4 and D6 costs documented.
 - 2026-10-22T21:43:50Z (records-detached): parked (waiting on user, review): User reviews plan revision 2 at commit 2d70542 on branch records-detached (.worktrees/records-detached/docs/plans/2026-10-22-records-detached.md; read it with git show 2d70542:docs/plans/2026-10-22-records-detached.md); then the agent revises again as a new commit, or links the plan (tasks edit tasks-211e28 --plan 2026-10-22-records-detached), files the step children per its Tracking section, runs the just test baseline, and executes subagent-driven
+  provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T21:51:12Z (records-detached): resumed
   provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
