@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: fix/tasks-f23cd5-git-isolation
 created: 2026-10-18T14:59:28Z
-updated: 2026-10-22T23:37:44Z
+updated: 2026-10-22T23:38:14Z
 started: 2026-10-22T23:37:44Z
 depends: []
 tags: [testing]
@@ -22,4 +22,6 @@ tasks-eeeeda stopped the HOME leak and made the test-only git helper in src/reco
 
 - 2026-10-18T14:59:30Z (main): concerns: tasks-eeeeda extension — the HOME-leak fix left production record commits in unit tests reading the host's global git config
 - 2026-10-22T23:37:44Z (main): started
+  provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-22T23:38:14Z (fix/tasks-f23cd5-git-isolation): resumed
   provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
