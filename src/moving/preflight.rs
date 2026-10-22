@@ -192,7 +192,7 @@ fn validate_destination_docs(
             continue;
         };
         match resolver.locate_entry(path)? {
-            LocatedEntry::Here(_) | LocatedEntry::Main { .. } => {}
+            LocatedEntry::Here(_) | LocatedEntry::Main { .. } | LocatedEntry::Code(_) => {}
             LocatedEntry::Missing => {
                 return Err(Error::Validation(format!(
                     "{source}: reference {} {} does not exist in {}; run `tasks edit {source} --rm-ref {}` or create it there",

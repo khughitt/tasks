@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::registry::Registry;
-use crate::repo::Project;
+use crate::repo::{Kind, Project};
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -93,13 +93,19 @@ impl DocKind {
 /// as missing; otherwise every fresh worktree of such a project fails its own gate.
 pub enum Located {
     Here(PathBuf),
-    Main { root: PathBuf, path: PathBuf },
+    Main {
+        root: PathBuf,
+        path: PathBuf,
+    },
+    /// Under a detached project's code tree: a reference document kept there by design.
+    Code(PathBuf),
     Missing,
 }
 
 pub enum LocatedEntry {
     Here(PathBuf),
     Main { root: PathBuf, path: PathBuf },
+    Code(PathBuf),
     Special(PathBuf),
     Missing,
 }
@@ -119,10 +125,16 @@ pub(crate) fn refuse_special(path: &Path) -> Result<()> {
 impl Located {
     pub fn into_path(self) -> Option<PathBuf> {
         match self {
-            Located::Here(path) | Located::Main { path, .. } => Some(path),
+            Located::Here(path) | Located::Main { path, .. } | Located::Code(path) => Some(path),
             Located::Missing => None,
         }
     }
+}
+
+enum Base {
+    Here,
+    Main(PathBuf),
+    Code(PathBuf),
 }
 
 pub struct Resolver<'a> {
@@ -183,50 +195,69 @@ impl<'a> Resolver<'a> {
         Ok(self.main.get_or_init(|| main).as_ref())
     }
 
-    /// `rel` in this checkout, else in the main checkout (see [`Located`]).
-    pub fn locate(&self, rel: &str) -> Result<Located> {
-        let here = self.project.doc_path(rel);
-        if here.is_file() {
-            return Ok(Located::Here(here));
+    /// Where documents are looked for, in order: the records directory; the main checkout
+    /// of the records repository when records is a linked worktree of it; for a detached
+    /// project, the code worktree the command runs in and then the code root.
+    fn bases(&self) -> Result<Vec<Base>> {
+        let mut bases = vec![Base::Here];
+        if let Some(main) = self.main_root()? {
+            bases.push(Base::Main(main.clone()));
         }
-        Ok(match self.main_root()? {
-            Some(root) if root.join(rel).is_file() => Located::Main {
-                root: root.clone(),
-                path: root.join(rel),
-            },
-            _ => Located::Missing,
-        })
+        if self.project.kind == Kind::Detached {
+            let resume = self.project.resume_root();
+            bases.push(Base::Code(resume.to_path_buf()));
+            if resume != self.project.root {
+                bases.push(Base::Code(self.project.root.clone()));
+            }
+        }
+        Ok(bases)
+    }
+
+    fn base_dir<'b>(&'b self, base: &'b Base) -> &'b Path {
+        match base {
+            Base::Here => &self.project.records,
+            Base::Main(root) | Base::Code(root) => root,
+        }
+    }
+
+    /// `rel` in the first base that holds it (see [`Located`] and [`Self::bases`]).
+    pub fn locate(&self, rel: &str) -> Result<Located> {
+        for base in self.bases()? {
+            let root = self.base_dir(&base);
+            let path = root.join(rel);
+            if !path.is_file() {
+                continue;
+            }
+            return Ok(match &base {
+                Base::Here => Located::Here(path),
+                Base::Main(_) => Located::Main {
+                    root: root.to_path_buf(),
+                    path,
+                },
+                Base::Code(_) => Located::Code(path),
+            });
+        }
+        Ok(Located::Missing)
     }
 
     pub fn locate_entry(&self, rel: &str) -> Result<LocatedEntry> {
-        let here = self.project.doc_path(rel);
-        match std::fs::metadata(&here) {
-            Ok(meta) => {
-                return Ok(if meta.is_file() || meta.is_dir() {
-                    LocatedEntry::Here(here)
-                } else {
-                    LocatedEntry::Special(here)
-                });
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
-        if let Some(root) = self.main_root()? {
+        for base in self.bases()? {
+            let root = self.base_dir(&base);
             let path = root.join(rel);
-            match std::fs::metadata(&path) {
-                Ok(meta) => {
-                    return Ok(if meta.is_file() || meta.is_dir() {
-                        LocatedEntry::Main {
-                            root: root.clone(),
-                            path,
-                        }
-                    } else {
-                        LocatedEntry::Special(path)
-                    });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            let meta = match std::fs::metadata(&path) {
+                Ok(meta) => meta,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error.into()),
+            };
+            if !(meta.is_file() || meta.is_dir()) {
+                return Ok(LocatedEntry::Special(path));
             }
+            let root = root.to_path_buf();
+            return Ok(match base {
+                Base::Here => LocatedEntry::Here(path),
+                Base::Main(_) => LocatedEntry::Main { root, path },
+                Base::Code(_) => LocatedEntry::Code(path),
+            });
         }
         Ok(LocatedEntry::Missing)
     }
@@ -234,7 +265,7 @@ impl<'a> Resolver<'a> {
     /// The file `rel` is read from, noting a main-checkout copy for [`Self::take_warnings`].
     fn find(&self, kind: DocKind, rel: &str) -> Result<Option<PathBuf>> {
         Ok(match self.locate(rel)? {
-            Located::Here(path) => Some(path),
+            Located::Here(path) | Located::Code(path) => Some(path),
             Located::Main { root, path } => {
                 self.note_main(kind, rel, &root);
                 Some(path)
@@ -290,13 +321,17 @@ impl<'a> Resolver<'a> {
             return Ok(name_or_path.to_string());
         }
 
-        let mut matches = doc_matches(&self.project.records, dirs, name_or_path)?;
+        let mut matches = Vec::new();
         let mut main = None;
-        if matches.is_empty()
-            && let Some(root) = self.main_root()?
-        {
+        for base in self.bases()? {
+            let root = self.base_dir(&base);
             matches = doc_matches(root, dirs, name_or_path)?;
-            main = Some(root);
+            if !matches.is_empty() {
+                if let Base::Main(root) = &base {
+                    main = Some(root.clone());
+                }
+                break;
+            }
         }
         match matches.len() {
             0 => Err(Error::DocNotFound(format!(
@@ -308,7 +343,7 @@ impl<'a> Resolver<'a> {
             1 => {
                 let found = matches.remove(0);
                 if let Some(root) = main {
-                    self.note_main(kind, &found, root);
+                    self.note_main(kind, &found, &root);
                 }
                 Ok(found)
             }
@@ -333,8 +368,11 @@ impl<'a> Resolver<'a> {
             let path = match self.find(kind, value)? {
                 Some(path) => path,
                 None => match self.locate_entry(value)? {
-                    LocatedEntry::Special(path) => path,
-                    _ => self.project.doc_path(value),
+                    LocatedEntry::Here(path)
+                    | LocatedEntry::Main { path, .. }
+                    | LocatedEntry::Code(path)
+                    | LocatedEntry::Special(path) => path,
+                    LocatedEntry::Missing => self.project.doc_path(value),
                 },
             };
             refuse_special(&path)?;

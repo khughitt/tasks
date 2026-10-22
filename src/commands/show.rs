@@ -170,7 +170,9 @@ pub fn describe(
             step.as_ref().map(|_| false)
         }
         (Some(plan), Some(step)) => match resolver.locate(plan)? {
-            Located::Here(_) | Located::Main { .. } => Some(resolver.step_exists(plan, step)?),
+            Located::Here(_) | Located::Main { .. } | Located::Code(_) => {
+                Some(resolver.step_exists(plan, step)?)
+            }
             Located::Missing => {
                 let here = project.doc_path(plan);
                 let existing = if here.try_exists()? {

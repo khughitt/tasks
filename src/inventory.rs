@@ -33,7 +33,7 @@ pub fn build(
         row.required = true;
         if !external {
             match resolver.locate(reference)? {
-                Located::Here(path) | Located::Main { path, .. } => {
+                Located::Here(path) | Located::Main { path, .. } | Located::Code(path) => {
                     row.status = RowStatus::Present;
                     row.path = Some(path.display().to_string());
                 }

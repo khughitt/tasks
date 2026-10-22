@@ -654,7 +654,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                     continue;
                 }
                 match resolver.locate(path)? {
-                    Located::Here(_) => {}
+                    Located::Here(_) | Located::Code(_) => {}
                     Located::Main { root, .. } => warnings.push(finding(
                         Some(task),
                         file.clone(),

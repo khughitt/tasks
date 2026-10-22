@@ -1116,3 +1116,94 @@ fn check_warns_when_the_code_checkout_is_missing() {
         "{out}"
     );
 }
+
+fn write_file(path: &Path, text: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+#[test]
+fn a_spec_under_records_and_a_retained_spec_in_the_code_tree_both_resolve() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    write_file(&l.project.join("docs/specs/a-design.md"), "# A\n");
+    write_file(&l.project.join("docs/plans/p.md"), "# P\n\n## Task 1: x\n");
+    l.git(&l.records, &["add", "-A"]);
+    l.git(&l.records, &["commit", "-qm", "docs"]);
+    write_file(&l.code.join("docs/specs/kept-design.md"), "# Kept\n");
+    l.git(&l.code, &["add", "-A"]);
+    l.git(&l.code, &["commit", "-qm", "kept"]);
+
+    let t1 = env.json(&l.code, &["add", "T1", "--spec", "docs/specs/a-design.md"]);
+    let t2 = env.json(
+        &l.code,
+        &["add", "T2", "--spec", "docs/specs/kept-design.md"],
+    );
+    let t3 = env.json(
+        &l.code,
+        &[
+            "add",
+            "T3",
+            "--plan",
+            "docs/plans/p.md",
+            "--step",
+            "Task 1: x",
+        ],
+    );
+    let (t1, t2, t3) = (common::id_of(t1), common::id_of(t2), common::id_of(t3));
+
+    let shown = env.json(&l.code, &["show", &t1]);
+    assert_eq!(
+        shown["spec_path"],
+        l.project.join("docs/specs/a-design.md").to_str().unwrap(),
+        "{shown}"
+    );
+    let shown = env.json(&l.code, &["show", &t2]);
+    assert_eq!(
+        shown["spec_path"],
+        l.code.join("docs/specs/kept-design.md").to_str().unwrap(),
+        "{shown}"
+    );
+    let shown = env.json(&l.code, &["show", &t3]);
+    assert_eq!(shown["step_found"], true, "{shown}");
+
+    let check = env.check(&l.code);
+    let text = check.to_string();
+    assert!(!text.contains("in_main_checkout"), "{text}");
+    assert_eq!(check["errors"].as_array().map_or(0, Vec::len), 0, "{text}");
+
+    // The worktree is searched before the main checkout.
+    write_file(&l.wt.join("docs/specs/wt-only.md"), "# Wt\n");
+    let t4 = common::id_of(env.json(&l.wt, &["add", "T4", "--spec", "docs/specs/wt-only.md"]));
+    let shown = env.json(&l.wt, &["show", &t4]);
+    assert_eq!(
+        shown["spec_path"],
+        l.wt.join("docs/specs/wt-only.md").to_str().unwrap(),
+        "{shown}"
+    );
+}
+
+#[test]
+fn an_output_ref_under_records_satisfies_the_completion_gate() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let a = common::id_of(env.json(
+        &l.code,
+        &["add", "A", "--ref", "rep (output): docs/notes/r.md"],
+    ));
+    env.json(&l.code, &["start", &a]);
+    assert_eq!(env.fail(&l.code, &["done", &a, "x"]), "ref_output_missing");
+    write_file(&l.project.join("docs/notes/r.md"), "r\n");
+    env.json(&l.code, &["done", &a, "x"]);
+
+    let b = common::id_of(env.json(
+        &l.code,
+        &["add", "B", "--ref", "rep (output): docs/notes/c.md"],
+    ));
+    env.json(&l.code, &["start", &b]);
+    assert_eq!(env.fail(&l.code, &["done", &b, "x"]), "ref_output_missing");
+    write_file(&l.code.join("docs/notes/c.md"), "c\n");
+    env.json(&l.code, &["done", &b, "x"]);
+}

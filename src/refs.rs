@@ -29,7 +29,7 @@ pub fn present(
 
     match location(&entry.reference)? {
         Location::Path(rel) => Ok(match resolver.locate_entry(rel)? {
-            LocatedEntry::Here(path) => Presence::Here(path),
+            LocatedEntry::Here(path) | LocatedEntry::Code(path) => Presence::Here(path),
             LocatedEntry::Main { root, path } => Presence::Main { root, path },
             LocatedEntry::Missing => Presence::Absent(project.doc_path(rel)),
             LocatedEntry::Special(path) => Presence::Special(path),
