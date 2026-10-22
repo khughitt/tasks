@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: records-detached
 created: 2026-10-22T20:54:24Z
-updated: 2026-10-22T21:52:57Z
+updated: 2026-10-22T21:52:59Z
 started: 2026-10-22T21:07:05Z
 depends: []
 tags: []
@@ -38,3 +38,5 @@ Implement the tasks CLI part of the approved design (tasks:docs/specs/2026-10-22
   provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-22T21:51:14Z (records-detached): review: plan round 2 — verdict: revise; findings: P1 1, P2 1, minor 2; reviewer: codex/gpt-6-astra
 - 2026-10-22T21:52:57Z (records-detached): plan round 2 fixes (revision 3, bea738c): TestEnv cmd/raw and the fixture git helper start from env_clear with PATH, HOME, USER, LC_ALL, GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM, GIT_AUTHOR_*/GIT_COMMITTER_*, and GIT_CEILING_DIRECTORIES/TMPDIR copied, via one shared isolate(); rename invocation looks records up by canonical_prefix(source) with a replay/explain-after-completion test; retirement test no longer expects retire from the code checkout to refuse; decision 3 amends spec §5.2 in Task 10; stale rename-root wording removed.
+- 2026-10-22T21:52:59Z (records-detached): parked (waiting on user, review): User reviews plan revision 3 at commit bea738c on branch records-detached (.worktrees/records-detached/docs/plans/2026-10-22-records-detached.md; read it with git show bea738c:docs/plans/2026-10-22-records-detached.md); then the agent revises again as a new commit, or links the plan (tasks edit tasks-211e28 --plan 2026-10-22-records-detached), files the step children per its Tracking section, runs the just test baseline, and executes subagent-driven
+  provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
