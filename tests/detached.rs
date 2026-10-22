@@ -445,3 +445,110 @@ fn a_move_from_an_older_records_worktree_refuses_and_names_the_registered_record
     );
     assert_eq!(moved["recovery"], "fresh");
 }
+
+#[test]
+fn the_lifecycle_from_the_code_checkout_and_its_worktree_writes_only_under_records() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register_by_hand(&env, &l, "det");
+    let code_before = l.porcelain(&l.code);
+    let wt_before = l.porcelain(&l.wt);
+    let spec = l.project.join("docs/specs/topic.md");
+    std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    std::fs::write(&spec, "# Topic\n").unwrap();
+    l.git(&l.records, &["add", "-A"]);
+    l.git(&l.records, &["commit", "-qm", "spec"]);
+    let shot = l.base.join("shot.png");
+    std::fs::write(&shot, b"\x89PNG\r\n\x1a\n").unwrap();
+    let elsewhere = l.base.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+
+    let id = env.json(&l.code, &["add", "Lifecycle"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&l.code, &["start", &id]);
+    env.json(&l.code, &["note", &id, "a note"]);
+    env.json(&l.code, &["edit", &id, "--spec", "topic"]);
+    env.json(
+        &l.code,
+        &["attach", &id, shot.to_str().unwrap(), "--caption", "a shot"],
+    );
+    env.json(&l.code, &["park", &id, "next", "--waiting-on", "agent"]);
+    env.json(&l.wt, &["start", &id]);
+    env.json(&l.wt, &["note", &id, "from the worktree"]);
+    env.json(&l.wt, &["done", &id, "landed"]);
+
+    env.json(&elsewhere, &["quiet", "--project", "det"]);
+    env.json(&elsewhere, &["next", "--all-projects"]);
+    env.json(&elsewhere, &["show", &id]);
+    env.json(&elsewhere, &["prime", "--project", "det"]);
+
+    let second = env.json(&l.code, &["add", "Second"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&l.code, &["block", &second, "waiting"]);
+    env.json(&l.code, &["unblock", &second]);
+    env.json(&l.code, &["shelve", &second, "later"]);
+    env.json(&l.code, &["unshelve", &second]);
+    env.json(&l.code, &["drop", &second, "no longer needed"]);
+
+    assert!(l.project.join(format!("tasks/{id}.md")).is_file());
+    assert!(
+        l.project.join(format!("tasks/files/{id}")).is_dir(),
+        "attachments live under the records directory"
+    );
+    assert_eq!(
+        l.porcelain(&l.code),
+        code_before,
+        "nothing written into the code checkout"
+    );
+    assert_eq!(
+        l.porcelain(&l.wt),
+        wt_before,
+        "nothing written into the code worktree"
+    );
+    assert_eq!(
+        l.porcelain(&l.records),
+        "",
+        "every record write was committed in the records repository"
+    );
+}
+
+#[test]
+fn stale_copy_never_fires_across_code_worktrees_and_fires_across_records_worktrees() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register_by_hand(&env, &l, "det");
+    l.git(
+        &l.code,
+        &["worktree", "add", "-q", "-b", "wt2", ".worktrees/wt2"],
+    );
+    let wt2 = l.code.join(".worktrees/wt2").canonicalize().unwrap();
+    let id = env.json(&l.code, &["add", "Stale"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    env.json(&l.wt, &["note", &id, "from wt"]);
+    env.json(&wt2, &["note", &id, "from wt2"]);
+    env.json(&l.wt, &["note", &id, "from wt again"]);
+
+    let side = l.base.join("records-side");
+    l.git(
+        &l.records,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "side",
+            side.to_str().unwrap(),
+        ],
+    );
+    env.json(&side.join("det"), &["note", &id, "from the side copy"]);
+    assert_eq!(
+        env.fail(&l.code, &["note", &id, "stale write"]),
+        "stale_copy"
+    );
+}
