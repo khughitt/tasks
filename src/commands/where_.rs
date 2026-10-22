@@ -1,14 +1,15 @@
 use crate::error::Result;
-use crate::link::{GitTree, holds_records, linked_project};
+use crate::link::{GitTree, holds_records, project_of_tree, refuse_moved};
 use crate::output::{Output, WhereOut, WhereProject};
 use crate::registry::Registry;
-use crate::repo::{CONFIG_REL, Project};
+use crate::repo::{CONFIG_REL, Kind, Project};
 use std::path::{Path, PathBuf};
 
 /// Which project a command run at `path` would open, without crossing a git boundary
 /// (ops linked-checkouts decision 4): the walk for `tasks/.config.toml` stops at the
-/// repository's top level, then the link step matches its main checkout. Outside git it
-/// walks as `locate` does and reads no registry.
+/// repository's top level, and a hit is `records_moved` as in `locate`; on a miss the
+/// pairing and link steps match its main checkout. Outside git it walks as `locate` does
+/// and reads no registry.
 pub fn run(path: Option<PathBuf>, dir: Option<&Path>) -> Result<Output> {
     let start = super::start_dir(dir)?;
     let path = match path {
@@ -28,8 +29,14 @@ pub fn run(path: Option<PathBuf>, dir: Option<&Path>) -> Result<Output> {
         Some(tree) => {
             let registry = Registry::load()?;
             let project = match walked {
-                Some(project) => Some(shown(project, false)),
-                None => linked_project(&registry, &tree)?.map(|p| shown(p, true)),
+                Some(project) => {
+                    refuse_moved(&registry, &project)?;
+                    Some(shown(project, false))
+                }
+                None => project_of_tree(&registry, &tree)?.map(|p| {
+                    let linked = p.kind == Kind::Linked;
+                    shown(p, linked)
+                }),
             };
             (project, holds_records(&registry, &tree)?)
         }

@@ -203,3 +203,203 @@ fn commit_from_a_detached_project_commits_in_the_records_repository() {
     );
     assert_eq!(l.porcelain(&l.code), before);
 }
+
+/// Registers `prefix` as a detached project by writing the registry file directly:
+/// [projects] prefix = code, [records] prefix = project.
+pub fn register_by_hand(env: &TestEnv, l: &Layout, prefix: &str) {
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "[projects]\n{prefix} = {:?}\n\n[records]\n{prefix} = {:?}\n",
+            l.code.display().to_string(),
+            l.project.display().to_string()
+        ),
+    )
+    .unwrap();
+}
+
+/// The registry file `register_by_hand` writes, with arbitrary text.
+fn write_registry(env: &TestEnv, text: &str) {
+    let path = env.home.path().join(".config/tasks/projects.toml");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, text).unwrap();
+}
+
+/// The `error.detail` of a failing command, after asserting its kind.
+fn fail_detail(env: &TestEnv, dir: &Path, args: &[&str], kind: &str) -> String {
+    assert_eq!(env.fail(dir, args), kind, "{args:?}");
+    let out = env.raw(dir).args(args).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    v["error"]["detail"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn a_detached_project_opens_from_its_checkout_its_worktree_and_its_records_directory() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register_by_hand(&env, &l, "det");
+    let id = env.json(&l.code, &["add", "from code"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(l.project.join(format!("tasks/{id}.md")).is_file());
+    assert!(!l.code.join("tasks").exists());
+    let from_wt = env.json(&l.wt, &["show", &id]);
+    assert_eq!(from_wt["task"]["title"], "from code");
+    std::fs::create_dir_all(l.code.join("src")).unwrap();
+    let from_deep = env.json(&l.code.join("src"), &["list"]);
+    assert_eq!(from_deep["tasks"].as_array().unwrap().len(), 1);
+    env.json(&l.project, &["note", &id, "from records"]);
+    // start from the worktree records the worktree as the resume root
+    env.json(&l.wt, &["start", &id]);
+    let store = std::fs::read_to_string(env.claim_store("det")).unwrap();
+    assert!(
+        store.contains(&format!("worktree = {:?}", l.wt.display().to_string())),
+        "{store}"
+    );
+}
+
+#[test]
+fn a_branch_that_still_tracks_the_config_is_records_moved() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register_by_hand(&env, &l, "det");
+    std::fs::create_dir_all(l.wt.join("tasks")).unwrap();
+    std::fs::write(l.wt.join("tasks/.config.toml"), "prefix = \"det\"\n").unwrap();
+    l.git(&l.wt, &["add", "tasks"]);
+    l.git(&l.wt, &["commit", "-qm", "old in-tree records"]);
+    let detail = fail_detail(&env, &l.wt, &["list"], "records_moved");
+    assert!(
+        detail.contains(&l.project.display().to_string()),
+        "{detail}"
+    );
+    assert!(detail.contains("rebase or merge"), "{detail}");
+    assert_eq!(
+        env.fail(&l.wt, &["note", "det-000000", "x"]),
+        "records_moved"
+    );
+    // the main checkout, which holds no config, still opens the detached project
+    env.json(&l.code, &["list"]);
+}
+
+#[test]
+fn a_registered_root_without_config_or_pairing_is_records_unpaired() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    write_registry(
+        &env,
+        &format!("[projects]\ndet = {:?}\n", l.code.display().to_string()),
+    );
+    let detail = fail_detail(&env, &l.code, &["list"], "records_unpaired");
+    assert!(
+        detail.contains("tasks init --prefix det --records"),
+        "{detail}"
+    );
+}
+
+#[test]
+fn an_in_tree_project_reached_from_a_worktree_without_its_tasks_dir_stays_no_project() {
+    let env = TestEnv::new();
+    let home = env.home.path().to_path_buf();
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let itr = repo(&home, &base, "itr");
+    env.json(&itr, &["init", "--prefix", "itr"]);
+    git(&home, &itr, &["add", "-A"]);
+    git(&home, &itr, &["commit", "-qm", "records"]);
+    let orphan = base.join("orphan");
+    git(
+        &home,
+        &itr,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--orphan",
+            "-b",
+            "orphan",
+            orphan.to_str().unwrap(),
+        ],
+    );
+    assert!(!orphan.join("tasks").exists());
+    assert_eq!(env.fail(&orphan, &["list"]), "no_project");
+}
+
+#[test]
+fn a_retirement_declared_in_the_registered_records_binds_an_older_records_worktree() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register_by_hand(&env, &l, "det");
+    let old = l.base.join("records-old");
+    l.git(
+        &l.records,
+        &["worktree", "add", "-q", "-b", "old", old.to_str().unwrap()],
+    );
+    let old_project = old.join("det");
+    assert!(old_project.join("tasks/.config.toml").is_file());
+    let code = l.code.to_str().unwrap();
+    env.json(&l.base, &["-C", code, "retire", "--reason", "over"]);
+    assert!(
+        std::fs::read_to_string(l.project.join("tasks/.config.toml"))
+            .unwrap()
+            .contains("[retired]"),
+        "the registered records directory holds the retirement"
+    );
+    assert_eq!(env.fail(&old_project, &["add", "late"]), "retired_project");
+    assert_eq!(env.fail(&l.code, &["add", "late"]), "retired_project");
+    let detail = fail_detail(
+        &env,
+        &l.base,
+        &[
+            "-C",
+            old_project.to_str().unwrap(),
+            "retire",
+            "--reason",
+            "again",
+        ],
+        "not_registered_checkout",
+    );
+    assert!(
+        detail.contains(&l.project.display().to_string()),
+        "{detail}"
+    );
+}
+
+#[test]
+fn a_registry_pairing_a_prefix_the_projects_table_lacks_is_a_config_error() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    write_registry(
+        &env,
+        &format!("[records]\ndet = {:?}\n", l.project.display().to_string()),
+    );
+    assert_eq!(env.fail(&l.project, &["list"]), "config");
+}
+
+#[test]
+fn a_config_whose_checkout_disagrees_with_the_registry_is_a_config_error() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    let id = env.json(&l.project, &["add", "first"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let other = repo(&l.home, &l.base, "other");
+    write_registry(
+        &env,
+        &format!(
+            "[projects]\ndet = {:?}\n\n[records]\ndet = {:?}\n",
+            other.display().to_string(),
+            l.project.display().to_string()
+        ),
+    );
+    let detail = fail_detail(&env, &l.base, &["show", &id], "config");
+    assert!(detail.contains("declares checkout"), "{detail}");
+    // The code checkout is no registered root, so the pairing does not reach it; the
+    // linked scan then opens every registered project and the mismatch stays an error.
+    assert_eq!(env.fail(&l.code, &["list"]), "config");
+    // From the records directory the walk opens it.
+    env.json(&l.project, &["show", &id]);
+}

@@ -13,6 +13,11 @@ pub struct Registry {
     /// a live prefix, enforced on load, so resolution is always one hop.
     #[serde(default)]
     pub aliases: BTreeMap<String, String>,
+    /// Live prefix -> the records directory of a detached project, absolute: the
+    /// directory holding its `tasks/.config.toml`, not the records root. Every key is a
+    /// live prefix, enforced on load. Not written when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub records: BTreeMap<String, PathBuf>,
     /// Group name -> member prefixes, each a live prefix, sorted and distinct
     /// (docs/specs/2026-10-03-lanes-needs-groups-design.md §6). Host-local like the rest
     /// of the registry. Not written when empty, so a registry without groups keeps its
@@ -97,13 +102,26 @@ impl Registry {
         };
         let mut registry: Registry = toml::from_str(&text)
             .map_err(|error| Error::Config(format!("{}: {error}", path.display())))?;
-        for (prefix, root) in &mut registry.projects {
-            if let Some(rest) = root.to_str().and_then(|root| root.strip_prefix("~/")) {
+        let expand = |what: &str, prefix: &str, path: &mut PathBuf| -> Result<()> {
+            if let Some(rest) = path.to_str().and_then(|path| path.strip_prefix("~/")) {
                 let home = home.as_ref().ok_or_else(|| {
-                    Error::Config(format!("project {prefix} uses ~ but HOME is not set"))
+                    Error::Config(format!("{what} {prefix} uses ~ but HOME is not set"))
                 })?;
-                *root = PathBuf::from(home).join(rest);
+                *path = PathBuf::from(home).join(rest);
             }
+            Ok(())
+        };
+        for (prefix, root) in &mut registry.projects {
+            expand("project", prefix, root)?;
+        }
+        for (prefix, dir) in &mut registry.records {
+            if !registry.projects.contains_key(prefix) {
+                return Err(Error::Config(format!(
+                    "{}: [records] names unregistered prefix {prefix:?}",
+                    path.display()
+                )));
+            }
+            expand("records of", prefix, dir)?;
         }
         for (alias, target) in &registry.aliases {
             if registry.projects.contains_key(alias) {
@@ -245,6 +263,7 @@ impl Registry {
             !members.is_empty()
         });
         self.locations.remove(prefix);
+        self.records.remove(prefix);
         Ok(Unregistered {
             root,
             aliases,
@@ -273,6 +292,7 @@ impl Registry {
         if let Some(history) = self.locations.remove(source) {
             self.locations.insert(target.into(), history);
         }
+        self.move_records(source, target);
 
         self.aliases.insert(source.into(), target.into());
         Ok(())
@@ -327,6 +347,7 @@ impl Registry {
                 }
             }
             self.retarget_groups(source, target);
+            self.move_records(source, target);
             self.aliases.insert(source.into(), target.into());
         } else {
             self.rename(source, target)?;
@@ -428,6 +449,25 @@ impl Registry {
 
     pub fn project_root(&self, prefix: &str) -> Option<&Path> {
         self.projects.get(prefix).map(PathBuf::as_path)
+    }
+
+    /// The records directory `[records]` pairs with `prefix`, a live prefix; `None` for an
+    /// in-tree or linked project.
+    pub fn records_dir(&self, prefix: &str) -> Option<&Path> {
+        self.records.get(prefix).map(PathBuf::as_path)
+    }
+
+    /// Pairs `prefix` with the records directory `dir`, replacing any earlier pairing.
+    pub fn pair_records(&mut self, prefix: &str, dir: &Path) {
+        self.records.insert(prefix.into(), dir.into());
+    }
+
+    /// Moves `from`'s pairing, if any, to `to`, its directory unchanged: a rename moves
+    /// the key, never the records.
+    fn move_records(&mut self, from: &str, to: &str) {
+        if let Some(dir) = self.records.remove(from) {
+            self.pair_records(to, &dir);
+        }
     }
 
     /// The live prefix `prefix` resolves to. One hop: aliases never chain (§2).
@@ -982,6 +1022,64 @@ mod tests {
                 assert!(error.to_string().contains(word), "{table}: {error}");
             }
         }
+    }
+
+    #[test]
+    fn records_table_round_trips_and_expands_home() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("projects.toml");
+        std::fs::write(
+            &path,
+            "[projects]\ndet = \"~/code\"\n\n[records]\ndet = \"~/records/det\"\n",
+        )
+        .unwrap();
+        let r = Registry::load_with_home(&path, Some(home.path().into())).unwrap();
+        let records = home.path().join("records/det");
+        assert_eq!(r.records_dir("det"), Some(records.as_path()));
+        assert_eq!(r.records_dir("other"), None);
+        r.save_to(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[records]"), "{text}");
+        let again = Registry::load_with_home(&path, Some(home.path().into())).unwrap();
+        assert_eq!(again.records, r.records);
+
+        let mut bare = Registry::default();
+        bare.register("sci", Path::new("/tmp/a")).unwrap();
+        bare.save_to(&path).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("[records]"),
+            "a registry without pairings keeps its shape"
+        );
+    }
+
+    #[test]
+    fn records_for_an_unregistered_prefix_is_a_config_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("projects.toml");
+        std::fs::write(&path, "[records]\nghost = \"/x\"\n").unwrap();
+        let error = Registry::load_from(&path).unwrap_err();
+        assert_eq!(error.kind(), "config");
+        let text = error.to_string();
+        assert!(
+            text.contains("[records]") && text.contains("ghost"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn unregister_and_rename_carry_the_records_entry() {
+        let mut r = Registry::default();
+        r.register("det", Path::new("/tmp/code")).unwrap();
+        r.pair_records("det", Path::new("/tmp/records/det"));
+        r.pair_records("det", Path::new("/tmp/records2/det"));
+        assert_eq!(r.records_dir("det"), Some(Path::new("/tmp/records2/det")));
+        r.rename("det", "dtx").unwrap();
+        assert_eq!(r.records_dir("dtx"), Some(Path::new("/tmp/records2/det")));
+        assert_eq!(r.records_dir("det"), None);
+        r.unregister("dtx").unwrap();
+        assert!(r.records.is_empty());
     }
 
     #[test]

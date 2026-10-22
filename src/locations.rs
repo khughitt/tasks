@@ -4,11 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// One registered project that declares a `[checkout]` (linked-checkouts §4.1).
+/// One registered project that declares a `[checkout]` (linked-checkouts §4.1): a linked
+/// or a detached one, as `kind` says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Linked {
     pub prefix: String,
     pub checkout: PathBuf,
+    pub records: PathBuf,
+    pub kind: crate::repo::Kind,
 }
 
 /// Every registered project on this host that declares a checkout, the color of every one
@@ -37,8 +40,8 @@ impl CheckoutScan {
 
 pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
     let mut scan = CheckoutScan::default();
-    for (prefix, root) in &registry.projects {
-        let opened = crate::scope::is_reachable(root).and_then(|reachable| {
+    for prefix in registry.projects.keys() {
+        let opened = crate::scope::is_reachable(registry, prefix).and_then(|reachable| {
             reachable
                 .then(|| {
                     crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)
@@ -54,6 +57,8 @@ pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
                     scan.linked.push(Linked {
                         prefix: prefix.clone(),
                         checkout: project.checkout,
+                        records: project.records,
+                        kind: project.kind,
                     });
                 }
             }

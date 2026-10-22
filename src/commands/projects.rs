@@ -72,7 +72,7 @@ pub fn run(
     let warnings = registry_warnings(&registry, &super::start_dir(dir)?)?;
     let mut rows = Vec::new();
     for (prefix, root) in &registry.projects {
-        let reachable = is_reachable(root)?;
+        let reachable = is_reachable(&registry, prefix)?;
         let (counts, total, last_activity, color, retired, checkout) = if reachable {
             let project = open_registered(&registry, prefix, Origin::Prefix)?;
             let tasks = project.scan()?;

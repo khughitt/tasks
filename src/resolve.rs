@@ -586,10 +586,10 @@ pub fn read_present(project: &Project, id: &TaskId) -> Result<Option<Task>> {
 /// opener makes malformed config or a registry/config prefix mismatch a config error.
 pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Task>> {
     let id = &registry.canonical_id(id);
-    let Some(root) = registry.project_root(&id.prefix) else {
+    let Some(dir) = crate::scope::config_dir(registry, &id.prefix) else {
         return Ok(None);
     };
-    if !crate::scope::has_config(root)? {
+    if !crate::scope::has_config(&dir)? {
         return Ok(None);
     }
     let project =
@@ -601,10 +601,10 @@ pub fn resolve_registered(registry: &Registry, id: &TaskId) -> Result<Option<Tas
 /// `resolve_registered`: an unregistered prefix or a missing root or config is `Ok(None)`.
 pub fn registered_color(registry: &Registry, prefix: &str) -> Result<Option<crate::palette::Rgb>> {
     let prefix = registry.canonical_prefix(prefix);
-    let Some(root) = registry.project_root(prefix) else {
+    let Some(dir) = crate::scope::config_dir(registry, prefix) else {
         return Ok(None);
     };
-    if !crate::scope::has_config(root)? {
+    if !crate::scope::has_config(&dir)? {
         return Ok(None);
     }
     let project = crate::scope::open_registered(registry, prefix, crate::scope::Origin::Prefix)?;

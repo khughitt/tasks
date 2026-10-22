@@ -110,14 +110,11 @@ pub fn run(ctx: Ctx) -> Result<Output> {
             false
         }
     };
-    let authority = ctx
-        .registry
-        .project_root(&ctx.project.prefix)
-        .unwrap_or(&ctx.project.root)
-        .to_path_buf();
+    let authority = crate::scope::config_dir(&ctx.registry, &ctx.project.prefix)
+        .unwrap_or_else(|| ctx.project.records.clone());
     // A retired project takes no writes, so the record cannot be closed as it stands;
     // a worktree's open copy is a stale branch of work the retirement already closed.
-    let way_out = if authority == ctx.project.root {
+    let way_out = if authority == ctx.project.records {
         "run `tasks unretire`, close it, then retire again".to_string()
     } else {
         format!(
@@ -215,10 +212,7 @@ pub fn run(ctx: Ctx) -> Result<Output> {
                 None => Counterpart::Missing,
             });
         }
-        let Some(root) = ctx.registry.project_root(&id.prefix) else {
-            return Ok(Counterpart::Unreachable);
-        };
-        if !crate::scope::is_reachable(root)? {
+        if !crate::scope::is_reachable(&ctx.registry, &id.prefix)? {
             return Ok(Counterpart::Unreachable);
         }
         Ok(match foreign(&id) {

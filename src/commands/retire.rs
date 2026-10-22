@@ -64,21 +64,21 @@ pub fn unretire(here: Project) -> Result<()> {
     Ok(())
 }
 
-/// The registered checkout, re-opened under the lock, with the pending-operation freeze
-/// applied as every writer applies it; a linked worktree is refused.
+/// The registered copy (`scope::config_dir`: a detached project's records directory, else
+/// its root), re-opened under the lock, with the pending-operation freeze applied as every
+/// writer applies it; another worktree's copy is refused.
 fn authority(registry: &Registry, here: &Project) -> Result<Project> {
     super::reject_pending_operations(Some(&here.root), &here.prefix)?;
-    let root = registry
-        .project_root(&here.prefix)
+    let dir = crate::scope::config_dir(registry, &here.prefix)
         .ok_or_else(|| Error::Config(format!("{} is not registered on this host", here.prefix)))?;
-    if root != here.root.as_path() {
+    if dir != here.records {
         return Err(Error::NotRegisteredCheckout(format!(
             "run this in the registered checkout of {}: {}",
             here.prefix,
-            root.display()
+            dir.display()
         )));
     }
-    let project = Project::open(root)?;
+    let project = Project::open(&dir)?;
     super::reject_stale_local(registry, &project)?;
     Ok(project)
 }

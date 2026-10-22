@@ -32,15 +32,15 @@ pub fn set(name: String, prefixes: Vec<String>) -> Result<Output> {
 /// already skip.
 fn reject_retired_members(registry: &Registry, members: &[String]) -> Result<()> {
     for member in members {
-        let Some(root) = registry.project_root(member) else {
+        let Some(dir) = crate::scope::config_dir(registry, member) else {
             continue;
         };
-        if !is_reachable(root)? {
+        if !is_reachable(registry, member)? {
             continue;
         }
         // Read without the prefix check: a member mid-adoption (registered under its old
         // prefix, its config already renamed) is still a member to judge.
-        if crate::repo::Project::open(root)?.retired.is_some() {
+        if crate::repo::Project::open(&dir)?.retired.is_some() {
             return Err(Error::RetiredProject(format!(
                 "{member} is retired; a group lists active projects"
             )));
@@ -89,12 +89,12 @@ pub fn list(dir: Option<&Path>) -> Result<Output> {
         let mut rows = Vec::new();
         for prefix in members {
             // `load` guarantees every member is registered; say so if that ever breaks.
-            let root = registry.project_root(prefix).ok_or_else(|| {
-                Error::Config(format!(
+            if registry.project_root(prefix).is_none() {
+                return Err(Error::Config(format!(
                     "group {name:?} names {prefix:?}, which is not a registered project"
-                ))
-            })?;
-            let reachable = is_reachable(root)?;
+                )));
+            }
+            let reachable = is_reachable(&registry, prefix)?;
             rows.push(GroupMember {
                 prefix: prefix.clone(),
                 reachable,

@@ -13851,18 +13851,18 @@ fn completion_is_silent_when_anything_is_wrong() {
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
     std::fs::set_permissions(locked.join("tasks"), perms).unwrap();
     assert!(out.is_empty(), "{out:?}");
-    // a malformed registry does not disable the local project: it is opened by walking
-    // up from the effective directory, not through the registry, so its ids are still
-    // offered even though the registry itself cannot be read
+    // a malformed registry: `locate` reads the registry on every walk hit (an in-tree
+    // config may be a pre-detach branch, records-detached spec §3.2), so the local
+    // project does not open and completion stays silent rather than failing
     std::fs::write(
         env.home.path().join(".config/tasks/projects.toml"),
         "not toml = [",
     )
     .unwrap();
-    assert_eq!(
-        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""]),
-        [fine.as_str()],
-        "a malformed registry must not disable the local project"
+    assert!(
+        env.complete_values(&sci, "bash", 2, &["tasks", "show", ""])
+            .is_empty(),
+        "a malformed registry leaves the menu empty"
     );
 }
 

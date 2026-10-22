@@ -519,23 +519,28 @@ impl Project {
         Ok(())
     }
 
-    /// The project a command run in `start` opens: the nearest `tasks/.config.toml` at or
-    /// above it, as always. Only on a miss, inside a git repository, the registered project
-    /// whose `[checkout]` is that repository's main checkout (linked-checkouts §4.1). An
-    /// in-tree project therefore never reads the registry here, and a miss outside git
-    /// stays `no_project` whatever state the registry is in.
+    /// The project a command run in `start` opens (records-detached spec §3.2). 1. The
+    /// nearest `tasks/.config.toml` at or above it, as always; the registry is read on
+    /// every hit, since an in-tree config whose prefix `[records]` pairs elsewhere is
+    /// `records_moved` (§3.3). 2. On a miss inside a git repository, the detached project
+    /// registered at its main checkout. 3. Else the registered project whose `[checkout]`
+    /// is that main checkout (linked-checkouts §4.1). A miss outside git stays
+    /// `no_project` whatever state the registry is in; a missing registry is empty and a
+    /// malformed one is an error.
     pub fn locate(start: &Path) -> Result<Project> {
         let start = start.canonicalize()?;
         let mut directory = Some(start.as_path());
         while let Some(path) = directory {
             if path.join(CONFIG_REL).is_file() {
-                return Self::open(path);
+                let project = Self::open(path)?;
+                crate::link::refuse_moved(&Registry::load()?, &project)?;
+                return Ok(project);
             }
             directory = path.parent();
         }
         if let Some(tree) = crate::link::GitTree::of(&start)? {
             let registry = Registry::load()?;
-            if let Some(project) = crate::link::linked_project(&registry, &tree)? {
+            if let Some(project) = crate::link::project_of_tree(&registry, &tree)? {
                 return Ok(project);
             }
         }

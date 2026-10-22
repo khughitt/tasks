@@ -1,8 +1,8 @@
 use crate::error::{Error, Result};
 use crate::model::{Task, TaskId};
 use crate::registry::Registry;
-use crate::repo::{CONFIG_REL, Project};
-use std::path::Path;
+use crate::repo::{CONFIG_REL, Kind, Project};
+use std::path::{Path, PathBuf};
 
 /// How a prefix reached the resolver, which decides the error kind when it cannot be
 /// opened (spec §3.1): an id that cannot be followed is `unresolvable_id`; a prefix a
@@ -27,8 +27,19 @@ pub fn has_config(root: &Path) -> Result<bool> {
     }
 }
 
-/// Opens the project registered as `prefix`, applying the three checks every
-/// cross-project path shares: registered, config present, prefix agrees.
+/// Where `prefix`'s config lives on this host: the records directory `[records]` pairs it
+/// with, else its registered root; `None` when it is not registered. `prefix` is the
+/// canonical (live) prefix.
+pub fn config_dir(registry: &Registry, prefix: &str) -> Option<PathBuf> {
+    registry
+        .records_dir(prefix)
+        .or_else(|| registry.project_root(prefix))
+        .map(Path::to_path_buf)
+}
+
+/// Opens the project registered as `prefix`, applying the checks every cross-project
+/// path shares: registered, config present (in its `config_dir`), prefix agrees, and for
+/// a paired prefix a detached config whose checkout is the registered root.
 pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Result<Project> {
     let fail = |detail: String| match origin {
         Origin::Id(id) => Error::UnresolvableId(format!("{id}: {detail}")),
@@ -38,13 +49,13 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
     // guard below then compares against the *canonical* prefix, so it keeps catching a
     // registry that points a name at the wrong root.
     let live = registry.canonical_prefix(prefix);
-    let Some(root) = registry.project_root(live) else {
+    let (Some(root), Some(dir)) = (registry.project_root(live), config_dir(registry, live)) else {
         return Err(fail(format!("no project registered as {prefix:?}")));
     };
-    if !has_config(root)? {
-        let advice = if root.is_dir() {
+    if !has_config(&dir)? {
+        let advice = if dir.is_dir() {
             "run `tasks init` there"
-        } else if root.exists() {
+        } else if dir.exists() {
             "it is not a directory; repoint it with `tasks init --force` in the checkout"
         } else {
             "it is not on this machine; restore it, or repoint it with `tasks init --force` \
@@ -52,25 +63,38 @@ pub fn open_registered(registry: &Registry, prefix: &str, origin: Origin) -> Res
         };
         return Err(fail(format!(
             "project {live:?} at {} has no {CONFIG_REL}; {advice}",
-            root.display()
+            dir.display()
         )));
     }
-    let project = Project::open(root)?;
+    let project = Project::open(&dir)?;
     if project.prefix != live {
         return Err(Error::Config(format!(
             "registry maps {live:?} to {}, whose prefix is {:?}; fix the registry",
-            root.display(),
+            dir.display(),
             project.prefix
+        )));
+    }
+    if registry.records_dir(live).is_some()
+        && (project.kind != Kind::Detached || crate::rename::root_identity(root)? != project.root)
+    {
+        return Err(Error::Config(format!(
+            "registry pairs {live} with {}, whose config declares checkout {}; fix the \
+             registry or the config",
+            dir.display(),
+            project.root.display()
         )));
     }
     Ok(project)
 }
 
-/// The first two outcomes of spec §3.2: a root that exists and holds a config. The third
-/// (a config that does not parse or disagrees with the key) surfaces from
-/// `open_registered`, which every reachable root then goes through.
-pub fn is_reachable(root: &Path) -> Result<bool> {
-    Ok(root.try_exists()? && has_config(root)?)
+/// The first two outcomes of spec §3.2: `prefix`'s `config_dir` exists and holds a
+/// config. The third (a config that does not parse or disagrees with the key) surfaces
+/// from `open_registered`, which every reachable project then goes through.
+pub fn is_reachable(registry: &Registry, prefix: &str) -> Result<bool> {
+    let Some(dir) = config_dir(registry, prefix) else {
+        return Ok(false);
+    };
+    Ok(dir.try_exists()? && has_config(&dir)?)
 }
 
 /// The two warnings every registry-wide command shares: an empty registry, and a `cwd`
@@ -139,7 +163,7 @@ impl Scope {
             .iter()
             .filter(|(prefix, _)| members.contains(prefix))
         {
-            if !is_reachable(root)? {
+            if !is_reachable(registry, prefix)? {
                 warnings.push(format!(
                     "project {prefix} at {} is unreachable",
                     root.display()
@@ -320,7 +344,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(CONFIG_REL)).unwrap();
         let registry = registry_with("sci", dir.path());
         let id = TaskId::parse("sci-000001").unwrap();
-        assert!(!is_reachable(dir.path()).unwrap());
+        assert!(!is_reachable(&registry, "sci").unwrap());
         assert!(
             crate::resolve::resolve_registered(&registry, &id)
                 .unwrap()

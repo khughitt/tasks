@@ -133,11 +133,11 @@ fn reject_repointing_a_retired_project(
     // config that exists and does not parse is an error, never "not retired".
     if let Some(current) = registry.project_root(prefix)
         && current != root
-        && crate::scope::is_reachable(current)?
-        && current.join(crate::repo::CONFIG_REL).exists()
-        && Project::open(current)?.retired.is_some()
+        && crate::scope::is_reachable(registry, prefix)?
+        && let Some(dir) = crate::scope::config_dir(registry, prefix)
+        && Project::open(&dir)?.retired.is_some()
     {
-        return refuse(current);
+        return refuse(&dir);
     }
     Ok(())
 }

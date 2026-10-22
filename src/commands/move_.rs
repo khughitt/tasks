@@ -31,7 +31,7 @@ fn open_source(source: Ctx, source_id: TaskId, to: &str) -> Result<MoveCtx> {
             "no project registered as {to:?}; register it or choose another project"
         ))
     })?;
-    if !scope::is_reachable(root)? {
+    if !scope::is_reachable(&registry, target_prefix)? {
         return Err(Error::Config(format!(
             "{target_prefix} at {} is unreachable; restore it or choose another project",
             root.display()
