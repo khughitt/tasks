@@ -159,7 +159,7 @@ fn reject_open_copies(project: &Project) -> Result<()> {
 }
 
 fn write_table(project: &Project, retirement: Option<&Retirement>) -> Result<()> {
-    let path = project.root.join(CONFIG_REL);
+    let path = project.records.join(CONFIG_REL);
     let text = std::fs::read_to_string(&path)?;
     let mut doc: toml_edit::DocumentMut = text
         .parse()

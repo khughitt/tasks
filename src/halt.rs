@@ -208,6 +208,8 @@ mod tests {
     fn every_open_halt_status_blocks_and_closed_statuses_do_not() {
         let project = Project {
             root: PathBuf::new(),
+            records: PathBuf::new(),
+            kind: crate::repo::Kind::InTree,
             prefix: "sci".into(),
             color: None,
             spec_dirs: vec![],
@@ -217,7 +219,7 @@ mod tests {
             needs: crate::needs::Vocabulary::new(),
             attachments_max_bytes: crate::attachments::DEFAULT_MAX_BYTES,
             retired: None,
-            checkout: None,
+            checkout: PathBuf::new(),
             worktree: None,
             commit_records: false,
         };
@@ -236,6 +238,8 @@ mod tests {
     fn local_priority_parent_and_dependency_edits_make_work_eligible() {
         let project = Project {
             root: PathBuf::new(),
+            records: PathBuf::new(),
+            kind: crate::repo::Kind::InTree,
             prefix: "sci".into(),
             color: None,
             spec_dirs: vec![],
@@ -245,7 +249,7 @@ mod tests {
             needs: crate::needs::Vocabulary::new(),
             attachments_max_bytes: crate::attachments::DEFAULT_MAX_BYTES,
             retired: None,
-            checkout: None,
+            checkout: PathBuf::new(),
             worktree: None,
             commit_records: false,
         };

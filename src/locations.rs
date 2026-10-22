@@ -50,10 +50,10 @@ pub fn scan_checkouts(registry: &crate::registry::Registry) -> CheckoutScan {
                 if let Some(color) = project.color {
                     scan.colors.insert(prefix.clone(), color);
                 }
-                if let Some(checkout) = project.checkout {
+                if project.kind != crate::repo::Kind::InTree {
                     scan.linked.push(Linked {
                         prefix: prefix.clone(),
-                        checkout,
+                        checkout: project.checkout,
                     });
                 }
             }

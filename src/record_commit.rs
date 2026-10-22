@@ -418,13 +418,13 @@ pub fn commit_written(warnings: &mut Vec<String>) -> BTreeSet<PathBuf> {
         return committed;
     };
     let mut trees: BTreeMap<PathBuf, Tree> = BTreeMap::new();
-    for (root, paths) in written.roots {
-        let project = match crate::repo::Project::open(&root) {
+    for (records, paths) in written.roots {
+        let project = match crate::repo::Project::open(&records) {
             Ok(project) => project,
             Err(error) => {
                 warnings.push(format!(
                     "commit_failed: {}: cannot read its config ({error})",
-                    root.display()
+                    records.display()
                 ));
                 continue;
             }
@@ -432,19 +432,19 @@ pub fn commit_written(warnings: &mut Vec<String>) -> BTreeSet<PathBuf> {
         if !project.commit_records {
             continue;
         }
-        match working_tree(&root) {
+        match working_tree(&records) {
             Ok(Some(top)) => {
                 let tree = trees.entry(top).or_default();
                 tree.ids.extend(ids_of(&paths));
                 tree.absolute
-                    .extend(paths.iter().map(|path| root.join(path)));
+                    .extend(paths.iter().map(|path| records.join(path)));
                 tree.projects.push(project);
             }
             Ok(None) => {
                 let paths: Vec<PathBuf> = paths.into_iter().collect();
-                warnings.push(unavailable(&root, &paths));
+                warnings.push(unavailable(&records, &paths));
             }
-            Err(error) => warnings.push(format!("commit_failed: {}: {error}", root.display())),
+            Err(error) => warnings.push(format!("commit_failed: {}: {error}", records.display())),
         }
     }
     for (top, tree) in trees {

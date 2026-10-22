@@ -185,7 +185,7 @@ impl<'a> Resolver<'a> {
 
     /// `rel` in this checkout, else in the main checkout (see [`Located`]).
     pub fn locate(&self, rel: &str) -> Result<Located> {
-        let here = self.project.root.join(rel);
+        let here = self.project.doc_path(rel);
         if here.is_file() {
             return Ok(Located::Here(here));
         }
@@ -199,7 +199,7 @@ impl<'a> Resolver<'a> {
     }
 
     pub fn locate_entry(&self, rel: &str) -> Result<LocatedEntry> {
-        let here = self.project.root.join(rel);
+        let here = self.project.doc_path(rel);
         match std::fs::metadata(&here) {
             Ok(meta) => {
                 return Ok(if meta.is_file() || meta.is_dir() {
@@ -290,7 +290,7 @@ impl<'a> Resolver<'a> {
             return Ok(name_or_path.to_string());
         }
 
-        let mut matches = doc_matches(&self.project.root, dirs, name_or_path)?;
+        let mut matches = doc_matches(&self.project.records, dirs, name_or_path)?;
         let mut main = None;
         if matches.is_empty()
             && let Some(root) = self.main_root()?
@@ -334,7 +334,7 @@ impl<'a> Resolver<'a> {
                 Some(path) => path,
                 None => match self.locate_entry(value)? {
                     LocatedEntry::Special(path) => path,
-                    _ => self.project.root.join(value),
+                    _ => self.project.doc_path(value),
                 },
             };
             refuse_special(&path)?;
@@ -541,7 +541,7 @@ impl<'a> Resolver<'a> {
         }
         let path = self
             .find(kind, rel)?
-            .unwrap_or_else(|| self.project.root.join(rel));
+            .unwrap_or_else(|| self.project.doc_path(rel));
         Ok(path.display().to_string())
     }
 }

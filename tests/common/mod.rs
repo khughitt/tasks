@@ -8,6 +8,33 @@ use tempfile::TempDir;
 /// magenta paints P1 as `38;2;215;95;215`.
 pub const TEST_PALETTE: &str = "fg=#e5e3d7 bg=#13140d cyan=#00d7ff magenta=#d75fd7";
 
+/// The environment every test subprocess starts from, built key by key: nothing of the
+/// invoking process leaks in, and a failing case cannot print a credential. `PATH` is
+/// copied, `HOME` is the test home, git gets an identity and no global or system config,
+/// and `GIT_CEILING_DIRECTORIES` and `TMPDIR` are copied when set. `TASKS_PALETTE` keeps
+/// the child from querying the terminal of whoever runs the suite.
+fn isolated_env(home: &Path) -> Vec<(&'static str, std::ffi::OsString)> {
+    let mut vars: Vec<(&'static str, std::ffi::OsString)> = vec![
+        ("PATH", std::env::var_os("PATH").expect("PATH is set")),
+        ("HOME", home.into()),
+        ("USER", "tester".into()),
+        ("LC_ALL", "C".into()),
+        ("GIT_CONFIG_GLOBAL", "/dev/null".into()),
+        ("GIT_CONFIG_NOSYSTEM", "1".into()),
+        ("GIT_AUTHOR_NAME", "t".into()),
+        ("GIT_AUTHOR_EMAIL", "t@t".into()),
+        ("GIT_COMMITTER_NAME", "t".into()),
+        ("GIT_COMMITTER_EMAIL", "t@t".into()),
+        ("TASKS_PALETTE", TEST_PALETTE.into()),
+    ];
+    for key in ["GIT_CEILING_DIRECTORIES", "TMPDIR"] {
+        if let Some(value) = std::env::var_os(key) {
+            vars.push((key, value));
+        }
+    }
+    vars
+}
+
 pub struct TestEnv {
     pub home: TempDir,
     dirs: Vec<TempDir>,
@@ -23,32 +50,11 @@ impl TestEnv {
 
     pub fn cmd(&self, dir: &Path) -> Command {
         let mut c = Command::cargo_bin("tasks").unwrap();
-        c.env("HOME", self.home.path())
-            .env_remove("XDG_CONFIG_HOME")
-            .env_remove("XDG_STATE_HOME")
-            .env_remove("RELAY_STATE_DIR")
-            .env_remove("TASKS_FORMAT")
-            .env_remove("TASKS_COMPLETE")
-            .env_remove("TASKS_OWNER")
-            .env_remove("TASKS_SESSION")
-            .env_remove("TASKS_SESSION_PID")
-            .env_remove("TASKS_MODEL")
-            .env_remove("TASKS_AGENT")
-            .env_remove("TASKS_MAX_COMPLEXITY")
-            .env_remove("TASKS_WITHOUT")
-            .env_remove("CLAUDE_CODE_SESSION_ID")
-            .env_remove("CLAUDE_PID")
-            .env_remove("CODEX_SESSION_ID")
-            .env_remove("CODEX_THREAD_ID")
-            .env_remove("TASKS_COLOR")
-            .env_remove("TASKS_THEME")
-            .env_remove("NO_COLOR")
-            .env_remove("COLUMNS")
-            // Never query the terminal of whoever runs the suite, and never inherit a
-            // malformed value: TASKS_PALETTE is validated whenever it is set.
-            .env("TASKS_PALETTE", TEST_PALETTE)
-            .env("USER", "tester")
-            .current_dir(dir);
+        c.env_clear();
+        for (key, value) in isolated_env(self.home.path()) {
+            c.env(key, value);
+        }
+        c.current_dir(dir);
         c
     }
 
@@ -56,32 +62,11 @@ impl TestEnv {
         let mut c = std::process::Command::new(assert_cmd::cargo::cargo_bin("tasks"));
         c.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .env("HOME", self.home.path())
-            .env_remove("XDG_CONFIG_HOME")
-            .env_remove("XDG_STATE_HOME")
-            .env_remove("RELAY_STATE_DIR")
-            .env_remove("TASKS_FORMAT")
-            .env_remove("TASKS_COMPLETE")
-            .env_remove("TASKS_OWNER")
-            .env_remove("TASKS_SESSION")
-            .env_remove("TASKS_SESSION_PID")
-            .env_remove("TASKS_MODEL")
-            .env_remove("TASKS_AGENT")
-            .env_remove("TASKS_MAX_COMPLEXITY")
-            .env_remove("TASKS_WITHOUT")
-            .env_remove("CLAUDE_CODE_SESSION_ID")
-            .env_remove("CLAUDE_PID")
-            .env_remove("CODEX_SESSION_ID")
-            .env_remove("CODEX_THREAD_ID")
-            .env_remove("TASKS_COLOR")
-            .env_remove("TASKS_THEME")
-            .env_remove("NO_COLOR")
-            .env_remove("COLUMNS")
-            // Never query the terminal of whoever runs the suite, and never inherit a
-            // malformed value: TASKS_PALETTE is validated whenever it is set.
-            .env("TASKS_PALETTE", TEST_PALETTE)
-            .env("USER", "tester")
-            .current_dir(dir);
+            .env_clear();
+        for (key, value) in isolated_env(self.home.path()) {
+            c.env(key, value);
+        }
+        c.current_dir(dir);
         c
     }
 

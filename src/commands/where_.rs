@@ -57,9 +57,7 @@ fn shown(project: Project, linked: bool) -> WhereProject {
     WhereProject {
         prefix: project.prefix,
         root: project.root.display().to_string(),
-        checkout: linked
-            .then(|| project.checkout.map(|c| c.display().to_string()))
-            .flatten(),
+        checkout: linked.then(|| project.checkout.display().to_string()),
         linked,
         color: project.color,
     }

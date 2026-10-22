@@ -65,12 +65,38 @@ pub const DEFAULT_SPEC_DIRS: &[&str] = &[
 ];
 pub const DEFAULT_PLAN_DIRS: &[&str] = &["docs/plans", "docs/superpowers/plans"];
 
+/// Where a project's records live relative to its code (record-home spec).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    /// Records under the code checkout: root, checkout and records coincide.
+    InTree,
+    /// Records in a separate directory; the root is the code checkout.
+    Detached,
+    /// A records overlay linked to a foreign code checkout.
+    Linked,
+}
+
+impl Kind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::InTree => "in-tree",
+            Kind::Detached => "detached",
+            Kind::Linked => "linked",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Project {
     /// The `[git] commit` switch: commit each record write as it lands. See
     /// docs/specs/2026-10-10-record-commit-design.md §3.1.
     pub commit_records: bool,
+    /// The registered root, what `tasks root` prints.
     pub root: PathBuf,
+    /// The directory holding `tasks/` and `docs/`; canonical.
+    pub records: PathBuf,
+    pub kind: Kind,
     pub prefix: String,
     pub color: Option<crate::palette::Rgb>,
     /// Roots a `spec` link may live under; also the search path for bare spec names.
@@ -92,10 +118,11 @@ pub struct Project {
     pub attachments_max_bytes: u64,
     /// The `[retired]` table: `Some` means the project is over and takes no writes.
     pub retired: Option<Retirement>,
-    /// The code checkout this project is linked to, from the config's `[checkout] path`,
-    /// absolute and normalized; `None` for an in-tree project. It need not exist: `check`
-    /// reports a missing one, and a missing one never matches (ops linked-checkouts §4.1).
-    pub checkout: Option<PathBuf>,
+    /// The code checkout sessions run in: the config's `[checkout] path`, absolute and
+    /// normalized, for a linked or detached project; the root for an in-tree one. It need
+    /// not exist: `check` reports a missing one, and a missing one never matches (ops
+    /// linked-checkouts §4.1).
+    pub checkout: PathBuf,
     /// The code working tree this command runs in, when `locate` found the project through
     /// its `[checkout]` link; `None` otherwise. Claims and parks record it (ops
     /// linked-checkouts §4.1, "record location and resume location are separate").
@@ -178,22 +205,33 @@ struct GitConfig {
 #[serde(deny_unknown_fields)]
 struct CheckoutConfig {
     path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
 }
 
-/// A `[checkout] path`: relative to the project root as `init --checkout` writes it, or
+/// A `[checkout] path`: relative to the records directory as `init --checkout` writes it, or
 /// absolute as written by hand. Normalized the way `resolve` normalizes paths, so a
 /// symlinked spelling and its real path compare equal when the target exists.
-fn checkout_path(root: &Path, raw: Option<CheckoutConfig>) -> Result<Option<PathBuf>> {
+fn checkout_path(records: &Path, raw: Option<CheckoutConfig>) -> Result<Option<(Kind, PathBuf)>> {
     let Some(table) = raw else {
         return Ok(None);
+    };
+    let kind = match table.kind.as_deref() {
+        None => Kind::Linked,
+        Some("detached") => Kind::Detached,
+        Some(_) => {
+            return Err(Error::Config(format!(
+                "{CONFIG_REL}: [checkout] kind must be \"detached\" or absent"
+            )));
+        }
     };
     if table.path.is_empty() {
         return Err(Error::Config(format!(
             "{CONFIG_REL}: [checkout] path must not be empty"
         )));
     }
-    crate::locations::normalize(Path::new(&table.path), root)
-        .map(Some)
+    crate::locations::normalize(Path::new(&table.path), records)
+        .map(|path| Some((kind, path)))
         .map_err(|problem| Error::Config(format!("{CONFIG_REL}: [checkout] path: {problem}")))
 }
 
@@ -373,13 +411,14 @@ impl Project {
                 )));
             }
             if let Some(checkout) = checkout
-                && existing.checkout.as_deref() != Some(checkout)
+                && (existing.kind != Kind::Linked || existing.checkout != checkout)
             {
                 return Err(Error::Config(format!(
-                    "{} already exists without this checkout; init does not relink an existing \
-                     project: add `[checkout] path = {:?}` by hand",
+                    "{} already exists as a {} project without this checkout; init does not \
+                     relink an existing project: add `[checkout] path = {:?}` by hand",
                     config.display(),
-                    crate::link::relative_path(&existing.root, checkout)
+                    existing.kind.as_str(),
+                    crate::link::relative_path(&existing.records, checkout)
                         .display()
                         .to_string()
                 )));
@@ -405,6 +444,7 @@ impl Project {
                             .to_str()
                             .map(|path| CheckoutConfig {
                                 path: path.to_string(),
+                                kind: None,
                             })
                             .ok_or_else(|| {
                                 Error::Config(format!(
@@ -419,14 +459,15 @@ impl Project {
             atomic_write(&config, text.as_bytes())?;
         }
         let project = Self::open(root)?;
-        std::fs::create_dir_all(project.root.join(&project.spec_dirs[0]))?;
-        std::fs::create_dir_all(project.root.join(&project.plan_dirs[0]))?;
+        std::fs::create_dir_all(project.records.join(&project.spec_dirs[0]))?;
+        std::fs::create_dir_all(project.records.join(&project.plan_dirs[0]))?;
         Ok(project)
     }
 
-    pub fn open(root: &Path) -> Result<Project> {
-        let root = root.canonicalize()?;
-        let text = std::fs::read_to_string(root.join(CONFIG_REL))?;
+    /// Opens the project whose `tasks/.config.toml` is under `dir`, the records directory.
+    pub fn open(dir: &Path) -> Result<Project> {
+        let records = dir.canonicalize()?;
+        let text = std::fs::read_to_string(records.join(CONFIG_REL))?;
         let config: Config = toml::from_str(&text)
             .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
         if !is_valid_prefix(&config.prefix) {
@@ -435,9 +476,15 @@ impl Project {
                 config.prefix
             )));
         }
-        let checkout = checkout_path(&root, config.checkout)?;
+        let (kind, root, checkout) = match checkout_path(&records, config.checkout)? {
+            None => (Kind::InTree, records.clone(), records.clone()),
+            Some((Kind::Detached, code)) => (Kind::Detached, code.clone(), code),
+            Some((kind, code)) => (kind, records.clone(), code),
+        };
         Ok(Project {
             root,
+            records,
+            kind,
             checkout,
             worktree: None,
             commit_records: config.git.is_some_and(|git| git.commit),
@@ -496,7 +543,12 @@ impl Project {
     }
 
     pub fn tasks_dir(&self) -> PathBuf {
-        self.root.join("tasks")
+        self.records.join("tasks")
+    }
+
+    /// A path under the records directory, such as a spec, plan or `--ref` document.
+    pub fn doc_path(&self, rel: &str) -> PathBuf {
+        self.records.join(rel)
     }
 
     pub fn task_path(&self, id: &TaskId) -> PathBuf {
@@ -622,7 +674,7 @@ impl Project {
         crate::hierarchy::validate_defer(self, registry, task)?;
         let path = self.task_path(&task.id);
         atomic_write(&path, serialize_task(task).as_bytes())?;
-        crate::written::record(&self.root, &path);
+        crate::written::record(&self.records, &path);
         Ok(())
     }
 
@@ -630,7 +682,7 @@ impl Project {
         std::process::Command::new("git")
             .args(args)
             .env("LC_ALL", "C")
-            .current_dir(&self.root)
+            .current_dir(&self.records)
             .output()
     }
 
@@ -657,7 +709,7 @@ impl Project {
                 }
                 Err(Error::Io(format!(
                     "git rev-parse in {} failed ({}): {}",
-                    self.root.display(),
+                    self.records.display(),
                     output.status,
                     stderr.trim()
                 )))
@@ -671,7 +723,7 @@ impl Project {
     /// path under the project root): the record was committed before the branch was made.
     /// `false` in the main worktree and outside git.
     pub fn linked_worktree_head_has(&self, relative: &str) -> Result<bool> {
-        let Some(tree) = crate::link::GitTree::of(&self.root)? else {
+        let Some(tree) = crate::link::GitTree::of(&self.records)? else {
             return Ok(false);
         };
         if tree.git_dir == tree.common {
@@ -682,7 +734,7 @@ impl Project {
         if !output.status.success() {
             return Err(Error::Io(format!(
                 "git ls-tree in {} failed ({}): {}",
-                self.root.display(),
+                self.records.display(),
                 output.status,
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
@@ -698,7 +750,7 @@ impl Project {
         if !output.status.success() {
             return Err(Error::Io(format!(
                 "git worktree list in {} failed: {}",
-                self.root.display(),
+                self.records.display(),
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
@@ -717,7 +769,7 @@ impl Project {
     pub fn checkout_roots(&self) -> Result<Vec<PathBuf>> {
         Ok(self
             .worktree_roots()?
-            .unwrap_or_else(|| vec![self.root.clone()]))
+            .unwrap_or_else(|| vec![self.records.clone()]))
     }
 
     /// This project's root in every worktree of the repository, in git's order, so the
@@ -740,7 +792,7 @@ impl Project {
         let Some(record) = records.into_iter().find(|record| record.root == root) else {
             return Ok(None);
         };
-        let at = self.root.display();
+        let at = self.records.display();
         let worktree = record.worktree.display();
         Ok(Some(if record.worktree.exists() {
             let records = root.join("tasks");
@@ -770,18 +822,18 @@ impl Project {
             return Ok(None);
         };
         // A nested project sits at the same offset below the top level in every worktree.
-        let Ok(offset) = self.root.strip_prefix(&toplevel) else {
+        let Ok(offset) = self.records.strip_prefix(&toplevel) else {
             return Err(Error::Io(format!(
                 "git reports {} as the top level, which does not contain {}",
                 toplevel.display(),
-                self.root.display()
+                self.records.display()
             )));
         };
         let listed = self.git(&["worktree", "list", "--porcelain", "-z"])?;
         if !listed.status.success() {
             return Err(Error::Io(format!(
                 "git worktree list in {} failed ({}): {}",
-                self.root.display(),
+                self.records.display(),
                 listed.status,
                 String::from_utf8_lossy(&listed.stderr).trim()
             )));
@@ -825,7 +877,10 @@ impl Project {
         let Some(roots) = self.worktree_roots()? else {
             return Ok(None);
         };
-        Ok(roots.into_iter().next().filter(|main| *main != self.root))
+        Ok(roots
+            .into_iter()
+            .next()
+            .filter(|main| *main != self.records))
     }
 
     /// This record as it stands in every *other* worktree of the repository. `None` in the
@@ -842,7 +897,7 @@ impl Project {
         let file = format!("tasks/{id}.md");
         let mut copies = Vec::new();
         for root in roots {
-            if root == self.root {
+            if root == self.records {
                 continue;
             }
             let raw = match std::fs::read_to_string(root.join(&file)) {
@@ -888,7 +943,7 @@ impl Project {
         if !output.status.success() {
             return Err(Error::Io(format!(
                 "git status in {} failed ({}): {}",
-                self.root.display(),
+                self.records.display(),
                 output.status,
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
@@ -906,10 +961,10 @@ impl Project {
                 fields.next(); // the source path of the rename or copy
             }
             let absolute = toplevel.join(repo_relative); // bound first: strip_prefix borrows it
-            let Ok(relative) = absolute.strip_prefix(&self.root) else {
+            let Ok(relative) = absolute.strip_prefix(&self.records) else {
                 return Err(Error::Io(format!(
                     "git status reported {repo_relative:?}, which is not under {}",
-                    self.root.display()
+                    self.records.display()
                 )));
             };
             let name = relative
@@ -1027,7 +1082,7 @@ impl Project {
         drop(file);
         let linked = std::fs::hard_link(temp, self.task_path(&task.id));
         if linked.is_ok() {
-            crate::written::record(&self.root, &self.task_path(&task.id));
+            crate::written::record(&self.records, &self.task_path(&task.id));
         }
         let _ = std::fs::remove_file(temp);
         linked
@@ -1060,6 +1115,67 @@ mod tests {
         assert_eq!(doc_root("plan_dirs", "notes/x:y/").unwrap(), "notes/x:y");
     }
     use crate::model::*;
+
+    #[test]
+    fn a_detached_config_opens_with_root_from_its_checkout_path() {
+        let base = tempfile::tempdir().unwrap();
+        let code = base.path().join("code");
+        let records = base.path().join("records/det");
+        std::fs::create_dir_all(&code).unwrap();
+        std::fs::create_dir_all(records.join("tasks")).unwrap();
+        std::fs::write(
+            records.join("tasks/.config.toml"),
+            "prefix = \"det\"\n\n[git]\ncommit = true\n\n[checkout]\npath = \"../../code\"\nkind = \"detached\"\n",
+        )
+        .unwrap();
+        let project = Project::open(&records).unwrap();
+        assert_eq!(project.kind, Kind::Detached);
+        assert_eq!(project.records, records.canonicalize().unwrap());
+        assert_eq!(project.root, code.canonicalize().unwrap());
+        assert_eq!(project.checkout, project.root);
+        assert_eq!(project.tasks_dir(), project.records.join("tasks"));
+        assert!(project.commit_records);
+    }
+
+    #[test]
+    fn in_tree_and_linked_configs_keep_their_shape() {
+        let (dir, project) = project_with_config("prefix = \"tst\"\n");
+        let project = project.unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        assert_eq!(project.kind, Kind::InTree);
+        assert_eq!(project.kind.as_str(), "in-tree");
+        assert_eq!(
+            (&project.root, &project.checkout, &project.records),
+            (&root, &root, &root)
+        );
+
+        let base = tempfile::tempdir().unwrap();
+        let code = base.path().join("code");
+        let overlay = base.path().join("overlay/lnk");
+        std::fs::create_dir_all(&code).unwrap();
+        std::fs::create_dir_all(overlay.join("tasks")).unwrap();
+        std::fs::write(
+            overlay.join("tasks/.config.toml"),
+            "prefix = \"lnk\"\n\n[checkout]\npath = \"../../code\"\n",
+        )
+        .unwrap();
+        let project = Project::open(&overlay).unwrap();
+        let overlay = overlay.canonicalize().unwrap();
+        assert_eq!(project.kind, Kind::Linked);
+        assert_eq!(project.kind.as_str(), "linked");
+        assert_eq!((&project.root, &project.records), (&overlay, &overlay));
+        assert_eq!(project.checkout, code.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn an_unknown_checkout_kind_is_a_config_error() {
+        let (_dir, project) = project_with_config(
+            "prefix = \"tst\"\n\n[checkout]\npath = \"x\"\nkind = \"overlay\"\n",
+        );
+        let error = project.unwrap_err();
+        assert_eq!(error.kind(), "config");
+        assert!(error.to_string().contains("[checkout] kind"), "{error}");
+    }
 
     fn project_with_config(text: &str) -> (tempfile::TempDir, Result<Project>) {
         let dir = tempfile::tempdir().unwrap();

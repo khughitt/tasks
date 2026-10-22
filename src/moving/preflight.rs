@@ -69,7 +69,7 @@ pub fn prepare(ctx: &mut MoveCtx) -> Result<Journal> {
     )?;
     validate_destination_docs(&ctx.target, &ctx.registry, &target, id)?;
     validate_record(&ctx.target, &ctx.registry, &target)?;
-    let destination = commands::open_ctx(Some(&ctx.target.root))?;
+    let destination = commands::open_ctx(Some(&ctx.target.records))?;
     commands::dep::ensure_acyclic(&destination, &target)?;
     for other in ctx.target.scan()? {
         let why = if other

@@ -85,7 +85,8 @@ pub fn run(
                 last,
                 project.color,
                 project.retired,
-                project.checkout.map(|c| c.display().to_string()),
+                (project.kind == crate::repo::Kind::Linked)
+                    .then(|| project.checkout.display().to_string()),
             )
         } else {
             (None, None, None, None, None, None)

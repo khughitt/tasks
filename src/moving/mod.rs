@@ -225,7 +225,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
             attachments::ensure_task_dir(&ctx.target, &target)?;
             let path = attachment_path(&ctx.target, &target, &attachment.name)?;
             attachments::write_new(&path, &bytes)?;
-            crate::written::record(&ctx.target.root, &path);
+            crate::written::record(&ctx.target.records, &path);
         }
         verify_attachment(&ctx.target, &target, attachment)?;
     }
@@ -267,7 +267,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
     let source_path = ctx.source.project.task_path(&source);
     if record_state(&source_path)? != FileState::Digest(digest(journal.tombstone_text.as_bytes())) {
         atomic_write(&source_path, journal.tombstone_text.as_bytes())?;
-        crate::written::record(&ctx.source.project.root, &source_path);
+        crate::written::record(&ctx.source.project.records, &source_path);
     }
     if stop_after("tombstone") {
         return Ok(out);
@@ -279,7 +279,7 @@ pub fn run(ctx: &mut MoveCtx, journal: Journal) -> Result<MoveOut> {
             EntryState::File(_) => {
                 verify_attachment(&ctx.source.project, &source, attachment)?;
                 std::fs::remove_file(&path)?;
-                crate::written::record(&ctx.source.project.root, &path);
+                crate::written::record(&ctx.source.project.records, &path);
             }
             EntryState::Absent => {}
             EntryState::Unsafe(detail) => return Err(Error::AttachmentUnsafe(detail)),

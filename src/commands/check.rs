@@ -151,9 +151,8 @@ pub fn run(ctx: Ctx) -> Result<Output> {
         errors.push(finding(None, file, "parse", error.to_string()));
     }
 
-    if let Some(checkout) = &ctx.project.checkout
-        && !checkout.is_dir()
-    {
+    let checkout = &ctx.project.checkout;
+    if ctx.project.kind != crate::repo::Kind::InTree && !checkout.is_dir() {
         warnings.push(finding(
             None,
             crate::repo::CONFIG_REL.into(),

@@ -730,14 +730,14 @@ pub fn lock_and_revalidate(ctx: &mut Ctx, routing: &Routing) -> Result<()> {
         let project = match routing {
             Routing::Local => Project {
                 worktree: ctx.project.worktree.clone(),
-                ..Project::open(&ctx.project.root)?
+                ..Project::open(&ctx.project.records)?
             },
             Routing::Registered(prefix) => {
                 let live = registry.canonical_prefix(prefix);
                 crate::scope::open_registered(&registry, live, Origin::Prefix)?
             }
         };
-        if project.prefix == ctx.project.prefix && project.root == ctx.project.root {
+        if project.prefix == ctx.project.prefix && project.records == ctx.project.records {
             reject_stale_local(&registry, &project)?;
             reject_retired(&registry, &project)?;
             ctx.project = project;

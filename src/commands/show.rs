@@ -160,7 +160,7 @@ pub fn describe(
             if !task.status.is_open()
                 && matches!(resolver.locate(plan)?, Located::Missing)
                 // Existing non-file paths and metadata errors must not become missing plans.
-                && !project.root.join(plan).try_exists()?
+                && !project.doc_path(plan).try_exists()?
                 && match project.main_checkout_root()? {
                     Some(main) => !main.join(plan).try_exists()?,
                     None => true,
@@ -172,7 +172,7 @@ pub fn describe(
         (Some(plan), Some(step)) => match resolver.locate(plan)? {
             Located::Here(_) | Located::Main { .. } => Some(resolver.step_exists(plan, step)?),
             Located::Missing => {
-                let here = project.root.join(plan);
+                let here = project.doc_path(plan);
                 let existing = if here.try_exists()? {
                     Some(here)
                 } else {
