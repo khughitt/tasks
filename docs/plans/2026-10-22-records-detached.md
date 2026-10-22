@@ -11,7 +11,7 @@
 
 **Tech Stack:** Rust (clap, serde, toml, toml_edit, assert_cmd integration tests).
 
-**Status:** draft for user review (round 3).
+**Status:** approved by the user 2026-10-22 after plan review round 3 (revision 3, bea738c). Execution is subagent-driven.
 
 Revision 3 (2026-10-22, after plan review round 2): `TestEnv::cmd`/`raw` and the fixture's git helper build their environment from `env_clear()` with the git identity the `tasks` subprocess needs for record commits (Global Constraints, Task 2); the rename invocation looks records up by the canonical prefix so replay and `--explain` after a completed rename report `complete` (Task 9); the retirement test no longer expects `retire` from the code checkout to refuse (Task 3); decision 3 amends spec §5.2 (Task 10); stale wording about rename's root removed.
 
