@@ -7,8 +7,8 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-22T20:54:25Z
-updated: 2026-10-22T20:54:25Z
-depends: []
+updated: 2026-10-22T20:54:27Z
+depends: [tasks-211e28]
 tags: []
 source: tasks-dc16eb
 agent: claude-code/claude-fable-5-1
