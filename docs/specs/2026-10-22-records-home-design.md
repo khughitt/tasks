@@ -1,6 +1,6 @@
 # Where task records and working documents live — design
 
-Task: tasks-dc16eb. Status: draft for user review (round 3).
+Task: tasks-dc16eb. Status: approved 2026-10-22 at revision 3, amended by plan review round 2 (§5.2); the tasks CLI part implemented by docs/plans/2026-10-22-records-detached.md (tasks-211e28).
 
 Revision 3 (2026-10-22, after spec review round 2): `check` applies the same
 staged-deletion exception as `init --records`, so §3.3 no longer blocks the removal
@@ -301,7 +301,7 @@ ops's `cli.toml` as the rules require.
   meaning. One client depends on the old shape: ops's `linked.py` rejects a non-null
   `checkout` on a row that is not linked, and the foreign-write guard would then
   refuse every write. Its tolerant version (§4) lands and is installed on both hosts
-  before the CLI release that changes the shape; the CLI piece names that dependency.
+  before the CLI release that changes the shape; the CLI piece names that dependency. On a row whose config could not be read (`reachable: false`), `records` is still present, from the registry's pairing or the root; `checkout` and `kind` are absent, since only the config can say them (plan review round 2, decision 3).
 - `tasks where` gains the same three; `linked` stays as a boolean for existing callers
   and equals `kind == "linked"`.
 - `tasks resolve` rows gain `records`, and `via` gains the value `records` (§3.2).

@@ -608,7 +608,7 @@ Preserve existing history when adding an entry, then run
 `tasks` binary drops `[locations]` whenever it writes the registry; update each host's
 binary before recording history.
 
-## Linked projects
+## Linked and detached projects
 
 A linked project keeps its task records, specs, and plans in an overlay project directory
 while its code lives in another git checkout. Run this in the overlay project directory:
@@ -618,8 +618,8 @@ while its code lives in another git checkout. Run this in the overlay project di
 Its `tasks/.config.toml` carries `[checkout] path`, written relative to the project root
 (absolute paths are accepted when read). Commands run in the code checkout or its
 worktrees open the linked project; nothing is written into the code tree. Claims and
-parks name the code worktree, so resume there. `tasks projects --json` includes an
-absolute `checkout` only on linked rows; `check` warns `checkout_missing` when the
+parks name the code worktree, so resume there. `tasks projects --json` rows carry
+an absolute `checkout`; `check` warns `checkout_missing` when the
 checkout is absent on this host. `resolve` matches it with `via: "checkout"`, and the
 storage its `.worktrees` link points into, removed worktrees included, with `via: "storage"`,
 while that link stands; nothing records it.
@@ -628,9 +628,11 @@ while that link stands; nothing records it.
 it stays within that repository; outside git it walks up to find a project. Its three
 outcomes are:
 
-- Project found: `{"project":{"prefix":"<p>","root":"<overlay>","checkout":"<code>","linked":true},"holds_records":false,"warnings":[]}`.
-  An in-tree project has `linked: false` and `checkout: null`. `color` is present when
-  the project sets one.
+- Project found: `{"project":{"prefix":"<p>","root":"<overlay>","checkout":"<code>","records":"<overlay>","kind":"linked","linked":true},"holds_records":false,"warnings":[]}`.
+  Every project reports `kind` (`in-tree`, `detached` or `linked`), `records` and
+  `checkout` as strings; an in-tree project has all three paths equal to `root`, with
+  `linked: false`. `linked` equals `kind == "linked"`. `color` is present when the
+  project sets one.
 - No project: `{"project":null,"holds_records":false,"warnings":[]}`.
 - Error: exit 1 with `{"error":{"kind":"<kind>","detail":"<detail>"}}` on stderr;
   success JSON is on stdout with exit 0.
@@ -643,6 +645,103 @@ even if that file is deleted locally. An unborn branch with no registered root h
 none. Two
 projects declaring the same checkout fail with `checkout_conflict`. Init refuses
 writes into a declared code checkout or any of its worktrees.
+
+### Detached projects
+
+A detached project keeps its records and working documents in a separate records
+repository, at `<records-root>/<prefix>`, while the code checkout stays free of them.
+Every project has three locations:
+
+| field | meaning | in-tree | detached | linked |
+| --- | --- | --- | --- | --- |
+| `root` | the registered root; what `tasks root` prints | the checkout | the checkout | `<overlay>/<prefix>` |
+| `checkout` | the code checkout sessions run in | = root | = root | the foreign repository |
+| `records` | where `tasks/` and `docs/` live | = root | `<records-root>/<prefix>` | = root |
+
+Run this in the code checkout:
+
+    tasks init --prefix <p> --records <records-root>
+
+It writes `<records-root>/<p>/tasks/.config.toml` with the prefix, `[git] commit = true`,
+`[checkout] path` (relative to the records directory, for example `../../<code>`) and
+`[checkout] kind = "detached"`, creates `docs/specs` and `docs/plans` there, and pairs
+the registry. Nothing is written in the checkout. On an existing records config (a
+migration) it keeps the file and its comments, adds `[checkout]`, and sets
+`[git] commit = true` when absent or false; a prefix mismatch is a `config` error. The
+second host runs the same command after the records sync, and only its registry is
+written. `--records` excludes `--checkout`. `--force` repoints as before and keeps
+aliases, groups and location history.
+
+The registry gains a `[records]` table beside `[projects]`:
+
+```toml
+[projects]
+tack = "<code>"
+
+[records]
+tack = "<records-root>/tack"
+```
+
+Init refuses with:
+
+- `records_in_tree`: `tasks/.config.toml` is still in the checkout's working tree or
+  index. Remove it with `git rm -r tasks`. A HEAD that still tracks it while the index
+  deletes it is allowed, so the removal commit's `tasks check` passes.
+- `checkout_conflict`: another prefix declares this checkout.
+- `config`: the checkout overlaps another registered project (containment either way
+  or a shared git common directory), is a linked worktree rather than a main checkout,
+  or the records root does not exist.
+- `retired_project`: the existing records config declares `[retired]` and `--force`
+  was used.
+
+A plain `init` that registers or repoints a prefix drops its `[records]` pairing with a
+warning; a plain `init` in a checkout paired in `[records]` refuses with `records_moved`.
+
+Commands run in the code checkout or any of its worktrees open the detached project
+through the registry pairing; `-C <records-root>/<p>` opens it by the config walk.
+Documents (`--spec`, `--plan`, `--ref`, `--source` paths) resolve under `records`
+first, then the code worktree the command runs in, then the code main checkout, so a
+reference document kept in the code tree still links and `check` does not warn
+`ref_in_main_checkout` for it. `check` warns `checkout_missing` when the code checkout
+is absent on this host, for detached and linked projects alike.
+
+A detached project in `tasks where --json`:
+
+    {"project":{"prefix":"<p>","root":"<code>","checkout":"<code>","records":"<records-root>/<p>","kind":"detached","linked":false},"holds_records":false,"warnings":[]}
+
+Pretty `where` prints `<p> <root> (records at <records>)`. In the detached code
+checkout `holds_records` is false unless HEAD still tracks the config; inside the
+records repository it is true. `tasks projects` rows carry `records` always, and
+`checkout` and `kind` whenever the config was read; an unreachable row has `records`
+(from the pairing or the root) but neither `checkout` nor `kind`. `projects --paths`
+appends ` -> <records>` on a detached row, and `resolve` rows gain `records`, with
+`via: "records"` for a path under a records directory.
+
+`where` outside git reads no registry, so a copied historical config outside git opens
+there while `locate` refuses it.
+
+Two errors guard against the split:
+
+- `records_moved`: a `tasks/.config.toml` found in a code tree (an old branch) whose
+  prefix is paired elsewhere, from every command and from `check` when the index still
+  holds the file. The detail names the records directory. Rebase or merge the branch
+  onto the main branch; that tree's `tasks/` is read-only history.
+- `records_unpaired`: a registered root with no config and no `[records]` row, as on a
+  second host before its own `init --records`. The detail names the command to run.
+
+A malformed registry is a `config` error for every command.
+
+`rename <old> <new>` on a detached project moves `<records-root>/<old>` to
+`<records-root>/<new>` as one resumable stage (`records` in `TASKS_RENAME_STOP_AFTER`),
+updates the `[records]` key and value in the same registry save, and leaves `[checkout]
+path` unchanged. It leaves the directory rename uncommitted: commit it in the records
+repository. The usual refusals apply against the records repository (clean `tasks/`, no
+live claims, at most one worktree). On the second host, `rename --adopt` pairs the
+renamed directory.
+
+Update each host's binary before the first detached project. An older binary cannot
+parse `kind = "detached"`, and it drops the `[records]` table on its next registry
+save.
 
 ## Resolving ids and paths
 
@@ -1044,7 +1143,7 @@ Opt in per project in `tasks/.config.toml`:
 
     tasks/.config.toml               prefix = "sci"; optional color / spec_dirs / plan_dirs / [tags] / [git]
     tasks/sci-4f2a9c.md              one task
-    ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live; [groups] name -> prefixes
+    ~/.config/tasks/projects.toml    per-machine registry: live prefix -> repo path; retired -> live; [records] prefix -> records dir; [groups] name -> prefixes
 
 ## License
 
