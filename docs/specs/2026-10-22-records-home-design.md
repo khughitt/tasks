@@ -1,6 +1,13 @@
 # Where task records and working documents live — design
 
-Task: tasks-dc16eb. Status: draft for user review (round 1).
+Task: tasks-dc16eb. Status: draft for user review (round 2).
+
+Revision 2 (2026-10-22, after spec review round 1): the history export runs as two
+filter passes with an inventory check (§8 step 2); registration precedes the removal commit
+so the hooks see the detached project (§5.1, §8 steps 3–4); ops's `linked.py` adapter is a
+consumer that lands before the output change (§4, §5.2); `init --records` takes the
+records root in the migration command too (§8 step 3); the retained-document set is the
+closure over document links and is validated after the move (§7.3).
 
 Supersedes, where they differ: the 2026-10-02 ruling on hq-d7b5b2 (task records and
 specs stay in the repository); hq's `2026-10-10-agent-docs-collection-design.md` §1
@@ -226,6 +233,7 @@ no-op; §10 files them.
 |---|---|---|
 | ops `claude-pretooluse` check 5 (`foreign_leak.py`) | exempts a tree with `HEAD:tasks/.config.toml`, guards every other checkout and refuses task ids, `tasks/` paths, vendored tools and `identity.toml` | keyed on `kind`: `linked` keeps every rule; `detached` refuses only writes under `tasks/` in the code tree (`records_in_tree`); task ids, vendored tools and identity are the repository's own |
 | ops `claude-pretooluse` check 4 (design docs) | `docs/superpowers/` only, keyed on `design_docs` | under `design_docs: records`, refuses a new file under `docs/specs/`, `docs/plans/`, `docs/superpowers/`, `docs/designs/`, `docs/notes/*-brief.md`, `docs/notes/*-handoff.md` in a detached checkout; tracked files revise in place |
+| ops `bin/linked.py` (the `where`/`projects` adapter the hooks and `ops-profile` use) | validates `checkout` as a non-empty string when `linked` and `null` otherwise; `linked_checkouts()` treats every populated `checkout` as linked | accepts `checkout` on every row and the new `kind` and `records` keys, and filters linked projects by `kind == "linked"`; lands before the CLI output changes (§5.2), tolerant of both shapes |
 | ops `ops-projects link` | refuses a profile without an overlay | `link` gains the detached form, or `tasks init --records` replaces it (§5.1); the overlay stays for work |
 | ops `ops-check` layout rule | exempts `^tasks/[^/]+\.md$` | also exempts `^[a-z0-9-]+/tasks/[^/]+\.md$` in the records repository; `tasks/files/` stays covered |
 | ops `obs-index` `task_journeys` | globs `root/tasks/<prefix>-*.md` | globs under `records` from `tasks projects` |
@@ -262,11 +270,14 @@ Run in the code checkout (or with `-C`):
 - For a migration, the directory already holds the moved records and config (§8); the
   command then keeps the config, adds the `[checkout]` table and verifies the prefix
   matches; a prefix mismatch is a typed error.
-- Refuses with `records_in_tree` while the checkout's HEAD tracks `tasks/.config.toml`
-  or the directory exists on disk, naming the removal commit as the remedy; with
-  `checkout_conflict` when another prefix declares this checkout; and with the existing
-  validations of `init --checkout` otherwise (a main checkout, not a worktree, not
-  inside another registered root).
+- Refuses with `records_in_tree` while `tasks/.config.toml` exists in the checkout's
+  working tree or its index, naming the removal (`git rm -r tasks …`) as the remedy. A
+  HEAD that still tracks the file is allowed exactly when the index deletes it: the
+  removal is staged, registration runs, and only then does the removal commit, so
+  that the pre-commit hook's `tasks check` already finds the detached project (§8 steps 3–4).
+  Refuses with `checkout_conflict` when another prefix declares this checkout, and
+  with the existing validations of `init --checkout` otherwise (a main checkout, not a
+  worktree, not inside another registered root).
 - The repoint of an already-registered prefix needs `--force` as today and preserves
   aliases, groups and location history (`unregister` is never part of the procedure).
 - A second host runs the same command after the sync delivers both directories; the
@@ -279,7 +290,10 @@ ops's `cli.toml` as the rules require.
 
 - `tasks projects` rows gain `records` (always) and `kind` (`in-tree` | `detached` |
   `linked`); `checkout` becomes always present. JSON keys are added, none change
-  meaning.
+  meaning. One client depends on the old shape: ops's `linked.py` rejects a non-null
+  `checkout` on a row that is not linked, and the foreign-write guard would then
+  refuse every write. Its tolerant version (§4) lands and is installed on both hosts
+  before the CLI release that changes the shape; the CLI piece names that dependency.
 - `tasks where` gains the same three; `linked` stays as a boolean for existing callers
   and equals `kind == "linked"`.
 - `tasks resolve` rows gain `records`, and `via` gains the value `records` (§3.2).
@@ -369,9 +383,14 @@ project when it next touches the subsystem, and is not part of the migration.
   paths in 1,224 bodies read correctly relative to the project's records directory.
 - A document the code repository's own tracked files cite (a skill's relative link to a
   spec section, a README anchor, an `AGENTS.md` pointer) stays in the code repository
-  until that project rewrites it as a reference document; the migration computes this
-  set by searching tracked non-docs files for `docs/` paths and leaves those files out
-  of the move. The task that links such a file still resolves it through the
+  until that project rewrites it as a reference document. The migration computes the
+  retained set as a closure: start from every `docs/` path cited by a tracked file
+  outside `docs/`, add every `docs/` path those documents cite, and repeat until
+  nothing is added; the whole set stays. The script prints the set for the user to
+  confirm before anything moves, and after the removal commit it scans every retained
+  tracked file for a `docs/` link that no longer resolves in the tree and stops on
+  the first. A retained chain is consolidated later under §7.2, not trimmed by the
+  migration. The task that links such a file still resolves it through the
   `records`-then-`root` order, trying the worktree the command runs in before the main
   checkout, as the resolver does today.
 - The external reference form (`<scheme>:<rest>`, `doc_fetch.rs`, `[docs.schemes]`,
@@ -400,20 +419,33 @@ at the first failed check and is rerunnable:
 1. **Preconditions.** No live claim for the prefix (`tasks claims`); every worktree of
    the code checkout is merged or its record changes are merged into the main branch
    (a worktree with a record diff against main stops the migration); `tasks check`
-   clean; the second host has synced (the user confirms).
-2. **Export history.** In a temporary clone of the code repository,
-   `git filter-repo --path tasks/ --path docs/specs/ --path docs/plans/ --path
-   docs/notes/ --path docs/superpowers/ --path docs/designs/ --path-glob
-   '<kept files>' --invert-paths ... --to-subdirectory-filter <prefix>`, with the kept
-   set from §7.3 excluded, then fetch and merge it into the records repository with
+   clean; the second host has synced (the user confirms); the retained set (§7.3) is
+   printed and confirmed.
+2. **Export history.** In a temporary clone of the code repository, two
+   `git filter-repo` passes: first an inclusion pass, `--path tasks/ --path docs/specs/
+   --path docs/plans/ --path docs/notes/ --path docs/superpowers/ --path docs/designs/`,
+   then an exclusion pass over the retained set, one `--path <file>` per retained
+   document with `--invert-paths` (a single invocation would negate every listed path,
+   records included), then `--to-subdirectory-filter <prefix>`. Before anything else
+   happens, the exported tree's file list is compared with `git ls-files` of the moved
+   paths minus the retained set in the source; any difference stops the migration.
+   Then fetch and merge the export into the records repository with
    `--allow-unrelated-histories`. The source repository is never rewritten; each moved
    file keeps its full log under `<records>/<prefix>/`.
-3. **Remove from the code tree.** One commit on the main branch deleting the moved
-   paths; the pre-commit hook's docs-only fast path no longer matches, which is
-   harmless.
-4. **Register.** `tasks init --prefix <prefix> --records <records>/<prefix> --force`
-   in the code checkout (§5.1); then on the other host once synced.
-5. **Verify.** `tasks where` in the checkout says `kind: detached`; `tasks check`
+3. **Stage the removal and register.** In the code checkout, `git rm -r` the moved
+   paths (the retained set stays), then
+   `tasks init --prefix <prefix> --records <records> --force` (§5.1: the index deletes
+   the config, so the command is allowed, and it derives `<records>/<prefix>`, where
+   the export already placed the records and config). The command verifies the prefix
+   in that config and adds the `[checkout]` table.
+4. **Commit the removal.** One commit on the main branch. Its pre-commit hook runs
+   `tasks check` as before; the working tree has no config, the registry pairs the
+   checkout with its records, so the check runs against the records directory and
+   passes. The hook's docs-only fast path no longer matches, which is harmless. The
+   retained-link scan of §7.3 runs on the committed tree.
+5. **Register on the other host.** The same `init --records` once the sync has
+   delivered both directories; it only writes the registry there.
+6. **Verify.** `tasks where` in the checkout says `kind: detached`; `tasks check`
    clean in the checkout and in the records directory; `tasks show` of a record with a
    spec and a plan resolves both; `tasks list --plan <path> --status done` finds the
    migrated steps; `tasks projects` shows `kind: detached` with `records` set. The
@@ -485,9 +517,12 @@ the ordering noted:
    `records` and commit there.
 2. A worktree on a branch that still tracks `tasks/.config.toml` gets `records_moved`
    from `tasks list` and from `tasks note`, naming the records directory.
-3. `init --records` on a checkout whose HEAD tracks `tasks/.config.toml` refuses with
-   `records_in_tree`; after the removal commit it succeeds; `--force` on the registered
-   prefix keeps its aliases and location history.
+3. `init --records` on a checkout whose working tree holds `tasks/.config.toml` refuses
+   with `records_in_tree`; with the deletion staged and HEAD still tracking it, it
+   succeeds, and the following commit's pre-commit `tasks check` passes; `--force` on
+   the registered prefix keeps its aliases and location history.
+9. ops's `linked.py` accepts rows from both the old and the new `tasks projects`
+   shape, and `linked_checkouts()` returns only `kind: linked` rows under the new one.
 4. A migrated project's done record with `plan: docs/plans/x.md` and `step` resolves
    (`step_found: true`); a spec kept in the code tree per §7.3 resolves through `root`.
 5. `stale_copy` does not fire across two code worktrees writing the same record; it
@@ -496,7 +531,8 @@ the ordering noted:
    `--head` form after a closing commit.
 7. `tasks docs --project <p> --kind plan --search <phrase>` lists the migrated plan
    with its linking task ids.
-8. The pilot migration of `wali` and `tui` passes §8 step 5 on both hosts, and
+8. The pilot migration of `wali` and `tui` passes §8 step 6 on both hosts, with the
+   export inventory check and the retained-link scan exercised, and
    `obs-index`, `tt-latency`, `session-episodes` (on a non-trial project) and
    `claude-pretooluse` check 5 behave as §4 says in the migrated checkout: a commit
    message naming a task id is allowed, a write under `tasks/` is refused.
