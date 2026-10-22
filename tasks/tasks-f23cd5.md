@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-f23cd5-git-isolation
 created: 2026-10-18T14:59:28Z
-updated: 2026-10-22T23:49:23Z
+updated: 2026-10-22T23:51:39Z
 started: 2026-10-22T23:37:44Z
 completed: 2026-10-22T23:49:23Z
 closed: 2026-10-22T23:49:23Z
@@ -39,3 +39,4 @@ tasks-eeeeda stopped the HOME leak and made the test-only git helper in src/reco
   provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-22T23:49:23Z (fix/tasks-f23cd5-git-isolation): Fixed fixture Git isolation by injecting the runner through discovery, staging, commit and cleanup; hostile-global-hook regression passed RED to GREEN. 1609-test full baseline, 22 module tests and 1606-test final fast suite passed; just check passed. Review accepted with one Minor deferred to tasks-79a907.
   provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-22T23:51:39Z (main): Integrated by fast-forward into local main. Merged-state module check passed 22 tests; cargo install --locked --path . succeeded and replaced the tracker on PATH. Cleanup dispositions: discard regenerable target/ and generated check/install logs; discard .superpowers/ review copies because tasks show confirms both review and ledger attachments. tt-report ran; no host launcher, unit or known config pointer resolves into this worktree.
