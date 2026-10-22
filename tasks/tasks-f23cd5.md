@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-f23cd5-git-isolation
 created: 2026-10-18T14:59:28Z
-updated: 2026-10-22T23:42:14Z
+updated: 2026-10-22T23:44:41Z
 started: 2026-10-22T23:37:44Z
 depends: []
 tags: [testing]
@@ -27,3 +27,4 @@ tasks-eeeeda stopped the HOME leak and made the test-only git helper in src/reco
   provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-22T23:38:20Z (fix/tasks-f23cd5-git-isolation): Process direct; workspace .worktrees/tasks-f23cd5. Scope: record_commit Git execution and all unit-test fixture callers, with a hostile-global-config regression; preserve production config behavior and avoid process-wide environment mutation. No setup recipe or worktree-local setup command is declared; baseline uses just test.
 - 2026-10-22T23:42:14Z (fix/tasks-f23cd5-git-isolation): Baseline: just test passed, exit 0, including the ignored exhaustive enumeration; test count is recorded by tools/tt. Root cause: commit_paths_in and cleanup use the production git() runner, which inherits global config and Git repository selectors despite isolated fixture setup.
+- 2026-10-22T23:44:41Z (fix/tasks-f23cd5-git-isolation): Baseline just test: 1609 tests passed (exit 0). RED: the hostile-global-hook regression rejected the fixture commit with commit_failed. GREEN: just test-one --bin tasks record_commit::tests passed all 22 tests; production Git configuration remains unchanged, fixture runners build an allowlisted environment without inherited GIT_* variables.
