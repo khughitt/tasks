@@ -4,8 +4,8 @@ title: "tasks -C on a checkout directory that no longer exists fails with the ge
 status: idea
 priority: 2
 created: 2026-10-21T12:23:32Z
-updated: 2026-10-22T23:11:11Z
-depends: []
+updated: 2026-10-22T23:11:13Z
+depends: [tasks-7b1b22]
 parent: tasks-a7460c
 tags: [feedback, gap, "from:obs"]
 agent: claude-code/claude-opus-5-5
