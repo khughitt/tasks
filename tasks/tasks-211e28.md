@@ -6,9 +6,9 @@ priority: 1
 size: l
 complexity: high
 process: planned
-owner: main
+owner: records-detached
 created: 2026-10-22T20:54:24Z
-updated: 2026-10-22T21:07:05Z
+updated: 2026-10-22T21:07:23Z
 started: 2026-10-22T21:07:05Z
 depends: []
 tags: []
@@ -22,4 +22,6 @@ Implement the tasks CLI part of the approved design (tasks:docs/specs/2026-10-22
 ## Notes
 
 - 2026-10-22T21:07:05Z (main): started
+  provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T21:07:23Z (records-detached): resumed
   provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
