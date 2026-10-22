@@ -1,13 +1,15 @@
 ---
 id: tasks-9a9ef3
 title: Trim the tasks skill to what tasks --help cannot supply
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-09-16T14:27:13Z
-updated: 2026-10-06T16:50:00Z
+updated: 2026-10-22T23:59:31Z
+started: 2026-10-22T23:59:31Z
 depends: []
 parent: tasks-6ed79b
 tags: [skills]
@@ -32,3 +34,5 @@ Check: in a fresh agent session using the revised skill, run one disposable proj
 - 2026-09-24T13:07:13Z (main): curate: refined; dated the 3271-word baseline, recorded current 3904 words and the unaudited sections, set size s and complexity mid (bounded editorial choices, clear done check)
 - 2026-09-24T13:35:22Z (main): Decided: trim the six audited rows plus the Lifecycle provenance section in one pass; keep the quiet-run note format and the host-pointer rule; back-fill the ai audit rows afterwards rather than blocking on them.
 - 2026-09-30T10:10:19Z (main): scope: scoped; retained the recorded seven-area trim decision and source, refreshed the baseline to 4317 words, and specified an isolated fresh-session check; external audit remains to verify during execution; p2/s/mid, direct
+- 2026-10-22T23:59:31Z (main): started
+  provenance: {"harness_session":"codex:01a16607-f945-7682-a5b3-0a260b7bcec1","harness_session_source":"CODEX_THREAD_ID"}
