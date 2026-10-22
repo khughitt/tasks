@@ -22,7 +22,7 @@ fn state_home() -> Result<PathBuf, String> {
 /// commit. An empty result means committed, or nothing differed from HEAD.
 pub fn commit_paths(dir: &Path, paths: &[PathBuf], message: &str) -> Vec<String> {
     match state_home() {
-        Ok(state) => commit_paths_in(dir, paths, message, &state, &mut || {}),
+        Ok(state) => commit_paths_in(dir, paths, message, &state, &mut || {}, git),
         Err(error) => vec![failed(dir, paths, &error, None)],
     }
 }
@@ -45,14 +45,17 @@ fn stderr_tail(output: &Output) -> String {
     lines[lines.len().saturating_sub(3)..].join(" / ")
 }
 
+type Git = fn(&Path, &[&str]) -> std::io::Result<Output>;
+
 struct Repo {
     toplevel: PathBuf,
     git_dir: PathBuf,
     common: PathBuf,
+    git: Git,
 }
 
 /// `Ok(None)` when `dir` is outside git or there is no git executable.
-fn discover(dir: &Path) -> Result<Option<Repo>, String> {
+fn discover(dir: &Path, git: Git) -> Result<Option<Repo>, String> {
     let output = match git(
         dir,
         &[
@@ -93,6 +96,7 @@ fn discover(dir: &Path) -> Result<Option<Repo>, String> {
         toplevel: canonical(toplevel)?,
         git_dir: canonical(git_dir)?,
         common: canonical(common)?,
+        git,
     }))
 }
 
@@ -124,7 +128,7 @@ fn in_progress(git_dir: &Path) -> Option<&'static str> {
 
 /// Top-level-relative paths with a staged change.
 fn staged(repo: &Repo) -> Result<BTreeSet<String>, String> {
-    let output = git(
+    let output = (repo.git)(
         &repo.toplevel,
         &["diff", "--cached", "--name-only", "--no-renames", "-z"],
     )
@@ -141,7 +145,7 @@ fn staged(repo: &Repo) -> Result<BTreeSet<String>, String> {
 }
 
 fn head_exists(repo: &Repo) -> bool {
-    git(&repo.toplevel, &["rev-parse", "-q", "--verify", "HEAD"])
+    (repo.git)(&repo.toplevel, &["rev-parse", "-q", "--verify", "HEAD"])
         .is_ok_and(|output| output.status.success())
 }
 
@@ -153,7 +157,7 @@ fn unstage(repo: &Repo, ours: &[String]) -> Result<(), String> {
         vec!["rm", "--cached", "-q", "-r", "--ignore-unmatch", "--"]
     };
     args.extend(ours.iter().map(String::as_str));
-    match git(&repo.toplevel, &args) {
+    match (repo.git)(&repo.toplevel, &args) {
         Ok(output) if output.status.success() => Ok(()),
         Ok(output) => Err(cause_of(args[0], &output)),
         Err(error) => Err(error.to_string()),
@@ -254,8 +258,9 @@ pub(crate) fn commit_paths_in(
     message: &str,
     state: &Path,
     before_commit: &mut dyn FnMut(),
+    git: Git,
 ) -> Vec<String> {
-    let repo = match discover(dir) {
+    let repo = match discover(dir, git) {
         Ok(Some(repo)) => repo,
         Ok(None) => return vec![unavailable(dir, paths)],
         Err(error) => return vec![failed(dir, paths, &error, None)],
@@ -353,7 +358,7 @@ pub(crate) fn commit_paths_in(
 /// The top level of the working tree `dir` lies in, canonical; `None` outside git or
 /// without a git executable. Record commits group roots by it (spec §3.7).
 pub fn working_tree(dir: &Path) -> Result<Option<PathBuf>, String> {
-    Ok(discover(dir)?.map(|repo| repo.toplevel))
+    Ok(discover(dir, git)?.map(|repo| repo.toplevel))
 }
 
 const SUBJECT_MAX: usize = 72;
@@ -519,14 +524,26 @@ mod tests {
     use super::*;
     use std::process::Command;
 
-    fn git(dir: &Path, args: &[&str]) -> String {
-        let out = Command::new("git")
+    fn isolated_git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
+        Command::new("git")
+            .arg("--literal-pathspecs")
             .args(args)
             .current_dir(dir)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap())
+            .env("HOME", dir)
+            .env("LC_ALL", "C")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env(
+                "GIT_CEILING_DIRECTORIES",
+                std::env::temp_dir().canonicalize().unwrap(),
+            )
             .output()
-            .unwrap();
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = isolated_git(dir, args).unwrap();
         assert!(
             out.status.success(),
             "git {args:?}: {}",
@@ -535,12 +552,20 @@ mod tests {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
-    /// A repository whose local config pins identity, signing and hooks, so the
-    /// developer's global config cannot change the outcome.
+    /// A repository with isolated Git execution and pinned local identity and signing.
     fn repo(initial_commit: bool) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         git(root, &["init", "-q", "-b", "main"]);
+        let canonical = root.canonicalize().unwrap();
+        assert_eq!(
+            PathBuf::from(git(root, &["rev-parse", "--show-toplevel"]).trim()),
+            canonical
+        );
+        assert!(
+            PathBuf::from(git(root, &["rev-parse", "--absolute-git-dir"]).trim())
+                .starts_with(&canonical)
+        );
         for (key, value) in [
             ("user.name", "t"),
             ("user.email", "t@t"),
@@ -593,6 +618,7 @@ mod tests {
             "chore(tasks): note tst-000001",
             state,
             &mut || {},
+            isolated_git,
         )
     }
 
@@ -610,6 +636,41 @@ mod tests {
             "chore(tasks): note tst-000001"
         );
         assert_eq!(git(root, &["status", "--porcelain"]).trim(), "M README");
+    }
+
+    #[test]
+    fn fixture_commits_ignore_a_hostile_global_hook() {
+        let home = tempfile::tempdir().unwrap();
+        let config = home.path().join("hostile.gitconfig");
+        std::fs::write(
+            &config,
+            "[hook \"reject\"]\n\tevent = pre-commit\n\tcommand = \"echo hostile global hook >&2; exit 1\"\n",
+        )
+        .unwrap();
+        let out = Command::new(std::env::current_exe().unwrap())
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap())
+            .env("HOME", home.path())
+            .env("GIT_CONFIG_GLOBAL", &config)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env(
+                "GIT_CEILING_DIRECTORIES",
+                std::env::temp_dir().canonicalize().unwrap(),
+            )
+            .args([
+                "--exact",
+                "record_commit::tests::commits_exactly_the_paths_and_leaves_unstaged_work_alone",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(String::from_utf8_lossy(&out.stdout).contains("1 passed;"));
     }
 
     #[test]
@@ -635,10 +696,17 @@ mod tests {
             let root = dir.path();
             let state = state_home();
             let record = write(root, "tasks/a*.txt", "ours");
-            let warnings = commit_paths_in(root, &[record], "m", state.path(), &mut || {
-                write(root, "tasks/ab.txt", "foreign");
-                git(root, &["add", "tasks/ab.txt"]);
-            });
+            let warnings = commit_paths_in(
+                root,
+                &[record],
+                "m",
+                state.path(),
+                &mut || {
+                    write(root, "tasks/ab.txt", "foreign");
+                    git(root, &["add", "tasks/ab.txt"]);
+                },
+                isolated_git,
+            );
             assert!(warnings[0].starts_with("commit_deferred:"), "{warnings:?}");
             assert_eq!(staged(root).trim(), "tasks/ab.txt");
             assert!(
@@ -705,7 +773,7 @@ mod tests {
             git(root, &["checkout", "-q", "main"]);
             write(root, "README", "main\n");
             git(root, &["commit", "-q", "-am", "conflicting main change"]);
-            let conflict = super::git(root, &[operation, first.trim(), second.trim()]).unwrap();
+            let conflict = isolated_git(root, &[operation, first.trim(), second.trim()]).unwrap();
             assert!(!conflict.status.success());
             write(root, "README", "resolved\n");
             git(root, &["add", "README"]);
@@ -804,10 +872,17 @@ mod tests {
         let root = dir.path();
         let state = state_home();
         let record = write(root, "tasks/tst-000001.md", "a");
-        let warnings = commit_paths_in(root, &[record], "m", state.path(), &mut || {
-            std::fs::write(root.join("other.txt"), "x").unwrap();
-            git(root, &["add", "other.txt"]);
-        });
+        let warnings = commit_paths_in(
+            root,
+            &[record],
+            "m",
+            state.path(),
+            &mut || {
+                std::fs::write(root.join("other.txt"), "x").unwrap();
+                git(root, &["add", "other.txt"]);
+            },
+            isolated_git,
+        );
         assert!(warnings[0].starts_with("commit_deferred:"), "{warnings:?}");
         assert_eq!(staged(root).trim(), "other.txt");
     }
@@ -935,8 +1010,14 @@ mod tests {
                         let record =
                             write(&root, &format!("tasks/tst-00000{n}.md"), &format!("{i}"));
                         let message = format!("chore(tasks): note tst-00000{n}");
-                        let warnings =
-                            commit_paths_in(&root, &[record], &message, &state, &mut || {});
+                        let warnings = commit_paths_in(
+                            &root,
+                            &[record],
+                            &message,
+                            &state,
+                            &mut || {},
+                            isolated_git,
+                        );
                         assert_eq!(warnings, Vec::<String>::new());
                     }
                 })
@@ -963,9 +1044,16 @@ mod tests {
         // Another git process takes the index lock after the records are staged: the
         // commit fails, and so does the unstage, which must be reported, not swallowed.
         let lock = root.join(".git/index.lock");
-        let warnings = commit_paths_in(root, &[record], "m", state.path(), &mut || {
-            std::fs::write(&lock, "").unwrap();
-        });
+        let warnings = commit_paths_in(
+            root,
+            &[record],
+            "m",
+            state.path(),
+            &mut || {
+                std::fs::write(&lock, "").unwrap();
+            },
+            isolated_git,
+        );
         std::fs::remove_file(&lock).unwrap();
         assert!(warnings[0].starts_with("commit_failed:"), "{warnings:?}");
         assert!(
