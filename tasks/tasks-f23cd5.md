@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-f23cd5-git-isolation
 created: 2026-10-18T14:59:28Z
-updated: 2026-10-22T23:49:11Z
+updated: 2026-10-22T23:49:22Z
 started: 2026-10-22T23:37:44Z
 depends: []
 tags: [testing]
@@ -32,3 +32,4 @@ tasks-eeeeda stopped the HOME leak and made the test-only git helper in src/reco
 - 2026-10-22T23:48:27Z (fix/tasks-f23cd5-git-isolation): review: impl round 1 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6.1-sol
 - 2026-10-22T23:49:08Z (fix/tasks-f23cd5-git-isolation): attached: git-isolation-review-report.md (2814 bytes): Full read-only review of a92324e by codex/gpt-6.1-sol: accepted, one deferred Minor
 - 2026-10-22T23:49:11Z (fix/tasks-f23cd5-git-isolation): attached: git-isolation-review-ledger.md (1495 bytes): Review rulings at a92324e and deferred Minor follow-up tasks-79a907
+- 2026-10-22T23:49:22Z (fix/tasks-f23cd5-git-isolation): Review accepted at a92324e; no Critical or Important findings. minor (deferred): inherited repository-selector and cleanup regression coverage is tracked as tasks-79a907. Rulings and the full reviewer response are attached. No setup command exists; documented test recipes built the worktree successfully.
