@@ -4,8 +4,8 @@ title: Expose dependency satisfaction separately from overall readiness
 status: idea
 priority: 2
 created: 2026-10-22T21:04:57Z
-updated: 2026-10-22T23:05:07Z
-depends: []
+updated: 2026-10-22T23:05:09Z
+depends: [tasks-e90b4f]
 parent: tasks-606dd3
 tags: [feedback, gap, "from:crew"]
 agent: codex
