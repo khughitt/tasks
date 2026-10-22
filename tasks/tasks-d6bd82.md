@@ -3,8 +3,10 @@ id: tasks-d6bd82
 title: "tasks -C on a checkout directory that no longer exists fails with the generic io error kind, so a caller cannot tell a removed checkout from a real read failure without inspecting the filesystem itself"
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-22T23:11:15Z
 created: 2026-10-21T12:23:32Z
-updated: 2026-10-22T23:11:13Z
+updated: 2026-10-22T23:11:15Z
 depends: [tasks-7b1b22]
 parent: tasks-a7460c
 tags: [feedback, gap, "from:obs"]
@@ -16,3 +18,7 @@ Seen as {"error":{"detail":"io: No such file or directory (os error 2)","kind":"
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-22-missing-checkout-errors-brief.md — evidence, constraints and open questions
+
+## Notes
+
+- 2026-10-22T23:11:15Z (main): scope: briefed; checked main 2ce5663; preserved the original report and identified unresolved absence versus corruption classification for both reported states; research: tasks-7b1b22; brief: docs/notes/2026-10-22-missing-checkout-errors-brief.md
