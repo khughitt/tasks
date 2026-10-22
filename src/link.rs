@@ -289,6 +289,15 @@ pub fn project_of_tree(registry: &Registry, tree: &GitTree) -> Result<Option<Pro
     }
 }
 
+/// The `records_moved` refusal for `prefix`, whose records live at `dir`.
+pub fn records_moved(prefix: &str, dir: &Path) -> Error {
+    Error::RecordsMoved(format!(
+        "{prefix}'s records live at {}; this tree's tasks/ is read-only history: rebase or \
+         merge the branch onto the main branch",
+        dir.display()
+    ))
+}
+
 /// Spec §3.3: an in-tree config whose prefix `[records]` pairs with another directory is
 /// a branch that predates the detach. Its `tasks/` is history, never written.
 pub fn refuse_moved(registry: &Registry, project: &Project) -> Result<()> {
@@ -296,12 +305,7 @@ pub fn refuse_moved(registry: &Registry, project: &Project) -> Result<()> {
         return Ok(());
     }
     match registry.records_dir(&project.prefix) {
-        Some(dir) if dir != project.records => Err(Error::RecordsMoved(format!(
-            "{}'s records live at {}; this tree's tasks/ is read-only history: rebase or \
-             merge the branch onto the main branch",
-            project.prefix,
-            dir.display()
-        ))),
+        Some(dir) if dir != project.records => Err(records_moved(&project.prefix, dir)),
         _ => Ok(()),
     }
 }

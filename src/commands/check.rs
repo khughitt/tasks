@@ -89,6 +89,17 @@ fn record_cycle(
 }
 
 pub fn run(ctx: Ctx) -> Result<Output> {
+    // A code tree whose index still holds the config is on the pre-move side of the
+    // migration: the walk missed it only because the working tree lost it.
+    if ctx.project.kind == crate::repo::Kind::Detached
+        && let Some(top) = &ctx.project.worktree
+        && crate::link::config_in_index(top)?
+    {
+        return Err(crate::link::records_moved(
+            &ctx.project.prefix,
+            &ctx.project.records,
+        ));
+    }
     let pending: Vec<_> = crate::moving::journal::Journal::pending()?
         .into_iter()
         .filter(|journal| journal.names_prefix(ctx.registry.canonical_prefix(&ctx.project.prefix)))

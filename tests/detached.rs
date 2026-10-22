@@ -1069,3 +1069,50 @@ fn resolve_matches_a_path_under_records_via_records_and_under_the_checkout_via_r
     assert_eq!(r["root"], l.code.to_str().unwrap());
     assert_eq!(r["records"], l.project.to_str().unwrap());
 }
+
+#[test]
+fn check_in_the_code_checkout_refuses_an_index_held_config_and_passes_a_staged_deletion() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    env.json(&l.code, &["init", "--prefix", "det"]);
+    l.git(&l.code, &["add", "tasks"]);
+    l.git(&l.code, &["commit", "-qm", "in-tree records"]);
+    register_by_hand(&env, &l, "det");
+    // (a) gone from the working tree, still in the index: the pairing opens the detached
+    // project, and check refuses like the walk does for a working-tree config
+    std::fs::remove_file(l.code.join("tasks/.config.toml")).unwrap();
+    let detail = fail_detail(&env, &l.code, &["check"], "records_moved");
+    assert!(detail.contains(l.project.to_str().unwrap()), "{detail}");
+    // opened by its records directory, the index check never runs
+    assert_eq!(env.check(&l.project)["errors"].as_array().unwrap().len(), 0);
+    // (b) the index deletes it while HEAD still tracks it: the removal commit's window
+    l.git(&l.code, &["rm", "-r", "-q", "tasks"]);
+    assert_eq!(env.check(&l.code)["errors"].as_array().unwrap().len(), 0);
+    // (c) committed
+    l.git(&l.code, &["commit", "-qm", "detach"]);
+    assert_eq!(env.check(&l.code)["errors"].as_array().unwrap().len(), 0);
+    assert_eq!(env.check(&l.project)["errors"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn check_warns_when_the_code_checkout_is_missing() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    l.git(
+        &l.code,
+        &["worktree", "remove", "--force", l.wt.to_str().unwrap()],
+    );
+    std::fs::remove_dir_all(&l.code).unwrap();
+    std::fs::remove_dir_all(l.base.join("storage/code")).unwrap();
+    env.json(&l.project, &["list"]);
+    let out = env.check(&l.project);
+    assert!(
+        out["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["kind"] == "checkout_missing"),
+        "{out}"
+    );
+}
