@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: records-home
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-22T20:54:21Z
+updated: 2026-10-22T20:54:22Z
 started: 2026-10-22T19:55:20Z
 depends: []
 tags: []
@@ -60,3 +60,4 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
 - 2026-10-22T20:54:19Z (records-home): resumed
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-22T20:54:21Z (records-home): review: spec round 3 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
+- 2026-10-22T20:54:22Z (records-home): Design approved by the user 2026-10-22 at revision 3 (c03869d). Filing §10 pieces as dependencies of ops-487484 and re-scoping hq-5a3e12's pieces per §7.4.
