@@ -1,19 +1,22 @@
 ---
 id: tasks-dc16eb
 title: Decide whether task records and design docs leave project repositories for a per-user records root
-status: doing
+status: done
 priority: 1
 size: m
 complexity: high
 process: planned
-owner: main
+owner: records-home
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-22T20:01:12Z
+updated: 2026-10-22T20:57:42Z
 started: 2026-10-22T19:55:20Z
+completed: 2026-10-22T20:57:42Z
+closed: 2026-10-22T20:57:42Z
 depends: []
 tags: []
 source: "user:2026-10-19 ops publication"
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-10-22-records-home-design.md
 ---
 
 Why: task records in code repositories add clutter (2026-10-19: v6 957 records, ops 757, tasks 616, beliefs 601, niri-material 473), distract from the code, and are the likeliest place for personal details to leak (machine layout, usernames, host stats, private project names). The user now questions keeping them in GitHub repositories at all, for ops and every other tasks project. This revisits hq-d7b5b2's 2026-10-02 answer (only briefs, handoffs and plans leave the repository; task records and specs stay; its brief lore:docs/notes/2026-10-02-agent-working-docs-brief.md, alternative 3). It blocks publishing ops as a clean repository (ops-741c5e).
@@ -38,4 +41,29 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
 - 2026-10-22T19:57:50Z (main): parked (waiting on user, decision): User answers where they stand when returning to a working doc (mindful search, repo, or from the task record); then the agent creates the task worktree and drafts the design spec in docs/specs
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-22T20:01:12Z (main): resumed
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:01:14Z (records-home): resumed
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:19:31Z (records-home): Spec drafted 2026-10-22 (docs/specs/2026-10-22-records-home-design.md). Two decisions beyond the agreed assessment, after the research: (1) root stays the code checkout and a third location 'records' is added (kind: in-tree|detached|linked), because ten consumers read root as the code; (2) working docs go beside the records in the records root rather than mindful: only tasks-91f63b of hq-5a3e12's seven pieces landed, the mindful plan snapshot exists only because a thought is not a file, and migrated docs keep their paths so 2,847 links resolve unchanged. mindful becomes a deferred indexer of the records root.
+- 2026-10-22T20:27:44Z (records-home): parked (waiting on user, review): User reviews the design spec at commit 1734fa2 on branch records-home (.worktrees/records-home/docs/specs/2026-10-22-records-home-design.md; frozen: read it with git show 1734fa2:docs/specs/2026-10-22-records-home-design.md); then the agent revises as a new commit, or files the §10 pieces per project as dependencies of ops-487484 and re-scopes hq-5a3e12's pieces per §7.4
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:38:28Z (records-home): resumed
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:38:30Z (records-home): review: spec round 1 — verdict: revise; findings: P1 3, P2 2; reviewer: codex/gpt-6-astra
+- 2026-10-22T20:39:36Z (records-home): spec round 1 fixes (revision 2, b67595ac35b646c3d0d5af63d67f6c3df542beb9): two-pass filter-repo export with inventory check; init --records allowed with the removal staged so registration precedes the removal commit and the hook's tasks check sees the detached project; linked.py adapter added as a consumer landing before the output change; migration passes the records root; retained docs are the closure over docs links, validated after the move
+- 2026-10-22T20:39:38Z (records-home): parked (waiting on user, review): User reviews revision 2 of the design spec at commit b67595ac35b646c3d0d5af63d67f6c3df542beb9 on branch records-home (.worktrees/records-home/docs/specs/2026-10-22-records-home-design.md; read it with git show b67595ac35b646c3d0d5af63d67f6c3df542beb9:docs/specs/2026-10-22-records-home-design.md); then the agent revises again or files the §10 pieces per project as dependencies of ops-487484 and re-scopes hq-5a3e12's pieces per §7.4
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:46:01Z (records-home): resumed
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:46:03Z (records-home): review: spec round 2 — verdict: revise; findings: P1 1, P2 2; reviewer: codex/gpt-6-astra
+- 2026-10-22T20:46:07Z (records-home): spec round 2 fixes (revision 3, c03869d844c79ed5cb8ee54e208749cc1000e55d): check shares init --records' staged-deletion exception (§3.3); retained-set seed excludes moved paths, tasks/ included (§7.3); acceptance 9 covers tasks where shapes for in-tree, detached and linked
+- 2026-10-22T20:46:09Z (records-home): parked (waiting on user, review): User reviews revision 3 of the design spec at commit c03869d844c79ed5cb8ee54e208749cc1000e55d on branch records-home (.worktrees/records-home/docs/specs/2026-10-22-records-home-design.md; read it with git show c03869d844c79ed5cb8ee54e208749cc1000e55d:docs/specs/2026-10-22-records-home-design.md); then the agent revises again or files the §10 pieces per project as dependencies of ops-487484 and re-scopes hq-5a3e12's pieces per §7.4
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:54:19Z (records-home): resumed
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:54:21Z (records-home): review: spec round 3 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
+- 2026-10-22T20:54:22Z (records-home): Design approved by the user 2026-10-22 at revision 3 (c03869d). Filing §10 pieces as dependencies of ops-487484 and re-scoping hq-5a3e12's pieces per §7.4.
+- 2026-10-22T20:57:42Z (records-home): done
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:57:42Z (records-home): Design approved at revision 3 (c03869d): records and working documents leave personal repositories for a private per-user records root (root stays the code checkout; a third location, records, with kind in-tree|detached|linked); repositories keep reference documents; mindful becomes a deferred indexer. Pieces filed: tasks-211e28, tasks-a8e28e; ops-2a0024, ops-33b672, ops-f35cb3, ops-7d796a, ops-7fdb4a, ops-5ec535, ops-275242, ops-b41a1b, migration goal ops-423f23 (ops-8af736, ops-38c523, ops-97d307, ops-64474b); obs-faa12c; hq-d05d5c; crew-dab0db; mind6-4bd00c; flows-2ea069, lore-ef7e5b, tasks-00723a re-scoped; ops-721511 dropped; obs-caab0c deferred; hq-5a3e12 and hq-d7b5b2 closed. All wired as dependencies of ops-487484.
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
