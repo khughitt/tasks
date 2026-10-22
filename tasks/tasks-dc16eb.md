@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: records-home
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-22T20:46:09Z
+updated: 2026-10-22T20:54:19Z
 started: 2026-10-22T19:55:20Z
 depends: []
 tags: []
@@ -56,4 +56,6 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
 - 2026-10-22T20:46:03Z (records-home): review: spec round 2 — verdict: revise; findings: P1 1, P2 2; reviewer: codex/gpt-6-astra
 - 2026-10-22T20:46:07Z (records-home): spec round 2 fixes (revision 3, c03869d844c79ed5cb8ee54e208749cc1000e55d): check shares init --records' staged-deletion exception (§3.3); retained-set seed excludes moved paths, tasks/ included (§7.3); acceptance 9 covers tasks where shapes for in-tree, detached and linked
 - 2026-10-22T20:46:09Z (records-home): parked (waiting on user, review): User reviews revision 3 of the design spec at commit c03869d844c79ed5cb8ee54e208749cc1000e55d on branch records-home (.worktrees/records-home/docs/specs/2026-10-22-records-home-design.md; read it with git show c03869d844c79ed5cb8ee54e208749cc1000e55d:docs/specs/2026-10-22-records-home-design.md); then the agent revises again or files the §10 pieces per project as dependencies of ops-487484 and re-scopes hq-5a3e12's pieces per §7.4
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:54:19Z (records-home): resumed
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
