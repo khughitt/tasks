@@ -1,15 +1,17 @@
 ---
 id: tasks-ab740c
 title: "Task 3: The registry `[records]` table and discovery from the code checkout"
-status: doing
+status: done
 priority: 1
 size: l
 complexity: high
 process: direct
 owner: records-detached
 created: 2026-10-22T22:11:26Z
-updated: 2026-10-22T22:26:55Z
+updated: 2026-10-22T22:49:13Z
 started: 2026-10-22T22:26:55Z
+completed: 2026-10-22T22:49:13Z
+closed: 2026-10-22T22:49:13Z
 depends: [tasks-a3fa6f]
 parent: tasks-211e28
 tags: []
@@ -22,4 +24,8 @@ step: "Task 3: The registry `[records]` table and discovery from the code checko
 ## Notes
 
 - 2026-10-22T22:26:55Z (records-detached): started
+  provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T22:49:13Z (records-detached): done
+  provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T22:49:13Z (records-detached): [records] registry table, config_dir, paired discovery from the code checkout and its worktrees, records_moved and records_unpaired, registered-copy comparisons by records location (519e9f3, 2181573); review clean after one fix round
   provenance: {"harness_session":"claude-code:ccb226ca-8960-426d-9504-c547cf14a4ac","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
