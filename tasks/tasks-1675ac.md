@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-22T21:18:57Z
-updated: 2026-10-22T23:04:42Z
+updated: 2026-10-22T23:04:45Z
 depends: []
 parent: tasks-606dd3
 tags: [feedback, friction, "from:ops"]
@@ -32,3 +32,7 @@ Assessment: P2 retained; s/low/direct because the outcome, existing condition, t
 ## References
 
 - brief (input, required, kind=brief): docs/notes/2026-10-22-dependency-state-brief.md — observed dependency rules and remaining contract decisions
+
+## Notes
+
+- 2026-10-22T23:04:45Z (main): scope: scoped; P2/s/low/direct; d0564d1 confirms shelved_dep warns without reading intent (introduced by 4a7bc5b); retain the warning and add the valid disposition of preserving an intentional wait with a recorded wake condition; no suppression state or readiness change; coordinate pending wording with tasks-52bd39; brief: docs/notes/2026-10-22-dependency-state-brief.md
