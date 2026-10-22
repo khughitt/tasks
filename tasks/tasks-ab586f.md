@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-20T16:06:05Z
-updated: 2026-10-22T22:35:17Z
+updated: 2026-10-22T22:35:19Z
 depends: []
 parent: tasks-5408fe
 tags: [feedback, friction, "from:hq"]
@@ -35,3 +35,7 @@ Original report: The scope skill has a pass write a brief that lists its follow-
 
 - scope-guide (input, required, kind=guide): skills/scope/SKILL.md — workflow whose brief and follow-up write order must be explicit
 - reference-contract (context, kind=spec): docs/specs/2026-10-19-task-references-design.md — local input and context targets must exist when written
+
+## Notes
+
+- 2026-10-22T22:35:19Z (main): scope: scoped; checked 6698ca8 and the implemented reference contract: require_targets validates local inputs before task creation; document brief creation, follow-up filing and real-id finalization in that order, preserving validation, reruns, revalidation and partial-write reporting; rejected accepting missing inputs; P2/xs/low/direct; reused goal tasks-5408fe; original report preserved in the body
