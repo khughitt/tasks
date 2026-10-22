@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-f23cd5-git-isolation
 created: 2026-10-18T14:59:28Z
-updated: 2026-10-22T23:49:08Z
+updated: 2026-10-22T23:49:11Z
 started: 2026-10-22T23:37:44Z
 depends: []
 tags: [testing]
@@ -31,3 +31,4 @@ tasks-eeeeda stopped the HOME leak and made the test-only git helper in src/reco
 - 2026-10-22T23:45:28Z (fix/tasks-f23cd5-git-isolation): Verification before implementation commit: just test-fast passed 1606 tests across 13 binaries (0 failures); just check passed hygiene, formatting, Clippy with warnings denied, and tasks check. Normal CLI commits retain their original environment; no CLI/schema/docs contract changed.
 - 2026-10-22T23:48:27Z (fix/tasks-f23cd5-git-isolation): review: impl round 1 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6.1-sol
 - 2026-10-22T23:49:08Z (fix/tasks-f23cd5-git-isolation): attached: git-isolation-review-report.md (2814 bytes): Full read-only review of a92324e by codex/gpt-6.1-sol: accepted, one deferred Minor
+- 2026-10-22T23:49:11Z (fix/tasks-f23cd5-git-isolation): attached: git-isolation-review-ledger.md (1495 bytes): Review rulings at a92324e and deferred Minor follow-up tasks-79a907
