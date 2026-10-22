@@ -6,7 +6,7 @@ priority: 2
 reviewed: true
 reviewed_at: 2026-10-20T02:03:30Z
 created: 2026-10-19T11:09:12Z
-updated: 2026-10-22T22:29:54Z
+updated: 2026-10-22T23:00:45Z
 depends: [tasks-e7424b]
 parent: tasks-96c00c
 tags: [feedback, friction, "from:mind6", "from:tasks"]
@@ -30,3 +30,5 @@ Scope handoff: [ref:brief] records the current code, unresolved contract or meas
 - 2026-10-20T14:27:34Z (feedback): feedback from tasks: prime's default JSON exceeded the tool response limit during session startup; a jq projection was needed to read the status and warnings
 - 2026-10-22T22:29:54Z (feedback): feedback from tasks: Session-start prime JSON exceeds the tool response budget
 - 2026-10-22T22:29:54Z (feedback): detail from tasks: The default prime response exceeded a 6,000-token command output limit and was truncated at roughly 30,600 tokens; a second read had to select summary fields to recover session context. A bounded session-start summary remains needed; this recurrence adds the observed response size and workaround.
+- 2026-10-22T23:00:45Z (feedback): feedback from tasks: tasks prime default JSON exceeds an agent tool output limit
+- 2026-10-22T23:00:45Z (feedback): detail from tasks: A scope session ran tasks prime and received truncated output at roughly 30,000 tokens. Reading the session summary required a second parsed view with an explicit key allowlist. A bounded default would let the session-start read fit one tool response.
