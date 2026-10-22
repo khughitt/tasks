@@ -262,6 +262,7 @@ pub enum Via {
     Root,
     Storage,
     Checkout,
+    Records,
     FormerRoot,
     FormerStorage,
     Git,
@@ -269,7 +270,10 @@ pub enum Via {
 
 impl Via {
     fn current(self) -> bool {
-        matches!(self, Via::Root | Via::Storage | Via::Checkout)
+        matches!(
+            self,
+            Via::Root | Via::Storage | Via::Checkout | Via::Records
+        )
     }
     fn storage(self) -> bool {
         matches!(self, Via::Storage | Via::FormerStorage)
@@ -357,7 +361,14 @@ impl Index {
             }
         }
         let scan = scan_checkouts(registry);
-        for linked in scan.linked {
+        for (prefix, records) in &registry.records {
+            add(prefix, Via::Records, records, &mut warnings);
+        }
+        for linked in scan
+            .linked
+            .into_iter()
+            .filter(|linked| linked.kind == crate::repo::Kind::Linked)
+        {
             add(
                 &linked.prefix,
                 Via::Checkout,

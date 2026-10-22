@@ -966,3 +966,106 @@ fn init_records_force_refuses_a_retired_records_config() {
     assert_eq!(std::fs::read(&config).unwrap(), bytes);
     assert!(!env.home.path().join(".config/tasks/projects.toml").exists());
 }
+
+#[test]
+fn where_reports_kind_records_and_checkout_for_every_shape() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    std::fs::create_dir_all(l.code.join("src")).unwrap();
+    for dir in [
+        l.code.clone(),
+        l.wt.clone(),
+        l.code.join("src"),
+        l.project.clone(),
+    ] {
+        let out = env.json(&dir, &["where"]);
+        let p = &out["project"];
+        assert_eq!(p["prefix"], "det", "{dir:?}: {out}");
+        assert_eq!(p["root"], l.code.to_str().unwrap(), "{dir:?}");
+        assert_eq!(p["checkout"], l.code.to_str().unwrap(), "{dir:?}");
+        assert_eq!(p["records"], l.project.to_str().unwrap(), "{dir:?}");
+        assert_eq!(p["kind"], "detached", "{dir:?}");
+        assert_eq!(p["linked"], false, "{dir:?}");
+        assert_eq!(out["holds_records"], dir == l.project, "{dir:?}");
+    }
+    let above = env.json(&l.records, &["where"]);
+    assert!(above["project"].is_null(), "{above}");
+    let pretty = env.pretty(&l.code, &["where"]);
+    assert_eq!(
+        pretty.trim(),
+        format!(
+            "det {} (records at {})",
+            l.code.display(),
+            l.project.display()
+        )
+    );
+}
+
+#[test]
+fn projects_rows_carry_the_three_locations_and_the_kind() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let row = |env: &TestEnv| {
+        env.json(&l.code, &["projects"])["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["prefix"] == "det")
+            .unwrap()
+            .clone()
+    };
+    let r = row(&env);
+    assert_eq!(r["root"], l.code.to_str().unwrap());
+    assert_eq!(r["checkout"], l.code.to_str().unwrap());
+    assert_eq!(r["records"], l.project.to_str().unwrap());
+    assert_eq!(r["kind"], "detached");
+    let paths = env.pretty(&l.code, &["projects", "--paths"]);
+    assert!(
+        paths.contains(&format!("{} → {}", l.code.display(), l.project.display())),
+        "{paths}"
+    );
+    std::fs::remove_dir_all(&l.project).unwrap();
+    let gone = env.json(&l.base, &["projects"])["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["prefix"] == "det")
+        .unwrap()
+        .clone();
+    assert_eq!(gone["reachable"], false);
+    assert_eq!(gone["records"], l.project.to_str().unwrap());
+    let object = gone.as_object().unwrap();
+    assert!(
+        !object.contains_key("checkout") && !object.contains_key("kind"),
+        "{gone}"
+    );
+}
+
+#[test]
+fn resolve_matches_a_path_under_records_via_records_and_under_the_checkout_via_root() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let resolve = |input: &Path| {
+        env.json(&l.base, &["resolve", input.to_str().unwrap()])["results"][0].clone()
+    };
+    let r = resolve(&l.project.join("tasks/det-000000.md"));
+    assert_eq!(r["prefix"], "det", "{r}");
+    assert_eq!(r["via"], "records", "{r}");
+    assert_eq!(r["records"], l.project.to_str().unwrap());
+    assert_eq!(r["relpath"], "tasks/det-000000.md");
+    let r = resolve(&l.code.join("src/main.rs"));
+    assert_eq!(r["via"], "root", "{r}");
+    assert_eq!(r["records"], l.project.to_str().unwrap());
+    let r = resolve(&l.wt.join("x"));
+    assert_eq!(r["via"], "storage", "{r}");
+    assert_eq!(
+        r["worktree"],
+        l.base.join("storage/code/wt").to_str().unwrap()
+    );
+    let r = env.json(&l.base, &["resolve", "det"])["results"][0].clone();
+    assert_eq!(r["root"], l.code.to_str().unwrap());
+    assert_eq!(r["records"], l.project.to_str().unwrap());
+}

@@ -44,8 +44,9 @@ fn row(
                 id: Some(registry.canonical_id(&id).to_string()),
                 alias: (live != id.prefix).then(|| id.prefix.clone()),
                 color: index.color(&live),
-                prefix: Some(live),
                 root: Some(root.display().to_string()),
+                records: Some(records_of(registry, &live, root)),
+                prefix: Some(live),
                 ..row_of(input, "id", "resolved")
             },
             None => ResolveRow {
@@ -60,8 +61,9 @@ fn row(
             Some(root) => ResolveRow {
                 alias: (live != input).then(|| input.clone()),
                 color: index.color(&live),
-                prefix: Some(live),
                 root: Some(root.display().to_string()),
+                records: Some(records_of(registry, &live, root)),
+                prefix: Some(live),
                 ..row_of(input, "prefix", "resolved")
             },
             None => ResolveRow {
@@ -119,6 +121,9 @@ fn path_row(
             root: registry
                 .project_root(&m.prefix)
                 .map(|r| r.display().to_string()),
+            records: registry
+                .project_root(&m.prefix)
+                .map(|root| records_of(registry, &m.prefix, root)),
             color: index.color(&m.prefix),
             prefix: Some(m.prefix),
             via: Some(m.via),
@@ -144,6 +149,15 @@ fn expand_home(input: &str) -> std::result::Result<PathBuf, String> {
     }
     let home = std::env::var_os("HOME").ok_or_else(|| format!("{input}: HOME is not set"))?;
     Ok(PathBuf::from(home).join(rest.trim_start_matches('/')))
+}
+
+/// The records directory the registry pairs with `prefix`, else its root.
+fn records_of(registry: &Registry, prefix: &str, root: &Path) -> String {
+    registry
+        .records_dir(prefix)
+        .unwrap_or(root)
+        .display()
+        .to_string()
 }
 
 fn row_of(input: String, kind: &'static str, status: &'static str) -> ResolveRow {

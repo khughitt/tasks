@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 /// Which project a command run at `path` would open, without crossing a git boundary
 /// (ops linked-checkouts decision 4): the walk for `tasks/.config.toml` stops at the
 /// repository's top level, and a hit is `records_moved` as in `locate`; on a miss the
-/// pairing and link steps match its main checkout. Outside git it walks as `locate` does
-/// and reads no registry.
+/// pairing and link steps match its main checkout. `where` reads the registry only inside
+/// git (decision 4), so outside git it can open a copied historical config that `locate`,
+/// which reads the registry on every walk hit, would refuse.
 pub fn run(path: Option<PathBuf>, dir: Option<&Path>) -> Result<Output> {
     let start = super::start_dir(dir)?;
     let path = match path {
@@ -25,18 +26,15 @@ pub fn run(path: Option<PathBuf>, dir: Option<&Path>) -> Result<Output> {
     let tree = GitTree::of(&dir)?;
     let walked = walk(&dir, tree.as_ref().map(|tree| tree.top.as_path()))?;
     let (project, holds) = match tree {
-        None => (walked.map(|p| shown(p, false)), false),
+        None => (walked.map(shown), false),
         Some(tree) => {
             let registry = Registry::load()?;
             let project = match walked {
                 Some(project) => {
                     refuse_moved(&registry, &project)?;
-                    Some(shown(project, false))
+                    Some(shown(project))
                 }
-                None => project_of_tree(&registry, &tree)?.map(|p| {
-                    let linked = p.kind == Kind::Linked;
-                    shown(p, linked)
-                }),
+                None => project_of_tree(&registry, &tree)?.map(shown),
             };
             (project, holds_records(&registry, &tree)?)
         }
@@ -60,12 +58,14 @@ fn walk(dir: &Path, stop: Option<&Path>) -> Result<Option<Project>> {
     Ok(None)
 }
 
-fn shown(project: Project, linked: bool) -> WhereProject {
+fn shown(project: Project) -> WhereProject {
     WhereProject {
         prefix: project.prefix,
         root: project.root.display().to_string(),
-        checkout: linked.then(|| project.checkout.display().to_string()),
-        linked,
+        checkout: project.checkout.display().to_string(),
+        records: project.records.display().to_string(),
+        kind: project.kind,
+        linked: project.kind == Kind::Linked,
         color: project.color,
     }
 }

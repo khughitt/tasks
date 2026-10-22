@@ -73,7 +73,7 @@ pub fn run(
     let mut rows = Vec::new();
     for (prefix, root) in &registry.projects {
         let reachable = is_reachable(&registry, prefix)?;
-        let (counts, total, last_activity, color, retired, checkout) = if reachable {
+        let (counts, total, last_activity, color, retired, located) = if reachable {
             let project = open_registered(&registry, prefix, Origin::Prefix)?;
             let tasks = project.scan()?;
             // Timestamps are fixed-width UTC with no fractional part, so the lexical max
@@ -85,8 +85,7 @@ pub fn run(
                 last,
                 project.color,
                 project.retired,
-                (project.kind == crate::repo::Kind::Linked)
-                    .then(|| project.checkout.display().to_string()),
+                Some((project.checkout.display().to_string(), project.kind)),
             )
         } else {
             (None, None, None, None, None, None)
@@ -95,12 +94,18 @@ pub fn run(
             prefix: prefix.clone(),
             color,
             root: root.display().to_string(),
+            records: registry
+                .records_dir(prefix)
+                .unwrap_or(root)
+                .display()
+                .to_string(),
+            kind: located.as_ref().map(|(_, kind)| *kind),
             reachable,
             counts,
             total,
             last_activity,
             retired,
-            checkout,
+            checkout: located.map(|(checkout, _)| checkout),
         });
     }
     sort_rows(&mut rows, key, reverse);
@@ -122,6 +127,8 @@ mod tests {
             prefix: prefix.into(),
             color: None,
             root: format!("/tmp/{prefix}"),
+            records: format!("/tmp/{prefix}"),
+            kind: None,
             reachable: total.is_some(),
             counts: total.map(|_| Counts::default()),
             total,
