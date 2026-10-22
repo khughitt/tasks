@@ -403,3 +403,45 @@ fn a_config_whose_checkout_disagrees_with_the_registry_is_a_config_error() {
     // From the records directory the walk opens it.
     env.json(&l.project, &["show", &id]);
 }
+
+#[test]
+fn a_move_from_an_older_records_worktree_refuses_and_names_the_registered_records() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register_by_hand(&env, &l, "det");
+    env.init("dest");
+    let id = env.json(&l.code, &["add", "movable"])["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let old = l.base.join("records-old");
+    l.git(
+        &l.records,
+        &["worktree", "add", "-q", "-b", "old", old.to_str().unwrap()],
+    );
+    let old_project = old.join("det");
+    assert!(old_project.join(format!("tasks/{id}.md")).is_file());
+    let detail = fail_detail(
+        &env,
+        &l.base,
+        &[
+            "-C",
+            old_project.to_str().unwrap(),
+            "move",
+            &id,
+            "--to",
+            "dest",
+        ],
+        "validation",
+    );
+    assert!(
+        detail.contains(&format!("tasks -C {}", l.project.display())),
+        "{detail}"
+    );
+    assert!(!env.home.path().join(".local/state/tasks/move").exists());
+    let moved = env.json(
+        &l.base,
+        &["-C", l.code.to_str().unwrap(), "move", &id, "--to", "dest"],
+    );
+    assert_eq!(moved["recovery"], "fresh");
+}

@@ -37,10 +37,11 @@ fn open_source(source: Ctx, source_id: TaskId, to: &str) -> Result<MoveCtx> {
             root.display()
         )));
     }
-    let registered = registry
-        .project_root(&source_id.prefix)
+    // The registered copy is decided by records location: two records worktrees of a
+    // detached project share one code root.
+    let registered = scope::config_dir(&registry, &source_id.prefix)
         .ok_or_else(|| Error::Config(format!("no project registered as {:?}", source_id.prefix)))?;
-    if root_identity(&source.project.root)? != root_identity(registered)? {
+    if root_identity(&source.project.records)? != root_identity(&registered)? {
         return Err(Error::Validation(format!(
             "{source_id} is moved from {}'s registered checkout, which foreign readers and check read; run `tasks -C {} move {source_id} --to {target_prefix}`",
             source_id.prefix,
