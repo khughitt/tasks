@@ -1,6 +1,11 @@
 # Where task records and working documents live — design
 
-Task: tasks-dc16eb. Status: draft for user review (round 2).
+Task: tasks-dc16eb. Status: draft for user review (round 3).
+
+Revision 3 (2026-10-22, after spec review round 2): `check` applies the same
+staged-deletion exception as `init --records`, so §3.3 no longer blocks the removal
+commit; the retained-set seed excludes the files being moved, records included
+(§7.3); acceptance case 9 covers the `tasks where` shapes that the adapter validates.
 
 Revision 2 (2026-10-22, after spec review round 1): the history export runs as two
 filter passes with an inventory check (§8 step 2); registration precedes the removal commit
@@ -196,7 +201,10 @@ against the registry, and a config whose prefix is in `[records]` with a differe
 directory is refused with a typed error, `records_moved`, naming the records
 directory and the remedy (rebase or merge the branch onto the main branch; the
 in-tree copy is read-only history). `check` run in the code checkout reports the same
-as an error while HEAD still tracks `tasks/.config.toml`.
+error under the same condition, a config present in the working tree or the index
+whose prefix is paired elsewhere. A HEAD that still tracks the config while the index
+deletes it is the removal commit's own window (§5.1, §8 steps 3–4): `check` then opens
+the detached project and runs against its records, so the pre-commit hook passes.
 
 ### 3.4 The records repository
 
@@ -385,8 +393,10 @@ project when it next touches the subsystem, and is not part of the migration.
   spec section, a README anchor, an `AGENTS.md` pointer) stays in the code repository
   until that project rewrites it as a reference document. The migration computes the
   retained set as a closure: start from every `docs/` path cited by a tracked file
-  outside `docs/`, add every `docs/` path those documents cite, and repeat until
-  nothing is added; the whole set stays. The script prints the set for the user to
+  that will remain in the code repository, that is, one outside `docs/` and outside
+  every moved path (`tasks/` above all: a record's `spec` and `plan` fields cite the
+  very documents being moved and must not retain them), add every `docs/` path those
+  documents cite, and repeat until nothing is added; the whole set stays. The script prints the set for the user to
   confirm before anything moves, and after the removal commit it scans every retained
   tracked file for a `docs/` link that no longer resolves in the tree and stops on
   the first. A retained chain is consolidated later under §7.2, not trimmed by the
@@ -521,8 +531,12 @@ the ordering noted:
    with `records_in_tree`; with the deletion staged and HEAD still tracking it, it
    succeeds, and the following commit's pre-commit `tasks check` passes; `--force` on
    the registered prefix keeps its aliases and location history.
-9. ops's `linked.py` accepts rows from both the old and the new `tasks projects`
-   shape, and `linked_checkouts()` returns only `kind: linked` rows under the new one.
+9. ops's `linked.py` accepts both the old and the new shape of `tasks where` for an
+   in-tree project (`checkout: null` today, the checkout path tomorrow), a detached
+   project (`linked: false` with `checkout` and `records` set) and a linked project,
+   and both shapes of `tasks projects`; `linked_checkouts()` returns only
+   `kind: linked` rows under the new shape. The `where` branch is where the current
+   validator rejects a non-null `checkout` on a non-linked row.
 4. A migrated project's done record with `plan: docs/plans/x.md` and `step` resolves
    (`step_found: true`); a spec kept in the code tree per §7.3 resolves through `root`.
 5. `stale_copy` does not fire across two code worktrees writing the same record; it
