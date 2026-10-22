@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: records-home
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-22T20:39:38Z
+updated: 2026-10-22T20:46:01Z
 started: 2026-10-22T19:55:20Z
 depends: []
 tags: []
@@ -50,4 +50,6 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
 - 2026-10-22T20:38:30Z (records-home): review: spec round 1 — verdict: revise; findings: P1 3, P2 2; reviewer: codex/gpt-6-astra
 - 2026-10-22T20:39:36Z (records-home): spec round 1 fixes (revision 2, b67595ac35b646c3d0d5af63d67f6c3df542beb9): two-pass filter-repo export with inventory check; init --records allowed with the removal staged so registration precedes the removal commit and the hook's tasks check sees the detached project; linked.py adapter added as a consumer landing before the output change; migration passes the records root; retained docs are the closure over docs links, validated after the move
 - 2026-10-22T20:39:38Z (records-home): parked (waiting on user, review): User reviews revision 2 of the design spec at commit b67595ac35b646c3d0d5af63d67f6c3df542beb9 on branch records-home (.worktrees/records-home/docs/specs/2026-10-22-records-home-design.md; read it with git show b67595ac35b646c3d0d5af63d67f6c3df542beb9:docs/specs/2026-10-22-records-home-design.md); then the agent revises again or files the §10 pieces per project as dependencies of ops-487484 and re-scopes hq-5a3e12's pieces per §7.4
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:46:01Z (records-home): resumed
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
