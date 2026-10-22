@@ -235,6 +235,42 @@ fn checkout_path(records: &Path, raw: Option<CheckoutConfig>) -> Result<Option<(
         .map_err(|problem| Error::Config(format!("{CONFIG_REL}: [checkout] path: {problem}")))
 }
 
+/// An existing config made detached, as a `toml_edit` edit so its comments and unrelated
+/// tables survive (as `retire` edits `[retired]`): `[checkout]` with `path` and
+/// `kind = "detached"` when the table is absent, and `[git] commit = true` when the table
+/// or the key is absent or the value is `false` (records-detached spec §3.4). The caller
+/// has opened the config, so a present `[checkout]` already names this checkout.
+fn detach_config(text: &str, path: &str) -> Result<String> {
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
+    if !doc.contains_key("checkout") {
+        let mut table = toml_edit::Table::new();
+        table["path"] = toml_edit::value(path);
+        table["kind"] = toml_edit::value(Kind::Detached.as_str());
+        doc["checkout"] = toml_edit::Item::Table(table);
+    }
+    match doc
+        .get_mut("git")
+        .and_then(toml_edit::Item::as_table_like_mut)
+    {
+        // Replacing the value in place keeps the key's own decor, a comment above it included.
+        Some(git) => match git.get_mut("commit") {
+            Some(commit) if commit.as_bool() == Some(true) => {}
+            Some(commit) => *commit = toml_edit::value(true),
+            None => {
+                git.insert("commit", toml_edit::value(true));
+            }
+        },
+        None => {
+            let mut table = toml_edit::Table::new();
+            table["commit"] = toml_edit::value(true);
+            doc["git"] = toml_edit::Item::Table(table);
+        }
+    }
+    Ok(doc.to_string())
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FeedbackConfig {
@@ -459,6 +495,79 @@ impl Project {
             atomic_write(&config, text.as_bytes())?;
         }
         let project = Self::open(root)?;
+        std::fs::create_dir_all(project.records.join(&project.spec_dirs[0]))?;
+        std::fs::create_dir_all(project.records.join(&project.plan_dirs[0]))?;
+        Ok(project)
+    }
+
+    /// Writes or adopts the config of a detached project whose records directory is
+    /// `records` (canonical) and whose code checkout is `checkout` (records-detached spec
+    /// §5.1). A new config gets `prefix`, `[git] commit = true` and `[checkout]` with the
+    /// path relative to `records` and `kind = "detached"`. An existing one (a migration, or
+    /// a second host the sync delivered it to) keeps its text: a different prefix or another
+    /// `[checkout]` is refused, a missing `[checkout]` is added and `[git] commit` is set,
+    /// and the file is written only when that changed it. Nothing is written in `checkout`.
+    pub fn init_detached(records: &Path, prefix: &str, checkout: &Path) -> Result<Project> {
+        if !is_valid_prefix(prefix) {
+            return Err(Error::Config(format!(
+                "prefix {prefix:?} must match [a-z][a-z0-9]{{1,7}}"
+            )));
+        }
+        let config = records.join(CONFIG_REL);
+        let relative = crate::link::relative_path(records, checkout);
+        let path = relative.to_str().ok_or_else(|| {
+            Error::Config(format!(
+                "checkout {} is not valid UTF-8",
+                checkout.display()
+            ))
+        })?;
+        std::fs::create_dir_all(records.join("tasks"))?;
+        if config.exists() {
+            let existing = Self::open(records)?;
+            if existing.prefix != prefix {
+                return Err(Error::Config(format!(
+                    "{} already exists with prefix {:?}",
+                    config.display(),
+                    existing.prefix
+                )));
+            }
+            if existing.kind != Kind::InTree
+                && (existing.kind != Kind::Detached || existing.checkout != checkout)
+            {
+                return Err(Error::Config(format!(
+                    "{} already declares a {} checkout at {}; init does not relink an \
+                     existing project",
+                    config.display(),
+                    existing.kind.as_str(),
+                    existing.checkout.display()
+                )));
+            }
+            let text = std::fs::read_to_string(&config)?;
+            let detached = detach_config(&text, path)?;
+            if detached != text {
+                atomic_write(&config, detached.as_bytes())?;
+            }
+        } else {
+            let text = toml::to_string(&Config {
+                prefix: prefix.into(),
+                color: None,
+                spec_dirs: None,
+                plan_dirs: None,
+                tags: None,
+                feedback: None,
+                attachments: None,
+                needs: None,
+                retired: None,
+                checkout: Some(CheckoutConfig {
+                    path: path.to_string(),
+                    kind: Some(Kind::Detached.as_str().into()),
+                }),
+                git: Some(GitConfig { commit: true }),
+            })
+            .expect("config serializes");
+            atomic_write(&config, text.as_bytes())?;
+        }
+        let project = Self::open(records)?;
         std::fs::create_dir_all(project.records.join(&project.spec_dirs[0]))?;
         std::fs::create_dir_all(project.records.join(&project.plan_dirs[0]))?;
         Ok(project)

@@ -41,6 +41,9 @@ impl Format {
 pub struct InitOut {
     pub prefix: String,
     pub root: String,
+    /// The records directory `init --records` paired the checkout with; omitted otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub records: Option<String>,
     pub warnings: Vec<String>,
     #[serde(default)]
     pub aliases: Vec<String>,

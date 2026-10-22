@@ -1936,8 +1936,9 @@ fn dispatch(cli: Cli) -> Result<Output> {
         Command::Init {
             prefix,
             checkout,
+            records,
             force,
-        } => init::run(dir, prefix, checkout, force),
+        } => init::run(dir, prefix, checkout, records, force),
         Command::Where { path } => where_::run(path, dir),
         Command::Rename {
             old,

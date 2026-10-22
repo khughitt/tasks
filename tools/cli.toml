@@ -271,6 +271,7 @@ summary = "Initialize tasks/ in this repository and register it"
 options = [
   { names = ["--prefix"], value = "string" },
   { names = ["--checkout"], value = "path" },
+  { names = ["--records"], value = "path" },
   { shared = "force", value = "none" },
 ]
 

@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::output::{InitOut, Output};
 use crate::registry::Registry;
-use crate::repo::Project;
+use crate::repo::{Kind, Project};
 use std::path::{Path, PathBuf};
 
 const SKILL_REL: &str = "skills/tasks/SKILL.md";
@@ -10,6 +10,7 @@ pub fn run(
     dir: Option<&Path>,
     prefix: Option<String>,
     checkout: Option<PathBuf>,
+    records: Option<PathBuf>,
     force: bool,
 ) -> Result<Output> {
     let root = match dir {
@@ -40,7 +41,13 @@ pub fn run(
     if force {
         reject_repointing_a_retired_project(&registry, &prefix, &root)?;
     }
-    reject_linked_destination(&root, &registry)?;
+    let records = match records {
+        Some(records_root) => Some(validate_records(&root, &records_root, &registry, &prefix)?),
+        None => {
+            reject_linked_destination(&root, &registry)?;
+            None
+        }
+    };
     let checkout = checkout
         .map(|checkout| validate_checkout(&root, &root.join(checkout), &registry, &prefix))
         .transpose()?;
@@ -50,7 +57,14 @@ pub fn run(
         registry.register(&prefix, &root)?;
         None
     };
-    let project = Project::init(&root, &prefix, checkout.as_deref())?;
+    let project = match &records {
+        Some(derived) => {
+            let project = Project::init_detached(derived, &prefix, &root)?;
+            registry.pair_records(&prefix, derived);
+            project
+        }
+        None => Project::init(&root, &prefix, checkout.as_deref())?,
+    };
     let today = crate::time::day(&crate::time::now()).to_string();
     let previous = displaced
         .clone()
@@ -74,6 +88,7 @@ pub fn run(
     Ok(Output::Init(InitOut {
         prefix: project.prefix,
         root: project.root.display().to_string(),
+        records: records.map(|derived| derived.display().to_string()),
         warnings,
         aliases: Vec::new(),
     }))
@@ -145,7 +160,8 @@ fn reject_repointing_a_retired_project(
 /// No command writes into a linked checkout (ops linked-checkouts §4.1), `init` included:
 /// a destination in a repository that a registered project declares as its checkout is
 /// refused, whichever of that repository's working trees it is in, because the
-/// repository's records already live in that project's root.
+/// repository's records already live in that project's root. A detached project's checkout
+/// is `records_moved`, naming the `init --records` that pairs it again (decision 6).
 fn reject_linked_destination(root: &Path, registry: &Registry) -> Result<()> {
     let Some(tree) = crate::link::GitTree::of(root)? else {
         return Ok(());
@@ -153,12 +169,25 @@ fn reject_linked_destination(root: &Path, registry: &Registry) -> Result<()> {
     let Some(main) = tree.main_checkout() else {
         return Ok(());
     };
-    let owners: Vec<_> = crate::locations::scan_checkouts(registry)
+    let rows: Vec<_> = crate::locations::scan_checkouts(registry)
         .strict()?
         .into_iter()
         .filter(|linked| linked.checkout == main)
-        .map(|linked| linked.prefix)
         .collect();
+    // A detached project's checkout: its records moved out (decision 6), and pairing the
+    // checkout again is `init --records`.
+    if let Some(detached) = rows.iter().find(|linked| linked.kind == Kind::Detached) {
+        let records_root = detached.records.parent().unwrap_or(&detached.records);
+        return Err(Error::RecordsMoved(format!(
+            "{}'s records live at {}; to pair this checkout again run `tasks init --prefix {} \
+             --records {} --force`",
+            detached.prefix,
+            detached.records.display(),
+            detached.prefix,
+            records_root.display()
+        )));
+    }
+    let owners: Vec<_> = rows.into_iter().map(|linked| linked.prefix).collect();
     if owners.is_empty() {
         return Ok(());
     }
@@ -258,4 +287,146 @@ fn validate_checkout(
         )));
     }
     Ok(checkout)
+}
+
+/// Records-detached spec §5.1: `root`, the checkout running `init --records`, must be the
+/// main checkout of a git repository that keeps no records in its working tree or index,
+/// overlapping no other registered project, and declared by no other prefix; the records
+/// directory `<records_root>/<prefix>` must lie outside its repository. Returns that
+/// directory, created and canonical; a refusal creates nothing.
+fn validate_records(
+    root: &Path,
+    records_root: &Path,
+    registry: &Registry,
+    prefix: &str,
+) -> Result<PathBuf> {
+    if !crate::model::is_valid_prefix(prefix) {
+        return Err(Error::Config(format!(
+            "prefix {prefix:?} must match [a-z][a-z0-9]{{1,7}}"
+        )));
+    }
+    let refuse = |why: String| {
+        Err(Error::Config(format!(
+            "--records: {} {why}",
+            root.display()
+        )))
+    };
+    let named = root.join(records_root);
+    let records_root = match named.canonicalize() {
+        Ok(dir) if dir.is_dir() => dir,
+        Ok(_) => {
+            return Err(Error::Config(format!(
+                "--records {}: is not a directory",
+                named.display()
+            )));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::Config(format!(
+                "--records {}: does not exist",
+                named.display()
+            )));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let Some(tree) = crate::link::GitTree::of(root)? else {
+        return refuse("is not in a git repository".into());
+    };
+    if tree.top != root {
+        return refuse(format!(
+            "is not the top level of its repository ({})",
+            tree.top.display()
+        ));
+    }
+    if !tree.is_main() {
+        let main = tree
+            .main_checkout()
+            .map(|m| m.display().to_string())
+            .unwrap_or_default();
+        return refuse(format!(
+            "is a linked worktree; pass its main checkout {main}"
+        ));
+    }
+    if tree.main_checkout().as_deref() != Some(root) {
+        return refuse("has no main checkout (a bare repository or a separate git dir)".into());
+    }
+    // The derived directory need not exist yet; its nearest existing ancestor carries its
+    // repository identity.
+    let derived = records_root.join(prefix);
+    let exists = derived.try_exists()?;
+    let derived = if exists {
+        derived.canonicalize()?
+    } else {
+        derived
+    };
+    let identity = if exists { &derived } else { &records_root };
+    if derived.starts_with(root)
+        || root.starts_with(&derived)
+        || crate::link::GitTree::of(identity)?.is_some_and(|theirs| theirs.common == tree.common)
+    {
+        return Err(Error::Config(format!(
+            "--records {}: {} is in this checkout's repository; records must live outside \
+             the code tree",
+            named.display(),
+            derived.display()
+        )));
+    }
+    if root.join(crate::repo::CONFIG_REL).is_file() || crate::link::config_in_index(&tree.top)? {
+        return Err(Error::RecordsInTree(format!(
+            "{}: tasks/.config.toml is in the working tree or the index; `git rm -r tasks` \
+             (and the docs you are moving) first, then rerun; a staged deletion is allowed",
+            root.display()
+        )));
+    }
+    let mut taken: Vec<_> = crate::locations::scan_checkouts(registry)
+        .strict()?
+        .into_iter()
+        .filter(|linked| linked.prefix != prefix && linked.checkout == root)
+        .map(|linked| linked.prefix)
+        .collect();
+    for (other, other_root) in &registry.projects {
+        if other != prefix
+            && registry.records_dir(other).is_some()
+            && crate::rename::root_identity(other_root)? == root
+            && !taken.contains(other)
+        {
+            taken.push(other.clone());
+        }
+    }
+    if !taken.is_empty() {
+        return Err(Error::CheckoutConflict(format!(
+            "{} is already the checkout of {}",
+            root.display(),
+            taken.join(" and ")
+        )));
+    }
+    // A repository nested in, or holding, another project's tree would be reached by the
+    // walk up to that project's config before the pairing; one sharing a common git
+    // directory with it is the same repository (validate_checkout's overlap rule).
+    for other in registry.projects.keys() {
+        if other == prefix {
+            continue;
+        }
+        let dirs = registry
+            .project_root(other)
+            .into_iter()
+            .chain(registry.records_dir(other));
+        for dir in dirs {
+            if !dir.try_exists()? {
+                continue;
+            }
+            let dir = dir.canonicalize()?;
+            if root.starts_with(&dir)
+                || dir.starts_with(root)
+                || crate::link::GitTree::of(&dir)?
+                    .is_some_and(|theirs| theirs.common == tree.common)
+            {
+                return refuse(format!(
+                    "overlaps registered project {other} at {}",
+                    dir.display()
+                ));
+            }
+        }
+    }
+    std::fs::create_dir_all(&derived)?;
+    Ok(derived.canonicalize()?)
 }

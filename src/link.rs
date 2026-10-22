@@ -403,6 +403,26 @@ fn tracked_config(top: &Path) -> Result<bool> {
 
 const CONFIG_PATH: &str = crate::repo::CONFIG_REL;
 
+/// `tasks/.config.toml` is in the index at `top` (records-detached spec §5.1): `git
+/// ls-files --cached` names it. A staged deletion takes it out, whatever `HEAD` tracks. A
+/// failing git run is an `io` error, never "absent".
+pub fn config_in_index(top: &Path) -> Result<bool> {
+    let listed = std::process::Command::new("git")
+        .arg("-C")
+        .arg(top)
+        .args(["ls-files", "-z", "--cached", "--", CONFIG_PATH])
+        .env("LC_ALL", "C")
+        .output()?;
+    if !listed.status.success() {
+        return Err(Error::Io(format!(
+            "git ls-files in {} failed: {}",
+            top.display(),
+            String::from_utf8_lossy(&listed.stderr).trim()
+        )));
+    }
+    Ok(!listed.stdout.is_empty())
+}
+
 /// `HEAD` names a branch that does not exist yet, and nothing is wrong: `symbolic-ref`
 /// resolves `HEAD` to a ref name, and `for-each-ref` on that name lists nothing and says
 /// nothing. A malformed loose ref fails `symbolic-ref` ("No such ref: HEAD"), and a

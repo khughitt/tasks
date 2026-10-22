@@ -19,6 +19,7 @@ pub fn run(prefix: String) -> Result<Output> {
     Ok(Output::Init(InitOut {
         prefix,
         root: removed.root.display().to_string(),
+        records: None,
         warnings,
         aliases: removed.aliases,
     }))
