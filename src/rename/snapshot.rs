@@ -7,11 +7,26 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// A rename keeps two paths apart: `root` is the project's identity, the registered root
+/// `[projects]` holds (the code checkout of a detached project), and `records` is where
+/// `tasks/` and the config are now, which a detached rename moves (§5.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
     pub source: String,
     pub target: String,
     pub root: PathBuf,
+    pub records: PathBuf,
+}
+
+/// Which of a detached inventory's `records_from` and `records_to` exist. `Old` for every
+/// project whose records do not move, and before an inventory exists while the current
+/// records directory does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RecordsDir {
+    Old,
+    New,
+    Both,
+    Neither,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +58,11 @@ pub struct RegistryState {
     pub alias: Option<String>,
     /// The target names a group in the registry: refusal R12, in every stage.
     pub target_group: bool,
+    /// `[records]` pairs the source with the inventory's `records_from` (both absent
+    /// counts as agreeing).
+    pub records_old: bool,
+    /// `[records]` pairs the target with the inventory's `records_to`, likewise.
+    pub records_new: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +82,7 @@ pub struct Named {
 pub struct Snapshot {
     pub invocation: Invocation,
     pub registry: RegistryState,
+    pub records: RecordsDir,
     pub config: Option<ConfigState>,
     pub inventory: Option<Inventory>,
     pub entries: Vec<EntryState>,
@@ -112,8 +133,14 @@ pub fn observe(
         .collect();
     let mut named = Named::default();
     let mut strays = Vec::new();
+    let records = observe_records(registry, invocation, inventory.as_ref())?;
+    // With neither directory there is nothing to read; the classifier refuses.
+    let tasks = (records != RecordsDir::Neither)
+        .then(|| task_paths(&invocation.records.join("tasks")))
+        .transpose()?
+        .unwrap_or_default();
 
-    for path in task_paths(&invocation.root.join("tasks"))? {
+    for path in tasks {
         let name = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -152,7 +179,7 @@ pub fn observe(
         }
     }
     let files_root = invocation
-        .root
+        .records
         .join("tasks")
         .join(crate::attachments::FILES_DIR);
     match crate::attachments::dir_state(&files_root)? {
@@ -191,6 +218,12 @@ pub fn observe(
         }
     }
     strays.sort();
+    let records_from = inventory
+        .as_ref()
+        .and_then(|inventory| inventory.records_from.as_deref());
+    let records_to = inventory
+        .as_ref()
+        .and_then(|inventory| inventory.records_to.as_deref());
 
     Ok(Snapshot {
         invocation: invocation.clone(),
@@ -207,8 +240,15 @@ pub fn observe(
                 .transpose()?,
             alias: registry.aliases.get(&invocation.source).cloned(),
             target_group: registry.groups.contains_key(&invocation.target),
+            records_old: same_dir(registry.records_dir(&invocation.source), records_from)?,
+            records_new: same_dir(registry.records_dir(&invocation.target), records_to)?,
         },
-        config: observe_config(invocation)?,
+        config: if records == RecordsDir::Neither {
+            None
+        } else {
+            observe_config(invocation)?
+        },
+        records,
         inventory,
         entries,
         named,
@@ -216,8 +256,61 @@ pub fn observe(
     })
 }
 
+/// `RecordsDir` from the existence of the inventory's two directories. Before an
+/// inventory, a detached project (one `[records]` pairs) is `Both` when the directory it
+/// would move to is already taken, as a destination task file refuses a fresh rename.
+fn observe_records(
+    registry: &Registry,
+    invocation: &Invocation,
+    inventory: Option<&Inventory>,
+) -> Result<RecordsDir> {
+    let (from, to) = match inventory {
+        Some(inventory) => match (&inventory.records_from, &inventory.records_to) {
+            (Some(from), Some(to)) => (from.clone(), to.clone()),
+            _ => return Ok(RecordsDir::Old),
+        },
+        None => {
+            let live = registry.canonical_prefix(&invocation.source);
+            if registry.records_dir(live).is_none() {
+                return Ok(RecordsDir::Old);
+            }
+            let to = invocation
+                .records
+                .parent()
+                .map(|parent| parent.join(&invocation.target))
+                .unwrap_or_else(|| invocation.records.clone());
+            (invocation.records.clone(), to)
+        }
+    };
+    Ok(match (present(&from)?, from != to && present(&to)?) {
+        (true, false) => RecordsDir::Old,
+        (false, true) => RecordsDir::New,
+        (true, true) => RecordsDir::Both,
+        (false, false) => RecordsDir::Neither,
+    })
+}
+
+/// Whether anything is at `path`, a symlink included.
+pub(crate) fn present(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Two optional directories compared by identity; a missing directory compares by its
+/// parent's identity and its name, so a moved directory still matches its old spelling.
+fn same_dir(left: Option<&Path>, right: Option<&Path>) -> Result<bool> {
+    Ok(match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => super::dir_identity(left)? == super::dir_identity(right)?,
+        _ => false,
+    })
+}
+
 fn observe_config(invocation: &Invocation) -> Result<Option<ConfigState>> {
-    let path = invocation.root.join(CONFIG_REL);
+    let path = invocation.records.join(CONFIG_REL);
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -268,6 +361,7 @@ parent: dot-b11111\ntags: []\n---\n";
             source: "dot".into(),
             target: "dots".into(),
             root: project.root.clone(),
+            records: project.records.clone(),
         }
     }
 

@@ -198,6 +198,11 @@ pub fn run(
     }
     if recovery == "fresh" || recovery == "resume_registry" {
         let displaced = registry.adopt(old, new, &project.root)?;
+        // `adopt` moved the `[records]` key with its old value; a detached project's
+        // records arrived under the new name, and the pairing follows them.
+        if project.kind == crate::repo::Kind::Detached {
+            registry.pair_records(new, &project.records);
+        }
         let today = crate::time::day(&crate::time::now()).to_string();
         out.warnings
             .extend(registry.note_root_change(new, Some(displaced), &today)?);

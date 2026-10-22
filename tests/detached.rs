@@ -1248,3 +1248,310 @@ fn a_document_under_records_resolves_without_asking_git_about_the_main_checkout(
         l.project.join("docs/specs/here.md").to_str().unwrap()
     );
 }
+
+/// A registered detached `det` with two committed tasks, one of them parked so the rename
+/// carries a claim store: the ids.
+fn rename_fixture(env: &mut TestEnv) -> (Layout, Vec<String>) {
+    let l = layout(env, "det");
+    register(env, &l, "det");
+    let ids: Vec<String> = ["first", "second"]
+        .iter()
+        .map(|title| common::id_of(env.json(&l.project, &["add", title])))
+        .collect();
+    env.json(&l.project, &["start", &ids[0]]);
+    env.json(
+        &l.project,
+        &["park", &ids[0], "next", "--waiting-on", "agent"],
+    );
+    assert_eq!(l.git(&l.records, &["status", "--porcelain"]), "");
+    (l, ids)
+}
+
+/// `rename det dtx` with `TASKS_RENAME_STOP_AFTER=stop`, run in the code checkout.
+fn rename_stop(env: &TestEnv, l: &Layout, stop: &str) {
+    let out = env
+        .raw(&l.code)
+        .env("TASKS_RENAME_STOP_AFTER", stop)
+        .args(["rename", "det", "dtx"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{stop}: {out:?}");
+}
+
+/// Every path and its bytes under the records root (its `.git` aside) and the test home:
+/// what `--explain` and a replay must leave alone.
+fn disk_state(env: &TestEnv, l: &Layout) -> std::collections::BTreeMap<PathBuf, Option<Vec<u8>>> {
+    fn collect(path: &Path, state: &mut std::collections::BTreeMap<PathBuf, Option<Vec<u8>>>) {
+        if path.file_name().is_some_and(|name| name == ".git") {
+            return;
+        }
+        if path.is_dir() {
+            state.insert(path.to_path_buf(), None);
+            for entry in std::fs::read_dir(path).unwrap() {
+                collect(&entry.unwrap().path(), state);
+            }
+        } else if path.exists() {
+            state.insert(path.to_path_buf(), Some(std::fs::read(path).unwrap()));
+        }
+    }
+    let mut state = std::collections::BTreeMap::new();
+    collect(&l.records, &mut state);
+    collect(env.home.path(), &mut state);
+    state
+}
+
+/// The end state of `det -> dtx`, however it was reached.
+fn assert_renamed(env: &TestEnv, l: &Layout, ids: &[String], label: &str) {
+    let moved = l.records.join("dtx");
+    assert!(!l.project.exists(), "{label}: det is gone");
+    for id in ids {
+        let renamed = id.replacen("det-", "dtx-", 1);
+        assert!(
+            moved.join(format!("tasks/{renamed}.md")).is_file(),
+            "{label}: {renamed}"
+        );
+        assert_eq!(
+            env.json(&l.code, &["show", id])["task"]["id"],
+            renamed,
+            "{label}: the old id resolves through the alias"
+        );
+    }
+    let registry: toml::Value = toml::from_str(&registry_text(env)).unwrap();
+    assert_eq!(
+        registry["projects"]["dtx"].as_str(),
+        l.code.to_str(),
+        "{label}"
+    );
+    assert!(registry["projects"].get("det").is_none(), "{label}");
+    assert_eq!(
+        registry["records"]["dtx"].as_str(),
+        moved.to_str(),
+        "{label}"
+    );
+    assert!(registry["records"].get("det").is_none(), "{label}");
+    assert_eq!(registry["aliases"]["det"].as_str(), Some("dtx"), "{label}");
+    let config: toml::Value =
+        toml::from_str(&std::fs::read_to_string(moved.join("tasks/.config.toml")).unwrap())
+            .unwrap();
+    assert_eq!(config["prefix"].as_str(), Some("dtx"), "{label}");
+    assert_eq!(
+        config["checkout"]["path"].as_str(),
+        Some("../../code"),
+        "{label}"
+    );
+    let listed = env.json(&l.code, &["list"]);
+    let listed: Vec<&str> = listed["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed.len(), ids.len(), "{label}: {listed:?}");
+    assert!(
+        listed.iter().all(|id| id.starts_with("dtx-")),
+        "{label}: {listed:?}"
+    );
+    assert!(
+        !env.home
+            .path()
+            .join(".local/state/tasks/rename/det.toml")
+            .exists(),
+        "{label}: the inventory is removed"
+    );
+    assert!(!env.claim_store("det").exists(), "{label}");
+    let store = std::fs::read_to_string(env.claim_store("dtx")).unwrap();
+    assert!(
+        store.contains(&ids[0].replacen("det-", "dtx-", 1)),
+        "{label}: the park moved\n{store}"
+    );
+    let status = l.git(&l.records, &["status", "--porcelain"]);
+    assert!(status.contains("?? dtx/"), "{label}: {status}");
+    assert!(
+        status.contains(" D det/tasks/.config.toml"),
+        "{label}: the rename is the user's to commit\n{status}"
+    );
+    assert_eq!(
+        env.json(&l.code, &["rename", "det", "dtx", "--explain"])["recovery"],
+        "complete",
+        "{label}"
+    );
+}
+
+#[test]
+fn rename_moves_the_records_directory_and_the_registry_pairing() {
+    let mut env = TestEnv::new();
+    let (l, ids) = rename_fixture(&mut env);
+    // A directory already at the destination refuses, as a destination task file does.
+    let taken = l.records.join("dtx");
+    std::fs::create_dir(&taken).unwrap();
+    let explained = env.json(&l.code, &["rename", "det", "dtx", "--explain"]);
+    assert_eq!(explained["recovery"], "refuse", "{explained}");
+    assert!(
+        explained["warnings"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("both "),
+        "{explained}"
+    );
+    assert!(
+        fail_detail(&env, &l.code, &["rename", "det", "dtx"], "validation").starts_with("both ")
+    );
+    assert!(
+        !env.home
+            .path()
+            .join(".local/state/tasks/rename/det.toml")
+            .exists()
+    );
+    std::fs::remove_dir(&taken).unwrap();
+    // The registry's [projects] names the code checkout, which is the invocation's identity.
+    assert_eq!(
+        env.json(&l.code, &["rename", "det", "dtx", "--explain"])["recovery"],
+        "fresh"
+    );
+    let out = env.json(&l.code, &["rename", "det", "dtx"]);
+    assert_eq!(out["recovery"], "fresh");
+    assert_eq!(out["tasks"], 2);
+    assert_eq!(out["root"], l.code.display().to_string());
+    assert_renamed(&env, &l, &ids, "uninterrupted");
+}
+
+#[test]
+fn rename_resumes_across_the_records_boundary() {
+    for (stop, want) in [
+        ("inventory", "resume_files"),
+        ("file:0", "resume_files"),
+        ("files", "resume_files"),
+        ("config", "resume_registry"),
+        ("records", "resume_registry"),
+        ("registry", "resume_cleanup"),
+        ("store", "resume_cleanup"),
+        ("claims", "resume_cleanup"),
+    ] {
+        let mut env = TestEnv::new();
+        let (l, ids) = rename_fixture(&mut env);
+        rename_stop(&env, &l, stop);
+        let moved = matches!(stop, "records" | "registry" | "store" | "claims");
+        assert_eq!(l.project.exists(), !moved, "{stop}");
+        assert_eq!(l.records.join("dtx").exists(), moved, "{stop}");
+        let before = disk_state(&env, &l);
+        let explained = env.json(&l.code, &["rename", "det", "dtx", "--explain"]);
+        assert_eq!(explained["recovery"], want, "{stop}: {explained}");
+        assert_eq!(disk_state(&env, &l), before, "{stop}: explain wrote");
+        let resumed = env.json(&l.code, &["rename", "det", "dtx"]);
+        assert_eq!(resumed["recovery"], want, "{stop}: {resumed}");
+        assert_renamed(&env, &l, &ids, stop);
+    }
+}
+
+#[test]
+fn rename_replay_and_explain_after_the_inventory_is_gone_report_complete_without_writes() {
+    let mut env = TestEnv::new();
+    let (l, ids) = rename_fixture(&mut env);
+    env.json(&l.code, &["rename", "det", "dtx"]);
+    let registry = std::fs::read(env.home.path().join(".config/tasks/projects.toml")).unwrap();
+    let before = disk_state(&env, &l);
+    let status = l.porcelain(&l.records);
+    for args in [
+        &["rename", "det", "dtx", "--explain"][..],
+        &["rename", "det", "dtx"][..],
+    ] {
+        let out = env.json(&l.code, args);
+        assert_eq!(out["recovery"], "complete", "{args:?}: {out}");
+        assert_eq!(
+            std::fs::read(env.home.path().join(".config/tasks/projects.toml")).unwrap(),
+            registry,
+            "{args:?}"
+        );
+        let after = disk_state(&env, &l);
+        let records: Vec<_> = before
+            .keys()
+            .filter(|path| path.starts_with(&l.records))
+            .collect();
+        assert_eq!(
+            records,
+            after
+                .keys()
+                .filter(|path| path.starts_with(&l.records))
+                .collect::<Vec<_>>(),
+            "{args:?}"
+        );
+        for path in records {
+            assert_eq!(before[path], after[path], "{args:?}: {}", path.display());
+        }
+        assert_eq!(l.porcelain(&l.records), status, "{args:?}");
+    }
+    assert_renamed(&env, &l, &ids, "replayed");
+}
+
+#[test]
+fn rename_refuses_a_second_worktree_of_the_records_repository_not_of_the_code_repository() {
+    let mut env = TestEnv::new();
+    let (l, _) = rename_fixture(&mut env);
+    assert!(l.wt.is_dir(), "the code repository has a second worktree");
+    env.json(&l.code, &["rename", "det", "dtx"]);
+    l.git(&l.records, &["add", "-A"]);
+    l.git(&l.records, &["commit", "-qm", "rename"]);
+    let second = l.base.join("records-wt");
+    l.git(
+        &l.records,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "rw",
+            second.to_str().unwrap(),
+        ],
+    );
+    let detail = fail_detail(&env, &l.code, &["rename", "dtx", "det"], "validation");
+    assert!(detail.contains("2 git worktrees"), "{detail}");
+    assert!(l.records.join("dtx").is_dir());
+}
+
+#[test]
+fn adopt_pairs_the_renamed_records_directory() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let id = common::id_of(env.json(&l.project, &["add", "first"]));
+    let renamed = id.replacen("det-", "dtx-", 1);
+    // What the sync delivers from the host that ran the rename.
+    let moved = l.records.join("dtx");
+    std::fs::rename(&l.project, &moved).unwrap();
+    let old = moved.join(format!("tasks/{id}.md"));
+    let text = std::fs::read_to_string(&old).unwrap();
+    std::fs::write(
+        moved.join(format!("tasks/{renamed}.md")),
+        text.replacen(&id, &renamed, 1),
+    )
+    .unwrap();
+    std::fs::remove_file(old).unwrap();
+    let config = moved.join("tasks/.config.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        text.replace("prefix = \"det\"", "prefix = \"dtx\""),
+    )
+    .unwrap();
+
+    let registry = registry_text(&env);
+    let explained = env.json(&l.code, &["rename", "det", "dtx", "--adopt", "--explain"]);
+    assert_eq!(explained["recovery"], "fresh", "{explained}");
+    assert_eq!(registry_text(&env), registry, "explain wrote the registry");
+    let out = env.json(&l.code, &["rename", "det", "dtx", "--adopt"]);
+    assert_eq!(out["mode"], "adopt");
+    assert_eq!(out["recovery"], "fresh");
+    assert_eq!(out["root"], l.code.display().to_string());
+    let registry: toml::Value = toml::from_str(&registry_text(&env)).unwrap();
+    assert_eq!(registry["projects"]["dtx"].as_str(), l.code.to_str());
+    assert_eq!(registry["records"]["dtx"].as_str(), moved.to_str());
+    assert!(registry["records"].get("det").is_none(), "{registry}");
+    assert_eq!(registry["aliases"]["det"].as_str(), Some("dtx"));
+    let listed = env.json(&l.code, &["list"]);
+    assert_eq!(listed["tasks"][0]["id"], renamed, "{listed}");
+    assert_eq!(env.json(&l.code, &["show", &id])["task"]["id"], renamed);
+    assert_eq!(
+        env.json(&l.code, &["rename", "det", "dtx", "--adopt", "--explain"])["recovery"],
+        "complete"
+    );
+}

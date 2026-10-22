@@ -22,6 +22,8 @@ pub struct InventoryEntry {
 pub struct Inventory {
     pub source: String,
     pub target: String,
+    /// The project's identity, the registered root; for a detached project the code
+    /// checkout, never its records directory.
     pub root: PathBuf,
     pub config_from: String,
     pub config_to: String,
@@ -30,6 +32,14 @@ pub struct Inventory {
     pub parks_store: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub store_to: Option<String>,
+    /// A detached project's records directory, `<records-root>/<source>`, and where the
+    /// `records` stage moves it, `<records-root>/<target>`; both absent otherwise. An
+    /// inventory from an older binary has neither, which means "records at `root`": what
+    /// it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub records_from: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub records_to: Option<PathBuf>,
 }
 
 pub fn digest(bytes: &[u8]) -> String {
@@ -66,7 +76,7 @@ impl Inventory {
             )));
         }
 
-        let config_bytes = std::fs::read(project.root.join(CONFIG_REL))?;
+        let config_bytes = std::fs::read(project.records.join(CONFIG_REL))?;
         let config_text = std::str::from_utf8(&config_bytes)
             .map_err(|error| Error::Config(format!("{CONFIG_REL}: {error}")))?;
         let config_to = rewrite_config_prefix(config_text, target)?;
@@ -154,6 +164,18 @@ impl Inventory {
             let digest = digest(text.as_bytes());
             (Some(text), Some(digest))
         };
+        let (records_from, records_to) = match project.kind {
+            crate::repo::Kind::Detached => {
+                let parent = project.records.parent().ok_or_else(|| {
+                    Error::Config(format!(
+                        "records directory {} has no parent",
+                        project.records.display()
+                    ))
+                })?;
+                (Some(project.records.clone()), Some(parent.join(target)))
+            }
+            crate::repo::Kind::InTree | crate::repo::Kind::Linked => (None, None),
+        };
 
         Ok(Inventory {
             source: project.prefix.clone(),
@@ -164,6 +186,8 @@ impl Inventory {
             entries,
             parks_store,
             store_to,
+            records_from,
+            records_to,
         })
     }
 
@@ -303,6 +327,23 @@ impl Inventory {
             }
             validate_digest(path, "entry from", &entry.from)?;
             validate_digest(path, "entry to", &entry.to)?;
+        }
+        match (&self.records_from, &self.records_to) {
+            (None, None) => {}
+            (Some(from), Some(to)) => {
+                if !from.is_absolute() || !to.is_absolute() || from == to {
+                    return Err(Error::Config(format!(
+                        "{}: records_from and records_to must be two absolute paths",
+                        path.display()
+                    )));
+                }
+            }
+            _ => {
+                return Err(Error::Config(format!(
+                    "{}: records_from and records_to must be present together",
+                    path.display()
+                )));
+            }
         }
         match (&self.parks_store, &self.store_to) {
             (None, None) => {}

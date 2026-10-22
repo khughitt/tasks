@@ -1,5 +1,6 @@
-use super::snapshot::{FileState, Snapshot};
+use super::snapshot::{FileState, RecordsDir, Snapshot};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recovery {
@@ -24,12 +25,8 @@ pub fn classify(snap: &Snapshot) -> Recovery {
         ));
     }
     let registry = &snap.registry;
-    let registry_old = registry.old_key.as_ref() == Some(&invocation.root)
-        && registry.new_key.is_none()
-        && registry.alias.is_none();
-    let registry_new = registry.new_key.as_ref() == Some(&invocation.root)
-        && registry.old_key.is_none()
-        && registry.alias.as_ref() == Some(&invocation.target);
+    let registry_old = registry_old(snap);
+    let registry_new = registry_new(snap);
 
     match &snap.inventory {
         None => {
@@ -64,38 +61,120 @@ pub fn classify(snap: &Snapshot) -> Recovery {
                     && matches!(entry.dest, FileState::Present(_))
                     && !entry.dirs.source
             });
-            if config.digest == inventory.config_from && registry_old {
+            // The `records` stage sits between config and registry: before it (`Old`)
+            // only the earlier stages resume, after it (`New`) only the later ones. An
+            // inventory whose records do not move is always `Old` and keeps every stage.
+            let moves = inventory.records_from.is_some();
+            let before_move = !moves || snap.records == RecordsDir::Old;
+            let after_move = !moves || snap.records == RecordsDir::New;
+            if config.digest == inventory.config_from && registry_old && before_move {
                 Recovery::ResumeFiles
             } else if files_done && config.digest == inventory.config_to && registry_old {
                 Recovery::ResumeRegistry
-            } else if files_done && config.digest == inventory.config_to && registry_new {
+            } else if files_done
+                && config.digest == inventory.config_to
+                && registry_new
+                && after_move
+            {
                 Recovery::ResumeCleanup
             } else {
                 Recovery::Refuse(format!(
-                    "no resumable stage: files_done={files_done}, config digest {:?}, registry {registry:?}",
-                    config.digest
+                    "no resumable stage: files_done={files_done}, config digest {:?}, records {:?}, registry {registry:?}",
+                    config.digest, snap.records
                 ))
             }
         }
     }
 }
 
+/// The registry still in its pre-rename state: the source key names the identity, no
+/// target key or alias, and for a detached inventory `[records]` pairs the source with
+/// `records_from`.
+pub(crate) fn registry_old(snap: &Snapshot) -> bool {
+    let (invocation, registry) = (&snap.invocation, &snap.registry);
+    registry.old_key.as_ref() == Some(&invocation.root)
+        && registry.new_key.is_none()
+        && registry.alias.is_none()
+        && (!records_move(snap) || registry.records_old)
+}
+
+/// The registry after the `registry` stage: the target key names the identity, the source
+/// is its alias, and for a detached inventory `[records]` pairs the target with
+/// `records_to`.
+pub(crate) fn registry_new(snap: &Snapshot) -> bool {
+    let (invocation, registry) = (&snap.invocation, &snap.registry);
+    registry.new_key.as_ref() == Some(&invocation.root)
+        && registry.old_key.is_none()
+        && registry.alias.as_ref() == Some(&invocation.target)
+        && (!records_move(snap) || registry.records_new)
+}
+
+fn records_move(snap: &Snapshot) -> bool {
+    snap.inventory
+        .as_ref()
+        .is_some_and(|inventory| inventory.records_from.is_some())
+}
+
+/// The two records directories a refusal names: the inventory's, or before one exists
+/// the current directory and its sibling named for the target.
+fn records_pair(snap: &Snapshot) -> (PathBuf, PathBuf) {
+    let invocation = &snap.invocation;
+    match snap.inventory.as_ref().and_then(|inventory| {
+        inventory
+            .records_from
+            .clone()
+            .zip(inventory.records_to.clone())
+    }) {
+        Some(pair) => pair,
+        None => (
+            invocation.records.clone(),
+            invocation
+                .records
+                .parent()
+                .map(|parent| parent.join(&invocation.target))
+                .unwrap_or_else(|| invocation.records.clone()),
+        ),
+    }
+}
+
 fn refusal(snap: &Snapshot) -> Option<String> {
-    if let Some(inventory) = &snap.inventory {
-        if inventory.source != snap.invocation.source
+    if let Some(inventory) = &snap.inventory
+        && (inventory.source != snap.invocation.source
             || inventory.target != snap.invocation.target
-            || inventory.root != snap.invocation.root
-        {
+            || inventory.root != snap.invocation.root)
+    {
+        return Some(format!(
+            "R1: inventory {} -> {} at {} disagrees with invocation {} -> {} at {}",
+            inventory.source,
+            inventory.target,
+            inventory.root.display(),
+            snap.invocation.source,
+            snap.invocation.target,
+            snap.invocation.root.display()
+        ));
+    }
+    // Every other observation was read in a records directory that may not be the
+    // project's, so where the records are comes first.
+    match snap.records {
+        RecordsDir::Old | RecordsDir::New => {}
+        RecordsDir::Both => {
+            let (old, new) = records_pair(snap);
             return Some(format!(
-                "R1: inventory {} -> {} at {} disagrees with invocation {} -> {} at {}",
-                inventory.source,
-                inventory.target,
-                inventory.root.display(),
-                snap.invocation.source,
-                snap.invocation.target,
-                snap.invocation.root.display()
+                "both {} and {} exist; remove the one that is not the renamed project",
+                old.display(),
+                new.display()
             ));
         }
+        RecordsDir::Neither => {
+            let (old, new) = records_pair(snap);
+            return Some(format!(
+                "neither {} nor {} exists",
+                old.display(),
+                new.display()
+            ));
+        }
+    }
+    if let Some(inventory) = &snap.inventory {
         let baseline: BTreeMap<_, _> = inventory
             .entries
             .iter()
@@ -131,13 +210,13 @@ fn refusal(snap: &Snapshot) -> Option<String> {
             {
                 return Some(format!(
                     "R3: destination {} conflicts with the inventory for source {}",
-                    inventory
-                        .root
+                    snap.invocation
+                        .records
                         .join("tasks")
                         .join(format!("{}-{}.md", inventory.target, entry.hex))
                         .display(),
-                    inventory
-                        .root
+                    snap.invocation
+                        .records
                         .join("tasks")
                         .join(format!("{}-{}.md", inventory.source, entry.hex))
                         .display()
@@ -222,8 +301,8 @@ mod tests {
     use super::*;
     use crate::rename::inventory::{Inventory, InventoryEntry};
     use crate::rename::snapshot::{
-        AttachmentDirs, ConfigState, EntryState, FileState, Invocation, Named, RegistryState,
-        Snapshot,
+        AttachmentDirs, ConfigState, EntryState, FileState, Invocation, Named, RecordsDir,
+        RegistryState, Snapshot,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
@@ -269,6 +348,8 @@ mod tests {
                 .collect(),
             parks_store: None,
             store_to: None,
+            records_from: None,
+            records_to: None,
         }
     }
 
@@ -279,13 +360,17 @@ mod tests {
                 source: inventory.source.clone(),
                 target: inventory.target.clone(),
                 root: inventory.root.clone(),
+                records: inventory.root.clone(),
             },
             registry: RegistryState {
                 old_key: Some(inventory.root.clone()),
                 new_key: None,
                 alias: None,
                 target_group: false,
+                records_old: true,
+                records_new: true,
             },
+            records: RecordsDir::Old,
             config: Some(ConfigState {
                 prefix: inventory.source.clone(),
                 digest: inventory.config_from.clone(),
@@ -307,6 +392,29 @@ mod tests {
                 target_dirs: 0,
             },
             strays: Vec::new(),
+        }
+    }
+
+    /// `inventory_only` for a detached project: the identity stays `/project`, the records
+    /// live in `/records/old` and move to `/records/new`.
+    fn detached(mut snap: Snapshot) -> Snapshot {
+        let inventory = snap.inventory.as_mut().unwrap();
+        inventory.records_from = Some("/records/old".into());
+        inventory.records_to = Some("/records/new".into());
+        snap.invocation.records = "/records/old".into();
+        snap
+    }
+
+    /// The registry after the `registry` stage: the target key, the alias and, for a
+    /// detached project, the pairing of the target with the moved directory.
+    fn registry_new() -> RegistryState {
+        RegistryState {
+            old_key: None,
+            new_key: Some("/project".into()),
+            alias: Some("new".into()),
+            target_group: false,
+            records_old: false,
+            records_new: true,
         }
     }
 
@@ -333,12 +441,7 @@ mod tests {
             digest: "config after".into(),
         });
         assert_eq!(classify(&snap), Recovery::ResumeRegistry, "after P4");
-        snap.registry = RegistryState {
-            old_key: None,
-            new_key: Some("/project".into()),
-            alias: Some("new".into()),
-            target_group: false,
-        };
+        snap.registry = registry_new();
         assert_eq!(classify(&snap), Recovery::ResumeCleanup, "after P5");
         snap.inventory = None;
         snap.entries.clear();
@@ -363,6 +466,96 @@ mod tests {
         fresh.inventory = None;
         fresh.entries.clear();
         assert_eq!(classify(&fresh), Recovery::Fresh, "untouched project");
+        let mut unpaired = inventory_only();
+        unpaired.registry.records_old = false;
+        assert_eq!(
+            classify(&unpaired),
+            Recovery::ResumeFiles,
+            "an inventory without records_from never consults the pairing"
+        );
+    }
+
+    #[test]
+    fn every_boundary_of_a_detached_rename_resumes_including_the_records_move() {
+        let mut snap = detached(inventory_only());
+        assert_eq!(classify(&snap), Recovery::ResumeFiles, "just after P2");
+        move_entry(&mut snap, 0);
+        assert_eq!(classify(&snap), Recovery::ResumeFiles, "partial file pass");
+        move_entry(&mut snap, 1);
+        assert_eq!(classify(&snap), Recovery::ResumeFiles, "files done");
+        snap.config = Some(ConfigState {
+            prefix: "new".into(),
+            digest: "config after".into(),
+        });
+        assert_eq!(
+            classify(&snap),
+            Recovery::ResumeRegistry,
+            "after config, the records still at records_from"
+        );
+        let configured = snap.clone();
+        snap.records = RecordsDir::New;
+        snap.invocation.records = "/records/new".into();
+        assert_eq!(
+            classify(&snap),
+            Recovery::ResumeRegistry,
+            "after the records move, the registry still old"
+        );
+        let moved = snap.clone();
+        snap.registry = registry_new();
+        assert_eq!(classify(&snap), Recovery::ResumeCleanup, "after registry");
+        let registered = snap.clone();
+
+        let mut unmoved = configured.clone();
+        unmoved.registry = registry_new();
+        assert!(
+            matches!(classify(&unmoved), Recovery::Refuse(_)),
+            "the registry names the target while the records were never moved"
+        );
+        let mut early = moved.clone();
+        early.config = Some(ConfigState {
+            prefix: "old".into(),
+            digest: "config before".into(),
+        });
+        assert!(
+            matches!(classify(&early), Recovery::Refuse(_)),
+            "records moved before the config was rewritten"
+        );
+        let mut stale_pairing = configured.clone();
+        stale_pairing.registry.records_old = false;
+        assert!(
+            matches!(classify(&stale_pairing), Recovery::Refuse(_)),
+            "registry key old but the pairing is not records_from"
+        );
+        let mut fresh_pairing = detached(inventory_only());
+        fresh_pairing.registry.records_old = false;
+        assert!(matches!(classify(&fresh_pairing), Recovery::Refuse(_)));
+        let mut unpaired = registered.clone();
+        unpaired.registry.records_new = false;
+        assert!(
+            matches!(classify(&unpaired), Recovery::Refuse(_)),
+            "registry key new but the target is not paired with records_to"
+        );
+        for (state, word) in [(RecordsDir::Both, "both"), (RecordsDir::Neither, "neither")] {
+            for base in [&configured, &moved, &registered] {
+                let mut snap = base.clone();
+                snap.records = state;
+                let Recovery::Refuse(reason) = classify(&snap) else {
+                    panic!("{state:?} must refuse: {snap:?}");
+                };
+                assert!(reason.starts_with(word), "{reason}");
+                assert!(reason.contains("/records/old"), "{reason}");
+                assert!(reason.contains("/records/new"), "{reason}");
+            }
+            let mut fresh = detached(inventory_only());
+            fresh.inventory = None;
+            fresh.entries.clear();
+            assert_eq!(classify(&fresh), Recovery::Fresh, "untouched detached");
+            fresh.records = state;
+            let Recovery::Refuse(reason) = classify(&fresh) else {
+                panic!("{state:?} must refuse a fresh rename");
+            };
+            assert!(reason.starts_with(word), "{reason}");
+        }
     }
 
     #[test]
@@ -434,16 +627,31 @@ mod tests {
             Some(root) => root != &invocation.root,
             None => false,
         };
+        // A detached inventory (records_from set) also needs the registry's pairing to
+        // name the records directory of the stage the keys are in.
+        let detached = snap
+            .inventory
+            .as_ref()
+            .is_some_and(|inv| inv.records_from.is_some());
         let registry_column = match (&registry.old_key, &registry.new_key, &registry.alias) {
-            (Some(root), None, None) if root == &invocation.root => 1,
+            (Some(root), None, None)
+                if root == &invocation.root && (!detached || registry.records_old) =>
+            {
+                1
+            }
             (None, Some(root), Some(target))
-                if root == &invocation.root && target == &invocation.target =>
+                if root == &invocation.root
+                    && target == &invocation.target
+                    && (!detached || registry.records_new) =>
             {
                 2
             }
             _ => 0,
         };
-        let mut excluded = two_roots || foreign_target || registry.target_group;
+        let mut excluded = two_roots
+            || foreign_target
+            || registry.target_group
+            || matches!(snap.records, RecordsDir::Both | RecordsDir::Neither);
         let mut done = true;
         let (has_inventory, config_column) = match &snap.inventory {
             Some(inv) => {
@@ -500,16 +708,43 @@ mod tests {
         if excluded {
             return Verdict::Refuse;
         }
+        // Stage order: files, config, records, registry. The records move sits between
+        // the config and registry columns, so `Old` allows only the stages before it and
+        // `New` only the stages after it.
+        let moved = snap.records == RecordsDir::New;
         match (has_inventory, config_column, registry_column) {
             (false, 1, 1) if snap.named.target == 0 && snap.named.target_dirs == 0 => {
                 Verdict::Fresh
             }
-            (true, 1, 1) => Verdict::ResumeFiles,
+            (true, 1, 1) if !detached || !moved => Verdict::ResumeFiles,
             (true, 2, 1) if done => Verdict::ResumeRegistry,
-            (true, 2, 2) if done => Verdict::ResumeCleanup,
+            (true, 2, 2) if done && (!detached || moved) => Verdict::ResumeCleanup,
             (false, 2, 2) if snap.named.source == 0 => Verdict::Complete,
             _ => Verdict::Refuse,
         }
+    }
+
+    /// The records dimension: `(records, records_old, records_new)`. An inventory without
+    /// `records_from` always observes `Old` (snapshot.rs), so the in-tree case crosses
+    /// every other dimension once; a detached inventory crosses all sixteen combinations.
+    fn records_cases(detached: bool) -> Vec<(RecordsDir, bool, bool)> {
+        if !detached {
+            return vec![(RecordsDir::Old, true, true)];
+        }
+        let mut cases = Vec::new();
+        for records in [
+            RecordsDir::Old,
+            RecordsDir::New,
+            RecordsDir::Both,
+            RecordsDir::Neither,
+        ] {
+            for records_old in [false, true] {
+                for records_new in [false, true] {
+                    cases.push((records, records_old, records_new));
+                }
+            }
+        }
+        cases
     }
 
     fn enumerate_snapshots(mut visit: impl FnMut(&Snapshot)) {
@@ -531,87 +766,108 @@ mod tests {
                     })
             }))
             .collect();
-        for count in 0..=2 {
+        // The detached cases cross task counts 0 and 1 only: with two entries the sixteen
+        // records cases would add 22,394,880 snapshots (~90 s in debug), and an entry's file states are
+        // independent of where the records directory is.
+        let shapes = (0..=2usize)
+            .map(|count| (count, false))
+            .chain((0..=1usize).map(|count| (count, true)));
+        for (count, detached) in shapes {
             for encoded in 0..9usize.pow(count as u32) {
-                let inventory = baseline(count);
-                let mut snap = inventory_only();
-                let mut digits = encoded;
-                snap.entries = inventory
-                    .entries
-                    .iter()
-                    .map(|record| {
-                        let pair = digits % 9;
-                        digits /= 9;
-                        let source = match pair % 3 {
-                            0 => FileState::Absent,
-                            1 => FileState::Present(record.from.clone()),
-                            _ => FileState::Present("edited".into()),
-                        };
-                        let dest = match pair / 3 {
-                            0 => FileState::Absent,
-                            1 => FileState::Present(record.to.clone()),
-                            _ => FileState::Present("conflict".into()),
-                        };
-                        EntryState {
-                            hex: record.hex.clone(),
-                            source,
-                            dest,
-                            dirs: AttachmentDirs::default(),
-                        }
-                    })
-                    .collect();
-                for inventory_case in 0..8 {
-                    snap.inventory = match inventory_case {
-                        0 => None,
-                        _ => {
-                            let mut inv = inventory.clone();
-                            match inventory_case {
-                                2 => inv.source = "other".into(),
-                                3 => inv.target = "other".into(),
-                                4 => inv.root = "/foreign".into(),
-                                5 => {
-                                    inv.entries.pop();
-                                }
-                                6 => inv.entries.push(InventoryEntry {
-                                    hex: "ffffff".into(),
-                                    from: "missing before".into(),
-                                    to: "missing after".into(),
-                                    attachments: false,
-                                }),
-                                7 => {
-                                    if let Some(entry) = inv.entries.first_mut() {
-                                        entry.hex = "ffffff".into();
-                                    }
-                                }
-                                _ => {}
+                for (records, records_old, records_new) in records_cases(detached) {
+                    let inventory = baseline(count);
+                    let mut snap = inventory_only();
+                    let mut digits = encoded;
+                    snap.entries = inventory
+                        .entries
+                        .iter()
+                        .map(|record| {
+                            let pair = digits % 9;
+                            digits /= 9;
+                            let source = match pair % 3 {
+                                0 => FileState::Absent,
+                                1 => FileState::Present(record.from.clone()),
+                                _ => FileState::Present("edited".into()),
+                            };
+                            let dest = match pair / 3 {
+                                0 => FileState::Absent,
+                                1 => FileState::Present(record.to.clone()),
+                                _ => FileState::Present("conflict".into()),
+                            };
+                            EntryState {
+                                hex: record.hex.clone(),
+                                source,
+                                dest,
+                                dirs: AttachmentDirs::default(),
                             }
-                            Some(inv)
-                        }
+                        })
+                        .collect();
+                    snap.records = records;
+                    snap.invocation.records = match (detached, records) {
+                        (false, _) => "/project".into(),
+                        (true, RecordsDir::New) => "/records/new".into(),
+                        (true, _) => "/records/old".into(),
                     };
-                    for old in &roots {
-                        for new in &roots {
-                            for alias in &aliases {
-                                snap.registry = RegistryState {
-                                    old_key: old.clone(),
-                                    new_key: new.clone(),
-                                    alias: alias.clone(),
-                                    target_group: false,
-                                };
-                                for config in &configs {
-                                    snap.config = config.clone();
-                                    for source in 0..=1 {
-                                        for target in 0..=1 {
-                                            snap.named = Named {
-                                                source,
-                                                target,
-                                                target_dirs: 0,
-                                            };
-                                            for stray in [false, true] {
-                                                snap.strays.clear();
-                                                if stray {
-                                                    snap.strays.push("tasks/old-ffffff.md".into());
+                    for inventory_case in 0..8 {
+                        snap.inventory = match inventory_case {
+                            0 => None,
+                            _ => {
+                                let mut inv = inventory.clone();
+                                if detached {
+                                    inv.records_from = Some("/records/old".into());
+                                    inv.records_to = Some("/records/new".into());
+                                }
+                                match inventory_case {
+                                    2 => inv.source = "other".into(),
+                                    3 => inv.target = "other".into(),
+                                    4 => inv.root = "/foreign".into(),
+                                    5 => {
+                                        inv.entries.pop();
+                                    }
+                                    6 => inv.entries.push(InventoryEntry {
+                                        hex: "ffffff".into(),
+                                        from: "missing before".into(),
+                                        to: "missing after".into(),
+                                        attachments: false,
+                                    }),
+                                    7 => {
+                                        if let Some(entry) = inv.entries.first_mut() {
+                                            entry.hex = "ffffff".into();
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                Some(inv)
+                            }
+                        };
+                        for old in &roots {
+                            for new in &roots {
+                                for alias in &aliases {
+                                    snap.registry = RegistryState {
+                                        old_key: old.clone(),
+                                        new_key: new.clone(),
+                                        alias: alias.clone(),
+                                        target_group: false,
+                                        records_old,
+                                        records_new,
+                                    };
+                                    for config in &configs {
+                                        snap.config = config.clone();
+                                        for source in 0..=1 {
+                                            for target in 0..=1 {
+                                                snap.named = Named {
+                                                    source,
+                                                    target,
+                                                    target_dirs: 0,
+                                                };
+                                                for stray in [false, true] {
+                                                    snap.strays.clear();
+                                                    if stray {
+                                                        snap.strays
+                                                            .push("tasks/old-ffffff.md".into());
+                                                    }
+                                                    visit(&snap);
                                                 }
-                                                visit(&snap);
                                             }
                                         }
                                     }
@@ -687,20 +943,48 @@ mod tests {
         assert!(reason.starts_with("R9:"), "{reason}");
     }
 
-    // 1,572,480 snapshots take ~7 s in a debug build and floor every `cargo test` that
-    // includes them, so the inner loop skips this one; `just test` and the pre-push gate
-    // run it with `--include-ignored`.
+    // 4,337,280 snapshots (1,572,480 in-tree, 2,764,800 detached) take ~17 s in a debug
+    // build and floor every `cargo test` that includes them, so the inner loop skips this
+    // one; `just test` and the pre-push gate run it with `--include-ignored`.
     #[test]
-    #[ignore = "exhaustive: ~7 s in debug; the full suite runs it with --include-ignored"]
+    #[ignore = "exhaustive: ~17 s in debug; the full suite runs it with --include-ignored"]
     fn every_enumerated_snapshot_gets_the_verdict_the_spec_names() {
         let started = std::time::Instant::now();
         let mut counts = BTreeMap::new();
+        let mut detached = BTreeMap::new();
         enumerate_snapshots(|snap| {
             let got = verdict(classify(snap));
             let want = expected(snap);
             assert_eq!(got, want, "snapshot {snap:?}");
             *counts.entry(got).or_insert(0usize) += 1;
+            if snap
+                .inventory
+                .as_ref()
+                .is_some_and(|inv| inv.records_from.is_some())
+            {
+                *detached.entry((snap.records, got)).or_insert(0usize) += 1;
+            }
         });
+        for reached in [
+            (RecordsDir::Old, Verdict::ResumeFiles),
+            (RecordsDir::Old, Verdict::ResumeRegistry),
+            (RecordsDir::New, Verdict::ResumeRegistry),
+            (RecordsDir::New, Verdict::ResumeCleanup),
+        ] {
+            assert!(
+                detached.contains_key(&reached),
+                "detached {reached:?} unreached: {detached:?}"
+            );
+        }
+        for unreachable in [
+            (RecordsDir::Old, Verdict::ResumeCleanup),
+            (RecordsDir::New, Verdict::ResumeFiles),
+        ] {
+            assert!(
+                !detached.contains_key(&unreachable),
+                "detached {unreachable:?} must refuse: {detached:?}"
+            );
+        }
         for verdict in [
             Verdict::Fresh,
             Verdict::ResumeFiles,
@@ -714,7 +998,7 @@ mod tests {
                 "{verdict:?} unreached: {counts:?}"
             );
         }
-        assert_eq!(counts.values().sum::<usize>(), 1_572_480);
-        eprintln!("1,572,480 snapshots in {:?}: {counts:?}", started.elapsed());
+        assert_eq!(counts.values().sum::<usize>(), 4_337_280);
+        eprintln!("4,337,280 snapshots in {:?}: {counts:?}", started.elapsed());
     }
 }

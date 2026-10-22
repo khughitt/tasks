@@ -47,11 +47,52 @@ fn invocation(registry: &Registry, old: &str, new: &str) -> Result<Invocation> {
     } else {
         return Err(Error::Config(format!("no project registered as {old:?}")));
     };
+    let records = match &inventory {
+        Some(Inventory {
+            records_from: Some(from),
+            records_to: Some(to),
+            ..
+        }) if crate::rename::snapshot::present(to)? && !crate::rename::snapshot::present(from)? => {
+            to.clone()
+        }
+        Some(Inventory {
+            records_from: Some(from),
+            ..
+        }) => from.clone(),
+        // The live prefix, as for `root`: after `det -> dtx` a replay still says
+        // `source = det`, and only `dtx` has registry entries.
+        _ => crate::scope::config_dir(registry, registry.canonical_prefix(source))
+            .unwrap_or_else(|| root.clone()),
+    };
     Ok(Invocation {
         source: source.into(),
         target: new.into(),
         root,
+        records: crate::rename::dir_identity(&records)?,
     })
+}
+
+/// The project `--adopt` adopts. When another host renamed a detached project, the sync
+/// delivers its records directory under the new name: `[records]` still pairs `old` with
+/// a directory that is gone, and its sibling named `new` holds a config with prefix `new`.
+/// Otherwise the project `start` locates.
+fn adopt_project(
+    registry: &Registry,
+    start: &Path,
+    old: &str,
+    new: &str,
+) -> Result<crate::repo::Project> {
+    if let Some(dir) = registry.records_dir(old)
+        && !crate::rename::snapshot::present(dir)?
+        && let Some(renamed) = dir.parent().map(|parent| parent.join(new))
+        && crate::rename::snapshot::present(&renamed.join(crate::repo::CONFIG_REL))?
+    {
+        let project = crate::repo::Project::open(&renamed)?;
+        if project.prefix == new {
+            return Ok(project);
+        }
+    }
+    crate::repo::Project::locate(start)
 }
 
 pub fn run(
@@ -74,20 +115,23 @@ pub fn run(
                 "source and target prefixes are both {old:?}"
             )));
         }
-        let project = crate::repo::Project::locate(&super::start_dir(dir)?)?;
+        let start = super::start_dir(dir)?;
         if explain {
-            reject_adopting_a_retired_project(&project)?;
             let mut registry = Registry::load()?;
+            let project = adopt_project(&registry, &start, &old, &new)?;
+            reject_adopting_a_retired_project(&project)?;
             return crate::rename::adopt::run(&mut registry, &project, &old, &new, true)
                 .map(Output::Rename);
         }
+        // A checkout that holds no project fails before the locks are taken.
+        adopt_project(&Registry::load()?, &start, &old, &new)?;
         let mut prefixes = [&old, &new];
         prefixes.sort();
         let _first = MutationLock::acquire(prefixes[0])?;
         let _second = MutationLock::acquire(prefixes[1])?;
         let _registry_lock = Registry::lock()?;
         let mut registry = Registry::load()?;
-        let project = crate::repo::Project::locate(&super::start_dir(dir)?)?;
+        let project = adopt_project(&registry, &start, &old, &new)?;
         reject_adopting_a_retired_project(&project)?;
         return crate::rename::adopt::run(&mut registry, &project, &old, &new, false)
             .map(Output::Rename);
@@ -138,13 +182,13 @@ fn reject_adopting_a_retired_project(project: &crate::repo::Project) -> Result<(
 /// check, so a pending rename whose config already carries the new prefix still resumes;
 /// a config that does not parse fails here as it would in the rename itself.
 fn reject_renaming_a_retired_project(registry: &Registry, source: &str) -> Result<()> {
-    if let Some(root) = registry.project_root(source)
-        && root.join(crate::repo::CONFIG_REL).exists()
-        && crate::repo::Project::open(root)?.retired.is_some()
+    if let Some(dir) = crate::scope::config_dir(registry, source)
+        && dir.join(crate::repo::CONFIG_REL).exists()
+        && crate::repo::Project::open(&dir)?.retired.is_some()
     {
         return Err(Error::RetiredProject(format!(
             "{source} is retired; a retired project is not renamed (`tasks unretire` in {} first)",
-            root.display()
+            dir.display()
         )));
     }
     Ok(())
