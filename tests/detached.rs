@@ -1207,3 +1207,44 @@ fn an_output_ref_under_records_satisfies_the_completion_gate() {
     write_file(&l.code.join("docs/notes/c.md"), "c\n");
     env.json(&l.code, &["done", &b, "x"]);
 }
+
+#[test]
+fn a_document_under_records_resolves_without_asking_git_about_the_main_checkout() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    write_file(&l.project.join("docs/specs/here.md"), "# Here\n");
+    write_file(&l.project.join("docs/plans/p.md"), "# P\n\n## Task 1: x\n");
+    l.git(&l.records, &["add", "-A"]);
+    l.git(&l.records, &["commit", "-qm", "docs"]);
+    let id = common::id_of(env.json(
+        &l.project,
+        &[
+            "add",
+            "T",
+            "--spec",
+            "docs/specs/here.md",
+            "--plan",
+            "docs/plans/p.md",
+            "--step",
+            "Task 1: x",
+        ],
+    ));
+    // A `git` that fails every call: any lookup that consults git before records misses
+    // surfaces as an error.
+    let bin = l.base.join("nogit");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("git"), "#!/bin/sh\nexit 1\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut command = env.raw(&l.project);
+    command.env("PATH", &bin).args(["show", &id]);
+    let out = command.output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let shown: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(shown["step_found"], true, "{shown}");
+    assert_eq!(
+        shown["spec_path"],
+        l.project.join("docs/specs/here.md").to_str().unwrap()
+    );
+}

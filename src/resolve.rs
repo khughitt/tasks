@@ -140,7 +140,7 @@ enum Base {
 pub struct Resolver<'a> {
     pub project: &'a Project,
     pub registry: &'a Registry,
-    /// Asked of git once, and only when some document is absent here.
+    /// Asked of git once, and only when a document is absent from the records directory.
     main: OnceCell<Option<PathBuf>>,
     /// One line per document read from the main checkout, for the caller's warnings.
     from_main: RefCell<Vec<String>>,
@@ -197,69 +197,68 @@ impl<'a> Resolver<'a> {
 
     /// Where documents are looked for, in order: the records directory; the main checkout
     /// of the records repository when records is a linked worktree of it; for a detached
-    /// project, the code worktree the command runs in and then the code root.
-    fn bases(&self) -> Result<Vec<Base>> {
-        let mut bases = vec![Base::Here];
+    /// project, the code worktree the command runs in and then the code root. Only the
+    /// records directory is consulted without asking git: the later bases are computed after
+    /// it misses. The first base where `probe` finds something wins.
+    fn walk<T>(
+        &self,
+        mut probe: impl FnMut(&Base, &Path) -> Result<Option<T>>,
+    ) -> Result<Option<(Base, T)>> {
+        if let Some(found) = probe(&Base::Here, &self.project.records)? {
+            return Ok(Some((Base::Here, found)));
+        }
+        let mut later = Vec::new();
         if let Some(main) = self.main_root()? {
-            bases.push(Base::Main(main.clone()));
+            later.push(Base::Main(main.clone()));
         }
         if self.project.kind == Kind::Detached {
             let resume = self.project.resume_root();
-            bases.push(Base::Code(resume.to_path_buf()));
+            later.push(Base::Code(resume.to_path_buf()));
             if resume != self.project.root {
-                bases.push(Base::Code(self.project.root.clone()));
+                later.push(Base::Code(self.project.root.clone()));
             }
         }
-        Ok(bases)
-    }
-
-    fn base_dir<'b>(&'b self, base: &'b Base) -> &'b Path {
-        match base {
-            Base::Here => &self.project.records,
-            Base::Main(root) | Base::Code(root) => root,
+        for base in later {
+            let (Base::Main(root) | Base::Code(root)) = &base else {
+                unreachable!("only Here is not a later base")
+            };
+            if let Some(found) = probe(&base, root)? {
+                return Ok(Some((base, found)));
+            }
         }
+        Ok(None)
     }
 
-    /// `rel` in the first base that holds it (see [`Located`] and [`Self::bases`]).
+    /// `rel` in the first base that holds it (see [`Located`] and [`Self::walk`]).
     pub fn locate(&self, rel: &str) -> Result<Located> {
-        for base in self.bases()? {
-            let root = self.base_dir(&base);
+        let found = self.walk(|_, root| {
             let path = root.join(rel);
-            if !path.is_file() {
-                continue;
-            }
-            return Ok(match &base {
-                Base::Here => Located::Here(path),
-                Base::Main(_) => Located::Main {
-                    root: root.to_path_buf(),
-                    path,
-                },
-                Base::Code(_) => Located::Code(path),
-            });
-        }
-        Ok(Located::Missing)
+            Ok(path.is_file().then_some(path))
+        })?;
+        Ok(match found {
+            None => Located::Missing,
+            Some((Base::Here, path)) => Located::Here(path),
+            Some((Base::Main(root), path)) => Located::Main { root, path },
+            Some((Base::Code(_), path)) => Located::Code(path),
+        })
     }
 
     pub fn locate_entry(&self, rel: &str) -> Result<LocatedEntry> {
-        for base in self.bases()? {
-            let root = self.base_dir(&base);
+        let found = self.walk(|_, root| {
             let path = root.join(rel);
-            let meta = match std::fs::metadata(&path) {
-                Ok(meta) => meta,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error.into()),
-            };
-            if !(meta.is_file() || meta.is_dir()) {
-                return Ok(LocatedEntry::Special(path));
+            match std::fs::metadata(&path) {
+                Ok(meta) => Ok(Some((path, meta.is_file() || meta.is_dir()))),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error.into()),
             }
-            let root = root.to_path_buf();
-            return Ok(match base {
-                Base::Here => LocatedEntry::Here(path),
-                Base::Main(_) => LocatedEntry::Main { root, path },
-                Base::Code(_) => LocatedEntry::Code(path),
-            });
-        }
-        Ok(LocatedEntry::Missing)
+        })?;
+        Ok(match found {
+            None => LocatedEntry::Missing,
+            Some((_, (path, false))) => LocatedEntry::Special(path),
+            Some((Base::Here, (path, true))) => LocatedEntry::Here(path),
+            Some((Base::Main(root), (path, true))) => LocatedEntry::Main { root, path },
+            Some((Base::Code(_), (path, true))) => LocatedEntry::Code(path),
+        })
     }
 
     /// The file `rel` is read from, noting a main-checkout copy for [`Self::take_warnings`].
@@ -321,18 +320,15 @@ impl<'a> Resolver<'a> {
             return Ok(name_or_path.to_string());
         }
 
-        let mut matches = Vec::new();
-        let mut main = None;
-        for base in self.bases()? {
-            let root = self.base_dir(&base);
-            matches = doc_matches(root, dirs, name_or_path)?;
-            if !matches.is_empty() {
-                if let Base::Main(root) = &base {
-                    main = Some(root.clone());
-                }
-                break;
-            }
-        }
+        let found = self.walk(|_, root| {
+            let matches = doc_matches(root, dirs, name_or_path)?;
+            Ok((!matches.is_empty()).then_some(matches))
+        })?;
+        let (mut matches, main) = match found {
+            None => (Vec::new(), None),
+            Some((Base::Main(root), matches)) => (matches, Some(root)),
+            Some((_, matches)) => (matches, None),
+        };
         match matches.len() {
             0 => Err(Error::DocNotFound(format!(
                 "no {} matching {name_or_path:?} under {}/{}",
