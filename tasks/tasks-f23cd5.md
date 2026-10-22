@@ -1,13 +1,15 @@
 ---
 id: tasks-f23cd5
 title: "record_commit unit tests commit through the production git runner under the host's global git config, so config-based hooks (hook.<name>.command) still run in test repos"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: main
 created: 2026-10-18T14:59:28Z
-updated: 2026-10-18T14:59:30Z
+updated: 2026-10-22T23:37:44Z
+started: 2026-10-22T23:37:44Z
 depends: []
 tags: [testing]
 source: tasks-eeeeda
@@ -19,3 +21,5 @@ tasks-eeeeda stopped the HOME leak and made the test-only git helper in src/reco
 ## Notes
 
 - 2026-10-18T14:59:30Z (main): concerns: tasks-eeeeda extension — the HOME-leak fix left production record commits in unit tests reading the host's global git config
+- 2026-10-22T23:37:44Z (main): started
+  provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
