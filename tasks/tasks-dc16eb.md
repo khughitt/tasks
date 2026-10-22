@@ -1,13 +1,15 @@
 ---
 id: tasks-dc16eb
 title: Decide whether task records and design docs leave project repositories for a per-user records root
-status: todo
+status: doing
 priority: 1
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-19T12:06:16Z
+updated: 2026-10-22T19:55:20Z
+started: 2026-10-22T19:55:20Z
 depends: []
 tags: []
 source: "user:2026-10-19 ops publication"
@@ -30,3 +32,5 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
 - 2026-10-19T01:44:37Z (main): Scope widened by the user 2026-10-19: every working document leaves public repositories, not only task records: plans, briefs, handoffs, and specs by default. A spec worth keeping as reference is committed consciously, possibly in a minimal form. Everything moved stays findable through a CLI (list, search, and possibly create and edit docs, e.g. 'tasks doc search' or an ops/lore command). Applies to ops and its sibling projects; the verifiably family keeps its own conventions unless it opts in.
 - 2026-10-19T11:40:55Z (main): From the boundary survey review (ops-630a87, revision 2, 2026-10-19), this design also settles: (1) one home for working docs, the records store or mindful; if the records store, rule on doc_fetch.rs and [docs.schemes] explicitly, reconcile ops-721511 and hq-5a3e12, and re-inventory stored external references (none on 2026-10-19) before removing code; (2) flows' fingerprint covers all retained repository content, reference: true permits presence only; (3) catalogue freshness as current/behind/unknown, since stale.rs cannot see another host's sync; (4) ops keeps its prefix as the records-only hub (rename reserves old prefixes), the public kit gets a fresh prefix; (5) the moves respect flow-trial-1 through readout 2027-02-16.
 - 2026-10-19T12:06:16Z (main): When filing this design's follow-ups, add each implementation piece as a dependency of ops-487484 (Phase B implementation goal); the publication goal ops-741c5e depends on ops-487484, so publication waits for the implementation, not this design (owner review 2026-10-19).
+- 2026-10-22T19:55:20Z (main): started
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
