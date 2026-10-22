@@ -1,15 +1,17 @@
 ---
 id: tasks-dc16eb
 title: Decide whether task records and design docs leave project repositories for a per-user records root
-status: doing
+status: done
 priority: 1
 size: m
 complexity: high
 process: planned
 owner: records-home
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-22T20:54:22Z
+updated: 2026-10-22T20:57:42Z
 started: 2026-10-22T19:55:20Z
+completed: 2026-10-22T20:57:42Z
+closed: 2026-10-22T20:57:42Z
 depends: []
 tags: []
 source: "user:2026-10-19 ops publication"
@@ -61,3 +63,7 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-22T20:54:21Z (records-home): review: spec round 3 — verdict: accept; findings: none; reviewer: codex/gpt-6-astra
 - 2026-10-22T20:54:22Z (records-home): Design approved by the user 2026-10-22 at revision 3 (c03869d). Filing §10 pieces as dependencies of ops-487484 and re-scoping hq-5a3e12's pieces per §7.4.
+- 2026-10-22T20:57:42Z (records-home): done
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:57:42Z (records-home): Design approved at revision 3 (c03869d): records and working documents leave personal repositories for a private per-user records root (root stays the code checkout; a third location, records, with kind in-tree|detached|linked); repositories keep reference documents; mindful becomes a deferred indexer. Pieces filed: tasks-211e28, tasks-a8e28e; ops-2a0024, ops-33b672, ops-f35cb3, ops-7d796a, ops-7fdb4a, ops-5ec535, ops-275242, ops-b41a1b, migration goal ops-423f23 (ops-8af736, ops-38c523, ops-97d307, ops-64474b); obs-faa12c; hq-d05d5c; crew-dab0db; mind6-4bd00c; flows-2ea069, lore-ef7e5b, tasks-00723a re-scoped; ops-721511 dropped; obs-caab0c deferred; hq-5a3e12 and hq-d7b5b2 closed. All wired as dependencies of ops-487484.
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
