@@ -4,8 +4,8 @@ title: "After the harness resumes a conversation under a new native session id, 
 status: idea
 priority: 2
 created: 2026-10-21T18:17:58Z
-updated: 2026-10-22T23:11:04Z
-depends: []
+updated: 2026-10-22T23:11:06Z
+depends: [tasks-ea0f60]
 parent: tasks-2fa8c6
 tags: [feedback, friction, "from:hq"]
 agent: claude-code/claude-opus-5-5
