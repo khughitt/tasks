@@ -22,6 +22,12 @@ pub fn run(
         Some(prefix) => prefix,
         None => default_prefix(&root)?,
     };
+    // Before the prefix names a lock file or, with `--records`, a directory.
+    if !crate::model::is_valid_prefix(&prefix) {
+        return Err(Error::Config(format!(
+            "prefix {prefix:?} must match [a-z][a-z0-9]{{1,7}}"
+        )));
+    }
     // Lock order (retired-projects plan): the project lock, then the registry lock, as
     // rename takes them. `init --force` repoints the root `retire` and every writer consult.
     let _project_lock = crate::claims::MutationLock::acquire(&prefix)?;
@@ -39,7 +45,10 @@ pub fn run(
     // The registry is only mutated in memory here: `save` runs after `Project::init`, so
     // an init that fails leaves the registry exactly as it was.
     if force {
-        reject_repointing_a_retired_project(&registry, &prefix, &root)?;
+        let derived = records
+            .as_ref()
+            .map(|records| root.join(records).join(&prefix));
+        reject_repointing_a_retired_project(&registry, &prefix, &root, derived.as_deref())?;
     }
     let records = match records {
         Some(records_root) => Some(validate_records(&root, &records_root, &registry, &prefix)?),
@@ -65,6 +74,12 @@ pub fn run(
         }
         None => Project::init(&root, &prefix, checkout.as_deref())?,
     };
+    // A plain init makes the project in-tree or linked: a pairing left from a detached
+    // registration would send `locate` to the old records directory (`records_moved`).
+    let unpaired = match &records {
+        Some(_) => None,
+        None => registry.unpair_records(&prefix),
+    };
     let today = crate::time::day(&crate::time::now()).to_string();
     let previous = displaced
         .clone()
@@ -76,6 +91,12 @@ pub fn run(
         warnings.push(format!(
             "prefix {prefix:?} was registered to {}",
             previous.display()
+        ));
+    }
+    if let Some(dir) = unpaired {
+        warnings.push(format!(
+            "prefix {prefix:?} was paired with {}; the pairing is removed",
+            dir.display()
         ));
     }
     warnings.extend(history);
@@ -129,11 +150,14 @@ fn skill_installed(root: &Path) -> bool {
 /// not done for a retired project: refused when the new root's config declares
 /// `[retired]`, or when the currently registered root declares it. An old root that is
 /// gone or holds no config does not block: repointing away from a moved checkout is what
-/// `--force` is for. One whose config exists but does not parse is an error.
+/// `--force` is for. One whose config exists but does not parse is an error. With
+/// `--records`, `records` is the records directory being paired, and a config already
+/// there that declares `[retired]` refuses too.
 fn reject_repointing_a_retired_project(
     registry: &Registry,
     prefix: &str,
     root: &Path,
+    records: Option<&Path>,
 ) -> Result<()> {
     let refuse = |where_: &Path| {
         Err(Error::RetiredProject(format!(
@@ -143,6 +167,12 @@ fn reject_repointing_a_retired_project(
     };
     if root.join(crate::repo::CONFIG_REL).exists() && Project::open(root)?.retired.is_some() {
         return refuse(root);
+    }
+    if let Some(records) = records
+        && records.join(crate::repo::CONFIG_REL).exists()
+        && Project::open(records)?.retired.is_some()
+    {
+        return refuse(records);
     }
     // Only an old root that is gone, or holds no config, may be passed over unread; a
     // config that exists and does not parse is an error, never "not retired".
@@ -169,25 +199,28 @@ fn reject_linked_destination(root: &Path, registry: &Registry) -> Result<()> {
     let Some(main) = tree.main_checkout() else {
         return Ok(());
     };
-    let rows: Vec<_> = crate::locations::scan_checkouts(registry)
+    // A detached project's checkout: its records moved out (decision 6), and pairing the
+    // checkout again is `init --records`. Read from the registry, not the scan, so a
+    // records directory not on this host yet still refuses.
+    for (other, other_root) in &registry.projects {
+        if let Some(dir) = registry.records_dir(other)
+            && crate::rename::root_identity(other_root)? == main
+        {
+            let records_root = dir.parent().unwrap_or(dir);
+            return Err(Error::RecordsMoved(format!(
+                "{other}'s records live at {}; to pair this checkout again run `tasks init \
+                 --prefix {other} --records {} --force`",
+                dir.display(),
+                records_root.display()
+            )));
+        }
+    }
+    let owners: Vec<_> = crate::locations::scan_checkouts(registry)
         .strict()?
         .into_iter()
-        .filter(|linked| linked.checkout == main)
+        .filter(|linked| linked.kind == Kind::Linked && linked.checkout == main)
+        .map(|linked| linked.prefix)
         .collect();
-    // A detached project's checkout: its records moved out (decision 6), and pairing the
-    // checkout again is `init --records`.
-    if let Some(detached) = rows.iter().find(|linked| linked.kind == Kind::Detached) {
-        let records_root = detached.records.parent().unwrap_or(&detached.records);
-        return Err(Error::RecordsMoved(format!(
-            "{}'s records live at {}; to pair this checkout again run `tasks init --prefix {} \
-             --records {} --force`",
-            detached.prefix,
-            detached.records.display(),
-            detached.prefix,
-            records_root.display()
-        )));
-    }
-    let owners: Vec<_> = rows.into_iter().map(|linked| linked.prefix).collect();
     if owners.is_empty() {
         return Ok(());
     }
@@ -293,18 +326,14 @@ fn validate_checkout(
 /// main checkout of a git repository that keeps no records in its working tree or index,
 /// overlapping no other registered project, and declared by no other prefix; the records
 /// directory `<records_root>/<prefix>` must lie outside its repository. Returns that
-/// directory, created and canonical; a refusal creates nothing.
+/// directory, created and canonical; a refusal creates nothing. `run` has checked that
+/// `prefix` is valid, so it is one path component.
 fn validate_records(
     root: &Path,
     records_root: &Path,
     registry: &Registry,
     prefix: &str,
 ) -> Result<PathBuf> {
-    if !crate::model::is_valid_prefix(prefix) {
-        return Err(Error::Config(format!(
-            "prefix {prefix:?} must match [a-z][a-z0-9]{{1,7}}"
-        )));
-    }
     let refuse = |why: String| {
         Err(Error::Config(format!(
             "--records: {} {why}",

@@ -462,6 +462,11 @@ impl Registry {
         self.records.insert(prefix.into(), dir.into());
     }
 
+    /// Removes `prefix`'s pairing, returning the records directory it named.
+    pub fn unpair_records(&mut self, prefix: &str) -> Option<PathBuf> {
+        self.records.remove(prefix)
+    }
+
     /// Moves `from`'s pairing, if any, to `to`, its directory unchanged: a rename moves
     /// the key, never the records.
     fn move_records(&mut self, from: &str, to: &str) {

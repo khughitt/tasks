@@ -908,3 +908,61 @@ fn init_records_refusals() {
     );
     assert!(!l.code.join("tasks").exists() && !l.wt.join("tasks").exists());
 }
+
+#[test]
+fn a_plain_init_repoint_drops_a_stale_records_pairing() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    let elsewhere = repo(&l.home, &l.base, "elsewhere");
+    let out = env.json(&elsewhere, &["init", "--prefix", "det", "--force"]);
+    let warnings = out["warnings"].to_string();
+    assert!(
+        warnings.contains(&format!(
+            "prefix \\\"det\\\" was paired with {}; the pairing is removed",
+            l.project.display()
+        )),
+        "{warnings}"
+    );
+    let registry: toml::Value = toml::from_str(&registry_text(&env)).unwrap();
+    assert!(registry.get("records").is_none(), "{registry}");
+    assert_eq!(registry["projects"]["det"].as_str(), elsewhere.to_str());
+    env.json(&elsewhere, &["list"]);
+    // A plain init that pairs nothing warns about nothing.
+    let out = env.json(&elsewhere, &["init", "--prefix", "det"]);
+    assert!(!out["warnings"].to_string().contains("paired"), "{out}");
+}
+
+#[test]
+fn a_plain_init_in_a_paired_checkout_refuses_while_its_records_are_off_this_host() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    std::fs::rename(&l.records, l.base.join("records-away")).unwrap();
+    assert_eq!(
+        env.fail(&l.code, &["init", "--prefix", "det", "--force"]),
+        "records_moved"
+    );
+    assert!(!l.code.join("tasks").exists());
+    assert!(registry_text(&env).contains("[records]"));
+}
+
+#[test]
+fn init_records_force_refuses_a_retired_records_config() {
+    let mut env = TestEnv::new();
+    let l = layout(&mut env, "det");
+    register(&env, &l, "det");
+    env.json(&l.code, &["retire", "--reason", "over"]);
+    let config = l.project.join("tasks/.config.toml");
+    let bytes = std::fs::read(&config).unwrap();
+    let mut args = init_records("det", &l.records).to_vec();
+    args.push("--force");
+    // re-pairing on this host
+    let detail = fail_detail(&env, &l.code, &args, "retired_project");
+    assert!(detail.contains("tasks unretire"), "{detail}");
+    // a second host meeting the retired config for the first time
+    std::fs::remove_file(env.home.path().join(".config/tasks/projects.toml")).unwrap();
+    assert_eq!(env.fail(&l.code, &args), "retired_project");
+    assert_eq!(std::fs::read(&config).unwrap(), bytes);
+    assert!(!env.home.path().join(".config/tasks/projects.toml").exists());
+}
