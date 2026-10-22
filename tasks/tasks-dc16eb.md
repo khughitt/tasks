@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: records-home
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-22T20:19:32Z
+updated: 2026-10-22T20:27:44Z
 started: 2026-10-22T19:55:20Z
 depends: []
 tags: []
@@ -43,3 +43,5 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
 - 2026-10-22T20:01:14Z (records-home): resumed
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-22T20:19:31Z (records-home): Spec drafted 2026-10-22 (docs/specs/2026-10-22-records-home-design.md). Two decisions beyond the agreed assessment, after the research: (1) root stays the code checkout and a third location 'records' is added (kind: in-tree|detached|linked), because ten consumers read root as the code; (2) working docs go beside the records in the records root rather than mindful: only tasks-91f63b of hq-5a3e12's seven pieces landed, the mindful plan snapshot exists only because a thought is not a file, and migrated docs keep their paths so 2,847 links resolve unchanged. mindful becomes a deferred indexer of the records root.
+- 2026-10-22T20:27:44Z (records-home): parked (waiting on user, review): User reviews the design spec at commit 1734fa2 on branch records-home (.worktrees/records-home/docs/specs/2026-10-22-records-home-design.md; frozen: read it with git show 1734fa2:docs/specs/2026-10-22-records-home-design.md); then the agent revises as a new commit, or files the §10 pieces per project as dependencies of ops-487484 and re-scopes hq-5a3e12's pieces per §7.4
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
