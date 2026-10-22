@@ -11,7 +11,9 @@
 
 **Tech Stack:** Rust (clap, serde, toml, toml_edit, assert_cmd integration tests).
 
-**Status:** draft for user review (round 1).
+**Status:** draft for user review (round 2).
+
+Revision 2 (2026-10-22, after plan review round 1): rename keeps the project's registered identity apart from the current records directory in the invocation, the inventory, the snapshot and the classifier (Task 9); the test fixtures build their git environment explicitly and assert the fixture repository before writing (Task 2); the registered-copy comparisons behind retirement compare records locations (Task 3); `init --records` on an existing config enables record commits and carries the registered-root overlap checks (Task 5); `projects` rows always carry `records` (Task 6, decision 3); the exhaustive classifier enumeration is scheduled (Task 9, Rollout).
 
 **Spec:** `docs/specs/2026-10-22-records-home-design.md` (approved 2026-10-22 at revision 3, commit c03869d). Read it with this plan; section numbers below refer to it. This plan implements §3, §5.1–§5.4 and §12 cases 1–6 and the CLI side of case 9. `tasks docs` (§5.5) is tasks-a8e28e; skill wording is tasks-00723a.
 
@@ -21,10 +23,10 @@ The reviewer should rule on each; none changes the spec's contract.
 
 1. **`root` of a detached project comes from its config.** `Project::open` on `<records>/<prefix>` derives `root` from `[checkout] path`, exactly as a linked overlay derives `checkout`. The registry's `[projects]` and `[records]` rows pair the two for discovery (§3.2 step 2) and for the `records_moved` refusal (§3.3); `open_registered` reports a `config` error when the registry's root and the config's path disagree. §3.2 step 1 says "root from the registry"; reading it from the config keeps `open` registry-free and makes the disagreement visible instead of silent.
 2. **`rename` moves the records directory with `std::fs::rename`, not `git mv`.** Every other rename stage is a plain filesystem operation and `rename` never commits; git records the rename at the user's commit. The move is one stage of the inventory with its own recovery state (§5.4).
-3. **`projects` rows carry `checkout`, `records` and `kind` on reachable rows.** An unreachable row has no config to read and keeps today's shape (`root`, `reachable: false`, no counts).
-4. **`where` applies the `records_moved` refusal inside git only.** `where` reads no registry outside git (linked-checkouts decision 4) and an old branch is by definition a git tree. `locate` reads the registry on every walk hit, as §3.2 says.
-5. **`init --records` adds `[checkout]` to an existing config with `toml_edit`**, the way `retire` writes `[retired]`, so a migrated config keeps its comments.
-6. **Plain `tasks init` in a checkout paired in `[records]` refuses with `records_moved`.** Not in the spec; without it an in-tree config could be created in a detached checkout and refused only on the next command.
+3. **`projects` rows always carry `records`; `checkout` and `kind` whenever the config was read.** `records` comes from the registry (the `[records]` pairing, else the root), so an unreachable row still says where its records should be. `checkout` and `kind` are facts of the config: an unreachable row has none to read, and inventing `checkout = root` would be wrong for an unreachable linked overlay. This is the one exception to §5.2's "`checkout` always present", stated in the README (Task 10); ops's tolerant `linked.py` accepts a row without `checkout`.
+4. **`where` applies the `records_moved` refusal inside git only.** `where` reads no registry outside git (linked-checkouts decision 4) and an old branch is by definition a git tree. `locate` reads the registry on every walk hit, as §3.2 says. Outside git, on a copied historical config, `where` and `locate` can therefore differ; the README states that limitation (Task 10).
+5. **`init --records` edits an existing config with `toml_edit`**, the way `retire` writes `[retired]`, so a migrated config keeps its comments. It adds `[checkout]` and sets `[git] commit = true` (§3.4) when that is absent or false.
+6. **Plain `tasks init` in a checkout paired in `[records]` refuses with `records_moved`.** Not in the spec; without it an in-tree config could be created in a detached checkout and refused only on the next command. The detail names the re-pairing command (`tasks init --prefix <p> --records <records-root> --force`).
 7. **`InitOut` gains `records`** (omitted unless `--records`), so the migration script reads the derived directory from the command that made it.
 
 ## Global Constraints
@@ -43,7 +45,8 @@ The reviewer should rule on each; none changes the spec's contract.
 - **No command writes under a detached project's `root`** (spec §5.3). This is a test (Task 4), not a convention.
 - **CLI surface:** `init --records <PATH>`, mutually exclusive with `--checkout`. The row lands in ops's `cli.toml` first (Task 1); this repo adopts it with `vendored adopt` in the parser commit (Task 5). Never edit `tools/cli.toml` by hand.
 - **Release order** (spec §5.2): the branch merges only after ops-2a0024 (`linked.py` tolerant of both shapes) is installed on both hosts; see Rollout.
-- **Tests:** run them only through `just test-one <args>` and `just test-fast`, never `cargo test` directly (AGENTS.md). Test git helpers set `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1` as `tests/linked.rs::git` does.
+- **Tests:** run them only through `just test-one <args>` and `just test-fast`, never `cargo test` directly (AGENTS.md). `just test` (the `#[ignore]`d enumeration included) runs after Task 9's classifier change and on the branch head before integration.
+- **Test git environments are built, not inherited.** A hook exports `GIT_DIR`, `GIT_INDEX_FILE` and `GIT_WORK_TREE`, which win over `git -C`; `GIT_CONFIG_GLOBAL` alone neutralizes none of them. The fixture's git helper starts from `env_clear()` and sets `PATH`, `HOME` (the test home), `LC_ALL=C`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_AUTHOR_NAME/EMAIL` and `GIT_COMMITTER_NAME/EMAIL`; before a fixture repository's first write it asserts that `rev-parse --show-toplevel` is the fixture directory and `--absolute-git-dir` lies inside it. `TestEnv::cmd` and `raw` remove every inherited `GIT_*` variable except `GIT_CEILING_DIRECTORIES`, which the justfile sets on purpose.
 
 ## Review Focus
 
@@ -130,6 +133,7 @@ The model change and the mechanical sweep land together: once `tasks_dir()` read
 **Files:**
 - Modify: `src/repo.rs` (`Kind`, `Project`, `CheckoutConfig`, `Project::open`, `Project::init`, `tasks_dir`, `git`, `worktree_records`, `sibling_task_copies`, `uncommitted_task_files`, `missing_checkout_advice`, the two `written::record` calls)
 - Modify: every `project.root` site that reaches `tasks/`, `docs/` or `CONFIG_REL`, or re-opens the project (the list in Step 3)
+- Modify: `tests/common/mod.rs` (`cmd` and `raw` drop inherited `GIT_*` variables)
 - Create: `tests/detached.rs`
 - Test: unit tests in `src/repo.rs`; `tests/detached.rs`; `tests/linked.rs` and `tests/cli.rs` must keep passing unchanged
 
@@ -197,7 +201,7 @@ Then replace `root` with `records` at every site that reaches `tasks/`, `docs/` 
 - `src/commands/mod.rs:733` (`Project::open(&ctx.project.records)`, keeping `worktree`); `src/moving/mod.rs:125-126,228,235,267,270,282`; `src/moving/preflight.rs:72` (`open_ctx(Some(&ctx.target.records))`).
 - `src/rename/mod.rs:143,172,195,198,252,336`; `src/rename/adopt.rs:54`; `src/rename/inventory.rs:69,74-79,161`; `src/rename/snapshot.rs:116,155-157,220`; `src/rename/classify.rs:134-141` (these read `invocation.root`/`inventory.root`; Task 9 makes that root the records directory for a detached project, so leave the field names and only route through `records` where a `Project` is in hand).
 - `src/record_commit.rs:422,435`: the journal key is now `records`; `Project::open(&root)` on it works for every kind. Rename the loop variable to `records`.
-- Leave on `root`: `src/commands/init.rs:68` (`skill_installed`), `src/commands/root.rs`, `src/commands/feedback.rs:228,234` (display), the registry comparisons at `src/commands/mod.rs:768,789`, `src/commands/check.rs:116-120`, `src/commands/retire.rs:70-80`.
+- Leave on `root`: `src/commands/init.rs:68` (`skill_installed`), `src/commands/root.rs`, `src/commands/feedback.rs:228,234` (display). The "is this copy the registered one" comparisons at `src/commands/mod.rs:784-807` (`effective_retirement`), `mod.rs:762-780` (`reject_retired`'s authority), `src/commands/check.rs:113-125` and `src/commands/retire.rs:69-82` (`authority`) stay as they are in this task and move to records locations in Task 3, which introduces the registry pairing they need.
 
 `project.checkout` is now a `PathBuf`: update `src/commands/init.rs:375-386` (compare `existing.kind == Kind::Linked && existing.checkout != checkout`), `src/commands/check.rs:154-166` (`checkout_missing` when `kind != InTree && !checkout.is_dir()`), `src/locations.rs:52-57` (`if project.kind != Kind::InTree`), `src/commands/where_.rs:56-66` and `src/commands/projects.rs` (keep today's output: `checkout` only when `kind == Linked`; Task 6 changes the shape).
 
@@ -216,11 +220,41 @@ use common::TestEnv;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-/// As tests/linked.rs::git: GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1, author set.
-fn git(dir: &Path, args: &[&str]) -> String { /* copy from tests/linked.rs:6-28 */ }
-/// `git init -b main`, one README commit; canonical path.
-fn repo(base: &Path, name: &str) -> PathBuf { /* as tests/linked.rs::code_repo */ }
-fn porcelain(dir: &Path) -> String { git(dir, &["status", "--porcelain", "--ignored"]) }
+/// Git with an environment built key by key (Global Constraints): nothing a hook exports
+/// reaches the fixture, and `-C` is the only thing that chooses the repository.
+fn git(home: &Path, dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap())
+        .env("HOME", home)
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t")
+        .arg("-C").arg(dir).args(args)
+        .output().unwrap();
+    assert!(out.status.success(), "git {args:?} in {}: {}", dir.display(), String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// `git init -b main`, then, before the first write, the assertion that this repository
+/// is the fixture: top level == dir and the git directory inside it. One README commit.
+fn repo(home: &Path, base: &Path, name: &str) -> PathBuf {
+    let dir = base.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    git(home, &dir, &["init", "-q", "-b", "main"]);
+    let dir = dir.canonicalize().unwrap();
+    let top = git(home, &dir, &["rev-parse", "--show-toplevel"]);
+    assert_eq!(Path::new(top.trim()), dir);
+    let git_dir = git(home, &dir, &["rev-parse", "--absolute-git-dir"]);
+    assert!(Path::new(git_dir.trim()).starts_with(&dir));
+    std::fs::write(dir.join("README"), "x\n").unwrap();
+    git(home, &dir, &["add", "README"]);
+    git(home, &dir, &["commit", "-qm", "init"]);
+    dir
+}
+fn porcelain(home: &Path, dir: &Path) -> String { git(home, dir, &["status", "--porcelain", "--ignored"]) }
 
 pub struct Layout {
     _base: TempDir,
@@ -236,7 +270,7 @@ pub struct Layout {
 }
 
 /// A detached project named `prefix`: config written by hand and committed in the records
-/// repository. Nothing is registered.
+/// repository. Nothing is registered. Every git call takes `env.home.path()` as its HOME.
 pub fn layout(env: &mut TestEnv, prefix: &str) -> Layout {
     // base/records (repo), base/code (repo), base/storage/code; code/.worktrees -> ../storage/code
     // records/<prefix>/tasks/.config.toml:
@@ -246,14 +280,19 @@ pub fn layout(env: &mut TestEnv, prefix: &str) -> Layout {
 }
 ```
 
+`Layout` also carries `pub home: PathBuf` (the test home) and the wrappers `l.git(dir, args)` and `l.porcelain(dir)` that pass it; the test outlines below write `git(&l.x, …)` and `porcelain(&l.x)` for those wrappers.
+
+In `tests/common/mod.rs`, `cmd` and `raw` remove every variable whose name starts with `GIT_` except `GIT_CEILING_DIRECTORIES` (iterate `std::env::vars_os()`); every existing suite must still pass.
+
 The tests:
 
 ```rust
 #[test]
 fn opened_from_its_records_directory_a_detached_project_writes_and_commits_there() {
     let mut env = TestEnv::new();
+    let home = env.home.path().to_path_buf();
     let l = layout(&mut env, "det");
-    let before = porcelain(&l.code);
+    let before = porcelain(&home, &l.code);
     let added = env.json(&l.project, &["add", "first"]);
     let id = added["id"].as_str().unwrap().to_string();
     assert!(l.project.join(format!("tasks/{id}.md")).is_file());
@@ -262,12 +301,15 @@ fn opened_from_its_records_directory_a_detached_project_writes_and_commits_there
     let doc = l.project.join("docs/specs/x-design.md");
     std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
     std::fs::write(&doc, "# x\n").unwrap();
+    git(&home, &l.records, &["add", "-A"]);
+    git(&home, &l.records, &["commit", "-qm", "spec"]);   // a record commit commits only what the command wrote
     env.json(&l.project, &["edit", &id, "--spec", "docs/specs/x-design.md"]);
     let shown = env.json(&l.project, &["show", &id]);
     assert_eq!(shown["spec_path"], doc.display().to_string());
-    assert_eq!(git(&l.records, &["log", "--format=%s", "-n", "1"]).trim(), format!("chore(tasks): edit {id}"));
-    assert_eq!(porcelain(&l.records), "");
-    assert_eq!(porcelain(&l.code), before);
+    assert_eq!(git(&home, &l.records, &["log", "--format=%s", "-n", "1"]).trim(), format!("chore(tasks): edit {id}"));
+    assert_eq!(git(&home, &l.records, &["show", "--stat", "--format=", "HEAD"]).trim().lines().count(), 2); // the record alone
+    assert_eq!(porcelain(&home, &l.records), "");
+    assert_eq!(porcelain(&home, &l.code), before);
 }
 
 #[test]
@@ -294,7 +336,7 @@ Run: `just test-fast` then `just check`
 Expected: PASS, no clippy findings.
 
 ```bash
-git add src tests/detached.rs
+git add src tests/detached.rs tests/common/mod.rs
 git commit -m "feat(repo): a project's records, kind and checkout; every record path under records"
 ```
 
@@ -312,6 +354,7 @@ git commit -m "feat(repo): a project's records, kind and checkout; every record 
 - Modify: `src/repo.rs` (`Project::locate`)
 - Modify: `src/commands/where_.rs` (`walk` applies `refuse_moved` inside git; `project_of_tree` on a miss)
 - Modify: `src/commands/parked.rs` (`open_recorded` uses `project_of_tree`)
+- Modify: `src/commands/mod.rs` (`effective_retirement`, `reject_retired`), `src/commands/check.rs:113-125`, `src/commands/retire.rs` (`authority`): the registered-copy comparisons
 - Modify: `src/error.rs` (`RecordsMoved`, `RecordsUnpaired`)
 - Modify: every `is_reachable(root)` caller: `src/commands/check.rs:222`, `src/complete.rs:448`, `src/commands/feedback.rs:48`, `src/commands/group.rs:38,97`, `src/commands/projects.rs:75`, `src/commands/move_.rs:34`, `src/commands/init.rs:136`, `src/locations.rs:41`
 - Test: unit tests in `src/registry.rs`; `tests/detached.rs`
@@ -334,6 +377,7 @@ git commit -m "feat(repo): a project's records, kind and checkout; every record 
   - `holds_records` iterates `registry.projects.keys()` and tests each prefix's `config_dir` against `tree.common`.
 - Produces, in `src/repo.rs`: `Project::locate` is §3.2's three steps: walk (then `refuse_moved` with `Registry::load()?`), then on a miss inside git `project_of_tree`, then `NoProject`.
 - Produces, in `src/error.rs`: `RecordsMoved(String)` → `records_moved`; `RecordsUnpaired(String)` → `records_unpaired`.
+- Produces: **the registered copy is decided by records location.** "Is this copy the registered one" means `scope::config_dir(registry, prefix) == Some(project.records)`, never `project_root == project.root`: two records worktrees of a detached project share one code root, so the old comparison would let a worktree made before a retirement skip the registered config. Change `effective_retirement` (`mod.rs:788-789`), `reject_retired`'s `authority` (`mod.rs:767-769`, which names `config_dir`), `check.rs:113-125` (`authority == ctx.project.records`) and `retire::authority` (`retire.rs:72-80`: run in the registered records directory, which the refusal names; `Project::open(config_dir)`). In-tree and linked projects are unchanged, since their `config_dir` is their root.
 
 - [ ] **Step 1: Write the failing registry unit tests in `src/registry.rs`**
 
@@ -422,6 +466,14 @@ fn a_registered_root_without_config_or_pairing_is_records_unpaired() {
 #[test]
 fn an_in_tree_project_reached_from_a_worktree_without_its_tasks_dir_stays_no_project() {
     // env.init("itr") in a repo, commit, worktree on an orphan branch without tasks/: fail == "no_project"
+}
+
+#[test]
+fn a_retirement_declared_in_the_registered_records_binds_an_older_records_worktree() {
+    // register_by_hand; `git -C l.records worktree add -b old <base>/records-old` (a records worktree made before the retirement);
+    // tasks -C l.project retire --reason "over" (from the registered records directory; l.code is refused with not_registered_checkout
+    // naming l.project); then env.fail(&<base>/records-old/det, &["add", "late"]) == "retired_project";
+    // env.fail(&l.code, &["add", "late"]) == "retired_project"
 }
 
 #[test]
@@ -536,12 +588,12 @@ git commit -m "test(detached): the lifecycle writes only under records; stale co
 - Produces, in `src/cli.rs`: on `Init`, `/// Keep this checkout's records at <PATH>/<prefix> (a records root kept elsewhere); registers the pairing and writes nothing here.` `#[arg(long, value_name = "PATH", conflicts_with = "checkout")] records: Option<PathBuf>`.
 - Produces, in `src/commands/init.rs`: `pub fn run(dir, prefix, checkout, records: Option<PathBuf>, force) -> Result<Output>`. With `records`:
   1. `root` = `dir` or cwd, canonical; `prefix` as today; locks and pending-operation checks as today.
-  2. `validate_records(&root, &records_root, &registry, &prefix) -> Result<PathBuf>` (the derived `<records-root>/<prefix>`, canonical after `create_dir_all`): `records_root` is resolved against `root`, must exist and be a directory (`Error::Config("--records <p>: does not exist")`); `root` must be a git top level and a main checkout (`GitTree::of`, `is_main`, `main_checkout() == root`), with the `--checkout` wording ("is a linked worktree; pass its main checkout"); `root` must not lie inside, contain, or share `common` with the derived directory; `Error::RecordsInTree` when `root.join(CONFIG_REL)` is a file or `config_in_index(&tree.top)?`, with the detail "tasks/.config.toml is in the working tree or the index; `git rm -r tasks` (and the docs you are moving) first, then rerun; a staged deletion is allowed"; `Error::CheckoutConflict` when another prefix's `Linked` row names `root` as its checkout, or another prefix's registered root equals `root` and is paired in `[records]`.
+  2. `validate_records(&root, &records_root, &registry, &prefix) -> Result<PathBuf>` (the derived `<records-root>/<prefix>`, canonical after `create_dir_all`): `records_root` is resolved against `root`, must exist and be a directory (`Error::Config("--records <p>: does not exist")`); `root` must be a git top level and a main checkout (`GitTree::of`, `is_main`, `main_checkout() == root`), with the `--checkout` wording ("is a linked worktree; pass its main checkout"); `root` must not lie inside, contain, or share `common` with the derived directory; **the overlap checks of `validate_checkout` (init.rs:227-243) apply to `root`**: for every other registered prefix (the prefix being paired is skipped, so `--force` re-pairing works), `root` must not contain or lie inside its registered root or its records directory, nor share `common` with either (`Error::Config("--records: <root> overlaps registered project <p> at <path>")`), so a repository nested under an in-tree project cannot detach while `locate` would walk up to the enclosing config; `Error::RecordsInTree` when `root.join(CONFIG_REL)` is a file or `config_in_index(&tree.top)?`, with the detail "tasks/.config.toml is in the working tree or the index; `git rm -r tasks` (and the docs you are moving) first, then rerun; a staged deletion is allowed"; `Error::CheckoutConflict` when another prefix's `Linked` row names `root` as its checkout, or another prefix's registered root equals `root` and is paired in `[records]`.
   3. `--force` repoints as today; without it `register` as today (a prefix registered to a different root refuses naming `--force`).
   4. `Project::init_detached(&derived, &prefix, &root)` writes the config, then `registry.pair_records(&prefix, &derived)`, `note_root_change` and `save` as today.
   5. Output: `InitOut { prefix, root, records: Some(derived), warnings, aliases }`.
-  Without `records`, `reject_linked_destination` becomes kind-aware: a `Linked` row of kind `Detached` whose `checkout` is this tree's main checkout refuses with `Error::RecordsMoved` naming the records directory (decision 6); a `Linked` row keeps today's `config` refusal.
-- Produces, in `src/repo.rs`: `pub fn init_detached(records: &Path, prefix: &str, checkout: &Path) -> Result<Project>`: `create_dir_all(records.join("tasks"))`; when no config exists, write `prefix`, `[git] commit = true`, `[checkout] path = <relative_path(records, checkout)>`, `kind = "detached"`; when one exists, open it, refuse a different prefix (`Config`, as `init` does), and if it has no `[checkout]` table append one with `add_checkout_table(text, path, "detached") -> Result<String>` (a `toml_edit::DocumentMut` edit, as `retire::write_table` does), else require `kind == Detached` and the same `checkout` (`Config("init does not relink an existing project")`). Then create `docs/specs` and `docs/plans` under `records` and return `open(records)`.
+  Without `records`, `reject_linked_destination` becomes kind-aware: a `Linked` row of kind `Detached` whose `checkout` is this tree's main checkout refuses with `Error::RecordsMoved` whose detail is "`<prefix>`'s records live at <dir>; to pair this checkout again run `tasks init --prefix <prefix> --records <records-root> --force`" (decision 6); a `Linked` row keeps today's `config` refusal.
+- Produces, in `src/repo.rs`: `pub fn init_detached(records: &Path, prefix: &str, checkout: &Path) -> Result<Project>`: `create_dir_all(records.join("tasks"))`; when no config exists, write `prefix`, `[git] commit = true`, `[checkout] path = <relative_path(records, checkout)>`, `kind = "detached"`; when one exists, open it, refuse a different prefix (`Config`, as `init` does), then `detach_config(text, path) -> Result<String>` (a `toml_edit::DocumentMut` edit, as `retire::write_table` does, so comments and unrelated tables survive): add `[checkout]` with `path` and `kind = "detached"` when the table is absent, else require `kind = "detached"` and the same `path` (`Config("init does not relink an existing project")`); set `[git] commit = true` when the table or the key is absent or the value is `false` (§3.4). Write the file only when the text changed. Then create `docs/specs` and `docs/plans` under `records` and return `open(records)`.
 - Produces, in `src/link.rs`: `pub fn config_in_index(top: &Path) -> Result<bool>`: `git -C top ls-files -z --cached -- tasks/.config.toml` prints a path. A failing git run is an `Io` error, never "absent".
 - Produces, in `src/output.rs`: `InitOut.records: Option<String>` with `skip_serializing_if = "Option::is_none"`.
 - Produces, in `src/error.rs`: `RecordsInTree(String)` → `records_in_tree`.
@@ -599,9 +651,19 @@ fn init_records_force_keeps_aliases_groups_and_location_history() {
 }
 
 #[test]
-fn init_records_on_an_existing_records_config_adds_the_checkout_table_only() {
-    // write records/<p>/tasks/.config.toml by hand with prefix, a comment line, [tags] x = "y", no [checkout]
-    // init --records: the file keeps the comment and [tags] and gains [checkout] path + kind; a prefix mismatch is "config"
+fn init_records_on_an_existing_records_config_adds_checkout_and_enables_commits() {
+    // write records/<p>/tasks/.config.toml by hand with prefix, a comment line, [tags] x = "y", no [checkout], no [git]:
+    //   init --records: the file keeps the comment and [tags], gains [checkout] path + kind and [git] commit = true
+    // the same with `[git]\ncommit = false\n`: commit becomes true, the comment survives
+    // the same with commit = true and the right [checkout] already present: bytes unchanged
+    // a prefix mismatch is "config"; a [checkout] with another path is "config"
+}
+
+#[test]
+fn init_records_refuses_a_checkout_that_overlaps_another_registered_project() {
+    // an in-tree project at base/outer (env.init); a git repo at base/outer/inner:
+    // env.fail(&inner, &["init", "--prefix", "inn", "--records", ..]) == "config", detail names "outer";
+    // a repo containing a registered root, and one sharing a common dir (a worktree's main), refuse the same way
 }
 
 #[test]
@@ -663,7 +725,7 @@ git commit -m "feat(init): tasks init --records pairs a checkout with its record
 **Interfaces:**
 - Produces, in `src/output.rs`:
   - `WhereProject { prefix, root: String, checkout: String, records: String, kind: Kind, linked: bool, color }`.
-  - `ProjectRow` gains `records: Option<String>` and `kind: Option<Kind>`, both `skip_serializing_if = "Option::is_none"`; `checkout` keeps its attribute but is set on every reachable row.
+  - `ProjectRow` gains `records: String` (always: the registry's pairing, else the root) and `kind: Option<Kind>` (`skip_serializing_if = "Option::is_none"`, set when the config was read); `checkout` keeps its attribute and is set on every row whose config was read (decision 3).
   - `ResolveRow` gains `records: Option<String>` (`skip_serializing_if`), set whenever `root` is.
   - Pretty `where`: `<prefix> <root>`, `<prefix> <root> (linked to <checkout>)`, or `<prefix> <root> (records at <records>)`.
   - Pretty `projects --paths`: the root column stays; a detached row appends ` → <records>` after the root.
@@ -689,6 +751,8 @@ fn where_reports_kind_records_and_checkout_for_every_shape() {
 #[test]
 fn projects_rows_carry_the_three_locations_and_the_kind() {
     // row for det: root == l.code, checkout == l.code, records == l.project, kind == "detached"
+    // after `rm -r l.project` (the records directory is gone): the row is reachable false, records == l.project,
+    // and has no checkout and no kind keys (decision 3)
 }
 
 #[test]
@@ -836,16 +900,19 @@ git commit -m "feat(resolve): documents resolve under records, then the code wor
 - Test: unit tests in `src/rename/classify.rs` (the boundary enumeration gains the new state), `tests/detached.rs`
 
 **Interfaces:**
-- Produces, in `src/rename/inventory.rs`: `pub records_to: Option<PathBuf>` with `#[serde(default, skip_serializing_if = "Option::is_none")]`: `Some(<records-root>/<new>)` when the project is detached, else `None`. `Inventory.root` stays the directory holding the records (`project.records`), which is where every file stage already works. An inventory from an older binary has no field and means in-tree, which is what it was.
-- Produces, in `src/rename/snapshot.rs`: `Snapshot.records: RecordsDir` with `pub enum RecordsDir { Old, New, Both, Neither }` (`Old` whenever `records_to` is `None`). After the move, `config`, `tasks/` and `tasks/files/` are observed under `records_to`.
-- Produces, in `src/rename/classify.rs`: `New` with config digest `config_to` and the registry old → `ResumeRegistry`; `New` with the registry new → `ResumeCleanup`; `Old` keeps today's rules; `Both` → `Refuse("both <old> and <new> exist; remove the one that is not the renamed project")`; `Neither` → `Refuse("neither <old> nor <new> exists")`.
-- Produces, in `src/rename/mod.rs`: after the `config` boundary and before `registry`, when `records_to` is `Some(to)`: `std::fs::rename(&inventory.root, to)?`, boundary name `records` for `TASKS_RENAME_STOP_AFTER`. After `registry.rename`, when `records_to` is `Some(to)`, `registry.pair_records(&invocation.target, to)` in the same save. `authorize`'s worktree count and the dirty-tree check already run in the records repository (Task 2).
-- Produces, in `src/commands/rename.rs`: `invocation` resolves `root` through `scope::config_dir`. For `--adopt`, when `registry.records_dir(old)` is `Some(dir)` and `dir` does not exist but `dir.parent().join(new)` holds a config whose prefix is `new`, the invocation's root is that directory; `adopt::run` then calls `registry.pair_records(new, &that)` after `registry.adopt`.
+
+Two paths run through rename and are kept apart everywhere: the project's **identity**, the registered root the registry's `[projects]` holds (the code checkout for a detached project; the overlay directory for a linked one; the root for in-tree), and its **current records directory**, where `tasks/` and the config are now. Today both are `root`; a detached project is the first where they differ, and where the second one changes during the rename.
+
+- Produces, in `src/rename/snapshot.rs`: `pub struct Invocation { pub source: String, pub target: String, pub root: PathBuf /* identity */, pub records: PathBuf /* current records directory */ }`. `observe` reads `tasks/`, `tasks/files/`, strays and the config under `invocation.records`; `registry.old_key`/`new_key` keep comparing `[projects]` with `invocation.root`; `Snapshot.registry` gains `records_old: bool` (`registry.records_dir(source) == inventory.records_from`) and `records_new: bool` (`registry.records_dir(target) == inventory.records_to`); `Snapshot.records: RecordsDir` with `pub enum RecordsDir { Old, New, Both, Neither }` from the existence of `records_from` and `records_to` (`Old` whenever the inventory has no `records_from`, and before an inventory exists when `config_dir` exists).
+- Produces, in `src/rename/inventory.rs`: `Inventory.root` stays the identity; `pub records_from: Option<PathBuf>` and `pub records_to: Option<PathBuf>`, both `#[serde(default, skip_serializing_if = "Option::is_none")]`: `Some(<records-root>/<old>)` and `Some(<records-root>/<new>)` for a detached project, `None` otherwise. An inventory from an older binary has neither and means "records at `root`", which is what it was. `Inventory::build(project, target)` fills them from `project.kind` and `project.records`.
+- Produces, in `src/rename/classify.rs`: `registry_old` additionally requires `records_old` when `records_from` is set, and `registry_new` requires `records_new` likewise. Under `RecordsDir::Old` today's rules stand (files, then config, under `records_from`); `New` with the config digest `config_to` and the registry old → `ResumeRegistry`; `New` with the registry new → `ResumeCleanup`; `Both` → `Refuse("both <old> and <new> exist; remove the one that is not the renamed project")`; `Neither` → `Refuse("neither <old> nor <new> exists")`. `refusal()`'s R3 and every path it builds use the snapshot's current records directory.
+- Produces, in `src/rename/mod.rs`: `Project::open(&invocation.records)` (never `root`); `authorize`'s worktree count and the dirty-tree check run in the records repository through that project (Task 2). After the `config` boundary and before `registry`, when `records_to` is `Some(to)`: `std::fs::rename(&records_from, to)?`, boundary name `records` for `TASKS_RENAME_STOP_AFTER`; from here on nothing opens `records_from`. In the `registry` stage, after `registry.rename`, `registry.pair_records(&invocation.target, to)` in the same save, so the inventory's old path and the registry's new path reconcile in one step.
+- Produces, in `src/commands/rename.rs`: `invocation` sets `root` as today (the identity from `[projects]`, else the inventory's) and `records` as: a pending inventory's `records_to` when that exists and its `records_from` does not; else the pending inventory's `records_from`; else `scope::config_dir(registry, source)`; else `root`. The pending-rename identity check at `rename/mod.rs:134` (`root_identity(&pending.root) == invocation.root`) stays an identity comparison. For `--adopt`, when `registry.records_dir(old)` is `Some(dir)`, `dir` does not exist and `dir.parent().join(new)` holds a config whose prefix is `new`, `records` is that directory; `adopt::run` opens it and calls `registry.pair_records(new, &project.records)` after `registry.adopt`.
 - Produces, in `src/registry.rs`: nothing new (`rename` and `adopt` move the key from Task 3; `pair_records` updates the value).
 
 - [ ] **Step 1: Write the failing classify unit tests**
 
-Extend the boundary table in `src/rename/classify.rs` with the `records` state: every existing row with `RecordsDir::Old`, plus rows for `New`+`config_to`+registry old → `ResumeRegistry`, `New`+registry new → `ResumeCleanup`, `Both` → `Refuse`, `Neither` → `Refuse`. The exhaustive `#[ignore]` enumeration gains the dimension.
+Extend the boundary table in `src/rename/classify.rs` with the `records` state: every existing row with `RecordsDir::Old` and `records_old`/`records_new` true, plus rows for `New`+`config_to`+registry old → `ResumeRegistry`, `New`+registry new → `ResumeCleanup`, `Old`+registry key old but `records_old` false → `Refuse`, `Both` → `Refuse`, `Neither` → `Refuse`. The exhaustive `#[ignore]` enumeration gains the dimension.
 
 Run: `just test-one classify::`
 Expected: FAIL (no `records` field on `Snapshot`).
@@ -856,16 +923,18 @@ Expected: FAIL (no `records` field on `Snapshot`).
 #[test]
 fn rename_moves_the_records_directory_and_the_registry_pairing() {
     // register(); add two tasks; commit the records repo;
-    // tasks -C l.code rename det dtx: l.records/dtx/tasks/dtx-*.md exist, l.records/det gone,
+    // tasks -C l.code rename det dtx (a fresh detached rename is not refused: the registry's [projects] still
+    // names l.code, which is the invocation's identity): l.records/dtx/tasks/dtx-*.md exist, l.records/det gone,
     // registry [projects] dtx = code, [records] dtx = l.records/dtx, [aliases] det = "dtx";
     // tasks -C l.code list opens dtx; tasks show det-<hex> resolves through the alias;
-    // [checkout] path in the moved config is still "../../code"
+    // [checkout] path in the moved config is still "../../code"; `git -C l.records status --porcelain` shows the rename for the user to commit
 }
 
 #[test]
 fn rename_resumes_across_the_records_boundary() {
-    // as tests/cli.rs::rename_every_mutation_boundary_resumes…: TASKS_RENAME_STOP_AFTER=config, then =records,
-    // then rerun without the variable: Complete; --explain between stops reports resume_registry after `records`
+    // as tests/cli.rs::rename_every_mutation_boundary_resumes…: TASKS_RENAME_STOP_AFTER=inventory, files, config, records, registry, store, claims,
+    // each followed by --explain (the verdict names the next stage; after `records` it is resume_registry and nothing opens l.records/det)
+    // and a rerun without the variable: Complete, with the same end state as the uninterrupted rename
 }
 
 #[test]
@@ -884,10 +953,13 @@ fn adopt_pairs_the_renamed_records_directory() {
 
 As the Interfaces block says. Keep the stage order: files, config, records, registry, store, claims.
 
-- [ ] **Step 4: Run the tests**
+- [ ] **Step 4: Run the tests, the exhaustive enumeration included**
 
 Run: `just test-one classify::` then `just test-one --test detached rename` then `just test-one --test cli rename`
 Expected: PASS, including every existing rename and adopt test.
+
+Run: `just test`
+Expected: PASS. `test-fast` skips the `#[ignore]`d `rename::classify` enumeration this task extends, and the branch's only other full run is the baseline before any change; this run is the one that exercises it.
 
 - [ ] **Step 5: Check and commit**
 
@@ -911,7 +983,7 @@ git commit -m "feat(rename): move a detached project's records directory and its
 
 - [ ] **Step 1: Document the detached shape**
 
-In `README.md`, after the linked paragraphs: the three locations table from spec §3.1; `tasks init --prefix <p> --records <records-root>` with what it writes and refuses (`records_in_tree`, the staged-deletion window, `checkout_conflict`); the `[records]` registry table with a TOML example; the `where` shape for a detached project (`kind: "detached"`, `records`, `checkout`, `linked: false`); `records_moved` and `records_unpaired` with their remedies; that `rename` moves the directory; that each host's binary must be current before the first detached project (an older binary drops `[records]` on its next registry save).
+In `README.md`, after the linked paragraphs: the three locations table from spec §3.1; `tasks init --prefix <p> --records <records-root>` with what it writes (the config, `[git] commit = true` enabled on an existing config too) and refuses (`records_in_tree`, the staged-deletion window, `checkout_conflict`, overlap with another registered project); the `[records]` registry table with a TOML example; the `where` shape for a detached project (`kind: "detached"`, `records`, `checkout`, `linked: false`); the `projects` row shape, including that an unreachable row carries `records` but no `checkout` or `kind` (decision 3); that `where` outside git does not consult the registry, so a copied historical config outside git opens there while `locate` refuses it (decision 4); `records_moved` and `records_unpaired` with their remedies; that `rename` moves the directory and leaves the rename for the user to commit; that each host's binary must be current before the first detached project (an older binary drops `[records]` on its next registry save).
 
 - [ ] **Step 2: Mark the spec**
 
@@ -929,6 +1001,7 @@ git commit -m "docs: detached records in the README; spec status"
 
 ## Rollout (after the branch is reviewed; operator steps, not implementer tasks)
 
+0. **The full suite on the branch head.** `just test` in `.worktrees/records-detached` after the final review's fixes; the pre-push hook would run it, but a local merge never pushes, and `test-fast` skips the enumeration Task 9 extended.
 1. **ops-2a0024 first.** Confirm `linked.py`'s tolerant version is installed on both hosts (`tests/test_linked.py` in ops covers both shapes). Until then the `where` shape change in Task 6 would make the foreign-write guard refuse every write.
 2. **Merge locally** (personal profile): `git merge --no-ff records-detached` on main, then `cargo install --path .` on this host, and on the other host from the same commit before any project is detached: an older binary cannot read `[records]` and drops the table on its next registry save.
 3. **Close the task**: `tasks done tasks-211e28` on the branch before the merge, as the session protocol says.
