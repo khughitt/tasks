@@ -6,9 +6,9 @@ priority: 1
 size: m
 complexity: high
 process: planned
-owner: main
+owner: records-home
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-22T20:01:12Z
+updated: 2026-10-22T20:01:14Z
 started: 2026-10-22T19:55:20Z
 depends: []
 tags: []
@@ -38,4 +38,6 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
 - 2026-10-22T19:57:50Z (main): parked (waiting on user, decision): User answers where they stand when returning to a working doc (mindful search, repo, or from the task record); then the agent creates the task worktree and drafts the design spec in docs/specs
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-22T20:01:12Z (main): resumed
+  provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-22T20:01:14Z (records-home): resumed
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
