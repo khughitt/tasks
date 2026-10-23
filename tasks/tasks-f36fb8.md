@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/records-home-obs-authorship
 created: 2026-10-23T14:00:10Z
-updated: 2026-10-23T16:48:28Z
+updated: 2026-10-23T16:51:30Z
 started: 2026-10-23T16:46:43Z
 depends: [obs-7348a9]
 tags: [docs]
@@ -29,3 +29,4 @@ obs-7348a9 landed locally in obs main at 9eb4f982cd60c70d6494c3278caec0cc805108e
   provenance: {"harness_session":"claude-code:049fb7ab-86eb-4014-8cfb-ff365280b5ff","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-23T16:48:28Z (docs/records-home-obs-authorship): resumed
   provenance: {"harness_session":"claude-code:049fb7ab-86eb-4014-8cfb-ff365280b5ff","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T16:51:30Z (docs/records-home-obs-authorship): baseline: just test in .worktrees/tasks-f36fb8 passed 1663 tests (0 failed). Verified obs spec r4 at ba84f7b (user approval 2026-10-23T15:21Z on obs-7348a9) and landed code at 9eb4f98 in obs main: authorship.EXCLUDED holds the six prefixes, VERSION authorship-v4, CLAIMS_VERSION claims-v4, outcome_report refuses missing or unequal versions with run obs index.
