@@ -42,12 +42,25 @@ its spec. Immediately after creation, hydrate from the first declared source:
 just setup when the justfile defines it; else the setup command the root guide names,
 or one its README or CONTRIBUTING names that writes only inside the worktree; else the
 frozen install of a lockfile that names its package manager and installs inside the
-worktree (package-lock.json: `npm ci`; uv.lock: `uv sync --frozen`). A bare manifest
-(pyproject.toml, package.json or requirements.txt without a lockfile), or a lockfile
-whose install can leave the worktree (Poetry's default cache environment), declares no
-usable installer: never guess one, and report the missing setup route before the first
-commit. Hydrate before that commit. A checkout that declares no dependencies needs no
-setup. Read-only investigation and task-record maintenance alone need no new
+worktree (package-lock.json: `npm ci`; uv.lock: `uv sync --frozen`). A command the
+root guide, README or CONTRIBUTING names may have its default build or install
+destinations pointed inside the worktree by its own documented settings or flags
+(`cargo install --locked --path .` with `--root` and `CARGO_TARGET_DIR` under the
+worktree), and must have them when it would otherwise replace a tool on the host's
+PATH; a shared download cache is not an environment and may stay where it is. That
+confinement is not guessing an installer and needs no approval, as long as the
+confined run neither swaps the package manager nor writes a shared environment. A
+README or CONTRIBUTING command that no documented setting confines, or any named
+command that would still replace a tool on the host's PATH, is reported as a missing
+setup route before the first commit. A bare manifest (pyproject.toml, package.json or
+requirements.txt without a lockfile), or a lockfile whose install can leave the
+worktree (Poetry's default cache environment), declares no usable installer: never
+guess one, and report the missing setup route before the first commit; the report
+informs, asks no approval, and the work continues. Hydrate before that commit. A
+checkout that declares no dependencies needs no setup, and a worktree checked out only
+to be read (a historical snapshot under review, in which nothing is committed, tested
+or run) needs none until something is to run or be committed in it, when hydration
+comes first. Read-only investigation and task-record maintenance alone need no new
 worktree. An explicit user instruction to work in place wins.
 
 ## Gates
