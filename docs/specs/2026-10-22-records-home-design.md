@@ -1,6 +1,13 @@
 # Where task records and working documents live — design
 
-Task: tasks-dc16eb. Status: approved 2026-10-22 at revision 3, amended by plan review round 2 (§5.2); the tasks CLI part implemented by docs/plans/2026-10-22-records-detached.md (tasks-211e28).
+Task: tasks-dc16eb. Status: approved 2026-10-22 at revision 3, amended by plan review round 2 (§5.2) and by obs-7348a9 (§4, §8, §10); the tasks CLI part implemented by docs/plans/2026-10-22-records-detached.md (tasks-211e28).
+
+Amendment (2026-10-23, tasks-f36fb8): obs's historical authorship no longer follows
+`flow-state` by `kind`. obs-7348a9's approved spec (obs
+`docs/specs/2026-10-23-records-authorship-design.md`, revision 4) replaced the §4
+suggestion that detached and linked projects exclude nothing with one path rule for
+every project, landed as `authorship-v4` and `claims-v4`; §8 carries it as a
+prerequisite of the first non-pilot migration.
 
 Revision 3 (2026-10-22, after spec review round 2): `check` applies the same
 staged-deletion exception as `init --records`, so §3.3 no longer blocks the removal
@@ -248,7 +255,7 @@ no-op; §10 files them.
 | ops `tt-latency` | reads `root/tasks/<id>.md`, understands the overlay offset | reads under `records` |
 | ops `ops-docs` | git top level as project root; family publish writes `tools/family.toml` into root | unchanged for detached (root is the code); ops-ba81cf stays a linked-only gap |
 | obs `stores._record_bytes` | `<checkout>/tasks/<id>.md` | `<records>/tasks/<id>.md`; copies collapse to one |
-| obs `authorship.EXCLUDED` | excludes `tasks/`, `docs/specs/`, `docs/plans/` always | excludes nothing when `kind` is `detached` or `linked`, matching `flow-state` |
+| obs `authorship.EXCLUDED` | excludes `tasks/`, `docs/specs/`, `docs/plans/` always | excludes `tasks/`, `docs/specs/`, `docs/plans/`, `docs/notes/`, `docs/superpowers/`, `docs/designs/` and the task's own spec and plan in every project, whatever its `kind`, matched on the placed relative path; no location class or layout lookup, so overlay guides and tools outside those prefixes stay eligible; reports refuse other attribution versions until `obs index` rederives (obs-7348a9, `authorship-v4`/`claims-v4`) |
 | obs `context_events` | `git log` in the resolved root | unchanged (root is the code) |
 | hq `session-episodes` | `git worktree list` of root, reads `<wt>/tasks/<id>.md`, requires `root/tasks` | reads the one copy under `records`; trial measurement, so it lands kind-aware before any trial project detaches (§8) |
 | hq `rename-cutover` | in-tree layout | takes `records` for the record and `tasks/files/` paths |
@@ -261,6 +268,16 @@ no-op; §10 files them.
 `flow-state`'s fingerprint for a detached project covers the whole code tree: there is
 nothing of the record's in it, which is the rule the boundary review asked for
 (revision 4, change 2). `reference: true` is not needed: no retained content is exempt.
+
+obs's historical attribution is a different measure and does not follow that rule. It
+recomputes authorship over history that spans the move, so a document must count the
+same before and after it leaves the code tree: the six prefixes hold in-tree, detached
+and linked projects alike, and cover every directory §3.4 and §8 place records and
+documents in. The cost is coverage, not correctness: retained documents and code under
+those prefixes count for no one, and a task whose only qualifying writes are documents
+can lose its write authors or fall to `several` in claim attribution. obs's spec
+measures that loss for the 2026-10-23 14:00 UTC derivation; exceptions for declared
+outputs are left to obs-bce837.
 
 ## 5. The tasks CLI
 
@@ -467,8 +484,9 @@ Order of projects:
 - **Pilot:** two small projects with no trial units and few consumers, `wali` and `tui`,
   to exercise every step end to end including the second host.
 - **Then** every personal project except hq and obs, smallest first, once the §4 pieces
-  that touch each have landed (the CLI first; `obs-index`, `tt-latency` and the hooks
-  before the first non-pilot project; crew before `crew`'s own move).
+  that touch each have landed (the CLI first; `obs-index`, `tt-latency`, the hooks and
+  obs's authorship v4 (obs-7348a9) before the first non-pilot project; crew before
+  `crew`'s own move).
 - **hq and obs** after the flow-trial-1 readout on 2027-02-16: their records are the
   trial's measured environment, and `session-episodes` reads them. The kind-aware
   reader changes land earlier as no-ops for in-tree projects.
@@ -498,7 +516,8 @@ the ordering noted:
   `ops-projects link` or its retirement for the detached form; the records repository
   skeleton and hooks (the GitHub repository on the user's go-ahead).
 - **flows** (direct): skill wording §6; `excluded()` by `kind`.
-- **obs** (direct): `_record_bytes` and `authorship.EXCLUDED` by `kind`.
+- **obs** (direct): `_record_bytes` reads under `records`. `authorship.EXCLUDED` became
+  its own planned piece, obs-7348a9: the six prefixes for every `kind` (§4).
 - **hq** (direct): `session-episodes` and `rename-cutover` read `records`; close
   hq-5a3e12 with the §7.4 ruling.
 - **crew** (direct): `run.ts` hashes under `records`.
