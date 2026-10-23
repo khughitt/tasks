@@ -6,9 +6,9 @@ priority: 2
 size: s
 complexity: mid
 process: direct
-owner: main
+owner: readme-restructure
 created: 2026-09-19T13:13:54Z
-updated: 2026-10-23T01:03:54Z
+updated: 2026-10-23T01:04:08Z
 started: 2026-10-23T01:03:54Z
 depends: []
 parent: tasks-6ed79b
@@ -34,4 +34,6 @@ Where to look: README.md, skills/tasks/SKILL.md, the design links already in REA
 - 2026-10-23T00:14:47Z (main): README anchor coordination from tasks-9a9ef3: pending reviewed commit 50735173002c749a5d8ed18f98534756ee31e2d7 adds explicit anchors session-selection, claims-and-checkouts, agent-and-completion-stamps, project-routing, lifecycle-provenance and prefix-renames-and-recovery for skill pointers. Preserve those ids when reorganizing the README; this trim does not otherwise restructure it.
 - 2026-10-23T00:31:03Z (main): Anchor coordination is now landed: tasks-9a9ef3 merged locally as ae61da8 and the installed skill resolves all 11 links. Preserve the six README anchor ids recorded above when reorganizing; the trim review accepted with no findings.
 - 2026-10-23T01:03:54Z (main): started
+  provenance: {"harness_session":"claude-code:915d6bb9-2a85-4261-8f71-92733dd9bdcb","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T01:04:08Z (readme-restructure): resumed
   provenance: {"harness_session":"claude-code:915d6bb9-2a85-4261-8f71-92733dd9bdcb","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
