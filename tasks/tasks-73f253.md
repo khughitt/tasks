@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-23T10:20:40Z
-updated: 2026-10-23T10:24:46Z
+updated: 2026-10-23T10:24:48Z
 depends: []
 tags: [feedback, gap, "from:lore"]
 agent: claude-code/claude-opus-5-5
@@ -23,3 +23,7 @@ The global wording to mirror, in its order:
 Done: skills/tasks/SKILL.md's "Process and workspace" worktree paragraph (around line 300), AGENTS.md's "Process and workspace" paragraph (around line 41), and docs/specs/2026-08-29-tasks-design.md's hydration paragraph (around line 963) each carry these clauses in the global rule's order and exemptions, adapted to their own voice, without the baseline-test clauses the skill does not cover; `just check` passes. Docs-only: no CLI or JSON change, no cli.toml row.
 
 Where: the global rule is the Git section of the user's global instructions (owned by lore); this task only mirrors it.
+
+## Notes
+
+- 2026-10-23T10:24:48Z (main): scope: scoped; premises checked against main 1524a4a: skills/tasks/SKILL.md, AGENTS.md and the design spec still carry the 15c2f98 wording without the confinement/no-approval and read-only-worktree clauses; body rewritten with the clauses and all three locations; todo, P2 unchanged, xs, low, direct
