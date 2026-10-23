@@ -1,13 +1,17 @@
 ---
 id: tasks-f23cd5
 title: "record_commit unit tests commit through the production git runner under the host's global git config, so config-based hooks (hook.<name>.command) still run in test repos"
-status: todo
+status: done
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: fix/tasks-f23cd5-git-isolation
 created: 2026-10-18T14:59:28Z
-updated: 2026-10-18T14:59:30Z
+updated: 2026-10-22T23:51:39Z
+started: 2026-10-22T23:37:44Z
+completed: 2026-10-22T23:49:23Z
+closed: 2026-10-22T23:49:23Z
 depends: []
 tags: [testing]
 source: tasks-eeeeda
@@ -19,3 +23,20 @@ tasks-eeeeda stopped the HOME leak and made the test-only git helper in src/reco
 ## Notes
 
 - 2026-10-18T14:59:30Z (main): concerns: tasks-eeeeda extension — the HOME-leak fix left production record commits in unit tests reading the host's global git config
+- 2026-10-22T23:37:44Z (main): started
+  provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-22T23:38:14Z (fix/tasks-f23cd5-git-isolation): resumed
+  provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-22T23:38:20Z (fix/tasks-f23cd5-git-isolation): Process direct; workspace .worktrees/tasks-f23cd5. Scope: record_commit Git execution and all unit-test fixture callers, with a hostile-global-config regression; preserve production config behavior and avoid process-wide environment mutation. No setup recipe or worktree-local setup command is declared; baseline uses just test.
+- 2026-10-22T23:42:14Z (fix/tasks-f23cd5-git-isolation): Baseline: just test passed, exit 0, including the ignored exhaustive enumeration; test count is recorded by tools/tt. Root cause: commit_paths_in and cleanup use the production git() runner, which inherits global config and Git repository selectors despite isolated fixture setup.
+- 2026-10-22T23:44:41Z (fix/tasks-f23cd5-git-isolation): Baseline just test: 1609 tests passed (exit 0). RED: the hostile-global-hook regression rejected the fixture commit with commit_failed. GREEN: just test-one --bin tasks record_commit::tests passed all 22 tests; production Git configuration remains unchanged, fixture runners build an allowlisted environment without inherited GIT_* variables.
+- 2026-10-22T23:45:28Z (fix/tasks-f23cd5-git-isolation): Verification before implementation commit: just test-fast passed 1606 tests across 13 binaries (0 failures); just check passed hygiene, formatting, Clippy with warnings denied, and tasks check. Normal CLI commits retain their original environment; no CLI/schema/docs contract changed.
+- 2026-10-22T23:48:27Z (fix/tasks-f23cd5-git-isolation): review: impl round 1 — verdict: accept; findings: Minor 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-22T23:49:08Z (fix/tasks-f23cd5-git-isolation): attached: git-isolation-review-report.md (2814 bytes): Full read-only review of a92324e by codex/gpt-6.1-sol: accepted, one deferred Minor
+- 2026-10-22T23:49:11Z (fix/tasks-f23cd5-git-isolation): attached: git-isolation-review-ledger.md (1495 bytes): Review rulings at a92324e and deferred Minor follow-up tasks-79a907
+- 2026-10-22T23:49:22Z (fix/tasks-f23cd5-git-isolation): Review accepted at a92324e; no Critical or Important findings. minor (deferred): inherited repository-selector and cleanup regression coverage is tracked as tasks-79a907. Rulings and the full reviewer response are attached. No setup command exists; documented test recipes built the worktree successfully.
+- 2026-10-22T23:49:23Z (fix/tasks-f23cd5-git-isolation): done
+  provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-22T23:49:23Z (fix/tasks-f23cd5-git-isolation): Fixed fixture Git isolation by injecting the runner through discovery, staging, commit and cleanup; hostile-global-hook regression passed RED to GREEN. 1609-test full baseline, 22 module tests and 1606-test final fast suite passed; just check passed. Review accepted with one Minor deferred to tasks-79a907.
+  provenance: {"harness_session":"codex:01a165e8-fe11-7e63-b157-1faff4921001","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-22T23:51:39Z (main): Integrated by fast-forward into local main. Merged-state module check passed 22 tests; cargo install --locked --path . succeeded and replaced the tracker on PATH. Cleanup dispositions: discard regenerable target/ and generated check/install logs; discard .superpowers/ review copies because tasks show confirms both review and ledger attachments. tt-report ran; no host launcher, unit or known config pointer resolves into this worktree.

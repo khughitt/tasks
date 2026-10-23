@@ -6,7 +6,7 @@ priority: 2
 reviewed: true
 reviewed_at: 2026-10-20T02:03:30Z
 created: 2026-10-19T11:09:12Z
-updated: 2026-10-20T14:27:34Z
+updated: 2026-10-22T23:20:03Z
 depends: [tasks-e7424b]
 parent: tasks-96c00c
 tags: [feedback, friction, "from:mind6", "from:tasks"]
@@ -28,3 +28,11 @@ Scope handoff: [ref:brief] records the current code, unresolved contract or meas
 - 2026-10-20T09:12:42Z (feedback): feedback from tasks: The default tasks prime JSON exceeded the agent tool output limit during session startup
 - 2026-10-20T09:12:42Z (feedback): detail from tasks: The session-start tool response was truncated at roughly 26,000 tokens; a locally filtered summary was needed to inspect counts, active work, closeout and warnings.
 - 2026-10-20T14:27:34Z (feedback): feedback from tasks: prime's default JSON exceeded the tool response limit during session startup; a jq projection was needed to read the status and warnings
+- 2026-10-22T22:29:54Z (feedback): feedback from tasks: Session-start prime JSON exceeds the tool response budget
+- 2026-10-22T22:29:54Z (feedback): detail from tasks: The default prime response exceeded a 6,000-token command output limit and was truncated at roughly 30,600 tokens; a second read had to select summary fields to recover session context. A bounded session-start summary remains needed; this recurrence adds the observed response size and workaround.
+- 2026-10-22T23:00:45Z (feedback): feedback from tasks: tasks prime default JSON exceeds an agent tool output limit
+- 2026-10-22T23:00:45Z (feedback): detail from tasks: A scope session ran tasks prime and received truncated output at roughly 30,000 tokens. Reading the session summary required a second parsed view with an explicit key allowlist. A bounded default would let the session-start read fit one tool response.
+- 2026-10-22T23:09:02Z (feedback): feedback from tasks: tasks prime output exceeds an agent tool response budget before the session summary can be read
+- 2026-10-22T23:09:02Z (feedback): detail from tasks: The default prime JSON was truncated at a 6000-token response budget during session startup. A bounded summary would let an agent read active work and blockers without manually projecting the full payload.
+- 2026-10-22T23:20:03Z (feedback): feedback from tasks: Session-start prime output exceeds the tool response limit
+- 2026-10-22T23:20:03Z (feedback): detail from tasks: A session-start prime read was truncated at roughly 31,000 tokens; removing ready still left roughly 33,000 tokens because roadmap dominates the remaining output. Extracting selected fields locally recovered a useful summary. This recurrence supports the existing bounded-summary design task; no JSON contract change was made.
