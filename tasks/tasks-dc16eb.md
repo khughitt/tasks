@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: records-home
 created: 2026-10-19T01:24:43Z
-updated: 2026-10-22T20:57:42Z
+updated: 2026-10-23T11:53:56Z
 started: 2026-10-22T19:55:20Z
 completed: 2026-10-22T20:57:42Z
 closed: 2026-10-22T20:57:42Z
@@ -67,3 +67,4 @@ Done: a reviewed spec choosing one alternative, with the migration order and the
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-22T20:57:42Z (records-home): Design approved at revision 3 (c03869d): records and working documents leave personal repositories for a private per-user records root (root stays the code checkout; a third location, records, with kind in-tree|detached|linked); repositories keep reference documents; mindful becomes a deferred indexer. Pieces filed: tasks-211e28, tasks-a8e28e; ops-2a0024, ops-33b672, ops-f35cb3, ops-7d796a, ops-7fdb4a, ops-5ec535, ops-275242, ops-b41a1b, migration goal ops-423f23 (ops-8af736, ops-38c523, ops-97d307, ops-64474b); obs-faa12c; hq-d05d5c; crew-dab0db; mind6-4bd00c; flows-2ea069, lore-ef7e5b, tasks-00723a re-scoped; ops-721511 dropped; obs-caab0c deferred; hq-5a3e12 and hq-d7b5b2 closed. All wired as dependencies of ops-487484.
   provenance: {"harness_session":"claude-code:5cc9eb71-2cff-4ed6-a7d4-36b77bedd448","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-23T11:53:56Z (main): follow-up: §4's obs authorship.EXCLUDED row (exclude nothing for detached/linked) would count record, spec and plan writes as implementation: obs places a records-dir or overlay write as (prefix, main, relpath), like a code write, because placement drops resolve's via/location. obs-faa12c landed the stores row only; the exclusion is obs-7348a9 (planned), now a dependency of ops-38c523 and ops-487484.
