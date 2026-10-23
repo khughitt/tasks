@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: fix/tasks-10385f-git-selectors
 created: 2026-10-23T01:04:39Z
-updated: 2026-10-23T11:34:47Z
+updated: 2026-10-23T11:34:53Z
 started: 2026-10-23T11:17:47Z
 depends: []
 tags: []
@@ -35,3 +35,4 @@ Raised by the final review of docs/plans/2026-10-22-records-detached.md (decline
 - 2026-10-23T11:33:04Z (fix/tasks-10385f-git-selectors): Correction verified at 6e1492a: config_in_index now selects the code repository by path and restores only an explicit GIT_INDEX_FILE. Guard regression proved RED then GREEN; detached suite 46 passed. just test-fast exited 0: 1659 passed, 4 existing ignored. Pre-commit passed formatting, clippy, hygiene and tasks check. Fresh scoped re-review requested.
 - 2026-10-23T11:34:42Z (fix/tasks-10385f-git-selectors): review: impl round 2 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-23T11:34:47Z (fix/tasks-10385f-git-selectors): attached: migration-index-round-2-report.md (2337 bytes): Fresh scoped review of 6e1492a by codex/gpt-6.1-sol: narrowed migration-index exception accepted with no findings.
+- 2026-10-23T11:34:53Z (fix/tasks-10385f-git-selectors): Ruling on review round 2, revision 6e1492a: keep broader Git environment overrides outside this change. Why: the scoped correction concerns repository/index selection; the whole-branch round 1 and this scoped re-review together cover the implementation. Cost: object-store/configuration overrides remain effective, as recorded for round 1. No minor findings were deferred in either review.
