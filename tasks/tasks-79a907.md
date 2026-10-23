@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-22T23:48:29Z
-updated: 2026-10-22T23:48:29Z
+updated: 2026-10-23T11:41:08Z
 depends: []
 tags: [testing]
 source: tasks-f23cd5
@@ -15,3 +15,7 @@ agent: codex
 ---
 
 Deferred Minor from implementation review of a92324edb974b190fb4e61ec97e139362b35d1e5: the current runner routes discovery, staging and cleanup correctly, but the hostile-global-hook regression exercises only a successful commit and no inherited repository selectors. Extend the child test with GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE pointing exclusively at owned temporary fixtures; exercise refused-commit cleanup and assert the unrelated fixture HEAD and index are unchanged. Keep child environments explicit and avoid process-wide mutation. Done when a targeted regression catches switching discovery or cleanup to the production runner, and just test-fast plus just check pass. This is a pre-close review follow-up, not a concerns record.
+
+## Notes
+
+- 2026-10-23T11:41:08Z (main): Follow-up audit of tasks-10385f confirmed this task covers the already-isolated src/record_commit.rs unit-test runner, not the older integration helpers. Complementary integration-fixture isolation is tracked separately as tasks-171b8b; keep this task focused on inherited-selector and refused-cleanup regression coverage.
