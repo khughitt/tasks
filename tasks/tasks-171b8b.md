@@ -7,7 +7,7 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-23T11:41:03Z
-updated: 2026-10-23T11:41:03Z
+updated: 2026-10-23T11:41:06Z
 depends: []
 tags: [testing]
 source: "tasks-10385f:integration-fixture-isolation"
@@ -25,3 +25,7 @@ Done: the two modules' Git fixtures cannot inherit repository selectors or host 
 ## References
 
 - review (input, required, kind=review): tasks/files/tasks-10385f/git-selectors-round-1-report.md — review exclusion identifying older fixture environment inheritance
+
+## Notes
+
+- 2026-10-23T11:41:06Z (main): concerns: tasks-10385f extension — Extend the completed production selector-isolation work to older linked-project and record-commit integration-test Git helpers, which its review explicitly left outside scope.
