@@ -690,12 +690,18 @@ Init refuses with:
 - `checkout_conflict`: another prefix declares this checkout.
 - `config`: the checkout overlaps another registered project (containment either way
   or a shared git common directory), is a linked worktree rather than a main checkout,
-  or the records root does not exist.
+  or the records root does not exist; or, without `--force`, the prefix is already
+  paired with another records directory (with `--force` the pairing is replaced and a
+  warning names the old one).
 - `retired_project`: the existing records config declares `[retired]` and `--force`
   was used.
 
-A plain `init` that registers or repoints a prefix drops its `[records]` pairing with a
-warning; a plain `init` in a checkout paired in `[records]` refuses with `records_moved`.
+A plain `init` that registers or repoints a prefix to an in-tree or linked root drops its
+`[records]` pairing with a warning; a plain `init` in a checkout paired in `[records]`
+refuses with `records_moved`, and one in a detached records directory refuses with
+`config`, naming the `init --records` to run from its checkout. A registry that maps a
+prefix to a detached records directory without a `[records]` row is a `config` error
+for every command that opens it.
 
 Commands run in the code checkout or any of its worktrees open the detached project
 through the registry pairing; `-C <records-root>/<p>` opens it by the config walk.
@@ -714,7 +720,7 @@ checkout `holds_records` is false unless HEAD still tracks the config; inside th
 records repository it is true. `tasks projects` rows carry `records` always, and
 `checkout` and `kind` whenever the config was read; an unreachable row has `records`
 (from the pairing or the root) but neither `checkout` nor `kind`. `projects --paths`
-appends ` -> <records>` on a detached row, and `resolve` rows gain `records`, with
+appends ` → <records>` on a detached row, and `resolve` rows gain `records`, with
 `via: "records"` for a path under a records directory.
 
 `where` outside git reads no registry, so a copied historical config outside git opens
@@ -727,7 +733,10 @@ Two errors guard against the split:
   holds the file. The detail names the records directory. Rebase or merge the branch
   onto the main branch; that tree's `tasks/` is read-only history.
 - `records_unpaired`: a registered root with no config and no `[records]` row, as on a
-  second host before its own `init --records`. The detail names the command to run.
+  second host before its own `init --records`, from its checkout and from every command
+  that names the prefix (`--project`, an id, `move --to`). The detail names `init
+  --prefix <p> --records <records-root>` first, then plain `init` for a root that keeps
+  no records anywhere.
 
 A malformed registry is a `config` error for every command.
 
@@ -737,7 +746,8 @@ updates the `[records]` key and value in the same registry save, and leaves `[ch
 path` unchanged. It leaves the directory rename uncommitted: commit it in the records
 repository. The usual refusals apply against the records repository (clean `tasks/`, no
 live claims, at most one worktree). On the second host, `rename --adopt` pairs the
-renamed directory.
+renamed directory; a plain `rename` there, finding the old directory gone and the new
+one present with no rename in progress, refuses with `validation` naming `--adopt`.
 
 Update each host's binary before the first detached project. An older binary cannot
 parse `kind = "detached"`, and it drops the `[records]` table on its next registry
